@@ -117,14 +117,6 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
     };
   }, [restaurantId]);
 
-  // Service mode replaces the whole menu with the maintenance screen. Pass THIS
-  // restaurant's branding so a non-#1 tenant's maintenance screen shows its own
-  // name/logo, never French House's (white-label; audit fix 2026-07-06).
-  if (serviceMode) {
-    const isDefault = (restaurantId || DEFAULT_RESTAURANT_ID) === DEFAULT_RESTAURANT_ID;
-    return <Maintenance logoText={logoText} logoUrl={logoUrl} isDefault={isDefault} />;
-  }
-
   // Per-restaurant FULL palette (Phase 2). When a restaurant has theme overrides, we
   // emit mode-scoped CSS (inline styles can't switch on the [data-theme] toggle). The
   // block targets #app.brand-themed so the vars cascade to EVERYTHING in the guest app
@@ -185,6 +177,28 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
     ? `${accentCanvasCss(accentColor)}:root{${accentPaletteCss(accentColor)}}`
     : "";
   const pageBg = accentColor ? accentBackground(accentColor) : null;
+
+  // Service mode replaces the whole menu with the maintenance screen. Pass THIS
+  // restaurant's branding so a non-#1 tenant's maintenance screen shows its own
+  // name/logo, never French House's (white-label; audit fix 2026-07-06).
+  //
+  // THIS RETURN USED TO SIT ABOVE THE PALETTE, and that was half the colour bug (T4, 2026-08-17).
+  // `rootAccentCss` and the themed block are computed below the old position, so bailing out here
+  // meant the maintenance screen rendered with NO tenant palette emitted at all — `--accent` fell
+  // back to whatever globals.css `:root` says, which is restaurant #1's. Even after the `.maint*`
+  // rules were taught to follow `--accent`, the variable would still have been #1's on the one
+  // screen that needed it most. So the styles are emitted alongside the maintenance screen too;
+  // it is the same two <style> tags, just no longer skipped.
+  if (serviceMode) {
+    const isDefault = (restaurantId || DEFAULT_RESTAURANT_ID) === DEFAULT_RESTAURANT_ID;
+    return (
+      <>
+        {rootAccentCss && <style dangerouslySetInnerHTML={{ __html: rootAccentCss }} />}
+        {themed && <style dangerouslySetInnerHTML={{ __html: themedCss }} />}
+        <Maintenance logoText={logoText} logoUrl={logoUrl} isDefault={isDefault} />
+      </>
+    );
+  }
 
   return (
     <>

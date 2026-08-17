@@ -35,8 +35,18 @@
     // move in flex/grid layouts; +1 forgives sub-pixel rounding so a perfectly-fitting
     // number never jitters. MIN_PX is the readability floor — below ~9px a figure is
     // unreadable anyway, so clipping becomes the lesser evil and we stop.
-    // a value that was shortened before must go back to full before we re-measure
-    if (el.dataset.lfhFull) { el.textContent = el.dataset.lfhFull; delete el.dataset.lfhFull; el.removeAttribute("title"); }
+    // A VALUE WE SHORTENED GOES BACK TO FULL BEFORE WE RE-MEASURE — BUT ONLY IF IT IS STILL OURS
+    // (T9 sweep, 2026-08-17). This used to restore data-lfh-full whenever the attribute existed,
+    // with no check that the text on screen was still the short form we wrote. So the moment a
+    // panel updated that same element in place, the next scan pasted the OLD figure back over the
+    // NEW one and re-shortened it — measured on a 70px tile: written "12", left reading "123 Cr",
+    // permanently, and the font never grew back either. Comparing against the short form we
+    // actually wrote means a value the panel has since changed is left exactly as the panel
+    // wrote it.
+    if (el.dataset.lfhFull) {
+      if (el.textContent === el.dataset.lfhShort) setText(el, el.dataset.lfhFull);
+      delete el.dataset.lfhFull; delete el.dataset.lfhShort; el.removeAttribute("title");
+    }
     for (var pass = 0; pass < 5; pass++) {
       var over = el.scrollWidth - el.clientWidth;
       if (over <= 1) return;
@@ -58,11 +68,47 @@
   // tiles. A bill is never in that net and MUST NEVER BE — on a bill the exact figure is the
   // law, and an abbreviated total is not a rounding preference, it is a wrong document. If a
   // bill selector is ever added here, this abbreviation has to be gated off first.
-    if (el.scrollWidth - el.clientWidth > 1 && el.childElementCount === 0) {
+    if (el.scrollWidth - el.clientWidth > 1 && el.childElementCount === 0 && !isExact(el)) {
       var full = el.textContent, sh = shortIndian(full);
-      if (sh && sh.length < full.length) { el.dataset.lfhFull = full; el.textContent = sh; el.title = full; }
+      if (sh && sh.length < full.length) {
+        el.dataset.lfhFull = full; el.dataset.lfhShort = sh; el.title = full; setText(el, sh);
+      }
     }
   }
+
+  // WHERE THE EXACT FIGURE IS THE LAW (T9 sweep, 2026-08-17).
+  //
+  // The note above says a bill is never in this net and MUST NEVER BE, and that if a bill
+  // selector were ever added the abbreviation would have to be gated off first. Four of them had
+  // been added and the gate had not: measured on the manager's Bills tab, an order total renders
+  // in a 64-pixel box, and a total of ₹1,23,45,678 came out of this function reading "₹1.2 Cr".
+  // A rounded total is not a tidier bill, it is a different bill.
+  //
+  // So money that IS a document — an order total, a bill amount, a cart total, a khata balance —
+  // shrinks to the 11px floor and then stops, clipping if it must, because a clipped exact figure
+  // is recoverable (the person can widen, zoom, or open the bill) and a rounded one is not.
+  // Dashboard stat tiles are untouched: those are summaries, and shortening them is the behaviour
+  // the owner asked for on 2026-08-15. `data-fit-exact` is the escape hatch, so a panel added
+  // later can say "mine is a document too" without editing this file.
+  var EXACT_SEL = "[data-fit-exact],.bill-amt,.ks-val,.ordtotal,.ctotal,.ord-total,.inv-money";
+  function isExact(el) {
+    try { return !!(el.closest && el.closest(EXACT_SEL)); } catch (e) { return false; }
+  }
+
+  // OUR OWN TEXT WRITES MUST NOT FEED THE OBSERVER (T9 sweep, 2026-08-17).
+  //
+  // The observer watches childList + characterData, and the note by boot() says our writes never
+  // re-trigger it because we only touch style and data-* — which stopped being true the day this
+  // file learned to rewrite the text. One abbreviated figure therefore kept a full scan running on
+  // EVERY animation frame for as long as the panel was open: measured at 482 text mutations in two
+  // seconds on one element, on a kitchen tablet that is left on all shift. `writing` makes the
+  // observer ignore the change we made ourselves, which is what the comment always claimed.
+  // The observer delivers its records on a LATER microtask, so a plain in-progress flag would
+  // already be back to false by then. Instead we remember which elements WE wrote to, and the
+  // callback ignores a batch that contains nothing else. A batch that also carries the panel's
+  // own changes still schedules a scan — dropping those would be the opposite fault.
+  var selfNodes = new Set();
+  function setText(el, s) { selfNodes.add(el); el.textContent = s; }
   function shortIndian(txt) {
     var m = String(txt).match(/^(\D*)([\d,]+(?:\.\d+)?)(.*)$/);
     if (!m) return null;
@@ -84,10 +130,18 @@
   }
 
   // One scan per frame at most — panels re-render whole boards via innerHTML, so mutations
-  // arrive in bursts. We only write style/data-* (attributes) while the observer watches
-  // childList/characterData, so our own writes never re-trigger it.
+  // arrive in bursts. We write style/data-* (attributes), which the observer does not watch, and
+  // the ONE place we write text goes through setText(), which raises `writing` so the change we
+  // made ourselves is ignored here. Without that this file feeds itself a mutation every frame,
+  // for ever — see the note on setText().
   var raf = 0;
-  function queue() {
+  function queue(records) {
+    var mine = records && records.length && records.every(function (r) {
+      var t = r.target && r.target.nodeType === 3 ? r.target.parentNode : r.target;
+      return t && selfNodes.has(t);
+    });
+    selfNodes.clear();
+    if (mine) return;                       // our own rewrite — scanning it again is the loop
     if (!raf) raf = requestAnimationFrame(function () { raf = 0; scan(); });
   }
 

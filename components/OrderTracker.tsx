@@ -101,6 +101,19 @@ export default function OrderTracker() {
       );
       if (live.length === 0) return; // nothing to ask about
       let changed = false;
+      // WHAT THIS ROUND ACTUALLY LEARNED, by order id — not the whole list (sweep 6 T3).
+      //
+      // This loop reads `lfh_active_orders` at the top, then makes one network call PER ORDER,
+      // then wrote the list it read back at the end. Everything else that touches that list does
+      // its read and its write in one synchronous step, so it is safe — but this one holds a copy
+      // across several hundred milliseconds of awaits, and whatever anyone else wrote in that
+      // window was silently reverted. Three real losses:
+      //   · the diner drags the strip onto the cross to hide it → it comes back,
+      //   · the offline queue finally sends a saved order and records it → the entry vanishes and
+      //     that order is never tracked again, though the kitchen has it,
+      //   · a partner's order pulled in by the session below → dropped (that one self-heals).
+      // So: remember only the fields THIS round changed, and apply them to a FRESH read.
+      const learned = new Map<string, { status: OrderStatus; finalizedAt?: number }>();
       for (const o of live) {
         const res = await getOrderStatus(o.id); // ask the server for this order's status
         if (cancelled) continue;
@@ -115,6 +128,7 @@ export default function OrderTracker() {
           if (nullCounts.current[o.id] >= 3 && !isFinal(o.status)) {
             o.status = "cancelled";
             o.finalizedAt = Date.now();
+            learned.set(o.id, { status: "cancelled", finalizedAt: o.finalizedAt });
             changed = true;
             if (lastStatus.current[o.id] !== "cancelled") {
               lastStatus.current[o.id] = "cancelled";
@@ -127,6 +141,7 @@ export default function OrderTracker() {
         if (res.status !== o.status) {
           o.status = res.status; // status moved forward — update our copy
           if (isFinal(res.status) && !o.finalizedAt) o.finalizedAt = Date.now(); // stamp the finish time
+          learned.set(o.id, { status: res.status, finalizedAt: o.finalizedAt });
           changed = true;
           // Show a toast the FIRST time we see each new status (not on every poll).
           if (lastStatus.current[o.id] !== res.status) {
@@ -147,8 +162,16 @@ export default function OrderTracker() {
         }
       }
       // If anything changed, save it, re-draw, and tell the open cart to refresh.
+      // Onto a FRESH read, touching only the orders this round actually learned something about —
+      // so an order added, hidden or re-recorded while we were awaiting keeps whatever it was
+      // given. An order that has since gone from the list stays gone (no resurrection): we only
+      // ever map over what is there now.
       if (changed && !cancelled) {
-        write(list);
+        const fresh = read().map((o) => {
+          const seen = learned.get(o.id);
+          return seen ? { ...o, status: seen.status, finalizedAt: o.finalizedAt ?? seen.finalizedAt } : o;
+        });
+        write(fresh);
         refresh();
         broadcast();
       }

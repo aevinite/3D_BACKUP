@@ -545,12 +545,22 @@ function renderWall() {
     const phase = orderPhase(o, rows);
     if (phase !== "served") live.push({ o, rows, phase });
   });
+  // ONE QUEUE, NOT TWO (T6 sweep, 2026-08-17). The wall exists to be first-come-first-served —
+  // this file and index.html both say "oldest first" — and it wasn't: dine-in tickets were sorted
+  // among themselves, platform tickets were sorted among themselves, and then the two lists were
+  // simply glued together. So every delivery ticket sat behind every dine-in ticket whatever the
+  // clock said. On a restaurant taking Zomato/Swiggy/Website/counter-parcel orders that means an
+  // hour-old delivery order rendered below a one-minute-old table order, at the bottom of a dense
+  // grid a cook reads top-left first — the food most likely to be late is the food shown last, and
+  // a late delivery order is the one the restaurant is penalised for. They are now sorted in ONE
+  // pass on the same two keys the wall already used: not-ready before ready, then oldest first.
   // cmpTime, not a bare date subtraction — see the note on orderTime(): a webhook timestamp we
-  // can't read used to make this comparator answer NaN and quietly un-FIFO the board.
-  live.sort((a, b) => ((a.phase === "ready") - (b.phase === "ready")) || cmpTime(a.o.created_at, b.o.created_at));
-  const plat = (state.platform || []).slice().sort((a, b) => ((platPhase(a.status) === "ready") - (platPhase(b.status) === "ready")) || cmpTime(a.created_at, b.created_at));
-  const desired = live.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
-    .concat(plat.map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
+  // can't read used to make this comparator answer NaN and quietly un-FIFO the board. A platform
+  // ticket's created_at comes from exactly such a webhook, which is why it must go through the
+  // same guarded comparator as a dine-in one rather than a private sort of its own.
+  const desired = live.map(({ o, rows, phase }) => ({ id: String(o.id), at: o.created_at, ready: phase === "ready", html: ticketHtml(o, rows) }))
+    .concat((state.platform || []).map((p) => ({ id: "plat-" + p.id, at: p.created_at, ready: platPhase(p.status) === "ready", html: platTicketHtml(p) })));
+  desired.sort((a, b) => (a.ready - b.ready) || cmpTime(a.at, b.at));
   reconcileList($("#wall"), desired);
 }
 // Paint the ACTIVE view. Every render() caller (load, loadTables, applyView) repaints
@@ -679,7 +689,23 @@ function markItemReady(id, btn) {
       icon: "🔥",
       onUndo: () => undoReady([{ id, prev }]),
     });
-  }).catch((e) => { toast("Failed: " + e.message); freshLoad(); });
+  }).catch((e) => {
+    // THE OPTIMISTIC OVERLAY MUST NOT OUTLIVE A REFUSED WRITE (T6 sweep, 2026-08-17 — watched
+    // happening). `pendingReady` is what keeps a just-tapped dish showing ready while the server
+    // catches up, and it was only ever cleared on the SUCCESS path (scheduleReadyReconcile's
+    // .finally). So when the server said no — "that dish isn't on this restaurant's board any
+    // more" after the manager cancelled the KOT, a 403 from a blocked device, a 400 — the cook got
+    // a four-second red toast and then the board went on painting the dish READY for ever: every
+    // later /board read re-applied the overlay, the ticket had already slid into the Ready lane,
+    // and the ✓ was gone so there was no way to try again. Nothing was saved, so the waiter was
+    // never told the dish was done and the guest waited on a dish the pass believed was finished.
+    // Drop the overlay and put the dish back where it was, THEN reconcile from the server: if the
+    // write did land and only the reply was lost, the refetch simply paints it ready again.
+    pendingReady.delete(id);
+    if (it.status !== "served") it.status = prev;
+    toast("Failed: " + e.message);
+    freshLoad();
+  });
 }
 
 // Take back a "marked ready": drop the optimistic overlay, restore each dish's
@@ -779,7 +805,17 @@ function markOrderReady(orderId) {
         onUndo: () => undoReady(snap, orderId),
       });
     }
-  }).catch((e) => { toast("Failed: " + e.message); freshLoad(); });
+  }).catch((e) => {
+    // Same rule as the single ✓ above, and this one is worse: the whole ticket had already slid
+    // into the Ready lane, so a refused ALL READY left a table's entire order sitting on the pass
+    // marked finished when the server had recorded nothing. BOTH overlays have to go — the
+    // item-keyed one for session orders and the order-keyed one that covers a legacy order's
+    // JSON dishes — or the very next read paints it ready again.
+    pendingReadyOrders.delete(orderId);
+    snap.forEach((s) => pendingReady.delete(s.id));
+    toast("Failed: " + e.message);
+    freshLoad();
+  });
 }
 
 // Manual REPRINT (owner 2026-07-07): re-run the KOT print for ONE order's current dishes on
@@ -1082,7 +1118,22 @@ function printKot(order, itemRows, restaurant, opts) {
       let done = false;
       const cleanup = () => { if (done) return; done = true; try { ifr.remove(); } catch (e) {} };
       try { w.onafterprint = cleanup; } catch (e) {}
-      try { w.focus(); w.print(); } catch (e) {}
+      // THE PRINT CALL ITSELF IS NOT ALLOWED TO FAIL IN SILENCE (T6 sweep, 2026-08-17). The catch
+      // at the bottom of printKot() was written precisely so a kitchen with no paper coming out
+      // could be diagnosed from the log instead of guesswork — but it only covers the SYNCHRONOUS
+      // setup. The actual print happens here, 250ms later, and its failure was swallowed by an
+      // empty catch: printKot had already returned true, so the cook was told "Printing KOT #313",
+      // the ticket was recorded in printedIds, and a print-first kitchen could work a whole service
+      // with nothing on paper and nothing anywhere saying so. That is the exact thing the function
+      // says it must never do. So: un-record the ticket (the next pass retries it, and a manual 🖨
+      // is not branded "DUPLICATE" for a ticket that never came out), write it to the Everything
+      // Log, and tell the cook and the manager through the same throttled path a synchronous
+      // failure already uses — once a minute, never once per ticket.
+      try { w.focus(); w.print(); } catch (e) {
+        try { if (order && order.id != null) { printedIds.delete(order.id); savePrintedIds(); } } catch (_e) {}
+        try { logKotPrintFailure(e); } catch (_e) {}
+        try { notePrintTrouble(); } catch (_e) {}
+      }
       setTimeout(cleanup, 60000);
     }, 250);
     return true;
@@ -1283,7 +1334,19 @@ if (typeof document !== "undefined") {
   // When the offline outbox drains on reconnect, snap the board to server truth at once
   // (a replayed action could have been rejected → the optimistic tile would otherwise stay
   // wrong until the 60s backstop). outbox.js dispatches this after a flush. (audit 2026-07-07)
-  window.addEventListener("lfh:outbox-flushed", () => { if (!document.hidden) load().catch(() => {}); });
+  // …AND THE OPTIMISTIC OVERLAY GOES WITH IT (T6 sweep, 2026-08-17 — the offline half of the same
+  // fault as the refused ✓ in markItemReady). A tap taken with no signal keeps its dish painted
+  // ready through `pendingReady` and skips the reconcile, because there is nothing to reconcile
+  // against yet. When the queue finally drains, most replays land and the refetch simply agrees —
+  // but a replay the server REFUSES (lib/clash: the table was closed and billed while this screen
+  // was offline) leaves the server saying "preparing" and the overlay saying "ready", for the rest
+  // of the shift. Clear both overlays once the post-flush read has landed, exactly as
+  // scheduleReadyReconcile does after a live tap: after a drain the server is the truth for
+  // everything that was queued.
+  window.addEventListener("lfh:outbox-flushed", () => {
+    if (document.hidden) return;
+    load().catch(() => {}).finally(() => { pendingReady.clear(); pendingReadyOrders.clear(); });
+  });
   // A read came from this device rather than the server: refetch once, quietly, so a
   // single slow reply can't leave the panel showing older data than it needs to.
   window.addEventListener("lfh:stale-refresh", () => { if (!document.hidden) load().catch(() => {}); });

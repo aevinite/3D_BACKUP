@@ -70,10 +70,29 @@ export default function HeroTitle({ greeting, title }: { greeting: string; title
   // The title supports *asterisk* highlight markers: marked letters use the accent,
   // the rest the mode-adaptive --text. With markers we add `has-split` so the CSS
   // drops the gradient (per-letter solid colours). No markers → original gradient.
+  //
+  // A REAL SPACE, NOT A NON-BREAKING ONE (T4 sweep, 2026-08-17).
+  //
+  // Every space used to become ` `. Combined with the letters being `inline-block` — an atomic
+  // box, so the browser may end a line between any two of them — the heading could break between any
+  // two LETTERS and at none of its SPACES, which is exactly backwards. Measured on a Samsung A35
+  // (360×780), screenshots read: German showed "Ganztags Café & Bäcke / rei" and French
+  // "Café & Boulangerie To / ute la Journée". English hid it, because "All-Day Café & Bakery" fits
+  // on one line — which is why it survived this long, on the biggest text on the guest menu.
+  //
+  // The pair of changes has to be made together, or one half looks worse than the bug:
+  //   · here — a real U+0020, so there IS a break opportunity between words;
+  //   · app/globals.css — the tagline's spans become `display: inline` (they animate opacity only,
+  //     so they never needed to be blocks) with `white-space: pre-wrap`, which preserves the space
+  //     and allows the break. Switching only the CSS leaves the NBSPs in place and the heading
+  //     overflows off the side instead of wrapping — measured, so do not split these two up.
+  //
+  // The GREETING is deliberately left on ` ` in split() below: it animates `y`, so it still
+  // needs an inline-block, and it is one short tracked word that never wraps.
   const titleSplit = hasBrandMarkers(title);
   const titleLetters = splitBrandSegments(title).flatMap((seg, si) =>
     splitGraphemes(seg.text).map((c, ci) => (
-      <span key={`${si}-${ci}`} className={seg.hi ? "hi" : undefined}>{c === " " ? " " : c}</span>
+      <span key={`${si}-${ci}`} className={seg.hi ? "hi" : undefined}>{c === " " ? " " : c}</span>
     ))
   );
 

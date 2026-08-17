@@ -1227,11 +1227,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
-        const [sessQ, memQ] = await Promise.all([
-          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone").in("id", sids),
+        // `bill_printed_at` rides along (mig 333) so the panel knows a bill has ALREADY been on
+        // paper and can brand the next copy "Reprint · Duplicate". It has to come from the row,
+        // not from the device that printed: the case that matters is the manager printing at the
+        // till and a WAITER reprinting from the tablet a minute later.
+        const [sessQ, memQ, chainQ] = await Promise.all([
+          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
+          // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
+          // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
+          // SERVER read of just these sessions, never something a client could ask for. Only the
+          // sequence and the hash leave here; the money on that row stays where it is.
+          sb.from("bill_chain").select("session_id,seq,chain_hash").eq("restaurant_id", rid).in("session_id", sids).limit(500),
         ]);
         const map: Record<string, any> = Object.fromEntries(((must(sessQ) || []) as any[]).map((s) => [s.id, s]));
+        // A session has at most one chain row; if a re-issue ever produced two, the LATEST is the
+        // one this bill was signed as, so it is the one that belongs on the paper.
+        const chainMap: Record<string, { seq: number; chain_hash: string }> = {};
+        for (const c of ((chainQ.data || []) as any[])) {
+          if (!c.session_id) continue;
+          const prev = chainMap[c.session_id];
+          if (!prev || Number(c.seq) > Number(prev.seq)) chainMap[c.session_id] = { seq: c.seq, chain_hash: c.chain_hash };
+        }
         const nameMap: Record<string, string> = {};
         for (const m of (must(memQ) || []) as any[]) { if (m.name && !nameMap[m.session_id]) nameMap[m.session_id] = m.name; }
         for (const o of orders as any[]) {
@@ -1241,6 +1258,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
+            // Has this bill already been on paper? (mig 333) — the next copy says "Reprint".
+            o.bill_printed_at = s.bill_printed_at;
+            // The verification line the bill prints (mig 332). Named the way billdoc's billData
+            // reads them off the session, so no panel has to reshape anything.
+            const ch = chainMap[o.session_id];
+            if (ch) { o.chain_seq = ch.seq; o.chain_hash = ch.chain_hash; }
           }
           if (nameMap[o.session_id]) o.customer_name = nameMap[o.session_id];
         }
@@ -2891,6 +2914,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (up.error) throw new Error(up.error.message);
       await log("manager", "parcel_collect", { restaurant_id: rid, detail: `₹${owns.total ?? 0} · ${method}`, device_id: dev });
       return ok({ ok: true, id: b, paid: true });
+    }
+
+    /* sessions/:id/bill-printed — record that this TABLE's bill went to the printer (mig 333).
+       The exact shape of platform/:id/printed below, one table across, and for the same stated
+       reason: the fact has to live on the BILL, not on the device that printed it, because the
+       manager prints at the till and a waiter may reprint from the tablet a minute later — that
+       second device has no way to know, and would hand out an unbranded duplicate.
+       Stamped ONCE and never moved: the first print stays the first print, so every later copy is
+       a reprint and the document brands it. Deliberately not reversible from here — this is a
+       record that paper was produced. Answering ok() when it is already stamped means a panel can
+       call it after every print without a guard of its own, and a retry is free. */
+    if (a === "sessions" && c === "bill-printed") {
+      const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
+      if (!owns) return err("That bill isn't for this restaurant.", 404);
+      if (owns.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: owns.bill_printed_at, reprint: true });
+      const at = new Date().toISOString();
+      const up = await sb.from("sessions").update({ bill_printed_at: at }).eq("id", b).eq("restaurant_id", rid);
+      if (up.error) throw new Error(up.error.message);
+      return ok({ ok: true, id: b, bill_printed_at: at, reprint: false });
     }
 
     // platform/:id/printed — record that this order's customer bill went to the printer

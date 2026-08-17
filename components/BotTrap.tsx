@@ -34,8 +34,12 @@ const HIDDEN: React.CSSProperties = {
 /**
  * Renders the trap field and keeps the "form was open this long" field up to date.
  *
- * The elapsed field is written on submit-time read rather than on a timer, so it costs nothing
- * while the page sits open.
+ * The elapsed field is refreshed on a half-second timer, and it writes straight to the input's
+ * value rather than through state — so a form left open for ten minutes says so, and none of it
+ * causes a re-render. (This header used to claim the value was written at submit time and that
+ * there was no timer at all. There has always been a timer; the claim was simply wrong, and a
+ * wrong comment in this file is worse than none — the next person reads it as the reason the
+ * elapsed number can be trusted. T4 sweep, 2026-08-17.)
  */
 export default function BotTrap() {
   const msRef = useRef<HTMLInputElement>(null);

@@ -54,6 +54,7 @@ Code: `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*`, `lib/men
 | the guest's cart, order placing, or the offline outbox | `verify:order-retry`, `verify:guest-recovery`, `verify:outbox` | nothing | no |
 | the guest session / table hand-over | `verify:session-ux` | `.env.local` | **YES** |
 | branding, theme, IntroSplash (one tenant must never show another's) | `test:units` (`lib/brandText`, `lib/brandTheme`) | nothing | no |
+| any of the THREE guest doors (`/menu`, `/r/<slug>/menu`, `/q/<code>`), or a tap that promises the guest something | `verify:guest-doors` ← all three doors must reach the SAME restaurant, and a guest's tap must never claim something that did not happen | nothing | no |
 
 ## 2 · 3D dish viewer
 
@@ -82,6 +83,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | Bills, a bill's money, a discount | `verify:audit`, `verify:one-number`, `verify:tax-mode` | nothing / `.env.local` | no |
 | the tax on a real bill, end to end (incl. an MRP bottle) | `verify:tax-mode-e2e`, `test:totals` (client maths vs the server's, to the cent) | `.env.local` | `verify:tax-mode-e2e` **YES** |
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
+| ↳ a DATE, a TIME or a DAY on any printed document, or the rows that explain a bill's money | `verify:print-paper` ← every document must read the SAME on every device (it re-renders under five time zones), an MRP line is counted once, and a printed percentage describes the rupees beside it | nothing | no |
 | joining / merging tables | `verify:merge`, `verify:merge-who`, `verify:merge-keeps-mark`, `verify:void-party` | mixed | some **YES** |
 | the waiter rota | `verify:rota-clash` | `.env.local` | **YES** |
 | a customer / CRM field | `verify:customers`, `verify:customer-erase`, `verify:personal-data` | `.env.local` | **YES** |
@@ -107,6 +109,7 @@ Code: `public/panels/tablet/*`, `app/api/tablet/*`
 | you touched | run | needs | writes |
 |---|---|---|---|
 | the waiter's floor | `verify:tablet-wants-in`, then `verify:tablet` | nothing / `.env.local` | `verify:tablet` **YES** |
+| **anything at all in `public/panels/tablet/app.js`** | `verify:tablet-taps` — it compiles the file (a stray backtick in a template literal blanks the whole panel), and holds the four bulk actions, the KOT rows, the destination pickers and the money buttons to "a tap must never vanish in silence" | nothing | no |
 | the tablet's own endpoints | `verify:tablet-parity` | `.env.local` | **YES** |
 | waiter sections | `verify:sections` | `.env.local` | **YES** |
 | the board fingerprint | `verify:board-sig` | nothing | no |
@@ -149,9 +152,11 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | ↳ *(`verify:clash` is kept as a short alias for the same thing — the file is `scripts/verify-clash-coverage.mjs`)* | — | — | — |
 | an order write | `verify:order`, `verify:order-retry`, `verify:closed-session` | mixed | some **YES** |
 | anything that lowers a bill | `verify:audit` ← every money change leaves a record | nothing | no |
+| a GUEST or STAFF-PANEL api route (`app/api/menu`, `app/api/editor`, `app/api/kitchen`, `app/api/tablet`) | `verify:panel-api` ← the scoping, gating and shape rules the T10 sweep put back, so they cannot quietly come back out | nothing | no |
 | a reply we send to an outside system | `verify:outbound` | `.env.local` | no |
 | behaviour when the server is overloaded | `verify:busy` | starts its own local server | no |
 | behaviour with no internet | `verify:offline`, `verify:outbox`, `verify:warm-shell` | mixed | no |
+| `public/offline.html` — the last-resort screen | `verify:offline-retry` ← it must keep ONE backing-off retry loop however many times the device says it is back, and must never blame the wrong side | starts its own local stub | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
 | anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
 
@@ -172,6 +177,8 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | you touched | run | needs | writes |
 |---|---|---|---|
 | any `.js` or `.css` under `public/panels/` | `verify:panel-cache` ← the `?v=` must be the file's own content hash, or staff run a weeks-old panel | nothing | no |
+| any of the SHARED panel files every staff panel loads (`public/panels/*.js` — the write queue, the connection pill, the back-button manager, the undo card, the guest bell, the settings drawer, the issue modal, the theme, the error log) | `verify:panel-plumbing` | nothing | no |
+| moved, renamed or deleted a panel HELPER function | `verify:panel-scope` ← a helper must exist where the code that calls it can see it; a panel that throws on load is a blank screen for staff | nothing | no |
 | a payload that hands a `settings` row to a panel, or `lib/panelSettings.ts` | `verify:panel-secrets` ← the row carries the delivery apps' connection keys; a panel must never receive them (T17 finding F1) | nothing | no |
 | an HTML comment, a `<style>` block, a CSS comment | `verify:ui` | nothing | no |
 

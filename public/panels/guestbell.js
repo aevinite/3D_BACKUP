@@ -69,14 +69,29 @@
     catch (e) { return []; }
   }
   function rowKey(r) { return String(r.key || (r.kind + ":" + (r.table == null ? "" : r.table) + ":" + (r.id || r.at || ""))); }
-  function isNew(r) { return readSeen().indexOf(rowKey(r)) < 0; }
+  // READ THE SEEN LIST ONCE PER PASS, NOT ONCE PER ROW (T9 sweep, 2026-08-17).
+  //
+  // `isNew()` used to re-read AND re-parse the whole list out of localStorage for every single
+  // row, and both the count and the sheet ask it — measured at 90 synchronous storage reads and
+  // 90 JSON.parses for one 30-row pass, on a file whose own doc line says it is "cheap enough to
+  // call on every paint". localStorage is synchronous, so that is main-thread time on the
+  // busiest device in the building, every time the floor repaints. One read per pass, held in a
+  // Set, is the same answer for a fraction of the work.
+  var seenSet = null;
+  function seen() {
+    if (!seenSet) seenSet = new Set(readSeen());
+    return seenSet;
+  }
+  function forgetSeen() { seenSet = null; }   // after a write, or when the rows change
+  function isNew(r) { return !seen().has(rowKey(r)); }
   function markSeen() {
     try {
       // Only what is on screen right now — a row that has been answered is gone, and remembering
       // it forever would just make the list of remembered things outlive the things themselves.
       var keys = last.rows.map(rowKey).slice(0, 200);
       localStorage.setItem(SEEN_KEY, JSON.stringify(keys));
-    } catch (e) {}
+      seenSet = new Set(keys);   // we just wrote it — no need to read it back
+    } catch (e) { forgetSeen(); }
   }
 
   function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
@@ -115,7 +130,12 @@
       ".lfh-bell-sheet{width:min(560px,100%);max-height:min(84vh,720px);overflow:auto;",
       "  background:var(--panel,#0f1830);color:var(--text,#e7eefc);",
       "  border:1px solid var(--line,rgba(127,127,127,.28));border-radius:18px 18px 0 0;",
-      "  padding:18px 18px calc(18px + var(--safe-b,0px));box-shadow:0 -18px 60px rgba(0,0,0,.5);",
+      // --sab, not --safe-b: the panels define --sab as max(env(safe-area-inset-bottom), --safe-b)
+      // precisely because only ONE of those two is ever real — --safe-b is injected by the host
+      // page into the iframe, env() only works when the panel is open on its own. Reading the
+      // injected one alone meant the last row of this sheet sat under a phone's home indicator
+      // whenever the panel was opened directly. undobar.js already reads it this way.
+      "  padding:18px 18px calc(18px + var(--sab, env(safe-area-inset-bottom, 0px)));box-shadow:0 -18px 60px rgba(0,0,0,.5);",
       "  font:500 13.5px/1.45 system-ui,sans-serif}",
       "@media(min-width:700px){.lfh-bell-sheet{border-radius:18px}}",
       ".lfh-bell-hd{display:flex;align-items:flex-start;gap:10px}",

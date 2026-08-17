@@ -111,8 +111,14 @@
         opts.headers["Content-Type"] = "application/json";
         opts.body = JSON.stringify(body);
       }
-      opts.signal = invDeadline();
     }
+    // A READ GETS A CEILING TOO (T9 sweep, 2026-08-17). The deadline used to be inside the
+    // write-only branch above, so a GET on a database that is up but answering nothing left the
+    // Inventory tab on "Loading inventory…" for as long as the manager was willing to stare at
+    // it — nothing rejected, so the error path that already exists never ran and there was
+    // nothing to tap. Same 15s and the same guarded helper; the catch below turns it into a
+    // sentence rather than the browser's own wording.
+    opts.signal = invDeadline();
     try {
       // THE QUEUE OWNS EVERY PLAIN WRITE (see the note above canQueue). It sends the same request
       // this function would have sent — same path, same body, same action id, same expectation —
@@ -149,6 +155,13 @@
         const off = new Error("A photo needs a connection. Save this without the photo for now and add it when the signal is back.");
         off.status = 0;
         throw off;
+      }
+      // A read that ran out of time says so in English. The browser's own wording for an aborted
+      // request ("signal is aborted without reason") is not something to put on a manager's screen.
+      if (method === "GET" && e && (e.name === "TimeoutError" || e.name === "AbortError")) {
+        const slow = new Error("This is taking longer than it should — the system didn't answer. Tap the tab again to retry.");
+        slow.status = 0;
+        throw slow;
       }
       throw e;
     } finally {

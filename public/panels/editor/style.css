@@ -1813,13 +1813,23 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
 .ft-take:hover { background: color-mix(in srgb, var(--gold) 28%, var(--panel-2)); border-color: var(--gold); color: var(--text); }
 .ft-take-x { font-weight: 800; }
 .ft-take-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The SHORT label, for the band where "Take order" cannot fit (see the container ladder below).
-   Hidden by default — exactly one of the three (＋ / "Take order" / "Order") is ever shown. */
-.ft-take-s { display: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* ── WHICH FACE DOES ＋ Take order WEAR? (T3 sweep, measured 2026-08-06) ─────────────────────
-   Three faces, exactly one shown: "＋ Take order" · "Order" · "＋". The choice depends on how much
-   room the row really has, which is the tile's width MINUS whatever else is in the row — so the
-   number of controls matters as much as the width, and the width alone was deciding it.
+/* REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO short "Order" label on this
+   button, and there must never be one again. He looked at a tile wearing it and said: *"instead of
+   order is written that should be just a plus icon, nothing else, and it should stay like that"*, and
+   about the tile as a whole: *"at the end of the day, UI should stay like this. I don't care if you
+   increase the size of or maybe whatever you do. But make sure UI should stay like this."*
+   So the button has exactly TWO faces, not three:
+       "＋ Take order"  — whenever it genuinely fits
+       "＋"             — whenever it does not (a crowded tile, a dense floor, a finished table)
+   The T5 sweep had briefly restored a middle rung reading "Order" (it was in this ladder from the
+   T3 sweep, 2026-08-06, and a later change had made it unreachable). He removed it deliberately.
+   Do NOT re-add a word between the two faces, do not "improve" the ＋ with a label, and do not
+   report the bare ＋ as a bug on a narrow tile — it is the design. */
+/* ── WHICH FACE DOES ＋ Take order WEAR? (T3 sweep, measured 2026-08-06; trimmed to two faces by
+      the owner 2026-08-17 — see the rejection above) ────────────────────────────────────────────
+   Two faces, exactly one shown: "＋ Take order" · "＋". The choice depends on how much room the row
+   really has, which is the tile's width MINUS whatever else is in the row — so the number of
+   controls matters as much as the width, and the width alone was deciding it.
    Two things were wrong and both put a clipped or empty button on the floor:
      · at 1920px a 133.9px tile still ellipsed "Take order" to "Take ord…" whenever 🧾 Bill shared
        the row, because the decorative ＋ ate ~14px of an 84px button;
@@ -1831,9 +1841,9 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
    produced an EMPTY button on a dense floor: the word was gone with the band and the ＋ was still
    suppressed from up here. Keep the depth uniform and let source order decide. */
 .ftile:has(.ft-ico-bill) .ft-take-x { display: none; }   /* the word beats the decoration */
-/* A finished tile is the crowded one at ANY size — it takes the short label from the start. */
+/* A finished tile is the crowded one at ANY size — three controls (⏻ · ＋ · 🧾) share the row, so it
+   drops the words from the start and shows the ＋. This is the A2 tile in his 2026-08-17 screenshot. */
 .ftile.ft-finished .ft-take-t { display: none; }
-.ftile.ft-finished .ft-take-s { display: inline; }
 /* Square icon buttons: the ✓ accept and the 🖨 bill. Same height as the take button so the
    row reads as one control strip. */
 /* THE ICON BUTTONS ARE A SHARE OF THE TILE, NEVER A FIXED SIZE (owner, 2026-08-02: "for all no.
@@ -1908,12 +1918,12 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    shrinks with the tile and is always the widest control in the row. */
 .ftile.ft-finished .ft-ico-bill { min-width: min(clamp(20px, 19cqw, 30px), 30cqw); max-width: 30cqw; padding-inline: 0; }
 .ftile.ft-finished .ft-bill-t { display: none; }
-/* …and the decorative ＋ goes too, so the WORD "Take order" fits instead of ellipsing to
-   "Take …". That is this tile's own stated priority — the word is the information, the ＋ is
-   decoration — and it is only given up here because a finished tile is the crowded one.
-   Below 88px the ＋ comes BACK (see the container block further down): at that size the word
-   is already gone, and a button with neither would be an empty box. */
-.ftile.ft-finished .ft-take-x { display: none; }
+/* …and on a finished tile the ＋ is the WHOLE button — no word beside it (owner, 2026-08-17:
+   "instead of order is written that should be just a plus icon, nothing else"). This is the middle
+   control of the A2 tile in his screenshot: [red ⏻] [＋] [🧾]. It used to be hidden here because the
+   short "Order" label took the space; that label is gone (see R28 at the top of the ladder), so
+   hiding the ＋ as well would leave an empty box. */
+.ftile.ft-finished .ft-take-x { display: inline; }
 /* ── SMALL TILES: DROP DETAIL, NEVER RESHAPE (owner: "small will not affect the shape of
    table, it will make text and stuff small") ────────────────────────────────────────────
    These widths are the tile's INNER width (a container query measures the content box), so
@@ -1931,26 +1941,27 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    receipt glyph, on every laptop, all the time. The words only ever appeared on a ~1920px monitor.
    That is the opposite of this tile's own stated rule, quoted twice from the owner: "never make
    take order button small", "＋ Take order must remain the BIGGEST control on every tile".
-   The fix keeps the ladder and adds one rung — a SHORT label for the band where the full one
-   genuinely cannot fit. Measured room for text in that band: 80.6 inner − 22 (bill glyph) − 4
-   (gap) − 10 (the button's own padding) = ~44px. "Take order" needs ~52px at 9.5px bold, so it
-   really doesn't fit and the old band was right to drop it; "Order" needs ~27px and fits with
-   room to spare. A word beats a glyph, which is this ladder's whole premise. */
+   The T3 fix answered it with a SHORT label ("Order") for the band where the full one cannot fit.
+   ⚠️ THAT RUNG IS GONE (owner, 2026-08-17 — R28 in docs/REJECTED-IDEAS.md). Shown the tile wearing
+   it, he ruled: *"instead of order is written that should be just a plus icon, nothing else, and it
+   should stay like that"*. So the band below simply drops to the ＋. "Never make it small" is still
+   honoured the way he now wants it honoured: the button keeps flex:1 and stays the WIDEST control in
+   the row at every density — it just wears the ＋ instead of a word once "Take order" cannot fit. */
 @container (max-width: 120px) {
   .ft-meta { -webkit-line-clamp: 1; }
   .ftile .ft-take-x { display: none; }
 }
-/* 88 → 76px: the full label cannot fit, so the SHORT one carries it. The ＋ stays hidden here —
-   it is decoration and the word needs the room (same trade the finished tile already makes). */
+/* Below 88px "Take order" cannot fit, so the button becomes the ＋ — nothing else, at every density
+   under this line. (This used to hand over to a short "Order" label; the owner removed that on
+   2026-08-17 — see R28 at the top of the ladder. Do not put a word back here.) */
 @container (max-width: 88px) {
   .ft-bill-t { display: none; }        /* the receipt glyph alone still reads as "bill" */
   .ftile .ft-take-t { display: none; }
-  .ftile .ft-take-s { display: inline; }   /* "Order" — a word, where "Take order" would ellipse */
-  .ftile .ft-take-x { display: none; }
-  /* …EXCEPT on a finished tile, whose three controls (⏻ · ＋ · 🧾) leave the take button 33px here.
-     Measured: even "Order" ellipses at that width, and a clipped word is the one thing this ladder
-     exists to avoid. Three controls means the glyph, as it always has. */
-  .ftile.ft-finished .ft-take-s { display: none; }
+  /* The ＋ comes back, and at the SAME `.ftile …` depth as the `:has(.ft-ico-bill)` suppression up
+     above — otherwise that rule (0,3,0) wins and the button is an EMPTY box, which is the exact
+     mistake the ⚠️ note at the top of this ladder records. */
+  .ftile:has(.ft-ico-bill) .ft-take-x { display: inline; }
+  .ftile .ft-take-x { display: inline; }
   .ftile.ft-finished .ft-take-x { display: inline; }
   .ft-seats { display: none; }
 }
@@ -1965,13 +1976,6 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    ✓ Close all live in full size. */
 @container (max-width: 76px) {
   .ftile.ft-finished .ft-ico-bill { display: none; }  /* keep ✕ close + ＋, the two that matter here */
-  /* Below here not even "Order" fits, so the ＋ is the fallback — a button with neither would be
-     an empty box. This is the rung that used to start at 88px. Written at the SAME depth as the
-     `:has(.ft-ico-bill)` suppression above so source order decides and the ＋ genuinely comes back;
-     a bare `.ft-take-x` here lost to it and left the button empty. */
-  .ftile .ft-take-s { display: none; }
-  .ftile:has(.ft-ico-bill) .ft-take-x { display: inline; }
-  .ftile .ft-take-x { display: inline; }
   .ftile.ft-finished .ft-take-x { display: inline; }
 }
 @container (max-width: 64px) {
