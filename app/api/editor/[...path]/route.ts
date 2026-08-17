@@ -344,6 +344,15 @@ async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action
 // Those stored values are LEFT IN THE DATABASE untouched — nothing reads them now, and if the row
 // is ever handed back it should be rebuilt deliberately rather than resurrected. The matching rows
 // went from lib/accessTree.ts and lib/accessModel.ts in the same commit.
+// REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. This function must keep answering
+// true for the Aevidine admin console ONLY. Do not widen it to the restaurant owner or a manager,
+// and do not re-introduce a grantable "Delete a bill" permission to feed it: *"I don't want to give
+// permission to the restaurant owner to delete the bill because he will fake the bill and delete the
+// bill … what can we do that the restaurant doesn't cheat, and at the same time we can keep the
+// track?"* Cancel is the only route out of a bill for anyone at the restaurant — a ₹0 sale that
+// stays visible with its reason, its person and its time. See docs/COMPLIANCE-GUARDRAILS.md §3.
+// (Marker added 2026-08-17: the rule was recorded in the doc but had no comment in the code, so the
+// guard was not enforcing it — and R27 was filed under the doc's "Reversed" heading by mistake.)
 async function canDeleteBill(g: { user: StaffUser | null }, _rid: string): Promise<boolean> {
   return !g.user; // the Aevidine admin console only; owner and manager alike get cancel, not delete
 }
