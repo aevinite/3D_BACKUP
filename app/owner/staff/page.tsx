@@ -220,7 +220,30 @@ export default function OwnerStaffPage() {
         body: JSON.stringify({ id: s.id, action: "edit", name, phone }),
       });
       setEditing(null); await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); await load(); }
+    } catch (e) {
+      // THE LOSER OF A CLASH WAS NEVER ACTUALLY TOLD (T13 sweep, 2026-08-17 — watched happen).
+      //
+      // This read `setErr(msg); await load();`. The refusal really does arrive correctly — the
+      // server answers 409 with `clash.plain` ("Someone else changed the name while you had it
+      // open — it now says …") and `call()` throws exactly that sentence. But `load()` ends its
+      // success path with `setErr(null)`, so the reload fired one line later ERASED the message
+      // before a single frame was painted with it. Measured: 409 + plain sentence on the wire,
+      // and zero error banners in the DOM afterwards.
+      //
+      // That is the whole rule defeated, not a cosmetic slip: "first save wins, and the loser is
+      // told" (CLAUDE.md item 11). What the owner saw instead was the row quietly showing someone
+      // else's name, their own typing still sitting in the box, and no explanation anywhere — the
+      // exact silent overwrite the expectation header exists to make impossible.
+      // `verify:owner-clash` reported green throughout, because a text scan can only see that the
+      // sentence is READ from the response; it cannot see it being cleared afterwards.
+      //
+      // So: refresh FIRST (the row must show the value that really landed), then say why. The
+      // editor deliberately stays open with the draft in it, which is what `clash.todo` tells them
+      // to do — "look at what it says now and redo yours if it's still right".
+      const why = e instanceof Error ? e.message : String(e);
+      await load();
+      setErr(why);
+    }
   }
 
   async function resetPw(s: Staff) {
