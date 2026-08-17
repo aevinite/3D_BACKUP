@@ -57,6 +57,13 @@ export default function OwnerFeedback() {
   const [iFilter, setIFilter] = useState<"open" | "all">("open");
   const [issuesOff, setIssuesOff] = useState(false);
   const [iErr, setIErr] = useState<string | null>(null); // issues load failed (vs genuinely empty)
+  // ── THE BADGE IS THE SERVER'S COUNT, NOT A COUNT OF WHAT FITS ON THE PAGE (sweep 6 · T14) ───────
+  // `/api/owner/issues` computes `openCount` as one indexed head-count over the whole scope — it was
+  // given that on 2026-08-12 precisely so a restaurant with more than 300 complaints could not
+  // understate how many are open. This page then threw it away and counted the rows it happened to
+  // have, which is the very thing that fix removed. Null until the first reply, so the badge can fall
+  // back to the shown page (and does, when the server says it couldn't count either).
+  const [openSrv, setOpenSrv] = useState<number | null>(null);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -82,6 +89,10 @@ export default function OwnerFeedback() {
       if (j.disabled) { setIssuesOff(true); return; }
       if (j.error) throw new Error(j.error);
       setIssues(j.issues || []); setIErr(null); setErr(null);
+      // The server says so in `partial` when its own head-count failed; in that case it already fell
+      // back to counting the shown page, and so do we.
+      const countUnread = Array.isArray(j.partial) && j.partial.includes("openCount");
+      setOpenSrv(!countUnread && typeof j.openCount === "number" ? j.openCount : null);
     } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setIErr(m); }
   }, [scp]);
 
@@ -156,6 +167,12 @@ export default function OwnerFeedback() {
     setBusy(id);
     const prev = status === "resolved" ? "open" : "resolved";
     setIssues((cur) => (cur || []).map((i) => (i.id === id ? { ...i, status } : i)));
+    // Keep the server's count in step with the optimistic row change, the same way the ratings
+    // badge already does — otherwise the badge would sit a beat behind until the reload lands.
+    const wasOpen = (issues || []).find((i) => i.id === id)?.status === "open";
+    if (wasOpen !== (status === "open")) {
+      setOpenSrv((n) => (n === null ? n : Math.max(0, n + (status === "open" ? 1 : -1))));
+    }
     try {
       const res = await fetch(`/api/owner/issues${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
       // A failed Resolve/Reopen must not silently revert: roll the row back and tell the owner.
@@ -163,14 +180,29 @@ export default function OwnerFeedback() {
       setErr(null); await loadIssues();
     } catch (e) {
       setIssues((cur) => (cur || []).map((i) => (i.id === id ? { ...i, status: prev } : i)));
+      if (wasOpen !== (status === "open")) {
+        setOpenSrv((n) => (n === null ? n : Math.max(0, n + (status === "open" ? -1 : 1))));
+      }
       setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(null); }
   };
 
-  const openCount = (issues || []).filter((i) => i.status === "open").length;
+  const shownOpen = (issues || []).filter((i) => i.status === "open").length;
+  const openCount = openSrv ?? shownOpen;
   const issueRows = (issues || []).filter((i) => iFilter === "all" || i.status === "open");
   const ratingRows = (ratings || []).filter((r) => rFilter === "all" || !r.acknowledged);
   const bothOff = ratingsOff && issuesOff;
+  // ── A LIST THAT IS ONLY PART OF THE LIST HAS TO SAY SO (sweep 6 · T14, 2026-08-18) ──────────────
+  // The two sister screens in this panel already do it — Customers says "the N most-recent of M",
+  // Pay Later says "the N people who owe the most, of M". This one said nothing, and on French House
+  // that meant 381 ratings, 200 cards and no hint that 181 of them were out of reach. An owner who
+  // scrolls to the bottom of a list is entitled to believe he has reached the bottom of it.
+  const RATINGS_PAGE = 200;   // /api/owner/ratings → .limit(200)
+  const ISSUES_PAGE = 300;    // /api/owner/issues  → .limit(300)
+  const ratingsShown = (ratings || []).length;
+  const ratingsOf = rFilter === "unhandled" ? (summary?.unhandled ?? 0) : (summary?.total ?? 0);
+  const ratingsCapped = ratingsShown >= RATINGS_PAGE && ratingsOf > ratingsShown;
+  const issuesCapped = (issues || []).length >= ISSUES_PAGE;
 
   return (
     <>
@@ -279,6 +311,14 @@ export default function OwnerFeedback() {
                       </div>
                     );
                   })}
+                  {/* Plain muted text, not a warning bar — nothing is wrong, the list is just long. */}
+                  {ratingsCapped && (
+                    <div className="adm-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                      {rFilter === "unhandled"
+                        ? `Showing the ${ratingsShown} newest of ${ratingsOf.toLocaleString("en-IN")} still to handle. Handle these and the next ones appear.`
+                        : `Showing the ${ratingsShown} most recent of ${ratingsOf.toLocaleString("en-IN")}. “To handle” reaches the older ones that still need you.`}
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -338,6 +378,14 @@ export default function OwnerFeedback() {
                     </div>
                   );
                 })}
+                {issuesCapped && (
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    Showing the {ISSUES_PAGE} most recent complaints.{" "}
+                    {openCount > ISSUES_PAGE
+                      ? `${openCount.toLocaleString("en-IN")} are still open, so some open ones are past the end of this page.`
+                      : "Open ones are listed first, so none of those is hidden below this."}
+                  </div>
+                )}
               </div>
             )}
           </>
