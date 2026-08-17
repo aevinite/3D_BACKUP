@@ -142,7 +142,16 @@ export default function SessionGate() {
   const [reqAutoSend, setReqAutoSend] = useState(true);
 
   // Working values that shouldn't trigger a re-draw when they change:
-  const settingsRef = useRef<Settings | null>(null); // cached restaurant settings
+  // The cached settings, KEYED BY RESTAURANT (sweep 6 T3). This was a bare
+  // `useRef<Settings | null>` filled once with `settingsRef.current || await getSettings(...)`,
+  // which is only correct while a mounted gate never sees a second restaurant — and it does see
+  // one: this component lives in the root layout, so it survives a move between restaurants, and
+  // `ridRef.current` is still restaurant #1's placeholder for the few hundred milliseconds it
+  // takes the slug to resolve. Whatever restaurant was cached in that window then decided the
+  // geofence, the table-count range check and whether a location check was needed, for the whole
+  // life of the page. Keyed, it simply cannot answer for the wrong restaurant.
+  const settingsByRid = useRef<Map<string, Settings>>(new Map());
+  const settingsRef = useRef<Settings | null>(null); // the settings for the restaurant we are acting on NOW
   const pending = useRef<Pending | null>(null); // the action we're trying to complete
   const coords = useRef<{ lat: number | null; lng: number | null }>({ lat: null, lng: null }); // the guest's location
   const sess = useRef<{ table: string; token: string; memberId: string; role: "owner" | "guest" } | null>(null); // our session once we have one
@@ -600,7 +609,15 @@ export default function SessionGate() {
       // opened — tapping Add-to-cart while offline just did nothing, silently.
       // Now the guest gets the connection-trouble screen with a working Retry.
       try {
-        settingsRef.current = settingsRef.current || (await getSettings(ridRef.current));
+        // THIS restaurant's settings, not "the first restaurant this tab ever asked about".
+        const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
+        const cached = settingsByRid.current.get(rid);
+        if (cached) settingsRef.current = cached;
+        else {
+          const s = await getSettings(rid);
+          settingsByRid.current.set(rid, s);
+          settingsRef.current = s;
+        }
       } catch {
         setNote("We can't reach the restaurant's system right now — check your internet and retry.");
         setOpen(true); setStep("net_error");
@@ -703,6 +720,37 @@ export default function SessionGate() {
   // Expose doJoinAsGuest to afterLocation (declared above) without a forward ref.
   joinGuestRef.current = doJoinAsGuest;
 
+  /**
+   * WHY A REQUEST TO STAFF DIDN'T LAND — a diner's sentence, or null when it DID land.
+   *
+   * Branches on the CODE, never on the server's prose. `already_sent` counts as landed: staff
+   * have the request, it just isn't a second one, and telling the diner it failed would send them
+   * tapping again for something already on its way.
+   */
+  const requestFailure = (r: { ok: boolean; reason?: string }): string | null => {
+    if (r?.ok !== false || r?.reason === "already_sent") return null;
+    if (isSessionTimeout(r)) return "The restaurant's system isn't answering — nobody has been told yet. Please try again.";
+    if (r.reason === "rate_limited") return "That's a lot of requests in a row — please wait a moment, then ask again.";
+    if (r.reason === "blocked" || r.reason === "banned") return "We can't call staff from this table — please speak to a member of staff.";
+    return "We couldn't tell the staff just now — please try again, or speak to a member of staff.";
+  };
+
+  /**
+   * DID IT REACH THE FLOOR? True when it did. When it didn't, the reason is TOASTED — not written
+   * into `note`, because three of the five screens that can send one (`waiting_approval`,
+   * `denied`, `table_closed`) never render `note`, and `location_help` renders it INSIDE a
+   * reassuring sentence, so a failure written there would read as if it had worked. A toast is
+   * the one channel visible on every screen. `alsoNote` is passed by the one caller whose screen
+   * both renders the note and keeps the guest standing in front of the button.
+   */
+  const requestLanded = (r: { ok: boolean; reason?: string }, alsoNote = false): boolean => {
+    const why = requestFailure(r);
+    if (!why) return true;
+    toast(why, "table", "error");
+    if (alsoNote) setNote(why);
+    return false;
+  };
+
   // Formal "request a waiter to your table" — used when location can't be
   // confirmed, or as the escape hatch on a table someone else holds.
   const doRequest = async (type: "open" | "access") => {
@@ -720,7 +768,20 @@ export default function SessionGate() {
     // fresh one each time — otherwise the same person can appear repeatedly in the
     // staff's list (audit fix bug #18). "open" requests are unaffected.
     if (type === "access" && accessReqRef.current) { setStep("request_sent"); return; }
-    await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
+    const r = await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
+    // NOBODY WAS TOLD IS NOT "WE'VE LET THE STAFF KNOW" (sweep 6 T3, 2026-08-17).
+    //
+    // The answer used to be thrown away: whatever the server said, the next line showed the
+    // "We've let the staff know — keep this open and your order is sent automatically" screen.
+    // `rpc()` in lib/session.ts never throws — a timeout comes back as `{ ok:false,
+    // reason:"timed_out" }` and a tripped limit as `rate_limited` — so a diner at a table nobody
+    // had opened could sit watching that promise with no request anywhere near the floor. That is
+    // worse than a tap doing nothing: they stop trying, because the screen says it worked.
+    //
+    // Every other path in this file already branches on the answer (joinSession, tableStatus,
+    // callWaiterSession). This one now does too, in the same words: say what happened and leave
+    // the buttons where they are, so the tap they make next is one that can work.
+    if (!requestLanded(r)) return;
     // Only mark the waiter-call as sent AFTER it actually succeeded, so a failed
     // request can still be retried (bug #18 fix must not swallow a real retry).
     if (type === "access") accessReqRef.current = true;
@@ -745,7 +806,13 @@ export default function SessionGate() {
     reqBusy.current = true;
     try {
     setReqAutoSend(true); // the not-open watcher (proceedWhenOpen) is running → auto-send is real
-    const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null, ridRef.current);
+    const p = pending.current!;
+    const r = await requestAccess(p.table, "open", name.trim(), null, ridRef.current);
+    // Same rule as doRequest: a request that never reached the floor must not be reported as one
+    // that did. The guest stays on "Your table isn't open yet" with their name still typed, and
+    // the Request button still works — so the next tap is one that can actually get them served.
+    if (!requestLanded(r, true)) return;
+    setNote("");
     setStep("request_sent");
     } finally { reqBusy.current = false; }
   };
@@ -755,7 +822,11 @@ export default function SessionGate() {
   // if needed, then resume the normal flow from wherever it can pick up.
   const retryFlow = async () => {
     if (!settingsRef.current) {
-      try { settingsRef.current = await getSettings(ridRef.current); } catch {
+      try {
+        const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
+        settingsRef.current = await getSettings(rid);
+        settingsByRid.current.set(rid, settingsRef.current);
+      } catch {
         setNote("Still can't reach the restaurant's system — check your internet and try again.");
         return;
       }

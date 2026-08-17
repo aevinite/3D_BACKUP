@@ -236,9 +236,18 @@ export default function ChefPopup() {
               window.dispatchEvent(new Event("lfh:table-scanned"));
             }}
           />
+          {/* Clearing here wipes the DEVICE-WIDE remembered table (the same memory typing in this
+              box writes, two handlers up) — so the rest of the app has to be told, exactly as
+              typing tells it. Without the announcement the bill panel kept the old number in its
+              own box and pre-filled it on the next open, so a guest who cleared a wrong table here
+              still had it waiting for them at Place Order. Same one-line announcement the session
+              gate's own table box already makes. (sweep 6 T3) */}
           {!lockedTable && (tableNumber || scannedTable) && (
             <button type="button" className="table-input-clear" aria-label="Clear table number"
-              onClick={() => { setTableNumber(""); setScannedTableState(""); setScannedTable(""); }}>✕</button>
+              onClick={() => {
+                setTableNumber(""); setScannedTableState(""); setScannedTable("");
+                window.dispatchEvent(new Event("lfh:table-scanned"));
+              }}>✕</button>
           )}
         </div>
         {/* One button per request reason, built from the REASONS list above. */}
