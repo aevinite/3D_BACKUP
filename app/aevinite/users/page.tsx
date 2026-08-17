@@ -297,6 +297,16 @@ function UsersStyle() {
   .usp-banner { border-radius:14px; padding:14px 16px; margin-bottom:14px; border:var(--border); background:var(--card); }
   .usp-banner.err { border-color:#7f1d1d; color:#fca5a5; }
   .usp-banner.ok { border-color:#166534; color:#86efac; }
+  /* ── BOTH BANNERS ON THE LIGHT CONSOLE (sweep T15, 2026-08-18) ────────────────────────────
+     #fca5a5 and #86efac are DARK-skin inks and a hard-coded hex cannot follow the skin, so on the
+     light console they sat on a white card at 1.90:1 and 1.40:1 (measured; on the dark console
+     they read 9.72 and 13.14). The green one is the worst sentence in the product to be unable to
+     read — it is the "copy it now, it won't be shown again" line that carries a brand-new
+     password — and the red one is every failure this page can report. Same hues taken darker;
+     the border and the card are untouched, and the dark console is not touched at all.
+     After: 5.61:1 and 6.77:1. (.usp-row .nm em below was fixed the same way in T11.) */
+  [data-skin="light"] .usp-banner.err { color: color-mix(in srgb, #fca5a5 55%, #000); }
+  [data-skin="light"] .usp-banner.ok  { color: color-mix(in srgb, #86efac 42%, #000); }
   .usp-code { font-size:18px; background:var(--bg); padding:8px 12px; border-radius:8px; letter-spacing:1px; }
   .usp-btn { padding:9px 14px; border-radius:9px; border:0; font-weight:700; font-size:13px; cursor:pointer; color:#fff; }
   .usp-btn.blue { background:var(--ub); } .usp-btn.ghost { background:#374151; }
