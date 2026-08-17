@@ -316,12 +316,22 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
       </div>
 
-      {/* What is on screen, in one line — so picking "Deleted bills" answers "how much?" too. */}
+      {/* What is on screen, in one line — so picking "Deleted bills" answers "how much?" too.
+          ── AND IT SAYS WHICH SLICE IT IS TOTALLING (T12 sweep, 2026-08-17) ──────────────────────
+          The record is paged server-side, so `list` is ONE page. Measured live: 426 removals on
+          the record and this line read "200 records · ₹91,337 in total" — three money figures on
+          one screen (₹35,998 moved, ₹1,83,895 record-only, ₹91,337 here) and only the middle one
+          silently described page 1 while calling itself a total. The Activity half beside it has
+          always said "Counts are for this page of N entries"; this half never did, and it is the
+          half that carries money. So: name the page when there is more than one, and say "on this
+          page" rather than "in total". The risk strip above still covers the WHOLE record — it is
+          counted in the database. */}
       {list.length > 0 && (
         <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
           {list.length.toLocaleString("en-IN")} {list.length === 1 ? "record" : "records"}
+          {pages > 1 ? ` on this page of ${total.toLocaleString("en-IN")}` : ""}
           {activeKind ? ` · ${KIND_LABEL[activeKind] || activeKind}` : ""}
-          {shownMoney > 0 ? ` · ${inr(shownMoney)} in total` : ""}
+          {shownMoney > 0 ? ` · ${inr(shownMoney)}${pages > 1 ? " on this page" : " in total"}` : ""}
         </p>
       )}
 
