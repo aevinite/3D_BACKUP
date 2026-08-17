@@ -517,6 +517,10 @@ export default function OwnerDashboard() {
   // line reports the OLDEST thing on screen — the honest worst case.
   const [ages, setAges] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  // A DELIBERATE "this section isn't enabled for you" answer, kept apart from `err` so it is never
+  // dressed as a breakage (see the branch in fetchPayload). While it is set, no analytics payload
+  // is ever going to arrive, so nothing on the page may keep saying "Loading…".
+  const [offNote, setOffNote] = useState<string | null>(null);
   // Has ANY payload answered this visit? Until one has, what is on screen is the instant-paint
   // snapshot from the last time this tab was open — real numbers, but last-seen ones. The age
   // line said "updated 15 hr ago" without saying that was a saved copy (T5 sweep, 2026-08-11).
@@ -644,8 +648,17 @@ export default function OwnerDashboard() {
       // PERMISSION, not a network problem — it used to drop the top strip's Connected pill to a
       // warning state and show the entitlement text in the red "couldn't load" banner
       // (T5 sweep, 2026-08-06). Say it plainly and leave the connection light alone.
-      if (a.error && a.disabled) { setErr(errText(a.error)); return; }
+      // ── SWITCHED OFF IS NOT BROKEN (T12 sweep, 2026-08-17) ──────────────────────────────────
+      // This branch has always understood that a 403 + `disabled: true` is a PERMISSION rather
+      // than a network problem — the 2026-08-06 fix stopped it dropping the Connected pill. But
+      // it still put the sentence in `err`, and `err` renders inside a RED-BORDERED card headed
+      // "Couldn't load.", over a page of cards that then said "Loading…" for ever and three KPI
+      // values that stayed blank. Measured by replaying the server's own answer: an owner whose
+      // Reports the admin deliberately switched off was told, permanently, that his dashboard was
+      // broken. It gets its own state so the page can say it plainly and stop pretending to load.
+      if (a.error && a.disabled) { setOffNote(errText(a.error)); setErr(null); setLanded(true); return; }
       if (a.error) throw new Error(errText(a.error));
+      setOffNote(null);
       setCache((c) => ({ ...c, [key]: a }));
       setLanded(true);
       if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
@@ -1191,6 +1204,15 @@ export default function OwnerDashboard() {
     return `Figures computed ${new Date(at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })} · ${timeAgo(at)}`;
   };
   const mainAge = () => ageTitle(`${scopeKey}|${globalRange}`);
+  /** What a card with no payload yet should say. "Loading…" is a promise, and once the server has
+   *  told us this section is switched off for this restaurant the promise is false — every card
+   *  said it for ever (T12 sweep, 2026-08-17). Short, because it is repeated per card. */
+  const loadNote = offNote ? "Not shown — Reports are switched off." : "Loading…";
+  /** Reports really are available for this scope: the admin still grants the section AND the
+   *  server has not refused this payload. Used to stop the KPI tiles linking into a Reports hub
+   *  that would only refuse him — the hero shortcut has always been gated, the tiles never were. */
+  const reportsOn = ov?.entitlements?.reports !== false && !offNote;
+  const kpiHref = (t: string) => (reportsOn ? reportHref(t) : undefined);
   const kMain = kpiOf(globalRange);
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
@@ -1269,31 +1291,37 @@ export default function OwnerDashboard() {
   // (T5 sweep, 2026-08-11); the count picks a balanced row instead (7 → 4 + 3).
   const kpiCount = 5 + (kMain?.staffPay ? 2 : 0);
   const kpiCols = kpiCount <= 5 ? kpiCount : Math.ceil(kpiCount / 2);
+  // ── WHEN REPORTS ARE SWITCHED OFF (T12 sweep, 2026-08-17) ───────────────────────────────────
+  // `offNote` means no analytics payload is ever coming, so every tile below prints an em dash and
+  // says why instead of animating a blank forever, and NONE of them is a link: the hero shortcut
+  // has always been gated on the `reports` entitlement, the tiles never were, so five taps led
+  // into a hub that would only refuse him. `kpiHref` returns undefined in that state, which makes
+  // Kpi render a plain card rather than a Link.
   const kpiRow = (
     <div className="adm-stats ow2-stats" style={{ ["--ow2-cols" as string]: String(kpiCols) }}>
-      <Kpi k="Revenue" href={reportHref("sales")} v={kMain?.revenue ?? 0} money loading={!kMain}
+      <Kpi k="Revenue" href={kpiHref("sales")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money loading={!offNote && !kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
-        prevTitle={PREV_LABEL[globalRange]} sub={PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
-      <Kpi k="Orders" href={reportHref("volume")} v={kMain?.orders ?? 0} loading={!kMain}
-        sub={kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
+        prevTitle={PREV_LABEL[globalRange]} sub={offNote ? "Reports are switched off" : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+      <Kpi k="Orders" href={kpiHref("volume")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
+        sub={offNote ? "Reports are switched off" : kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Avg order" href={reportHref("avgbill")} v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
-      <Kpi k="Today so far" href={reportHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
+      <Kpi k="Avg order" href={kpiHref("avgbill")} v={offNote ? "—" : (kMain?.avg ?? 0)} money loading={!offNote && !kMain} sub={offNote ? "Reports are switched off" : "per paid order"} />
+      <Kpi k="Today so far" href={kpiHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
         sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
-      <Kpi k="Lost to cancellations" href={reportHref("cancellations")} v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
-        loading={!money}
-        sub={money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
+      <Kpi k="Lost to cancellations" href={kpiHref("cancellations")} v={offNote || money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
+        loading={!offNote && !money}
+        sub={offNote ? "Reports are switched off" : money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
       {/* STAFF PAY AS AN EXPENSE (owner 2026-07-30). Only drawn when the restaurant has the
           module — otherwise the tiles don't exist, same as everywhere else. "After staff pay"
           is the number he asked for: revenue minus what actually went out to the team. */}
       {kMain?.staffPay && (
         <>
-          <Kpi k="Staff pay out" href={reportHref("team")} v={kMain.staffPay.paidOut} money loading={!kMain}
+          <Kpi k="Staff pay out" href={kpiHref("team")} v={kMain.staffPay.paidOut} money loading={!kMain}
             sub={kMain.staffPay.entries
               ? `${kMain.staffPay.entries} payment${kMain.staffPay.entries === 1 ? "" : "s"} · ${kMain.staffPay.people} on the pay list`
               : "nothing paid out yet"} />
-          <Kpi k="After staff pay" href={reportHref("team")} v={(kMain.revenue ?? 0) - kMain.staffPay.paidOut} money loading={!kMain}
+          <Kpi k="After staff pay" href={kpiHref("team")} v={(kMain.revenue ?? 0) - kMain.staffPay.paidOut} money loading={!kMain}
             sub="revenue minus what went out to the team" />
         </>
       )}
@@ -1336,6 +1364,15 @@ export default function OwnerDashboard() {
       </div>
 
       {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 16 }}><b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span></div>}
+      {/* The switched-off note: a plain, unalarming card in the muted colour, NOT the red one.
+          Nothing here is broken — Aevidine has simply not given this restaurant the Reports
+          section, and the owner's next move is to ask us, which the sentence says. */}
+      {offNote && !err && (
+        <div className="adm-card" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <i className="fas fa-eye-slash" style={{ color: "var(--muted)", marginTop: 2 }} aria-hidden="true" />
+          <span><b>Figures aren&rsquo;t shown here.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{offNote}</span></span>
+        </div>
+      )}
 
 
       {/* ═══════ HOME · MULTI ═══════ */}
@@ -1353,7 +1390,7 @@ export default function OwnerDashboard() {
                 <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"} · each bar split by restaurant</span></span>
                 <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
               </div>
-              {!trendPayload ? <div className="adm-empty">Loading…</div>
+              {!trendPayload ? <div className="adm-empty">{loadNote}</div>
                 : <StackedDailyBars data={groupTrend.rows} lines={groupTrend.lines} />}
             </div>
           ) : (
@@ -1361,13 +1398,13 @@ export default function OwnerDashboard() {
               <div className="adm-card">
                 <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
                   <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
-                {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
+                {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">{loadNote}</div>
                   : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(r.id) }))}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
                 <div className="ow2-ct"><span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span></div>
-                {!trendPayload ? <div className="adm-empty">Loading…</div>
+                {!trendPayload ? <div className="adm-empty">{loadNote}</div>
                   : <AreaTrend data={groupTrend.rows} lines={groupTrend.lines} />}
               </div>
             </div>
@@ -1453,7 +1490,7 @@ export default function OwnerDashboard() {
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
-              {!pl("month") ? <div className="adm-empty">Loading…</div>
+              {!pl("month") ? <div className="adm-empty">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
@@ -1469,7 +1506,7 @@ export default function OwnerDashboard() {
               <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "categories")} />
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
           </div>
 
@@ -1480,14 +1517,14 @@ export default function OwnerDashboard() {
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · {restScopeText}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "payments")} />
               {(pl(globalRange) as GroupA | undefined)?.paymentMethods
                 ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
           </div>
 
@@ -1527,7 +1564,7 @@ export default function OwnerDashboard() {
               <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span>
               <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
             </div>
-            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
+            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">{loadNote}</div>
               : restTrend.length >= 9
                 ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} />
                 : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0, __orders: Number(r.__orders) || 0 })) as { label: string; revenue: number }[]} color={GREEN} />}
@@ -1536,7 +1573,7 @@ export default function OwnerDashboard() {
           <div className="ow2-two">
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
-              {!pl("month") ? <div className="adm-empty">Loading…</div>
+              {!pl("month") ? <div className="adm-empty">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
@@ -1546,7 +1583,7 @@ export default function OwnerDashboard() {
               <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
           </div>
 
@@ -1556,13 +1593,13 @@ export default function OwnerDashboard() {
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.paymentMethods && ((pl(globalRange) as RestA).paymentMethods.reduce((a, m) => a + m.revenue, 0) > 0)
                 ? <PaymentDonut data={(pl(globalRange) as RestA).paymentMethods} />
-                : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">Loading…</div>)}
+                : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">{loadNote}</div>)}
             </div>
           </div>
 
@@ -1613,7 +1650,7 @@ export default function OwnerDashboard() {
                   </span>
                 </span>
               </div>
-              <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort}
+              <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort} note={loadNote}
                 onDish={(t) => viewTo({ level: "dish", rid: activeRid, dish: t })} />
             </div>
             {/* Recent activity — the owner's mini log (surprise add).
@@ -1667,7 +1704,7 @@ export default function OwnerDashboard() {
       {/* ═══════ DISH ═══════ */}
       {view.level === "dish" && (
         <div className="adm-card own-dish">
-          {dishView === "loading" || dishView === null ? <div className="adm-empty">Loading dish…</div>
+          {dishView === "loading" || dishView === null ? <div className="adm-empty">{offNote ? loadNote : "Loading dish…"}</div>
           : dishView === "missing" ? (
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
@@ -1864,8 +1901,10 @@ export default function OwnerDashboard() {
 }
 
 // ── Every-dish list (kept from the old view, range now per-card) ──────────────
-function DishList({ payload, sort, onDish }: { payload?: RestA; sort: "revenue" | "qty"; onDish: (t: string) => void }) {
-  if (!payload) return <div className="adm-empty">Loading…</div>;
+function DishList({ payload, sort, onDish, note }: { payload?: RestA; sort: "revenue" | "qty"; onDish: (t: string) => void; note?: string }) {
+  // `note` is the page's own placeholder text: "Loading…" normally, but "Reports are switched off"
+  // once the server has said so, because then no payload is ever coming (T12 sweep, 2026-08-17).
+  if (!payload) return <div className="adm-empty">{note ?? "Loading…"}</div>;
   const dishes = [...payload.dishes].sort((a, b) => (sort === "revenue" ? b.revenue - a.revenue : b.qty - a.qty));
   const maxRev = Math.max(1, ...dishes.map((d) => d.revenue));
   return (
