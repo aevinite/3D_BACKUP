@@ -8364,14 +8364,25 @@ function floorTileHtml(i) {
   // tile ("never make take order button small"). It only exists on a finished table, so on every
   // other tile the row is unchanged.
   const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-power-off" aria-hidden="true"></i></button>` : "")
-    // THREE FACES, ONE BUTTON, EXACTLY ONE SHOWN (T3 sweep, 2026-08-06). The stylesheet's container
-    // ladder picks between them by how wide the tile actually is: "Take order" while it fits, then
-    // the short "Order" (because 12-per-row on a 1280px laptop — the shipped default — leaves ~44px
-    // of text room, enough for a word but not that word), then the bare ＋ on a genuinely dense
-    // floor. Before this the middle rung didn't exist, so every laptop showed the ＋ and the owner's
-    // "never make take order button small" was only honoured on a 1920px monitor.
-    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span><span class="ft-take-s">Order</span></button>`)
+    // TWO FACES, ONE BUTTON, EXACTLY ONE SHOWN. The stylesheet's container ladder picks between them
+    // by how wide the tile actually is: "＋ Take order" while it genuinely fits, and the bare ＋ when
+    // it does not (a crowded tile, a dense floor, a finished table).
+    //
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO third, short "Order"
+    // face, and there must never be one again. The T3 sweep (2026-08-06) added one, this sweep
+    // briefly restored it after a later change had made it unreachable, and he removed it looking at
+    // the real tile: "instead of order is written that should be just a plus icon, nothing else, and
+    // it should stay like that" — plus, about the tile as a whole, "at the end of the day, UI should
+    // stay like this. I don't care if you increase the size of or maybe whatever you do."
+    // So: never add a word between the two faces, and never report the bare ＋ on a narrow tile as a
+    // bug. The size may change; the two faces may not.
+    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R29: there is no 🍽️ Serve-all on the
+    // tile. Offered as a way to make serving one tap instead of two ("tile → 🍽️ Serve all"), he said
+    // "we will not do any of that stuff". Serving stays two taps. It also protects this row, which he
+    // has ruled on twice (R4, and "never make take order button small"): a fifth control on an 89px
+    // tile could only take room from ＋ Take order. Do not add one.
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
     // on a green tile — the one control you look for while closing a table, camouflaged.
@@ -9844,6 +9855,10 @@ function tablePanelParts(t, host = "float") {
     // instead of being counted in silence.
     const shownN = newOrders.length + liveOrders.length;
     const voidedN = os.length - shownN;
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R30: this sentence is where it STOPS.
+    // Offered a next step for a table in this state — a line saying what to do, or a ⏻ that ends an
+    // empty party — he said "we will not do any of that stuff". State the truth and leave it: the
+    // bill is in the record, the table is usable, and no table ends itself (mig 254).
     const voidNote = shownN === 0 && voidedN > 0
       ? `<div class="sx-empty">Nothing on this table — ${voidedN} cancelled ticket${voidedN === 1 ? "" : "s"}, kept in Bills.</div>`
       : "";

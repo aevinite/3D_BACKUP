@@ -358,12 +358,34 @@ async function t5Fixes() {
   /clamp\(want, 0, maxDisc\)/.test(chip) && /refuse\(capLine\(\)\)/.test(chip)
     ? ok("a discount chip clamps to the person's cap and says so") : bad("the chips set a figure the server will refuse");
 
-  // H4 · the floor's primary action keeps a WORD at the shipped default (12 per row on a 1280px
-  // laptop = a ~73px container). The rung that drops the label must sit BELOW that.
-  const rung = /@container \(max-width: (\d+)px\) \{[^}]*\.ftile \.ft-take-s \{ display: none; \}/s.exec(css);
-  rung && Number(rung[1]) <= 70
-    ? ok("the ＋-only rung sits below the shipped default's tile", `${rung[1]}px`)
-    : bad("the take-order label is dropped at the width a 1280px laptop actually renders", rung ? rung[1] + "px" : "rung not found");
+  // H4 · the take-order button has TWO faces and only two (owner, 2026-08-17 — R28). This started
+  // life the other way round: the T5 sweep restored a short "Order" label for the band where
+  // "＋ Take order" cannot fit, and he removed it looking at the real tile — "instead of order is
+  // written that should be just a plus icon, nothing else, and it should stay like that". So what is
+  // guarded now is his rule: the word must not come back, in the markup or in the stylesheet, and
+  // when the full label is dropped the ＋ must be shown (a button with neither is an empty box —
+  // which is what this ladder's own ⚠️ note records happening once).
+  !/ft-take-s/.test(app) && !/ft-take-s/.test(css)
+    ? ok("no short \"Order\" face anywhere — just \"＋ Take order\" and \"＋\"")
+    : bad("the short \"Order\" label is back — he removed it on 2026-08-17 (R28)");
+  // The band is found by SCANNING to its closing brace, not with one regex: the block has inner
+  // rules (and inner `}`s), which is what made the first version of this check report "band not
+  // found" about a band that was right there.
+  const drop = (() => {
+    for (const m of css.matchAll(/@container \(max-width: (\d+)px\) \{/g)) {
+      let i = m.index + m[0].length, depth = 1;
+      while (i < css.length && depth > 0) { if (css[i] === "{") depth++; else if (css[i] === "}") depth--; i++; }
+      const body = css.slice(m.index + m[0].length, i - 1);
+      if (/\.ftile \.ft-take-t \{ display: none; \}/.test(body)) return { px: Number(m[1]), body };
+    }
+    return null;
+  })();
+  drop && /\.ftile \.ft-take-x \{ display: inline; \}/.test(drop.body) && /:has\(\.ft-ico-bill\) \.ft-take-x \{ display: inline; \}/.test(drop.body)
+    ? ok("…and where the full label is dropped, the ＋ is shown instead", `at ${drop.px}px, including on a tile that has the bill glyph`)
+    : bad("the band that drops the label does not bring the ＋ back — the button would be empty", drop ? `at ${drop.px}px` : "band not found");
+  /\.ftile\.ft-finished \.ft-take-x \{ display: inline; \}/.test(css)
+    ? ok("…and a finished tile's middle control is the ＋ (his A2 tile)")
+    : bad("a finished tile hides the ＋ with no word to replace it");
 }
 
 const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes];
