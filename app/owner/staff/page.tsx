@@ -432,7 +432,7 @@ export default function OwnerStaffPage() {
                     <div className="ost-editrow">
                       <input className="ost-in" value={editing.name} autoFocus placeholder="Username (their login)" autoComplete="off" maxLength={80}
                         onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-                      <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off"
+                      <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off" maxLength={20}
                         onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
                       <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
                       <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
@@ -465,7 +465,13 @@ export default function OwnerStaffPage() {
                 onChange={(e) => setNewRole((m) => ({ ...m, [r.id]: e.target.value }))}>
                 {ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}
               </select>
-              <input className="ost-in" name="password" placeholder="Password (blank = auto)" autoComplete="off" />
+              {/* THE MINIMUM IS STATED WHERE IT IS TYPED (T13 sweep, 2026-08-17). The server has
+                  always refused a password under 6 characters, and this field said only
+                  "blank = auto" — so the owner learned the rule from a red banner after a round
+                  trip, which on a phone renders above the fold (fixed separately). The sibling
+                  field on /owner/settings already says "min 6 characters"; this one now agrees.
+                  `minLength` is not violated by an empty value, so "blank = auto" still works. */}
+              <input className="ost-in" name="password" placeholder="Password (blank = auto, min 6)" autoComplete="off" minLength={6} />
               {/* PHONE IS NOT A PAY DETAIL (T19 sweep, 2026-08-14). It used to live inside the
                   payroll-gated "Add their details now" block below, so at a restaurant without
                   the pay module the owner had to add the person FIRST and then reopen the row
@@ -475,7 +481,12 @@ export default function OwnerStaffPage() {
                   someone's hand. The server has always accepted `phone` on create regardless of
                   the module. Full name / designation / joining date stay in the block: those
                   really are the profile feature. */}
-              <input className="ost-in" name="phone" placeholder="Phone (optional)" autoComplete="off" inputMode="tel" />
+              {/* maxLength matches the server's own `.slice(0, 20)` (T13 sweep, 2026-08-17). Without
+                  it a longer number — two numbers in one box, or an extension — was accepted by the
+                  form and then quietly cut short on save, so the roster showed a phone number that
+                  was not the one the owner typed and nothing said so. The username field next to it
+                  has always mirrored its server limit (80) for exactly this reason. */}
+              <input className="ost-in" name="phone" placeholder="Phone (optional)" autoComplete="off" inputMode="tel" maxLength={20} />
               <button className="ost-btn" type="submit"
                 disabled={busy || (newRole[r.id] === "tablet" && !(newTables[r.id] || []).length)}
                 title={newRole[r.id] === "tablet" && !(newTables[r.id] || []).length ? "Pick at least one table for this waiter first" : ""}>
