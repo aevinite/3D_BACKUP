@@ -631,7 +631,10 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         if (!Number.isFinite(rate) || rate < 0) throw new BadInput(`Rate missing for ${it.name}.`);
         const amount = Math.round(qty * rate * 100) / 100;
         subtotal += amount;
-        return { item_id: it.id, qty_purchase: qty, qty_base: qty * Number(it.purchase_factor), rate, amount, factor: Number(it.purchase_factor), track: it.track_level };
+        // `factor` and `track` used to ride along here for the movement loop below. That loop now
+        // reads them from `byId` (they are per-ITEM, not per-line), so carrying them on the line
+        // would only be a second copy of the same fact for a later reader to trust wrongly.
+        return { item_id: it.id, qty_purchase: qty, qty_base: qty * Number(it.purchase_factor), rate, amount };
       });
       const tax = Number.isFinite(num(body.tax)) && num(body.tax) >= 0 ? num(body.tax) : 0;
       subtotal = Math.round(subtotal * 100) / 100;
@@ -650,19 +653,44 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       const li = await sb.from("inv_purchase_lines").insert(lines.map((l) => ({
         purchase_id: pid, restaurant_id: rid, item_id: l.item_id,
         qty_purchase: l.qty_purchase, qty_base: l.qty_base, rate: l.rate, amount: l.amount,
-      }))).select("id, item_id");
+      }))).select("id, item_id, qty_base, rate");
       if (li.error) return writeFail("the purchase lines", li.error);
       // Stock in + WAC + last_rate, one movement per line, keyed on the LINE id so a
       // retry of this handler (idempotency header lost, network replay) can't double-post.
+      //
+      // ── EACH MOVEMENT COMES FROM ITS OWN ROW (T10 sweep, finding F4) ────────────────────────
+      //
+      // This used to be `const l = lines.find((x) => x.item_id === row.item_id)!` — a lookup by a
+      // key that is NOT unique on a purchase. Nothing stops the same ingredient appearing on two
+      // lines of one bill: `purchasePop()` in public/panels/editor/inventory.js pushes a line with
+      // no duplicate check, `inv_purchase_lines` has no unique index on (purchase_id, item_id)
+      // (migration 221), and putting an item on two lines is ordinary — two pack sizes, two rates,
+      // or a corrected quantity. So `find` returned the FIRST tomatoes line for BOTH inserted rows:
+      // 10 kg @ ₹20 plus 5 kg @ ₹30 posted 10 kg twice, i.e. 20 kg into stock instead of 15, at the
+      // wrong average cost, with `last_rate` written from line 1 twice. The BILL was stored
+      // correctly, so the purchase record and the stock ledger simply disagreed and no screen said
+      // so — and the order list then under-orders an ingredient the restaurant has less of than it
+      // thinks. The per-line dedupe key could never catch it: each movement genuinely is a new one.
+      //
+      // The fix is to stop looking the line back up at all. The insert already returns `qty_base`
+      // and `rate` ON THE ROW, so the movement is built from the row it belongs to. Only
+      // `purchase_factor` and `track_level` are still looked up by item — and those are per-ITEM
+      // properties, so one lookup is the correct answer for every line that shares an item.
+      //
+      // `last_rate` now ends on the LAST line's rate rather than the first line's, which is also
+      // the better answer: it means "the most recent rate we paid", which is what the purchase form
+      // pre-fills from.
       for (const row of li.data || []) {
-        const l = lines.find((x) => x.item_id === row.item_id)!;
-        if (l.track === "EXPENSE") continue; // spend-only items never hold stock
+        const it = byId.get(String(row.item_id));
+        if (!it || it.track_level === "EXPENSE") continue; // spend-only items never hold stock
+        const factor = Number(it.purchase_factor) || 0;
+        const rate = Number(row.rate) || 0;
         await postMovement({
-          rid, item: l.item_id, qty: l.qty_base, kind: "purchase", dedupe: `pur:${pid}:${row.id}`,
-          unitCost: l.factor > 0 ? l.rate / l.factor : 0, refType: "purchase", refId: pid, by: actor,
+          rid, item: row.item_id, qty: Number(row.qty_base), kind: "purchase", dedupe: `pur:${pid}:${row.id}`,
+          unitCost: factor > 0 ? rate / factor : 0, refType: "purchase", refId: pid, by: actor,
         });
-        await sb.from("inv_items").update({ last_rate: l.rate, updated_at: new Date().toISOString() })
-          .eq("restaurant_id", rid).eq("id", l.item_id);
+        await sb.from("inv_items").update({ last_rate: rate, updated_at: new Date().toISOString() })
+          .eq("restaurant_id", rid).eq("id", row.item_id);
       }
       await logAction("manager", "inv_purchase", { restaurant_id: rid, actor, actor_id: actorId, detail: `${kind === "cash" ? "Cash buy" : `Bill${vendor_name ? ` — ${vendor_name}` : ""}`}: ₹${subtotal + tax} (${lines.length} items)` });
       return ok({ id: pid });
