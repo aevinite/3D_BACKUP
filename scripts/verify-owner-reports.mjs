@@ -486,5 +486,88 @@ console.log("\n── 22. EVERY CHART GOES THROUGH THE 'IS THERE ENOUGH DATA' GA
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// T11 SWEEP (2026-08-17) — four faults that were on the owner's screen, each with its check
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+console.log("\nT11-A · the Reports Studio page");
+{
+  // ── 1 · the day sheet must MERGE the settlement, not just relabel it ──────────────────────
+  // 5 Aug 2026 rendered "Cash · 7 bills ₹1,838" directly above "Cash · 2 bills ₹525", because
+  // the settlement is grouped in the database by the RAW payment_method and this panel only
+  // canonicalised the LABEL. Two rows, one pile of cash, and a React duplicate-key error.
+  const dayBlock = reportsPage.slice(
+    reportsPage.indexOf('if (bk === "daysummary")'),
+    reportsPage.indexOf('if (bk === "sales")'),
+  );
+  check(
+    "the Day summary settlement merges payment methods by canonical name",
+    dayBlock.length > 200 && /payMerged|new Map<string, PayRow>/.test(dayBlock),
+    "app/owner/reports/page.tsx — the Day summary's `pays` must fold the rows into a Map keyed by " +
+      "canonPayMethod() BEFORE rendering. Relabelling alone leaves one method on two lines whenever the " +
+      "database holds two casings of it (French House really holds both 'Cash' and 'cash'), with two " +
+      "shares, two bars and a duplicate React key.",
+  );
+  check(
+    "…and it merges BEFORE dropping the empty methods",
+    /payMerged\.values\(\)\]\s*\.filter/.test(dayBlock.replace(/\s+/g, " ").replace(/\[\.\.\./g, "[...")) ||
+      /\[\.\.\.payMerged\.values\(\)\]\.filter/.test(dayBlock.replace(/\s+/g, "")),
+    "app/owner/reports/page.tsx — filter `revenue > 0` AFTER the merge, or a method split across two " +
+      "casings can be thrown away in halves.",
+  );
+
+  // ── 2 · Refresh has to reach the "By restaurant" cards ────────────────────────────────────
+  // Every other fetch in refreshNow() passes ?refresh=1; the hub's per-restaurant brief did not,
+  // so the headline updated and the cards under it stayed up to five minutes stale (sweep #5 F7).
+  const hubBlock = reportsPage.slice(reportsPage.indexOf("function Hub("), reportsPage.indexOf("function ReportView("));
+  check(
+    "Refresh forces the hub's per-restaurant brief to recompute live",
+    /briefQs\}\$\{[^}]*refresh=1/.test(hubBlock) || /refresh=1/.test(hubBlock),
+    "app/owner/reports/page.tsx — the `type=byrestaurant` fetch in Hub() must append &refresh=1 when the " +
+      "read was triggered by the Refresh button. Without it the server answers from the snapshot cache and " +
+      "the 'By restaurant' cards stop adding up to the headline directly above them.",
+  );
+  check(
+    "…but only for the tick Refresh just bumped, so a period change stays a cached read",
+    /forcedTick/.test(hubBlock),
+    "app/owner/reports/page.tsx — gate the force on the briefTick that has not been answered yet. Forcing on " +
+      "every re-run would make each period change pay for a live recompute of the whole estate, which is the " +
+      "cost the snapshot cache exists to avoid.",
+  );
+
+  // ── 3 · a count of one is "1 order" ───────────────────────────────────────────────────────
+  // "QUIETEST HOUR · 10 AM · ₹441 · 1 orders" was on screen most of the time, because a quiet
+  // hour with exactly one order is the normal case for a quiet hour.
+  const bareOrders = [...reportsPage.matchAll(/\)\}\s*orders`/g)].length
+    + [...reportsPage.matchAll(/\}\s+orders`/g)].length;
+  check(
+    "no count on the Reports page is followed by a bare 'orders'",
+    bareOrders === 0,
+    "app/owner/reports/page.tsx — write `order${n === 1 ? \"\" : \"s\"}`, the way the day sheet, the volume " +
+      "report, the tips line and the staff-pay line in this same file already do. Found " + bareOrders + " place(s).",
+  );
+}
+
+console.log("\nT11-B · the chart kit");
+{
+  // ── 4 · a ranking chart must never paint outside its own box ──────────────────────────────
+  // The plot has a 140px floor; the container was capped at rows*42+20 unconditionally (62px at
+  // one row) with overflowY visible, so the plot painted 78px out of the bottom of its box and
+  // over the sentence underneath it.
+  const lb = charts.slice(charts.indexOf("export function LeaderBar("), charts.indexOf("export function WhoEarnsMore("));
+  check(
+    "LeaderBar caps its height only when the list actually scrolls",
+    /const scrolls\s*=/.test(lb) && /scrolls\s*\?\s*\{\s*maxHeight/.test(lb.replace(/\s+/g, " ")),
+    "components/owner/Charts.tsx — apply maxHeight/overflowY only when there are more rows than fit " +
+      "(data.length > 8). Below that, overflowY is visible, so a cap tighter than the plot's own 140px " +
+      "floor does not clip anything — it just lets the bars paint over whatever follows the chart.",
+  );
+  check(
+    "…and the plot height is computed once, from the same floor",
+    /const plotH\s*=\s*Math\.max\(140/.test(lb),
+    "components/owner/Charts.tsx — keep the 140px floor in one named value so the box and the plot can never " +
+      "disagree about how tall the chart is again.",
+  );
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }
