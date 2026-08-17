@@ -870,10 +870,29 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
   const showBrief = !rid && rests.length > 1;
   const [brief, setBrief] = useState<{ id: string; name: string; accent: string; revenue: number; orders: number }[] | null>(
     () => (showBrief && briefMemo.get(briefQs)) || null);
+  // Which `briefTick` we have already answered with a FORCED read — see the effect below.
+  const forcedTick = useRef(0);
   useEffect(() => {
     if (!showBrief) { setBrief(null); return; }
     let live = true;
-    fetch(`/api/owner/reports?${briefQs}`, { cache: "no-store" }).then((r) => r.json())
+    // REFRESH HAS TO REACH THESE CARDS TOO (T11 sweep, 2026-08-17 — sweep #5 F7).
+    // Every other fetch in refreshNow() passes `force`, which sends ?refresh=1 and makes the
+    // server recompute live instead of answering from the snapshot cache. This one only had
+    // its `briefTick` bumped, so it re-requested the SAME cached key: the big headline and the
+    // five KPI columns above updated to the live figures while the "By restaurant" cards
+    // underneath kept figures up to five minutes old (older still on an idle key) — so the
+    // cards stopped adding up to the headline, right after he pressed the button whose whole
+    // job is to give him the live numbers.
+    //
+    // Only the tick Refresh has just bumped forces a recompute. A later period change re-runs
+    // this effect with the same tick, and that must stay an ordinary cached read — forcing on
+    // every subsequent period change would make each one pay for a live recompute of the whole
+    // estate, which is the cost this snapshot cache exists to avoid.
+    const force = briefTick > 0 && forcedTick.current !== briefTick;
+    if (force) forcedTick.current = briefTick;
+    // The MEMO stays keyed on the plain query string, so the instant-repaint on the way back
+    // from a report still finds it whether the last read was forced or not.
+    fetch(`/api/owner/reports?${briefQs}${force ? "&refresh=1" : ""}`, { cache: "no-store" }).then((r) => r.json())
       .then((d) => { if (Array.isArray(d.rows)) { briefMemo.set(briefQs, d.rows); if (live) setBrief(d.rows); } }).catch(() => {});
     return () => { live = false; };
   }, [showBrief, briefQs, briefTick]);
