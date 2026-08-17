@@ -92,8 +92,20 @@ check("the card is left out entirely when the log is off",
 
 // ── 5. a switched-off section reads as off, not broken ──────────────────────────────────────────
 check("a `disabled` analytics answer goes to its own state, not the error banner",
-  /a\.disabled.*setOffNote/.test(homeC) && !/a\.disabled\s*\)\s*\{\s*setErr\(errText/.test(homeC),
+  /a\.disabled.*setOffScope/.test(homeC) && !/a\.disabled\s*\)\s*\{\s*setErr\(errText/.test(homeC),
   "app/owner/page.tsx: the `disabled` branch of fetchPayload is putting the sentence back into\n       `err`, which renders in a RED card headed \"Couldn't load.\" A permission is not a breakage.");
+// The refusal must be about ONE scope, or drilling into a reports-off restaurant would blank the
+// group view the owner returns to — a return to a cached scope fires no fetch, so nothing would
+// clear a scope-less flag.
+check("the refusal is remembered per scope",
+  /offScope && offScope\.scope === scopeKey/.test(homeC),
+  "app/owner/page.tsx: the switched-off flag is no longer scope-aware. On an estate where one\n       restaurant has Reports removed, it would blank the group dashboard too.");
+// Found in a light-skin screenshot of the switched-off state: the note said figures were not shown
+// while the tiles still drew delta chips and sparklines and the payroll tiles printed real money,
+// all of it from the instant-paint snapshot of an earlier visit.
+check("no stale snapshot figure leaks through the switched-off state",
+  /\(offScope && offScope\.scope === scopeKey\) \? undefined/.test(homeC),
+  "app/owner/page.tsx: `pl` is serving the instant-paint snapshot again for a scope the server has\n       refused, so the page prints delta chips, sparklines, a full revenue chart and real payroll\n       money underneath a note saying the figures are not shown.");
 check("no card claims to be loading once the section is known to be off",
   /const loadNote = offNote \?/.test(homeC) && (homeC.match(/\{loadNote\}/g) || []).length >= 12,
   "app/owner/page.tsx: the chart cards are back to a hardcoded \"Loading…\". Once the server has\n       said the section is switched off, no payload is coming and that promise is false — route\n       every placeholder through `loadNote` (12 of them at the time of writing).");
@@ -180,4 +192,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 21 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 23 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");

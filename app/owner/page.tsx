@@ -563,7 +563,12 @@ export default function OwnerDashboard() {
   // A DELIBERATE "this section isn't enabled for you" answer, kept apart from `err` so it is never
   // dressed as a breakage (see the branch in fetchPayload). While it is set, no analytics payload
   // is ever going to arrive, so nothing on the page may keep saying "Loading…".
-  const [offNote, setOffNote] = useState<string | null>(null);
+  //
+  // It carries the SCOPE it belongs to. On an estate where the admin has taken Reports away from
+  // one restaurant, drilling into that restaurant must not blank the group view the owner then
+  // returns to — and a return to a scope already in `cache` fires no fetch, so nothing would clear
+  // a scope-less flag.
+  const [offScope, setOffScope] = useState<{ scope: string; msg: string } | null>(null);
   // Has ANY payload answered this visit? Until one has, what is on screen is the instant-paint
   // snapshot from the last time this tab was open — real numbers, but last-seen ones. The age
   // line said "updated 15 hr ago" without saying that was a saved copy (T5 sweep, 2026-08-11).
@@ -617,10 +622,20 @@ export default function OwnerDashboard() {
     writeSnap(snapKey, { ov, cache, money: moneyCache, updatedAt: updatedAt ?? undefined });
   }, [snapKey, ov, cache, moneyCache, updatedAt]);
 
+  /** The refusal, but only if it is about the scope currently on screen. */
+  const offNote = offScope && offScope.scope === scopeKey ? offScope.msg : null;
+  // ── AND NO STALE FIGURE MAY LEAK THROUGH IT (T12 sweep, 2026-08-17, second pass) ──────────────
+  // `pl` falls back to the instant-paint snapshot — real numbers from the last time this tab was
+  // open. Seen in a light-skin screenshot of the switched-off state: the note said figures were not
+  // shown while the tiles beside it still drew "-59%" delta chips and green sparklines, the revenue
+  // chart was fully painted, and "Staff pay out" and "After staff pay" printed real money derived
+  // from the very revenue that was supposedly hidden. Once the server has refused this scope, the
+  // honest answer is that we have nothing to show for it — snapshot included.
   const pl = useCallback((range: string): Payload | undefined =>
-    cache[`${scopeKey}|${range}`] ?? snap?.cache?.[`${scopeKey}|${range}`], [cache, snap, scopeKey]);
+    (offScope && offScope.scope === scopeKey) ? undefined
+      : cache[`${scopeKey}|${range}`] ?? snap?.cache?.[`${scopeKey}|${range}`], [cache, snap, scopeKey, offScope]);
   const moneyOf = (range: Range): MoneyTotals | "err" | undefined =>
-    moneyCache[`${scopeKey}|${range}`] ?? snap?.money?.[`${scopeKey}|${range}`];
+    offNote ? undefined : moneyCache[`${scopeKey}|${range}`] ?? snap?.money?.[`${scopeKey}|${range}`];
 
   // Refresh-proof drill (owner round-5: "if you refresh it, it comes backwards").
   // The panel runs under the back-stack history manager, which OWNS pushState/popstate
@@ -699,9 +714,9 @@ export default function OwnerDashboard() {
       // values that stayed blank. Measured by replaying the server's own answer: an owner whose
       // Reports the admin deliberately switched off was told, permanently, that his dashboard was
       // broken. It gets its own state so the page can say it plainly and stop pretending to load.
-      if (a.error && a.disabled) { setOffNote(errText(a.error)); setErr(null); setLanded(true); return; }
+      if (a.error && a.disabled) { setOffScope({ scope: sk, msg: errText(a.error) }); setErr(null); setLanded(true); return; }
       if (a.error) throw new Error(errText(a.error));
-      setOffNote(null);
+      setOffScope((cur) => (cur && cur.scope === sk ? null : cur));
       setCache((c) => ({ ...c, [key]: a }));
       setLanded(true);
       if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
