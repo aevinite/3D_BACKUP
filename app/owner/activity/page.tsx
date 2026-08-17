@@ -18,7 +18,7 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useState } from "react";
-import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
@@ -151,16 +151,18 @@ export default function OwnerAuditLogs() {
   useEffect(() => { setRemovals(null); loadAudit(); }, [loadAudit]);
   useEffect(() => { setRows(null); loadActivity(); }, [loadActivity]);
 
-  // 60s backstop refresh of the view on screen, paused while the tab is hidden (egress-safe).
-  useEffect(() => {
-    const reload = () => { if (view === "audit") loadAudit(); else loadActivity(); };
-    let t: ReturnType<typeof setInterval> | null = null;
-    const start = () => { if (!t) t = setInterval(() => { if (!document.hidden) reload(); }, 60_000); };
-    const stop = () => { if (t) { clearInterval(t); t = null; } };
-    const onVis = () => { if (document.hidden) stop(); else { reload(); start(); } };
-    start(); document.addEventListener("visibilitychange", onVis);
-    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
-  }, [view, loadAudit, loadActivity]);
+  // 60s backstop refresh of the view on screen — through the console's OWN shared hook, so this
+  // page behaves like every other owner screen (T12 sweep, 2026-08-17).
+  //
+  // It used to hand-roll a plain setInterval. That paused while the tab was HIDDEN, which is the
+  // important half, but it kept firing forever while the tab sat visible and unattended — an owner
+  // who leaves Audit & logs open through a service pays ~480 reads for a screen nobody is looking
+  // at. `useActiveAutoRefresh` adds the two things the hand-rolled version lacked: it stops after
+  // two minutes without a pointer, key or scroll and refreshes the instant he comes back, and it
+  // jitters each tick by ±20% so ten devices that opened at the start of a shift stop asking the
+  // database on the same beat. Same 60s floor, same "never faster" rule.
+  const refreshView = useCallback(() => { if (view === "audit") loadAudit(); else loadActivity(); }, [view, loadAudit, loadActivity]);
+  useActiveAutoRefresh(refreshView, 60_000);
 
   const bothOff = audDisabled && actDisabled;
 
