@@ -154,6 +154,56 @@ check("44-48", "restaurant #1's branding never leaks onto another tenant", () =>
   has(F.menuView, "isDefault ? t.greeting", "isDefault ? t.heroTitle") &&
   has(code("components/IntroSplash.tsx"), 'isDefault && <img className="intro-logo"'));
 
+// ── sweep #6 / T1 (2026-08-17): four more that must never come back ───────────────────────
+const T1 = { menuPage: code("app/r/[restaurant]/menu/page.tsx") };
+
+// ONE RESTAURANT, ONE ADDRESS. getRestaurantBySlug folds case, so /r/French-House/menu resolves —
+// but lib/tenantStorage derives its scope from the RAW path, so the cart, the scanned table, the
+// favourites and the session landed under "French-House" while MenuView's own browse state used
+// "french-house". Measured: /menu?table=4 on the capitalised link wrote `lfh_table:French-House`,
+// and the menu's own dish links are built from r.slug — so the first dish tapped moved the guest to
+// the lower-case address, where getScannedTable() returns "". The door canonicalises instead.
+check("P00155", "an oddly-cased menu link is sent to the canonical one, query and all", () => {
+  const guard = rx(T1.menuPage, /if \(restaurant !== r\.slug\)/);
+  const keepsQuery = has(T1.menuPage, "searchParams", "URLSearchParams", "qs.append");
+  const redirects = rx(T1.menuPage, /redirect\(`\/r\/\$\{r\.slug\}\/menu/);
+  return { ok: guard && keepsQuery && redirects, note: `guard=${guard} query=${keepsQuery} redirect=${redirects}` };
+});
+
+// A menu that isn't serving must not preview as an open one. app/q/[code] always did this; the
+// tenant door advertised the name, tagline and logo whatever the state was, then landed the guest
+// on "This menu isn't available right now".
+check("P00165", "a not-serving menu previews neutrally on the tenant door too", () =>
+  rx(T1.menuPage, /if \(!r\.active \|\| !\w+\.menuEnabled\)[\s\S]{0,120}?title: "Menu"/));
+
+// THE BELL STAYS PUT — R29 (owner, 2026-08-17): "i want like previous bell of call waiter should be
+// stuck at his place we can scrool and click the thing make sure don't change that again."
+// Sweep T1 built the opposite (stand down when nothing is clean) and it was reverted on his word.
+// This guard is here so the next person who measures the overlap does not "fix" it a second time:
+// the fallback must stay a plain return-to-the-corner, and the bell must never be hidden, faded or
+// made untappable. Comments are stripped before this runs, so the R29 note above cannot satisfy it.
+check("R29", "the call-waiter bell is never hidden, faded or made untappable", () => {
+  const bellArea = (F.menuView.match(/const settleBell[\s\S]*?\n    \};/) || [""])[0];
+  const banned = [/visibility/, /pointer-events/, /yieldBell/, /opacity/, /display\s*=/, /\.hidden\b/]
+    .filter((r) => r.test(bellArea)).map((r) => String(r));
+  const fallbackIntact = /bell\.style\.removeProperty\("--bell-lift"\);\s*\n\s*\};/.test(bellArea);
+  return { ok: banned.length === 0 && fallbackIntact,
+    note: banned.length ? "bell is being hidden/faded: " + banned.join(", ") : `fallback intact=${fallbackIntact}` };
+});
+
+// Two guest surfaces that describe themselves to a screen reader as something they are not. The
+// category chips were corrected in 2026-08-12 (tablist with no tabpanel); the search suggestions
+// were still a listbox with no `option` inside it, and the sold-out pill swallowed the card link.
+check("P00488", "the guest menu describes its own widgets honestly", () => {
+  const chips = has(F.menuView, 'role="group"') && !rx(F.menuView, /role="tablist"/);
+  const sugg = !rx(F.menuView, /className="search-dropdown"\s+role="listbox"/) &&
+               rx(F.menuView, /className="search-dropdown"[\s\S]{0,120}?role="list"/);
+  return { ok: chips && sugg, note: `chips=${chips} suggestions=${sugg}` };
+});
+check("P00143", "the sold-out pill no longer swallows the card's own link", () =>
+  !rx(F.food, /sold-out-pill"\s*\n?\s*onClick/) &&
+  !rx(F.food, /className="sold-out-pill"[^>]*onClick/));
+
 // ── LIVE half ────────────────────────────────────────────────────────────────────────────
 async function live(base) {
   let chromium;

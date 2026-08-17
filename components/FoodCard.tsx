@@ -367,11 +367,18 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         )}
         {/* The bottom-right control changes depending on the dish's state: */}
         {soldOut ? (
-          // 1) Sold out: a non-clickable "Not available" pill.
-          <span
-            className="sold-out-pill"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          >
+          // 1) Sold out: a "Not available" LABEL — not a button, and no longer a dead spot either.
+          //
+          // It used to carry `onClick={e => { e.preventDefault(); e.stopPropagation(); }}`, which
+          // did keep it from behaving like a button — but it also swallowed the whole-card link
+          // underneath it. So on a sold-out dish there was one patch of the tile where a tap did
+          // absolutely nothing, while every other patch opened the dish. A diner who taps the words
+          // "Not available" is asking *what is this, and when is it back* — the honest answer is the
+          // dish page, which is what the rest of the card already gives them.
+          // Dropping the handler is all it takes: the tap bubbles to the card's own <Link>. There is
+          // nothing here to preventDefault FOR — unlike the "+" and the −/+ stepper below, this
+          // element has no action of its own to protect. (Guest sweep T1, 2026-08-17.)
+          <span className="sold-out-pill">
             {t.notAvailable}
           </span>
         ) : hasOptions ? (

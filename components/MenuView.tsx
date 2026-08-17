@@ -636,6 +636,22 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // corner the owner designed rather than staying parked mid-screen on a heading: at rest the
       // bell is at least where a guest expects to find it, and the scroll step-aside below still
       // uncovers whatever is under it while they are moving.
+      //
+      // REJECTED (owner, 2026-08-17): the bell must NOT hide, fade, move away or become untappable
+      // when there is nowhere clean — *"i want like previous bell of call waiter should be stuck at
+      // his place we can scrool and click the thing make sure don't change that again"*.
+      // docs/REJECTED-IDEAS.md → R29.
+      //
+      // Guest sweep T1 offered exactly that and it was refused. So nobody re-discovers the
+      // measurements as new: with the search suggestions open, the panel is full-width (x 21..339)
+      // and stacks unbroken from y 362 to 739, so all 33 candidate positions in the 260px band are
+      // covered; the bell returns here to y 707..755 and overlaps a dish's "+" (y 734..776,
+      // x 291..333) by 22px. With every category folded, full-width `.cat-group-head` buttons tile
+      // ~53px apart and the same thing happens with 48px of overlap. Both restaurants, 360x780.
+      // The owner has weighed that and wants the bell to stay put regardless: it is a fixed thing
+      // in a fixed corner that a guest can always find, and scrolling moves the page under it.
+      // Do NOT add a stand-down, a hide-while-searching, a pointer-events yield, a fade, a
+      // horizontal step, or a bigger BELL_MAX_LIFT. Do not re-report the overlap as a fault.
       bell.style.removeProperty("--bell-lift");
     };
     const markScrolling = () => {
@@ -827,6 +843,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
 
     // Dishes in the current category (preload first) vs. everything else. The "All"
     // view shows every category, so treat it like no filter — preload them all.
+    //
+    // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R28. There is NO ceiling on this on
+    // purpose: *"don't do the sixth one any time soon like in the code, also reject that it is
+    // rejected by me."* Offered as guest sweep T1 improvement I2 (a restaurant that models 30 dishes
+    // would have every diner's phone pull ~60 MB in the background for dishes nobody opens). His
+    // answer is that a diner must never wait when they tap a dish. So do not add a cap, a first-N
+    // window, an "only what's on screen" queue, a data-saver mode or a per-restaurant preload
+    // setting — and do not re-report the unbounded preload as an egress or performance problem.
+    // The measured facts, so nobody re-discovers them as new: 2 GLB requests on a French House menu
+    // open (it has 2 such dishes, Aangan has none), and lib/modelLoader already evicts past 40 MB.
     const isAllView = !currentCategory || currentCategory === "all";
     const inCat = isAllView
       ? fourD
@@ -1021,7 +1047,17 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         {/* The big animated greeting banner up top. */}
         <div className="hero">
           {/* #1 keeps its localized hero. Other restaurants use their CUSTOM hero when set,
-              else a NEUTRAL generic line — never #1's French i18n default (no-LFH-leak rule). */}
+              else a NEUTRAL generic line — never #1's French i18n default (no-LFH-leak rule).
+
+              REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md → R30. "Welcome" and "Our Menu"
+              STAY ENGLISH for every restaurant and every language: *"i want english only for all"*.
+              Guest sweep T1 offered a pair of neutral translated keys in lib/i18n.ts so a Hindi or
+              Arabic guest would get this line in their own language; the answer was no. Do not add
+              those keys, do not reach for t.greeting/t.heroTitle here (they are restaurant #1's own
+              copy — "BONJOUR", "All-Day Café & Bakery" — and leaking them is the bug this line
+              exists to prevent), and do not re-report the English fallback as a translation gap.
+              Extends R15 and R23, which already ruled that the guest menu's remaining English is
+              not to be brought back as work. */}
           <HeroTitle greeting={isDefault ? t.greeting : (tagline || "Welcome")} title={isDefault ? t.heroTitle : (heroTitle || "Our Menu")} />
         </div>
 
@@ -1156,13 +1192,27 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {/* When there are matches, show the dropdown of quick results. */}
+            {/* SAY WHAT THIS ACTUALLY IS — the same correction the category chips got above
+                (guest sweep T1, 2026-08-17). It was `role="listbox"` whose children are plain
+                links: a listbox promises a screen reader a set of `option`s to choose between, and
+                there was not one `option` anywhere inside, so a blind diner was told "list box"
+                and then handed nothing selectable. Arrow keys do nothing here either — the rows
+                are links, and tapping one OPENS THAT DISH.
+                A labelled list of links is what it really is, and `aria-label` carries the count so
+                the number of matches is spoken rather than left to be discovered by swiping. The
+                class names, the styling and the scroll cue are all untouched. */}
             {searchResults.length > 0 && (
-              <div className="search-dropdown" role="listbox">
+              <div
+                className="search-dropdown"
+                role="list"
+                aria-label={`${searchResults.length} matching ${searchResults.length === 1 ? "dish" : "dishes"}`}
+              >
                 {searchResults.map((r) => (
                   <Link
                     key={r.id}
                     href={`${itemBase}/item/${r.slug}`}
                     className="search-result"
+                    role="listitem"
                     onClick={() => setSearchQuery("")}
                   >
                     <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />

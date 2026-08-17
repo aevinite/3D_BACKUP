@@ -30,7 +30,28 @@ export function tenantSlug(): string {
   const path = window.location.pathname || "";
   const m = path.match(/^\/r\/([^/]+)/);
   if (m) {
-    const slug = decodeURIComponent(m[1]);
+    // FOLDED, because the slug in the address bar is whatever was typed or shared, and this string
+    // becomes the NAME OF THE STORAGE BUCKET for the cart, the scanned table, the favourites and
+    // the dining session (guest sweep T1, 2026-08-17).
+    //
+    // getRestaurantBySlug() has always folded case, so /r/French-House/menu resolves and renders
+    // perfectly — and MenuView namespaces the browse state it owns from the RESOLVED slug. This
+    // function did not fold, so one diner on one phone ended up with two scopes at once:
+    //
+    //     lfh_menu_layout:french-house     (MenuView, resolved)
+    //     lfh_table:French-House           (here, as typed)      ← measured, /menu?table=4
+    //
+    // The table is what costs someone something: the menu builds its dish links from the resolved
+    // slug, so the first dish a diner taps moves them to the lower-case address, where
+    // getScannedTable() returns "" and they are asked to join a table they are already sitting at.
+    // The menu route now also redirects an oddly-cased address to the canonical one, but this is
+    // the root cause — it is what protects a guest who lands STRAIGHT on /r/<Slug>/item/... from a
+    // shared dish link, without passing through the menu page at all.
+    //
+    // Safe to fold here because a slug is lower-case by construction everywhere it is created
+    // (lib/tenant.ts folds on every lookup), so this can only ever CORRECT a mis-cased address —
+    // it can never point at a different restaurant.
+    const slug = decodeURIComponent(m[1]).trim().toLowerCase();
     try { sessionStorage.setItem(LAST_SLUG_KEY, slug); } catch {}
     return slug;
   }
@@ -97,15 +118,18 @@ export function tremove(base: string) {
 // not "whichever page this tab is on right now". Needed by the offline outbox,
 // which flushes an order that may belong to restaurant A while the tab has moved
 // on to restaurant B — the order's tracker entry must land under A, not B.
+// Folded for the same reason tenantSlug() folds: a caller may hand us a slug that came from a URL,
+// and the bucket name has to be the one the rest of the app uses.
+const fold = (slug: string) => (slug || DEFAULT_RESTAURANT_SLUG).trim().toLowerCase();
 export function tgetFor(base: string, slug: string): string | null {
   if (typeof window === "undefined") return null;
   migrateLegacyOnce();
-  try { return localStorage.getItem(`${base}:${slug || DEFAULT_RESTAURANT_SLUG}`); } catch { return null; }
+  try { return localStorage.getItem(`${base}:${fold(slug)}`); } catch { return null; }
 }
 export function tsetFor(base: string, slug: string, value: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
-  try { localStorage.setItem(`${base}:${slug || DEFAULT_RESTAURANT_SLUG}`, value); } catch {}
+  try { localStorage.setItem(`${base}:${fold(slug)}`, value); } catch {}
 }
 
 // For cross-tab "storage" event listeners: does this event belong to the given
