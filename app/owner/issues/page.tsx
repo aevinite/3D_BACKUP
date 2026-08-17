@@ -9,6 +9,8 @@
 // without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
+// Client-safe by design (lib/partialRead has zero imports) — see that file's header.
+import { partialNote } from "@/lib/partialRead";
 
 type Issue = {
   id: string; restaurant_id: string; restaurantName: string;
@@ -64,6 +66,11 @@ export default function OwnerFeedback() {
   // have, which is the very thing that fix removed. Null until the first reply, so the badge can fall
   // back to the shown page (and does, when the server says it couldn't count either).
   const [openSrv, setOpenSrv] = useState<number | null>(null);
+  // Which figures the two routes could NOT read this time. Both tabs feed the same note, so the
+  // owner reads one sentence rather than hunting for which half of the page went quiet. Each loader
+  // clears its own keys on every load, so a passing blip disappears by itself.
+  const [rPartial, setRPartial] = useState<string[]>([]);
+  const [iPartial, setIPartial] = useState<string[]>([]);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -80,6 +87,7 @@ export default function OwnerFeedback() {
       if (j.disabled) { setRatingsOff(true); return; }
       if (j.error) throw new Error(j.error);
       setRatings(j.ratings || []); setSummary(j.summary || null); setRErr(null); setErr(null);
+      setRPartial(Array.isArray(j.partial) ? j.partial : []);
     } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setRErr(m); }
   }, [scp, rFilter]);
 
@@ -93,6 +101,7 @@ export default function OwnerFeedback() {
       // back to counting the shown page, and so do we.
       const countUnread = Array.isArray(j.partial) && j.partial.includes("openCount");
       setOpenSrv(!countUnread && typeof j.openCount === "number" ? j.openCount : null);
+      setIPartial(Array.isArray(j.partial) ? j.partial : []);
     } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setIErr(m); }
   }, [scp]);
 
@@ -203,6 +212,7 @@ export default function OwnerFeedback() {
   const ratingsOf = rFilter === "unhandled" ? (summary?.unhandled ?? 0) : (summary?.total ?? 0);
   const ratingsCapped = ratingsShown >= RATINGS_PAGE && ratingsOf > ratingsShown;
   const issuesCapped = (issues || []).length >= ISSUES_PAGE;
+  const partial = [...new Set([...rPartial, ...iPartial])];
 
   return (
     <>
@@ -219,6 +229,14 @@ export default function OwnerFeedback() {
           {!issuesOff && <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")}>Complaints · {openCount}</button>}
           <button className="adm-btn" style={{ marginLeft: "auto" }} onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
         </div>
+
+        {partial.length > 0 && (
+          <div className="adm-card" style={{ margin: "0 0 12px", borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn)" }} aria-hidden="true" />
+            <span style={{ flex: 1, minWidth: 200 }}>{partialNote(partial)}</span>
+            <button className="adm-btn" onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Try again</button>
+          </div>
+        )}
 
         {err && (
           <div className="adm-card" style={{ borderColor: "var(--adm-danger)", margin: "0 0 12px" }}>

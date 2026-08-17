@@ -8,6 +8,9 @@ import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
 import { asSuffix } from "@/lib/ownerPin";
 import { useBackClose } from "@/lib/backStack";
+// Client-safe by design (lib/partialRead has zero imports) — see the header of that file for why it
+// is not lib/ownerScope. Pay Later has shown this note since August; this screen never did.
+import { partialNote } from "@/lib/partialRead";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -43,6 +46,12 @@ export default function OwnerCustomers() {
   const [rests, setRests] = useState<Array<{ id: string; name: string }>>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  // ── WHICH FIGURE COULD NOT BE READ, SAID OUT LOUD (sweep 6 · T14, 2026-08-18) ───────────────────
+  // The route reports `partial: ["restaurantNames"]` when the brand lookup failed. Nothing here read
+  // it, so every row's restaurant chip simply showed "—" and an owner with three restaurants was
+  // left staring at a list that had stopped telling him whose guests they were, with no reason
+  // given and nothing to press. Cleared on every load, so a passing blip disappears by itself.
+  const [partial, setPartial] = useState<string[]>([]);
   const filt = useRef({ search, rid, seg, sort }); filt.current = { search, rid, seg, sort };
   const searchRef = useRef(search); searchRef.current = search;
 
@@ -73,6 +82,7 @@ export default function OwnerCustomers() {
       if (j.disabled) { setDisabled(true); return; }
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);
+      setPartial(Array.isArray(j.partial) ? j.partial : []);
       if (j.restaurants) setRests(j.restaurants);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopePin]);
@@ -191,6 +201,14 @@ export default function OwnerCustomers() {
             <div className="adm-stat"><div className="k">New (last 30 days)</div><div className="v"><AnimatedNumber value={summary?.newThisMonth ?? 0} loading={!summary} format={nfmt} /></div></div>
             <div className="adm-stat"><div className="k">Blocked</div><div className="v"><AnimatedNumber value={summary?.blocked ?? 0} loading={!summary} format={nfmt} /></div></div>
           </div>
+
+          {partial.length > 0 && (
+            <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn)" }} aria-hidden="true" />
+              <span style={{ flex: 1, minWidth: 200 }}>{partialNote(partial)}</span>
+              <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Try again</button>
+            </div>
+          )}
 
           <div className="adm-card">
             <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
