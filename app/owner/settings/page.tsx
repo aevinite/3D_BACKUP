@@ -14,9 +14,36 @@ type Data = {
   sections: Record<string, boolean>; restaurants: { id: string; name: string }[];
   modules?: Module[];
 };
+// THE CARD THAT ANSWERS "WHY CAN'T I SEE THAT?" COULD NOT ANSWER IT (T13 sweep, 2026-08-17).
+//
+// This list had six entries. `OWNER_SECTION_KEYS` (lib/ownerEntitlements.ts) has twelve, and the
+// API sends an answer for every one of them — so three sections the admin really can switch off
+// had no chip at all: Menu (2026-07-25), Audit & logs (2026-07-31) and Manager mode (2026-08-02).
+// Verified on the running panel: with `menu` switched off, the Menu item vanished from the
+// sidebar, /owner/menu said "ask your administrator", and this card — whose whole job is to be
+// the place that confirms it — still showed the same six chips and said nothing about Menu.
+//
+// Two of those six were also named after screens that no longer exist. "Staff & powers" lost its
+// Powers tab in the access rebuild of 2026-07-31; the sidebar was corrected to "Team" on
+// 2026-08-05 ("the sidebar promised a screen that no longer exists") and the roster's own crumb on
+// 2026-08-14 — this chip was the third copy of the same stale name, sitting one card below a
+// sidebar that says "Team". Same for "Feedback & issues", which every other surface calls
+// "Feedback & complaints". A chip he cannot match to a sidebar item cannot explain anything.
+//
+// ORDER MIRRORS THE SIDEBAR (components/owner/OwnerShell.tsx) so the two can be read side by side,
+// with "Guest ratings" after Feedback because that is the page it lives inside rather than a nav
+// item of its own.
+//
+// DELIBERATELY NOT CHIPS: logs_signins / logs_service / logs_staff_changes. Those three are not
+// sections — they are which KINDS of row the Audit & logs page shows (read by /api/owner/oplog).
+// A chip for each would read as three more screens he does not have, which is the same confusion
+// in the opposite direction. Pay Later and Inventory are MODULES, not sections, and are correctly
+// absent too. If a genuine SECTION is ever added to OWNER_SECTION_KEYS, it needs a line here —
+// `npm run verify:owner-panel` fails until it has one.
 const SECTION_LABEL: Record<string, string> = {
-  reports: "Reports", staff: "Staff & powers", customers: "Customers",
-  issues: "Feedback & issues", ratings: "Guest ratings", settings: "Settings",
+  manager_mode: "Manager mode", menu: "Menu", reports: "Reports", staff: "Team",
+  customers: "Customers", logs: "Audit & logs", issues: "Feedback & complaints",
+  ratings: "Guest ratings", settings: "Settings",
 };
 
 export default function OwnerSettings() {
