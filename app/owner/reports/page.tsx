@@ -1250,7 +1250,29 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
   // ── DAY SUMMARY ──
   if (bk === "daysummary") {
     if (!t) return <EmptyCard text="Nothing in this period yet." />;
-    const pays = (data.payments || []).map((p) => ({ ...p, method: canonPayMethod(p.method) })).filter((p) => p.revenue > 0);
+    // MERGE by canonical method, don't just relabel (T11 sweep, 2026-08-17). The database
+    // groups the settlement by the RAW `payment_method` string, so one method stored with two
+    // casings arrives as two rows — French House really holds both "Cash" and "cash". This
+    // line used to canonicalise the LABEL and stop there, so the 5 Aug 2026 sheet rendered
+    //     Cash · 4% · 7 bills   ₹1,838
+    //     Cash · 1% · 2 bills   ₹525
+    // one directly above the other, with two shares and two bars for one pile of cash — and
+    // because the row key IS the canonical name, React logged "two children with the same key"
+    // and was free to drop or duplicate one of them. The Payments report (below, l.1885-1891)
+    // and PaymentDonut have always merged; this panel is the one that never did, so the day
+    // sheet disagreed with the full report one click away. Merge FIRST, then drop the empty
+    // methods — otherwise a method split across two casings can be filtered out in halves.
+    const payMerged = new Map<string, PayRow>();
+    for (const p of data.payments || []) {
+      const method = canonPayMethod(p.method);
+      const row = payMerged.get(method) || { method, revenue: 0, orders: 0 };
+      row.revenue += p.revenue; row.orders += p.orders;
+      payMerged.set(method, row);
+    }
+    // Biggest first, which is both what the RPC's own `ORDER BY revenue DESC` intended and
+    // what the Payments report shows — merging can reorder, so the sort is what keeps the two
+    // screens reading the same way round.
+    const pays = [...payMerged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
     // ONE meaning of "orders placed" for the whole console (T5 sweep, 2026-08-11). `t.orders`
