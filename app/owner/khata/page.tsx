@@ -43,6 +43,14 @@ export default function OwnerKhata() {
   // as the whole book and concludes people are missing (T7 finding F13).
   const [shown, setShown] = useState<{ of: number; showing: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // ── "NOBODY OWES ANYTHING" AND "PAY LATER IS SWITCHED OFF" ARE DIFFERENT SENTENCES ──────────────
+  // (sweep 6 · T14, 2026-08-18.) The route answers `moduleOff: true` when NONE of the owner's
+  // restaurants has the pay-later module effective, and this page ignored it — so an owner who
+  // reaches the page after the admin switched the module off (a bookmark, a typed URL, a tab left
+  // open) was told "No one owes anything right now", which is a reassurance about MONEY that nobody
+  // checked. The Customers screen has always said "isn't enabled — contact Aevidine" in the same
+  // situation; this now matches it, word for word.
+  const [moduleOff, setModuleOff] = useState(false);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const multi = new Set((customers || []).map((c) => c.restaurant_id)).size > 1;
@@ -53,6 +61,7 @@ export default function OwnerKhata() {
       const j = await (await fetch(`/api/owner/khata${qs}`, { cache: "no-store" })).json();
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);
+      setModuleOff(!!j.moduleOff);
       setPartial(Array.isArray(j.partial) ? j.partial : []);
       setShown(j.listCapped ? { of: j.summary?.peopleCount || 0, showing: Number(j.peopleShown) || 0 } : null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
@@ -79,6 +88,10 @@ export default function OwnerKhata() {
       <h1 className="adm-page-h">Pay Later</h1>
       <p className="adm-page-sub">Money guests still owe on a tab, and how much you&apos;ve collected. Staff collect a tab from the manager panel; this is your live view of what&apos;s outstanding.</p>
 
+      {moduleOff ? (
+        <div className="adm-card"><div className="adm-empty">Pay Later isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
+      ) : (
+      <>
       <div className="adm-stats" style={{ marginBottom: 14 }}>
         <div className="adm-stat"><div className="k">Outstanding now</div><div className="v">{summary ? inr(summary.totalOutstanding) : "…"}</div></div>
         <div className="adm-stat"><div className="k">People who owe</div><div className="v">{summary ? summary.peopleCount.toLocaleString("en-IN") : "…"}</div></div>
@@ -161,6 +174,8 @@ export default function OwnerKhata() {
           </div>
         )}
       </div>
+      </>
+      )}
     </>
   );
 }
