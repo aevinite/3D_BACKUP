@@ -539,7 +539,20 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               {crumbTail.length > 0 ? (
                 <>
                   <button type="button" className="cr root" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer" }}
-                    onClick={() => window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }))}>
+                    onClick={() => {
+                      // The dashboard hears this as "show me everything"; the reports hub hears it
+                      // as "back to the hub". Manager mode hears NEITHER — it listens on its own
+                      // channel (lfh:owner-manager-rid), so on /owner/manager this crumb was a
+                      // silent dead tap: the segment renders as soon as the floor names its
+                      // restaurant in the tail, and tapping it did nothing at all (T12 sweep,
+                      // 2026-08-17 — measured by listening for all three events). A tap must never
+                      // vanish in silence, so send its channel too; the pages that do not listen
+                      // for the other event simply ignore it.
+                      window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }));
+                      if (path.startsWith("/owner/manager")) {
+                        window.dispatchEvent(new CustomEvent("lfh:owner-manager-rid", { detail: { rid: null } }));
+                      }
+                    }}>
                     {ownerSectionLabel(path)}
                   </button>
                   {crumbTail.map((t, i) => (
