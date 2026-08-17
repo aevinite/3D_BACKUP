@@ -19,6 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 
 const VIEWER = "app/view/[folder]/ViewerClient.tsx";
+const VIEW_PAGE = "app/view/[folder]/page.tsx";
 const PUBLIC_MV = "components/PublicModelViewer.tsx";
 const LOADER = "lib/modelLoader.ts";
 const ITEM_CLIENT = "app/item/[slug]/ItemClient.tsx";
@@ -101,6 +102,34 @@ check(
     `${TENANT_STORAGE} calls it ${owner ? `"${owner[1]}"` : "(not found)"}; ${VIEWER} writes ` +
       `${used ? `"${used[1]}"` : "(nothing)"}. They must be the same string, or a 3D link opened ` +
       "cold puts the diner's dish into restaurant #1's basket."
+  );
+}
+
+// The 3D route has no /r/<slug> in its path, so the tab pin is the ONLY thing that tells the rest
+// of the app which restaurant a cold-opened 3D link belongs to — and it has to be there before React
+// runs, because lib/restaurant-context.tsx reads it once, in an effect, on first mount.
+{
+  const src2 = read(VIEW_PAGE);
+  check(
+    "the 3D route pins the tab's restaurant BEFORE hydration, like app/q/[code] does",
+    /sessionStorage\.setItem\("lfh_tab_tenant"/.test(src2) && /dangerouslySetInnerHTML/.test(src2),
+    `${VIEW_PAGE} → without the inline script, a cold /view link leaves lib/restaurant-context.tsx ` +
+      "on restaurant #1: it reads the pin once in an effect, and ViewerClient's own stamp is async " +
+      "and lands later. Every body-level widget then reads the wrong restaurant's settings."
+  );
+  // ?r= is whatever a stranger put in a link. JSON.stringify does NOT escape "/", so interpolating
+  // the raw value would let "</script>" close the tag early.
+  check(
+    "…and it pins the DATABASE's slug, never the raw ?r= from the address bar",
+    /getRestaurantBySlug\(r\)/.test(src2) && /pinned\?\.slug/.test(src2) &&
+      !/setItem\("lfh_tab_tenant",\$\{JSON\.stringify\(String\(r\)/.test(src2),
+    `${VIEW_PAGE} → resolve the slug first and pin the resolved value. Interpolating the raw search ` +
+      'param into a <script> lets a link containing "</script>" break out of the tag.'
+  );
+  check(
+    "…with a character check on the slug as well",
+    /\/\^\[a-z0-9-\]\+\$\/\.test\(pinned\.slug\)/.test(src2),
+    `${VIEW_PAGE} → keep the [a-z0-9-] test, so nothing but a real slug shape can ever reach the script.`
   );
 }
 
