@@ -1546,8 +1546,8 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               {(pl(globalRange) as GroupA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">{loadNote}</div>}
@@ -1622,8 +1622,8 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two" style={{ marginTop: 12 }}>
             <div className="adm-card">
-              <PartialStrip keys={(pl(globalRange) as RestA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <PartialStrip keys={(pl(globalRange) as RestA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               {(pl(globalRange) as RestA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">{loadNote}</div>}
