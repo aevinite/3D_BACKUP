@@ -17,7 +17,14 @@ const parseEnv = (t) =>
     const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
   }));
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
-const BASE = "http://localhost:4000";
+// RUNNABLE FROM A WORKTREE (sweep #6, terminal 13, 2026-08-18). The base was hard-coded to :4000,
+// which is the owner's own window — a sweep lane is given its own port precisely so it never points
+// anything there, so this guard could not be run at all from a worktree (and simply failed with
+// connection errors whenever :4000 was not up). Default is unchanged, so an ordinary
+// `npm run verify:staff-accounts` behaves exactly as before.
+//   node scripts/verify-staff-accounts.mjs --base http://localhost:4113
+const argBase = (() => { const i = process.argv.indexOf("--base"); return i > -1 ? process.argv[i + 1] : null; })();
+const BASE = argBase || process.env.LFH_BASE || "http://localhost:4000";
 const ADMIN = env.ADMIN_PASSWORD;
 if (!ADMIN) throw new Error("ADMIN_PASSWORD missing from .env.local");
 // The admin gate stores sha256hex(password) in the lfh_staff_auth cookie — compute
@@ -60,8 +67,22 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   // script died with `Cannot read properties of undefined (reading 'password')`. It had been
   // failing that way with 8 stale accounts sitting in the dev DB. Clearing them first makes
   // the run repeatable instead of one-shot. (2026-07-30)
+  // SCOPED TO THE NAMES THIS SCRIPT ITSELF USES (sweep #6, terminal 13, 2026-08-18).
+  // This was `/^zztest/i` — "delete whatever is there". With several sweep lanes sharing one dev
+  // database that is the exact filter the project's own test-safety rule forbids: it can remove
+  // another run's in-flight fixtures, which then looks like a product fault to whoever owns them.
+  // The purpose here is only to make THIS script repeatable after a crash, and for that it needs
+  // nothing wider than its own ten names (defined just below, and re-used here).
   const stale = await api("/api/admin/users", { cookie: adminCookie });
-  const staleZz = (stale.json?.users || stale.json || []).filter?.((u) => /^zztest/i.test(String(u.username || u.name || ""))) || [];
+  const OWN = [
+    "zztest Alpha", "zztest Beta", "zztest Gamma", "zztest Delta", "zztest Echo",
+    "zztest Foxtrot", "zztest Golf", "zztest Hotel", "zztest India", "zztest Juliet",
+    "zztest BadRole", "zztest ShortPw", "zztest NoAuth", "zztest Alpha Renamed",
+  ].map((n) => n.toLowerCase().replace(/\s+/g, " ").trim());
+  const staleZz = (stale.json?.users || stale.json || []).filter?.((u) => {
+    const key = String(u.username || u.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+    return OWN.includes(key);
+  }) || [];
   for (const u of staleZz) await api(`/api/admin/users?id=${encodeURIComponent(u.id)}`, { method: "DELETE", cookie: adminCookie });
   if (staleZz.length) console.log(`   (pre-clean removed ${staleZz.length} leftover zztest account(s) from an earlier run)\n`);
 
