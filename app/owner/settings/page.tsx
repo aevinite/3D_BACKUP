@@ -14,32 +14,28 @@ type Data = {
   sections: Record<string, boolean>; restaurants: { id: string; name: string }[];
   modules?: Module[];
 };
-// THE CARD THAT ANSWERS "WHY CAN'T I SEE THAT?" COULD NOT ANSWER IT (T13 sweep, 2026-08-17).
+// REJECTED (owner, 2026-08-18): DO NOT show the owner which sections are switched OFF.
+// *"owner can't know which option are not given to them only admin should know that"* — said after
+// being shown a card that listed nine sections with a ✓ or a ✗ on each. What is withheld from a
+// restaurant is Aevidine's business and the admin's alone; a ✗ here tells the owner a feature
+// exists that he has not been given, which is an invitation to ask for it. Row R36 in
+// docs/REJECTED-IDEAS.md.
 //
-// This list had six entries. `OWNER_SECTION_KEYS` (lib/ownerEntitlements.ts) has twelve, and the
-// API sends an answer for every one of them — so three sections the admin really can switch off
-// had no chip at all: Menu (2026-07-25), Audit & logs (2026-07-31) and Manager mode (2026-08-02).
-// Verified on the running panel: with `menu` switched off, the Menu item vanished from the
-// sidebar, /owner/menu said "ask your administrator", and this card — whose whole job is to be
-// the place that confirms it — still showed the same six chips and said nothing about Menu.
+// So this card lists ONLY what is ON, and there is no off-state on the screen at all. Do not
+// re-add the ✗ chip, do not grey a withheld section, do not add a count ("6 of 9"), and do not
+// re-report the missing ones as a gap — a section he does not have simply is not mentioned, which
+// is the same thing his sidebar already does.
 //
-// Two of those six were also named after screens that no longer exist. "Staff & powers" lost its
-// Powers tab in the access rebuild of 2026-07-31; the sidebar was corrected to "Team" on
-// 2026-08-05 ("the sidebar promised a screen that no longer exists") and the roster's own crumb on
-// 2026-08-14 — this chip was the third copy of the same stale name, sitting one card below a
-// sidebar that says "Team". Same for "Feedback & issues", which every other surface calls
-// "Feedback & complaints". A chip he cannot match to a sidebar item cannot explain anything.
+// The MAP still holds every section, and that is not disclosure: it is what stops a section he DOES
+// have from having no chip. Before 2026-08-17 the map held six of the nine, so a restaurant with
+// Menu, Audit & logs or Manager mode switched ON was missing those chips from a card headed "the
+// sections Aevidine has switched on for you" — the card under-reported what he HAD, which is the
+// opposite fault and is the half of this that survives. Names and order mirror the sidebar
+// (components/owner/OwnerShell.tsx) so the two read side by side; "Staff & powers" and "Feedback &
+// issues" were names of screens that no longer exist.
 //
-// ORDER MIRRORS THE SIDEBAR (components/owner/OwnerShell.tsx) so the two can be read side by side,
-// with "Guest ratings" after Feedback because that is the page it lives inside rather than a nav
-// item of its own.
-//
-// DELIBERATELY NOT CHIPS: logs_signins / logs_service / logs_staff_changes. Those three are not
-// sections — they are which KINDS of row the Audit & logs page shows (read by /api/owner/oplog).
-// A chip for each would read as three more screens he does not have, which is the same confusion
-// in the opposite direction. Pay Later and Inventory are MODULES, not sections, and are correctly
-// absent too. If a genuine SECTION is ever added to OWNER_SECTION_KEYS, it needs a line here —
-// `npm run verify:owner-panel` fails until it has one.
+// logs_signins / logs_service / logs_staff_changes are deliberately absent: they are which KINDS of
+// row the Audit & logs page shows, not sections. Pay Later and Inventory are MODULES, not sections.
 const SECTION_LABEL: Record<string, string> = {
   manager_mode: "Manager mode", menu: "Menu", reports: "Reports", staff: "Team",
   customers: "Customers", logs: "Audit & logs", issues: "Feedback & complaints",
@@ -144,14 +140,13 @@ export default function OwnerSettings() {
         <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>The sections Aevidine has switched on for you. To change these, contact Aevidine.</p>
         {err ? <div className="adm-empty">Not available.</div> : !data ? <div className="adm-empty">Loading…</div> : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {Object.keys(SECTION_LABEL).map((k) => {
-              const on = data.sections[k] !== false;
-              return (
-                <span key={k} className="adm-chip" style={{ background: on ? "color-mix(in srgb, var(--adm-ok,#16a34a) 14%, transparent)" : "rgba(128,128,128,.14)", color: on ? "var(--adm-ok,#16a34a)" : "var(--muted)" }}>
-                  <i className={`fas ${on ? "fa-check" : "fa-xmark"}`} aria-hidden="true" /> {SECTION_LABEL[k]}
-                </span>
-              );
-            })}
+            {/* ON only — see the REJECTED note above. `!== false` matches the server's own rule
+                (an absent key means ON), so nothing he has can be missed. */}
+            {Object.keys(SECTION_LABEL).filter((k) => data.sections[k] !== false).map((k) => (
+              <span key={k} className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-ok,#16a34a) 14%, transparent)", color: "var(--adm-ok,#16a34a)" }}>
+                <i className="fas fa-check" aria-hidden="true" /> {SECTION_LABEL[k]}
+              </span>
+            ))}
           </div>
         )}
       </div>
