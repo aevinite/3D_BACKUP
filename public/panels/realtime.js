@@ -110,6 +110,11 @@
 
   function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
+  // catchUp() is a sibling of start(), not inside it, so the "hold this panel open while hidden"
+  // answer has to live here for both to read. Set by start() when a caller passes keepAlive.
+  let keepAliveFn = null;
+  const holdOpenAny = () => { try { return !!(keepAliveFn && keepAliveFn()); } catch (e) { return false; } };
+
   // A BURST COALESCES HARDER THAN A TRICKLE (improvement #12, 2026-08-06).
   //
   // The plain 200ms debounce above collapses a Preparing→Ready→Served flurry into one refetch,
@@ -270,6 +275,17 @@
     // holding a websocket connection. It reconnects + refetches the instant it's shown again.
     // An always-VISIBLE panel (e.g. a kitchen display left on) never disconnects.
     const IDLE_MS = 120000;
+    // …UNLESS THIS PANEL IS DOING A JOB WHILE IT IS HIDDEN (owner, 2026-08-17). A caller can pass
+    // keepAlive(): while it answers true, the idle drop is skipped and the socket stays subscribed
+    // even with the window covered or minimised. Exactly one caller uses it today — the kitchen
+    // panel with auto-print ON, i.e. the one device per restaurant that PRINTS the tickets. Its
+    // Chrome window is routinely covered by another app, Chrome calls that hidden, and dropping the
+    // socket meant the printer stopped hearing about orders and printed nothing until somebody
+    // clicked on the window. Everything else keeps giving its connection back after two minutes,
+    // which is the rule that protects the connection budget.
+    const keepAlive = typeof opts.keepAlive === "function" ? opts.keepAlive : null;
+    if (keepAlive) keepAliveFn = keepAlive;
+    const holdOpen = () => { try { return !!(keepAlive && keepAlive()); } catch (e) { return false; } };
     let idleTimer = null, torndown = false;
     const teardown = () => { if (!sb) return; channels.forEach((c) => { try { sb.removeChannel(c); } catch (e) {} }); channels = []; torndown = true; };
     let lastWake = 0;
@@ -293,8 +309,13 @@
       fireAll();
     };
     const onVisibility = () => {
-      if (document.hidden) { clearTimeout(idleTimer); idleTimer = setTimeout(teardown, IDLE_MS); } // arm the idle drop
-      else wake();
+      if (document.hidden) {
+        clearTimeout(idleTimer);
+        // Re-checked when the timer FIRES, not only when it is armed: auto-print can be switched on
+        // while the tab is already in the background, and the printer must not lose its socket
+        // because of what was true two minutes ago.
+        idleTimer = setTimeout(() => { if (!holdOpen()) teardown(); }, IDLE_MS);
+      } else wake();
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", wake);
@@ -335,7 +356,9 @@
       // Live again, hidden, or genuinely offline → nothing to catch up on. Reset the backoff so
       // the next real gap starts responsive.
       if (stopped) return;
-      if (document.hidden || connStatus === "online" || navigator.onLine === false) { step = 0; return arm(); }
+      // `holdOpen()` — a panel that keeps its socket while hidden (the printing kitchen screen) also
+      // needs its catch-up poll while hidden, or a blocked websocket leaves it with nothing at all.
+      if ((document.hidden && !holdOpenAny()) || connStatus === "online" || navigator.onLine === false) { step = 0; return arm(); }
       try { await fn(); step = 0; }
       catch (e) { step = Math.min(step + 1, 8); }
       arm();

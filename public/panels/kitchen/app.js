@@ -989,7 +989,12 @@ async function loadTables(tables) {
   const seq = ++loadSeq;
   let slices;
   try {
-    slices = await Promise.all(tables.map((t) => api("GET", "/board?table=" + encodeURIComponent(t))));
+    // `&jobs=1` while this screen is the printer: a new order's breadcrumb names its table, so THIS
+    // targeted read is what answers it — without the queue riding along, a queued ticket waited for
+    // the 60s backstop (measured while building mig 335). Off when auto-print is off, so an ordinary
+    // display's slice stays exactly as cheap as before.
+    const jobsQ = state.autoPrintKot ? "&jobs=1" : "";
+    slices = await Promise.all(tables.map((t) => api("GET", "/board?table=" + encodeURIComponent(t) + jobsQ)));
   } catch (e) { return load(); }      // network/parse blip → safe full reload
   // NOTE: the latest-wins `seq` guard used to sit HERE and `return` — which silently
   // dropped a superseded targeted refetch BEFORE it printed/chimed/merged, so a rush
@@ -1025,8 +1030,13 @@ async function loadTables(tables) {
   // id entered knownIds while it was still 'received'.
   const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
   if (newReceived.length) chime();
-  // Auto-print via the shared helper (printedIds-tracked, hidden-tab-safe, serialized).
-  autoPrintNew(state.autoPrintKot, freshOrders, freshItems, state.restaurant);
+  // The targeted slice never carries `queuedFor` (it is a whole-board answer), so the net stays out
+  // of it on purpose — the queue prints these, and the next full read runs the net if it must.
+  autoPrintNet(state.autoPrintKot, freshOrders, freshItems, state.restaurant, null);
+  // The queue rode along on the slice (see `jobs=1` above) — print whatever is waiting, now, rather
+  // than on the next whole-board pass. Every slice carries the same restaurant-wide list, so one
+  // pass over the last one is enough; the atomic claim makes a repeat harmless anyway.
+  { const jl = slices.map((s) => s && s.printJobs).filter((j) => Array.isArray(j) && j.length).pop(); if (jl) processPrintJobs(jl); }
   for (const o of freshOrders) state.knownIds.add(o.id);
 
   // The set of orders the changed tables used to show (cached) PLUS the orders the slice
@@ -1229,9 +1239,15 @@ async function claimPrintJobs(ids) {
   return (await r.json().catch(() => ({}))).won || [];
 }
 function processPrintJobs(jobs) {
-  // While hidden the browser suppresses iframe printing — leave the jobs queued; the wake
-  // refetch (realtime.js fires every handler on visibilitychange) picks them up.
-  if (!Array.isArray(jobs) || !jobs.length || document.hidden) return;
+  // IT NO LONGER REFUSES WHILE HIDDEN (owner, 2026-08-17: "if you minimize, or open another app on
+  // the same PC, the KOT prints totally stop"). This used to return early on `document.hidden`,
+  // which was the honest thing when a missed ticket was gone forever — the browser may suppress a
+  // print from a background window, so trying looked pointless. Since mig 335 the ticket is a ROW:
+  // if the print does not happen, the job is reported failed and REQUEUED (five tries, then the
+  // manager's floor strip says so), and if it does happen the paper is out. So the right move is to
+  // TRY, always. A window Chrome was launched with --disable-backgrounding-occluded-windows (see
+  // docs/KITCHEN-PRINT-SETUP.md) prints perfectly well while another app sits on top of it.
+  if (!Array.isArray(jobs) || !jobs.length) return;
   const fresh = jobs.filter((j) => j && j.order && !jobsInFlight.has(j.id));
   if (!fresh.length) return;
   fresh.forEach((j) => jobsInFlight.add(j.id));
@@ -1243,7 +1259,15 @@ function processPrintJobs(jobs) {
     let i = 0;
     const step = () => {   // serialized 400ms apart, same as the auto-print queue
       const j = mine[i++]; if (!j) return;
-      const okPrint = printKot(j.order, j.items || [], state.restaurant, { reprint: j.reprint !== false });
+      // A RETRY SAYS SO ON THE PAPER. `reprint` marks the manager's manual reprint; `attempts > 0`
+      // marks a job we already tried once — if the first attempt did reach the printer after all,
+      // the second sheet is a duplicate, and the one thing worse than two tickets on the rail is
+      // two tickets on the rail that both look original (the reason the banner exists, 2026-08-04).
+      const okPrint = printKot(j.order, j.items || [], state.restaurant, { reprint: j.reprint !== false || (j.attempts || 0) > 0 });
+      // Remember the ORDER as printed, not just the job: the self-healing net below (autoPrintNet)
+      // and the manual 🖨 button both read printedIds, and without this a queue-printed ticket would
+      // look unprinted to them.
+      if (okPrint && j.order && j.order.id) { printedIds.add(j.order.id); savePrintedIds(); }
       if (!okPrint) notePrintTrouble();
       api("POST", `/print-jobs/${j.id}/done`, { ok: okPrint, error: okPrint ? undefined : "print call failed on the kitchen screen" })
         .catch(() => {})
@@ -1291,45 +1315,62 @@ function openPrinterSheet() {
     }
   }));
 }
-function printQueue(queue, allItems, restaurant) {
+// ── THE SELF-HEALING NET (was the whole of auto-print until mig 335) ────────────────────────────
+// Auto-print used to work exactly like this and nothing else: diff the board, print what this tab
+// had not printed. That is what died whenever the tab was not the front window, because a tab that
+// hears nothing sees no new orders — and nothing anywhere remembered the ticket.
+//
+// Now the DATABASE queues a row for every new order (mig 335) and processPrintJobs above prints it,
+// so this is only the net underneath: it prints an order that the queue does not have in hand at
+// all, and only once it is 20 seconds old. In normal service it never fires — the row exists within
+// milliseconds. It fires when the queue genuinely cannot help:
+//   • a database that has not had mig 335 yet (a stack awaiting its release — AV live today),
+//   • a job somebody dismissed by mistake,
+//   • auto-print switched ON mid-service, when orders already on the board never got a row.
+// `queuedFor` comes from the server and lists orders with a job in ANY state — including one another
+// screen is printing right now — so the net can never race the queue into a second ticket.
+const NET_AFTER_MS = 20000;
+function printQueueSerial(queue, allItems, restaurant) {
   if (!queue || !queue.length) return;
   let i = 0;
   const step = () => {
-    if (document.hidden || i >= queue.length) return; // paused if tab hidden mid-burst
+    if (i >= queue.length) return;
     const o = queue[i++];
     if (!printedIds.has(o.id)) {
       // Mark it printed only if it ACTUALLY printed. Marking first meant one failure (a bad
       // deploy leaving billdoc.js missing, say) consumed the ticket forever: the order never
-      // printed and never would, on any later pass. A failure now leaves it pending — the same
-      // treatment a hidden tab already gets — and tells the cook once, rather than never.
+      // printed and never would, on any later pass. A failure now leaves it pending and tells the
+      // cook once, rather than never.
       if (printKot(o, (allItems || []).filter((it) => it.order_id === o.id), restaurant)) { printedIds.add(o.id); savePrintedIds(); }
       else notePrintTrouble();
     }
-    if (i < queue.length) setTimeout(step, 400);
+    if (i < queue.length) setTimeout(step, 400);   // serialized, so a burst can't stack N dialogs
   };
   step();
 }
-function autoPrintNew(autoOn, orders, allItems, restaurant) {
-  if (!autoOn || document.hidden) return;
-  // Print a brand-new order that still needs a KOT — 'received' (guest order awaiting
-  // accept) OR 'preparing'. Waiter/tablet orders auto-accept straight to 'preparing'
-  // (the waiter already took them), so they never pass through 'received' while the
-  // tab is open — filtering to 'received' alone meant a tablet-only restaurant (e.g.
-  // Aangan) never auto-printed a single KOT. printedIds guards against a double-print
-  // when a guest order later advances received→preparing. Matches the visibilitychange
-  // handler below, which already prints both.
-  printQueue((orders || []).filter((o) => (o.status === "received" || o.status === "preparing") && !printedIds.has(o.id)), allItems, restaurant);
+function autoPrintNet(autoOn, orders, allItems, restaurant, queuedFor) {
+  if (!autoOn) return;
+  // Unknown (an old server, or the targeted ?table= slice which never carries it) → assume the
+  // queue has everything and do nothing. The net must never be the reason a ticket prints twice.
+  if (!Array.isArray(queuedFor)) return;
+  const queued = new Set(queuedFor.map(String));
+  const cutoff = Date.now() - NET_AFTER_MS;
+  printQueueSerial((orders || []).filter((o) => {
+    if (o.status !== "received" && o.status !== "preparing") return false;
+    if (printedIds.has(o.id) || queued.has(String(o.id))) return false;
+    const t = new Date(o.created_at).getTime();
+    return Number.isFinite(t) && t < cutoff;   // a bad timestamp is never retro-printed
+  }), allItems, restaurant);
 }
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden || !state.autoPrintKot) return;
-    // On becoming visible, print EVERY not-yet-printed order that still needs a ticket —
-    // not just those still 'received'. An order that advanced to 'preparing' (accepted by
-    // the waiter/manager) WHILE the tab was hidden never had a chance to print (the browser
-    // suppresses iframe printing on a hidden tab AND autoPrintNew only looks at 'received'),
-    // so it would be lost. printedIds guards against a double-print. (bug: auto-print skips
-    // a KOT accepted while the tab was hidden)
-    printQueue((state.orders || []).filter((o) => (o.status === "received" || o.status === "preparing") && !printedIds.has(o.id)), state.items || [], state.restaurant);
+    // COMING BACK IS NOW JUST A READ. Anything missed while this screen was in the background is
+    // sitting in print_jobs (mig 335), so the honest way to catch up is to fetch the board — the
+    // queue comes with it and processPrintJobs prints whatever is still unclaimed. It used to
+    // re-diff the board here, which was the only catch-up there was and could not help with an
+    // order that had already left the board.
+    load().catch(() => {});
   });
   // When the offline outbox drains on reconnect, snap the board to server truth at once
   // (a replayed action could have been rejected → the optimistic tile would otherwise stay
@@ -1390,7 +1431,10 @@ function load() {
 async function loadImpl() {
   markFullRead();   // this IS a whole-board read — the rate guard must count it
   const seq = ++loadSeq;
-  const data = await api("GET", "/board");
+  // `?autojobs=1` says "this panel prints from the QUEUE" (mig 335). A panel from before that
+  // migration prints by diffing its own board, so the server only hands the new auto rows to a panel
+  // that asks — otherwise a device still running last month's app.js would print every ticket twice.
+  const data = await api("GET", "/board?autojobs=1");
   if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
   // Table display names FIRST — before any auto-print below, or a ticket printed in the
   // boot window would fall back to the raw number on a renamed table.
@@ -1408,10 +1452,9 @@ async function loadImpl() {
     const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
     if (newReceived.length || freshPlat) chime();
-    // Auto-print via the shared helper (printedIds-tracked, hidden-tab-safe, serialized)
-    // — never prints the existing board on first open (knownIds is set only after) and
-    // never double-prints (printedIds).
-    autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
+    // The QUEUE prints new orders now (processPrintJobs, below — mig 335). This is only the net
+    // for an order the queue has no row for at all, and it waits 20s before it acts.
+    autoPrintNet(!!data.autoPrintKot, data.orders, data.items, data.restaurant, data.queuedFor);
   } else {
     // FIRST load (no baseline yet): treat orders that already existed BEFORE this panel
     // opened as already handled, so we never retro-print the existing board. But an order
@@ -1425,7 +1468,11 @@ async function loadImpl() {
     // seeding made `printedIds` claim a print that never happened, and the manual 🖨 then branded
     // the cook's genuine FIRST ticket "*** REPRINT · DUPLICATE ***". That is the exact lie the
     // reprint path warns about forty lines up. With auto-print off there is nothing to retro-print
-    // either (autoPrintNew returns immediately), so the seed has no other job here.
+    // either (autoPrintNet returns immediately), so the seed has no other job here.
+    // Seeding does NOT hold back the queue: a ticket that queued while this screen was closed still
+    // prints from print_jobs the moment the panel opens (that is mig 269's promise, and it is what
+    // "the kitchen was shut, then opened" is supposed to do). printedIds only guards the net and the
+    // duplicate banner.
     if (data.autoPrintKot) {
       for (const o of data.orders) {
         const t = new Date(o.created_at).getTime();
@@ -1433,9 +1480,9 @@ async function loadImpl() {
       }
       savePrintedIds();   // one write for the whole seeding pass, not one per order
     }
-    // Print any order that landed during boot (created after BOOT_TS, still 'received' and
-    // not seeded above). Safe: printedIds guards against a double-print on the next pass.
-    autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
+    // An order that landed during boot has its own queued row, so the queue takes it; the net only
+    // covers one with no row at all (and never one seeded above).
+    autoPrintNet(!!data.autoPrintKot, data.orders, data.items, data.restaurant, data.queuedFor);
   }
   state.autoPrintKot = !!data.autoPrintKot;
   state.restaurant = data.restaurant || null;
@@ -1719,14 +1766,29 @@ if (window.LFH_RT) {
   // started. It was blind to the boot read and to the 60s backstop, so a breadcrumb arriving a
   // moment after either of those fired instantly rather than waiting its turn.
   markFullRead = () => { lastFullAt = Date.now(); };
-  LFH_RT.start({ handlers: {
-    ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : fullSoon(),
-    menu: () => fullSoon(),
-  }});
+  LFH_RT.start({
+    handlers: {
+      ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : fullSoon(),
+      menu: () => fullSoon(),
+    },
+    // KEEP THE LIVE SOCKET WHILE THIS SCREEN IS THE PRINTER (owner, 2026-08-17). realtime.js drops
+    // its channels after two minutes hidden to protect the connection budget — right for a
+    // backgrounded display, wrong for the device the tickets come out of: it meant a covered window
+    // stopped hearing about orders altogether. Only ever true when auto-print is on, so an ordinary
+    // kitchen display still gives its connection back.
+    keepAlive: () => !!state.autoPrintKot,
+  });
   // Backup sync — but NOT while the tab is hidden: a backgrounded wall display kept
   // firing a full-board read every 60s forever (egress waste). realtime.js already does
   // a fresh full reload via wake() on re-show, so a hidden tab needs no backstop.
-  setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60000);
+  //
+  // ONE EXCEPTION, AND IT IS THE POINT OF THIS WHOLE CHANGE: a screen with auto-print ON is not a
+  // display, it is the PRINTER. When another window covers it, Chrome calls it hidden — and the old
+  // rule then left the printer with no heartbeat at all, so a ticket waited for someone to click on
+  // the window (owner, 2026-08-17). A minute of egress on the one device per restaurant that is
+  // doing the printing is the cheapest honest answer; realtime normally beats this to it, so it is
+  // a backstop, not the mechanism.
+  setInterval(() => { if (!document.hidden || state.autoPrintKot) load().catch(() => {}); }, 60000);
   // If realtime isn't connected (blocked/flaky WebSocket, or a database that dropped its
   // realtime connection), LFH_RT.start() swallows the subscribe error and only the 60s backstop
   // runs — a new KOT could sit unseen up to 60s (bug M9, 2026-07-05). LFH_RT.catchUp polls every

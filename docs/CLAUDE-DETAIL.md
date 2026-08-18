@@ -1398,3 +1398,13 @@ the Windows `*.bat` launchers are gitignored (they carried machine paths). The t
 macOS `*.command` launchers ARE committed and should stay that way — they `cd "$(dirname "$0")"`,
 so they work from any checkout. The admin gate needs `ADMIN_PASSWORD` set in the Vercel project
 env to work in production.
+
+## Light mode on /owner — measured wrong once, corrected 2026-08-05
+
+An earlier CLAUDE.md note said the owner console was "dark-only, no toggle". It was measured with the
+GUEST key (`lfh_theme`), which genuinely does nothing on `/owner` — so the check looked right and the
+conclusion was wrong. The owner console's skin key is **`aevidine_skin`** (localStorage + cookie),
+driven by the ☀/🌙 button in `OwnerShell.tsx`: tapping it turns the cards white and the text dark, it
+survives a reload, and it pushes the same skin into the embedded panel by postMessage —
+`useOwnerSkin` exists precisely because those two drifted apart once. DARK IS THE DEFAULT and the
+owner asked to keep it that way; that part of the old note always stood.
