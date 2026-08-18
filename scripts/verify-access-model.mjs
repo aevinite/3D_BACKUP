@@ -886,6 +886,24 @@ else ok("the read/write route derives every allow-list from the model");
   else ok(`every expectation header is pure ASCII, for all ${ALL_NODES.length} rows and for a person's own typing`);
 }
 
+// ── 27 · A REFUSED SAVE MUST STILL BE ON SCREEN A SECOND LATER ──────────────
+// The Access screen answers a refusal by setting the sentence AND reloading the row, so you can see
+// what it really says now. load() cleared the error on success — on the same tick — so the sentence
+// was gone before anyone could read it and the switch just snapped back. Sampled every 100ms: there
+// at +0ms, gone by +100ms. (sweep T15, 2026-08-18)
+{
+  const src = read("components/admin/AccessTree.tsx");
+  const bad = [];
+  if (!/const load = useCallback\(\(id: string, keepError = false\)/.test(src))
+    bad.push("load() no longer takes the keep-the-message flag");
+  if (!/setSaving\("err"\); load\(rid, true\)/.test(src))
+    bad.push("the refusal path reloads WITHOUT keeping its own message, so the sentence is wiped by the reload it asked for");
+  if (/connection dropped[\s\S]{0,40}load\(rid\)/.test(src))
+    bad.push("the dropped-connection path reloads without keeping its message");
+  if (bad.length) fail(`a refused save on the Access screen says nothing: ${bad.join("; ")}`);
+  else ok("a refused save keeps its explanation on screen after the reload it triggers");
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);

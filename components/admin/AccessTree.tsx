@@ -323,11 +323,19 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   const [info, setInfo] = useState<Node | null>(null);
   const flash = useRef<number>(0);
 
-  const load = useCallback((id: string) => {
+  // `keepError` = this reload was CAUSED by a refusal, so do not wipe the sentence explaining it.
+  //
+  // THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). A refused save set the message and then
+  // called load() on the same line to show what the row really says now — and load() cleared it on
+  // success. Sampled every 100ms: the banner read "Someone else changed Quick order — send to a
+  // table while you had it open — it now says off" at +0ms and was GONE before anyone could read
+  // it. The switch snapped back with no reason given, which is the silent-refusal shape this whole
+  // panel is built to avoid.
+  const load = useCallback((id: string, keepError = false) => {
     if (!id) return;
     fetch(`/api/admin/restaurants/access-tree?restaurant_id=${id}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => { if (d.error) setErr(d.error); else { setErr(""); setSt(d.state as TreeState); } })
+      .then((d) => { if (d.error) setErr(d.error); else { if (!keepError) setErr(""); setSt(d.state as TreeState); } })
       .catch(() => setErr("Couldn't load this restaurant's settings."));
   }, []);
   useEffect(() => { setSt(null); setRecent([]); load(rid); loadRecent(rid); }, [rid, load, loadRecent]);
@@ -356,13 +364,13 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
           // 409 = another admin got there first. Say so in their words and RELOAD, so the row
           // shows what it actually says now rather than the value that lost.
           setErr(j.clash ? `${j.clash.plain} ${j.clash.todo}` : (j.error || "That change didn't save."));
-          setSaving("err"); load(rid); return;
+          setSaving("err"); load(rid, true); return;   // keep the sentence; the reload is the refusal's own
         }
         setErr("");
         if (stamp === flash.current) { setSaving("saved"); setTimeout(() => { if (stamp === flash.current) setSaving(""); }, 1400); }
         loadRecent(rid);   // the line the server just wrote — one scoped read, only after a save that landed
       })
-      .catch(() => { setSaving("err"); setErr("That change didn't save — the connection dropped."); load(rid); });
+      .catch(() => { setSaving("err"); setErr("That change didn't save — the connection dropped."); load(rid, true); });
   }, [rid, load, loadRecent]);
 
   /**
