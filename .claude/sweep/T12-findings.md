@@ -43,3 +43,28 @@ Found by the **second pass**: 7 (a false green on the first pass), 11 and 12.
   mitigation is an SVG `<title>` for hover — which does not exist on a phone, so on the A35 the name
   is simply gone. Needed change: truncate with an ellipsis at the axis width (so the loss is
   visible), widen the axis, or make the label tappable.
+
+---
+
+## His review, 2026-08-18 — what changed after he read the list
+
+He kept all 12 fixes. He also found a 13th problem himself, and turned the parked items into work.
+
+| # | where | what | commit |
+|---|---|---|---|
+| 13 | owner → Dashboard → any tile → the report it opens | on an admin tab pinned to one restaurant but VIEWING all restaurants, every tile landed on that one restaurant — and always on 30 days whatever period was on screen. His catch. Reproduced, then fixed on both sides | `05f8b760` |
+
+**Two challenges, checked rather than coded:**
+
+* *"there is no toggle for report to be switch on and off. What are you even saying?"* — there is
+  one, and I was right to guard the state: `/aevinite/access` → **Owner** → **Owner's menu** →
+  **Reports** (`own_reports` in `lib/accessTree.ts`, `def: true`). It was added on 2026-08-06
+  precisely because the entitlement was enforced but unswitchable. Default ON, so no restaurant is
+  affected unless he switches it off himself.
+* *"is there any options that we can allow to own that card or off that card"* (the activity card) —
+  no, and none is being added, which is what he asked for. There is no toggle anywhere for that
+  card. It simply disappears when **Audit & logs** is switched off, which is what fixes 2 and 3 do.
+
+**The three handoffs became fixes** (`59559518`, `794ee3eb`, `1f8dda6b`) — he said "you can do this
+3 also", so I worked outside the original sweep fence on `OwnerManagerMode.tsx`,
+`app/owner/reports/page.tsx` and `components/owner/Charts.tsx`.
