@@ -102,7 +102,17 @@ const adminHost = (userId: string): ProfileHost => ({
       body: JSON.stringify({ id: userId, ...payload }),
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || "That didn't save.");
+    // A REFUSAL HAS TO READ AS ENGLISH (sweep T15, 2026-08-18). When another admin has moved the
+    // same field first, lib/clash.ts answers 409 with { error: "clash_changed_elsewhere", clash:
+    // { plain, todo } } — and this read `j.error`, so the person on screen was shown the machine
+    // code. Measured: changing a manager's designation underneath and pressing Save printed
+    // "clash_changed_elsewhere" in the header. The OWNER's copy of this same panel has said the
+    // plain sentence since it was built (components/owner/ownerProfileHost.ts), and so does the
+    // Access screen — the admin host was the one that did not.
+    if (!r.ok) {
+      const c = j?.clash as { plain?: string; todo?: string } | undefined;
+      throw new Error(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : (j.error || "That didn't save."));
+    }
     return j;
   },
   photo: {

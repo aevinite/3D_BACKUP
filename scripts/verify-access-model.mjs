@@ -680,6 +680,21 @@ else ok("the read/write route derives every allow-list from the model");
   if (!/typeof v === "boolean"/.test(clash) || !/"pin"/.test(clash))
     fail("lib/clash.ts describe() no longer says on/off for a switch — a refused permission change would quote \"true\"/\"false\"/\"pin\" at an admin");
   else ok("a refused permission change is described in the words the screen uses (on / off / manager PIN)");
+  // …AND EVERY SCREEN THAT SENDS AN EXPECTATION HAS TO READ THE ANSWER THE SAME WAY. The staff
+  // profile sends X-LFH-Expect on the job, the pay and every profile card, but its ADMIN host read
+  // `j.error` — which is the machine code — so a refused save printed "clash_changed_elsewhere" at
+  // the person. The owner's copy of the same panel has always read `clash.plain`. (T15, 2026-08-18)
+  // CODE ONLY — both files EXPLAIN this rule in a comment, so a naive text search reads its own
+  // documentation and passes over the very line that was wrong (it did, on the first draft).
+  const codeOf = (s) => s.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const [file, raw] of [["components/admin/StaffProfile.tsx", read("components/admin/StaffProfile.tsx")],
+                             ["components/owner/ownerProfileHost.ts", read("components/owner/ownerProfileHost.ts")]]) {
+    const src = codeOf(raw);
+    if (!/X-LFH-Expect/.test(src) && !/clash/.test(src)) continue;   // this host doesn't opt in
+    if (!/\.clash\b[\s\S]{0,200}\bplain\b/.test(src))
+      fail(`${file} shows a refused save as the raw code instead of the plain sentence lib/clash.ts sends`);
+    else ok(`${file} shows a refused save in plain words`);
+  }
 }
 
 // ── 21 · THE SCREEN MUST NOT OFFER A PERMISSION THE OWNER DELETED (R27) ─────
