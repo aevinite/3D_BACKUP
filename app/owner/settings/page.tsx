@@ -14,9 +14,32 @@ type Data = {
   sections: Record<string, boolean>; restaurants: { id: string; name: string }[];
   modules?: Module[];
 };
+// REJECTED (owner, 2026-08-18): DO NOT show the owner which sections are switched OFF.
+// *"owner can't know which option are not given to them only admin should know that"* — said after
+// being shown a card that listed nine sections with a ✓ or a ✗ on each. What is withheld from a
+// restaurant is Aevidine's business and the admin's alone; a ✗ here tells the owner a feature
+// exists that he has not been given, which is an invitation to ask for it. Row R36 in
+// docs/REJECTED-IDEAS.md.
+//
+// So this card lists ONLY what is ON, and there is no off-state on the screen at all. Do not
+// re-add the ✗ chip, do not grey a withheld section, do not add a count ("6 of 9"), and do not
+// re-report the missing ones as a gap — a section he does not have simply is not mentioned, which
+// is the same thing his sidebar already does.
+//
+// The MAP still holds every section, and that is not disclosure: it is what stops a section he DOES
+// have from having no chip. Before 2026-08-17 the map held six of the nine, so a restaurant with
+// Menu, Audit & logs or Manager mode switched ON was missing those chips from a card headed "the
+// sections Aevidine has switched on for you" — the card under-reported what he HAD, which is the
+// opposite fault and is the half of this that survives. Names and order mirror the sidebar
+// (components/owner/OwnerShell.tsx) so the two read side by side; "Staff & powers" and "Feedback &
+// issues" were names of screens that no longer exist.
+//
+// logs_signins / logs_service / logs_staff_changes are deliberately absent: they are which KINDS of
+// row the Audit & logs page shows, not sections. Pay Later and Inventory are MODULES, not sections.
 const SECTION_LABEL: Record<string, string> = {
-  reports: "Reports", staff: "Staff & powers", customers: "Customers",
-  issues: "Feedback & issues", ratings: "Guest ratings", settings: "Settings",
+  manager_mode: "Manager mode", menu: "Menu", reports: "Reports", staff: "Team",
+  customers: "Customers", logs: "Audit & logs", issues: "Feedback & complaints",
+  ratings: "Guest ratings", settings: "Settings",
 };
 
 export default function OwnerSettings() {
@@ -117,14 +140,13 @@ export default function OwnerSettings() {
         <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>The sections Aevidine has switched on for you. To change these, contact Aevidine.</p>
         {err ? <div className="adm-empty">Not available.</div> : !data ? <div className="adm-empty">Loading…</div> : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {Object.keys(SECTION_LABEL).map((k) => {
-              const on = data.sections[k] !== false;
-              return (
-                <span key={k} className="adm-chip" style={{ background: on ? "color-mix(in srgb, var(--adm-ok,#16a34a) 14%, transparent)" : "rgba(128,128,128,.14)", color: on ? "var(--adm-ok,#16a34a)" : "var(--muted)" }}>
-                  <i className={`fas ${on ? "fa-check" : "fa-xmark"}`} aria-hidden="true" /> {SECTION_LABEL[k]}
-                </span>
-              );
-            })}
+            {/* ON only — see the REJECTED note above. `!== false` matches the server's own rule
+                (an absent key means ON), so nothing he has can be missed. */}
+            {Object.keys(SECTION_LABEL).filter((k) => data.sections[k] !== false).map((k) => (
+              <span key={k} className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-ok,#16a34a) 14%, transparent)", color: "var(--adm-ok,#16a34a)" }}>
+                <i className="fas fa-check" aria-hidden="true" /> {SECTION_LABEL[k]}
+              </span>
+            ))}
           </div>
         )}
       </div>

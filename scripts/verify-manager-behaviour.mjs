@@ -323,7 +323,72 @@ async function catchUpPoll() {
   ok("it does nothing at all while the socket is live", `${d2.length} timer(s) armed, 0 reads`);
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll];
+// ── H · THE T5 SWEEP'S FIXES (2026-08-17) ─────────────────────────────────────────────────────
+// Four of them are decisions taken while building a screen, so there is no function to call —
+// what can be checked is that the SHIPPED source still makes the decision, at the point it is
+// made. Each one is written against the exact line, and each says which live failure it prevents.
+// (The fifth, "a helper must be visible to its caller", is its own guard: verify:panel-scope.)
+async function t5Fixes() {
+  console.log("\nH · the T5 sweep's fixes — are they still in the shipped panel?");
+  const app = src("public/panels/editor/app.js");
+  const css = src("public/panels/editor/style.css");
+
+  // H1 · a table whose every ticket was voided is not a bill. Offering 🖨 Print bill there issues
+  // a tax-invoice number for a sale that never happened (mig 331 refuses it — so the tap was
+  // offered and then refused, which is the failure the bill modal was fixed for on 2026-08-16).
+  /const billableOs = os\.filter\(\(o\) => o\.status !== "cancelled"\);/.test(app)
+    ? ok("the table detail knows which of its orders are billable") : bad("billableOs is gone from tablePanelParts");
+  /const printBtn = !billableOs\.length \? "" :/.test(app)
+    ? ok("…and Print bill is only offered when one of them is") : bad("Print bill is back to counting cancelled tickets");
+  /const splitBtn = billableOs\.length && splitBillOn\(\)/.test(app)
+    ? ok("…and so is 🍴 Split") : bad("Split is back to counting cancelled tickets");
+  // …and the heading counts what is drawn, not what exists: "Orders · 6" over an empty box reads
+  // as a screen that failed to load.
+  /Orders <span class="sub">· \$\{shownN\}<\/span>/.test(app)
+    ? ok("the Orders heading counts the tickets actually listed") : bad("the Orders heading counts cancelled tickets again");
+
+  // H2 · the top-bar 🔔 is part of the floor, so the INCREMENTAL path has to refresh it too —
+  // that is the path every realtime breadcrumb takes.
+  const patch = lift("public/panels/editor/app.js", "function patchFloorTiles(tables) {", "return true;\n}", "patchFloorTiles");
+  /setTimeout\(syncGuestBell, 0\);/.test(patch)
+    ? ok("a patched floor still refreshes the guest bell") : bad("patchFloorTiles no longer syncs the bell — the count goes stale for up to 60s");
+
+  // H3 · the discount % chips obey the person's own %-limit, like the two boxes beside them.
+  const chip = lift("public/panels/editor/app.js", 'wrap.querySelectorAll(".disc-pct-pick")', "}));", "discount chips");
+  /clamp\(want, 0, maxDisc\)/.test(chip) && /refuse\(capLine\(\)\)/.test(chip)
+    ? ok("a discount chip clamps to the person's cap and says so") : bad("the chips set a figure the server will refuse");
+
+  // H4 · the take-order button has TWO faces and only two (owner, 2026-08-17 — R28). This started
+  // life the other way round: the T5 sweep restored a short "Order" label for the band where
+  // "＋ Take order" cannot fit, and he removed it looking at the real tile — "instead of order is
+  // written that should be just a plus icon, nothing else, and it should stay like that". So what is
+  // guarded now is his rule: the word must not come back, in the markup or in the stylesheet, and
+  // when the full label is dropped the ＋ must be shown (a button with neither is an empty box —
+  // which is what this ladder's own ⚠️ note records happening once).
+  !/ft-take-s/.test(app) && !/ft-take-s/.test(css)
+    ? ok("no short \"Order\" face anywhere — just \"＋ Take order\" and \"＋\"")
+    : bad("the short \"Order\" label is back — he removed it on 2026-08-17 (R28)");
+  // The band is found by SCANNING to its closing brace, not with one regex: the block has inner
+  // rules (and inner `}`s), which is what made the first version of this check report "band not
+  // found" about a band that was right there.
+  const drop = (() => {
+    for (const m of css.matchAll(/@container \(max-width: (\d+)px\) \{/g)) {
+      let i = m.index + m[0].length, depth = 1;
+      while (i < css.length && depth > 0) { if (css[i] === "{") depth++; else if (css[i] === "}") depth--; i++; }
+      const body = css.slice(m.index + m[0].length, i - 1);
+      if (/\.ftile \.ft-take-t \{ display: none; \}/.test(body)) return { px: Number(m[1]), body };
+    }
+    return null;
+  })();
+  drop && /\.ftile \.ft-take-x \{ display: inline; \}/.test(drop.body) && /:has\(\.ft-ico-bill\) \.ft-take-x \{ display: inline; \}/.test(drop.body)
+    ? ok("…and where the full label is dropped, the ＋ is shown instead", `at ${drop.px}px, including on a tile that has the bill glyph`)
+    : bad("the band that drops the label does not bring the ＋ back — the button would be empty", drop ? `at ${drop.px}px` : "band not found");
+  /\.ftile\.ft-finished \.ft-take-x \{ display: inline; \}/.test(css)
+    ? ok("…and a finished tile's middle control is the ＋ (his A2 tile)")
+    : bad("a finished tile hides the ＋ with no word to replace it");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

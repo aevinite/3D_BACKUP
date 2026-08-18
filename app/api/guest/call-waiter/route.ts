@@ -19,7 +19,6 @@ import { invalidateFloor } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
 const isUuid = (v: unknown) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 // A call this old is not worth ringing the floor for. The diner asked twenty minutes ago; a
@@ -28,6 +27,35 @@ const isUuid = (v: unknown) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4
 // constant on the device (lib/guestOutbox.ts STALE_CALL_MS), which is where it is usually caught
 // first; this is the half that does not depend on the phone getting it right.
 const STALE_CALL_MS = 10 * 60 * 1000;
+
+// ── "THE RESTAURANT IS BUSY — WAIT THIS LONG" (T10 sweep, improvement I2) ─────────────────────────
+//
+// A 502 here means the restaurant's server did not answer, and the phone saves the call and retries
+// on its own fixed schedule. /api/guest/place-order was given a server-set wait for exactly this
+// (improvement I10, owner 2026-08-12) and its reasoning applies word for word to a raised hand:
+// "during a genuine rush that is the worst possible behaviour: every waiting phone comes back at the
+// same moment, on the same timer, and lands on the server that was already struggling."
+//
+// It applies MORE to a call, if anything. Calling a waiter is the thing a diner does when something
+// is wrong, so it is the most re-tapped guest action of all — and the queue that carries it is the
+// same queue: lib/guestOutbox.ts drains orders and calls in ONE loop, and reads the hint GENERICALLY
+// (`if (j?.retryAfter != null) noteServerRetryAfter(j.retryAfter)`, before any branch) into a shared
+// backoff. So a busy moment taught the phone to back off when it happened to be draining an order
+// and taught it nothing when it happened to be draining a call — the same server, the same rush, two
+// different behaviours depending on what the diner had tapped.
+//
+// Nothing on the device changes: the field is already read, it is a HINT, and a build that ignores
+// it keeps its existing schedule and is exactly as correct as before. The jitter is added HERE
+// rather than on the phone so a thousand devices get a thousand different answers — the whole point
+// is that they stop arriving together. `reason: "server_busy"` stays spelled out in full: it is the
+// code lib/guestOutbox.ts words for the diner, and `npm run verify:order-retry` greps for it.
+function busy(): Response {
+  const retryAfter = 20 + Math.floor(Math.random() * 25);   // 20–45s, spread
+  return NextResponse.json(
+    { ok: false, reason: "server_busy", retryAfter },
+    { status: 502, headers: { "Retry-After": String(retryAfter) } },
+  );
+}
 
 type Body = {
   mode?: "session" | "public";
@@ -71,7 +99,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     const { data, error } = await sb.rpc("lfh_call_waiter", { p_token: b.token, p_reason: reason });
     // The database's own words never travel to a diner — a code does, and lib/guestOutbox.ts owns
     // the sentence. Same rule as place-order.
-    if (error) { console.error("[guest/call-waiter] session RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
+    if (error) { console.error("[guest/call-waiter] session RPC failed:", error.message); return busy(); }
     // Prefer the restaurant the RPC itself resolved from the token over the one the phone sent —
     // an older saved call may carry none, and the floor snapshot then never got dropped, so a
     // manager reloading inside the shared 1.5s window saw a floor without the raised hand on it
@@ -85,10 +113,26 @@ async function postImpl(req: NextRequest): Promise<Response> {
     return NextResponse.json(data ?? { ok: false, reason: "empty" });
   }
 
-  // QR / table-number path. Same restaurant rule as place-order: the legacy single-restaurant
-  // shape (no field at all) falls back to #1, but a malformed value is refused rather than
-  // quietly ringing a different restaurant's floor.
-  const rid = b.restaurantId === undefined ? DEFAULT_RID : (isUuid(b.restaurantId) ? b.restaurantId : "");
+  // WHICH RESTAURANT — AND THERE IS NO LONGER A GUESS (owner, 2026-08-18: "I agree to 7").
+  //
+  // This used to read: no `restaurantId` field at all → restaurant #1. That fallback was the shape
+  // these routes shipped with, back when there was only ever one restaurant, and it was deliberately
+  // kept when a MALFORMED value was made a refusal. On a stack serving many restaurants it is the one
+  // remaining way a real order — and its money — can land on somebody else's floor and somebody
+  // else's books: an order saved on a phone by a build old enough to predate the field replays here
+  // months later and is filed under #1.
+  //
+  // Nothing that runs today can hit this. `useRestaurantId()` (lib/restaurant-context.tsx) always
+  // returns a real id — it defaults to #1 itself and is never undefined — and every call site that
+  // queues a guest action passes it (components/CartPanel.tsx, ChefPopup.tsx, SessionGate.tsx). So the
+  // only body that reaches this branch is one saved before the field existed, which is exactly the
+  // body we must not guess about. Checked before changing it: guessing was the whole risk, and
+  // refusing costs a genuinely ancient saved order that would otherwise have been billed to the wrong
+  // restaurant.
+  //
+  // The diner is TOLD, not silently dropped: lib/guestOutbox.ts already words `unknown_restaurant` as
+  // "We couldn't tell which restaurant this order was for." No client change was needed.
+  const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
   if (!rid) return NextResponse.json({ ok: false, reason: "unknown_restaurant" }, { status: 400 });
   if (await offPlanTable(rid, b.table)) return NextResponse.json({ ok: false, reason: "off_plan_table" }, { status: 400 });
 
@@ -97,7 +141,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     p_note: reason || null,
     p_restaurant_id: rid,
   });
-  if (error) { console.error("[guest/call-waiter] public RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
+  if (error) { console.error("[guest/call-waiter] public RPC failed:", error.message); return busy(); }
   invalidateFloor(rid);
   return NextResponse.json(data ?? { ok: false, reason: "empty" });
 }

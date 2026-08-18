@@ -3,11 +3,25 @@
 // first/last seen), scoped server-side to the owner's restaurants and gated by the
 // admin-controlled "customers" entitlement. READ-ONLY and money-free. A 60s backstop
 // refresh (paused while hidden) keeps it fresh without a faster poll (egress rule).
+// ── `--border` IS A WHOLE BORDER, NOT A COLOUR (sweep 6 · T14, 2026-08-18) ───────────────────────
+// `app/globals.css` declares `--border: 1px solid #1d2430`. So every `1px solid var(--border)` in
+// this file expanded to `1px solid 1px solid #1d2430`, which is not a valid declaration — the
+// browser threw the whole line away. MEASURED, not guessed: the computed value of the customers
+// table's row separator was `0px none`, the ratings bar's track computed to `rgba(0,0,0,0)`, and the
+// "empty" half of a star row computed to the SAME amber as the filled half.
+// That last one is the one that mattered: every rating on the Feedback screen drew FIVE GOLD STARS,
+// so a 1★ complaint and a 5★ compliment looked identical. No text check could ever have caught it —
+// the `aria-label` said "1 out of 5" the whole time, which is exactly why it survived every sweep.
+// `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
+// wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
 import { asSuffix } from "@/lib/ownerPin";
 import { useBackClose } from "@/lib/backStack";
+// Client-safe by design (lib/partialRead has zero imports) — see the header of that file for why it
+// is not lib/ownerScope. Pay Later has shown this note since August; this screen never did.
+import { partialNote } from "@/lib/partialRead";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -28,6 +42,32 @@ type Detail = {
 const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: IST });
 
+// One summary figure. When it names a `seg` it is a real button that puts the list on that
+// segment — and it says so, both to a screen reader (aria-pressed) and to the eye (the pointer,
+// a soft outline while it is the active one). Without a `seg` it is exactly the tile it always was.
+function Tile({ label, value, loading, seg, on, pick }: {
+  label: string; value?: number; loading: boolean;
+  seg?: string; on?: string; pick?: (s: string) => void;
+}) {
+  const body = (
+    <>
+      <div className="k">{label}</div>
+      <div className="v"><AnimatedNumber value={value ?? 0} loading={loading} format={nfmt} /></div>
+    </>
+  );
+  if (!seg || !pick) return <div className="adm-stat">{body}</div>;
+  const active = on === seg;
+  return (
+    <button type="button" className="adm-stat" aria-pressed={active}
+      title={`Show ${label.toLowerCase()}`}
+      onClick={() => pick(seg)}
+      style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
+        outline: active ? "2px solid var(--accent, #16a34a)" : undefined, outlineOffset: -2 }}>
+      {body}
+    </button>
+  );
+}
+
 export default function OwnerCustomers() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
@@ -43,10 +83,44 @@ export default function OwnerCustomers() {
   const [rests, setRests] = useState<Array<{ id: string; name: string }>>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
+  // ── WHICH FIGURE COULD NOT BE READ, SAID OUT LOUD (sweep 6 · T14, 2026-08-18) ───────────────────
+  // The route reports `partial: ["restaurantNames"]` when the brand lookup failed. Nothing here read
+  // it, so every row's restaurant chip simply showed "—" and an owner with three restaurants was
+  // left staring at a list that had stopped telling him whose guests they were, with no reason
+  // given and nothing to press. Cleared on every load, so a passing blip disappears by itself.
+  const [partial, setPartial] = useState<string[]>([]);
+  // ── ON A PHONE THE LIST IS CARDS, NOT AN EIGHT-COLUMN TABLE (owner, 2026-08-18) ─────────────────
+  // "We can do the eleventh one, but it will be showing in a customer tab only where all the history
+  // of, like, number and all that data has been stored at that tab only."
+  // So the phone list carries only what identifies a guest — name, number, how many visits, whether
+  // they are a regular or blocked — and the DATES move into that guest's own record, which is one
+  // tap away and is where their whole history already lives. Before this, four of the eight columns
+  // (first visit, last visit, the chip and the erase button) sat off the right edge behind a
+  // sideways scroll nobody signposted. Measured with matchMedia rather than a CSS breakpoint because
+  // every style on this page is inline; the list only renders after the first load, so there is no
+  // wrong-shape flash to see.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const sync = () => setNarrow(mq.matches);
+    sync(); mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   const filt = useRef({ search, rid, seg, sort }); filt.current = { search, rid, seg, sort };
   const searchRef = useRef(search); searchRef.current = search;
 
-  const load = useCallback(async () => {
+  // ── REFRESH HAS TO MEAN REFRESH (sweep 6 · T14, 2026-08-18) ─────────────────────────────────────
+  // The four tiles are AGGREGATES and ride the compute-on-view snapshot cache, whose change-detector
+  // is `MAX(last_seen_at)` over `customers` (mig 229). That detector cannot see a guest being ADDED
+  // with an older date or being ERASED — the maximum does not move — so the cache says "nothing
+  // changed", bumps its timestamp and serves the OLD counts. Measured on 2026-08-18: the list showed
+  // 24 guests while "Total customers" still read 23, and it stayed 23.
+  // The route has always accepted `?refresh=1` to recompute live (the standing rule is "Refresh
+  // forces live"), and this page was the one owner screen that never sent it — its Refresh button
+  // re-read the LIST and left the tiles exactly as stale as before. Now `load(true)` forces the
+  // recount, which is what the button says it does, and an erase forces one too so the guest the
+  // owner just removed stops being counted.
+  const load = useCallback(async (force?: boolean) => {
     try {
       const { search: sv, rid: rv, seg: gv, sort: sov } = filt.current;
       const s = sv.trim();
@@ -56,11 +130,13 @@ export default function OwnerCustomers() {
         rv ? `restaurant_id=${rv}` : "",
         gv !== "all" ? `seg=${gv}` : "",
         sov !== "last_seen_at" ? `sort=${sov}` : "",
+        force ? "refresh=1" : "",
       ].filter(Boolean).join("&");
       const j = await (await fetch(`/api/owner/customers${qs ? `?${qs}` : ""}`, { cache: "no-store" })).json();
       if (j.disabled) { setDisabled(true); return; }
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);
+      setPartial(Array.isArray(j.partial) ? j.partial : []);
       if (j.restaurants) setRests(j.restaurants);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopePin]);
@@ -111,32 +187,55 @@ export default function OwnerCustomers() {
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Couldn't erase.");
       setCustomers((prev) => (prev || []).filter((x) => !(x.restaurant_id === c.restaurant_id && x.phone === c.phone)));
+      // …and recount, LIVE. Without this the guest disappears from the list while "Total customers"
+      // keeps counting them — see the note on `load` above for why the snapshot cannot notice a
+      // deletion on its own.
+      await load(true);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setErasing(null); }
-  }, []);
+  }, [load]);
 
   // One guest's record: their bills here, what they've spent, and the lifetime figures.
   // Money is fine on the OWNER's page — these are their own takings. Escape closes it.
+  // ── CLOSING IT WHILE IT LOADS HAS TO WORK (sweep 6 · T14, 2026-08-18) ──────────────────────────
+  // The drawer is on screen from the moment the row is tapped (`detail || detailBusy`), but every
+  // way of closing it only cleared `detail`. So during the second or two the record is loading —
+  // which on a phone on a restaurant's wifi is the whole of the interaction — Escape, the ✕, the
+  // backdrop and the phone's own Back all did NOTHING VISIBLE, and then the record opened anyway,
+  // on top of the owner who had just asked for it to go away. Watched happen on 2026-08-18: pressing
+  // Escape right after the tap left the drawer up. That is a tap vanishing in silence, which this
+  // project does not allow.
+  // The same counter fixes a second, quieter fault: tapping guest A and then guest B raced the two
+  // replies, so a slow A could land last and show A's bills under B's name. Every request carries
+  // its sequence number and only the current one is allowed to render.
+  const detailSeq = useRef(0);
+  const closeDetail = useCallback(() => {
+    detailSeq.current += 1;      // whatever is in flight is now nobody's business
+    setDetail(null);
+    setDetailBusy(false);
+  }, []);
   const openDetail = useCallback(async (phone: string) => {
+    const mine = ++detailSeq.current;
     setDetailBusy(true);
     try {
       const qs = [scopePin ? `scope=${scopePin}${asSuffix()}` : "", `phone=${encodeURIComponent(phone)}`].filter(Boolean).join("&");
       const j = await (await fetch(`/api/owner/customers?${qs}`, { cache: "no-store" })).json();
+      if (mine !== detailSeq.current) return;          // closed, or another guest was opened
       if (j.error) throw new Error(j.error);
       setDetail(j.detail || null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setDetailBusy(false); }
+    } catch (e) { if (mine === detailSeq.current) setErr(e instanceof Error ? e.message : String(e)); }
+    finally { if (mine === detailSeq.current) setDetailBusy(false); }
   }, [scopePin]);
   useEffect(() => {
     if (!detail && !detailBusy) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDetail(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeDetail(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, detailBusy]);
+  }, [detail, detailBusy, closeDetail]);
   // …and the PHONE's hardware Back closes it too. Escape alone only helps on a desktop:
   // without a back-stack layer the guest record stayed open and Back navigated off the page
   // instead (project rule: every popup registers the moment it's built; found 2026-08-04).
-  useBackClose("owner-customer-detail", !!detail || detailBusy, () => setDetail(null));
+  useBackClose("owner-customer-detail", !!detail || detailBusy, closeDetail);
 
   const rows = customers || [];
 
@@ -149,13 +248,30 @@ export default function OwnerCustomers() {
         <div className="adm-card"><div className="adm-empty">Customers isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : (
         <>
-          {/* Summary tiles */}
+          {/* ── Summary tiles — and three of them are the filter (owner, 2026-08-18) ──────────────
+              "We can do the twelfth one also." Tapping a figure shows you the people behind it.
+              ONLY where the tile's number and the segment's number are THE SAME QUESTION, because a
+              tile that opens a list with a different count in it is worse than a tile you can't tap:
+                · Total customers  ⇄ Everyone   — both the whole scope
+                · Regulars         ⇄ Regulars   — both "visits ≥ 2"
+                · Blocked          ⇄ Blocked    — both "blocked = true"
+                · New (last 30 days) has NO segment: it counts who FIRST CAME in 30 days, while
+                  "First-timers" counts who has been once. Different people, different number. It
+                  stays a plain figure until the list can be asked that question server-side. */}
           <div className="adm-stats" style={{ marginBottom: 14 }}>
-            <div className="adm-stat"><div className="k">Total customers</div><div className="v"><AnimatedNumber value={summary?.total ?? 0} loading={!summary} format={nfmt} /></div></div>
-            <div className="adm-stat"><div className="k">Regulars (came back)</div><div className="v"><AnimatedNumber value={summary?.returning ?? 0} loading={!summary} format={nfmt} /></div></div>
-            <div className="adm-stat"><div className="k">New (last 30 days)</div><div className="v"><AnimatedNumber value={summary?.newThisMonth ?? 0} loading={!summary} format={nfmt} /></div></div>
-            <div className="adm-stat"><div className="k">Blocked</div><div className="v"><AnimatedNumber value={summary?.blocked ?? 0} loading={!summary} format={nfmt} /></div></div>
+            <Tile label="Total customers" value={summary?.total} loading={!summary} seg="all" on={seg} pick={setSeg} />
+            <Tile label="Regulars (came back)" value={summary?.returning} loading={!summary} seg="regulars" on={seg} pick={setSeg} />
+            <Tile label="New (last 30 days)" value={summary?.newThisMonth} loading={!summary} />
+            <Tile label="Blocked" value={summary?.blocked} loading={!summary} seg="blocked" on={seg} pick={setSeg} />
           </div>
+
+          {partial.length > 0 && (
+            <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn)" }} aria-hidden="true" />
+              <span style={{ flex: 1, minWidth: 200 }}>{partialNote(partial)}</span>
+              <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Try again</button>
+            </div>
+          )}
 
           <div className="adm-card">
             <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
@@ -176,7 +292,8 @@ export default function OwnerCustomers() {
                 <button role="tab" aria-selected={sort === "last_seen_at"} className={sort === "last_seen_at" ? "on" : ""} onClick={() => setSort("last_seen_at")}>Recent</button>
                 <button role="tab" aria-selected={sort === "visits"} className={sort === "visits" ? "on" : ""} onClick={() => setSort("visits")}>Most visits</button>
               </div>
-              <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+              {/* Refresh means "count them again now", not "re-read the same snapshot". */}
+              <button className="adm-btn" onClick={() => load(true)}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
             </div>
 
             {err && (
@@ -190,6 +307,51 @@ export default function OwnerCustomers() {
               <div className="adm-empty">Loading customers…</div>
             ) : rows.length === 0 ? (
               <div className="adm-empty">{search ? "No customers match that search." : "No customers yet. They appear here once guests dine in and share a name/phone."}</div>
+            ) : narrow ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                {rows.map((c) => (
+                  <div key={`${c.restaurant_id}:${c.phone}`}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px",
+                      border: "1px solid var(--border-c,#e5e7eb)", borderRadius: 13, opacity: c.blocked ? 0.65 : 1 }}>
+                    <button type="button" onClick={() => openDetail(c.phone)}
+                      aria-label={`Open ${c.name || "this guest"}'s record`}
+                      style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: 0,
+                        color: "inherit", font: "inherit", padding: 0, cursor: "pointer" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                        <b style={{ fontSize: 14.5 }}>{c.name || <span className="adm-muted">Guest</span>}</b>
+                        {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented"
+                          style={{ fontSize: 10.5, color: "var(--adm-ok,#16a34a)" }} />}
+                        {c.blocked ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>
+                          : c.returning ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-ok,#16a34a) 16%, transparent)", color: "var(--adm-ok,#16a34a)" }}>regular</span>
+                          : <span className="adm-chip">new</span>}
+                      </div>
+                      <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontFamily: "ui-monospace, monospace" }}>{showPhone(c.phone)}</span>
+                        <span>· {c.visits ?? 0} visit{(c.visits ?? 0) === 1 ? "" : "s"}</span>
+                        {rests.length > 1 && <span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span>}
+                      </div>
+                      {/* The dates are NOT here on purpose — they live in the record this opens. */}
+                      <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 3 }}>Tap for their visits, dates and bills</div>
+                    </button>
+                    <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${c.name || c.phone}`}
+                      disabled={erasing === `${c.restaurant_id}:${c.phone}`}
+                      onClick={(e) => { e.stopPropagation(); erase(c); }}
+                      style={{ flex: "none", padding: "9px 11px", fontSize: 13, color: "var(--muted)", background: "transparent",
+                        border: "1px solid transparent", minWidth: 40, minHeight: 40 }}>
+                      {erasing === `${c.restaurant_id}:${c.phone}` ? "…" : <i className="fas fa-trash-can" aria-hidden="true" />}
+                    </button>
+                  </div>
+                ))}
+                {search ? (
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
+                  </div>
+                ) : summary && summary.total > summary.shown ? (
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
+                  </div>
+                ) : null}
+              </div>
             ) : (
               <div className="adm-tablewrap" style={{ overflow: "auto" }}>
                 <table className="adm-table" style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -209,7 +371,7 @@ export default function OwnerCustomers() {
                     {rows.map((c) => (
                       <tr key={`${c.restaurant_id}:${c.phone}`} onClick={() => openDetail(c.phone)}
                         title="See this guest's visits and what they've spent"
-                        style={{ borderTop: "1px solid var(--border,#e5e7eb)", opacity: c.blocked ? 0.65 : 1, cursor: "pointer" }}>
+                        style={{ borderTop: "1px solid var(--border-c,#e5e7eb)", opacity: c.blocked ? 0.65 : 1, cursor: "pointer" }}>
                         <td style={{ padding: "9px 10px", fontWeight: 700 }}>
                           {c.name || <span className="adm-muted">Guest</span>}
                           {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented" style={{ marginLeft: 6, fontSize: 11, color: "var(--adm-ok,#16a34a)" }} />}
@@ -258,11 +420,18 @@ export default function OwnerCustomers() {
 
           {/* ── one guest's record: visits, spend and their bills here ────────────── */}
           {(detail || detailBusy) && (
-            <div onClick={() => setDetail(null)} role="dialog" aria-modal="true" aria-label="Customer record"
+            <div onClick={closeDetail} role="dialog" aria-modal="true" aria-label="Customer record"
               style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", backdropFilter: "blur(3px)", zIndex: 80, display: "flex", justifyContent: "flex-end" }}>
               <div onClick={(e) => e.stopPropagation()} className="adm-card"
                 style={{ width: "min(460px, 100%)", height: "100%", borderRadius: 0, overflow: "auto", padding: 22 }}>
-                {!detail ? <div className="adm-empty">Loading…</div> : (
+                {/* A ✕ while it loads too — the drawer is already on screen, so it needs a visible
+                    way out that does not depend on knowing about Escape or the phone's Back. */}
+                {!detail ? (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <div className="adm-empty" style={{ flex: 1 }}>Loading…</div>
+                    <button className="adm-btn" style={{ padding: "6px 11px" }} onClick={closeDetail} aria-label="Close">✕</button>
+                  </div>
+                ) : (
                   <>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                       <div>
@@ -271,7 +440,7 @@ export default function OwnerCustomers() {
                           {detail.phone && detail.phone.length === 10 ? `${detail.phone.slice(0, 5)} ${detail.phone.slice(5)}` : detail.phone}
                         </div>
                       </div>
-                      <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={() => setDetail(null)} aria-label="Close">✕</button>
+                      <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={closeDetail} aria-label="Close">✕</button>
                     </div>
 
                     <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))" }}>
@@ -293,8 +462,11 @@ export default function OwnerCustomers() {
                         <div key={r.restaurant_id} style={{ border: "var(--border)", borderRadius: 11, padding: "9px 12px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <b style={{ fontSize: 13 }}>{r.restaurantName}</b>
                           {r.blocked && <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>}
-                          <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-                            {r.visits} visit{r.visits === 1 ? "" : "s"} · since {fmt(r.first_seen_at)}
+                          {/* First AND last visit live here now — on a phone the list no longer
+                              carries the dates, so this record has to be complete on its own. */}
+                          <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12, textAlign: "right" }}>
+                            {r.visits} visit{r.visits === 1 ? "" : "s"}<br />
+                            first {fmt(r.first_seen_at)} · last {fmt(r.last_seen_at)}
                           </span>
                         </div>
                       ))}

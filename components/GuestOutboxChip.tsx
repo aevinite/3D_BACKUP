@@ -169,7 +169,22 @@ export default function GuestOutboxChip() {
                       type="button"
                       className="gob-btn gob-rest"
                       disabled={busyId === o.id}
-                      onClick={() => act(o.id, async (id) => { await orderRestWithout(id); })}
+                      onClick={() => act(o.id, async (id) => {
+                        // A TAP MUST NEVER VANISH IN SILENCE (sweep 6 T3). The render guard above
+                        // is a good filter, not a proof: `orderRestWithout` also refuses when the
+                        // dropped line can't be identified at all, or when nothing is left of the
+                        // basket afterwards — and it refuses by returning `{ ok:false }`, which
+                        // this handler threw away. The row simply sat there, and the diner tapped
+                        // it again. Say what happened, in their words, and leave the order where
+                        // it is so "Try again" is still there to use.
+                        const r = await orderRestWithout(id);
+                        if (r.ok) return;
+                        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+                          message: "We couldn’t work out what to leave out",
+                          subtitle: "please order again, or ask a member of staff",
+                          kicker: "your order", variant: "error",
+                        } }));
+                      })}
                     >
                       Order the rest
                     </button>

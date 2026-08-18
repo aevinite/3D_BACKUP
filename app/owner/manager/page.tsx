@@ -81,7 +81,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   if (!restaurants.length) {
     return (
       <div className="adm-page">
-        <h1 className="adm-page-title">Manager mode</h1>
+        {/* `adm-page-h`, not `adm-page-title` — the latter is declared in no stylesheet, so this
+            heading fell back to the browser's own 32px h1 and looked nothing like every other page
+            in the cockpit (sweep 6 · T14, 2026-08-18). The other two pages that used the same dead
+            class — app/owner/menu/page.tsx and app/aevinite/access/page.tsx — were corrected in the
+            same PR once their owning terminals' branches were checked for an overlap; there is now
+            no `adm-page-title` anywhere in app/, and `verify:owner-money` keeps it that way. */}
+        <h1 className="adm-page-h">Manager mode</h1>
         <p className="adm-page-sub">No restaurant is available here right now.</p>
       </div>
     );

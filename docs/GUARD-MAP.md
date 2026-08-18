@@ -54,6 +54,7 @@ Code: `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*`, `lib/men
 | the guest's cart, order placing, or the offline outbox | `verify:order-retry`, `verify:guest-recovery`, `verify:outbox` | nothing | no |
 | the guest session / table hand-over | `verify:session-ux` | `.env.local` | **YES** |
 | branding, theme, IntroSplash (one tenant must never show another's) | `test:units` (`lib/brandText`, `lib/brandTheme`) | nothing | no |
+| any of the THREE guest doors (`/menu`, `/r/<slug>/menu`, `/q/<code>`), or a tap that promises the guest something | `verify:guest-doors` ← all three doors must reach the SAME restaurant, and a guest's tap must never claim something that did not happen | nothing | no |
 
 ## 2 · 3D dish viewer
 
@@ -62,6 +63,7 @@ Code: `components/PublicModelViewer.tsx`, `lib/modelLoader.ts`, `app/view/*`
 | you touched | run | needs | writes |
 |---|---|---|---|
 | the loader, caching, or "no re-fetch on navigation" | `verify:cache` ← **in the Definition of done** | app running | no |
+| the dish page or the 3D viewer's own code — badges, fallbacks, what a diner is told when a model can't open | `verify:3d-viewer` ← source-level, so it runs in under a second with no server | nothing | no |
 | the slow-network / still-loading message | `verify:slow-load` | app running | no |
 | GLB upload or storage cache headers | `node scripts/set-glb-cache.mjs` (check-only unless creds are set) | `.env.local` | no |
 
@@ -81,9 +83,13 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | Bills, a bill's money, a discount | `verify:audit`, `verify:one-number`, `verify:tax-mode` | nothing / `.env.local` | no |
 | the tax on a real bill, end to end (incl. an MRP bottle) | `verify:tax-mode-e2e`, `test:totals` (client maths vs the server's, to the cent) | `.env.local` | `verify:tax-mode-e2e` **YES** |
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
+| ↳ a DATE, a TIME or a DAY on any printed document, or the rows that explain a bill's money | `verify:print-paper` ← every document must read the SAME on every device (it re-renders under five time zones), an MRP line is counted once, and a printed percentage describes the rupees beside it | nothing | no |
+| ↳ auto-print itself — WHO prints and WHETHER it prints at all | `verify:print-queue` ← a ticket is a ROW (mig 335), the print path never refuses a hidden/covered window, the targeted slice carries the queue, and one shared claim serves both panels | nothing | no |
+| releasing everything to AV live (the client site) | `node scripts/release-avlive.mjs --dry-run "<his words>"` ← says what it WOULD do (files, migrations, order) and changes nothing; the real run needs his own AV-live deny rules lifted, on purpose | `.env.AV.live` + the live folder | no |
 | joining / merging tables | `verify:merge`, `verify:merge-who`, `verify:merge-keeps-mark`, `verify:void-party` | mixed | some **YES** |
 | the waiter rota | `verify:rota-clash` | `.env.local` | **YES** |
 | a customer / CRM field | `verify:customers`, `verify:customer-erase`, `verify:personal-data` | `.env.local` | **YES** |
+| the owner's Customers / Pay Later / Inventory / Complaints / Manager-mode screens | `verify:owner-money` ← every fault these five screens had was the same shape: the ROUTE did the careful thing (a true head-count, a `moduleOff` flag, a `partial` list, a `?refresh=1` escape hatch, the month's real counts) and the SCREEN quietly ignored it. Also pins the owner's 2026-08-18 decisions (R34: Pay Later never hides itself) and the rendering rule that `--border` is a whole border, not a colour — a 1★ rating drew five gold stars for months because of it. | nothing | no |
 | a login in the recycle bin | `verify:recycle-name` | nothing | no |
 | opening a table that had a join request (the "Attend" flash) | `verify:no-attend-flash`, `verify:open-request-guard` | nothing | no |
 | a parcel, or the 🛵 Platform / 🥡 Parcels tab appearing/disappearing | `verify:parcel-home` ← a parcel has ONE home; the floor must never grow a parcel strip again (owner, 2026-08-14) | nothing | no |
@@ -106,6 +112,7 @@ Code: `public/panels/tablet/*`, `app/api/tablet/*`
 | you touched | run | needs | writes |
 |---|---|---|---|
 | the waiter's floor | `verify:tablet-wants-in`, then `verify:tablet` | nothing / `.env.local` | `verify:tablet` **YES** |
+| **anything at all in `public/panels/tablet/app.js`** | `verify:tablet-taps` — it compiles the file (a stray backtick in a template literal blanks the whole panel), and holds the four bulk actions, the KOT rows, the destination pickers and the money buttons to "a tap must never vanish in silence" | nothing | no |
 | the tablet's own endpoints | `verify:tablet-parity` | `.env.local` | **YES** |
 | waiter sections | `verify:sections` | `.env.local` | **YES** |
 | the board fingerprint | `verify:board-sig` | nothing | no |
@@ -122,6 +129,7 @@ Code: `app/owner/*`, `components/owner/*`, `app/api/owner/*`, `lib/ownerCache.ts
 | revenue anywhere | `verify:one-number` ← one revenue number, checked against the database | `.env.local` | no |
 | light / dark skin, or any colour | `verify:css-tokens`, `verify:skin-ink`, `verify:dead-css` | nothing / app running | no |
 | two owners editing the same value | `verify:owner-clash` | app running | no |
+| the owner's **Menu editor**, **Team** roster or **Settings** page | `verify:owner-panel` ← every fault these three screens had was the same shape: the screen SAID something that was not what happened — a query that failed reported as "the admin switched Menu off", a first-save-wins refusal whose sentence the reload erased before it was painted, a refusal rendered 950px above a phone screen, a picker with nothing in it telling you to pick. Also pins the owner's 2026-08-18 decisions: **R36** (the owner is never shown which sections are switched OFF — only the admin knows that), the Team search, the disabled-people group, and the banner heading that names the reason instead of always crying "Something went wrong". **Section numbers 1–7 map to the seven problems**; §9 holds the three things he picked himself. | nothing | no |
 | the owner's first load on a fresh stack | `verify:owner-home` | `.env.local` | no |
 | staff, profiles or pay | `verify:staff-accounts` | `.env.local` | **YES** |
 
@@ -148,9 +156,11 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | ↳ *(`verify:clash` is kept as a short alias for the same thing — the file is `scripts/verify-clash-coverage.mjs`)* | — | — | — |
 | an order write | `verify:order`, `verify:order-retry`, `verify:closed-session` | mixed | some **YES** |
 | anything that lowers a bill | `verify:audit` ← every money change leaves a record | nothing | no |
+| a GUEST or STAFF-PANEL api route (`app/api/menu`, `app/api/editor`, `app/api/kitchen`, `app/api/tablet`) | `verify:panel-api` ← the scoping, gating and shape rules the T10 sweep put back, so they cannot quietly come back out | nothing | no |
 | a reply we send to an outside system | `verify:outbound` | `.env.local` | no |
 | behaviour when the server is overloaded | `verify:busy` | starts its own local server | no |
 | behaviour with no internet | `verify:offline`, `verify:outbox`, `verify:warm-shell` | mixed | no |
+| `public/offline.html` — the last-resort screen | `verify:offline-retry` ← it must keep ONE backing-off retry loop however many times the device says it is back, and must never blame the wrong side | starts its own local stub | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
 | anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
 
@@ -171,6 +181,9 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | you touched | run | needs | writes |
 |---|---|---|---|
 | any `.js` or `.css` under `public/panels/` | `verify:panel-cache` ← the `?v=` must be the file's own content hash, or staff run a weeks-old panel | nothing | no |
+| any of the SHARED panel files every staff panel loads (`public/panels/*.js` — the write queue, the connection pill, the back-button manager, the undo card, the guest bell, the settings drawer, the issue modal, the theme, the error log) | `verify:panel-plumbing` | nothing | no |
+| …and AFTER DEPLOYING any of those shared panel files | `verify:panel-plumbing-live -- --base <url>` ← runs the same checks against the bytes the SITE is really serving, and prints the served content hash beside the local one. A green guard on a laptop proves the source is right, not that the site is: the panels are static assets behind a cache `vercel.json` lets go stale for up to 24h, and a device has twice run a weeks-old panel whose bug was already fixed. GET requests for static files only — signs in to nothing, writes nothing | app running | no |
+| moved, renamed or deleted a panel HELPER function | `verify:panel-scope` ← a helper must exist where the code that calls it can see it; a panel that throws on load is a blank screen for staff | nothing | no |
 | a payload that hands a `settings` row to a panel, or `lib/panelSettings.ts` | `verify:panel-secrets` ← the row carries the delivery apps' connection keys; a panel must never receive them (T17 finding F1) | nothing | no |
 | an HTML comment, a `<style>` block, a CSS comment | `verify:ui` | nothing | no |
 

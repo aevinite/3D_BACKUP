@@ -10,7 +10,9 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
 import { ownerScope, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
-import { inventoryLadder } from "@/lib/tableTags";
+import { inventoryLadder, inventoryEffectiveByRid } from "@/lib/tableTags";
+import { scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
+import { restaurantNames } from "@/lib/restaurantNames";
 import { rd, ReadSet, ReadFailed } from "@/lib/readGuard";
 import { inventoryMonthWindow } from "@/lib/inventoryWindow";
 
@@ -32,6 +34,27 @@ export async function GET(req: NextRequest) {
   // window over there — so the same restaurant could read two different totals depending on which
   // screen it was opened from. lib/inventoryWindow.ts is now the single definition both use.
   const { from, to, fromIso, toIso } = inventoryMonthWindow(month);
+
+  // ── ?estate=1 · ONE BOX PER RESTAURANT (owner, 2026-08-18) ──────────────────────────────────────
+  // "when there are two or more restaurant, it should show boxes of restaurants — in which
+  //  restaurant how much thing has been going on."
+  // Everything below computes ONE restaurant. This branch computes the same seven figures for every
+  // restaurant in the owner's scope that has the module on, and it obeys the same three rules the
+  // rest of this file does, because they are the rules he restated as "it should not load every
+  // time, so that egress can be saved… everything should be in the back end calculating… it should
+  // not take time to load":
+  //   · BACK END. Each restaurant's figures come from `lfh_inv_report_summary` — the same function
+  //     the single-restaurant view uses, over the same window from `inventoryMonthWindow`. So a box
+  //     and the screen you reach by tapping it can never disagree; they are one calculation asked
+  //     twice, not two calculations that happen to look alike.
+  //   · NOT EVERY TIME. The whole thing sits in ONE `cachedOwnerPayload`, so a normal open is a
+  //     single row read. The fingerprint is the newest ledger id + newest expense stamp ACROSS the
+  //     scope (two bounded reads), so nothing recomputes until someone actually moves stock or
+  //     writes an expense somewhere in the estate.
+  //   · NOT SLOW. On a recompute the per-restaurant summaries run in parallel, in chunks of 6, so
+  //     twenty restaurants cost four round-trip waits rather than twenty — and never a fan-out of
+  //     twenty at once, which is what the khata route was corrected for on 2026-08-04.
+  if (sp.get("estate") === "1") return estate(req, scope, month, from, to, fromIso, toIso, force);
 
   // Inventory is per-restaurant (stock can't meaningfully sum across kitchens):
   // the page picks one restaurant; default = the owner's first entitled one.
@@ -58,7 +81,14 @@ export async function GET(req: NextRequest) {
 
   try {
     const payload = await cachedOwnerPayload({
-      key: `inv:v1:${scopeKeyOf(rid, false, [rid])}:${month}`,
+      // ── v2, NOT v1 (2026-08-18) ──────────────────────────────────────────────────────────────
+      // The payload gained `purchasesCount`, `wasteCount` and `caps` today. A stored snapshot is
+      // served as-is until its fingerprint moves, so every restaurant that had been opened once kept
+      // handing the screen the OLD shape — and the screen's new "showing 100 of 412" line silently
+      // never appeared, on exactly the busy restaurants that need it. Caught by checking the cached
+      // reply rather than the forced one. Bump this string whenever the shape changes; the old rows
+      // age out on their own.
+      key: `inv:v2:${scopeKeyOf(rid, false, [rid])}:${month}`,
       force,
       fingerprint,
       compute: async () => {
@@ -183,7 +213,18 @@ export async function GET(req: NextRequest) {
             purchases: Number(sum.purchases_amt || 0),
             waste: Number(sum.wasted_val || 0),
             expenses: Number(sum.expenses_amt || 0),
+            // ── HOW MANY THERE REALLY ARE (owner, 2026-08-18: "every number should match") ──────
+            // The lists below are capped reads. `lfh_inv_report_summary` already counts the month's
+            // bills and waste slips in the DATABASE, over the same window, and this route was
+            // throwing both counts away — so a card headed "Purchases (100)" could not tell an owner
+            // whether that was all of them or the first hundred of four hundred. The screen now
+            // compares the true count against the rows it holds and says so when they differ.
+            purchasesCount: Number(sum.purchases_count || 0),
+            wasteCount: Number(sum.waste_count || 0),
           },
+          // The caps this reply was built with, so the screen never has to guess them (and cannot
+          // drift out of step with them the way a hard-coded 200 on a page always eventually does).
+          caps: { expenses: 300, purchases: 100, low: 500, negative: 50 },
           low, negative,
           // Expense slips get a short-lived signed link, not the permanent public one
           // (lib/mediaLinks.ts). Figures above were summed from the raw rows.
@@ -213,3 +254,116 @@ export async function GET(req: NextRequest) {
     return dbFail("owner/inventory", e, { message: "Couldn't load your stock figures just now — please try again." });
   }
 }
+
+// ── the estate roll-up ──────────────────────────────────────────────────────────────────────────
+// Returns { month, estate: [ { rid, name, …the same seven figures… } ], totals, cachedAt }.
+// `totals` is summed from the SAME rows the boxes are drawn from, in one place, so the header and
+// the boxes cannot drift apart — that is the whole of "every number should match" here. Stock VALUE
+// is summed because money adds up across kitchens; stock QUANTITIES deliberately are not, because
+// 4 kg here and 4 kg there is not 8 kg of anything an owner can use.
+async function estate(
+  req: NextRequest, scope: Awaited<ReturnType<typeof ownerScope>>,
+  month: string, from: string, to: string, fromIso: string, toIso: string, force: boolean,
+) {
+  if (!scope) return err("Not authorised.", 401);
+  let ids: string[];
+  try { ids = await scopedRestaurantIds(scope); }
+  catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
+  if (!ids.length) return NextResponse.json({ month, estate: [], totals: emptyTotals() });
+
+  // ── NOTHING BEFORE THE CACHE THAT DOES NOT HAVE TO BE (owner, 2026-08-18: "it should not load
+  // every time, so that egress can be saved… it should not take time to load") ────────────────────
+  // "Which restaurants have the module on" and "what are they called" used to be answered out here,
+  // on the way past — two database round-trips paid on EVERY open, including the ones that go on to
+  // be served from the snapshot in a single row read. Both answers are already IN the stored
+  // payload, so both belong inside `compute`, where they are paid for only when the figures are
+  // actually recalculated. The key and the change-detector work off the owner's whole scope instead
+  // of the live subset: a superset only ever means we notice a change we could have ignored, which
+  // is the safe direction, and it removes the last reason to look at `settings` up front.
+  const fingerprint = async () => {
+    const [mv, ex] = await Promise.all([
+      sb.from("inv_movements").select("id").in("restaurant_id", ids).order("id", { ascending: false }).limit(1),
+      sb.from("expenses").select("created_at, voided_at").in("restaurant_id", ids)
+        .order("created_at", { ascending: false }).limit(1),
+    ]);
+    const m = (mv.data || [])[0]; const e = (ex.data || [])[0];
+    return [ids.length, m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? ""].join("|");
+  };
+
+  try {
+    const payload = await cachedOwnerPayload({
+      key: `investate:v2:${scopeKeyOf(null, !!scope.all, ids)}:${month}`,
+      force,
+      fingerprint,
+      compute: async () => {
+        // Which of them actually have the module — ONE settings read for the whole estate.
+        const eff = await inventoryEffectiveByRid(ids);
+        const live = ids.filter((id) => eff[id]);
+        // `offCount` is not decoration: an owner with seven restaurants and three boxes needs to be
+        // told the other four are switched off, not left wondering where they went.
+        const offCount = ids.length - live.length;
+        if (!live.length) return { month, estate: [], totals: emptyTotals(), offCount, countedOf: { counted: 0, of: 0 } };
+        const names = await restaurantNames(live);
+        const rows: Record<string, unknown>[] = [];
+        const unread: string[] = [];
+        for (let i = 0; i < live.length; i += 6) {
+          const batch = live.slice(i, i + 6);
+          const got = await Promise.all(batch.map((rid) =>
+            rd(`sum:${rid}`, () => sb.rpc("lfh_inv_report_summary", { p_restaurant: rid, p_from: fromIso, p_to: toIso }))));
+          got.forEach((g, k) => {
+            const rid = batch[k];
+            // A RESTAURANT WHOSE FIGURES DID NOT READ IS NOT A RESTAURANT WITH ₹0 IN IT. It keeps its
+            // box, with nulls, and names itself in `partial` — the screen draws dashes and says which
+            // one. Printing ₹0 for a full storeroom is the exact fault this file was corrected for on
+            // 2026-08-12, one level up.
+            if (g.error) { unread.push(rid); rows.push({ rid, name: names.get(rid) || "—", unread: true }); return; }
+            const d = (Array.isArray(g.data) ? g.data[0] : g.data) as Record<string, unknown> | null;
+            const sum = d || {};
+            rows.push({
+              rid, name: names.get(rid) || "—", unread: false,
+              stockValue: Number(sum.stock_value || 0),
+              itemCount: Number(sum.stock_items || 0),
+              lowCount: Number(sum.low_count || 0),
+              negativeCount: Number(sum.negative_count || 0),
+              purchases: Number(sum.purchases_amt || 0),
+              waste: Number(sum.wasted_val || 0),
+              expenses: Number(sum.expenses_amt || 0),
+            });
+          });
+        }
+        // Busiest first — the box an owner wants is the one where the most has happened this month.
+        rows.sort((a, b) => (Number(b.purchases || 0) + Number(b.expenses || 0) + Number(b.waste || 0))
+                          - (Number(a.purchases || 0) + Number(a.expenses || 0) + Number(a.waste || 0)));
+        const totals = rows.reduce((t: EstateTotals, r) => {
+          if (r.unread) return t;                    // never sum a figure nobody read
+          t.stockValue += Number(r.stockValue || 0);
+          t.purchases += Number(r.purchases || 0);
+          t.waste += Number(r.waste || 0);
+          t.expenses += Number(r.expenses || 0);
+          t.lowCount += Number(r.lowCount || 0);
+          t.negativeCount += Number(r.negativeCount || 0);
+          t.itemCount += Number(r.itemCount || 0);
+          return t;
+        }, emptyTotals());
+        const round = (n: number) => Math.round(n * 100) / 100;
+        return {
+          month,
+          estate: rows,
+          totals: { ...totals, stockValue: round(totals.stockValue), purchases: round(totals.purchases),
+                    waste: round(totals.waste), expenses: round(totals.expenses) },
+          offCount,
+          // `countedOf` lets the screen say "5 of 7 restaurants" rather than implying the totals
+          // cover an estate they do not.
+          countedOf: { counted: rows.length - unread.length, of: rows.length },
+          ...(unread.length ? { partial: ["inventory"] as PartialKey[] } : {}),
+        };
+      },
+    });
+    return NextResponse.json(payload);
+  } catch (e) {
+    if (e instanceof ReadFailed) return dbFail("owner/inventory.estate", e.cause, { message: "Couldn't load your stock figures just now — please try again." });
+    return dbFail("owner/inventory.estate", e, { message: "Couldn't load your stock figures just now — please try again." });
+  }
+}
+type EstateTotals = { stockValue: number; purchases: number; waste: number; expenses: number; lowCount: number; negativeCount: number; itemCount: number };
+const emptyTotals = (): EstateTotals => ({ stockValue: 0, purchases: 0, waste: 0, expenses: 0, lowCount: 0, negativeCount: 0, itemCount: 0 });

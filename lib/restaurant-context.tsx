@@ -15,6 +15,26 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG, getRestaurantBySlug } from "./tenant";
+// THE ONE RULE for "which restaurant is this tab on" (sweep 6 T3, 2026-08-17). This file used to
+// carry its OWN copy of that rule — a `/^\/r\/([^/]+)/` match on the path and nothing else — while
+// lib/tenantStorage.ts carried a fuller one. They disagreed on the door a real diner actually uses:
+// the printed table sticker.
+//
+// THE THIRD DOOR. `/q/<code>` renders the restaurant's menu with the URL left as `/q/<code>` on
+// purpose (the table number must not go back in the address bar), so there is no `/r/<slug>` to
+// match. tenantStorage handles that by reading the tenant the tab was PINNED to — app/q/[code]
+// stamps `lfh_tab_tenant` in a script before hydration — so the cart, the session and the tracker
+// were scoped correctly. This provider knew nothing about that pin, so every GLOBAL widget
+// (cart, session gate, feature switches, tax rate, the bell) answered "restaurant #1".
+//
+// WATCHED HAPPENING on Aangan's own table-1 sticker: Aangan has the dining-session system OFF, but
+// the widgets read restaurant #1's settings, where it is ON — so tapping "+" on a dish opened the
+// join-a-table gate instead of adding it, and the basket stayed empty. A diner scanning the sticker
+// on their table could not order at all. It went unnoticed because restaurant #1's own stickers
+// resolve to #1 by accident, which is the right answer for exactly one restaurant.
+//
+// So: import the rule instead of re-writing it. A door added tomorrow is handled in one place.
+import { tenantSlug } from "./tenantStorage";
 
 export interface RestaurantMeta {
   /** Resolved restaurant id (defaults to #1 until a /r/<slug> resolves). */
@@ -49,26 +69,36 @@ export function useRestaurantMeta(): RestaurantMeta {
 
 export function RestaurantProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  // Slug is known SYNCHRONOUSLY from the URL, so a widget can always build a
-  // correct /r/<slug>/... link even before the id/name resolve.
-  const slug = useMemo(() => {
+  // The slug the PATH alone can tell us, known synchronously and identical on the server and on
+  // the first client render — so a widget can always build a correct /r/<slug>/... link, and
+  // hydration can never mismatch. A door with no slug in its path (`/q/<code>`, `/view/<folder>`)
+  // is settled a moment later by the effect below, which is where the tab's pin can be read.
+  const pathSlug = useMemo(() => {
     const m = (pathname || "").match(/^\/r\/([^/]+)/);
     return m ? decodeURIComponent(m[1]) : DEFAULT_RESTAURANT_SLUG;
   }, [pathname]);
 
+  const [slug, setSlug] = useState<string>(pathSlug);
   const [id, setId] = useState<string>(DEFAULT_RESTAURANT_ID);
   const [name, setName] = useState<string | null>(null);
-  // A tenant route starts NOT ready (its id is still #1's placeholder); a bare route is
-  // ready at once because it genuinely IS restaurant #1.
-  const [ready, setReady] = useState<boolean>(() => !/^\/r\/[^/]+/.test(pathname || ""));
+  // Ready at once ONLY for the routes that genuinely ARE restaurant #1 — the bare /menu and
+  // /item, the original single-restaurant URLs. Everything else has to be looked up, including
+  // the pinned doors: answering "#1, ready" for those is precisely the bug fixed here.
+  const [ready, setReady] = useState<boolean>(() => /^\/(menu|item)(\/|$)/.test(pathname || ""));
   useEffect(() => {
     let alive = true;
-    const m = (pathname || "").match(/^\/r\/([^/]+)/);
-    const s = m ? decodeURIComponent(m[1]) : null;
     // Reset name so a stale name from the previous restaurant can't flash during
     // the resolve window (the audit's "widget briefly on old tenant" note).
     setName(null);
-    if (!s) { setId(DEFAULT_RESTAURANT_ID); setReady(true); return; }
+    // ONE rule, shared with the tenant-scoped storage the same widgets read from:
+    //   /r/<slug>/…      → that slug (and the tab is pinned to it)
+    //   /menu, /item/…   → restaurant #1, by definition
+    //   anything else    → the tenant this TAB was pinned to (the printed-QR door), else #1
+    // Read inside the effect, never during render: it touches sessionStorage, which does not
+    // exist on the server.
+    const s = tenantSlug();
+    setSlug(s);
+    if (s === DEFAULT_RESTAURANT_SLUG) { setId(DEFAULT_RESTAURANT_ID); setReady(true); return; }
     setReady(false);
     getRestaurantBySlug(s)
       // `ready` flips true even when the lookup FAILS: the answer is then "it's #1", and a

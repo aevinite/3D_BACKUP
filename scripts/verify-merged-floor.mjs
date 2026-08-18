@@ -66,7 +66,7 @@ p.on("pageerror", (e) => errs.push(String(e).slice(0, 120)));
 await p.goto(B + "/manager", { waitUntil: "networkidle", timeout: 120000 });
 await p.waitForTimeout(4500);
 const fr = p.frameLocator("iframe").first();
-try { await fr.locator('[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
+try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6500);
 // tiles: all four purple and naming the others; the three separate ones untouched
 for (const t of PARTY) {
@@ -102,8 +102,18 @@ const pay = fr.locator("#sxPayAll").first();
 check("mark-paid offered", (await pay.count()) > 0);
 await pay.click({ force: true }); await p.waitForTimeout(2500);
 const cash = fr.locator('button:has-text("Cash")').first();
-if (await cash.count()) { await cash.click({ force: true }); await p.waitForTimeout(10000); }
-st = await snap();
+if (await cash.count()) { await cash.click({ force: true }); }
+// WAIT FOR THE MONEY, DON'T GUESS AT IT (T5 sweep, 2026-08-17). This was a flat 10-second sleep,
+// and a party's bill is settled one order at a time — four requests, plus the invoice afterwards.
+// On a dev database answering in ~450ms, or one that hands back a 503 and makes the panel's queue
+// retry (which is the panel behaving correctly), that is longer than 10s, and the check failed on a
+// run where the payment had simply not landed YET. A guard that flaps teaches people to re-run it
+// until it is green, which is the opposite of what it is for. Same assertion, polled: up to 30s.
+for (let i = 0; i < 30; i++) {
+  st = await snap();
+  if (PARTY.every((t) => (st.by[t] || "").endsWith("/paid"))) break;
+  await p.waitForTimeout(1000);
+}
 // A TABLE IS NEVER ENDED BY THE APP (mig 254, owner 2026-08-02: "all the serve has been done
 // and all the mark-as-paid has been done … the table restarts. I don't want that"). These three
 // checks were written the same day and still asserted the OLD auto-close behaviour — that
@@ -121,7 +131,7 @@ check("mark paid → the 3 separate tables STILL open and unpaid", SOLO.every((t
 // a separate table's own flow must still work end to end
 await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(5000);
 const fr2 = p.frameLocator("iframe").first();
-try { await fr2.locator('[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
+try { await fr2.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6000);
 await fr2.locator('.ftile[data-floor-table="21"]').click({ force: true }); await p.waitForTimeout(4500);
 const a2 = fr2.locator("[data-accept-all]").first();

@@ -342,10 +342,48 @@ async function readBody(req: NextRequest): Promise<any> { try { return await req
 type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET /api/tablet/state — everything the tablet floor needs in one call ─────
+// ── A BLOCKED DEVICE GOES DARK, IT DOES NOT JUST LOSE ITS BUTTONS (owner, 2026-08-18) ────────────
+//
+// Every WRITE on this route has checked `deviceBlocked(dev, rid)` since blocking shipped. The READ
+// never did — so a screen the staff had deliberately blocked went on showing the live board in full
+// and could only be stopped by pulling it off the wifi. The owner's word when this was put to him:
+// **"do 9th goees completely black"**. Blocked now means blocked: the board refuses, and the panel
+// paints a full-screen wall over everything (public/panels/<panel>/app.js → the `device_blocked`
+// branch), so the device shows nothing at all.
+//
+// `reason: "device_blocked"` is a CODE, not prose — the panel branches on codes, never on wording
+// (the house rule), so this can be re-worded any time without breaking the wall.
+//
+// MEMOISED FOR 30 SECONDS, and that is the whole cost of this feature. `deviceBlocked` is one small
+// indexed read, but a board read is the most frequent thing this panel does — a realtime burst can
+// fire several a second — and the egress rules are explicit that a hot path does not get a new
+// per-request query. 30s is the same TTL the panel-entitlement cache uses (lib/userAuth.ts), and it
+// means a block takes hold within half a minute, which is what "we blocked that screen" means in a
+// real kitchen. A WRITE is never memoised: it still asks every time, exactly as before.
+const blockMemo = new Map<string, { at: number; blocked: boolean }>();
+const BLOCK_TTL_MS = 30_000;
+async function blockedForRead(dev: string | null, rid: string): Promise<boolean> {
+  if (!dev) return false;
+  const key = `${rid}:${dev}`;
+  const hit = blockMemo.get(key);
+  if (hit && Date.now() - hit.at < BLOCK_TTL_MS) return hit.blocked;
+  const blocked = await deviceBlocked(dev, rid);
+  blockMemo.set(key, { at: Date.now(), blocked });
+  // Bounded: a busy restaurant has a handful of devices, but nothing should grow without a ceiling.
+  if (blockMemo.size > 500) for (const [k, v] of blockMemo) { if (Date.now() - v.at > BLOCK_TTL_MS) blockMemo.delete(k); }
+  return blocked;
+}
+const BLOCKED_READ = () => NextResponse.json(
+  { error: "This device has been blocked by staff.", reason: "device_blocked", blocked: true },
+  { status: 403 },
+);
+
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  // Blocked device → the whole screen goes dark (see the note by blockedForRead above).
+  if (await blockedForRead(deviceIdFrom(req), rid)) return BLOCKED_READ();
   // WHOSE tablet is the admin looking at? ?as=<staff id> (owner, 2026-08-02 — the
   // profile's "Visit their panel"). Null for everyone else and for an unpinned admin
   // tab, and it costs NOTHING when the param is absent (no DB read). It shapes what is
@@ -1353,6 +1391,45 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       await log("table_merge", { table_number: to, detail: `T${(mg as any).from} → T${to} (one bill)`, device_id: dev });
       return ok(mg);
+    }
+
+    // tables/:t/unmerge — separate THIS table from the party it was merged into (mig 249).
+    //
+    // WHY IT IS HERE (owner, 2026-08-17). Merging was a ONE-WAY DOOR on the waiter tablet: this
+    // panel could join two tables, and its own KOT menu then told the waiter "Change table —
+    // unmerge first", an instruction the device gave them no way to follow. The only unmerge lived
+    // on /api/editor (the manager panel), so undoing a mis-tapped merge meant walking away from the
+    // table. Splitting and joining are the same feature and must answer to the same switch, so this
+    // carries the gate its merge twin carries, line for line: the module rung
+    // (tableOpsTabletAllowed) AND the tri-state (tabletPerm off/pin/on), with the admin act-as
+    // bypass. It is the SAME RPC the manager calls, so the two panels can never split a party two
+    // different ways.
+    //
+    // Reached from the CHILD table (owner: "you can only unmerge by clicking on the seven number
+    // table"); opening the table that HOLDS the bill offers one button per child, each posting that
+    // child's number here. The RPC returns what actually moved, so the panel's confirm can have told
+    // the truth before anyone tapped.
+    if (a === "tables" && c === "unmerge") {
+      const tu = String(b || "").trim();
+      if (!/^\d+$/.test(tu)) return err("valid table required");
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      const gu = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gu.allow) return gu.resp;
+      // The same actor rule as merge: a PIN-approved split names the MANAGER who approved it.
+      const pinU = pinAuth as { actor: string; actor_id: string | null } | null;
+      const unmergeActor = pinU?.actor || actor?.name || actor?.username || "waiter";
+      const { data: um, error: umErr } = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: tu, p_actor: unmergeActor });
+      if (umErr) throw new Error(umErr.message);
+      const ur = (um || {}) as { ok?: boolean; reason?: string; parent?: string; moved?: number; kots?: string | null };
+      if (ur.ok === false) {
+        // Same three answers the manager gives, in the same words — one bill, one explanation.
+        return err(ur.reason === "invoiced"
+          ? "This bill has already been invoiced. A manager must reopen (void) the invoice first, then the tables can be split."
+          : ur.reason === "not_merged" ? "That table isn't merged with another one."
+          : "Couldn't split those tables.", 409);
+      }
+      invalidateFloor(rid);
+      await log("table_unmerge", { table_number: tu, detail: `split from T${ur.parent ?? "?"} · ${ur.moved ?? 0} ${(ur.moved ?? 0) === 1 ? "order" : "orders"} returned${ur.kots ? ` (KOT ${ur.kots})` : ""}`, device_id: dev });
+      return ok({ ok: true, ...ur });
     }
 
     // order-items/:id/move — move ONE dish line to another table's bill (KOT ▾ menu).

@@ -217,6 +217,11 @@ const ACTIONS: ActionDef[] = [
   // reopen row and the percentage cap INSIDE the discount row — his words: "there will be a
   // drop down for reopen bill how much minute is set… you could able to go inside and change".
   // ── "Delete a bill" IS GONE FROM THE LADDER (owner, 2026-08-16) ────────────────────────────
+  // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. Do not re-add a "Delete a bill"
+  // row here, and do not offer one on the Per-person tab or as a manager default. The note below
+  // is his reasoning in his own words; this line is the marker `npm run verify:rejected` looks for,
+  // added 2026-08-17 when R27 was found filed under the doc's "Reversed" heading — which reads as
+  // "he changed his mind" and is the opposite of what he decided.
   // "I don't want to give permission to the restaurant owner to delete the bill because he will
   // fake the bill and delete the bill … what can we do that the restaurant doesn't cheat, and at
   // the same time we can keep the track?" So there is no row here to hand anyone: CANCEL is the

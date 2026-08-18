@@ -40,6 +40,24 @@ import { auditForReader, forReader } from "@/lib/auditActor";
 import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
+// The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
+// claim from the same rows, and one implementation is what stops them drifting into two ideas of
+// "claimed" — which would be a ticket printed twice.
+import { pendingKotJobs, claimKotJobs, finishKotJob } from "@/lib/printQueue";
+// How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
+// gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
+const BACKUP_PRINTER_MS = 30000;
+// May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
+// Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
+// mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
+async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string }> {
+  const st = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target")
+    .eq("restaurant_id", rid).maybeSingle()).data as
+    { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+  const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
+  const target = String(st?.kot_print_target || "kitchen");
+  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target };
+}
 import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
@@ -344,6 +362,15 @@ async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action
 // Those stored values are LEFT IN THE DATABASE untouched — nothing reads them now, and if the row
 // is ever handed back it should be rebuilt deliberately rather than resurrected. The matching rows
 // went from lib/accessTree.ts and lib/accessModel.ts in the same commit.
+// REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. This function must keep answering
+// true for the Aevidine admin console ONLY. Do not widen it to the restaurant owner or a manager,
+// and do not re-introduce a grantable "Delete a bill" permission to feed it: *"I don't want to give
+// permission to the restaurant owner to delete the bill because he will fake the bill and delete the
+// bill … what can we do that the restaurant doesn't cheat, and at the same time we can keep the
+// track?"* Cancel is the only route out of a bill for anyone at the restaurant — a ₹0 sale that
+// stays visible with its reason, its person and its time. See docs/COMPLIANCE-GUARDRAILS.md §3.
+// (Marker added 2026-08-17: the rule was recorded in the doc but had no comment in the code, so the
+// guard was not enforcing it — and R27 was filed under the doc's "Reversed" heading by mistake.)
 async function canDeleteBill(g: { user: StaffUser | null }, _rid: string): Promise<boolean> {
   return !g.user; // the Aevidine admin console only; owner and manager alike get cancel, not delete
 }
@@ -1218,11 +1245,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
-        const [sessQ, memQ] = await Promise.all([
-          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone").in("id", sids),
+        // `bill_printed_at` rides along (mig 333) so the panel knows a bill has ALREADY been on
+        // paper and can brand the next copy "Reprint · Duplicate". It has to come from the row,
+        // not from the device that printed: the case that matters is the manager printing at the
+        // till and a WAITER reprinting from the tablet a minute later.
+        const [sessQ, memQ, chainQ] = await Promise.all([
+          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
+          // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
+          // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
+          // SERVER read of just these sessions, never something a client could ask for. Only the
+          // sequence and the hash leave here; the money on that row stays where it is.
+          sb.from("bill_chain").select("session_id,seq,chain_hash").eq("restaurant_id", rid).in("session_id", sids).limit(500),
         ]);
         const map: Record<string, any> = Object.fromEntries(((must(sessQ) || []) as any[]).map((s) => [s.id, s]));
+        // A session has at most one chain row; if a re-issue ever produced two, the LATEST is the
+        // one this bill was signed as, so it is the one that belongs on the paper.
+        const chainMap: Record<string, { seq: number; chain_hash: string }> = {};
+        for (const c of ((chainQ.data || []) as any[])) {
+          if (!c.session_id) continue;
+          const prev = chainMap[c.session_id];
+          if (!prev || Number(c.seq) > Number(prev.seq)) chainMap[c.session_id] = { seq: c.seq, chain_hash: c.chain_hash };
+        }
         const nameMap: Record<string, string> = {};
         for (const m of (must(memQ) || []) as any[]) { if (m.name && !nameMap[m.session_id]) nameMap[m.session_id] = m.name; }
         for (const o of orders as any[]) {
@@ -1232,6 +1276,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
+            // Has this bill already been on paper? (mig 333) — the next copy says "Reprint".
+            o.bill_printed_at = s.bill_printed_at;
+            // The verification line the bill prints (mig 332). Named the way billdoc's billData
+            // reads them off the session, so no panel has to reshape anything.
+            const ch = chainMap[o.session_id];
+            if (ch) { o.chain_seq = ch.seq; o.chain_hash = ch.chain_hash; }
           }
           if (nameMap[o.session_id]) o.customer_name = nameMap[o.session_id];
         }
@@ -1819,6 +1869,29 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         merges,
         ...(printer ? { printer } : {}),
       });
+    }
+
+    // ── print-jobs/pending — THIS SCREEN IS A PRINTER TOO (owner, 2026-08-17) ───────────────────
+    // "Add auto-print in the manager panel — when you turn that on, the ticket prints there instead
+    // of the kitchen." The kitchen PC could not be trusted to keep its Chrome tab in front, and the
+    // ticket was lost when it wasn't; since mig 335 every new order queues a ROW, so the honest fix
+    // is to let a SECOND screen claim the same rows. Whichever screen is awake prints; the atomic
+    // claim in lib/printQueue.ts means they can never both print the same ticket.
+    //
+    // Asked for ONLY by a device whose own "print tickets on this screen" switch is on (it is a
+    // per-device choice, kept in that browser — the counter PC prints, the manager's phone must not),
+    // and only while auto-print is switched on for the restaurant at all. `?mode=backup` is the
+    // gentler setting: it asks for jobs at least 30 seconds old, so the KITCHEN printer always gets
+    // first refusal and this screen is the safety net rather than the main path. The age test is
+    // enforced again at the claim, server-side, so a stale tab cannot jump the queue.
+    if (path[0] === "print-jobs" && path[1] === "pending") {
+      const t = await counterPrintTarget(rid);
+      // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
+      // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
+      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target });
+      // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
+      // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target });
     }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
@@ -2893,6 +2966,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (up.error) throw new Error(up.error.message);
       await log("manager", "parcel_collect", { restaurant_id: rid, detail: `₹${owns.total ?? 0} · ${method}`, device_id: dev });
       return ok({ ok: true, id: b, paid: true });
+    }
+
+    /* sessions/:id/bill-printed — record that this TABLE's bill went to the printer (mig 333).
+       The exact shape of platform/:id/printed below, one table across, and for the same stated
+       reason: the fact has to live on the BILL, not on the device that printed it, because the
+       manager prints at the till and a waiter may reprint from the tablet a minute later — that
+       second device has no way to know, and would hand out an unbranded duplicate.
+       Stamped ONCE and never moved: the first print stays the first print, so every later copy is
+       a reprint and the document brands it. Deliberately not reversible from here — this is a
+       record that paper was produced. Answering ok() when it is already stamped means a panel can
+       call it after every print without a guard of its own, and a retry is free. */
+    if (a === "sessions" && c === "bill-printed") {
+      const owns = must(await sb.from("sessions").select("id,bill_printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { bill_printed_at?: string | null } | null;
+      if (!owns) return err("That bill isn't for this restaurant.", 404);
+      if (owns.bill_printed_at) return ok({ ok: true, id: b, bill_printed_at: owns.bill_printed_at, reprint: true });
+      const at = new Date().toISOString();
+      const up = await sb.from("sessions").update({ bill_printed_at: at }).eq("id", b).eq("restaurant_id", rid);
+      if (up.error) throw new Error(up.error.message);
+      return ok({ ok: true, id: b, bill_printed_at: at, reprint: false });
     }
 
     // platform/:id/printed — record that this order's customer bill went to the printer
@@ -4253,6 +4345,46 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }));
       await log("editor", "kot_reprint_sent", { order_id: orderId, detail: `KOT #${o.kot_no ?? "—"}`, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
+    }
+
+    // ── print-jobs/claim + /done — the manager screen as a printer (owner, 2026-08-17) ──────────
+    // The same two steps the kitchen screen has always used, on the same shared implementation
+    // (lib/printQueue.ts): win the row with ONE filtered UPDATE, print, then say what happened. A
+    // claim is a PLAIN fetch on the panel side, never the offline outbox — a claim replayed hours
+    // later would print a stale ticket behind everyone's back — while the done report does ride the
+    // outbox, because it is idempotent and losing it would let the 2-minute reclaim reprint.
+    if (a === "print-jobs" && b === "claim") {
+      const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).map(String).slice(0, 20) : [];
+      if (!ids.length) return ok({ won: [] });
+      // WHO MAY PRINT IS RE-ASKED HERE, not taken from the caller. A counter screen left open from
+      // before the admin changed the setting would otherwise keep claiming tickets the kitchen is
+      // now supposed to print — the classic "the screen said yes, the server says no" fault.
+      const t = await counterPrintTarget(rid);
+      if (!t.mayPrint) return ok({ won: [], off: true });
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }) });
+    }
+
+    if (a === "print-jobs" && c === "done") {
+      const okPrint = !!(body && body.ok === true);
+      const r = await finishKotJob(rid, String(b), okPrint, body?.error ? String(body.error) : undefined);
+      if (!r.found) return err("That print job is gone.", 404);
+      // Same two diary lines the kitchen writes, so the Activity log reads the same whichever screen
+      // the paper came out of — it names the panel, and that is the only difference.
+      if (okPrint) {
+        await log("editor", "kot_printed", {
+          order_id: r.orderId, table_number: r.tableNumber, device_id: dev, restaurant_id: rid,
+          detail: `${r.reprint ? "reprinted" : "printed"} KOT${r.kotNo != null ? ` #${r.kotNo}` : ""} on this screen`,
+        });
+        return ok({ ok: true });
+      }
+      await log("editor", "kot_print_failed", {
+        order_id: r.orderId, device_id: dev, restaurant_id: rid,
+        level: r.parked ? "warn" : "info",
+        detail: r.parked
+          ? `gave up after ${r.attempts} tries — ${String(body?.error || "print failed").slice(0, 120)}`
+          : `try ${r.attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
+      });
+      return ok({ ok: true, attempts: r.attempts });
     }
 
     // print-jobs/:id/dismiss — the manager handled a stuck/failed reprint another way

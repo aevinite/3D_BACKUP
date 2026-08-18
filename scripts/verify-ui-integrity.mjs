@@ -516,6 +516,14 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
     "public/panels/editor/index.html",      // the manager panel
     "public/panels/kitchen/index.html",     // the kitchen screen
     "public/panels/tablet/index.html",      // the waiter panel
+    // The printer setup guide (owner, 2026-08-18: "where is this setup in the app… make it
+    // downloadable… or you can make HTML, it will open a whole page"). It MUST be served: the admin
+    // console and the kitchen panel's 🖨❗ sheet both link to it, and a page the app serves is always
+    // the version that matches the running code — which a file emailed to a restaurant never is.
+    // Public-by-URL is fine and was considered: it holds a Chrome command line, printer paper
+    // settings and the app's own panel paths (all login-gated), and no secret, no data, no key.
+    // The two starter files beside it (public/print-station/*) are the same call for the same reason.
+    "public/print-setup.html",              // the kitchen-printer setup guide (linked from admin + kitchen)
   ]);
   const found = [];
   const walk = (dir) => {
@@ -569,6 +577,34 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
         "\n         Fix: git add --renormalize -- <files>   (index only; the bytes on disk are untouched)" +
         "\n         If a file is DELIBERATELY CRLF, give it `-text` in .gitattributes instead.",
     );
+  }
+}
+
+// ── 15. THE RAIL'S UNREAD COUNT MAY NOT BE PLACED WITH `transform` ────────────────────────────
+// WHY (owner, 2026-08-18: "when there is notification it hides emoji and show 1"). The collapsed
+// left rail put its red count on the icon with `transform: translate(12px,-12px)`. That can never
+// hold: `.tab-badge` also runs the `badgePulse` animation, whose keyframes set `transform: scale(…)`
+// — and an animation beats a normal declaration, so the translate was discarded on the first frame
+// and the pill fell back onto its static spot, directly over the emoji. The section then showed a
+// red "1" and NO icon, which is exactly the thing the icons are there for.
+// So the count is anchored with top/right, which `transform` cannot fight, and the pulse keeps
+// `transform` to itself. Re-introducing a transform here silently brings the fault back, so it is
+// a static check rather than a comment nobody reads.
+{
+  const f = "public/panels/editor/style.css";
+  const css = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
+  if (css) {
+    const rule = css.match(/body\.nav-rail:not\(\.nav-rail-open\)\s+\.tab-badge\s*\{[^}]*\}/);
+    if (!rule) bad("the collapsed rail has no rule placing .tab-badge — the unread count would sit wherever the row happens to put it", `expected a \`body.nav-rail:not(.nav-rail-open) .tab-badge\` block in ${f}`);
+    else if (/transform\s*:/.test(rule[0])) bad("the collapsed rail's unread count is placed with `transform` — badgePulse's own transform overrides it and the pill lands on top of the emoji", `${f}\n         Anchor it with top/right instead (that is what makes the icon stay visible).`);
+    else if (!/top\s*:/.test(rule[0]) || !/right\s*:/.test(rule[0])) bad("the collapsed rail's unread count is not anchored to the icon's top-right corner", `${f}\n         The rule needs both \`top:\` and \`right:\` or the count drifts back over the emoji.`);
+    else ok("the rail's unread count is anchored top-right of the icon, not placed with transform");
+    // The hover peek is the other half of the same screen: names appear without a click, and the
+    // page underneath must not move — so .layout keeps the COLLAPSED width. If someone widens the
+    // rail on hover by changing --rail-w instead, every hover reflows the floor.
+    if (!/\.tabs:hover\s*\{[^}]*width:\s*var\(--rail-w-open\)/.test(css)) bad("hovering the collapsed rail no longer opens it to full width", `${f}\n         Owner, 2026-08-18: hovering the side must show the section names.`);
+    else if (!/@media \(hover: hover\) and \(pointer: fine\)/.test(css)) bad("the rail's hover peek is not fenced to real mice", `${f}\n         On a touch screen :hover latches after a tap and the tablet keeps a half-open rail.`);
+    else ok("hovering the collapsed rail opens it, and only on a device with a real mouse");
   }
 }
 

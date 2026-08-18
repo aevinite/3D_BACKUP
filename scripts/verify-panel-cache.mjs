@@ -32,8 +32,15 @@ import { fileURLToPath } from "node:url";
 // checked with --repo, the flag was dropped, THIS repo was checked instead, it passed, and the
 // other checkout still had a panel pointing at a stale version. A guard that reports on a tree
 // you did not ask about is a guard that lies, so an unknown flag now stops the run.
+// --hook: Claude Code PostToolUse mode (owner, 2026-08-17: *"you will run that automatically set
+// it like that"*). It reads the tool-call JSON on stdin, does nothing at all unless a file under
+// public/panels/ was just edited, and then RE-STAMPS the versions itself instead of printing a
+// command for somebody to remember. Re-stamping is the whole of the fix and it cannot be wrong —
+// the version IS the file's content hash, so writing it is copying a number, not a judgement.
+// It derives the checkout root from the edited file's path, so it is correct inside a worktree.
 const argv = process.argv.slice(2);
-const KNOWN = new Set(["--fix", "--repo"]);
+const HOOK = argv.includes("--hook");
+const KNOWN = new Set(["--fix", "--repo", "--hook"]);
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === "--repo") { i++; continue; }          // its value
@@ -44,12 +51,22 @@ for (let i = 0; i < argv.length; i++) {
 }
 const repoArg = argv.includes("--repo") ? argv[argv.indexOf("--repo") + 1] : null;
 if (argv.includes("--repo") && !repoArg) { console.error("verify-panel-cache: --repo needs a path."); process.exit(2); }
-const ROOT = repoArg ? resolve(repoArg) : join(dirname(fileURLToPath(import.meta.url)), "..");
+let ROOT = repoArg ? resolve(repoArg) : join(dirname(fileURLToPath(import.meta.url)), "..");
+if (HOOK) {
+  let raw = "";
+  try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }
+  let payload = {};
+  try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
+  const file = String(payload?.tool_input?.file_path || payload?.tool_response?.filePath || "").replace(/\\/g, "/");
+  if (!/\/public\/panels\//.test(file)) process.exit(0);          // not our business
+  const cut = file.indexOf("/public/panels/");
+  if (cut > 0) ROOT = file.slice(0, cut);
+}
 if (!existsSync(join(ROOT, "public", "panels"))) {
   console.error(`verify-panel-cache: no public/panels under ${ROOT}`);
   process.exit(2);
 }
-const FIX = argv.includes("--fix");
+const FIX = argv.includes("--fix") || HOOK;   // --hook always fixes; see the note above
 const PANELS = join(ROOT, "public", "panels");
 
 const hashOf = (file) => createHash("sha1").update(readFileSync(file)).digest("hex").slice(0, 8);
@@ -68,7 +85,12 @@ for (const page of pages) {
 
   // src="…" / href="…" pointing at a local .js or .css, with or without an existing ?v=
   html = html.replace(/((?:src|href)=")([^"]+?\.(?:js|css))(\?v=[^"]*)?(")/g, (m, pre, path, ver, post) => {
-    if (/^https?:/i.test(path) || path.includes("/vendor/")) return m;      // third-party: leave alone
+    // OUR OWN VENDORED FILES ARE VERSIONED LIKE EVERYTHING ELSE (owner, 2026-08-18). This used to
+    // skip anything under /vendor/, so the charts library's `?v=4.4.7` was a label somebody TYPED and
+    // nothing could tell you whether it still matched the file. A remote URL is genuinely not ours to
+    // stamp; a file we generate and commit is, and its content hash is the only version that cannot
+    // quietly become a lie. The semantic version now lives in package.json + the generated banner.
+    if (/^https?:/i.test(path)) return m;                                    // remote: not ours to stamp
     // resolve the URL to a file on disk: "/panels/x/y.js" is absolute, "app.js" is relative
     const onDisk = path.startsWith("/")
       ? join(ROOT, "public", path.replace(/^\//, ""))
@@ -86,7 +108,15 @@ for (const page of pages) {
 }
 
 if (!stale) {
+  if (HOOK) process.exit(0);                       // nothing to say when nothing moved
   console.log(`✓ all ${checked} panel assets carry their own content hash — no browser can be left on a stale file`);
+  process.exit(0);
+}
+if (HOOK) {
+  // Say what was re-stamped so the editing session sees it, and exit 0 — this is a repair, not a
+  // complaint, and it must never interrupt the edit that triggered it.
+  console.log(`panel cache: re-stamped ${stale} version string(s) so no staff device serves a stale file:`);
+  for (const p of problems) console.log(`  ${p}`);
   process.exit(0);
 }
 if (FIX) {

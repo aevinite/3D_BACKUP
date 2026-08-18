@@ -29,8 +29,49 @@ const { data: fh } = await sb.from("restaurants").select("id").eq("slug", "frenc
 const rid = fh.id;
 const { data: dish } = await sb.from("menu_items").select("id").eq("restaurant_id", rid).limit(1).maybeSingle();
 const { data: st } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+// ── WHICH TABLES THIS RUN MAY USE ────────────────────────────────────────────────────────────────
+//
+// "Has an open session" is NOT the whole answer, and assuming it was made this file fail for every
+// terminal on a shared database (T10 sweep, 2026-08-18).
+//
+// A MERGED CHILD has no session of its own — that is the whole point of a merge: its orders sit on
+// the PARENT's session (mig 249/250). So a child table looked free here, this test placed an order
+// on it, and the order silently joined the parent's party. The merge phase below then merged a
+// session that was not the one it thought, and reported the product as broken:
+//   "merging 10 into 12 actually happened — {ok:true, from:11, to:10}"
+//   "…naming BOTH tables — named: 11,12,13,14"   ← neither of the tables this run asked for
+//
+// That is not a fault in merging. It is this test walking into another run's leftovers — and on a
+// stack where several sweeps share one dev database, leftovers are the normal state, not the
+// exception. A test that only passes on an empty database is a test that reports noise.
+//
+// So both ENDS of every live merge are treated as taken, and the whole thing is one extra tiny
+// indexed read. Same for the parent, because seating a new party on a table that is holding
+// somebody else's joint bill is exactly as wrong.
 const busy = new Set(((await sb.from("sessions").select("table_number").eq("restaurant_id", rid).eq("status", "open")).data || []).map(s => s.table_number));
-const freeTable = (n) => { for (let t = 5; t <= st.table_count; t++) { const s = String(t); if (!busy.has(s)) { busy.add(s); if (--n < 0) return s; } } return null; };
+for (const m of ((await sb.from("table_merges").select("parent_table,child_table").eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || [])) {
+  busy.add(String(m.parent_table)); busy.add(String(m.child_table));
+}
+// Every table this run seizes. The sweep-up at the bottom closes whatever is open on them —
+// including a session this run did not create DIRECTLY: unmerging gives the child table a BRAND-NEW
+// party of its own (mig 299), and `cleanup` only ever held the sessions `mk()` made. So every run
+// leaked exactly one open session, and after enough runs the restaurant had all 30 tables "occupied"
+// and this file failed with `table null` — which is how it went red again the day it went green.
+const used = new Set();
+const freeTable = (n) => {
+  for (let t = 5; t <= st.table_count; t++) {
+    const s = String(t);
+    if (!busy.has(s)) { busy.add(s); if (--n < 0) { used.add(s); return s; } }
+  }
+  // NEVER return null quietly. A null table turns every assertion below into nonsense
+  // ("both simultaneous orders landed at table null — 0/2") and blames the product for a floor
+  // that is simply full. Say what is actually wrong, and say what to do about it.
+  throw new Error(
+    `verify-write-paths: no free table on this restaurant — all ${st.table_count} are occupied or caught in a live merge.\n` +
+    `  This is the DEV database's state, not a product fault. Close the stale parties (an OPEN session\n` +
+    `  with no live orders on it is a state no screen can show — owner, 2026-08-01) and run again.`
+  );
+};
 const cleanup = [];
 
 // ── PHASE 3699 — two simultaneous FIRST orders at one table must yield ONE bill number ─────────
@@ -84,9 +125,28 @@ const cleanup = [];
   const named = new Set(crumbs.filter(c => c.table_number).map(c => c.table_number));
   chk("3664 …naming BOTH tables, so both tiles update", named.has(parent) && named.has(child), `named: ${[...named].sort().join(",")}`);
   const b2 = (await sb.from("realtime_events").select("id").order("id", { ascending: false }).limit(1)).data[0].id;
-  const u = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: child, p_actor: "writetest" });
+  // UNMERGE THE TABLE THE MERGE ACTUALLY MADE THE CHILD — which is NOT necessarily the one we
+  // asked it to merge into. lfh_staff_merge_tables keeps the LOWER table number as the parent
+  // (the owner's rule, mig 249) and returns `child_table` saying which one it dropped. Passing our
+  // own `child` variable therefore found no live merge roughly half the time, the RPC answered
+  // {ok:false, reason:'not_merged'}, nothing was emitted, and this line reported "0 crumb(s)" — as
+  // if the PRODUCT had stopped announcing an unmerge. It has not: migration 299 writes the same
+  // four rows here that every other merge path writes, and the T10 sweep (2026-08-17) traced them.
+  //
+  // This is EXACTLY the mistake the comment at the top of this block already describes for the
+  // merge half — "'no breadcrumb' was my test not merging, not the product failing" — fixed there
+  // and left standing here. So the RPC's own answer is asserted first, the same way, and only then
+  // the breadcrumbs. A test that blames the product for its own wrong argument is worse than no
+  // test: this one has been red for every terminal that ran it.
+  const realChild = (m.data && m.data.child_table) || child;
+  const u = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: realChild, p_actor: "writetest" });
+  chk("3664 separating them actually happened", !u.error && u.data && u.data.ok === true,
+      u.error ? u.error.message.slice(0, 60) : `child ${realChild} → ${JSON.stringify(u.data).slice(0, 70)}`);
   const uc = (await sb.from("realtime_events").select("kind,table_number").gt("id", b2).limit(30)).data || [];
-  chk("3664 SEPARATING them announces itself too", !u.error && uc.length > 0, `${uc.length} crumb(s)`);
+  chk("3664 SEPARATING them announces itself too", uc.length > 0, `${uc.length} crumb(s)`);
+  const uNamed = new Set(uc.filter((c) => c.table_number).map((c) => c.table_number));
+  chk("3664 …naming BOTH tables again, so both tiles go back to themselves",
+      uNamed.has(realChild) && uNamed.size >= 2, `named: ${[...uNamed].sort().join(",")}`);
 }
 
 // ── PHASE 3786 — the counter uses now(), not the row's created_at. What does a backdated order get?
@@ -126,15 +186,49 @@ const cleanup = [];
 // So the sweep-up now removes the orders too, and it does it the way the memory says to: **by the
 // exact ids this run created**, never "whatever is on those tables" — another session's real order
 // could be sitting on the same table number by the time this runs.
-const sessionIds = [...new Set(cleanup)];
+// The sessions this run made — PLUS anything now open on a table it used. The second half is what
+// catches the party the unmerge creates for the child table, which nothing here ever created and so
+// nothing here ever closed. Scoped to the exact table numbers this run seized (see `used`), never
+// "whatever is open on the floor" — another run's party must survive this.
+const strayIds = used.size
+  ? (((await sb.from("sessions").select("id").eq("restaurant_id", rid).eq("status", "open").in("table_number", [...used])).data) || []).map((r) => r.id)
+  : [];
+const sessionIds = [...new Set([...cleanup, ...strayIds])];
 for (const s of sessionIds) await sb.from("sessions").update({ status: "closed" }).eq("id", s);
 const left = (await sb.from("sessions").select("id").in("id", sessionIds).eq("status", "open")).data || [];
 chk("cleanup: every table this test opened is closed again", left.length === 0, `${left.length} left open`);
 // The orders belonging to THOSE sessions — scoped to the restaurant as well, so a stray id can
 // never reach another tenant's rows.
 if (sessionIds.length) {
-  await sb.from("orders").delete().eq("restaurant_id", rid).in("session_id", sessionIds);
-  const stillThere = (await sb.from("orders").select("id").eq("restaurant_id", rid).in("session_id", sessionIds)).data || [];
+  // ── CANCEL THEM. DO NOT DELETE THEM. (T10 sweep, 2026-08-17) ─────────────────────────────────
+  //
+  // This used to be a hard DELETE, and a hard delete of these rows CANNOT WORK — by design, and
+  // for a reason this product sells. Migration 190 (`trg_block_issued_delete`) refuses to
+  // hard-delete an order that is served, paid, or sitting on a session that has taken a bill
+  // number: "a sale can be cancelled, a sale can never disappear"
+  // (docs/COMPLIANCE-GUARDRAILS.md §3.0). This test walks its orders all the way to served, so the
+  // delete raised a check_violation, the result's `.error` was never looked at, and the line below
+  // then reported the rows as "left on the kitchen board" — a red gate, on every run, for every
+  // terminal, blaming the product for obeying its own most important rule.
+  //
+  // So the sweep-up now does what the PRODUCT does when a party ends with work still on it
+  // (lib/sessionClose.ts + migration 232): it CANCELS the ticket and archives it. A cancelled,
+  // archived order is off the live board — which is the only thing this check ever cared about —
+  // and it stays in the record with its own ✕, exactly as a real walk-out does. Still by the exact
+  // ids this run created, never "whatever is on those tables".
+  //
+  // And the write is CHECKED. A cleanup that cannot report its own failure is how this sat red
+  // long enough for four sweeps to walk past it.
+  const stamp = new Date().toISOString();
+  const swept = await sb.from("orders")
+    .update({ status: "cancelled", cancelled_at: stamp, archived: true, archived_at: stamp })
+    .eq("restaurant_id", rid).in("session_id", sessionIds).select("id");
+  chk("cleanup: the sweep-up write itself succeeded", !swept.error,
+      swept.error ? swept.error.message.slice(0, 80) : `${(swept.data || []).length} ticket(s) taken off the board`);
+  // What "left on the board" MEANS: the kitchen reads received/preparing, not-archived. Anything
+  // else this run created is a record, not a ticket a cook could act on.
+  const stillThere = (await sb.from("orders").select("id").eq("restaurant_id", rid)
+    .in("session_id", sessionIds).in("status", ["received", "preparing"]).eq("archived", false)).data || [];
   chk("cleanup: no ticket this test placed is left on the kitchen board", stillThere.length === 0,
       `${stillThere.length} order(s) left — a cook would read this run's notes as a real dish`);
 }

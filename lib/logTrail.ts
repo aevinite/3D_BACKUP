@@ -87,6 +87,11 @@ const PLACE: Record<string, Place> = {
   order_cancel: { area: "Orders & bills", screen: "Kitchen tickets" },
   order_uncancel: { area: "Orders & bills", screen: "Kitchen tickets" },
   kot_reprint_sent: { area: "Orders & bills", screen: "Kitchen tickets" },
+  // A ticket actually reaching paper, and failing to (mig 269 recorded them; mig 335 made them
+  // routine — one per KOT). Without a place here every one of them read "System › Other", which is
+  // the opposite of the owner's rule that the Activity log must read as English.
+  kot_printed: { area: "Orders & bills", screen: "Kitchen tickets" },
+  kot_print_failed: { area: "Orders & bills", screen: "Kitchen tickets" },
   order_move: { area: "Orders & bills", screen: "Move an order" },
   order_delete: { area: "Orders & bills", screen: "Billing" },
   orders_delete: { area: "Orders & bills", screen: "Billing" },
@@ -213,6 +218,9 @@ const PLACE: Record<string, Place> = {
   printer_problem_resolved: { area: "Settings & features", screen: "Printing" },
 
   // ── Sign-in & security ──────────────────────────────────────────────────────────────────────
+  // The admin stepping into a restaurant's own panel (act-as). Already red on main before the print
+  // queue branch touched this file — one line, and the log stops filing it under "System › Other".
+  admin_enter_panel: { area: "Sign-in & security", screen: "Sign in" },
   login: { area: "Sign-in & security", screen: "Sign in" },
   logout: { area: "Sign-in & security", screen: "Sign in" },
   login_failed: { area: "Sign-in & security", screen: "Sign in" },

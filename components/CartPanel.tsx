@@ -117,6 +117,7 @@ export default function CartPanel() {
   // cart+table, reused if the guest retries after a failed/lost send (so the server
   // dedups and never double-charges), and regenerated the moment the cart changes.
   const orderKeyRef = useRef<{ sig: string; id: string } | null>(null);
+  const scannedRef = useRef(""); // the remembered table as of the LAST prefill, so we can tell a wipe from a first read
   const declaredHydrated = useRef(false); // skip the first persist so restore can't be clobbered
   const menuLoadedRef = useRef(false); // fetch the full menu (pairings/edit/allergens) only ONCE, on first open
 
@@ -162,10 +163,16 @@ export default function CartPanel() {
       // responding at the ceiling while the menu card's "+" explained itself, so the
       // same limit was spelled out in one place and silent in the other — and the
       // silent one was the bill (guest sweep 2026-08-04). Same wording as FoodCard.
+      // A LIMIT IS NOT A SUCCESS (owner asked, 2026-08-18). Both copies of this message raised the
+      // toast with no `variant`, so ToastHost fell back to "success" and stamped it with a ✓ —
+      // a green tick for something that had just REFUSED to happen. `info` is the honest flavour:
+      // nothing went wrong and there is nothing to fix, the "+" simply has a ceiling and this says
+      // so. Kept byte-identical in FoodCard, because the whole point of these two strings is that
+      // the bill and the dish card explain the same limit the same way.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: "Maximum 99 per dish",
         subtitle: "that's the most we can add to one line",
-        kicker: "your order", duration: 1400,
+        kicker: "your order", variant: "info", duration: 1400,
       } }));
       return;
     }
@@ -252,10 +259,21 @@ export default function CartPanel() {
     } catch {}
     // Pre-fill the table from a scanned QR (?table=N stored in lib/table). Only
     // fills an empty field, so it never clobbers what the guest typed.
+    //
+    // …AND LET GO OF IT WHEN THE GUEST WIPES IT (sweep 6 T3). Two ✕ buttons clear the
+    // device-wide remembered table — the one in the waiter popup and the one in the session
+    // gate's table box — and both announce it. This handler only ever FILLED, so the number the
+    // guest had just deleted was still sitting in the bill's own field, ready to send their food
+    // to the table they were trying to get away from. It is only dropped when this field still
+    // holds exactly what was remembered: a number typed into the bill itself is the guest's own
+    // and is never touched.
     const prefillScanned = () => {
       const scanned = getScannedTable();
+      const previous = scannedRef.current;
+      scannedRef.current = scanned;
       setScannedTableState(scanned);
-      if (scanned) setTableNumber((cur) => cur || scanned);
+      if (scanned) { setTableNumber((cur) => cur || scanned); return; }
+      if (previous) setTableNumber((cur) => (cur === previous ? "" : cur));
     };
     // While you hold a session, lock the table to it — you can only order for the
     // table you're seated at (leave the table to order elsewhere).

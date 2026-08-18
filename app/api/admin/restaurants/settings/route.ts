@@ -43,6 +43,10 @@ const SETTINGS_COLS = [
   "banquet_paper", "banquet_paper_size", "banquet_paper_top", "banquet_paper_bot",
   "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign", "banquet_paper_fill",
   "floor_layout_mode",
+  // WHICH screen may print a kitchen ticket (mig 336): kitchen | counter | both. Admin-owned for the
+  // same reason the KOT entitlement above it is — the manager panel's Kitchen-printing section is
+  // hidden from everyone there by the owner's 2026-07-31 decision.
+  "kot_print_target",
 ] as const;
 const SELECT = SETTINGS_COLS.join(", ");
 
@@ -113,6 +117,13 @@ function sanitize(body: Patch): Patch {
   // Only the two modes the panel can draw (mig 242 has the same CHECK) — a typo must not be able
   // to take a restaurant's floor away.
   if ("floor_layout_mode" in body) out.floor_layout_mode = body.floor_layout_mode === "custom" ? "custom" : "classic";
+  // Only the three the queue understands (mig 336 has the same CHECK constraint). Anything else
+  // falls back to 'kitchen' — the setup every restaurant starts on — rather than to an error, so a
+  // stale panel can never take a restaurant's printing away.
+  if ("kot_print_target" in body) {
+    const t = String(body.kot_print_target || "kitchen");
+    out.kot_print_target = ["kitchen", "counter", "both"].includes(t) ? t : "kitchen";
+  }
   if ("table_seats" in body) {
     const raw = body.table_seats;
     const clean: Record<string, number> = {};

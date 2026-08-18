@@ -234,12 +234,41 @@
     }
 
     // ── Upload one attachment → public URL ──────────────────────────────────────
+    // EVERY WRITE ON THIS SCREEN NOW HAS A CEILING (T9 sweep, 2026-08-17).
+    //
+    // The ticket itself goes through the panel's api() → the shared queue, which has carried a
+    // 15-second deadline since the busy-server work. This upload was the one write left with
+    // none: on a database that is up but answering nothing (measured at 30–90s on 2026-07-31)
+    // the modal sat on "Uploading photo…" with Send greyed out and no end to it, and the issue —
+    // often the very thing being reported — never got raised. 30s rather than 15: a photo on a
+    // restaurant's wifi is a genuinely slower request than a JSON write, and cutting one off
+    // that was about to land would be its own fault.
+    //
+    // Reading AbortSignal.timeout is wrapped because it THROWS on some older phones, and staff
+    // tablets are the oldest devices in the building (the same guard outbox.js carries).
+    var UPLOAD_TIMEOUT_MS = 30000;
+    function uploadDeadline() {
+      try {
+        return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+          ? AbortSignal.timeout(UPLOAD_TIMEOUT_MS) : undefined;
+      } catch (e) { return undefined; }
+    }
     async function uploadMedia(file, kind) {
       var fd = new FormData();
       fd.append("file", file);
       fd.append("kind", kind);
       var url = "/api/issue-media" + (opts.rid ? "?rid=" + encodeURIComponent(opts.rid) : "");
-      var res = await fetch(url, { method: "POST", body: fd });
+      var res;
+      try {
+        res = await fetch(url, { method: "POST", body: fd, signal: uploadDeadline() });
+      } catch (e) {
+        // Name the part that failed, so "Couldn't send" doesn't read as if the whole ticket is
+        // impossible — the ticket can go without the attachment, and the person can choose that.
+        var slow = e && (e.name === "TimeoutError" || e.name === "AbortError");
+        throw new Error(slow
+          ? "the " + (kind === "audio" ? "voice note" : "photo") + " is taking too long to upload. Remove it and send the ticket, or try again when the signal is better."
+          : "the " + (kind === "audio" ? "voice note" : "photo") + " couldn't be uploaded.");
+      }
       var j = await res.json().catch(function () { return {}; });
       if (!res.ok) throw new Error(j.error || "Upload failed");
       return j.url;
@@ -287,10 +316,24 @@
       ov.classList.remove("show");
       setTimeout(function () { ov.remove(); }, 200);
     }
-    function onKey(e) { if (e.key === "Escape") close(); }
+    // A STRAY TAP MUST NOT THROW AWAY A RECORDING (T9 sweep, 2026-08-17).
+    //
+    // The backdrop and Escape both closed the modal outright, and close() stops the recorder and
+    // drops the blob — so two minutes of a manager describing a broken fridge went, on one
+    // mis-tap beside the card, with nothing said. Recording is the one state in here that holds
+    // work the person cannot get back, so while it is running the two ACCIDENTAL exits refuse and
+    // say why. Cancel still closes: that one is a deliberate "throw this away".
+    function guardedClose() {
+      if (rec && rec.state === "recording") {
+        setStatus("Still recording — tap Stop first, or Cancel to throw it away.", "err");
+        return;
+      }
+      close();
+    }
+    function onKey(e) { if (e.key === "Escape") guardedClose(); }
 
     $("lfhirCancel").onclick = function () { close(); };
-    ov.onclick = function (e) { if (e.target === ov) close(); };
+    ov.onclick = function (e) { if (e.target === ov) guardedClose(); };
     document.addEventListener("keydown", onKey);
     window.addEventListener("online", reflectOffline);
     window.addEventListener("offline", reflectOffline);

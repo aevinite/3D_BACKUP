@@ -117,7 +117,61 @@ const ridQ = (path) => {
   if (PANEL_AS) path += "&as=" + encodeURIComponent(PANEL_AS);
   return path;
 };
+// ── A DEVICE THE STAFF HAVE BLOCKED SHOWS NOTHING AT ALL (owner, 2026-08-18) ─────────────────────
+//
+// Blocking a device used to take away its BUTTONS and leave the board on screen: every write on
+// /api/<panel> has checked the block list since it shipped, but the READ never did — so a screen
+// somebody had deliberately blocked carried on showing live tickets, and the only way to silence it
+// was to pull it off the wifi. His answer when it was put to him was one line — **"do 9th goees
+// completely black"** — so it does.
+//
+// The server refuses the board read with `reason: "device_blocked"` (a CODE — this panel branches on
+// codes, never on wording, so the sentence can change without breaking the wall). This paints over
+// the whole viewport, once, and never takes it down. There is no retry and nothing to dismiss: the
+// point of a block is that this screen stops being a working screen until staff lift it.
+//
+// AND IT STOPS THE DEVICE TALKING. `blockedWallUp` is checked at the top of api() below, so the very
+// next call short-circuits before it reaches the network. Without that the panel would sit behind a
+// black screen re-asking for a board it can never have — every few seconds, for the rest of the
+// shift — which is the flavour of pointless traffic the egress rules exist to stop, and it would
+// fill the error log with a refusal nobody needs told twice.
+//
+// Plain words, and no detail: it says who to ask, and nothing about why. The person holding the
+// tablet is not always the person the block is about.
+let blockedWallUp = false;
+function showBlockedWall() {
+  if (blockedWallUp) return;
+  blockedWallUp = true;
+  const w = document.createElement("div");
+  w.id = "lfh-blocked-wall";
+  w.setAttribute("role", "alertdialog");
+  w.setAttribute("aria-label", "This device has been blocked");
+  // Inline styles on purpose: a blocked screen must go dark even if the panel's stylesheet is the
+  // thing that failed to load, and this is the one overlay that cannot afford to depend on CSS.
+  w.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:#000;color:#e5e7eb;"
+    + "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;"
+    + "text-align:center;padding:28px;font-family:system-ui,sans-serif;-webkit-user-select:none;user-select:none";
+  const icon = document.createElement("div");
+  icon.textContent = "\u26D4";
+  icon.style.cssText = "font-size:56px;line-height:1";
+  const head = document.createElement("div");
+  head.textContent = "This device has been blocked";
+  head.style.cssText = "font-size:21px;font-weight:800;letter-spacing:.01em";
+  const sub = document.createElement("div");
+  sub.textContent = "Ask a manager to unblock it.";
+  sub.style.cssText = "font-size:14.5px;color:#94a3b8;max-width:34ch;line-height:1.55";
+  w.appendChild(icon); w.appendChild(head); w.appendChild(sub);
+  document.body.appendChild(w);
+  // If a timer that was already in flight paints an overlay after us, put the wall back in front.
+  // Only when something genuinely landed on top — never an unconditional re-append every tick.
+  setInterval(() => { if (document.body.lastElementChild !== w) document.body.appendChild(w); }, 3000);
+}
+const blockedError = () => { const e = new Error("This device has been blocked by staff."); e.status = 403; e.blocked = true; return e; };
+
 const api = async (method, path, body, opts) => {
+  // Blocked by staff → this device has stopped being a working screen. Refuse before the network,
+  // so a walled panel never asks for anything again (see showBlockedWall above).
+  if (blockedWallUp) throw blockedError();
   // Writes go through the offline outbox: sent now if online, else saved on this
   // device and replayed on reconnect (at-most-once via X-LFH-Action-Id). GETs stay
   // a plain fetch. Same return/throw contract as before (see outbox.js send()).
@@ -141,6 +195,8 @@ const api = async (method, path, body, opts) => {
   // Live reply or the device's saved copy? The offline bar needs to know.
   if (window.LFH_OFF) window.LFH_OFF.noteResponse(r);
   const j = await r.json().catch(() => null);
+  // Blocked by staff → the whole screen goes dark and stays dark (see showBlockedWall above).
+  if (r.status === 403 && j && j.reason === "device_blocked") { showBlockedWall(); throw blockedError(); }
   // Attach the parsed body + status to the error so callers can read server flags like
   // duplicateWarning (#15) / needPin, which a bare message string would have dropped.
   if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; e.busy = (j && j.busy === true) || r.headers.get("X-LFH-Busy") === "1"; throw e; }
@@ -414,7 +470,12 @@ async function actGated(method, path, body, opts = {}) {
     }
     if (isQueued(r)) { toast(savedMsg(r)); return; }  // #2: saved offline — skip the offline GET + the success toast
     await load();
-    if (typeof opts.onSuccess === "function") { try { opts.onSuccess(); } catch (e) {} }
+    // THE SERVER'S ANSWER IS HANDED TO onSuccess. Some writes decide something the screen cannot
+    // work out for itself — a merge picks which table KEEPS the bill (the lowest number, not the one
+    // that was tapped), and until this argument existed the tablet guessed, named the wrong table in
+    // its toast, and pointed its undo at a table that was never the child. Every existing callback
+    // ignores the argument, so adding it changes nothing for them.
+    if (typeof opts.onSuccess === "function") { try { opts.onSuccess(r); } catch (e) {} }
     else if (opts.toast) toast(opts.toast);
   } catch (e) {
     toast("Failed: " + errText(e), false);
@@ -693,7 +754,20 @@ function printTableBill(t) {
     // value would otherwise render a broken image on a guest's bill.
     logo: /^https?:\/\//i.test(String((state.data.restaurant || {}).logo_url || "")) ? String(state.data.restaurant.logo_url) : "",
     autoPrint: true,
+    // A SECOND COPY SAYS SO (mig 333). This is the device the case was built for: the manager
+    // prints at the till, the guest asks for another copy, and a waiter reprints it HERE. The flag
+    // lives on the bill, so this panel knows what the other one already did.
+    reprint: !!(sess.bill_printed_at || os.some((o) => o && o.bill_printed_at)),
   }));
+  // Stamp the first print, so the next copy from ANY device is branded. Idempotent on the server;
+  // fire-and-forget, because a failed stamp must never stand between a guest and their bill.
+  if (sess.id && !sess.bill_printed_at) {
+    try {
+      api("POST", `/sessions/${sess.id}/bill-printed`)
+        .then(() => { sess.bill_printed_at = new Date().toISOString(); })
+        .catch(() => {});
+    } catch (e) { /* offline — the paper still came out */ }
+  }
   // One reusable named window, and nothing here ever closes it — Print and Cancel are the same
   // event to the page, so closing on afterprint threw the bill away when someone pressed Cancel.
   const w = window.open("", "lfh_bill_print", "width=380,height=680");
@@ -1729,6 +1803,19 @@ function renderPanel() {
   // every dish with a tappable status pill, and an Accept button when it's new.
   // One dish row: qty · name · price · status badge · Serve button, with per-item
   // allergens (the order-wide "avoid in all" distributed onto each item; no banner).
+  // WHICH TABLE WAS THIS ORDERED AT? Only ever asked on a MERGED bill (owner, 2026-08-17: "keep a
+  // track [of which] table has ordered which, but everything is merged … so at the time when we
+  // split the KOT, the item all [goes back] when it is done by mistake").
+  //
+  // The number is not new and is not a guess: an order keeps the table it was rung at even while the
+  // party is joined — that is precisely what makes a split exact (mig 249), and it is what the
+  // unmerge confirm and the server both work from. It simply was not on screen, so a waiter looking
+  // at "T26 + T27" saw one list of dishes with no way to tell whose was whose. On a table that is
+  // NOT merged the chip never renders, so an ordinary bill is untouched.
+  const partySpread = partyTablesOf(t).length > 1;
+  const fromChip = (o) => (partySpread && o && o.table_number != null)
+    ? `<span class="ifrom" title="Ordered at ${esc(tableLabel(o.table_number))} — it goes back there if the tables are split">${esc(tableLabel(o.table_number))}</span>`
+    : "";
   const dishRowHtml = (r, o) => {
     const opt = (r.options && r.options.length) ? `<div class="iopt">${esc(r.options.map((x) => x.label || x).join(" · "))}</div>` : "";
     const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
@@ -1776,7 +1863,7 @@ function renderPanel() {
     // The trailing status/serve/edit/delete cluster is ONE .iacts container so narrow
     // phones can wrap it to its own right-aligned second row (the name + price keep the
     // first row) instead of crushing the dish name to a sliver (A36 audit 2026-07-20).
-    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}<span class="iacts">${statusBadge}${serveBtn}${editCtl}${delBtn}</span></div>`;
+    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${fromChip(o)}${opt}${rem}${note}</span>${priceTag}<span class="iacts">${statusBadge}${serveBtn}${editCtl}${delBtn}</span></div>`;
   };
   // Per-order staff controls. NOT editing: an "✎ Edit" button (opens the gated edit
   // mode) + Delete order. EDITING: allergen toggle chips ("avoid in all dishes"),
@@ -1868,6 +1955,23 @@ function renderPanel() {
   // to cost two taps — close, then find and tap the next tile, on tiles that are deliberately
   // small. ‹ › walk the SAME list the floor draws, in the same order, honouring this waiter's
   // section, so "next" always means the next table they can actually serve.
+  // ⇹ UNMERGE, AT THE VERY BOTTOM OF A JOINED TABLE'S DETAIL (owner, 2026-08-17: "if you go inside a
+  // detail view, there will be option like unmerge this table when it is merged").
+  //
+  // Until now the tablet could JOIN two tables and never separate them — its own KOT menu said
+  // "Change table — unmerge first" about a thing this device could not do, so a mis-tapped merge
+  // meant walking to the manager panel. The undo bar after a merge (see renderMergePicker) catches
+  // the immediate mistake; this is the way back at any time after that.
+  //
+  // THE BUTTONS ARE THE MANAGER'S, EXACTLY (editor/app.js, owner 2026-08-01: "at the very bottom
+  // there will be a button to unmerge, and for that particular table it will unmerge that particular
+  // table from it"): opening a CHILD offers one button for itself; opening the table that HOLDS the
+  // bill offers one per child, because there is nothing to detach IT from. Same place, same words,
+  // same gate (tablet_table_ops) — a waiter and a manager must not learn two different screens.
+  const unmergeKids = mergeParentOf(t) ? [String(t)] : mergeChildrenOf(t);
+  const unmergeRow = (s && unmergeKids.length && kotOpsOn() && tshow("tablet_table_ops"))
+    ? `<div class="unmerge-row">${unmergeKids.map((k) => `<button class="btn danger unmerge-btn${txray("tablet_table_ops")}" data-unmerge="${esc(k)}">⇹ Unmerge ${esc(tableLabel(k))}</button>`).join("")}</div>`
+    : "";
   const walk = stepTables();
   const wi = walk.indexOf(String(t));
   const prevT = wi > 0 ? walk[wi - 1] : (walk.length > 1 ? walk[walk.length - 1] : null);
@@ -1905,10 +2009,22 @@ function renderPanel() {
            screen already shows the waiter, so there is nothing extra to permit — and a waiter who
            can settle a table but cannot hand over its bill is the gap this closes (T7 F9). -->
       ${s && os.length ? `<button class="btn" id="printBillBtn">🖨 Print bill</button>` : ""}
-      ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
+      <!-- A DISABLED BUTTON EATS THE TAP, AND THIS IS A TOUCH PANEL (T7 sweep, 2026-08-17). While an
+           order on this table is still un-accepted the bill cannot be settled — true, and the button
+           used to be rendered disabled with the reason in a title attribute. A title needs a HOVER,
+           and a waiter carrying plates has no mouse: the tap simply vanished on the most repeated
+           money control in a service. The split-payment button forty lines from here already answers
+           this exact situation the right way ("Stays ENABLED and says WHY it won't go"), and two
+           controls in one panel must not answer the same situation two different ways. So: dimmed,
+           still tappable, and it refuses OUT LOUD (see the #payBill handler below).
+           NOTE FOR WHOEVER EDITS THIS COMMENT: it lives INSIDE a JavaScript template literal, so a
+           backtick here ends the string and breaks the whole panel. This comment had two, and the
+           tablet was blank until the live walk caught it — no static check can see that. -->
+      ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' data-needs-accept="1" style="opacity:.55" title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s && os.length && a.paid && tshow("tablet_mark_paid") ? `<button class="btn${txray("tablet_mark_paid")}" id="unpayBill" title="Reopen this paid bill (a refund/correction — asks for a reason)">↩ Mark unpaid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
+    ${unmergeRow}
     ${foot}
    </div>`;
   { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
@@ -1918,6 +2034,11 @@ function renderPanel() {
   // rest (it fetches that table's slice and repaints), so this is the same one-tap open the
   // floor gives — just reachable from inside an open table.
   document.querySelectorAll("[data-step-table]").forEach((b) => (b.onclick = () => selectTable(b.dataset.stepTable)));
+  // ⇹ Unmerge — SAY WHAT WILL HAPPEN BEFORE IT HAPPENS. The manager's identical confirm lists it,
+  // and a waiter needs it more, not less: splitting a party moves money between two bills. Written
+  // as plain lines because this panel's confirm box takes text, not markup (which is the safer of
+  // the two anyway — nothing typed by a person can ever become markup here).
+  document.querySelectorAll("[data-unmerge]").forEach((b) => (b.onclick = () => unmergeTable(b.dataset.unmerge)));
 
   // wire it up
   document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
@@ -1957,7 +2078,10 @@ function renderPanel() {
   document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = async () => {
     const tbl = b.dataset.attendAllCalls;
     const ids = callsOf(tbl).map((c) => c.id);
-    if (!ids.length) return;
+    // Same rule as optimisticAccept — the button is on screen because the slice HAD calls; if
+    // another device attended them a second ago this list is empty, and a bell that is dropped
+    // in silence is the worst of the three to lose.
+    if (!ids.length) { toast("Those calls are already done — refreshing this table.", false); load().catch(() => {}); return; }
     try {
       for (const id of ids) await api("POST", `/calls/${id}/attend`);
       await load();
@@ -2046,7 +2170,12 @@ function renderPanel() {
   const kmb = $("#kotMenuBtn"); if (kmb && s) kmb.onclick = () => renderKotMenu(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
-  const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
+  const pb = $("#payBill"); if (pb) pb.onclick = () => {
+    // The refusal, said out loud — see the note on the button above. The words name the thing the
+    // waiter must do next, not the rule that stopped them.
+    if (pb.dataset.needsAccept) { toast("Accept the order first — a bill can only be paid once the kitchen has it.", false); return; }
+    payBillWithMethod(t, a);
+  };
   const ub = $("#unpayBill"); if (ub) ub.onclick = () => markBillUnpaid(t);
   const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
@@ -2055,6 +2184,64 @@ function renderPanel() {
   const clb = $("#closeTable"); if (clb && s) clb.onclick = () => closeTableAndFree(t);
   { const tob = $("#takeOrder"); if (tob) tob.onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }; }
   restoreScroll();   // #U2: keep the popup scroll across a live-update rebuild (same table)
+}
+
+// unmergeTable(child): separate ONE table back out of the party it was joined to (mig 249).
+//
+// THE ONE PATH, used by the detail's ⇹ Unmerge buttons AND by the undo bar the merge raises — a
+// second copy would be a second place to forget the confirm, which is exactly how the close path
+// got its own shared function. `opts.silent` skips the question for the undo bar, because the undo
+// bar IS the question: the waiter is answering "did you mean that?" by tapping it.
+//
+// The confirm tells the truth BEFORE the tap, in the same three parts the manager's does, because
+// splitting a party moves money between two bills:
+//   · what goes BACK to this table — its own KOTs and their total. An order keeps the table number
+//     it was rung at even while merged (that is what makes a split exact), so this is not a guess;
+//   · what STAYS on the table holding the bill;
+//   · what does NOT move at all — a whole-bill discount was given to the JOINT bill and cannot be
+//     divided between two tables, and nobody recorded which guests sat where.
+async function unmergeTable(child, opts = {}) {
+  const parent = mergeParentOf(child);
+  // NEVER A SILENT RETURN ON A TAP: the button renders from the merge list, and a poll or another
+  // device can end the merge between the paint and the finger.
+  if (!parent) { toast(`${tableLabel(child)} isn't merged with another table any more.`, false); load().catch(() => {}); return; }
+  if (!opts.silent) {
+    await ensurePartySlices(child, true);      // both halves, so the sums below are the real ones
+    // ordersOf() already resolves a merged child through the PARTY's session and then keeps only the
+    // rows rung AT that table number — which is exactly the split the server will perform.
+    const live = (x) => ordersOf(x).filter((o) => o.status !== "cancelled" && !o.archived);
+    const mine = live(child), theirs = live(parent);
+    const sum = (list) => list.reduce((acc, o) => acc + (parseFloat(o.total) || 0), 0);
+    const kots = (list) => list.map((o) => "#" + (o.kot_no ?? "—")).join(", ");
+    const sess = sessionOf(child) || {};
+    const disc = parseFloat(sess.discount) || 0;
+    const lines = [
+      `Split ${tableLabel(child)} back out of ${tableLabel(parent)}?`,
+      "",
+      mine.length
+        ? `• Back to ${tableLabel(child)}: KOT ${kots(mine)} — ${inr(sum(mine))}`
+        : `• ${tableLabel(child)} gets nothing back — nothing was ordered at it. It simply becomes free.`,
+      theirs.length ? `• Stays on ${tableLabel(parent)}: KOT ${kots(theirs)} — ${inr(sum(theirs))}` : "",
+      disc > 0 ? `• Does NOT move: the ${inr(disc)} whole-bill discount stays on ${tableLabel(parent)} — it was given to the joint bill, so it can't be split between two tables.` : "",
+      membersOf(child).length ? `• Does NOT move: the guest count stays with ${tableLabel(parent)} — nobody recorded which guests sat where.` : "",
+    ].filter((x) => x !== "");
+    if (!(await confirmDialog(lines.join("\n"), "Unmerge"))) return;
+  }
+  try {
+    const r = await api("POST", `/tables/${child}/unmerge`, {});
+    if (isQueued(r)) { toast(savedMsg(r)); return; }
+    const moved = r && r.moved ? ` · ${r.moved} ${r.moved === 1 ? "order" : "orders"} back` : "";
+    toast(`${tableLabel(child)} split from ${tableLabel(parent)}${moved}`);
+    // Both tiles change, and the open popup was showing a party that no longer exists — reload the
+    // whole floor rather than patching, then repaint the table the waiter is actually looking at.
+    lastSig = null;
+    await load();
+    renderFloor();
+    if (!state.ordering && !state.pickerOpen) renderPanel();
+  } catch (e) {
+    toast("Couldn't split those tables: " + errText(e), false);
+    lastSig = null; load().catch(() => {});
+  }
 }
 
 // closeTableAndFree(t): THE one close path — the popup's "✕ Close table" and the finished
@@ -2270,8 +2457,20 @@ function flipOrders(orderIds, { from, to, orderStatus }) {
   renderFloor();
   if (!state.ordering) renderPanel();
 }
+// NEVER A SILENT RETURN ON A TAP (owner's standing rule; sweep #5 found this exact shape — the
+// little green ✓ on a tile "doing nothing and saying nothing"). The three bulk actions below are
+// each handed a list built a moment earlier from the table's cached slice, and that list can come
+// back EMPTY for reasons the waiter cannot see:
+//   · the forced `ensurePartySlices` read failed — ensureTableSlice swallows a fetch blip on
+//     purpose ("the action then no-ops rather than throwing"), which is precisely how the tap
+//     became invisible;
+//   · someone else (the kitchen screen, the manager panel, another waiter's tablet) accepted or
+//     served it in the seconds between the tile being painted and the finger landing.
+// The tile still shows ✓ / 🍽️ in both cases, so the person taps a control that is visibly there
+// and nothing happens at all — indistinguishable from a broken button, and invisible in the logs.
+// Say what happened and refresh, exactly like bumpItemQty and the allergy chip already do.
 function optimisticAccept(orderIds) {
-  if (!orderIds.length) return;
+  if (!orderIds.length) { toast("Nothing left to accept here — refreshing this table.", false); load().catch(() => {}); return; }
   // Snapshot the dishes that were still "received" (the ones this accept sends to the
   // kitchen) so an accidental Accept can be taken back to the new-order queue. Reuses the
   // serve-undo revert with prev:"received" (owner undo bar, 2026-07-22).
@@ -2295,7 +2494,8 @@ function optimisticAccept(orderIds) {
     .catch((e) => { toast("Failed: " + errText(e), false); load(); });
 }
 function optimisticServeAll(orderIds) {
-  if (!orderIds.length) return;
+  // Same rule as optimisticAccept above — an empty list is never a reason to say nothing.
+  if (!orderIds.length) { toast("Nothing left to serve here — refreshing this table.", false); load().catch(() => {}); return; }
   // Snapshot each not-yet-served dish's prior status BEFORE the flip, so "Serve all"
   // can be taken back to exactly where each dish was (owner undo bar, 2026-07-22).
   const snap = (state.data.items || [])
@@ -2402,7 +2602,13 @@ function renderKotMenu(t, s) {
   let occupiedOthers = 0;
   // Count what the merge picker will actually OFFER (a joined table can't host a party), so the
   // row is never enabled onto an empty picker.
-  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && canHostAParty(i)) occupiedOthers++;
+  // …AND THROUGH THE SECTION RULE, which is the other half of that predicate (T7 sweep, 2026-08-17).
+  // renderMergePicker offers `inMySection(i) && canHostAParty(i)`; this count asked only the second
+  // half, so a waiter with a section whose OTHER open tables all belong to someone else got an
+  // enabled "🪢 Merge tables" row that opened "No other open tables to merge with." — the exact
+  // thing the line above says must not happen, and the same fault the split row was fixed for on
+  // 2026-08-04. Same filter as the picker, deliberately duplicated rather than approximated.
+  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && inMySection(i) && canHostAParty(i)) occupiedOthers++;
   const body =
     // A merged party doesn't shift (mig 264): unmerge first — the row says so instead of
     // offering a move the server will refuse.
@@ -2500,8 +2706,16 @@ function renderMoveItemPicker(t) {
 }
 function renderMoveItemTarget(t, itemId) {
   const tiles = [];
+  // NEVER OFFER A TABLE THIS DISH ALREADY SHARES A BILL WITH (T7 sweep, 2026-08-17). Its sibling
+  // renderMoveOrderTarget has excluded party mates since 2026-08-11 for a reason that applies word
+  // for word here: while T26+T27 are one party, T26 was listed on T27's dish picker, labelled with
+  // the party's own state — and the server resolves a merged destination to the party head and then
+  // refuses with reason 'same_table' ("That dish is already on that table."), which is exactly what
+  // this was measured doing. The only possible outcome of that button was a confusing refusal.
+  // partyTablesOf(t) includes t itself, so this also covers the old `String(i) === String(t)` test.
+  const mates = new Set(partyTablesOf(t).map(String));
   for (let i = 1, n = tableCount(); i <= n; i++) {
-    if (String(i) === String(t)) continue;
+    if (mates.has(String(i))) continue;
     // SAME TWO RULES AS EVERY OTHER DESTINATION PICKER (T4 sweep, 2026-08-04). This one offered
     // every table in the restaurant while its three siblings (renderMoveOrderTarget,
     // renderMergePicker, renderShiftPicker) all filter by section — so a sectioned waiter was
@@ -2537,15 +2751,50 @@ function renderMergePicker(t, s) {
   const btns = occ.length
     ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileState(i).label}</small></button>`).join("") + `</div>`
     : `<div class="muted">No other open tables to merge with.</div>`;
-  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Everything — orders, guests &amp; bill — joins the other table as ONE bill. T${esc(t)} then frees up:</div><div class="shiftgrid">${btns}</div>`;
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Everything — orders, guests &amp; bill — joins the other table as ONE bill. The LOWEST table number holds it:</div><div class="shiftgrid">${btns}</div>`;
   const { dropLayer } = renderPickerShell(`Merge T${esc(t)} into →`, bodyHtml, "tablet-merge-picker", renderPanel);
   document.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
     const to = b.dataset.mergeto;
-    if (!(await confirmDialog(`Merge T${t} into T${to}? Both parties become ONE bill on T${to}.`, "Merge"))) return;
+    // NAME THE TABLE THAT WILL ACTUALLY HOLD THE BILL (T7, 2026-08-17). The server keeps the LOWEST
+    // table number and moves the other party's rows onto it — a deliberate rule, written in
+    // lfh_staff_merge_tables: "If the caller merged 6 into 7, we keep 6 … the floor always names the
+    // same table as the one in charge." This screen did not know that: merging T24 into T25 promised
+    // "ONE bill on T25" and the bill landed on T24, so the waiter went looking on the wrong table.
+    // The MANAGER panel was fixed for exactly this on 2026-08-11 and words it the same way, with the
+    // two amounts, so a waiter and a manager read one sentence about one rule.
+    const keeps = (Number(t) <= Number(to)) ? String(t) : String(to);
+    const mine = tableAgg(t).due || 0;
+    const theirs = Number((summaryTile(to) || {}).due) || 0;
+    const money = (mine > 0 || theirs > 0) ? ` ${inr(mine)} + ${inr(theirs)} → ${inr(mine + theirs)} on one bill.` : "";
+    if (!(await confirmDialog(`Merge ${tableLabel(t)} into ${tableLabel(to)}? They become ONE party on ONE bill, held by ${tableLabel(keeps)} (the lowest table number).${money}`, "Merge"))) return;
     dropLayer();
     actGated("POST", `/sessions/${s.id}/merge`, { to }, {
       message: "Enter a manager PIN to merge these tables.",
-      onSuccess: () => { state.table = String(to); toast(`Merged into ${tname(to) || "T" + to} — one bill`); renderFloor(); renderPanel(); },
+      // TAKE IT BACK, FOR FIFTEEN SECONDS (owner, 2026-08-17: "the timer of undo should be of
+      // fifteen second"). Longer than the panel's other undo bars (5s for serve / accept / settle)
+      // and deliberately so: joining two bills is a bigger thing to notice than serving a dish, and
+      // a waiter mid-room may only look down a few seconds later. Undo runs the SAME unmergeTable()
+      // the detail's ⇹ button runs — with the question skipped, because tapping UNDO is the answer.
+      // FOLLOW THE TABLE THE SERVER KEPT, never the one that was tapped. `r.parent_table` /
+      // `r.child_table` are what really happened; guessing from `to` sent the waiter to the child
+      // and pointed UNDO at a table that was never joined to anything, so tapping undo answered
+      // "that table isn't merged" and the merge stayed. (Caught by the merge walk, 2026-08-17 —
+      // the manager panel follows the server's answer for the same reason.)
+      onSuccess: (r) => {
+        const holder = String((r && r.parent_table) || ((Number(t) <= Number(to)) ? t : to));
+        const joined = String((r && r.child_table) || ((Number(t) <= Number(to)) ? to : t));
+        state.table = holder;
+        renderFloor(); renderPanel();
+        if (window.LFH_UNDO) {
+          LFH_UNDO.show({
+            message: `${tableLabel(joined)} joined ${tableLabel(holder)} — one bill`,
+            sub: `tap undo to separate them again`,
+            icon: "🪢",
+            seconds: 15,
+            onUndo: () => unmergeTable(joined, { silent: true }),
+          });
+        } else toast(`${tableLabel(joined)} joined ${tableLabel(holder)} — one bill`);
+      },
     });
   }));
 }
@@ -4025,10 +4274,20 @@ function openQuickDest() {
   }
   const ov = document.createElement("div");
   ov.className = "qdest-overlay";
+  // AN EMPTY GRID IS A DEAD END WITH NO WORDS (T7 sweep, 2026-08-17). A waiter who holds no section
+  // can still reach ⚡ Quick order — the button is on the top bar at all times — build a whole order,
+  // tap SEND, and land on a picker with nothing in it and nothing said. The floor behind already
+  // explains this state kindly ("No tables assigned to you yet"), and every other picker in this file
+  // has an empty state; this was the last one without. Same sentence, same person to ask.
+  const emptyPick = `<div class="muted" style="grid-column:1/-1;padding:18px 4px;text-align:center;line-height:1.6">
+      <div style="font-size:26px;margin-bottom:4px">🪑</div>
+      <div style="font-weight:800;font-size:14px;color:var(--text)">No tables assigned to you yet</div>
+      <div style="font-size:12.5px;margin-top:3px">Ask your manager to give you a section — your order stays here until then.</div>
+    </div>`;
   ov.innerHTML = `<div class="qdest-box">
     <div class="qdest-head"><h3>Which table gets this order?</h3><button class="qdest-x" aria-label="Close">✕</button></div>
-    <div class="muted small" style="margin:2px 0 12px">Tap a table to send it to the kitchen — a busy table adds it to that table's bill.</div>
-    <div class="qdest-grid">${tiles.join("")}</div>
+    <div class="muted small" style="margin:2px 0 12px">${tiles.length ? "Tap a table to send it to the kitchen — a busy table adds it to that table's bill." : "This order is safe — nothing has been sent yet."}</div>
+    <div class="qdest-grid">${tiles.length ? tiles.join("") : emptyPick}</div>
   </div>`;
   document.body.appendChild(ov);
   let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-qdest", () => closeDest()) : null;

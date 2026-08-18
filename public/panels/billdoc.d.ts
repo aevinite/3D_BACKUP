@@ -35,7 +35,15 @@ export interface BillDocData {
   lines?: BillDocLine[];
   subtotal?: number;
   discount?: number;
+  /** The discount written as a percentage, in brackets after the word "Discount". Use `discPct()`
+   *  so every screen quotes the same figure. On the one bill where the document has to CLAMP the
+   *  discount (more discount than there is subtotal), it re-words this from what it actually
+   *  deducted rather than print a percentage nobody was given. */
   discLabel?: string;
+  /** DECLARED FOR THE CALLERS THAT STILL PASS IT — the document does NOT render this value.
+   *  "Taxable value" is DERIVED as (subtotal − discount) inside `billRows()`, precisely so the row
+   *  cannot disagree with the two rows above it. Passing a different number here changes nothing;
+   *  if it ever needs to, it has to go through `billRows()`. */
   taxable?: number;
   /** Tax rows ADDED on top, printed above the TOTAL. An EMPTY array means no tax line at all —
    *  a composition-scheme restaurant, or a bill whose prices already contain all of their tax. */
@@ -63,6 +71,30 @@ export interface BillDocData {
    *  bill has no taxable value to restate). `billData` sets it from the money; a caller building
    *  figures by hand (the admin preview, `lib/billPreview.ts`) must pass it too. */
   composition?: boolean;
+  /** true = every order on this bill was CANCELLED, so the paper is a **Cancelled Bill**, not a tax
+   *  invoice: the heading and `<title>` change, the "Cancelled — no charge" band prints across the
+   *  top, the item rows are re-titled "Ordered value" against a matching "Cancelled — not charged"
+   *  line, and the TOTAL is ₹0. No discount, tax, MRP or round-off row prints — none of them
+   *  describes a bill nobody paid. A cancelled bill that HAD an invoice number still names it,
+   *  marked "— voided" (COMPLIANCE §2): the number retires, it is never freed.
+   *
+   *  `billData` sets it from the orders. It was undeclared here until 2026-08-17, so a TypeScript
+   *  caller could not render this document at all — on the one flag the whole sheet's identity
+   *  turns on. */
+  cancelled?: boolean;
+  /** true = this is a SECOND copy of a bill already printed, so it carries the "Reprint ·
+   *  Duplicate" band across the top — the same band and the same flag name the kitchen ticket has
+   *  used since 2026-08-04, so all three documents brand a duplicate identically. A first print must
+   *  never set it: a sheet marked DUPLICATE that is really the original is a lie on paper.
+   *  A bill that is both cancelled AND reprinted shows both bands. */
+  reprint?: boolean;
+  /** The bill's position in the signed chain (mig 332) and its `chain_hash`. Supply BOTH or the
+   *  verification line does not print at all. The document takes the first 12 characters of the
+   *  hash — enough to identify one bill, short enough for a 66mm roll — and formats the line
+   *  itself, so every panel prints the same reference for the same bill.
+   *  Never printed on a cancelled sheet. */
+  chainSeq?: number | string;
+  chainHash?: string;
   /** true = leave OFF the screen-only toolbar and its script. For a bill shown as EVIDENCE (the Audit
    *  card renders it in a sandboxed iframe with no scripts), where the bar's Print and Close buttons
    *  would be dead controls sitting on the document. The paper is identical either way. */
@@ -114,7 +146,13 @@ export interface BillIdentity {
 export function billDocHtml(d: BillDocData): string;
 export function kotDocHtml(o: KotDocData): string;
 /** The time on a printed kitchen ticket, with the DAY when it isn't today
- *  ("09:31 PM" · "YESTERDAY 09:31 PM" · "6 AUG 09:31 PM"). Black-and-white by design. */
+ *  ("09:31 PM" · "YESTERDAY 09:31 PM" · "6 AUG 09:31 PM"). Black-and-white by design.
+ *
+ *  Pinned to en-IN + Asia/Kolkata like the bill's date row and the banquet sheet's, so one order
+ *  reads the same on every device in the building — and "today" is the restaurant's **05:00 IST
+ *  business day** (mig 044, `lib/businessDay.ts`), the same day the counters, the panels' Today
+ *  filter and the Z-report use, so a ticket rung at 23:50 is not "YESTERDAY" at 00:10 of the same
+ *  service. Returns "" for a missing or unparseable timestamp — never "Invalid Date". */
 export function kotWhen(ts: string | number | Date | null | undefined): string;
 export function kotLineHtml(r: KotDocLine): string;
 export function billIdentity(
@@ -186,6 +224,9 @@ export function billData(a: {
   tableDisp?: string;
   logo?: string;
   parcel?: boolean;
+  /** true = the panel has printed this bill before, so the sheet carries the Reprint · Duplicate
+   *  band. Only the panel knows this, which is why it is passed in rather than derived. */
+  reprint?: boolean;
   autoPrint?: boolean;
   now?: string | number | Date;
 }): BillDocData;

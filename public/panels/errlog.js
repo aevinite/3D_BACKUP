@@ -28,16 +28,82 @@
     try { return (window.LFH_RT && window.LFH_RT.getRid && window.LFH_RT.getRid()) || ""; } catch (e) { return ""; }
   }
 
+  // ── A CRASH WITH NO SIGNAL IS STILL A CRASH (owner, 2026-08-18) ───────────────────────────────
+  //
+  // Until now a crash note was thrown at the network and, with no signal, simply lost: sendBeacon
+  // fails quietly and nothing retried. So a fault that only ever happens in the dead-signal corners
+  // of a restaurant — the walk-in, the dry store, the back door — was the one fault that could never
+  // reach the Logs or the Repair board. Nobody's WORK was affected; the owner's ability to find out
+  // was, which is worse in the long run because it is invisible.
+  //
+  // CRASHES ONLY, NOT TAP BREADCRUMBS. Breadcrumbs are diagnostics about diagnostics and a shift's
+  // worth of them would fill this store to no purpose; a lost batch of taps costs nothing.
+  //
+  // FIVE, BECAUSE FIVE IS WHAT THE SERVER WILL TAKE. /api/log/client-error caps a device at 5 error
+  // rows per ten minutes (MAX_ERRORS_PER_DEVICE_10MIN) and silently drops the rest, so keeping
+  // twenty would be promising a delivery that cannot happen — the same "don't say saved when it
+  // isn't" rule the write queue follows. Identical messages are folded, so one crash repeating in a
+  // loop cannot spend all five places that five different faults might need.
+  var PENDING_KEY = "lfh_errlog_pending";
+  var PENDING_MAX = 5;
+  function readPending() {
+    try { var v = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+    catch (e) { return []; }
+  }
+  function writePending(list) {
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(list.slice(-PENDING_MAX))); } catch (e) {}
+  }
+  function stash(payload) {
+    try {
+      if (payload.kind !== "error") return;                    // breadcrumbs are not worth keeping
+      var list = readPending();
+      for (var i = 0; i < list.length; i++) if (list[i].message === payload.message) return; // folded
+      payload.offlineAt = Date.now();
+      list.push(payload);
+      writePending(list);
+    } catch (e) { /* never throw from the logger */ }
+  }
+  // Send what was kept, ONE AT A TIME with a gap. All five land inside the server's own ten-minute
+  // window, and spacing them keeps a reconnecting device from arriving as a burst.
+  function flushPending() {
+    try {
+      if (navigator.onLine === false) return;
+      var list = readPending();
+      if (!list.length) return;
+      writePending([]);                                        // taken; a failed send re-stashes
+      list.forEach(function (p, i) {
+        setTimeout(function () {
+          // Say it happened EARLIER, so a replayed row is never read as a fault happening now.
+          var mins = Math.round((Date.now() - (p.offlineAt || Date.now())) / 60000);
+          delete p.offlineAt;
+          p.where = String((p.where || "") + " · offline, " + (mins < 1 ? "under a minute" : mins + " min") + " earlier").slice(0, 120);
+          send(p);
+        }, i * 1500);
+      });
+    } catch (e) { /* never throw from the logger */ }
+  }
+
   function post(payload) {
     try {
       payload.panel = PANEL;
       var rd = rid(); if (rd) payload.rid = rd;
+      // Known offline → keep it rather than fire it into the dark.
+      if (navigator.onLine === false) return stash(payload);
+      send(payload);
+    } catch (e) { /* never throw from the logger */ }
+  }
+
+  function send(payload) {
+    try {
       var body = JSON.stringify(payload);
       // sendBeacon survives a page unload (important for the on-hide tap flush); fall back to fetch.
+      // A beacon the browser REFUSES to queue answers false — that is our one chance to keep it.
       if (navigator.sendBeacon) {
-        navigator.sendBeacon("/api/log/client-error", new Blob([body], { type: "application/json" }));
+        var queued = navigator.sendBeacon("/api/log/client-error", new Blob([body], { type: "application/json" }));
+        if (!queued) stash(payload);
       } else {
-        fetch("/api/log/client-error", { method: "POST", headers: { "Content-Type": "application/json" }, body: body, keepalive: true }).catch(function () {});
+        fetch("/api/log/client-error", { method: "POST", headers: { "Content-Type": "application/json" }, body: body, keepalive: true })
+          .catch(function () { stash(payload); });
       }
     } catch (e) { /* never throw from the logger */ }
   }
@@ -224,4 +290,8 @@
   setInterval(flush, 30000);
   document.addEventListener("visibilitychange", function () { if (document.hidden) flush(); });
   window.addEventListener("pagehide", flush);
+
+  // Deliver anything a dead signal kept — now, and again the moment the connection returns.
+  flushPending();
+  window.addEventListener("online", flushPending);
 })();

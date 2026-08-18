@@ -28,37 +28,81 @@ const read = (f) => { try { return fs.readFileSync(path.resolve(f), "utf8"); } c
 
 console.log("Erasing a guest must never erase a sale\n");
 
-// ── STATIC · exactly three tables, and none of them hold money ─────────────────────────────────
+// ── THIS GUARD WAS CHECKING A ROUTE THAT NO LONGER EXISTS (sweep 6 · T14, 2026-08-18) ──────────
+// Three of its five static checks had been failing on a clean `main` for days, and none of them
+// meant anything was wrong: the handler was REWRITTEN in August to walk the declared list in
+// lib/personalData.ts (`ERASABLE`) instead of naming three tables inline, and to log through
+// `ownerLogPanel(scope)` instead of the literal "owner". The regexes still looked for the old
+// shape, found nothing, and shouted.
+//
+// That is worse than having no guard. A red that is always red gets ignored, and the next person to
+// look at it is as likely to "fix" the ROUTE back to the old shape to make it green. So the checks
+// now describe the code as it actually is — and the one thing this file exists for, the rule that a
+// guest's erase can never take a SALE with it, is checked in two places instead of one: the literal
+// deletes in the handler AND the declared list itself, which is where a forbidden table would
+// realistically arrive now.
 const ROUTE = "app/api/owner/customers/route.ts";
+const DECLARED = "lib/personalData.ts";
+// Tables that hold a sale, a session, an invoice or a record of what happened. Deleting any of them
+// while erasing a guest is not a data-erasure any more — it is hiding a sale.
+const FORBIDDEN = ["orders", "order_items", "sessions", "bills", "invoices", "daily_counters", "deletion_audit", "staff_actions"];
 const src = read(ROUTE);
+const declaredSrc = read(DECLARED);
 if (!src) bad(`${ROUTE} not found (if it moved, update this guard)`);
 else {
-  // Everything the DELETE handler deletes from.
   const del = src.slice(src.indexOf("export async function DELETE"));
-  const tables = [...del.matchAll(/from\("([a-z_]+)"\)\s*\.delete\(\)/g)].map((m) => m[1]).sort();
-  const EXPECTED = ["customer_devices", "customer_visits", "customers"];
-  if (JSON.stringify(tables) === JSON.stringify(EXPECTED)) ok(`deletes exactly: ${tables.join(", ")}`);
-  else bad(`deletes ${tables.join(", ") || "(none found)"} — expected ONLY ${EXPECTED.join(", ")}`);
 
-  // The named sales/records tables must never appear in a delete on this route. If a future change
-  // needs to touch one of these, it is not a DPDP erase any more and this guard should stop it.
-  const FORBIDDEN = ["orders", "order_items", "sessions", "bills", "invoices", "daily_counters", "deletion_audit", "staff_actions"];
+  // 1. What the handler deletes OUTRIGHT. Everything else it touches goes through the declared
+  //    list below, so this should be the single `customers` row and nothing else.
+  const tables = [...del.matchAll(/from\("([a-z_]+)"\)\s*\.delete\(\)/g)].map((m) => m[1]).sort();
+  const inline = tables.filter((t) => t !== "customers");
+  if (!inline.length) ok(`deletes exactly one table by name: customers`);
+  else bad(`also deletes ${inline.join(", ")} by name — everything but customers must go through ${DECLARED}`);
+
   const badTable = FORBIDDEN.find((t) => tables.includes(t));
   if (!badTable) ok("no sales, session, invoice or audit table is deleted here");
   else bad(`the erase deletes "${badTable}" — that is hiding a sale (docs/COMPLIANCE-GUARDRAILS.md)`);
 
-  // Every delete must be scoped to BOTH the restaurant and the one phone number — an erase that
-  // forgot one of those would take out other guests, or the same guest at another restaurant.
-  const scoped = [...del.matchAll(/from\("[a-z_]+"\)\s*\.delete\(\)\s*\.eq\("restaurant_id",\s*restaurantId\)\s*\.eq\("phone",\s*phone\)/g)].length;
-  if (scoped === EXPECTED.length) ok("all three deletes are scoped to (restaurant_id, phone)");
-  else bad(`only ${scoped}/${EXPECTED.length} deletes are scoped to both restaurant_id and phone`);
+  // 2. The DECLARED list is now the thing that decides which tables are written to, so the same
+  //    rule has to hold there. A `keep` entry is fine — `sessions` is listed precisely so the erase
+  //    knows to leave the bills alone — what must never happen is one of these being erasable.
+  if (!declaredSrc) bad(`${DECLARED} not found (if it moved, update this guard)`);
+  else {
+    const entries = [...declaredSrc.matchAll(/table:\s*"([a-z_]+)"[\s\S]{0,400}?policy:\s*"(erase|anonymise|keep)"/g)]
+      .map((m) => ({ table: m[1], policy: m[2] }));
+    if (!entries.length) bad(`could not read the declared list in ${DECLARED}`);
+    else {
+      const wrong = entries.filter((e) => e.policy !== "keep" && FORBIDDEN.includes(e.table));
+      if (!wrong.length) ok(`the declared list writes to ${entries.filter((e) => e.policy !== "keep").length} table(s), none of them a sales record`);
+      else bad(`${DECLARED} would ${wrong[0].policy} "${wrong[0].table}" — that is a sales record`);
+      const sess = entries.find((e) => e.table === "sessions");
+      if (sess && sess.policy === "keep") ok("the bill's own row (sessions) is declared KEEP, so a bill can never lose its guest");
+      else bad("sessions is no longer declared KEEP — an issued bill could be rewritten by an erase");
+    }
+  }
 
-  // The FACT of the erase has to be traceable, or a guest vanishing is indistinguishable from a bug.
-  if (/logAction\(\s*"owner",\s*"customer_erase"/.test(del)) ok("the erase is recorded in the activity log");
+  // 3. Every write is scoped to this restaurant and this one number. The handler builds them from
+  //    the declared list, so the scoping lives in the builder rather than at each call site.
+  const scopedBuilder = /p\.scopeBy === "restaurant" \? q\.eq\("restaurant_id", restaurantId\)/.test(del)
+    && /p\.scopeBy === "session" \? q\.in\("session_id", sessionIds as string\[\]\)/.test(del)
+    && /\.eq\(p\.phoneColumn, phone\)/.test(del);
+  if (scopedBuilder) ok("every declared write is scoped to the restaurant (or its sessions) AND the one number");
+  else bad("a declared write is no longer scoped to both the restaurant and the phone");
+  if (/from\("customers"\)\.delete\(\)\.eq\("restaurant_id", restaurantId\)\.eq\("phone", phone\)/.test(del))
+    ok("the customers row itself is deleted by (restaurant_id, phone)");
+  else bad("the customers delete is not scoped to both restaurant_id and phone");
+
+  // 4. The FACT of the erase has to be traceable, or a guest vanishing is indistinguishable from a
+  //    bug — and with several co-owners nobody could say who did it.
+  if (/logAction\([\s\S]{0,40}"customer_erase"/.test(del)) ok("the erase is recorded in the activity log");
   else bad("the erase is not recorded — nobody could say who did it");
-  // …but the log must not become a second copy of the number just erased.
+  if (/from\("deletion_audit"\)\.insert\(/.test(del)) ok("…and in the removals record, where anyone would go looking");
+  else bad("the erase never reaches the removals record");
+  // …but neither record may become a second copy of the number just erased.
   if (/phone\.slice\(-4\)/.test(del)) ok("only the last 4 digits are recorded, not the whole number");
   else bad("the log may store the full phone number the owner asked us to erase");
+  if (!/detail:[^\n]*\$\{phone\}/.test(del) && !/phone_full/.test(del)) ok("no line writes the whole number");
+  else bad("something in the erase writes the full number into a record");
 }
 
 // ── LIVE · seed a guest + a real sale, erase the guest, prove the sale survives ─────────────────
@@ -109,7 +153,9 @@ if (!LIVE) {
     orderId = o.data.id;
     ok(`seeded a throwaway guest (…${PHONE.slice(-4)}) with one paid ₹111 sale`);
 
-    // Erase exactly the way the handler does — the same three tables, the same scoping.
+    // Erase the three tables this fixture actually seeded, with the handler's own scoping. (The real
+    // handler walks the whole declared list; the point being proved here is narrower and does not
+    // need the rest — that the SALE is still standing afterwards.)
     await sb.from("customer_visits").delete().eq("restaurant_id", rid).eq("phone", PHONE);
     await sb.from("customer_devices").delete().eq("restaurant_id", rid).eq("phone", PHONE);
     const del = await sb.from("customers").delete().eq("restaurant_id", rid).eq("phone", PHONE).select("phone");

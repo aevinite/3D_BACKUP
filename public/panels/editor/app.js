@@ -1020,17 +1020,27 @@ function syncBulkBtn() {
 async function bulkSoldOut(makeSoldOut) {
   const ids = [...state.bulkSel];
   if (!ids.length) return;
-  let done = 0;
+  let done = 0, failed = 0, already = 0;
   for (const id of ids) {
     const dish = (state.data.items || []).find((d) => d.id === id);
     if (!dish) continue;
     const tags = Array.isArray(dish.tags) ? dish.tags.slice() : [];
     const has = tags.includes("sold-out");
-    if (makeSoldOut === has) continue; // already in the wanted state
+    if (makeSoldOut === has) { already++; continue; } // already in the wanted state
     if (makeSoldOut) tags.push("sold-out"); else tags.splice(tags.indexOf("sold-out"), 1);
-    try { await api("POST", "/items", { id, tags }); dish.tags = tags; done++; } catch (e) { /* skip one, keep going */ }
+    try { await api("POST", "/items", { id, tags }); dish.tags = tags; done++; } catch (e) { failed++; }
   }
-  toast(`${done} dish${done === 1 ? "" : "es"} marked ${makeSoldOut ? "sold-out" : "available"}`, "ok");
+  // SAY WHAT ACTUALLY HAPPENED. Every failure used to be swallowed and the toast still went out
+  // green — with all five refused it read "0 dishes marked sold-out" in the success colour, which
+  // is the shape of a tap that vanished. Same rule the khata collect-all and payOrdersWithMethod
+  // already follow: report the split, in the colour the worse half deserves. (T5, 2026-08-17)
+  const word = makeSoldOut ? "sold-out" : "available";
+  toast(failed
+    ? `${done} marked ${word} — ${failed} could NOT be saved. Try again.`
+    : done
+      ? `${done} dish${done === 1 ? "" : "es"} marked ${word}`
+      : `Nothing to change — ${already === 1 ? "that dish is" : "those dishes are"} already ${word}.`,
+  failed ? "err" : "ok");
   renderList();
 }
 // bulkDeleteDishes: delete every selected dish, with a single confirm + a bulk Undo.
@@ -1039,8 +1049,8 @@ async function bulkDeleteDishes() {
   if (!ids.length) return;
   if (!(await confirmDialog(`Delete ${ids.length} dish${ids.length === 1 ? "" : "es"}?`, "Delete"))) return;
   const snaps = (state.data.items || []).filter((d) => ids.includes(d.id)).map((d) => ({ ...d }));
-  let done = 0;
-  for (const id of ids) { try { await api("DELETE", "/items/" + encodeURIComponent(id)); done++; } catch (e) { /* keep going */ } }
+  let done = 0, failed = 0;
+  for (const id of ids) { try { await api("DELETE", "/items/" + encodeURIComponent(id)); done++; } catch (e) { failed++; } }
   state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn();
   await loadAll(); renderList(); renderEditor();
   const undoDelete = async () => {
@@ -1049,6 +1059,10 @@ async function bulkDeleteDishes() {
     toast(`Restored ${r}`, "ok");
     await loadAll(); renderList(); renderEditor();
   };
+  // A REFUSED DELETE IS NEWS (T5, 2026-08-17) — the loop above used to swallow every failure, so
+  // "Deleted 5 dishes" could appear over 5 dishes that are all still on the menu. The undo bar is
+  // still offered for whatever DID go, because that part is real.
+  if (failed) toast(`Deleted ${done} — ${failed} could NOT be deleted. They are still on the menu.`, "err", undefined, 9000);
   if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 6, onUndo: undoDelete });
   else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
@@ -2471,7 +2485,8 @@ function formGeneral(s) {
       : `<div class="hint">Auto-print isn't enabled for this restaurant yet — ask your admin to turn it on.</div>`}
     <button type="button" class="btn" id="kotPreviewBtn" style="margin-top:14px">🖨 Preview a sample KOT</button>
     <p style="color:var(--muted);font-size:12px;margin:8px 0 0">Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
-  </div>`;
+  </div>
+`;
   }
   if (sec === "sessions") {
     return `
@@ -2894,6 +2909,20 @@ function groupOrdersBySession(orders) {
   });
   return [...map.values()];
 }
+// The orders behind ONE bill card, from the key its buttons carry: a "solo:" key is a single
+// order (a walk-in / banquet row with no session), anything else is a session id.
+//
+// TOP LEVEL ON PURPOSE (T5 sweep, 2026-08-17). This lived as a `const` inside renderEditor's
+// Bills branch, so it existed only while that branch was running — and printIssuingInvoice(),
+// 11,000 lines below, calls it too. Pressing 🖨 Print bill on a LIVE bill card therefore:
+// issued a real tax-invoice number, then threw "ordersInGroup is not defined" inside a click
+// handler nobody awaits — so nothing printed, no toast appeared, and the second press was met
+// with "This invoice was voided. Re-issuing assigns a NEW number — why?" and burned another
+// number off the restaurant's series. Proved live on the backup floor, not reasoned.
+// Never move it back inside a function.
+const ordersInGroup = (key) => ((key || "").startsWith("solo:")
+  ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
+  : (state.data.orders || []).filter((o) => o.session_id === key));
 
 // Pending waiter calls shown at the top of the Orders tab.
 function callsHtml() {
@@ -4981,11 +5010,29 @@ function printBill(t, sess, os, opts = {}) {
   const tnum = (t || "").toString().trim();
   const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
 
+  // A SECOND COPY SAYS SO (mig 333, owner 2026-08-17). The kitchen ticket has branded reprints
+  // since 2026-08-04; the bill did not, so one sale could be represented by two identical sheets.
+  // The answer comes off the BILL, never off this device — the manager prints at the till and a
+  // waiter may reprint the same bill from the tablet, where a local "already printed" flag would
+  // be wrong and would hand out an unbranded duplicate.
+  const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
     money: billMath(os), session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
+    reprint: printedBefore,
   }));
+  // Tell the server this bill has now been on paper, so the NEXT copy — from any device — is
+  // branded. Idempotent server-side, so calling it after every print is free and a retry is safe;
+  // fire-and-forget because a failed stamp must never stop a guest getting their bill.
+  const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  if (printedSid && !printedBefore) {
+    try {
+      api("POST", `/sessions/${printedSid}/bill-printed`)
+        .then(() => { if (sess) sess.bill_printed_at = new Date().toISOString(); })
+        .catch(() => {});
+    } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
+  }
 
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands the
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
@@ -5722,10 +5769,9 @@ function renderEditor() {
       };
     });
     // Merged session-card actions act on EVERY order in the group (one bill).
-    // The group is the orders sharing a session_id (or a single "solo:" order).
-    const ordersInGroup = (key) => (key || "").startsWith("solo:")
-      ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
-      : (state.data.orders || []).filter((o) => o.session_id === key);
+    // The group is the orders sharing a session_id (or a single "solo:" order) — resolved by the
+    // top-level ordersInGroup() next to groupOrdersBySession(), which printIssuingInvoice() also
+    // reads. It used to be redeclared here as a local, which is what made that call throw.
     ed.querySelectorAll("[data-sess-accept]").forEach((btn) => {
       btn.onclick = async () => { for (const o of ordersInGroup(btn.dataset.sessAccept).filter((x) => x.status === "received")) await acceptOrder(o.id); };
     });
@@ -6093,7 +6139,6 @@ function bindEditor() {
 
   // Kitchen settings: "Preview a sample KOT" test-print button.
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
-
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
   // boxes it depends on — the mode AND the price typed above it. A stale example is worse
   // than none: it would show ₹294 while the box says ₹500 and quietly teach the wrong rule.
@@ -7137,6 +7182,21 @@ const AUDIT_KIND = (function () {
     order_restored: ["\u267B\uFE0F", "Bill put back"],
   };
 })();
+// WHY this row was removed, in the words a person chose (the preset's own label + anything they
+// typed), or an honest "no reason recorded" for a row from before the reason sheet existed.
+//
+// TOP LEVEL ON PURPOSE (T5 sweep, 2026-08-17). It lived as a `const` inside auditHtml(), and
+// openRemovalDetail() — the card the owner asked for on 2026-08-04, "click and view the full …
+// which KOT he deleted and what was the item, with time, day, everything" — calls it too. So
+// clicking ANY row in Audit → Removals did nothing at all: the card is built as one template
+// literal, the call threw "reasonTxt is not defined" before it was finished, and the throw landed
+// in a click handler nobody awaits. Measured on the backup floor: 200 rows on screen, every one
+// of them dead. Same shape as the ordersInGroup bug found the same day; verify:panel-scope now
+// refuses either of them.
+const auditReasonTxt = (r) => {
+  const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
+  return [preset ? preset[1] : r.reason_code, r.reason_note].filter(Boolean).join(" — ") || "no reason recorded";
+};
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
   catch (e) { state.audit = { error: e.message }; }
@@ -7186,10 +7246,6 @@ function auditHtml() {
         (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
   const shownMoney = AS ? AS.sumAmount(list) : 0;
   const when = (t) => { const d = new Date(t); return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
-  const reasonTxt = (r) => {
-    const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
-    return [preset ? preset[1] : r.reason_code, r.reason_note].filter(Boolean).join(" — ") || "no reason recorded";
-  };
   return `<div class="ed-head"><h2>Audit · what was removed <span class="sub">· ${rows.length}</span></h2>
       <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
     <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
@@ -7234,7 +7290,7 @@ function auditHtml() {
         <div class="au-main" data-au-open="${esc(r.id)}" role="button" tabindex="0" title="See exactly what was removed">
           <span class="au-ico" title="${esc(label)}">${ico}</span>
           <div class="au-mid"><b>${esc(label)}</b><span class="au-bits">${bits || "—"}</span>
-            <span class="au-reason">${esc(reasonTxt(r))}</span>${tagHtml}</div>
+            <span class="au-reason">${esc(auditReasonTxt(r))}</span>${tagHtml}</div>
           <div class="au-who"><b>${esc(r.actor || "—")}</b><small>${esc(r.actor_role || "")}</small><small>${esc(when(r.at))}</small></div>
         </div>${askHtml}
       </div>`;
@@ -7374,7 +7430,7 @@ async function openRemovalDetail(id) {
       ${row("What", esc(label))}
       ${row("When", whenLong(d.at))}
       ${row("Who", esc(d.actor || "—") + (d.actor_role ? ` · ${esc(d.actor_role)}` : ""))}
-      ${row("Reason", esc(reasonTxt(d)))}
+      ${row("Reason", esc(auditReasonTxt(d)))}
       ${d.amount != null ? row("Value removed", inr(parseFloat(d.amount) || 0)) : ""}
       <div class="au-d-head">Which ticket / bill</div>
       ${row("Kitchen ticket", (w && w.kot_no != null ? w.kot_no : d.kot_no) != null ? "KOT #" + esc((w && w.kot_no != null ? w.kot_no : d.kot_no)) : "—")}
@@ -8414,14 +8470,25 @@ function floorTileHtml(i) {
   // tile ("never make take order button small"). It only exists on a finished table, so on every
   // other tile the row is unchanged.
   const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-power-off" aria-hidden="true"></i></button>` : "")
-    // THREE FACES, ONE BUTTON, EXACTLY ONE SHOWN (T3 sweep, 2026-08-06). The stylesheet's container
-    // ladder picks between them by how wide the tile actually is: "Take order" while it fits, then
-    // the short "Order" (because 12-per-row on a 1280px laptop — the shipped default — leaves ~44px
-    // of text room, enough for a word but not that word), then the bare ＋ on a genuinely dense
-    // floor. Before this the middle rung didn't exist, so every laptop showed the ＋ and the owner's
-    // "never make take order button small" was only honoured on a 1920px monitor.
-    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span><span class="ft-take-s">Order</span></button>`)
+    // TWO FACES, ONE BUTTON, EXACTLY ONE SHOWN. The stylesheet's container ladder picks between them
+    // by how wide the tile actually is: "＋ Take order" while it genuinely fits, and the bare ＋ when
+    // it does not (a crowded tile, a dense floor, a finished table).
+    //
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO third, short "Order"
+    // face, and there must never be one again. The T3 sweep (2026-08-06) added one, this sweep
+    // briefly restored it after a later change had made it unreachable, and he removed it looking at
+    // the real tile: "instead of order is written that should be just a plus icon, nothing else, and
+    // it should stay like that" — plus, about the tile as a whole, "at the end of the day, UI should
+    // stay like this. I don't care if you increase the size of or maybe whatever you do."
+    // So: never add a word between the two faces, and never report the bare ＋ on a narrow tile as a
+    // bug. The size may change; the two faces may not.
+    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R29: there is no 🍽️ Serve-all on the
+    // tile. Offered as a way to make serving one tap instead of two ("tile → 🍽️ Serve all"), he said
+    // "we will not do any of that stuff". Serving stays two taps. It also protects this row, which he
+    // has ruled on twice (R4, and "never make take order button small"): a fifth control on an 89px
+    // tile could only take room from ＋ Take order. Do not add one.
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
     // on a green tile — the one control you look for while closing a table, camouflaged.
@@ -8943,7 +9010,7 @@ function floorHtml() {
   // sideways any more — owner, 2026-08-15: "there shouldn't be horizontal scroll anywhere" — so the
   // chip, its wrapper and syncFloorMore()'s measuring pass went with the scroll they described.)
   const gridBlock = gridHtml;
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${printStationStripHtml()}${planNote}${gridBlock}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -9036,6 +9103,15 @@ function patchFloorTiles(tables) {
   // sig and skip the redraw — leaving the screen on the patched state. Invalidate the sig so the
   // next full poll always redraws once (cheaper than re-stringifying the summary here).
   lastBoardSig = "";
+  // THE 🔔 IS PART OF THE FLOOR, SO IT HAS TO BE PATCHED WITH IT (T5 sweep, 2026-08-17).
+  // syncGuestBell() ran only from renderEditor(), and this path exists precisely to AVOID a full
+  // render — which is the path every realtime breadcrumb takes (a waiter call, a join request and
+  // a new order all name their table). Measured on the backup: a targeted refetch fired zero bell
+  // syncs while a full one fired one, so the count in the top bar sat still until the 60-second
+  // backstop came round. It reads nothing and fetches nothing — the rows are already in
+  // state.summary, which the lines above have just refreshed. Deferred the same way renderEditor
+  // defers it, so it never lands inside the paint it is describing.
+  setTimeout(syncGuestBell, 0);
   window.__lfhPerf.patches++;
   window.__lfhPerf.tilesPatched += patched;
   window.__lfhPerf.lastMs = performance.now() - _t0;
@@ -9238,6 +9314,9 @@ function bindFloor() {
     } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
   }));
   ed.querySelectorAll("[data-prhere]").forEach((b) => (b.onclick = () => printJobHere(b.dataset.prhere, b)));
+  // "Should this screen print the kitchen tickets?" — the print-station strip beside the printer-
+  // problem one (mig 336). Bound on the same pass so a repaint never leaves a dead button.
+  bindPrintStationStrip(ed);
   // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
   // and everything that lived in it are gone. A table opens as a popup, full stop.)
   // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
@@ -9876,7 +9955,23 @@ function tablePanelParts(t, host = "float") {
     const editToggle = allOut ? "" : (editing
       ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done editing</button>`
       : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`);
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}</div>`;
+    // THE HEADING COUNTS WHAT IS ON THE SCREEN (T5 sweep, 2026-08-17). It counted `os`, which
+    // includes CANCELLED tickets — and a cancelled ticket is deliberately drawn nowhere in this
+    // detail (its record lives in Bills and in Audit). Measured on the backup floor: table 1 held
+    // six voided tickets and the section read "Orders · 6" over an empty box, which reads as a
+    // screen that failed to load rather than a table with nothing on it. So the number is the
+    // number of tickets listed, and when there are none the voided ones are named in a sentence
+    // instead of being counted in silence.
+    const shownN = newOrders.length + liveOrders.length;
+    const voidedN = os.length - shownN;
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R30: this sentence is where it STOPS.
+    // Offered a next step for a table in this state — a line saying what to do, or a ⏻ that ends an
+    // empty party — he said "we will not do any of that stuff". State the truth and leave it: the
+    // bill is in the record, the table is usable, and no table ends itself (mig 254).
+    const voidNote = shownN === 0 && voidedN > 0
+      ? `<div class="sx-empty">Nothing on this table — ${voidedN} cancelled ticket${voidedN === 1 ? "" : "s"}, kept in Bills.</div>`
+      : "";
+    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${shownN}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}${voidNote}</div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
@@ -9903,7 +9998,15 @@ function tablePanelParts(t, host = "float") {
   // Split among guests = what's still DUE (exclude any order already paid), not the
   // whole historical total — matches the KOT-on split-settle path.
   const splitDue = billMath(os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total || mBill.total;
-  const splitBtn = os.length && splitBillOn() ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
+  // A CANCELLED TICKET IS NOT A BILL (T5 sweep, 2026-08-17). Every money control below asked
+  // `os.length`, which counts voided tickets too — so a table whose every ticket had been
+  // cancelled still offered 🍴 Split and 🖨 Print bill over a ₹0 total. Split is merely useless
+  // there; Print is not: it issues the tax invoice first, so it would draw the next number off
+  // the restaurant's series for a sale that never happened. That is the exact thing the BILL
+  // MODAL was fixed to stop on 2026-08-16 and that migration 331 refuses server-side — this
+  // screen was simply never given the same test, so the tap was offered and then refused.
+  const billableOs = os.filter((o) => o.status !== "cancelled");
+  const splitBtn = billableOs.length && splitBillOn() ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
   // Invoice-first billing (owner 2026-07-24): NO direct Print on a running tab — show
   // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
   // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
@@ -9918,7 +10021,7 @@ function tablePanelParts(t, host = "float") {
   // Both are offered on any table that has orders, cooking or not. The compliance rules are
   // untouched: an issued invoice still locks the bill (no discount until ↩ Reopen voids it, which
   // is recorded), and nothing here can erase a sale.
-  const printBtn = !os.length ? "" : (invoicedNow
+  const printBtn = !billableOs.length ? "" : (invoicedNow
     ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
     // ONE button (owner, 2026-08-05: "print means generate invoice and print ... once the bill is
     // printed, the invoice has been generated"). Print already issues-then-prints; a second
@@ -11925,6 +12028,9 @@ function kotLineHtml(r) { return LFH_BILLDOC.kotLineHtml(r); }
 function kotTicketHtml(o) { return LFH_BILLDOC.kotDocHtml(o); }
 
 // Print a ticket through a hidden iframe — no pop-up to allow, nothing left on screen.
+// Answers false when the print could not even be started (billdoc missing after a bad deploy, the
+// iframe blocked). The manager print station reports that to the server, which requeues the job —
+// so a swallowed failure is no longer a silently lost ticket. Existing callers ignore the value.
 function printTicketHtml(html) {
   try {
     const ifr = document.createElement("iframe");
@@ -11944,7 +12050,8 @@ function printTicketHtml(html) {
       try { w.focus(); w.print(); } catch (e) {}
       setTimeout(cleanup, 60000);
     }, 250);
-  } catch (e) { /* printing must NEVER break the panel */ }
+    return true;
+  } catch (e) { return false; /* printing must NEVER break the panel */ }
 }
 // Reprint ONE order's kitchen ticket, on THIS device.
 //
@@ -12109,6 +12216,146 @@ async function printJobHere(id, btn) {
     toast("Printed here ✓ — the kitchen job is closed.", "ok");
     await pollOrders();
   } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
+}
+
+// ── THIS SCREEN CAN BE THE PRINTER (owner, 2026-08-17) ──────────────────────────────────────────
+// "In the kitchen they can't keep a PC… if you minimize, or open another app on the same PC, the KOT
+// prints totally stop. What I want is auto-print in the manager panel — when you turn that on, the
+// ticket prints there instead of the kitchen."
+//
+// Since mig 335 a ticket is a ROW, so this screen can simply be a second claimant on the same queue;
+// the atomic claim means the kitchen screen and this one can both watch and a ticket still comes out
+// exactly once.
+//
+// TWO GATES, and both are needed:
+//
+//  1. THE ADMIN says whether a counter screen may print at all — /aevinite → the restaurant → 🖨 KOT
+//     printing → "Which screen prints" (mig 336: kitchen | counter | both). It is not a control in
+//     THIS panel: the Settings → Kitchen printing section is hidden from everyone here on purpose
+//     (owner, 2026-07-31 — *"there shouldn't be grayed out option also"*), which is exactly why the
+//     first version of this feature sat somewhere nobody could reach.
+//
+//  2. THIS DEVICE says yes, once, on the floor screen. Not optional and not a nicety: the manager
+//     panel is also opened on PHONES. A phone that claimed a ticket would "print" it into a dialog
+//     nobody looks at and report it done — a LOST ticket, caused by the feature meant to save it. So
+//     a device that has not answered never claims, and the honest default is no.
+const PRINT_HERE_KEY = "lfh_print_here";        // "on" | "off" — this device's answer, this browser
+const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v === "on" || v === "off" ? v : ""; };
+// What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
+// read, so the strip only ever asks a question the admin has actually opened.
+let printTargetSays = null;
+let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
+
+// The one-question strip, above the floor grid, in the same visual grammar as the printer-problem
+// strip that already lives there (mig 269) — a restaurant should not have to learn a second one.
+function printStationStripHtml() {
+  if (!printTargetSays || !printTargetSays.mayPrint) return "";
+  const ans = printHereAnswer();
+  if (ans === "off") return "";                       // answered no: never ask again on this device
+  if (ans === "on") {
+    const last = lastPrintedHere
+      ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
+      : (printTargetSays.target === "both"
+          ? "Waiting — it prints anything the kitchen hasn't within 30 seconds."
+          : "Waiting for the next order.");
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">This screen is printing the kitchen tickets<small>${last}</small></span>
+      <a class="btn" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Guide</a>
+      <button class="btn" data-printhere-set="off">Stop printing here</button>
+    </div></div>`;
+  }
+  return `<div class="prstrip"><div class="prstrip-row">
+    <span class="prstrip-ico">🖨</span>
+    <span class="prstrip-txt">Should <b>this screen</b> print the kitchen tickets?<small>${
+      printTargetSays.target === "both"
+        ? "Your admin has set the counter screen as the BACKUP printer — it prints anything the kitchen hasn't within 30 seconds. Say yes only on the computer the printer is attached to."
+        : "Your admin has set kitchen tickets to print on the counter screen. Say yes only on the computer the printer is attached to — never on a phone."
+    }</small></span>
+    <button class="btn primary" data-printhere-set="on">Yes, print here</button>
+    <button class="btn" data-printhere-set="off">No</button>
+  </div></div>`;
+}
+// Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
+// a yes prints anything already waiting straight away — so answering IS the test that it works.
+function bindPrintStationStrip(root) {
+  (root || document).querySelectorAll("[data-printhere-set]").forEach((b) => (b.onclick = () => {
+    const v = b.dataset.printhereSet === "on" ? "on" : "off";
+    lsSet(PRINT_HERE_KEY, v);
+    if (v === "on") { toast("This screen will print the kitchen tickets ✓", "ok"); managerPrintPass(); }
+    else toast("This screen will not print kitchen tickets.", "ok");
+    if (state.tab === "tables") renderEditor();   // repaint the strip in place (there is no renderTables)
+  }));
+}
+
+// One pass of the queue: what is waiting → claim it → print it → say what happened.
+//
+// Called on every ops breadcrumb (so a ticket prints the instant the order lands) and by a 20s
+// timer as the backstop. It deliberately does NOT check document.hidden: this screen being covered
+// by another window is exactly the situation the owner reported, and a print that does not happen is
+// reported failed and requeued rather than lost.
+let printPassBusy = false;
+async function managerPrintPass() {
+  if (printPassBusy) return;
+  // A device that has said NO never asks the server anything. A device that has not answered yet asks
+  // ONCE (so the strip can appear at all) and prints nothing until it is answered.
+  const ans = printHereAnswer();
+  if (ans === "off") return;
+  printPassBusy = true;
+  try {
+    const r = await api("GET", "/print-jobs/pending");
+    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen" };
+    const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target;
+    printTargetSays = says;
+    if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
+    if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet
+    const jobs = (r && r.jobs) || [];
+    if (!jobs.length) return;
+    // The CLAIM is a plain fetch, never the offline outbox: a claim replayed hours later would print
+    // a stale ticket behind everyone's back. A claim that fails simply waits for the next pass.
+    const cr = await fetch("/api/editor" + ridQ("/print-jobs/claim"), {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify({ ids: jobs.map((j) => j.id) }),
+    });
+    if (!cr.ok) return;
+    const won = new Set(((await cr.json().catch(() => ({}))).won) || []);
+    for (const j of jobs.filter((x) => won.has(x.id))) {
+      const o = j.order || {};
+      const rows = (j.items && j.items.length) ? j.items : (Array.isArray(o.items) ? o.items : []);
+      // A retry says so on the paper (`attempts > 0`) — see the same rule in the kitchen panel.
+      const okPrint = printTicketHtml(kotTicketHtml({
+        title: `KOT ${o.kot_no ?? "—"}`,
+        rname: (state.data.restaurant || {}).name || "Kitchen",
+        head: "KITCHEN TICKET",
+        kot: o.kot_no ?? "—",
+        tableLabel: tablePrintLabel(o.table_number),
+        when: LFH_BILLDOC.kotWhen(o.created_at),
+        lines: rows,
+        allergies: Array.isArray(o.allergies) ? o.allergies : [],
+        reprint: j.reprint !== false || (j.attempts || 0) > 0,
+      })) !== false;
+      // The done report DOES ride the outbox — it is idempotent, and losing it would let the
+      // two-minute reclaim print the same ticket again.
+      api("POST", `/print-jobs/${j.id}/done`, { ok: okPrint, error: okPrint ? undefined : "print call failed on the manager screen" }).catch(() => {});
+      if (okPrint) {
+        lastPrintedHere = { kot: o.kot_no ?? null, table: o.table_number != null ? tablePrintLabel(o.table_number) : null, at: new Date().toISOString() };
+        // Repaint the card if the person happens to be looking at it, so "is this thing working?"
+        // is answered on screen instead of by walking to the printer.
+        if (state.tab === "tables") renderEditor();   // the strip shows the ticket it just printed
+      } else {
+        // Tell the manager once a minute at most — the same discipline the kitchen panel uses.
+        notePrintTroubleHere();
+      }
+      await new Promise((res) => setTimeout(res, 400));   // serialized: a burst can't stack dialogs
+    }
+  } catch (e) { /* offline / busy — the next pass retries, and the job is still queued */ }
+  finally { printPassBusy = false; }
+}
+let lastPrintTroubleHereAt = 0;
+function notePrintTroubleHere() {
+  if (Date.now() - lastPrintTroubleHereAt < 60000) return;
+  lastPrintTroubleHereAt = Date.now();
+  toast("A kitchen ticket wouldn't print on this screen — check the printer.", "err");
 }
 
 // SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
@@ -12597,7 +12844,18 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // The pay box already holds the full bill, so clicking it must SELECT that figure — otherwise
   // "make it 800" on a ₹817 bill types 817800 and the manager has to clear it first.
   payInput.onfocus = () => payInput.select();
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { clearRefusal(); discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
+  // A CHIP IS A TYPED FIGURE WITH ONE TAP, SO IT OBEYS THE SAME CEILING (T5 sweep, 2026-08-17).
+  // The two boxes clamp to maxDisc and say why; the chips set the raw percentage and said
+  // nothing — so with a manager capped at, say, 10%, tapping "25%" showed ₹250 off and a "They
+  // pay" figure the server was always going to refuse. Measured with a 10% cap: typing 250 gave
+  // "Most you can take off this bill is ₹100 — that is your 10% limit", the 25% chip gave ₹250
+  // and no message at all. Refusing at the last tap is the failure this modal's own cap exists
+  // to remove, so the chip now goes through the same clamp and the same sentence.
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => {
+    const want = round2((base * Number(c.dataset.pct)) / 100);
+    if (want > maxDisc + 0.004) refuse(capLine()); else clearRefusal();
+    discAmount = clamp(want, 0, maxDisc); setBlank(false); paint();
+  }));
   paint();
 
   const close = () => wrap.remove();
@@ -14406,6 +14664,10 @@ function startOrderWatch() {
         // order moved — and LFH_INV.live() self-guards on "tab actually visible / no popup open /
         // not backgrounded" and coalesces a rush, so an idle floor pays nothing. (T13, 2026-08-05)
         if (state.tab === "inventory" && window.LFH_INV && window.LFH_INV.live) window.LFH_INV.live();
+        // Is THIS screen the printer? Then an ops breadcrumb is also "a ticket may be waiting" — the
+        // same event the kitchen screen prints on (mig 335 deliberately gives an auto job NO
+        // breadcrumb of its own; it rides the order's). A no-op unless the device switch is on.
+        managerPrintPass();
       },
       // `menu` carries dish/category/filter/settings edits AND — since mig 299 — a change to this
       // restaurant's permissions. So re-read who we are alongside the menu: refreshWhoami() is one
@@ -14416,6 +14678,11 @@ function startOrderWatch() {
       menu: () => { refreshWhoami(); if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
     setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 60000); // backup sync; skip on a hidden/backgrounded tab (realtime refetches on wake) so an idle tab stops costing egress (B18)
+    // The print station's own backstop, and it runs even while the tab is HIDDEN — being covered by
+    // another window is precisely the case this feature exists for. It is a tiny scoped read and it
+    // returns immediately unless this device is switched on to print.
+    setInterval(() => { managerPrintPass(); }, 20000);
+    managerPrintPass();   // …and once on boot, so a ticket queued while this screen was shut prints now
     // CATCH UP WHILE THE SOCKET IS DOWN BUT READS STILL WORK (sweep 2026-08-04).
     // The 60s timer above was the ONLY backstop for a socket that is connected-but-dead — a
     // blocked websocket (restaurant wifi, a proxy) or a drop the browser hasn't noticed. So a
@@ -14526,7 +14793,10 @@ function syncNavRail() {
     const word = open ? "Collapse menu" : "Expand menu";
     btn.setAttribute("aria-label", word);
     btn.setAttribute("title", word);
-    const lbl = btn.querySelector(".tab-lbl"); if (lbl) lbl.textContent = "Collapse";
+    // The word has to follow the state, not be fixed: hovering a COLLAPSED rail now shows every
+    // label (see "HOVER TO PEEK" in style.css), and this row read "Collapse" while sitting in a
+    // rail that was already collapsed — the one button whose name said the opposite of its job.
+    const lbl = btn.querySelector(".tab-lbl"); if (lbl) lbl.textContent = open ? "Collapse" : "Keep open";
     const ico = btn.querySelector(".tab-ico"); if (ico) ico.textContent = open ? "«" : "»";
     if (!btn.__railWired) {
       btn.__railWired = true;
@@ -16025,13 +16295,22 @@ function applyHierarchyView() {
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
   }
-  // A real manager who raced the whoami hide and parked on an admin-only settings section
-  // (billing/kitchen/dining sessions) is bounced back to General so they never sit on cards
-  // whose sidebar row is now hidden. One-shot: after the hop the condition self-clears.
-  // (No longer "!higher": those rows are hidden for EVERYONE in this panel now, so an admin
-  // parked on one would be looking at a section with no way back to it.)
-  if (state.tab === "general" && (state.settingsSection === "billing" || state.settingsSection === "kitchen" || state.settingsSection === "sessions")) {
-    state.settingsSection = "general";
+  // Anyone parked on an ADMIN-OWNED settings section (billing / KOT printing / dining sessions) is
+  // bounced off it, because its sidebar row is hidden for EVERYONE in this panel — owner and admin
+  // included. That is a decision, not an oversight (owner, 2026-07-31, looking at the tinted rows:
+  // *"there shouldn't be grayed out option also"*): nobody can ever grant them to a manager, so the
+  // rows are gone and the three sections are edited in the admin console instead
+  // (components/admin/RestaurantSettings.tsx). Do NOT "fix" this by making the rows visible again.
+  //
+  // ONE REAL BUG FIXED HERE, 2026-08-18: it hopped to `"general"`, an id that NO LONGER EXISTS (the
+  // General section was removed on 2026-08-01). formGeneral() has no branch for it, so it fell
+  // through to its default arm and drew the two cards that section used to hold — "Menu maintenance"
+  // and "Bubble effect" — controls deliberately moved to Access & permissions. So clicking a row
+  // that raced the hide showed you the DELETED General page, on the live site. It now lands on the
+  // first section this viewer actually has.
+  const ADMIN_ONLY_SETTINGS_SECS = ["billing", "kitchen", "sessions"];
+  if (state.tab === "general" && ADMIN_ONLY_SETTINGS_SECS.includes(state.settingsSection)) {
+    state.settingsSection = (settingsSections().find((x) => !ADMIN_ONLY_SETTINGS_SECS.includes(x.id)) || { id: "tables" }).id;
     renderList();
     renderEditor();
   }

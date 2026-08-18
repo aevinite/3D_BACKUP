@@ -6,9 +6,9 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=b82e85ba">
+  <link rel="stylesheet" href="style.css?v=d55215e3">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
-  <script src="/panels/theme.js?v=e909d1de"></script>
+  <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
 <body>
   <!-- MINIMAL top bar (owner, 2026-08-03 — "minimize the top so the tables get the screen"):
@@ -66,12 +66,12 @@
       </div>
     </div>
   </div>
-  <script src="/panels/maint.js?v=1b283f26"></script>
-  <script src="/panels/realtime.js?v=3a9eadca"></script>
+  <script src="/panels/maint.js?v=d47de242"></script>
+  <script src="/panels/realtime.js?v=6b2c32a5"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=3498e0da"></script>
+  <script src="/panels/outbox.js?v=98da97e5"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=fdfc0881"></script>
+  <script src="/panels/connbadge.js?v=6fde35d1"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
@@ -86,25 +86,25 @@
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
        After backstack.js, because its sheet registers a back layer. -->
-  <script src="/panels/guestbell.js?v=7e59d876"></script>
+  <script src="/panels/guestbell.js?v=3826b621"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
-  <script src="/panels/billcustomer.js?v=1a505d43"></script>
+  <script src="/panels/billcustomer.js?v=eb941f4b"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=f93ea3ae"></script>
-  <script src="/panels/issue-raise.js?v=99268ea5"></script>
+  <script src="/panels/errlog.js?v=4ba49df8"></script>
+  <script src="/panels/issue-raise.js?v=c383fa38"></script>
   <!-- My profile & pay (mig 220) — shared with the manager panel -->
-  <script src="/panels/myprofile.js?v=e61d5127"></script>
+  <script src="/panels/myprofile.js?v=b6bc2e82"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Ready/Settle mis-tap. -->
-  <script src="/panels/undobar.js?v=26fc85cb"></script>
+  <script src="/panels/undobar.js?v=dd4b67a0"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=02758e4c" data-fit=".ordtotal,.ctotal"></script>
+  <script src="/panels/fitnums.js?v=3bf875b3" data-fit=".ordtotal,.ctotal"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). This panel does
        not print, but it reads the shared money rules from here — discPct(), the one definition of
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
-  <script src="/panels/billdoc.js?v=a1759a47"></script>
-  <script src="app.js?v=3f12ff9e"></script>
+  <script src="/panels/billdoc.js?v=49bc4266"></script>
+  <script src="app.js?v=d4ce49f0"></script>
 </body>
 </html>

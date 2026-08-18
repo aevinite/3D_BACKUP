@@ -137,6 +137,31 @@
 
   var badge = null, barsEl = null, msEl = null, nEl = null, pop = null, backOff = null;
   var outbox = { queued: [], failed: [], count: 0 };
+  // A finger is DOWN somewhere inside the open popover — see popSig()/renderPop().
+  var popHeld = false;
+  // What the popover currently says. Compared before every rebuild.
+  var popPrinted = "";
+
+  // SAY WHAT IS ACTUALLY HAPPENING TO THE WAITING WORK (T9 sweep, 2026-08-17).
+  //
+  // This panel said "Sending…" about every waiting change whenever the browser reported it was
+  // online — which is not the same question. The queue backs off between rounds, out to two
+  // minutes (outbox.js scheduleRetry), so for most of a wait NOTHING is being sent. outbox.js
+  // publishes `syncing` for exactly this reason and says so in as many words: "the bar must not
+  // say 'Sending…' purely because the count is above zero." The offline bar was fixed to read it;
+  // this panel was still guessing, so the two of them described the same moment differently.
+  //
+  // Now it reads the same flag, and when nothing is in flight it says when the next go is due
+  // instead of pretending one is under way. Cry-wolf is the fault this surface has already been
+  // repaired for once.
+  function syncState() {
+    if (navigator.onLine === false) return { word: "Waiting", head: "Saved on this device", sending: false };
+    if (outbox.syncing) return { word: "Sending…", head: "Sending…", sending: true };
+    var due = 0;
+    try { due = (window.LFH_OUTBOX && window.LFH_OUTBOX.nextTryAt && window.LFH_OUTBOX.nextTryAt()) || 0; } catch (e) {}
+    var secs = due ? Math.max(0, Math.round((due - Date.now()) / 1000)) : 0;
+    return { word: "Waiting", head: secs > 1 ? "Waiting to send · next try in " + secs + "s" : "Waiting to send", sending: false };
+  }
 
   function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
   function fmtAgo(ts) { var m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? "just now" : m < 60 ? m + "m ago" : Math.floor(m / 60) + "h ago"; }
@@ -213,7 +238,33 @@
     if (pop) { renderPop(v); clampPop(); } // keep the open popover live — and still on-screen
   }
 
+  // WHAT THE POPOVER WOULD SAY, as one short string. Rebuilding only when this changes is what
+  // keeps the Retry / Dismiss buttons alive under a finger — see renderPop().
+  function popSig(v) {
+    var s = syncState();
+    return [v.level, v.label, v.ms, v.bars, s.head,
+      outbox.failed.map(function (it) { return it.id + ":" + (it.error || "") + ":" + (it.retryable === false ? "0" : "1"); }).join("|"),
+      outbox.queued.map(function (it) { return it.id; }).join("|"),
+      (window.LFH_RT && window.LFH_RT.getLatencyHistory ? window.LFH_RT.getLatencyHistory().length : 0),
+    ].join("~");
+  }
+
+  // A RETRY TAP MUST NOT BE SWALLOWED BY A REPAINT (T9 sweep, 2026-08-17).
+  //
+  // render() runs on every latency breadcrumb, on every outbox change and on an 8-second timer,
+  // and it used to blow the whole popover away and build it again — `pop.innerHTML = ""`. A
+  // browser only fires `click` when the press and the release land on the SAME element, so a
+  // breadcrumb arriving between a manager's finger going down on Retry and coming back up meant
+  // the button had been replaced and the tap simply did nothing. That is a dropped tap, which
+  // this codebase does not allow, and on a busy floor breadcrumbs arrive several times a second.
+  //
+  // Two guards, both cheap: never rebuild while a finger is down inside the panel, and otherwise
+  // only rebuild when what it would SAY has actually changed. A repaint that changes nothing was
+  // never worth a single frame, let alone a lost tap.
   function renderPop(v) {
+    var sig = popSig(v);
+    if (popHeld || sig === popPrinted) return;
+    popPrinted = sig;
     pop.innerHTML = "";
     // header
     var hd = el("span", "lfh-conn-pop-hd");
@@ -260,9 +311,10 @@
     }
     // waiting-to-sync
     var off = navigator.onLine === false;
+    var st = syncState();
     if (outbox.failed.length || outbox.queued.length) {
       var sync = el("span", "lfh-conn-pop-sync");
-      sync.appendChild(el("span", "lfh-conn-pop-sub", outbox.failed.length ? "Couldn't send" : off ? "Saved on this device" : "Sending…"));
+      sync.appendChild(el("span", "lfh-conn-pop-sub", outbox.failed.length ? "Couldn't send" : st.head));
       outbox.failed.forEach(function (it) {
         var row = el("span", "lfh-conn-row");
         var t = el("span", "lfh-conn-row-t");
@@ -293,9 +345,9 @@
         t.appendChild(el("b", null, it.label || "Action"));
         t.appendChild(el("small", null, fmtAgo(it.at)));
         row.appendChild(t);
-        var pill = el("span", "lfh-conn-pill", off ? "Waiting" : "Sending…");
-        pill.style.background = off ? "rgba(239,68,68,.18)" : "rgba(34,197,94,.18)";
-        pill.style.color = off ? "#fca5a5" : "#86efac";
+        var pill = el("span", "lfh-conn-pill", st.word);
+        pill.style.background = st.sending ? "rgba(34,197,94,.18)" : "rgba(239,68,68,.18)";
+        pill.style.color = st.sending ? "#86efac" : "#fca5a5";
         row.appendChild(pill);
         sync.appendChild(row);
       });
@@ -326,11 +378,20 @@
     pop.style.transform = "translateX(" + shift + ")";  // holds once the animation ends
   }
 
-  var onDocClick = null;
+  var onDocClick = null, onPointerUp = null;
   function openPop() {
     if (pop) return;
     pop = el("span", "lfh-conn-pop"); pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "Connection details");
     pop.addEventListener("click", function (e) { e.stopPropagation(); });
+    // A finger is on this panel → hold every repaint until it lifts, so the button under it is
+    // still the same node when the release arrives. See renderPop().
+    pop.addEventListener("pointerdown", function () { popHeld = true; });
+    onPointerUp = function () { if (!popHeld) return; popHeld = false; if (pop) { renderPop(computeView()); clampPop(); } };
+    pop.addEventListener("pointercancel", onPointerUp);
+    // On WINDOW, not on the panel: a finger that slides off the button before lifting still has
+    // to release the hold, or the panel would freeze on whatever it last said.
+    window.addEventListener("pointerup", onPointerUp);
+    popPrinted = "";
     badge.appendChild(pop);
     renderPop(computeView());
     clampPop();
@@ -344,7 +405,9 @@
   function closePop() {
     if (!pop) return;
     pop.remove(); pop = null;
+    popHeld = false; popPrinted = "";
     badge.setAttribute("aria-expanded", "false");
+    if (onPointerUp) { window.removeEventListener("pointerup", onPointerUp); onPointerUp = null; }
     if (onDocClick) { document.removeEventListener("click", onDocClick); onDocClick = null; }
     if (backOff) { try { backOff(); } catch (e) {} backOff = null; }
   }
@@ -359,7 +422,12 @@
     if (window.LFH_OUTBOX && window.LFH_OUTBOX.onChange) {
       window.LFH_OUTBOX.onChange(function (snap) { outbox = snap; render(); });
     }
-    setInterval(render, 8000); // refresh "ago" + latency freshness (no network)
+    // Refresh "ago" + latency freshness (no network). NOT while the tab is hidden: a kitchen
+    // display left on all day was rebuilding this pill — a layout read and a handful of new
+    // nodes — every eight seconds behind a screen nobody was looking at. Coming back repaints
+    // once, which is the only moment the numbers matter.
+    setInterval(function () { if (!document.hidden) render(); }, 8000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) render(); });
   }
 
   if (document.readyState !== "loading") boot();

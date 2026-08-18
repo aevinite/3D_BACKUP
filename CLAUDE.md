@@ -170,8 +170,9 @@ update the detail doc's section in the same commit.
 
 - **Feature switches (mig 035):** `settings.features` + `useFeatures()`; four backend-only flags
   (`verification`, `payments`, `aggregators`, `gst_invoice`) stay invisible in every UI.
-- **KOT/bills (migs 036–038):** daily `kot_no`/`bill_no`; discount stored apart from totals.
-  Which of the THREE numbers is which, and why bill/invoice series have honest gaps: `docs/NUMBERING.md`.
+- **KOT/bills (migs 036–038):** daily `kot_no`/`bill_no`; discount apart from totals. Which of the
+  THREE numbers is which, and why series have honest gaps: `docs/NUMBERING.md`. **Auto-print = a QUEUE
+  (mig 335)**, never a tab noticing; no `document.hidden` refusal: `docs/KITCHEN-PRINT-SETUP.md`.
   **New Postgres functions are PUBLIC-executable by default** — every staff-only fn needs
   REVOKE/GRANT (mig 038/267 lesson); `verify:grants` guards it.
 - **3D loading:** `lib/modelLoader.ts` singleton on `globalThis` — it is what makes "no re-fetch
@@ -282,18 +283,13 @@ update the detail doc's section in the same commit.
   `claude mcp` output to null; masked reads only. Treat a pasted key as compromised.
 - MCP servers load from `~/.claude.json` / root `.mcp.json`, NOT `.claude/settings.json`;
   config changes need a full restart.
-- **Light mode: which surfaces even HAVE it.** The GUEST menu has a toggle (`lfh_theme`, tenant
-  menus default DARK). The manager / kitchen / tablet panels have one (`lfh_panel_theme`, default
-  LIGHT) and **a staff member's choice is remembered when they reopen the panel** — verified on
-  all three, 2026-08-05. The **owner console DOES have light mode** — its own ☀/🌙 button in the
-  top bar (`OwnerShell.tsx`), stored as **`aevidine_skin`** (localStorage + cookie), and it
-  survives a reload. `lfh_theme` is the GUEST key and indeed does nothing on `/owner`, which is
-  what made an earlier note here say "dark-only, no toggle" — measured wrong, corrected
-  2026-08-05: tapping that button turns the cards white, the text dark, and pushes the same skin
-  into the embedded panel by postMessage (`useOwnerSkin` exists precisely because that drifted).
-  DARK IS THE DEFAULT and the owner asked to keep it that way — that part stands. So light-skin
-  checks on `/owner` are real and worth writing; drive the **`aevidine_skin`** toggle, never
-  `lfh_theme`.
+- **Light mode: which surfaces even HAVE it.** GUEST menu: a toggle (`lfh_theme`, tenants default
+  DARK). Manager/kitchen/tablet panels: `lfh_panel_theme`, default LIGHT, **remembered per staff
+  member**. The **owner console DOES have light mode** — its own ☀/🌙 in `OwnerShell.tsx`, stored as
+  **`aevidine_skin`** (localStorage + cookie), survives a reload, and pushed into the embed by
+  postMessage (`useOwnerSkin`). DARK stays the default. So light-skin checks on `/owner` are real:
+  drive **`aevidine_skin`**, never `lfh_theme` (that key does nothing there — the mistake that made
+  an old note here claim "dark-only"; full story: `docs/CLAUDE-DETAIL.md`).
 - Staff can run a weeks-old panel: `?v=` is a content hash — `verify:panel-cache`.
 
 ## Definition of done

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
 import { useOwnerSkin, useEmbedFrame } from "./useOwnerSkin";
 
-type Summary = { stockValue: number; itemCount: number; lowCount: number; negativeCount: number; purchases: number; waste: number; expenses: number };
+type Summary = { stockValue: number; itemCount: number; lowCount: number; negativeCount: number; purchases: number; waste: number; expenses: number; purchasesCount?: number; wasteCount?: number };
 type ExpenseRow = { id: string; category: string; title: string; amount: number; expense_date: string; note: string | null; photo_url: string | null; created_by: string | null; voided_at: string | null; void_reason: string | null };
 type Payload = {
   month: string; rid: string; summary: Summary;
@@ -20,10 +20,75 @@ type Payload = {
   purchases: { id: string; kind: string; vendor_name: string | null; bill_no: string | null; bill_date: string; total: number; created_by: string | null; voided_at: string | null }[];
   wasteByReason: Record<string, number>;
   usage?: { usedByOrders: number; corrections: number; top: { name: string; consumedVal: number; adjustedVal: number }[] };
+  caps?: { expenses: number; purchases: number; low: number; negative: number };
   cachedAt?: string;
+  partial?: string[];
+};
+// ── ONE BOX PER RESTAURANT (owner, 2026-08-18) ───────────────────────────────────────────────────
+// "when there are two or more restaurant, it should show boxes of restaurants — in which restaurant
+// how much thing has been going on." Every figure in a box is the SAME `lfh_inv_report_summary` the
+// single-restaurant screen below uses, over the same month window, computed in one cached backend
+// pass (/api/owner/inventory?estate=1) — so a box and the screen you reach by tapping it can never
+// disagree, and a normal open costs one row read.
+type EstateRow = {
+  rid: string; name: string; unread?: boolean;
+  stockValue?: number; itemCount?: number; lowCount?: number; negativeCount?: number;
+  purchases?: number; waste?: number; expenses?: number;
+};
+type Estate = {
+  month: string; estate: EstateRow[]; offCount?: number;
+  totals: { stockValue: number; purchases: number; waste: number; expenses: number; lowCount: number; negativeCount: number; itemCount: number };
+  countedOf?: { counted: number; of: number };
+  cachedAt?: string; partial?: string[];
 };
 
 const inr = (n: number) => "₹" + (Math.round(Number(n || 0) * 100) / 100).toLocaleString("en-IN");
+// ── THE INSIDE OF ONE RESTAURANT (owner, 2026-08-18) ─────────────────────────────────────────────
+// "make a good UI also for the owner of inventory management and all that. and all correct UI. Like,
+//  every number should match and all that stuff."
+// Three things were wrong with this screen and all three are about trust, not decoration:
+//   · it printed RAW DATABASE DATES ("2026-08-18") in the middle of a panel where every other date
+//     is written the way a person says it;
+//   · every card was headed with a COUNT and no money, so nothing on the screen tied a card back to
+//     the tile above it — you had to add the rows up yourself to check they agreed;
+//   · the lists are capped reads (300 expenses, 100 bills) and NOTHING said so, so a busy month
+//     silently showed you part of itself.
+// Each card now carries its own total, that total is the one from the database — not a sum of the
+// rows it happens to be holding — and where the two differ the card says which is which.
+const IST = "Asia/Kolkata";
+const shortDate = (d?: string | null) => {
+  if (!d) return "";
+  const t = new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00+05:30` : d);
+  return isNaN(t.getTime()) ? String(d) : t.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
+};
+// One heading shape for every card: what it is, and what it comes to. `of` is the TRUE figure from
+// the database; `rows` is how many the card is holding — when they disagree the card says so rather
+// than letting a capped list read as the whole month.
+function CardHead({ icon, title, total, note }: { icon: string; title: string; total?: number; note?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap", marginBottom: 10 }}>
+      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>{icon} {title}</h3>
+      {total !== undefined && (
+        <b style={{ marginLeft: "auto", fontSize: 17, fontVariantNumeric: "tabular-nums" }}>{inr(total)}</b>
+      )}
+      {note && <div className="adm-muted" style={{ fontSize: 11.5, width: "100%" }}>{note}</div>}
+    </div>
+  );
+}
+// A row that shows its share of the whole, so "which of these is the big one" is answerable at a
+// glance instead of by reading seven numbers. Falls back to no bar when the total is zero.
+function ShareRow({ label, value, of, tone }: { label: string; value: number; of: number; tone?: string }) {
+  const pct = of > 0 ? Math.max(2, Math.round((value / of) * 100)) : 0;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "2px 10px", padding: "6px 0" }}>
+      <span style={{ fontSize: 13.5 }}>{label}</span>
+      <b style={{ fontSize: 13.5, fontVariantNumeric: "tabular-nums" }}>{inr(value)}</b>
+      <span style={{ gridColumn: "1 / -1", height: 5, borderRadius: 4, background: "var(--border-c,#e5e7eb)", overflow: "hidden" }}>
+        <span style={{ display: "block", height: "100%", width: `${pct}%`, background: tone || "var(--accent, #10b981)" }} />
+      </span>
+    </div>
+  );
+}
 const EXP_LABELS: Record<string, string> = { breakage: "🔨 Breakage", repair: "🛠️ Repair", utilities: "💡 Utilities", cleaning: "🧹 Cleaning", supplies: "📦 Supplies", rent: "🏠 Rent", transport: "🛵 Transport", misc: "🧾 Other" };
 const WASTE_LABELS: Record<string, string> = { spoiled: "Spoiled", burnt: "Burnt", spilled: "Spilled", expired: "Expired", staff_meal: "Staff meals", complimentary: "On the house", other: "Other" };
 const agoLabel = (iso?: string) => {
@@ -37,6 +102,12 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
 }) {
   const [rid, setRid] = useState(initial);
   const [view, setView] = useState<"overview" | "manage">("overview");
+  // A one-restaurant owner never sees the estate screen — there is nothing to compare. With two or
+  // more, the estate IS the front door, and one tap goes into a restaurant.
+  const multi = restaurants.length > 1;
+  const [where, setWhere] = useState<"estate" | "one">(multi ? "estate" : "one");
+  const [est, setEst] = useState<Estate | null>(null);
+  const [estErr, setEstErr] = useState<string | null>(null);
   // Live cockpit skin → the embedded Manage panel, by message (never via src: that reloads it).
   const liveSkin = useOwnerSkin(skin);
   // Mounted IMPERATIVELY (useEmbedFrame) so the frame adds NO browser-history entry — a JSX
@@ -59,7 +130,26 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
     setBusy(false);
   }, [rid, month]);
 
-  useEffect(() => { if (view === "overview") load(); }, [load, view]);
+  // One estate read at a time. React's dev strict mode runs an effect twice, a fast month-tap can
+  // fire two, and a reconnect can fire a third — and this is exactly the screen he asked not to
+  // "load every time, so that egress can be saved". A forced Refresh always goes, because that is
+  // the button whose whole job is to go.
+  const estInFlight = useRef(false);
+  const loadEstate = useCallback(async (force?: boolean) => {
+    if (!multi) return;
+    if (estInFlight.current && !force) return;
+    estInFlight.current = true;
+    setBusy(true);
+    try {
+      const j = await (await fetch(`/api/owner/inventory?estate=1&month=${month}${force ? "&refresh=1" : ""}${asSuffix()}`, { cache: "no-store" })).json();
+      if (j.error) throw new Error(j.error);
+      setEst(j); setEstErr(null);
+    } catch (e) { setEstErr(e instanceof Error ? e.message : String(e)); }
+    finally { estInFlight.current = false; setBusy(false); }
+  }, [month, multi]);
+
+  useEffect(() => { if (view === "overview" && where === "one") load(); }, [load, view, where]);
+  useEffect(() => { if (view === "overview" && where === "estate") loadEstate(); }, [loadEstate, view, where]);
 
   const shiftMonth = (dir: number) => {
     const [y, m] = month.split("-").map(Number);
@@ -72,15 +162,28 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
     <div className="adm-page">
       <div className="adm-page-head" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <h1 className="adm-page-h" style={{ margin: 0 }}>Inventory &amp; expenses</h1>
-        {restaurants.length > 1 && (
-          <select className="adm-input" style={{ width: "auto" }} value={rid} onChange={(e) => { setRid(e.target.value); setData(null); }}>
-            {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-        )}
+        {multi && (where === "one" ? (
+          <>
+            {/* NOT the words "All restaurants" — the cockpit's own sidebar already has a nav item
+                with exactly that label, meaning something else (the whole-estate scope). Two controls
+                on one screen reading the same and doing different things is how someone ends up on
+                the dashboard when they wanted to come back here. */}
+            <button className="adm-btn" onClick={() => setWhere("estate")} title="Back to every restaurant's stock">
+              <i className="fas fa-arrow-left" aria-hidden="true" /> All restaurants&apos; stock
+            </button>
+            <select className="adm-input" style={{ width: "auto" }} value={rid} onChange={(e) => { setRid(e.target.value); setData(null); }}>
+              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </>
+        ) : (
+          <span className="adm-chip" style={{ textTransform: "none", fontWeight: 700 }}>{restaurants.length} restaurants</span>
+        ))}
         <span style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 6 }}>
           {(["overview", "manage"] as const).map((v) => (
-            <button key={v} className="adm-btn" onClick={() => setView(v)}
+            // Manage is one restaurant's ledger — there is no estate-wide version of entering a
+            // bill, so choosing it from the estate screen steps into the restaurant first.
+            <button key={v} className="adm-btn" onClick={() => { setView(v); if (v === "manage") setWhere("one"); }}
               style={view === v ? { background: "var(--ow-accent, #10b981)", color: "#08130e", fontWeight: 700 } : undefined}>
               {v === "overview" ? "Overview" : "Manage"}
             </button>
@@ -88,7 +191,100 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
         </div>
       </div>
 
-      {view === "manage" ? (
+      {view === "overview" && where === "estate" ? (
+        <>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "10px 0", flexWrap: "wrap" }}>
+            <button className="adm-btn" onClick={() => shiftMonth(-1)}>‹</button>
+            <b style={{ minWidth: 140, textAlign: "center" }}>{monthLabel}</b>
+            <button className="adm-btn" onClick={() => shiftMonth(1)}>›</button>
+            <span style={{ flex: 1 }} />
+            <span className="adm-muted" style={{ fontSize: 12 }}>{agoLabel(est?.cachedAt)}</span>
+            <button className="adm-btn" onClick={() => loadEstate(true)} disabled={busy} title="Recompute now">
+              <i className="fas fa-rotate" /> Refresh
+            </button>
+          </div>
+
+          {estErr && (
+            <div className="adm-card" style={{ borderColor: "var(--adm-danger)" }}>
+              <b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{estErr}</span>{" "}
+              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => loadEstate()}>Try again</button>
+            </div>
+          )}
+          {!estErr && !est && <div className="adm-empty">Loading your restaurants…</div>}
+
+          {est && (
+            <>
+              {/* The estate total. Summed from the SAME rows the boxes below are drawn from, so the
+                  header and the boxes cannot drift apart. Stock VALUE adds up across kitchens;
+                  quantities deliberately do not — 4 kg here and 4 kg there is not 8 kg of anything. */}
+              <div className="adm-stats">
+                <div className="adm-stat"><div className="k">Stock on shelf · all restaurants</div><div className="v">{inr(est.totals.stockValue)}</div></div>
+                <div className="adm-stat"><div className="k">Bought ({monthLabel.split(" ")[0]})</div><div className="v">{inr(est.totals.purchases)}</div></div>
+                <div className="adm-stat"><div className="k">Wasted</div><div className="v">{inr(est.totals.waste)}</div></div>
+                <div className="adm-stat"><div className="k">Expenses</div><div className="v">{inr(est.totals.expenses)}</div></div>
+              </div>
+
+              {/* Say what these totals cover. An owner with seven restaurants and three boxes needs
+                  to be told the other four have stock switched off, not left hunting for them. */}
+              <p className="adm-muted" style={{ fontSize: 12.5, margin: "10px 2px 14px" }}>
+                {est.estate.length === 0
+                  ? "None of your restaurants has stock switched on yet."
+                  : <>These figures cover <b>{est.countedOf ? est.countedOf.counted : est.estate.length}</b>{" "}
+                    of your restaurants{est.offCount ? <> · {est.offCount} more {est.offCount === 1 ? "has" : "have"} stock switched off</> : null}
+                    {est.partial?.length ? <> · some figures couldn&apos;t be read this time — press Refresh</> : null}.</>}
+              </p>
+
+              {est.estate.length > 0 && (
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(272px, 1fr))" }}>
+                  {est.estate.map((r) => (
+                    <button key={r.rid} type="button" className="adm-card"
+                      onClick={() => { setRid(r.rid); setData(null); setWhere("one"); }}
+                      title={`Open ${r.name}`}
+                      style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
+                        margin: 0, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <b style={{ fontSize: 15, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</b>
+                        {!r.unread && !!r.negativeCount && (
+                          <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 18%, transparent)", color: "var(--adm-danger,#e5484d)" }}>
+                            {r.negativeCount} below zero
+                          </span>
+                        )}
+                        {!r.unread && !r.negativeCount && !!r.lowCount && (
+                          <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-warn,#c98a2b) 20%, transparent)", color: "var(--adm-warn,#c98a2b)" }}>
+                            {r.lowCount} running low
+                          </span>
+                        )}
+                      </div>
+
+                      {r.unread ? (
+                        // A restaurant whose figures did not read keeps its box and shows dashes.
+                        // "₹0 of stock" for a full storeroom is a claim; a dash is the truth.
+                        <div className="adm-muted" style={{ fontSize: 13 }}>Couldn&apos;t read this one — press Refresh.</div>
+                      ) : (
+                        <>
+                          <div>
+                            <div className="adm-muted" style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: ".03em" }}>STOCK ON SHELF</div>
+                            <div style={{ fontSize: 23, fontWeight: 800, fontVariantNumeric: "tabular-nums", lineHeight: 1.15 }}>{inr(r.stockValue || 0)}</div>
+                            <div className="adm-muted" style={{ fontSize: 11.5 }}>{r.itemCount || 0} ingredient{(r.itemCount || 0) === 1 ? "" : "s"}</div>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, borderTop: "1px solid var(--border-c,#e5e7eb)", paddingTop: 9 }}>
+                            {[["Bought", r.purchases], ["Wasted", r.waste], ["Expenses", r.expenses]].map(([k, v]) => (
+                              <div key={String(k)}>
+                                <div className="adm-muted" style={{ fontSize: 11 }}>{k}</div>
+                                <div style={{ fontWeight: 700, fontSize: 13.5, fontVariantNumeric: "tabular-nums" }}>{inr(Number(v) || 0)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      ) : view === "manage" ? (
         // The manager panel's inventory engine, scoped to this restaurant. Identical
         // behaviour in both panels; the API enforces powers per call regardless.
         <div ref={mount} style={{ width: "100%", height: "calc(100vh - 170px)", borderRadius: 12, overflow: "hidden", display: "flex" }} />
@@ -110,96 +306,141 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
           {data && s && (
             <>
               <div className="adm-stats">
-                <div className="adm-stat"><span className="k">Stock on shelf</span><span className="v">{inr(s.stockValue)}</span></div>
-                <div className="adm-stat"><span className="k">Bought ({monthLabel.split(" ")[0]})</span><span className="v">{inr(s.purchases)}</span></div>
-                <div className="adm-stat"><span className="k">Wasted</span><span className="v">{inr(s.waste)}</span></div>
-                <div className="adm-stat"><span className="k">Expenses</span><span className="v">{inr(s.expenses)}</span></div>
+                <div className="adm-stat"><div className="k">Stock on shelf</div><div className="v">{inr(s.stockValue)}</div></div>
+                <div className="adm-stat"><div className="k">Bought ({monthLabel.split(" ")[0]})</div><div className="v">{inr(s.purchases)}</div></div>
+                <div className="adm-stat"><div className="k">Wasted</div><div className="v">{inr(s.waste)}</div></div>
+                <div className="adm-stat"><div className="k">Expenses</div><div className="v">{inr(s.expenses)}</div></div>
               </div>
 
-              {data.negative.length > 0 && (
-                <div className="adm-card" style={{ borderColor: "rgba(239,68,68,.5)" }}>
-                  <h3>⚠️ Stock below zero</h3>
-                  <p className="adm-muted">Usually a purchase that was never entered — ask your manager to add the missing bill.</p>
-                  {data.negative.map((i) => <div key={i.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}><span>{i.name}</span><b>{i.have} {i.uom}</b></div>)}
-                </div>
-              )}
+              {/* Two columns from 1000px up: the four short cards sit side by side instead of
+                  making the owner scroll past five full-width blocks to reach the last one. The two
+                  LISTS (the expense book, the bills) stay full width — they are reading material. */}
+              <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(330px, 1fr))", alignItems: "start", marginTop: 14 }}>
 
-              <div className="adm-card">
-                <h3>💸 Expense book — {inr(s.expenses)} this month</h3>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
-                  {Object.entries(data.expTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
-                    <span key={k} className="adm-chip">{EXP_LABELS[k] || k}: <b>{inr(v)}</b></span>
-                  ))}
+                {data.negative.length > 0 && (
+                  <div className="adm-card" style={{ margin: 0, borderColor: "color-mix(in srgb, var(--adm-danger,#e5484d) 50%, transparent)" }}>
+                    <CardHead icon="⚠️" title={`Stock below zero (${s.negativeCount})`}
+                      note="Almost always a delivery that was never entered — the shelf has it, the books don't. Ask your manager to add the missing bill." />
+                    {data.negative.map((i) => (
+                      <div key={i.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 0", fontSize: 13.5, borderTop: "1px solid var(--border-c,#e5e7eb)" }}>
+                        <span>{i.name}</span>
+                        <b style={{ color: "var(--adm-danger,#e5484d)", fontVariantNumeric: "tabular-nums" }}>{i.have} {i.uom}</b>
+                      </div>
+                    ))}
+                    {data.negative.length >= (data.caps?.negative ?? 50) && (
+                      <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 8 }}>Showing the first {data.caps?.negative ?? 50}.</div>
+                    )}
+                  </div>
+                )}
+
+                {/* LOW STOCK — worst first, because "which do I reorder" is the question. The bar is
+                    how much of par is actually on the shelf, so a nearly-empty line is obvious. */}
+                <div className="adm-card" style={{ margin: 0 }}>
+                  <CardHead icon="🛒" title={`Running low (${s.lowCount})`}
+                    note={s.lowCount !== data.low.length ? `Showing ${data.low.length} of ${s.lowCount}.` : undefined} />
+                  {data.low.length === 0 ? <div className="adm-empty" style={{ padding: 12 }}>Everything is at or above its par level.</div> : (
+                    [...data.low].sort((a, b) => (a.par ? a.have / a.par : 1) - (b.par ? b.have / b.par : 1)).map((i) => {
+                      const pct = i.par > 0 ? Math.max(0, Math.min(100, Math.round((i.have / i.par) * 100))) : 0;
+                      return (
+                        <div key={i.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "2px 10px", padding: "6px 0" }}>
+                          <span style={{ fontSize: 13.5 }}>{i.name}</span>
+                          <span className="adm-muted" style={{ fontSize: 12.5, fontVariantNumeric: "tabular-nums" }}>{i.have} / {i.par} {i.uom}</span>
+                          <span style={{ gridColumn: "1 / -1", height: 5, borderRadius: 4, background: "var(--border-c,#e5e7eb)", overflow: "hidden" }}>
+                            <span style={{ display: "block", height: "100%", width: `${Math.max(2, pct)}%`,
+                              background: pct < 34 ? "var(--adm-danger,#e5484d)" : "var(--adm-warn,#c98a2b)" }} />
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
-                {data.expenses.length === 0 && <div className="adm-empty">No expenses recorded in {monthLabel}.</div>}
+
+                {/* WASTE — the heading is the DATABASE's figure for the month, so it always equals
+                    the "Wasted" tile above; the rows are what it is made of. */}
+                <div className="adm-card" style={{ margin: 0 }}>
+                  <CardHead icon="🗑️" title="Wasted" total={s.waste}
+                    note={s.wasteCount ? `${s.wasteCount} slip${s.wasteCount === 1 ? "" : "s"} in ${monthLabel}` : undefined} />
+                  {Object.keys(data.wasteByReason).length === 0
+                    ? <div className="adm-empty" style={{ padding: 12 }}>Nothing logged as wasted in {monthLabel}.</div>
+                    : Object.entries(data.wasteByReason).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                        <ShareRow key={k} label={WASTE_LABELS[k] || k} value={v} of={s.waste || 1} tone="var(--adm-danger,#e5484d)" />
+                      ))}
+                </div>
+
+                {/* WHERE THE EXPENSE MONEY WENT — the categories, biggest first. The list of slips
+                    is below, full width, because it is the thing you read line by line. */}
+                <div className="adm-card" style={{ margin: 0 }}>
+                  <CardHead icon="💸" title="Expenses by kind" total={s.expenses} note={`in ${monthLabel}`} />
+                  {Object.keys(data.expTotals).length === 0
+                    ? <div className="adm-empty" style={{ padding: 12 }}>No expenses recorded in {monthLabel}.</div>
+                    : Object.entries(data.expTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                        <ShareRow key={k} label={EXP_LABELS[k] || k} value={v} of={s.expenses || 1} />
+                      ))}
+                </div>
+
+                {data.usage && (data.usage.usedByOrders !== 0 || data.usage.corrections !== 0 || data.usage.top.length > 0) && (
+                  <div className="adm-card" style={{ margin: 0 }}>
+                    <CardHead icon="📊" title="Used by orders, and corrections"
+                      note="What the recipes took off the shelf, and what a stock count had to correct on top of that. A big correction means the shelf and the books disagree." />
+                    <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginBottom: 8 }}>
+                      <div><div className="adm-muted" style={{ fontSize: 11.5 }}>USED BY ORDERS</div>
+                        <b style={{ fontSize: 17 }}>{inr(data.usage.usedByOrders)}</b></div>
+                      <div><div className="adm-muted" style={{ fontSize: 11.5 }}>CORRECTED BY COUNTS</div>
+                        <b style={{ fontSize: 17, color: data.usage.corrections < -0.01 ? "var(--adm-danger,#e5484d)" : undefined }}>{inr(data.usage.corrections)}</b></div>
+                    </div>
+                    {data.usage.top.map((u) => (
+                      <div key={u.name} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0", fontSize: 13.5, borderTop: "1px solid var(--border-c,#e5e7eb)" }}>
+                        <span>{u.name}<span className="adm-muted"> · used {inr(u.consumedVal)}</span></span>
+                        <b style={{ fontVariantNumeric: "tabular-nums", color: u.adjustedVal < -0.01 ? "var(--adm-danger,#e5484d)" : u.adjustedVal > 0.01 ? "var(--adm-ok,#16a34a)" : undefined }}>
+                          {u.adjustedVal ? `corrected ${inr(u.adjustedVal)}` : "—"}
+                        </b>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── the two lists, full width ─────────────────────────────────────────────────── */}
+              <div className="adm-card" style={{ marginTop: 14 }}>
+                <CardHead icon="🧾" title="Expense book" total={s.expenses}
+                  note={data.expenses.length >= (data.caps?.expenses ?? 300)
+                    ? `Showing the ${data.expenses.length} most recent slips of ${monthLabel}. The figure above counts every one of them.`
+                    : `${data.expenses.length} slip${data.expenses.length === 1 ? "" : "s"} in ${monthLabel} · struck-out ones stay visible and are not counted`} />
+                {data.expenses.length === 0 && <div className="adm-empty" style={{ padding: 12 }}>No expenses recorded in {monthLabel}.</div>}
                 {data.expenses.map((e) => (
-                  <div key={e.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--adm-line, rgba(128,128,128,.2))", opacity: e.voided_at ? 0.55 : 1 }}>
+                  <div key={e.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 0", borderTop: "1px solid var(--border-c,#e5e7eb)", opacity: e.voided_at ? 0.55 : 1 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ textDecoration: e.voided_at ? "line-through" : "none" }}>
+                      <div style={{ textDecoration: e.voided_at ? "line-through" : "none", fontSize: 13.5 }}>
                         {EXP_LABELS[e.category] || e.category} — <b>{e.title}</b>
                         {e.voided_at && <span className="adm-muted"> · struck out{e.void_reason ? `: ${e.void_reason}` : ""}</span>}
                       </div>
                       <div className="adm-muted" style={{ fontSize: 12 }}>
-                        {e.expense_date}{e.created_by ? ` · by ${e.created_by}` : ""}{e.note ? ` · ${e.note}` : ""}
+                        {shortDate(e.expense_date)}{e.created_by ? ` · by ${e.created_by}` : ""}{e.note ? ` · ${e.note}` : ""}
                       </div>
                     </div>
                     {e.photo_url && (
-                      <a href={e.photo_url} target="_blank" rel="noopener noreferrer">
-                        <img src={e.photo_url} alt="" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
+                      <a href={e.photo_url} target="_blank" rel="noopener noreferrer" title="Open the photo">
+                        <img src={e.photo_url} alt="Expense slip" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
                       </a>
                     )}
-                    <b style={{ whiteSpace: "nowrap" }}>{inr(e.amount)}</b>
+                    <b style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{inr(e.amount)}</b>
                   </div>
                 ))}
               </div>
 
-              <div className="adm-card">
-                <h3>🛒 Low stock ({data.low.length})</h3>
-                {data.low.length === 0 && <div className="adm-empty">Everything is at or above its par level.</div>}
-                {data.low.map((i) => (
-                  <div key={i.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
-                    <span>{i.name}</span>
-                    <span className="adm-muted">have {i.have} / par {i.par} {i.uom}</span>
-                  </div>
-                ))}
-              </div>
-
-              {data.usage && (data.usage.usedByOrders !== 0 || data.usage.corrections !== 0 || data.usage.top.length > 0) && (
-                <div className="adm-card">
-                  <h3>📊 Usage &amp; corrections</h3>
-                  <p className="adm-muted">
-                    Recipes used {inr(data.usage.usedByOrders)} of stock this month; the counts corrected {inr(data.usage.corrections)} beyond orders and logged waste — the closest thing to a leak meter.
-                  </p>
-                  {data.usage.top.map((u) => (
-                    <div key={u.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
-                      <span>{u.name}<span className="adm-muted"> · used {inr(u.consumedVal)}</span></span>
-                      <b style={{ color: u.adjustedVal < -0.01 ? "#ef4444" : u.adjustedVal > 0.01 ? "#22c55e" : undefined }}>
-                        {u.adjustedVal ? `corrected ${inr(u.adjustedVal)}` : "—"}
-                      </b>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="adm-card">
-                <h3>🗑️ Waste by reason</h3>
-                {Object.keys(data.wasteByReason).length === 0 && <div className="adm-empty">Nothing logged as wasted in {monthLabel}.</div>}
-                {Object.entries(data.wasteByReason).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
-                  <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
-                    <span>{WASTE_LABELS[k] || k}</span><b>{inr(v)}</b>
-                  </div>
-                ))}
-              </div>
-
-              <div className="adm-card">
-                <h3>🧾 Purchases in {monthLabel} ({data.purchases.length})</h3>
-                {data.purchases.length === 0 && <div className="adm-empty">No purchases entered.</div>}
+              <div className="adm-card" style={{ marginTop: 14 }}>
+                <CardHead icon="📦" title="Bills & cash buys" total={s.purchases}
+                  note={(s.purchasesCount ?? data.purchases.length) !== data.purchases.length
+                    ? `Showing ${data.purchases.length} of ${s.purchasesCount} in ${monthLabel}. The figure above counts every one of them.`
+                    : `${data.purchases.length} in ${monthLabel}`} />
+                {data.purchases.length === 0 && <div className="adm-empty" style={{ padding: 12 }}>No purchases entered.</div>}
                 {data.purchases.map((p) => (
-                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "4px 0", opacity: p.voided_at ? 0.55 : 1 }}>
-                    <span style={{ textDecoration: p.voided_at ? "line-through" : "none" }}>
+                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 0", fontSize: 13.5, borderTop: "1px solid var(--border-c,#e5e7eb)", opacity: p.voided_at ? 0.55 : 1 }}>
+                    <span style={{ textDecoration: p.voided_at ? "line-through" : "none", minWidth: 0 }}>
                       {p.kind === "cash" ? "⚡ Cash buy" : `🧾 ${p.vendor_name || "Bill"}`}{p.bill_no ? ` #${p.bill_no}` : ""}
-                      <span className="adm-muted"> · {p.bill_date}{p.created_by ? ` · ${p.created_by}` : ""}</span>
+                      <span className="adm-muted"> · {shortDate(p.bill_date)}{p.created_by ? ` · ${p.created_by}` : ""}</span>
                     </span>
-                    <b>{inr(p.total)}</b>
+                    <b style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{inr(p.total)}</b>
                   </div>
                 ))}
               </div>

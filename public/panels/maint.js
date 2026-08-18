@@ -89,13 +89,34 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   })();
 
   // ── shared maintenance (menu live/offline) state + actions ─────────────────
+  // THE SWITCH MUST NEVER CLAIM SOMETHING THE SERVER DID NOT DO (T9 sweep, 2026-08-17).
+  //
+  // Two halves of the same fault, and both of them lie about whether GUESTS can order right now:
+  //
+  //   · setMaint() ignored the response entirely, so a refusal or a 500 still flipped the button
+  //     to "🔴 Bring menu back online". A manager reads that as "the menu is off" and walks away
+  //     while the guest menu is still perfectly live — or the other way round, believes the menu
+  //     is back when it is not and wonders why nobody is ordering.
+  //   · fetchMaint() swallowed a failed READ and left maintOn at its default false, so the button
+  //     said "🟢 Take guest menu offline" on a menu that was ALREADY offline, and the one control
+  //     that could bring it back was pointing the wrong way.
+  //
+  // Now the response is checked, the state only moves when the server really moved it, and a
+  // state we could not read says so instead of guessing. `maintOn` is null while unknown.
   let maintOn = false;
   async function fetchMaint() {
-    try { const r = await fetch("/api/maintenance", { cache: "no-store" }); maintOn = (await r.json()).maintenance === true; } catch {}
+    try {
+      const r = await fetch("/api/maintenance", { cache: "no-store" });
+      if (!r.ok) { maintOn = null; return maintOn; }
+      const j = await r.json();
+      maintOn = j.maintenance === true;
+    } catch { maintOn = null; }
     return maintOn;
   }
   async function setMaint(turnOn) {
-    await fetch("/api/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turnOn }) });
+    const r = await fetch("/api/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turnOn }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(j.error || "The server wouldn't change it."); e.status = r.status; throw e; }
     maintOn = turnOn;
   }
 
@@ -368,14 +389,22 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
       if (isManager) {
         const maintBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)", width: "100%" } }, ["…"]);
         const renderMaint = () => {
+          // null = we could not read it. Say so and offer the read again, rather than paint a
+          // confident answer about whether guests can order.
+          if (maintOn === null) {
+            maintBtn.textContent = "⚠️ Couldn't read the guest menu — tap to check again";
+            maintBtn.style.background = "var(--line,#243049)";
+            return;
+          }
           maintBtn.textContent = maintOn ? "🔴 Bring menu back online" : "🟢 Take guest menu offline";
           maintBtn.style.background = maintOn ? "#7f1d1d" : "var(--line,#243049)";
         };
         maintBtn.addEventListener("click", async () => {
+          if (maintOn === null) { maintBtn.textContent = "…"; await fetchMaint(); renderMaint(); return; }
           const turnOn = !maintOn;
           const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)? Guests can’t browse or order until it’s back." : "Bring the guest menu back ONLINE?";
           if (!confirm(msg)) return;
-          try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + (e && e.message)); }
+          try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + ((e && e.message) || "the server didn't answer") + " — the guest menu has NOT changed."); }
         });
         fetchMaint().then(renderMaint);
         sections.push(el("div", { class: "lfh-sec" }, [
@@ -479,4 +508,14 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
 
   if (document.readyState !== "loading") init();
   else document.addEventListener("DOMContentLoaded", init);
+  // A PANEL THAT OPENED WITH NO SIGNAL STILL GETS ITS TOP BAR (T9 sweep, 2026-08-17).
+  //
+  // init() only builds anything when the profile read succeeds. With no connection it succeeded
+  // at nothing and never asked again, so a waiter whose tablet woke up out of range had no
+  // ⚙ Settings and no Sign out for the rest of the session — including the first-login card, which
+  // is the one thing that is meant to be unskippable. Once, when the connection returns; the
+  // guard inside init() (the button already exists) makes a second run a no-op.
+  window.addEventListener("online", function () {
+    if (!document.getElementById("staffSettingsBtn") && !profile) init();
+  });
 })();

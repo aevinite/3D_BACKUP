@@ -690,8 +690,25 @@
     if (!again.length) return;
     failed = failed.filter(function (x) { return x.retryable === false; });
     for (const it of again) { resetTries(it); queued.push(it); await idbPut(it); }
+    requeueInOrder();
     notify();
     flush();
+  }
+
+  // A CHANGE PUT BACK GOES WHERE IT BELONGS, NOT AT THE END (T9 sweep, 2026-08-17).
+  //
+  // Both retry paths appended to the tail, which quietly re-opened the very swap the per-table
+  // ordering rule in send() exists to stop. The real sequence, watched on port 4109: a discount
+  // for table 5 runs out of its automatic tries and moves to "Needs you"; the waiter then taps
+  // Mark paid on the same table, which send() correctly queues BEHIND it; the person taps Try
+  // again on the discount — and it went in after the settle. The bill commits at the full amount
+  // and the discount is then applied to an already-settled bill.
+  //
+  // `at` is when the PERSON did it and never changes, so ordering by it puts every re-queued
+  // change back in the sequence it was made in — which is the only sequence that is correct.
+  // boot() already restores a saved queue this way; the two retry buttons now agree with it.
+  function requeueInOrder() {
+    queued.sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
   }
 
   // One place that says what "a fresh go" means, so the two retry entry points can't drift.
@@ -712,6 +729,7 @@
     // which left the three newer counters (network / busy / signed-out) at their ceiling.
     resetTries(it);
     queued.push(it);
+    requeueInOrder();   // back into ITS place in the sequence, never the tail — see requeueInOrder()
     await idbPut(it);
     notify();
     flush();
