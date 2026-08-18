@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { inr, useActiveAutoRefresh, actLabel, panelLabel } from "@/components/admin/shared";
-import { asSuffix } from "@/lib/ownerPin";
+import { asSuffix, asValue } from "@/lib/ownerPin";
 import {
   AreaTrend, TimeBar, LeaderBar, WhoEarnsMore, CategoryDonut, PaymentDonut, canonPayMethod,
   DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevMonthCompare,
@@ -404,13 +404,19 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
   );
 }
 
-// ── D1-style KPI card: sparkline inside, delta chip; the whole card is a LINK
-// into the matching report (owner round-3: "the top five box … should take you
-// to the report section").
-function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }: {
-  k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
+// ── D1-style KPI card: sparkline inside, delta chip. The whole card is a BUTTON that opens the
+// tile's popup (owner, 2026-08-18: "if you click on orders, it will take you to that pop up, which
+// will show average order and all the details of the order"). It used to be a Link straight into
+// the report; that is now the LAST line of the popup instead, so the figure gets explained before
+// he leaves the page — and so the link can carry the scope and the range he is actually looking at.
+//
+// `compact` prints the short form on the FACE of the tile (₹55.1L) — his ask, and what makes five
+// tiles fit one line. The exact rupees are in the popup.
+function Kpi({ k, v, money, compact, delta, prevTitle, sub, loading, spark, pill, onOpen }: {
+  k: string; v: number | string; money?: boolean; compact?: boolean;
+  delta?: { now: number; prev: number | null };
   prevTitle?: string; sub?: string; loading?: boolean; spark?: number[];
-  pill?: string; href?: string;
+  pill?: string; onOpen?: () => void;
 }) {
   const hasSpark = !!spark && spark.length >= 2 && !loading;
   const body = (
@@ -420,7 +426,13 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
         {pill ? <span className="ow2-live">{pill}</span> : null}
       </div>
       <div className="row">
-        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
+        <div className="v">{typeof v === "number"
+          ? (compact && !loading
+              // the SHARED short form (lib/money), the same one the restaurant switcher and the
+              // chart axes use — so one amount never reads two ways on one screen
+              ? <span style={{ fontVariantNumeric: "tabular-nums" }}>{compactINR(v)}</span>
+              : <AnimatedNumber value={v} loading={loading} money={money} />)
+          : v}</div>
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
       {sub && !loading && <div className="ow2-sub">{sub}</div>}
@@ -447,7 +459,12 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
          360px phone each was carrying 34px of empty green-less space (T5 sweep, 2026-08-06).
          Same three-class weight so it still beats .owx .adm-stat. */
       .owx .adm-stat.ow2-kpi.ow2-nospark { padding-bottom: 14px; }
-      .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; transition: border-color .15s, transform .15s; }
+      /* ow2-click is a <button> now (owner, 2026-08-18: the tile opens a popup). A button brings
+         its own font, centring and padding, so reset all three or the tiles stop matching the cards
+         around them. width:100% keeps it filling its grid track, and text-align:left undoes the
+         centring a button does by default. NEVER use a backtick in these comments — this block is a
+         template literal and a backtick closes it (this file's own warning, learned twice today). */
+      .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; width: 100%; font: inherit; text-align: left; transition: border-color .15s, transform .15s; }
       .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
       .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
@@ -486,8 +503,10 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
       }
     `}</style>
   );
-  return href ? (
-    <Link href={href} className={`adm-stat owx-kpi ow2-kpi ow2-click${hasSpark ? "" : " ow2-nospark"}`} title="Open the full report">{body}{styles}</Link>
+  return onOpen ? (
+    <button type="button" onClick={onOpen}
+      className={`adm-stat owx-kpi ow2-kpi ow2-click${hasSpark ? "" : " ow2-nospark"}`}
+      title={`${k} — tap for the detail`}>{body}{styles}</button>
   ) : (
     <div className={`adm-stat owx-kpi ow2-kpi${hasSpark ? "" : " ow2-nospark"}`}>{body}{styles}</div>
   );
@@ -1181,6 +1200,18 @@ export default function OwnerDashboard() {
     return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: p.dishes.length, dishes: p.dishes } : ("missing" as const);
   }, [view, pl, globalRange]);
 
+  // ── the tile popup (owner, 2026-08-18) ───────────────────────────────────────────────────────
+  // Which tile is open, or null. Every figure it shows is already in hand, so opening it costs no
+  // request. Registered with the back-stack manager like every other overlay on this page.
+  const [tileOpen, setTileOpen] = useState<null | "revenue" | "orders" | "today" | "expenses" | "onhand">(null);
+  useBackClose("owner-kpi-tile", !!tileOpen, () => setTileOpen(null));
+  useEffect(() => {
+    if (!tileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTileOpen(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tileOpen]);
+
   // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
   const [drawerRid, setDrawerRid] = useState<string | null>(null);
   useBackClose("owner-rest-drawer", !!drawerRid, () => setDrawerRid(null));
@@ -1238,7 +1269,27 @@ export default function OwnerDashboard() {
   };
   const exportName = `aevidine-report-${new Date().toISOString().slice(0, 10)}`;
   // KPI boxes deep-link into the matching report (round-3).
-  const reportHref = (t: string) => (scopePin ? `/owner/reports?rid=${scopePin}${asSuffix()}&open=${t}` : `/owner/reports?open=${t}`);
+  // ── THE DEEP LINK CARRIES WHAT HE IS LOOKING AT (owner, 2026-08-18) ──────────────────────────
+  // His bug, in his words: "whenever I click on order, it takes me to the order of a particular
+  // restaurant. But actually I am in a tab for all the restaurant." Exactly right, and this line was
+  // why: it only ever sent `rid`, which on an admin tab is the ADMIN'S PIN — the restaurant the
+  // console drilled into — and the reports page then forces its own scope to that pin. So from
+  // "All restaurants" on a pinned admin tab, every tile landed on Burger Barn.
+  //
+  // Two things now travel with the link, and the reports page prefers them over the pin:
+  //   • `view=all` or `view=<rid>` — the scope THIS PAGE is showing (`activeRid`), which is null on
+  //     the all-restaurants view. A separate name from `rid` on purpose: `rid` is the admin's
+  //     authorisation pin and must keep meaning that, or a tab could re-scope its own permissions.
+  //   • `range=<the dropdown's value>` — "if I'm at thirty days all restaurant and I open the detail
+  //     view of orders then it should be also open in thirty days and all restaurant."
+  const detailHref = (t: string) => {
+    const q = new URLSearchParams();
+    if (scopePin) { q.set("rid", scopePin); const a = asValue(); if (a) q.set("as", a); }
+    q.set("view", activeRid ?? "all");
+    q.set("range", globalRange);
+    q.set("open", t);
+    return `/owner/reports?${q.toString()}`;
+  };
 
   const goHome = () => viewTo({ level: "home" });
   const openFull = (rid: string) => { setDrawerRid(null); viewTo({ level: "restaurant", rid }); };
@@ -1270,7 +1321,6 @@ export default function OwnerDashboard() {
    *  server has not refused this payload. Used to stop the KPI tiles linking into a Reports hub
    *  that would only refuse him — the hero shortcut has always been gated, the tiles never were. */
   const reportsOn = ov?.entitlements?.reports !== false && !offNote;
-  const kpiHref = (t: string) => (reportsOn ? reportHref(t) : undefined);
   const kMain = kpiOf(globalRange);
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
@@ -1344,47 +1394,125 @@ export default function OwnerDashboard() {
     </div>
   ) : null;
 
-  // How many tiles this row will actually draw — 5 normally, 7 once the payroll module is on.
-  // Seven into a fixed 5-across grid left the last two alone against three empty columns
-  // (T5 sweep, 2026-08-11); the count picks a balanced row instead (7 → 4 + 3).
-  const kpiCount = 5 + (kMain?.staffPay ? 2 : 0);
-  const kpiCols = kpiCount <= 5 ? kpiCount : Math.ceil(kpiCount / 2);
-  // ── WHEN REPORTS ARE SWITCHED OFF (T12 sweep, 2026-08-17) ───────────────────────────────────
-  // `offNote` means no analytics payload is ever coming, so every tile below prints an em dash and
-  // says why instead of animating a blank forever, and NONE of them is a link: the hero shortcut
-  // has always been gated on the `reports` entitlement, the tiles never were, so five taps led
-  // into a hub that would only refuse him. `kpiHref` returns undefined in that state, which makes
-  // Kpi render a plain card rather than a Link.
+  // ── THE TILE ROW (owner, 2026-08-18, after reviewing the sweep) ───────────────────────────────
+  // "you can just do, like, money has been generated, orders, if you click on orders it will take
+  // you to that pop up … we can keep revenue, orders, today so far, expenses, on hand money" and
+  // "everything should be in the one line. That's what I want. Right now it is two rows."
+  //
+  // So: FIVE tiles, one row. "Avg order" is gone from the row — it lives inside the Orders popup,
+  // which is where he asked for it. "Lost to cancellations", "Staff pay out" and "After staff pay"
+  // are gone as tiles; what they held is now Expenses + On hand, with the detail in the popups.
+  //
+  // ── THE MONEY MODEL, CHECKED RATHER THAN ASSUMED ─────────────────────────────────────────────
+  // He said cancellations should sit under Expenses. They must not be added to it, and this is why:
+  // migration 315 made `revenue` the NET figure — the discount is already taken off it — and every
+  // rollup counts only orders that are not cancelled. So a discount and a cancellation are ALREADY
+  // out of revenue. Adding them to Expenses and then subtracting Expenses from revenue would count
+  // the same loss twice, and "on hand" would read lakhs too low.
+  //   Expenses = what actually LEFT the business (the staff pay ledger).
+  //   On hand   = revenue − Expenses, so the three tiles reconcile on screen.
+  //   Discounts and cancellations live in the REVENUE popup under "what you didn't charge", which
+  //   is the honest home for them: they are the answer to "why isn't revenue higher?".
+  const staffOut = kMain?.staffPay?.paidOut ?? 0;
+  const hasPayroll = !!kMain?.staffPay;
+  const onHand = (kMain?.revenue ?? 0) - staffOut;
+  const mt = money === "err" ? undefined : (money as MoneyTotals | undefined);
+  // ── WHEN REPORTS ARE SWITCHED OFF ────────────────────────────────────────────────────────────
+  // `offNote` means no analytics payload is ever coming, so every tile prints an em dash and says
+  // why instead of animating a blank for ever, and none of them opens a popup or a report.
+  const offSub = "Reports are switched off";
   const kpiRow = (
-    <div className="adm-stats ow2-stats" style={{ ["--ow2-cols" as string]: String(kpiCols) }}>
-      <Kpi k="Revenue" href={kpiHref("sales")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money loading={!offNote && !kMain}
+    <div className="adm-stats ow2-stats ow2-stats5">
+      <Kpi k="Revenue" onOpen={offNote ? undefined : () => setTileOpen("revenue")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money compact loading={!offNote && !kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
-        prevTitle={PREV_LABEL[globalRange]} sub={offNote ? "Reports are switched off" : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
-      <Kpi k="Orders" href={kpiHref("volume")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
-        sub={offNote ? "Reports are switched off" : kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
+        prevTitle={PREV_LABEL[globalRange]} sub={offNote ? offSub : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+      <Kpi k="Orders" onOpen={offNote ? undefined : () => setTileOpen("orders")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
+        sub={offNote ? offSub : kMain ? `${inr(kMain.avg)} per paid order` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Avg order" href={kpiHref("avgbill")} v={offNote ? "—" : (kMain?.avg ?? 0)} money loading={!offNote && !kMain} sub={offNote ? "Reports are switched off" : "per paid order"} />
-      <Kpi k="Today so far" href={kpiHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
+      <Kpi k="Today so far" onOpen={() => setTileOpen("today")} v={todayRev} money compact loading={!ov} pill="● live"
         sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
-      <Kpi k="Lost to cancellations" href={kpiHref("cancellations")} v={offNote || money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
-        loading={!offNote && !money}
-        sub={offNote ? "Reports are switched off" : money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
-      {/* STAFF PAY AS AN EXPENSE (owner 2026-07-30). Only drawn when the restaurant has the
-          module — otherwise the tiles don't exist, same as everywhere else. "After staff pay"
-          is the number he asked for: revenue minus what actually went out to the team. */}
-      {kMain?.staffPay && (
-        <>
-          <Kpi k="Staff pay out" href={kpiHref("team")} v={kMain.staffPay.paidOut} money loading={!kMain}
-            sub={kMain.staffPay.entries
-              ? `${kMain.staffPay.entries} payment${kMain.staffPay.entries === 1 ? "" : "s"} · ${kMain.staffPay.people} on the pay list`
-              : "nothing paid out yet"} />
-          <Kpi k="After staff pay" href={kpiHref("team")} v={(kMain.revenue ?? 0) - kMain.staffPay.paidOut} money loading={!kMain}
-            sub="revenue minus what went out to the team" />
-        </>
-      )}
+      <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : staffOut} money compact loading={!offNote && !kMain}
+        sub={offNote ? offSub : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
+      <Kpi k="On hand" onOpen={offNote ? undefined : () => setTileOpen("onhand")} v={offNote ? "—" : onHand} money compact loading={!offNote && !kMain}
+        sub={offNote ? offSub : "revenue minus expenses"} />
     </div>
   );
+
+  // ── THE TILE POPUP (owner, 2026-08-18) ───────────────────────────────────────────────────────
+  // "there should be a pop up which should open, and in that average order and information about
+  // the order should be written, and at the below there will be a click for a seen proper detail,
+  // and that will take me to that particular page." The tile shows a SHORT figure so five fit one
+  // line; the popup carries the exact rupees and the breakdown, which is also what solves the
+  // spacing he complained about.
+  //
+  // "it should also take me in the dashboard of whatever I am at … if I am at all restaurant, it
+  // should take me to the all restaurant orders thing … and thirty days" — so both the popup's
+  // heading AND its bottom link carry the scope he is looking at and the range he has chosen. See
+  // `detailHref` for how that travels.
+  // A row is [label, value, hint?, isTotal?]. `isTotal` is EXPLICIT rather than "the last row",
+  // because on the Revenue popup the last row is "Cancelled bills" — which is emphatically not a
+  // total, and styling it as one made a figure that is deliberately excluded look like the answer.
+  const tileDetail = (): { title: string; sub: string; rows: [string, string, (string | undefined)?, boolean?][]; note?: string; open: string } | null => {
+    const per = RANGE_LABEL[globalRange];
+    switch (tileOpen) {
+      case "revenue": return {
+        title: "Revenue", sub: `what guests actually paid · ${per}`,
+        rows: [
+          ["Revenue", inr(kMain?.revenue ?? 0), "after discounts, cancelled bills never counted"],
+          ["Paid orders", (kMain?.paidOrders ?? 0).toLocaleString("en-IN"), "bills that have been settled"],
+          ["Average per paid order", inr(kMain?.avg ?? 0)],
+          ...(kMain?.prev ? [["The period before", inr(kMain.prev.revenue), PREV_LABEL[globalRange]] as [string, string, string]] : []),
+          // WHAT HE DIDN'T CHARGE — the honest home for these two (see the money model above).
+          ...(mt && mt.discount > 0 ? [["Discounts given", inr(mt.discount), "already taken off the revenue above"] as [string, string, string]] : []),
+          ...(mt && mt.cancelledValue > 0 ? [["Cancelled bills", inr(mt.cancelledValue), `${mt.cancelledOrders} bill${mt.cancelledOrders === 1 ? "" : "s"} — never charged, so never in the revenue above`] as [string, string, string]] : []),
+        ],
+        open: "sales",
+      };
+      case "orders": return {
+        title: "Orders", sub: `every order in the period · ${per}`,
+        rows: [
+          ["Orders", (kMain?.orders ?? 0).toLocaleString("en-IN")],
+          ["Paid", (kMain?.paidOrders ?? 0).toLocaleString("en-IN"), "settled bills"],
+          ["Still open", Math.max(0, (kMain?.orders ?? 0) - (kMain?.paidOrders ?? 0)).toLocaleString("en-IN"), "on a table right now, or unpaid"],
+          ["Average per paid order", inr(kMain?.avg ?? 0), "revenue ÷ paid orders"],
+          ...(kMain?.prev ? [["The period before", kMain.prev.orders.toLocaleString("en-IN"), PREV_LABEL[globalRange]] as [string, string, string]] : []),
+        ],
+        open: "volume",
+      };
+      case "today": return {
+        title: "Today so far", sub: "live, since the business day started at 5am",
+        rows: [
+          ["Taken today", inr(todayRev)],
+          ["Orders today", todayOrd.toLocaleString("en-IN")],
+          ["Average per order", inr(todayOrd ? todayRev / todayOrd : 0)],
+          ["Tables open now", String(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0))],
+        ],
+        note: "This one does not follow the period above — it is always today.",
+        open: "daysummary",
+      };
+      case "expenses": return {
+        title: "Expenses", sub: `money that left the business · ${per}`,
+        rows: [
+          ["Staff pay out", inr(staffOut), hasPayroll ? `${kMain!.staffPay!.entries} payment${kMain!.staffPay!.entries === 1 ? "" : "s"} to ${kMain!.staffPay!.people} ${kMain!.staffPay!.people === 1 ? "person" : "people"}` : "nothing recorded in this period"],
+          ["Total expenses", inr(staffOut), undefined, true],
+        ],
+        note: "Discounts and cancelled bills are NOT counted here. Your revenue figure already has them taken out, so counting them again would make this number — and your money on hand — wrong. You will find both inside the Revenue tile.",
+        open: "team",
+      };
+      case "onhand": return {
+        title: "On hand", sub: `what is left of the period · ${per}`,
+        rows: [
+          ["Revenue", inr(kMain?.revenue ?? 0)],
+          ["Less expenses", "− " + inr(staffOut), "money that left the business"],
+          ["Money on hand", inr(onHand), undefined, true],
+        ],
+        note: "This is takings minus what went out. It is not a bank balance — rent, bills and stock you have not recorded here are not in it.",
+        open: "team",
+      };
+      default: return null;
+    }
+  };
 
   return (
     <>
@@ -1788,6 +1916,56 @@ export default function OwnerDashboard() {
         </div>
       )}
 
+      {/* ═══════ TILE POPUP — the detail behind a KPI tile (owner, 2026-08-18) ═══════ */}
+      {(() => {
+        const d = tileDetail();
+        if (!d) return null;
+        // WHOSE numbers these are, said on the popup itself: "it should also show for all restaurant
+        // or of a particular restaurant". The heading answers it before he reads a figure.
+        const who = activeRid
+          ? (ov?.restaurants.find((r) => r.id === activeRid)?.name ?? "this restaurant")
+          : `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`;
+        return (
+          <div className="ow2-tile-wrap" role="dialog" aria-label={`${d.title} detail`} aria-modal="true">
+            <div className="ow2-tile-back" onClick={() => setTileOpen(null)} aria-hidden="true" />
+            <div className="ow2-tile">
+              <header>
+                <span className="ti"><b>{d.title}</b><i>{d.sub}</i></span>
+                <button className="x" onClick={() => setTileOpen(null)} aria-label="Close">✕</button>
+              </header>
+              <div className="who"><i className="fas fa-store" aria-hidden="true" /> {who}</div>
+              <div className="rows">
+                {d.rows.map(([label, value, hint, isTotal]) => (
+                  <div className={`r${isTotal ? " last" : ""}`} key={label}>
+                    <span className="l">{label}{hint ? <i>{hint}</i> : null}</span>
+                    <span className="v">{value}</span>
+                  </div>
+                ))}
+              </div>
+              {d.note ? <p className="note"><i className="fas fa-circle-info" aria-hidden="true" /> {d.note}</p> : null}
+              <footer>
+                {/* "at the below there will be a click for a seen proper detail, and that will take
+                    me to that particular page" — and it carries the scope and the range (detailHref). */}
+                {reportsOn ? (
+                  /* NO onClick THAT CLOSES THIS FIRST. Measured: closing the popup on the same tap
+                     sent us straight back to the dashboard instead of to the report. The popup owns
+                     a back-stack layer, and closing it makes backStack rewind that entry with
+                     history.go(-1) — which wins the race against the router and undoes the
+                     navigation. It is the identical trap components/owner/OwnerShell.tsx documents
+                     for its nav links ("pages that NAVIGATE leave it open and let the route change
+                     close it"), and the same cure: navigate, and let the unmount tidy up, where
+                     backStack's own "a real navigation pushed on top of our buffer" guard sees the
+                     new URL and leaves the buffer alone. */
+                  <Link className="full" href={detailHref(d.open)}>
+                    See the full detail <i className="fas fa-arrow-right" aria-hidden="true" />
+                  </Link>
+                ) : <span className="full off">Reports are switched off for this restaurant</span>}
+              </footer>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ═══════ DRAWER — phase 2 of the 3-phase drill (multi only) ═══════ */}
       {drawer && (
         <div className="ow2-drawer-wrap" role="dialog" aria-label={`${drawer.r.name} summary`}>
@@ -1831,6 +2009,13 @@ export default function OwnerDashboard() {
         .ow2-tools { display: flex; gap: 10px; align-items: flex-start; }
         .ow2-stats { margin-bottom: 12px; }
         :global(.ow2-stats) { display: grid; grid-template-columns: repeat(var(--ow2-cols, 5), 1fr); gap: 12px; }
+        /* ONE LINE, FIVE TILES (owner, 2026-08-18: "everything should be in the one line. That is
+           what I want. Right now it is top bottom two rows"). minmax(0,1fr) not 1fr, for the same
+           reason the chart pair below uses it: a bare 1fr floors at the item's min-content width, so
+           one long figure could push its own track wider than the row. The short money form on the
+           tile face (compactINR) is the other half of making five fit. */
+        :global(.ow2-stats5) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        :global(.ow2-stats5) > * { min-width: 0; }
         .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
         .ow2-ct .mut { color: var(--muted); font-weight: 500; }
         /* A quiet caption under a chart, for saying what it deliberately leaves out. */
@@ -1938,12 +2123,47 @@ export default function OwnerDashboard() {
         .dspark small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
         .dall { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--muted); }
         .dall i { opacity: .7; margin-right: 4px; }
+        /* ── the KPI tile popup (owner, 2026-08-18) ────────────────────────────────────────────
+           A centred sheet rather than the side drawer: this is a figure being explained, not a
+           restaurant being previewed, and the numbers read better centred over the tile they came
+           from. Same close contract as every other overlay here — backdrop, the X, Escape and the
+           phone's BACK. */
+        .ow2-tile-wrap { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 18px; }
+        .ow2-tile-back { position: absolute; inset: 0; background: rgba(5,8,14,.6); backdrop-filter: blur(2px); animation: ow2fade .18s ease-out; }
+        .ow2-tile { position: relative; width: min(430px, 100%); max-height: min(88vh, 720px); overflow-y: auto; background: var(--card); border: var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.45); animation: ow2pop .18s cubic-bezier(.4,0,.2,1); }
+        @keyframes ow2pop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+        .ow2-tile header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 16px 18px 10px; }
+        .ow2-tile header .ti { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .ow2-tile header .ti b { font-size: 17px; font-weight: 800; }
+        .ow2-tile header .ti i { font-style: normal; font-size: 11.5px; color: var(--muted); }
+        .ow2-tile .x { flex: none; background: var(--bg); border: var(--border); color: var(--text); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; cursor: pointer; }
+        .ow2-tile .who { display: flex; align-items: center; gap: 7px; margin: 0 18px 12px; padding: 6px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 9%, transparent); font-size: 11.5px; font-weight: 700; color: var(--text); }
+        .ow2-tile .who i { font-size: 10px; opacity: .7; }
+        .ow2-tile .rows { padding: 0 18px; display: flex; flex-direction: column; }
+        .ow2-tile .r { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border-c, rgba(128,128,128,.16)); }
+        .ow2-tile .r:last-child { border-bottom: none; }
+        /* the total line reads as the answer, not as one more row */
+        .ow2-tile .r.last { margin-top: 4px; border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-bottom: none; padding-top: 11px; }
+        .ow2-tile .r.last .l, .ow2-tile .r.last .v { font-weight: 800; }
+        .ow2-tile .r.last .v { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-size: 17px; }
+        .ow2-tile .r .l { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 600; min-width: 0; }
+        .ow2-tile .r .l i { font-style: normal; font-size: 10.5px; color: var(--muted); font-weight: 500; line-height: 1.35; }
+        .ow2-tile .r .v { flex: none; font-size: 14.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .ow2-tile .note { display: flex; gap: 8px; margin: 12px 18px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+        .ow2-tile .note i { margin-top: 2px; opacity: .8; }
+        .ow2-tile footer { padding: 14px 18px 16px; }
+        :global(.ow2-tile .full) { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a !important; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; text-decoration: none; }
+        :global(.ow2-tile .full:hover) { filter: brightness(1.08); }
+        :global(.ow2-tile .full.off) { background: var(--bg); border: var(--border); color: var(--muted) !important; cursor: default; font-weight: 600; }
         .ow2-drawer footer { padding: 14px 18px; border-top: var(--border); }
         .ow2-drawer .full { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; }
         .ow2-drawer .full:hover { filter: brightness(1.08); }
-        @media (max-width: 1080px) { :global(.ow2-stats) { grid-template-columns: repeat(3, 1fr) !important; } }
+        /* Five in a line is a DESKTOP promise. Below ~1080px five tiles would be ~150px each and the
+           labels would break mid-word, which is the exact fault the 2026-08-11 fix cured — so the
+           laptop step is 3 and the phone step is 2. Told to him plainly rather than pretended. */
+        @media (max-width: 1080px) { :global(.ow2-stats), :global(.ow2-stats5) { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
         @media (max-width: 760px) {
-          :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
+          :global(.ow2-stats), :global(.ow2-stats5) { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           .ow2-two, .ow2-callouts { grid-template-columns: minmax(0, 1fr); }
           /* by CLASS, never by nth-child — a row whose cells don't line up 1:1 with the header
              (the "figures hidden" row) used to lose the wrong ones. And :global, because the
