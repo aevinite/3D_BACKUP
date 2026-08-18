@@ -261,9 +261,26 @@
     // describes it was left behind.
     var composition = !!d.composition;
     var restate = !inclusive && !inclOnly && !composition;
+    // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
+    // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
+    var R = billRows(d);
+    /* THE PERCENTAGE MUST DESCRIBE THE RUPEES PRINTED BESIDE IT (T8 sweep, 2026-08-17).
+       billRows() clamps a discount larger than the row it comes off — that was added on 2026-08-06
+       so no negative "Taxable value" could reach a guest's hands — but the LABEL is the caller's own
+       string and was printed unchanged, so a bill built with subtotal ₹100 and discount ₹150 read
+       "Discount (150%) − ₹100": a percentage of the subtotal that nobody was given, against the
+       amount that was actually deducted. Every panel path clamps before it gets here, but
+       billDocHtml is also called DIRECTLY with hand-built figures (lib/billPreview.ts, the admin
+       preview, lib/auditDetail.ts replaying a stored snapshot), which is the same reasoning that put
+       the clamp in billRows in the first place — this function is the last thing between an
+       arithmetic slip and a piece of paper. So when, and ONLY when, the clamp actually bites, the
+       label is re-worded from what the document really deducted. An ordinary bill keeps the caller's
+       own label byte-for-byte. */
+    var discLabel = d.discLabel;
+    if (disc > R.discount) discLabel = discPct(R.subtotal, R.discount);
     var discBlock = disc > 0
-      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(billRows(d).discount) + "</span></div>"
-        + (restate ? '<div class="t tx"><span>Taxable value</span><span>' + inr(billRows(d).taxable) + "</span></div>" : "")
+      ? '<div class="t"><span>Discount' + (discLabel ? " (" + esc(discLabel) + ")" : "") + "</span><span>− " + inr(R.discount) + "</span></div>"
+        + (restate ? '<div class="t tx"><span>Taxable value</span><span>' + inr(R.taxable) + "</span></div>" : "")
       : "";
 
     /* MRP / untaxed lines (mig 270). 'nontax' is the part of the bill GST is NOT charged on —
@@ -278,9 +295,8 @@
     var subLabel = nontax > 0 ? "Food subtotal" : "Subtotal";
     // (There used to be a second `subAmount` computed here. It was dead — the render below reads
     // R.subtotal — so a later editor "fixing" one of the two would have changed nothing. Gone.)
-    // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
-    // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
-    var R = billRows(d);
+    // (`R` is billRows(d), resolved once above the discount block — it used to be called three
+    // separate times for the same bill, which is three chances for two of them to disagree.)
     // What the cancelled bill WOULD have come to — added straight from the printed lines, so
     // the "Ordered value" row and the item rows above it are the same arithmetic.
     var orderedValue = (d.lines || []).reduce(function (a, i) {
@@ -412,8 +428,20 @@
 + (d.logo ? '<img class="logo" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
 + "\n<h2>" + name + "</h2>\n"
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
-// A cancelled bill says so, in a band nobody can miss, and is NOT called a tax invoice.
+/* A SECOND COPY OF A BILL SAYS SO (owner, 2026-08-17: "do both 11 and 12").
+   The KITCHEN TICKET has carried a big DUPLICATE banner since 2026-08-04 — the owner's own ask, so
+   a cook can never mistake a reprint for a fresh order. The BILL had nothing, so a re-issued copy
+   was indistinguishable from the original: two identical sheets for one sale, and no way for the
+   person holding either to tell which is which. That is the one gap left where this product's paper
+   can mislead someone, on the document that carries the money.
+   Same flag name and same band as everywhere else ('.vband', the double border the cancelled sheet
+   uses), so all three documents brand a duplicate identically. A first print is never branded — a
+   sheet marked DUPLICATE that is actually the original would be a lie on paper, which is the same
+   reasoning that keeps 'reprint' off a fresh KOT.
+   A cancelled bill that is ALSO reprinted shows both bands: both statements are true, and the
+   cancellation is the one that goes first because it is the one that changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
++ (d.reprint ? '<div class="vband">Reprint · Duplicate</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 + (d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
@@ -452,6 +480,24 @@
 + ((composition && !d.cancelled)
    ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">Composition taxable person — not eligible to collect tax on supplies.</div>\n'
    : "")
+/* THE VERIFICATION LINE — the signed chain, on the paper (owner, 2026-08-17).
+   Migration 332 writes one hash-chained row the moment a bill becomes a tax document, so a removed
+   or altered sale is DETECTABLE rather than merely forbidden. Until now that proof lived only in
+   the database: the person holding the receipt had to take the software's word for it. Germany's
+   KassenSichV settled this the same way — the signature is printed ON the receipt, which is what
+   makes it checkable by whoever holds it rather than only by whoever owns the server.
+   So: the bill's position in that chain and the first 12 characters of its hash. Twelve is enough
+   to pick one bill out of a restaurant's whole history and short enough for a 66mm roll; the full
+   value stays in the ledger, which is where a real verification reads it from anyway.
+   Formatted HERE, not at the call sites, for the reason this whole file exists — the manager panel,
+   the waiter tablet and the admin preview must print the same reference for the same bill.
+   Renders NOTHING unless the caller supplies both parts, so every bill printed today is unchanged,
+   and never on a cancelled sheet (that sale was withdrawn; its chain row records the issue, and the
+   band across the top is what the paper is for). */
++ ((!d.cancelled && d.chainSeq != null && d.chainHash)
+   ? '<div class="mini" style="margin-top:6px">Verification ' + esc(String(d.chainSeq)) + " · "
+     + esc(String(d.chainHash).slice(0, 12)) + "</div>\n"
+   : "")
 + '<div class="foot">' + footer + "</div>\n"
 + (d.noBar ? "" : pageScript(d.autoPrint));
   }
@@ -480,26 +526,62 @@
    * (the kitchen's auto-print and queued reprints, and the manager panel twice). One of them getting
    * the day and the others not is precisely the twin-drift this file exists to prevent.
    */
+  /* ONE CLOCK AND ONE DAY, ON EVERY DEVICE IN THE BUILDING (T8 sweep, 2026-08-17).
+   *
+   * The paragraph above says a kitchen ticket "must read the same on every device in the building",
+   * and only the MONTH NAME was ever made to obey it. Everything else here was left to the device:
+   * the time came from 'toLocaleTimeString([], …)' — the machine's own locale AND its own time zone —
+   * and the today/yesterday decision compared local calendar dates. Measured on one order rung at
+   * 2026-08-16 21:31 IST, the same ticket printed:
+   *
+   *     India tablet   YESTERDAY 09:31 pm      London   YESTERDAY 05:01 pm
+   *     New York       12:01 pm                Sydney   02:01 am
+   *
+   * — four different times and three different days, while the BILL for that same order said
+   * "16/08/2026 09:31 pm" on all four and the banquet sheet said "16-08-2026 09:31PM" on all four.
+   * The thermal bill was pinned to en-IN + Asia/Kolkata on 2026-08-05 and the banquet sheet on
+   * 2026-08-06; the ticket was the one document left on device time. A tablet bought abroad, or one
+   * left on its factory zone, hands the kitchen a time that is hours out and a day that is wrong —
+   * which is precisely the confusion this function was written to remove.
+   *
+   * AND THE DAY IS THE RESTAURANT'S DAY, NOT THE CALENDAR'S. "Today" in this product rolls over at
+   * 05:00 IST, not at midnight (mig 044, 'lib/businessDay.ts', 'docs/NUMBERING.md') — the counters,
+   * every panel's Today filter and the Z-report all agree on that, because a service running past
+   * midnight is still the same night's trade. On a calendar day a ticket rung at 23:50 and reprinted
+   * at 00:10 of the SAME rush came back branded "YESTERDAY". It now uses the same business day
+   * everything else uses, so the ticket agrees with the board, the bill and the Z-report.
+   * (The trade: a ticket rung at 03:00 and reprinted after 05:00 now says YESTERDAY on what is still
+   * the same calendar date. That is the correct answer — the restaurant HAS turned the day over by
+   * then, and every other "today" in the product has turned with it.)
+   *
+   * The business-day key is derived the way 'businessDayDate()' derives it — UTC+05:30 − 05:00 =
+   * UTC+00:30, so the key is the UTC date half an hour on. This file takes no imports (it is loaded
+   * by the panels, the Next server and React alike), so the arithmetic is repeated here rather than
+   * shared; if 'lib/businessDay.ts' ever changes, change this with it. 'verify:billdoc-paper' pins
+   * both halves.
+   */
   function kotWhen(ts) {
     if (ts == null || ts === "") return "";
     var d = new Date(ts);
     var t = d.getTime();
     if (!isFinite(t) || t <= 0) return "";          // never print "Invalid Date" on a ticket
-    var time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    var now = new Date();
-    var sameDay = function (a, b) {
-      return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-    };
-    if (sameDay(d, now)) return time;
-    var y = new Date(now.getTime() - 86400000);
-    if (sameDay(d, y)) return "YESTERDAY " + time;
+    // The same clock the bill's date row uses (see dateStr in billData), uppercased because this one
+    // is read at arm's length off a 203dpi roll.
+    var time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }).toUpperCase();
+    var bkey = function (ms) { return new Date(ms + 30 * 60000).toISOString().slice(0, 10); };
+    var today = bkey(Date.now());
+    var mine = bkey(t);
+    if (mine === today) return time;
+    if (mine === bkey(Date.now() - 86400000)) return "YESTERDAY " + time;
     // Older than that: the date itself. Day-and-month only — a KOT is never a year old, and the
     // paper is 66mm wide.
     // Built explicitly, NOT via toLocaleDateString's own ordering: the system locale decided it, so
     // the same ticket printed "AUG 6" on one machine and "6 AUG" on another. A kitchen ticket must
-    // read the same on every device in the building.
-    var mon = d.toLocaleDateString("en-GB", { month: "short" }).toUpperCase();
-    return d.getDate() + " " + mon + " " + time;
+    // read the same on every device in the building — and the DAY NUMBER has to come from India too,
+    // or a ticket rung at 01:30 IST prints the previous date on a device sitting behind UTC.
+    var day = d.toLocaleDateString("en-GB", { day: "numeric", timeZone: "Asia/Kolkata" });
+    var mon = d.toLocaleDateString("en-GB", { month: "short", timeZone: "Asia/Kolkata" }).toUpperCase();
+    return day + " " + mon + " " + time;
   }
 
   function kotLineHtml(r) {
@@ -813,6 +895,26 @@
         if (!i) return;
         var mode = String(i.tax_mode || "excl");
         if (mode === "exempt") return;
+        /* AN MRP LINE IS NOT ONE OF THE TAXED ROWS (T8 sweep, 2026-08-17).
+           A sealed bottle sold at its printed price is kept OUT of this order's taxable base — that
+           is what 'nontax_amount' is — and the tax sitting inside its price is the manufacturer's,
+           reported separately under the total by 'mrpTaxInside'. But an MRP line whose tax_mode is
+           "incl" is not "exempt", so it fell through to both sums below: counted here as a taxed
+           row, and counted AGAIN as the "MRP items" row the document adds after the tax.
+
+           A ₹400 dal beside two ₹21 bottles printed, on paper headed Tax Invoice:
+               Food subtotal ₹442   ← the whole bill, under a heading that says food
+               CGST ₹9 · SGST ₹9    ← ₹18 of a ₹20 tax, the other ₹2 pushed below the total
+               MRP items ₹42        ← the bottles, a second time
+               Round off − ₹40      ← the double count, silently clawed back
+               TOTAL ₹462
+           The amount charged was right; every row explaining it was wrong, and a "round off" of ₹40
+           on a ₹462 bill is not a rounding — it is this file's own note ("at most a rupee or two")
+           being contradicted on the one document that has to reconcile to the rupee.
+
+           Only skipped when this order really does hold the line outside its taxable base (ntx > 0);
+           an order carrying MRP lines with no 'nontax_amount' behaves exactly as it did before. */
+        if (i.is_mrp && ntx > 0) return;
         var amt = r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1));
         grossTaxed += amt;
         if (mode === "incl") netIncl += r2(amt / (1 + r));
@@ -1043,6 +1145,16 @@
       invNo: sess.invoice_no == null ? ""
         : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) + (voidedAll ? " — voided" : ""),
       billNo: sess.bill_no != null ? sess.bill_no : "",
+      // A SECOND COPY SAYS SO. The panel is the only thing that knows whether this sheet has been
+      // printed before, so it passes the flag; assembling it here keeps the panels' change to one
+      // word and keeps the decision about what a duplicate LOOKS like in the document, with the
+      // ticket's identical band.
+      reprint: !!a.reprint,
+      // The signed chain (mig 332), straight off the session row when the server sends it. Absent
+      // today on every caller, so nothing prints until the columns are exposed — and then every
+      // panel gets the verification line at once, with no second format to keep in step.
+      chainSeq: sess.chain_seq != null ? sess.chain_seq : undefined,
+      chainHash: sess.chain_hash || undefined,
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
       // en-IN + Asia/Kolkata, NOT the printing device's locale. This is a document headed "Tax

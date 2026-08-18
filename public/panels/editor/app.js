@@ -1020,17 +1020,27 @@ function syncBulkBtn() {
 async function bulkSoldOut(makeSoldOut) {
   const ids = [...state.bulkSel];
   if (!ids.length) return;
-  let done = 0;
+  let done = 0, failed = 0, already = 0;
   for (const id of ids) {
     const dish = (state.data.items || []).find((d) => d.id === id);
     if (!dish) continue;
     const tags = Array.isArray(dish.tags) ? dish.tags.slice() : [];
     const has = tags.includes("sold-out");
-    if (makeSoldOut === has) continue; // already in the wanted state
+    if (makeSoldOut === has) { already++; continue; } // already in the wanted state
     if (makeSoldOut) tags.push("sold-out"); else tags.splice(tags.indexOf("sold-out"), 1);
-    try { await api("POST", "/items", { id, tags }); dish.tags = tags; done++; } catch (e) { /* skip one, keep going */ }
+    try { await api("POST", "/items", { id, tags }); dish.tags = tags; done++; } catch (e) { failed++; }
   }
-  toast(`${done} dish${done === 1 ? "" : "es"} marked ${makeSoldOut ? "sold-out" : "available"}`, "ok");
+  // SAY WHAT ACTUALLY HAPPENED. Every failure used to be swallowed and the toast still went out
+  // green — with all five refused it read "0 dishes marked sold-out" in the success colour, which
+  // is the shape of a tap that vanished. Same rule the khata collect-all and payOrdersWithMethod
+  // already follow: report the split, in the colour the worse half deserves. (T5, 2026-08-17)
+  const word = makeSoldOut ? "sold-out" : "available";
+  toast(failed
+    ? `${done} marked ${word} — ${failed} could NOT be saved. Try again.`
+    : done
+      ? `${done} dish${done === 1 ? "" : "es"} marked ${word}`
+      : `Nothing to change — ${already === 1 ? "that dish is" : "those dishes are"} already ${word}.`,
+  failed ? "err" : "ok");
   renderList();
 }
 // bulkDeleteDishes: delete every selected dish, with a single confirm + a bulk Undo.
@@ -1039,8 +1049,8 @@ async function bulkDeleteDishes() {
   if (!ids.length) return;
   if (!(await confirmDialog(`Delete ${ids.length} dish${ids.length === 1 ? "" : "es"}?`, "Delete"))) return;
   const snaps = (state.data.items || []).filter((d) => ids.includes(d.id)).map((d) => ({ ...d }));
-  let done = 0;
-  for (const id of ids) { try { await api("DELETE", "/items/" + encodeURIComponent(id)); done++; } catch (e) { /* keep going */ } }
+  let done = 0, failed = 0;
+  for (const id of ids) { try { await api("DELETE", "/items/" + encodeURIComponent(id)); done++; } catch (e) { failed++; } }
   state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn();
   await loadAll(); renderList(); renderEditor();
   const undoDelete = async () => {
@@ -1049,6 +1059,10 @@ async function bulkDeleteDishes() {
     toast(`Restored ${r}`, "ok");
     await loadAll(); renderList(); renderEditor();
   };
+  // A REFUSED DELETE IS NEWS (T5, 2026-08-17) — the loop above used to swallow every failure, so
+  // "Deleted 5 dishes" could appear over 5 dishes that are all still on the menu. The undo bar is
+  // still offered for whatever DID go, because that part is real.
+  if (failed) toast(`Deleted ${done} — ${failed} could NOT be deleted. They are still on the menu.`, "err", undefined, 9000);
   if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 6, onUndo: undoDelete });
   else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
@@ -2894,6 +2908,20 @@ function groupOrdersBySession(orders) {
   });
   return [...map.values()];
 }
+// The orders behind ONE bill card, from the key its buttons carry: a "solo:" key is a single
+// order (a walk-in / banquet row with no session), anything else is a session id.
+//
+// TOP LEVEL ON PURPOSE (T5 sweep, 2026-08-17). This lived as a `const` inside renderEditor's
+// Bills branch, so it existed only while that branch was running — and printIssuingInvoice(),
+// 11,000 lines below, calls it too. Pressing 🖨 Print bill on a LIVE bill card therefore:
+// issued a real tax-invoice number, then threw "ordersInGroup is not defined" inside a click
+// handler nobody awaits — so nothing printed, no toast appeared, and the second press was met
+// with "This invoice was voided. Re-issuing assigns a NEW number — why?" and burned another
+// number off the restaurant's series. Proved live on the backup floor, not reasoned.
+// Never move it back inside a function.
+const ordersInGroup = (key) => ((key || "").startsWith("solo:")
+  ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
+  : (state.data.orders || []).filter((o) => o.session_id === key));
 
 // Pending waiter calls shown at the top of the Orders tab.
 function callsHtml() {
@@ -4977,11 +5005,29 @@ function printBill(t, sess, os, opts = {}) {
   const tnum = (t || "").toString().trim();
   const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
 
+  // A SECOND COPY SAYS SO (mig 333, owner 2026-08-17). The kitchen ticket has branded reprints
+  // since 2026-08-04; the bill did not, so one sale could be represented by two identical sheets.
+  // The answer comes off the BILL, never off this device — the manager prints at the till and a
+  // waiter may reprint the same bill from the tablet, where a local "already printed" flag would
+  // be wrong and would hand out an unbranded duplicate.
+  const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
     money: billMath(os), session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
+    reprint: printedBefore,
   }));
+  // Tell the server this bill has now been on paper, so the NEXT copy — from any device — is
+  // branded. Idempotent server-side, so calling it after every print is free and a retry is safe;
+  // fire-and-forget because a failed stamp must never stop a guest getting their bill.
+  const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  if (printedSid && !printedBefore) {
+    try {
+      api("POST", `/sessions/${printedSid}/bill-printed`)
+        .then(() => { if (sess) sess.bill_printed_at = new Date().toISOString(); })
+        .catch(() => {});
+    } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
+  }
 
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands the
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
@@ -5718,10 +5764,9 @@ function renderEditor() {
       };
     });
     // Merged session-card actions act on EVERY order in the group (one bill).
-    // The group is the orders sharing a session_id (or a single "solo:" order).
-    const ordersInGroup = (key) => (key || "").startsWith("solo:")
-      ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
-      : (state.data.orders || []).filter((o) => o.session_id === key);
+    // The group is the orders sharing a session_id (or a single "solo:" order) — resolved by the
+    // top-level ordersInGroup() next to groupOrdersBySession(), which printIssuingInvoice() also
+    // reads. It used to be redeclared here as a local, which is what made that call throw.
     ed.querySelectorAll("[data-sess-accept]").forEach((btn) => {
       btn.onclick = async () => { for (const o of ordersInGroup(btn.dataset.sessAccept).filter((x) => x.status === "received")) await acceptOrder(o.id); };
     });
@@ -7129,6 +7174,21 @@ const AUDIT_KIND = (function () {
     order_restored: ["\u267B\uFE0F", "Bill put back"],
   };
 })();
+// WHY this row was removed, in the words a person chose (the preset's own label + anything they
+// typed), or an honest "no reason recorded" for a row from before the reason sheet existed.
+//
+// TOP LEVEL ON PURPOSE (T5 sweep, 2026-08-17). It lived as a `const` inside auditHtml(), and
+// openRemovalDetail() — the card the owner asked for on 2026-08-04, "click and view the full …
+// which KOT he deleted and what was the item, with time, day, everything" — calls it too. So
+// clicking ANY row in Audit → Removals did nothing at all: the card is built as one template
+// literal, the call threw "reasonTxt is not defined" before it was finished, and the throw landed
+// in a click handler nobody awaits. Measured on the backup floor: 200 rows on screen, every one
+// of them dead. Same shape as the ordersInGroup bug found the same day; verify:panel-scope now
+// refuses either of them.
+const auditReasonTxt = (r) => {
+  const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
+  return [preset ? preset[1] : r.reason_code, r.reason_note].filter(Boolean).join(" — ") || "no reason recorded";
+};
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
   catch (e) { state.audit = { error: e.message }; }
@@ -7178,10 +7238,6 @@ function auditHtml() {
         (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
   const shownMoney = AS ? AS.sumAmount(list) : 0;
   const when = (t) => { const d = new Date(t); return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
-  const reasonTxt = (r) => {
-    const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
-    return [preset ? preset[1] : r.reason_code, r.reason_note].filter(Boolean).join(" — ") || "no reason recorded";
-  };
   return `<div class="ed-head"><h2>Audit · what was removed <span class="sub">· ${rows.length}</span></h2>
       <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
     <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
@@ -7203,7 +7259,7 @@ function auditHtml() {
       return `<div class="au-row" data-au-open="${esc(r.id)}" role="button" tabindex="0" title="See exactly what was removed">
         <span class="au-ico" title="${esc(label)}">${ico}</span>
         <div class="au-mid"><b>${esc(label)}</b><span class="au-bits">${bits || "—"}</span>
-          <span class="au-reason">${esc(reasonTxt(r))}</span></div>
+          <span class="au-reason">${esc(auditReasonTxt(r))}</span></div>
         <div class="au-who"><b>${esc(r.actor || "—")}</b><small>${esc(r.actor_role || "")}</small><small>${esc(when(r.at))}</small></div>
       </div>`;
     }).join("")}</div>`
@@ -7316,7 +7372,7 @@ async function openRemovalDetail(id) {
       ${row("What", esc(label))}
       ${row("When", whenLong(d.at))}
       ${row("Who", esc(d.actor || "—") + (d.actor_role ? ` · ${esc(d.actor_role)}` : ""))}
-      ${row("Reason", esc(reasonTxt(d)))}
+      ${row("Reason", esc(auditReasonTxt(d)))}
       ${d.amount != null ? row("Value removed", inr(parseFloat(d.amount) || 0)) : ""}
       <div class="au-d-head">Which ticket / bill</div>
       ${row("Kitchen ticket", (w && w.kot_no != null ? w.kot_no : d.kot_no) != null ? "KOT #" + esc((w && w.kot_no != null ? w.kot_no : d.kot_no)) : "—")}
@@ -8326,14 +8382,25 @@ function floorTileHtml(i) {
   // tile ("never make take order button small"). It only exists on a finished table, so on every
   // other tile the row is unchanged.
   const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-power-off" aria-hidden="true"></i></button>` : "")
-    // THREE FACES, ONE BUTTON, EXACTLY ONE SHOWN (T3 sweep, 2026-08-06). The stylesheet's container
-    // ladder picks between them by how wide the tile actually is: "Take order" while it fits, then
-    // the short "Order" (because 12-per-row on a 1280px laptop — the shipped default — leaves ~44px
-    // of text room, enough for a word but not that word), then the bare ＋ on a genuinely dense
-    // floor. Before this the middle rung didn't exist, so every laptop showed the ＋ and the owner's
-    // "never make take order button small" was only honoured on a 1920px monitor.
-    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span><span class="ft-take-s">Order</span></button>`)
+    // TWO FACES, ONE BUTTON, EXACTLY ONE SHOWN. The stylesheet's container ladder picks between them
+    // by how wide the tile actually is: "＋ Take order" while it genuinely fits, and the bare ＋ when
+    // it does not (a crowded tile, a dense floor, a finished table).
+    //
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO third, short "Order"
+    // face, and there must never be one again. The T3 sweep (2026-08-06) added one, this sweep
+    // briefly restored it after a later change had made it unreachable, and he removed it looking at
+    // the real tile: "instead of order is written that should be just a plus icon, nothing else, and
+    // it should stay like that" — plus, about the tile as a whole, "at the end of the day, UI should
+    // stay like this. I don't care if you increase the size of or maybe whatever you do."
+    // So: never add a word between the two faces, and never report the bare ＋ on a narrow tile as a
+    // bug. The size may change; the two faces may not.
+    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R29: there is no 🍽️ Serve-all on the
+    // tile. Offered as a way to make serving one tap instead of two ("tile → 🍽️ Serve all"), he said
+    // "we will not do any of that stuff". Serving stays two taps. It also protects this row, which he
+    // has ruled on twice (R4, and "never make take order button small"): a fifth control on an 89px
+    // tile could only take room from ＋ Take order. Do not add one.
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
     // on a green tile — the one control you look for while closing a table, camouflaged.
@@ -8948,6 +9015,15 @@ function patchFloorTiles(tables) {
   // sig and skip the redraw — leaving the screen on the patched state. Invalidate the sig so the
   // next full poll always redraws once (cheaper than re-stringifying the summary here).
   lastBoardSig = "";
+  // THE 🔔 IS PART OF THE FLOOR, SO IT HAS TO BE PATCHED WITH IT (T5 sweep, 2026-08-17).
+  // syncGuestBell() ran only from renderEditor(), and this path exists precisely to AVOID a full
+  // render — which is the path every realtime breadcrumb takes (a waiter call, a join request and
+  // a new order all name their table). Measured on the backup: a targeted refetch fired zero bell
+  // syncs while a full one fired one, so the count in the top bar sat still until the 60-second
+  // backstop came round. It reads nothing and fetches nothing — the rows are already in
+  // state.summary, which the lines above have just refreshed. Deferred the same way renderEditor
+  // defers it, so it never lands inside the paint it is describing.
+  setTimeout(syncGuestBell, 0);
   window.__lfhPerf.patches++;
   window.__lfhPerf.tilesPatched += patched;
   window.__lfhPerf.lastMs = performance.now() - _t0;
@@ -9788,7 +9864,23 @@ function tablePanelParts(t, host = "float") {
     const editToggle = allOut ? "" : (editing
       ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done editing</button>`
       : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`);
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}</div>`;
+    // THE HEADING COUNTS WHAT IS ON THE SCREEN (T5 sweep, 2026-08-17). It counted `os`, which
+    // includes CANCELLED tickets — and a cancelled ticket is deliberately drawn nowhere in this
+    // detail (its record lives in Bills and in Audit). Measured on the backup floor: table 1 held
+    // six voided tickets and the section read "Orders · 6" over an empty box, which reads as a
+    // screen that failed to load rather than a table with nothing on it. So the number is the
+    // number of tickets listed, and when there are none the voided ones are named in a sentence
+    // instead of being counted in silence.
+    const shownN = newOrders.length + liveOrders.length;
+    const voidedN = os.length - shownN;
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R30: this sentence is where it STOPS.
+    // Offered a next step for a table in this state — a line saying what to do, or a ⏻ that ends an
+    // empty party — he said "we will not do any of that stuff". State the truth and leave it: the
+    // bill is in the record, the table is usable, and no table ends itself (mig 254).
+    const voidNote = shownN === 0 && voidedN > 0
+      ? `<div class="sx-empty">Nothing on this table — ${voidedN} cancelled ticket${voidedN === 1 ? "" : "s"}, kept in Bills.</div>`
+      : "";
+    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${shownN}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}${voidNote}</div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
@@ -9815,7 +9907,15 @@ function tablePanelParts(t, host = "float") {
   // Split among guests = what's still DUE (exclude any order already paid), not the
   // whole historical total — matches the KOT-on split-settle path.
   const splitDue = billMath(os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total || mBill.total;
-  const splitBtn = os.length && splitBillOn() ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
+  // A CANCELLED TICKET IS NOT A BILL (T5 sweep, 2026-08-17). Every money control below asked
+  // `os.length`, which counts voided tickets too — so a table whose every ticket had been
+  // cancelled still offered 🍴 Split and 🖨 Print bill over a ₹0 total. Split is merely useless
+  // there; Print is not: it issues the tax invoice first, so it would draw the next number off
+  // the restaurant's series for a sale that never happened. That is the exact thing the BILL
+  // MODAL was fixed to stop on 2026-08-16 and that migration 331 refuses server-side — this
+  // screen was simply never given the same test, so the tap was offered and then refused.
+  const billableOs = os.filter((o) => o.status !== "cancelled");
+  const splitBtn = billableOs.length && splitBillOn() ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
   // Invoice-first billing (owner 2026-07-24): NO direct Print on a running tab — show
   // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
   // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
@@ -9830,7 +9930,7 @@ function tablePanelParts(t, host = "float") {
   // Both are offered on any table that has orders, cooking or not. The compliance rules are
   // untouched: an issued invoice still locks the bill (no discount until ↩ Reopen voids it, which
   // is recorded), and nothing here can erase a sale.
-  const printBtn = !os.length ? "" : (invoicedNow
+  const printBtn = !billableOs.length ? "" : (invoicedNow
     ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
     // ONE button (owner, 2026-08-05: "print means generate invoice and print ... once the bill is
     // printed, the invoice has been generated"). Print already issues-then-prints; a second
@@ -12509,7 +12609,18 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // The pay box already holds the full bill, so clicking it must SELECT that figure — otherwise
   // "make it 800" on a ₹817 bill types 817800 and the manager has to clear it first.
   payInput.onfocus = () => payInput.select();
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { clearRefusal(); discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
+  // A CHIP IS A TYPED FIGURE WITH ONE TAP, SO IT OBEYS THE SAME CEILING (T5 sweep, 2026-08-17).
+  // The two boxes clamp to maxDisc and say why; the chips set the raw percentage and said
+  // nothing — so with a manager capped at, say, 10%, tapping "25%" showed ₹250 off and a "They
+  // pay" figure the server was always going to refuse. Measured with a 10% cap: typing 250 gave
+  // "Most you can take off this bill is ₹100 — that is your 10% limit", the 25% chip gave ₹250
+  // and no message at all. Refusing at the last tap is the failure this modal's own cap exists
+  // to remove, so the chip now goes through the same clamp and the same sentence.
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => {
+    const want = round2((base * Number(c.dataset.pct)) / 100);
+    if (want > maxDisc + 0.004) refuse(capLine()); else clearRefusal();
+    discAmount = clamp(want, 0, maxDisc); setBlank(false); paint();
+  }));
   paint();
 
   const close = () => wrap.remove();

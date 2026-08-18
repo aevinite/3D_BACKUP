@@ -179,6 +179,64 @@ const inPanelAsync = async (page, fn, arg) => {
   );
   return r;
 };
+// ── CUT THE LINE, AND MAKE SURE THE PAGE STILL KNOWS IT AFTER A RELOAD ──────────────────────────
+//
+// `ctx.setOffline(true)` does flip `navigator.onLine` to false — but a SERVICE-WORKER-SERVED RELOAD
+// puts it back to true, and every offline check in this file reloads the page. Measured on
+// Playwright 1.62.1 / Chromium 151.0.7922.34 (T4 sweep, 2026-08-17):
+//
+//     onLine right after setOffline(true), no reload : false
+//     onLine after a reload the worker answered     : true      ← the emulated flag is not carried
+//                                                                 into a document the worker served
+//
+// That matters because the panels read `navigator.onLine` to tell "this device has no signal" apart
+// from "the connection is there but nothing is answering" — two situations they deliberately word
+// DIFFERENTLY, because blaming a person's internet when it is fine is the cry-wolf fault this app
+// has already made once. So after an offline reload the bar honestly said "Connection is struggling
+// — showing saved data", and this file reported "no honest offline message shown" on the manager and
+// the kitchen: two red lines about the emulator, not the app. A red that is really the harness is the
+// expensive kind — it reads as "offline is broken" and teaches people to skip the 53 checks under it.
+//
+// WHY A COOKIE AND NOT JUST addInitScript. An init script cannot be removed once added and re-runs
+// on every navigation, so pinning onLine=false that way leaves the whole context believing it is
+// offline for the rest of the run: the first attempt at this took the suite from 53 passed / 2 failed
+// to 18 passed / 3 failed, because later ONLINE phases never drained the outbox. The init script is
+// therefore installed ONCE and reads a cookie, which is per-context, survives a reload, and is
+// visible to a brand-new tab — so the pin can be turned back OFF. The cookie is only ever
+// OVERWRITTEN, never cleared, because clearing cookies by hand would take the signed-in session with
+// it and the whole run would fall out of its one sign-in.
+const PIN_COOKIE = "__lfh_test_offline";
+const pinned = new WeakSet();
+async function installOnlinePin(ctx) {
+  if (pinned.has(ctx)) return;
+  pinned.add(ctx);
+  await ctx.addInitScript(`(() => {
+    try {
+      Object.defineProperty(navigator, "onLine", {
+        configurable: true,
+        get() {
+          try { return document.cookie.indexOf("${PIN_COOKIE}=1") < 0; } catch (e) { return true; }
+        },
+      });
+    } catch (e) { /* a browser that won't allow it simply keeps its own value */ }
+  })();`);
+}
+async function setPin(ctx, offline) {
+  await installOnlinePin(ctx);
+  // Set the cookie BEFORE toggling the network, so the real `online`/`offline` event Chromium fires
+  // is already seen with the right answer by every handler that reads navigator.onLine.
+  await ctx.addCookies([{ name: PIN_COOKIE, value: offline ? "1" : "0", url: BASE, httpOnly: false }]).catch(() => {});
+}
+/** Cut the network AND make the pages believe it, across reloads and new tabs. */
+async function goOffline(ctx) {
+  await setPin(ctx, true);
+  await ctx.setOffline(true);
+}
+/** Put it back — both halves, or the next online phase measures a lie. */
+async function goOnline(ctx) {
+  await setPin(ctx, false);
+  await ctx.setOffline(false);
+}
 // A tab opened AFTER the network was cut adopts that state a moment later; navigating
 // before it does races the real server and the test measures nothing. Always go through this.
 async function offlinePage(ctx) {
@@ -418,7 +476,7 @@ async function run() {
       : bad("a forced refresh returned saved figures", JSON.stringify(forced));
 
     console.log("\n2) Manager panel RELOADED with no internet");
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     await page.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     const openedOffline = await waitFor(async () => {
       const v = await inPanel(page, () => !!document.querySelector(".topbar"));
@@ -441,7 +499,7 @@ async function run() {
     /no internet/i.test(barText || "")
       ? ok(`it tells the truth: "${(barText || "").trim().slice(0, 64)}…"`)
       : bad("no honest offline message shown", `bar said: ${JSON.stringify(barText)}`);
-    await ctx.setOffline(false);
+    await goOnline(ctx);
     await page.close();
 
     // ══ WAITER: can a real order be taken with no internet? ════════════════════
@@ -479,7 +537,7 @@ async function run() {
     // can't close over this script's scope, so the values go via window).
     await inPanel(tab, (arg) => { window.__T = arg.free; window.__D = arg.dishId; return true; }, target);
 
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     const placed = await inPanelAsync(tab, async () => {
       const w = window;
       const before = w.LFH_OUTBOX.getSnapshot().count;
@@ -496,18 +554,33 @@ async function run() {
     }
 
     // Does the waiter SEE it on the table while still offline?
-    const seenLocally = await inPanel(tab, () => {
+    //
+    // POLL FOR THE CHIP, DON'T READ IT ONCE. The ⏳ mark is stamped onto the already-rendered tile
+    // the moment the queue changes, and re-stamped on a slow tick — because the panels repaint their
+    // grids constantly and a repaint wipes it (public/panels/offline.js → stampTiles/syncStamping).
+    // So a repaint landing between the stamp and this read leaves up to ~1.2s with no chip, and this
+    // check failed on one run and passed the next on the same build. That is the worst kind of red:
+    // the feature works, so the next person learns to re-run and move on. (T4 sweep, 2026-08-17.)
+    const seenLocally = await waitFor(async () => {
+      const v = await inPanel(tab, () => {
+        const p = window.LFH_OUTBOX && window.LFH_OUTBOX.pendingForTable ? window.LFH_OUTBOX.pendingForTable(window.__T) : null;
+        const tile = document.querySelector(`.tile[data-t="${window.__T}"]`);
+        return { pending: p ? p.length : 0, tileMarked: !!(tile && /pending|wait|⏳/i.test(tile.className + " " + tile.innerHTML)) };
+      });
+      if (!v || v.__err) return v || null;                 // a real error still reports itself below
+      return v.pending > 0 && v.tileMarked ? v : null;     // both true, or keep looking
+    }, 8000, 250) || await inPanel(tab, () => {            // time ran out → report what is ACTUALLY there
       const p = window.LFH_OUTBOX && window.LFH_OUTBOX.pendingForTable ? window.LFH_OUTBOX.pendingForTable(window.__T) : null;
       const tile = document.querySelector(`.tile[data-t="${window.__T}"]`);
       return { pending: p ? p.length : 0, tileMarked: !!(tile && /pending|wait|⏳/i.test(tile.className + " " + tile.innerHTML)) };
     });
     if (seenLocally && !seenLocally.__err) {
       seenLocally.pending > 0 ? ok(`the table shows ${seenLocally.pending} change waiting`) : bad("the table shows nothing pending — the waiter can't tell the order was taken");
-      seenLocally.tileMarked ? ok("the table tile is marked as having an unsent change") : bad("the table tile is not marked");
+      seenLocally.tileMarked ? ok("the table tile is marked as having an unsent change") : bad("the table tile is not marked (polled for 8s)");
     }
 
     console.log("\n4) Back online — it must land exactly once");
-    await ctx.setOffline(false);
+    await goOnline(ctx);
     await inPanel(tab, () => { window.dispatchEvent(new Event("online")); });
     const drained = await waitFor(async () => {
       const s = await inPanel(tab, () => window.LFH_OUTBOX.getSnapshot());
@@ -568,7 +641,7 @@ async function run() {
       ok(`table ${clashTarget.free} is open with a live bill`);
 
       // 2. The waiter's device drops offline and takes ANOTHER order for that table.
-      await ctx.setOffline(true);
+      await goOffline(ctx);
       await inPanelAsync(tab, async () => {
         // The note carries a nonce so the order is UNIQUE to this run. Byte-identical every time,
         // it tripped the app's duplicate-order guard ("This looks identical to an order you just
@@ -589,7 +662,7 @@ async function run() {
       // 4. The replay guard only judges a change that is genuinely OLD (so live writes are
       //    never touched) — wait past that threshold before reconnecting.
       await sleep(22000);
-      await ctx.setOffline(false);
+      await goOnline(ctx);
       await inPanel(tab, () => { window.dispatchEvent(new Event("online")); });
 
       const needsYou = await waitFor(async () => {
@@ -701,7 +774,7 @@ async function run() {
     }, 40000);
     kLive ? ok(`kitchen loaded live (${kLive} dishes on the board)`) : bad("kitchen never loaded live");
     (await waitCached(kit, "/api/kitchen/board")) ? ok("the kitchen board is saved on the device") : bad("the kitchen board never got saved");
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     await kit.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     const kOff = await waitFor(async () => {
       const v = await inPanel(kit, () => (typeof state !== "undefined" && (state.dishes || []).length) || 0);
@@ -713,7 +786,7 @@ async function run() {
       return v && String(v).length ? String(v) : null;
     }, 15000);
     /no internet/i.test(String(kBar || "")) ? ok("the kitchen says it's offline") : bad("the kitchen shows no offline message", JSON.stringify(kBar));
-    await ctx.setOffline(false);
+    await goOnline(ctx);
     await kit.close();
 
     // ══ OWNER PANEL ════════════════════════════════════════════════════════════
@@ -726,7 +799,7 @@ async function run() {
     await waitControlled(own);
     await own.reload({ waitUntil: "domcontentloaded" });
     await sleep(6000);
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     await own.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     await sleep(5000);
     const oText = (await own.locator("body").textContent().catch(() => "")) || "";
@@ -740,7 +813,7 @@ async function run() {
       return /No internet|saved figures/i.test(t) ? t : null;
     }, 40000);
     notice ? ok("it admits the figures are saved ones, not live") : bad(hydrationBlame("the owner panel shows figures with no offline warning"));
-    await ctx.setOffline(false);
+    await goOnline(ctx);
     await own.close();
 
     // ══ GUEST MENU ═════════════════════════════════════════════════════════════
@@ -762,7 +835,7 @@ async function run() {
     }, 75000);
     liveDishes ? ok(`guest menu live with ${liveDishes} dishes`) : bad("guest menu never loaded live (test setup problem)");
     (await waitCached(guest, "/menu-data")) ? ok("the menu is saved on the device") : bad("the menu never got saved");
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     await guest.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     const body = (await guest.locator("body").textContent().catch(() => "")) || "";
     // Match the last-resort page by the ONE line only it says. Its headline is decided at
@@ -780,7 +853,7 @@ async function run() {
       return n > 0 ? n : null;
     }, 45000);
     offDishes ? ok(`the menu still lists ${offDishes} dishes offline (live was ${liveDishes})`) : bad(hydrationBlame("the guest menu is empty offline"));
-    await ctx.setOffline(false);
+    await goOnline(ctx);
 
     // 409 is EXPECTED here: it's the clash refusal this suite deliberately provokes.
     // ══ A CRAWLING CONNECTION (there, but hopeless) ════════════════════════════
@@ -876,7 +949,7 @@ async function run() {
     await waitControlled(lg);
     await lg.reload({ waitUntil: "domcontentloaded" });   // once online, so it's saved
     await sleep(2500);
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     await lg.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     await sleep(2000);
     const lgText = ((await lg.locator("body").textContent().catch(() => "")) || "");
@@ -901,7 +974,7 @@ async function run() {
     afterText.length > 0
       ? ok("and the next navigation is still answered (not the browser's error page)")
       : bad("a sign-in reload left the next navigation unhandled (empty body)");
-    await ctx.setOffline(false);
+    await goOnline(ctx);
     await lg.close(); await after.close();
 
     // ══ A SCREEN THIS DEVICE HAS NEVER OPENED, offline ═════════════════════════
@@ -919,7 +992,7 @@ async function run() {
       bad("the worker never precached /offline.html, so the last-resort checks below cannot mean anything",
           "give the server room and re-run — this is the guard not being ready, not the product failing");
     }
-    await ctx.setOffline(true);
+    await goOffline(ctx);
     for (let i = 0; i < 20 && !(await fresh.evaluate(() => navigator.onLine === false).catch(() => false)); i++) await sleep(250);
     // A URL that certainly has no saved copy on this device.
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
@@ -969,7 +1042,7 @@ async function run() {
     (await fresh.locator("#home").count()) > 0 && (await fresh.locator("#home").isVisible())
       ? ok("and it offers the way out (go to the home screen)")
       : bad("the last-resort page has no way out");
-    await ctx.setOffline(false);
+    await goOnline(ctx);
     await fresh.close();
 
     // ══ NO FALSE ALARMS ON A HEALTHY CONNECTION ════════════════════════════════

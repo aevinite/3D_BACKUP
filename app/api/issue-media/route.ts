@@ -12,18 +12,47 @@
 // a staff member can only attach media for their OWN restaurant; an admin uses the
 // per-tab ?rid pin / act-as cookie, exactly like the panels' other calls.
 import { NextRequest, NextResponse } from "next/server";
-import { userFromCookie, USER_COOKIE } from "@/lib/userAuth";
+import { userFromCookie, USER_COOKIE, AuthDbError } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { storeIssueMedia, type MediaKind } from "@/lib/issues";
+// The one sentence a person reads when the database didn't answer — shared with every panel route.
+import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 
 export const dynamic = "force-dynamic";
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 
 export async function POST(req: NextRequest) {
   // Staff login FIRST (a device can hold both cookies — see requireRole's note), else admin.
+  //
+  // "THE DATABASE DIDN'T ANSWER" IS NOT "YOU ARE NOT LOGGED IN" (T10 sweep, finding F2).
+  //
+  // This catch used to swallow everything with the comment "treat as not-staff". That reading is
+  // right for a BAD or EXPIRED cookie and wrong for the other thing `userFromCookie` throws:
+  // `AuthDbError`, raised when the staff_users lookup itself fails after its own retry. A sustained
+  // DB/DNS flap therefore turned a signed-in cook into "nobody", the `!staff && !isAdmin` line
+  // answered 401, and public/panels/issue-raise.js — which throws on any non-ok upload — put
+  // "Couldn't send: Not authorised — please log in." on the screen of somebody who was logged in,
+  // and threw away the photo, the voice note AND the typed report with it.
+  //
+  // lib/userAuth.ts states the rule this breaks in its own words: "A transient outage must surface
+  // as 503 ('try again'), never as 'please log in'." So the two are told apart: a bad cookie still
+  // falls through to the admin check exactly as before, and a database blip answers `busy` — the
+  // same 503 + `X-LFH-Busy` shape every other panel route gives, which the device's offline layer
+  // already knows how to read (lib/panelFailure.ts).
   let staff = null;
-  try { staff = await userFromCookie(req.cookies.get(USER_COOKIE)?.value); } catch { /* treat as not-staff */ }
+  try {
+    staff = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  } catch (e) {
+    if (e instanceof AuthDbError) {
+      console.error("[issue-media] auth lookup failed:", e.message);
+      return NextResponse.json(
+        { error: BUSY_MESSAGE, busy: true },
+        { status: 503, headers: { "X-LFH-Busy": "1" } },
+      );
+    }
+    /* anything else: a bad/expired cookie — treat as not-staff, as before */
+  }
   // `await` MATTERS HERE and its absence made this gate a no-op (sweep 2026-08-04). tokenIsValid is
   // async, so `const isAdmin = tokenIsValid(…)` is a Promise — always truthy — which made `!isAdmin`
   // always false and the 401 below UNREACHABLE. Anyone could reach the upload; the only thing left

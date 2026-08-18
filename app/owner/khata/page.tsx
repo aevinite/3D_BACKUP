@@ -108,7 +108,7 @@ export default function OwnerKhata() {
           "Pay Later isn't enabled" when the module reads off. Built once as sweep-6 item 4 and taken
           straight back out on his word — *"if the feature is on by me, it will stay on"*. The page
           shows the book; it never decides whether Pay Later exists. `/api/owner/khata` does send
-          `moduleOff`, and it stays deliberately unread here. docs/REJECTED-IDEAS.md → R31. */}
+          `moduleOff`, and it stays deliberately unread here. docs/REJECTED-IDEAS.md → R34. */}
       <h1 className="adm-page-h">Pay Later</h1>
       <p className="adm-page-sub">Money guests still owe on a tab, and how much you&apos;ve collected. Staff collect a tab from the manager panel; this is your live view of what&apos;s outstanding.</p>
 
@@ -145,7 +145,7 @@ export default function OwnerKhata() {
               much is owed. (It could not have been done honestly from this screen anyway: the list is
               bounded to the biggest 500 debts, so "oldest" of that slice is not the oldest on the book
               — the order would have to move into `lfh_khata_outstanding`.) The age colouring on each
-              row is the part that IS wanted. docs/REJECTED-IDEAS.md → R32. */}
+              row is the part that IS wanted. docs/REJECTED-IDEAS.md → R35. */}
           <input className="adm-input" style={{ flex: 1, minWidth: 200 }} placeholder="Search by name or phone…"
             value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search people who owe" />
           <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>

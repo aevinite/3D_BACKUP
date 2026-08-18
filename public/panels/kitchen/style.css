@@ -178,7 +178,19 @@ html[data-theme="light"] .age.age-late { color: #b91c1c; }
 html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 /* Manual reprint (🖨) — a secondary control, so it's subtle and small; only rendered when KOT
    printing is enabled for the restaurant. Sits after the age in the ticket header. */
-.reprint { margin-left: 8px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 3px 9px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
+/* ── FINGER-SIZED AT EVERY WIDTH (T6 sweep, 2026-08-17) ───────────────────────────────────────
+   Measured on the real board: 38×22 at 1280×800, at 1194×834 (the actual kitchen tablet) and at
+   768×1024 (an older iPad in portrait) — the smallest control on the screen, and against the 44px
+   finger target the rest of the product holds to. A phone already got 44×40 from the media block
+   below; every other width did not, and a kitchen screen is a TOUCH screen at 1194px just as much
+   as at 360px. This is the button a print-first kitchen reaches for after a jam or a paper-out,
+   with wet hands, and the ticket header packs it against the age chip, so a miss lands on nothing
+   or on the ticket body. Same reasoning and the same 44px the T14 tablet sweep applied to the 86
+   board's toggles, which were 37px for exactly the same reason: "applies at every width — a phone
+   is touch too, and nothing here was ever mouse-only". The button LOOKS the same; the padding does
+   the growing, so the ticket header is unchanged to the eye. */
+.reprint { margin-left: 8px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 3px 9px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto;
+  min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 .reprint:hover { border-color: var(--blue); color: var(--text); }
 .reprint:active { transform: scale(0.92); }
 /* Per-dish edit markers: green "＋" on a staff-ADDED allergen; amber "✎−" on the dish
@@ -335,6 +347,16 @@ html[data-theme="light"] #col-cooking h2 { color: var(--blue-ink); }
    a cook reads first (T11 sweep, 2026-08-13). Same hues, deepened for the light skin only. */
 html[data-theme="light"] #col-new h2 { color: #a1560a; }
 html[data-theme="light"] #col-ready h2 { color: #15803d; }
+/* "served ✓" — the last green word on the light skin that never got deepened (T6 sweep,
+   2026-08-17, pixel-measured on the running board). --green is #16a34a as INK on the white ticket:
+   3.30:1 at 18px/900, which is just under the 18.66px bold that would let large-text 3:1 apply, so
+   it is the one word on a kitchen ticket that fails outright — while the ✓ button's glyph beside it
+   (20px/900) legitimately passes at the same colour, which is why this survived three sweeps. It is
+   the mark that says a dish has already left the kitchen, on a half-served ticket a cook is scanning
+   to find what is still theirs. Same hue one step deeper — the exact value the ✅ Ready heading was
+   given for the same reason — measures 5.02:1. The dark skin was fine (6.40:1) and is untouched, and
+   `.done.rdy` keeps its pink through its own more specific rule below. */
+html[data-theme="light"] .done{ color:#15803d; }
 html[data-theme="light"] .done.rdy{ color:#be185d; }
 html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
 /* Deepen the "new — waiting for the waiter" footer text in light mode: the dark-theme
@@ -385,8 +407,8 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
      RESTAURANT's own name is the part that must survive a narrow screen — no tenant may lose its
      branding — so the throwaway words go, exactly as the tablet's top bar already does it. */
   .brand .sub { display: none; }
-  /* Bigger reprint tap target on a phone/greasy tablet. */
-  .reprint { min-height: 40px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  /* (The 🖨 reprint target used to be widened only here, at 40px. It is now 44px in the base rule
+     for every width — see the note there — so the phone needs no rule of its own.) */
 }
 
 /* special table-type badge on the ticket head (mig 166) */

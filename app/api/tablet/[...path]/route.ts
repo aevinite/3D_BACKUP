@@ -1355,6 +1355,45 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(mg);
     }
 
+    // tables/:t/unmerge — separate THIS table from the party it was merged into (mig 249).
+    //
+    // WHY IT IS HERE (owner, 2026-08-17). Merging was a ONE-WAY DOOR on the waiter tablet: this
+    // panel could join two tables, and its own KOT menu then told the waiter "Change table —
+    // unmerge first", an instruction the device gave them no way to follow. The only unmerge lived
+    // on /api/editor (the manager panel), so undoing a mis-tapped merge meant walking away from the
+    // table. Splitting and joining are the same feature and must answer to the same switch, so this
+    // carries the gate its merge twin carries, line for line: the module rung
+    // (tableOpsTabletAllowed) AND the tri-state (tabletPerm off/pin/on), with the admin act-as
+    // bypass. It is the SAME RPC the manager calls, so the two panels can never split a party two
+    // different ways.
+    //
+    // Reached from the CHILD table (owner: "you can only unmerge by clicking on the seven number
+    // table"); opening the table that HOLDS the bill offers one button per child, each posting that
+    // child's number here. The RPC returns what actually moved, so the panel's confirm can have told
+    // the truth before anyone tapped.
+    if (a === "tables" && c === "unmerge") {
+      const tu = String(b || "").trim();
+      if (!/^\d+$/.test(tu)) return err("valid table required");
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      const gu = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gu.allow) return gu.resp;
+      // The same actor rule as merge: a PIN-approved split names the MANAGER who approved it.
+      const pinU = pinAuth as { actor: string; actor_id: string | null } | null;
+      const unmergeActor = pinU?.actor || actor?.name || actor?.username || "waiter";
+      const { data: um, error: umErr } = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: tu, p_actor: unmergeActor });
+      if (umErr) throw new Error(umErr.message);
+      const ur = (um || {}) as { ok?: boolean; reason?: string; parent?: string; moved?: number; kots?: string | null };
+      if (ur.ok === false) {
+        // Same three answers the manager gives, in the same words — one bill, one explanation.
+        return err(ur.reason === "invoiced"
+          ? "This bill has already been invoiced. A manager must reopen (void) the invoice first, then the tables can be split."
+          : ur.reason === "not_merged" ? "That table isn't merged with another one."
+          : "Couldn't split those tables.", 409);
+      }
+      invalidateFloor(rid);
+      await log("table_unmerge", { table_number: tu, detail: `split from T${ur.parent ?? "?"} · ${ur.moved ?? 0} ${(ur.moved ?? 0) === 1 ? "order" : "orders"} returned${ur.kots ? ` (KOT ${ur.kots})` : ""}`, device_id: dev });
+      return ok({ ok: true, ...ur });
+    }
+
     // order-items/:id/move — move ONE dish line to another table's bill (KOT ▾ menu).
     // Same ladder gate as merge; the RPC (mig 175) reprices both KOTs server-side.
     if (a === "order-items" && c === "move") {

@@ -173,8 +173,22 @@
     // timer. navigator.onLine is TRUE on a cafe Wi-Fi with no internet, so reloading just
     // because it says "online" looped this page forever: PROVE there's a real connection
     // first, and back off so a bad network isn't hammered.
-    var wait = 5000, checking = false;
+    //
+    // ONE RETRY LOOP, HOWEVER MANY TIMES THE DEVICE SAYS IT IS BACK.
+    // `retryTimer` is not tidiness — it is the whole point. A phone on the edge of coverage fires
+    // `online` over and over, and every one of those events that landed while no check happened to
+    // be running scheduled ANOTHER timer, with no handle kept anywhere, so nothing could ever
+    // cancel it. The chains only died by colliding with each other. Measured with the real page on
+    // a local stub (scripts/verify-offline-retry.mjs): ten "back online" events left 47 retry gaps
+    // scheduled and produced 59 probes where one loop makes a handful. That is the exact opposite
+    // of what the doubling and the jitter below exist for — the page hammered a struggling server
+    // HARDER the worse the line flapped, and every device in the restaurant is on this page at the
+    // same moment. One handle, cleared before each schedule, keeps it to one loop.
+    var wait = 5000, checking = false, retryTimer = null;
     function cycle(fast) {
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      // A check already in flight will schedule the next gap itself when it finishes, so there is
+      // never a moment with no loop — this only ever collapses duplicates.
       if (checking) return;
       checking = true;
       $("hint").textContent = "Checking the connection...";
@@ -194,7 +208,11 @@
         // moment the thing needs a quiet gap. Each device now rolls its own delay, so the same
         // number of checks arrive spread out instead of pulsing.
         var jittered = Math.round(wait * (0.75 + Math.random() * 0.5));
-        setTimeout(function () { wait = Math.min(wait * 2, 60000); cycle(false); }, jittered);
+        retryTimer = setTimeout(function () {
+          retryTimer = null;
+          wait = Math.min(wait * 2, 60000);
+          cycle(false);
+        }, jittered);
       };
       // The catch is not decoration: if a check ever threw, `checking` would stay true and
       // this page would never look again — a screen that recovers from nothing, which is the

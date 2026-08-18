@@ -12,7 +12,7 @@
 // the act-as cookie, else the default. The id is not secret (it's already in panel URLs).
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 
@@ -20,7 +20,44 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   let restaurantId = DEFAULT_RESTAURANT_ID;
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  // "THE DATABASE DIDN'T ANSWER" GETS ITS OWN CODE, LIKE EVERY OTHER ANSWER HERE (T10 sweep, F3).
+  //
+  // `userFromCookie` THROWS `AuthDbError` when the staff_users lookup fails after its own retry,
+  // and this call was bare — so a sustained flap made this route the ONE panel API with no answer
+  // for "the database is busy": it escaped as an unclassified 500. public/panels/realtime.js does
+  // `await (await fetch(...)).json()`, which throws on that body, so the panel's live socket never
+  // booted and it dropped to the 5-second catch-up poll.
+  //
+  // Answering 503 with a CODE puts this route back in step with the `rt_unconfigured` answer below
+  // (the house rule: branch on codes, never on prose) and lets the connection badge say "busy, it
+  // will come back" instead of lumping a passing blip in with a bad signal. `retryable` is the half
+  // that differs from `rt_unconfigured`: this one genuinely does come back on its own.
+  //
+  // Deliberately NOT falling back to DEFAULT_RESTAURANT_ID here. `restaurantId` is what the panel
+  // uses to DROP realtime breadcrumbs belonging to other restaurants, so guessing it would either
+  // make a tenant's panel ignore its own events or make it wake on everyone else's — the exact
+  // egress problem this field was added to fix. Refusing is the honest answer.
+  //
+  // ⚠️ There is a second half to this, and it is NOT in this file: after a failed boot,
+  // realtime.js only retries on visibilitychange / focus / pageshow / online, none of which ever
+  // fire on a wall-mounted kitchen display. See the HANDOFF row in .claude/sweep/T10-findings.md.
+  let u;
+  try {
+    u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  } catch (e) {
+    if (!(e instanceof AuthDbError)) throw e;
+    console.error("[rt-config] couldn't resolve who is asking:", e.message);
+    return NextResponse.json(
+      {
+        error: "The system is very busy right now — live updates will come back by themselves.",
+        reason: "rt_busy",
+        retryable: true,
+        /** Nothing for the staff member to do, and nothing to call Aevidine about either. */
+        selfFixable: false,
+      },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   if (u) {
     // Real staff member → ALWAYS their own restaurant (a ?rid= can't move them).
     restaurantId = u.restaurant_id || DEFAULT_RESTAURANT_ID;

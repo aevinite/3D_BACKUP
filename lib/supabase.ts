@@ -34,7 +34,28 @@ const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 // that never resolves. The service worker keeps its own, shorter timeout for deciding when to serve
 // the saved copy — that decision stays where it already lives.
 const REST_TIMEOUT_MS = 15000;
+// NO SESSION STORAGE, BECAUSE THIS APP HAS NO SUPABASE-AUTH USER — and because keeping it took the
+// guest menu down on a real class of phone (T4 sweep, 2026-08-17).
+//
+// Aevidine does its own sign-in (`/api/panel-login`, `/api/staff-login`, the owner and admin
+// tokens); `supabase.auth` is called in exactly ZERO places in this codebase, and realtime
+// authenticates with the anon key above, not with a user session. So the auth client here was only
+// ever dead weight.
+//
+// Dead weight that could crash the page, though. Left to its defaults, supabase-js builds a session
+// store on `localStorage` while this module is being EVALUATED. On a browser set to block all site
+// data — Chrome's "Block all cookies", Safari's equivalent, a locked-down tablet profile — reading
+// that property throws `SecurityError`, and a throw during module evaluation takes the whole page
+// with it. Measured on a production build with the getter made to throw: the guest menu rendered
+// "Something went wrong" and zero dishes, and the captured stack named
+// `_initSupabaseAuthClient`. `persistSession: false` keeps the session in memory and never touches
+// storage at all — the same choice lib/supabaseAdmin.ts already makes on the server, for its own
+// reason (it is stateless).
+//
+// If this app ever DOES adopt Supabase Auth in the browser, do not simply delete this block: give
+// the client an explicit `auth.storage` that cannot throw, or the same class of phone breaks again.
 export const supabase = createClient(url, anon, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   realtime: { worker: true, params: { eventsPerSecond: 10 } },
   global: {
     fetch: (input, init) =>

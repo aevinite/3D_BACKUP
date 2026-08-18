@@ -74,10 +74,21 @@
     return me;
   }
 
+  // ONE ESCAPER, AND IT LIVES HERE (T9 sweep, 2026-08-17).
+  //
+  // `title` was escaped inside this function while `sub` and `right` were not, so half the call
+  // sites escaped their own text and half did not — and three of them escaped a title that this
+  // function then escaped a second time. The visible result: a job title of "Owner's assistant"
+  // printed on a waiter's own profile as "Owner&#39;s assistant", and any designation, shift
+  // label or pay-extra label with an apostrophe or an ampersand read the same way. Apostrophes
+  // are ordinary English, so this was not an edge case, it was most of them.
+  //
+  // Every argument is now escaped exactly once, right here, and every caller hands over plain
+  // text. Do not re-add esc() at a call site — that is the bug, not the fix.
   function row(icon, title, sub, right) {
     return '<div class="me-row"><i class="fas ' + icon + '" aria-hidden="true"></i>' +
-      '<span class="me-rt"><b>' + esc(title) + '</b>' + (sub ? '<small>' + sub + "</small>" : "") + "</span>" +
-      (right ? '<span class="me-rr">' + right + "</span>" : "") + "</div>";
+      '<span class="me-rt"><b>' + esc(title) + '</b>' + (sub ? '<small>' + esc(sub) + "</small>" : "") + "</span>" +
+      (right ? '<span class="me-rr">' + esc(right) + "</span>" : "") + "</div>";
   }
 
   function render() {
@@ -112,12 +123,12 @@
       h += '<div class="me-sect">My pay</div>';
       h += '<div class="me-card">';
       h += row("fa-indian-rupee-sign", money(s.thisMonth) + " paid this month",
-        me.pay.pay_amount ? esc(money(me.pay.pay_amount) + " " + (PAYT[me.pay.pay_type] || "")) : "no rate set yet");
+        me.pay.pay_amount ? money(me.pay.pay_amount) + " " + (PAYT[me.pay.pay_type] || "") : "no rate set yet");
       if (s.advanceOutstanding) h += row("fa-hand-holding-dollar", money(s.advanceOutstanding) + " advance pending", "will be taken from a later salary");
       if (s.lastPaidOn) h += row("fa-calendar-check", "Last paid " + dateIN(s.lastPaidOn), "");
       (me.pay.pay_extras || []).forEach(function (x) {
         h += row(x.kind === "deduction" ? "fa-minus" : "fa-plus",
-          esc(x.label) + " · " + money(x.amount), x.kind === "deduction" ? "taken off every cycle" : "added every cycle");
+          x.label + " · " + money(x.amount), x.kind === "deduction" ? "taken off every cycle" : "added every cycle");
       });
       h += "</div>";
       var pays = me.payments || [];
@@ -137,8 +148,8 @@
     // ── your job, as set by the owner (read-only on purpose) ─────────────────
     if (job.designation || job.shift_label || (job.weekly_off || []).length) {
       h += '<div class="me-sect">My job <span class="me-mut">· set by the owner</span></div><div class="me-card">';
-      if (job.designation) h += row("fa-briefcase", esc(job.designation), "");
-      if (job.shift_label) h += row("fa-clock", esc(job.shift_label) + " shift", "");
+      if (job.designation) h += row("fa-briefcase", job.designation, "");
+      if (job.shift_label) h += row("fa-clock", job.shift_label + " shift", "");
       if ((job.weekly_off || []).length) h += row("fa-bed", "Weekly off: " + job.weekly_off.map(function (d) { return d.charAt(0).toUpperCase() + d.slice(1); }).join(", "), "");
       h += "</div>";
     }
@@ -228,13 +239,21 @@
 
   // Cheap pre-check so a panel can hide its "My profile" button when the restaurant
   // doesn't have the feature (no dead UI). Cached after the first answer.
+  // A FAILED READ IS NOT AN ANSWER (T9 sweep, 2026-08-17).
+  //
+  // This cached `false` when the request THREW, so one blip — a panel opened where the signal
+  // doesn't reach, one 500 — meant "My profile & pay" was gone for the whole session even after
+  // the connection came back, and a waiter had no way to reach their own pay page short of a
+  // reload they had no reason to try. It is the same scar realtime.js carries in as many words
+  // ("a failed boot must not be remembered forever"), and the same fix: only a real answer is
+  // remembered, and the question is asked again when the connection returns.
   var availability = null;
   async function available() {
     if (availability !== null) return availability;
     try {
       var j = await load();
       availability = !!(j && !j.error && j.profileModule);
-    } catch { availability = false; }
+    } catch (e) { return false; }   // this time, no. Not remembered — ask again on the next call.
     return availability;
   }
 
@@ -256,6 +275,11 @@
   // AFTER that event has already fired — so the listener never ran (2026-07-31 sweep, pass 2).
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireManagerButton);
   else wireManagerButton();
+  // …and ask again the moment the connection comes back, so a panel that opened with no signal
+  // still grows its "My profile & pay" button instead of waiting for a reload. Cheap: available()
+  // remembers a real YES, so this makes at most one extra request per reconnect, and none at all
+  // once the answer is known.
+  window.addEventListener("online", function () { if (availability !== true) wireManagerButton(); });
 
   // Styles ride with the script so a panel only has to add the <script> tag.
   var css = document.createElement("style");

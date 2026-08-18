@@ -77,7 +77,7 @@ p.on("pageerror", (e) => errs.push(String(e).slice(0, 140)));
 await p.goto(B + "/manager", { waitUntil: "networkidle", timeout: 120000 });
 await p.waitForTimeout(4500);
 const fr = p.frameLocator("iframe").first();
-try { await fr.locator('[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
+try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6500);
 
 // ── while the party is up: does the HEADER agree with the tiles? (T3 sweep, 2026-08-06) ──────────
@@ -152,7 +152,7 @@ const soloOrderId = (await q(`select id from orders where restaurant_id='${RID}'
   and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`))[0].id;
 await p.reload({ waitUntil: "networkidle", timeout: 120000 });
 await p.waitForTimeout(5000);
-try { await fr.locator('[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
+try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6500);
 await fr.locator(`.ftile[data-floor-table="${PARENT}"]`).click({ force: true });
 await p.waitForTimeout(5000);
@@ -170,7 +170,11 @@ if ((await soloCancel.count()) > 0) {
 }
 solo = await snap();
 check("the solo table freed itself (no live food left)", !solo.live[PARENT], JSON.stringify(solo.live));
-check("…and its party was ended, so the next guests start clean", solo.open.length === 0, "open " + (solo.open.join() || "(none)"));
+// SCOPED TO THE TABLE THIS CHECK IS ABOUT (T5 sweep, 2026-08-17). It asserted that NEITHER of the
+// two tables had an open session, so a guest order arriving on the OTHER table from anywhere else —
+// another sweep lane, a real phone, the owner's own tab — failed a check about table 27's party.
+// The sentence means "27's party ended", so that is what it asks.
+check("…and its party was ended, so the next guests start clean", !solo.open.includes(PARENT), "open " + (solo.open.join() || "(none)"));
 
 await browser.close();
 await wipe();

@@ -49,7 +49,7 @@
   var mounted = null;      // the <button> in the top bar, once there is something to mount it in
   var sheet = null;
   var backOff = null;
-  var last = { menuOn: false, rows: [], onOpen: null };
+  var last = { menuOn: false, rows: [], allRows: [], onOpen: null };
   // WHICH ROWS HAVE BEEN SEEN — not "when did you last look".
   //
   // A timestamp was the obvious way and it is wrong here, because the most important row has no
@@ -69,14 +69,33 @@
     catch (e) { return []; }
   }
   function rowKey(r) { return String(r.key || (r.kind + ":" + (r.table == null ? "" : r.table) + ":" + (r.id || r.at || ""))); }
-  function isNew(r) { return readSeen().indexOf(rowKey(r)) < 0; }
+  // READ THE SEEN LIST ONCE PER PASS, NOT ONCE PER ROW (T9 sweep, 2026-08-17).
+  //
+  // `isNew()` used to re-read AND re-parse the whole list out of localStorage for every single
+  // row, and both the count and the sheet ask it — measured at 90 synchronous storage reads and
+  // 90 JSON.parses for one 30-row pass, on a file whose own doc line says it is "cheap enough to
+  // call on every paint". localStorage is synchronous, so that is main-thread time on the
+  // busiest device in the building, every time the floor repaints. One read per pass, held in a
+  // Set, is the same answer for a fraction of the work.
+  var seenSet = null;
+  function seen() {
+    if (!seenSet) seenSet = new Set(readSeen());
+    return seenSet;
+  }
+  function forgetSeen() { seenSet = null; }   // after a write, or when the rows change
+  function isNew(r) { return !seen().has(rowKey(r)); }
   function markSeen() {
     try {
-      // Only what is on screen right now — a row that has been answered is gone, and remembering
-      // it forever would just make the list of remembered things outlive the things themselves.
-      var keys = last.rows.map(rowKey).slice(0, 200);
+      // Only what is waiting right now — a row that has been answered is gone, and remembering it
+      // forever would just make the list of remembered things outlive the things themselves.
+      // EVERY waiting row, not just the 50 that render: the badge counts them all now, so marking
+      // only the visible ones would leave it stuck on the remainder after the person had read the
+      // sheet — a badge that will not clear is one people stop reading. Bounded by the floor's own
+      // size, and 500 short keys is a few kilobytes.
+      var keys = last.allRows.map(rowKey).slice(0, 500);
       localStorage.setItem(SEEN_KEY, JSON.stringify(keys));
-    } catch (e) {}
+      seenSet = new Set(keys);   // we just wrote it — no need to read it back
+    } catch (e) { forgetSeen(); }
   }
 
   function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
@@ -115,7 +134,12 @@
       ".lfh-bell-sheet{width:min(560px,100%);max-height:min(84vh,720px);overflow:auto;",
       "  background:var(--panel,#0f1830);color:var(--text,#e7eefc);",
       "  border:1px solid var(--line,rgba(127,127,127,.28));border-radius:18px 18px 0 0;",
-      "  padding:18px 18px calc(18px + var(--safe-b,0px));box-shadow:0 -18px 60px rgba(0,0,0,.5);",
+      // --sab, not --safe-b: the panels define --sab as max(env(safe-area-inset-bottom), --safe-b)
+      // precisely because only ONE of those two is ever real — --safe-b is injected by the host
+      // page into the iframe, env() only works when the panel is open on its own. Reading the
+      // injected one alone meant the last row of this sheet sat under a phone's home indicator
+      // whenever the panel was opened directly. undobar.js already reads it this way.
+      "  padding:18px 18px calc(18px + var(--sab, env(safe-area-inset-bottom, 0px)));box-shadow:0 -18px 60px rgba(0,0,0,.5);",
       "  font:500 13.5px/1.45 system-ui,sans-serif}",
       "@media(min-width:700px){.lfh-bell-sheet{border-radius:18px}}",
       ".lfh-bell-hd{display:flex;align-items:flex-start;gap:10px}",
@@ -173,8 +197,16 @@
     closeSheet();
   }
 
+  // THE NUMBER ON THE BELL IS THE TRUE NUMBER (owner, 2026-08-18).
+  //
+  // The list that RENDERS is capped at 50 so a floor that has got away from someone cannot build a
+  // sheet nobody can scroll — that cap stays, it is the right call. But the count was worked out from
+  // that same capped list, so with 60 tables waiting the badge said 50. A badge that under-states a
+  // backlog is a badge that under-states exactly when it matters most, and the fix costs nothing:
+  // counting is a pass over an array the panel has already built and handed us, with no DOM and no
+  // storage read per row (see seen()).
   function newCount() {
-    return last.rows.filter(isNew).length;
+    return last.allRows.filter(isNew).length;
   }
 
   function paintButton() {
@@ -259,16 +291,18 @@
    */
   function sync(next) {
     var menuOn = !!(next && next.menuOn);
+    // Newest first — a waiter reads the top of a list.
+    var all = (next && Array.isArray(next.rows) ? next.rows : []).slice()
+      .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
     last = {
       menuOn: menuOn,
-      rows: (next && Array.isArray(next.rows) ? next.rows : []).slice()
-        // Newest first — a waiter reads the top of a list.
-        .sort(function (a, b) { return (b.at || 0) - (a.at || 0); })
-        // A ceiling, so a floor that has got away from someone cannot build a list nobody can
-        // scroll. The count on the button is still the true one.
-        .slice(0, 50),
+      allRows: all,        // what the COUNT is worked out from — every waiting row
+      // …and a ceiling on what RENDERS, so a floor that has got away from someone cannot build a
+      // sheet nobody can scroll. The count on the button is the true one — see newCount().
+      rows: all.slice(0, 50),
       onOpen: (next && typeof next.onOpen === "function") ? next.onOpen : null,
     };
+    forgetSeen();        // the rows moved on; re-read the seen list once on the next pass
     // THE GUEST MENU IS OFF → THERE IS NO BELL. Not a zero, not a greyed button: gone.
     if (!menuOn) { unmount(); return; }
     paintButton();

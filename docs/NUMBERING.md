@@ -32,13 +32,21 @@ Gaps can still appear, and each is honest:
   different numbers, never the same one (migration 051 takes a row lock to guarantee it).
 
 **A missing bill number never means a sale was removed.** Sales are never deleted — see
-`docs/COMPLIANCE-GUARDRAILS.md`. If you need to prove where a number went, ask **the Audit** and the
-**admin bill ledger** — those two keep the record permanently:
+`docs/COMPLIANCE-GUARDRAILS.md`. If you need to prove where a number went, ask **the Audit**, the
+**admin bill ledger** and the **signed chain** — those three keep the record permanently:
 
 * **the Audit** (`deletion_audit`, migration 251) — every removal with its reason, the person, the
   bill/KOT number and the amount. Append-only, and **nothing prunes it**;
 * **the admin bill ledger** (`/aevinite` → Bills) — the bill row itself, tombstoned rather than
-  erased, reachable at any time by number, date or table.
+  erased, reachable at any time by number, date or table;
+* **the signed chain** (migration 332) — the moment a bill becomes a tax document, one row is
+  written holding its identity, its money at that instant, and a hash of all of it together with the
+  hash of the row before it for that restaurant. Remove a row or re-order two and the next row's
+  `prev_hash` stops matching, visibly; change a bill's food or totals afterwards and the row's stored
+  money stops matching what the orders now say, and it is reported as CHANGED. That is what turns
+  "our software cannot make a sale vanish" from a promise into something an inspector can check. It
+  is tamper-EVIDENT, not encryption and not a certification claim — the full reasoning, and why the
+  hash is computed in the database rather than in the app, is in the migration's own header.
 
 ⚠️ **Not the Activity log.** This page used to name it, and it is the wrong place to send anyone:
 the Activity log is `staff_actions`, and `lfh_prune_logs()` (migration 158) deletes it after a hard
@@ -74,11 +82,19 @@ two bills (migration 296).
 
 ## Where each rule actually lives
 
+Find these by their CONTENT, not by the number in the name: parallel branches get renumbered on
+merge, and numbers are already duplicated on `main`. The filenames below are the ones as they stand
+today.
+
 | rule | file |
 |---|---|
 | the counters themselves, atomic | `036_kot_bill_staff_orders.sql` |
 | bill number on first order, not on open | `040_bill_no_lazy_and_otp_rename.sql` |
 | 05:00 IST business day | `044_business_day_counter.sql` |
+| two first orders in the same instant get different numbers | `051_concurrency_integrity_guards.sql` |
 | invoice generate / void | `073_invoice_pipeline.sql` |
 | per-restaurant counters | `080_tenant_counters.sql` |
+| one series for parcel, banquet and the delivery platforms | `261_parcel_platform_bill_numbers.sql` |
 | no duplicate KOT on a backdated write | `296_database_layer_a_sweep_fixes.sql` |
+| a cancelled sale takes no invoice number | `331_a_cancelled_sale_takes_no_invoice_number.sql` |
+| every issued bill is signed and chained | `332_every_bill_is_signed_and_chained.sql` |

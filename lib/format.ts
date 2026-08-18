@@ -77,12 +77,37 @@ const LANGUAGE_KEY = "lfh_language";
 // INR; one who deliberately chose another currency keeps their choice.
 export const DEFAULT_CURRENCY: CurrencyMeta = CURRENCIES.find((c) => c.code === "INR") || CURRENCIES[0];
 
+// `typeof localStorage === "undefined"` IS NOT A SAFE TEST, and that is the whole point of this
+// helper (T4 sweep, 2026-08-17).
+//
+// It reads like a guard and it only covers ONE of the two ways this can go wrong. It handles the
+// server, where the global genuinely does not exist. It does NOT handle a browser set to block all
+// site data — Chrome's "Block all cookies", Safari's equivalent, a locked-down tablet profile —
+// where `localStorage` is a property whose GETTER throws `SecurityError`. `typeof` evaluates the
+// property to find its type, so `typeof localStorage` throws too, and the "guard" is the line that
+// crashes.
+//
+// Measured on a production build with the getter made to throw: the guest menu rendered
+// "Something went wrong" and ZERO dishes, for a diner who had simply turned cookies off. The app
+// already treats this device as real everywhere else — lib/guestDevice.ts says in as many words
+// that it "returns '' if storage is unavailable", lib/tenantStorage.ts wraps every read, and both
+// offline queues switch to "this is NOT saved" for it. These two reads were the exception.
+//
+// One helper, used by both, so the next reader cannot copy the unsafe shape back in.
+const readStored = (key: string): string | null => {
+  try {
+    if (typeof localStorage === "undefined") return null;   // the server
+    return localStorage.getItem(key);                        // …and a browser that refuses to answer
+  } catch {
+    return null;
+  }
+};
+
 // Read back which currency the guest picked last time (defaults to INR).
-// localStorage only exists in the browser, so if it's missing we just return
-// the default so nothing crashes on the server.
+// Returns the default whenever the device can't tell us, so nothing crashes on the server OR on a
+// phone that blocks storage.
 export const getCurrency = (): CurrencyMeta => {
-  if (typeof localStorage === "undefined") return DEFAULT_CURRENCY;
-  const stored = localStorage.getItem(CURRENCY_KEY);
+  const stored = readStored(CURRENCY_KEY);
   if (!stored) return DEFAULT_CURRENCY;
   return CURRENCIES.find((c) => c.code === stored) || DEFAULT_CURRENCY;
 };
@@ -100,9 +125,9 @@ export const setCurrency = (code: CurrencyCode) => {
 };
 
 // Same idea as getCurrency, but for the chosen language (defaults to English).
+// Goes through readStored for the reason spelled out above it.
 export const getLanguage = (): LanguageMeta => {
-  if (typeof localStorage === "undefined") return LANGUAGES[0];
-  const code = (localStorage.getItem(LANGUAGE_KEY) || "en") as LanguageCode;
+  const code = (readStored(LANGUAGE_KEY) || "en") as LanguageCode;
   return LANGUAGES.find((l) => l.code === code) || LANGUAGES[0];
 };
 
