@@ -25,6 +25,8 @@ const KHATA = "app/owner/khata/page.tsx";
 const ISSUES = "app/owner/issues/page.tsx";
 const INVENTORY = "app/owner/inventory/page.tsx";
 const MANAGER = "app/owner/manager/page.tsx";
+const PANEL_MGR = "public/panels/editor/app.js";
+const PANEL_TAB = "public/panels/tablet/app.js";
 
 // { item, file, say, must: [RegExp], mustNot: [RegExp] }
 const RULES = [
@@ -114,6 +116,32 @@ const RULES = [
     item: 10, file: KHATA,
     say: "an old tab is coloured by its age",
     must: [/const OldestTab = /, /d >= 60 \? "var\(--adm-danger/, /<OldestTab iso=\{c\.oldestKhataAt\} \/>/],
+  },
+  {
+    // ── HE ASKED FOR THIS ONE BY NAME (owner, 2026-08-18) ────────────────────────────────────────
+    // "if the pay later is off, while time of pay — UPI, cash and pay later option — at that time
+    // when pay later is off, the pay later option should not be shown. Check that also."
+    // Checked live on 2026-08-18 and it is correct: Green Bowl (module off) offers Pay Later
+    // nowhere, French House (module on) does. It was fixed on 2026-08-02 and had been right since.
+    // Guarded now so it cannot drift back — it already drifted once, when Pay Later stopped sharing
+    // table_tags_* and this check was left reading the old columns.
+    item: 14, file: PANEL_MGR,
+    say: "manager panel: the pay-later payment button is gated on the pay-later module, not on table tags",
+    must: [
+      /function khataOn\(\)[\s\S]{0,260}s\.khata_allowed === true/,          // its own ladder
+      /flag === "khata" \? khataOn\(\) : tableTagsOn\(\)/,                     // …used by the gate
+      /khata: tagActionAllowed\("khata"\)/,                                    // …fed into the modal
+      /opts\.khata \? `<button[\s\S]{0,200}Pay Later<\/button>` : ""/,        // …and the button obeys it
+    ],
+  },
+  {
+    item: 14, file: PANEL_TAB,
+    say: "waiter tablet: the same, on its own copy",
+    must: [
+      /function tabletKhataOn\(\)[\s\S]{0,200}s\.khata_allowed === true/,
+      /khata: tabletKhataOn\(\) && tshow\("tablet_khata"\)/,
+      /opts\.khata \? `<button[\s\S]{0,600}Pay Later<\/button>` : ""/,
+    ],
   },
   {
     item: 7, file: MANAGER,
