@@ -1,4 +1,4 @@
--- 333_was_the_food_actually_made.sql
+-- 336_was_the_food_actually_made.sql
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- P1 of docs/CANCEL-AND-LOSS-SPEC.md — the owner, 2026-08-18:
 --   "while kot delete button there will be one thing order was mode and order was not made like in
@@ -116,6 +116,14 @@ DECLARE
 BEGIN
   SELECT * INTO v_order FROM orders WHERE id = p_order AND restaurant_id = p_restaurant;
   IF NOT FOUND THEN RETURN jsonb_build_object('ok', false, 'reason', 'order_not_found'); END IF;
+
+  -- Link to the removal row it answers, without making every caller carry its id. recordRemoval()
+  -- returns void, so the cancel endpoint has nothing to pass — it finds its own.
+  IF p_audit_id IS NULL THEN
+    SELECT id INTO p_audit_id FROM deletion_audit
+     WHERE restaurant_id = p_restaurant AND kind = 'order_cancelled' AND order_id = p_order
+     ORDER BY at DESC, id DESC LIMIT 1;
+  END IF;
   IF v_order.status <> 'cancelled' THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'not_cancelled');
   END IF;
