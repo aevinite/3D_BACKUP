@@ -311,6 +311,22 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
   // Ranking bars: comfortable row height, but past ~8 rows the card would grow
   // unbounded — cap the visible height and scroll instead of stretching the page.
   const rowH = 42, visible = Math.min(data.length, 8);
+  // ── THE CAP MUST NEVER BE TIGHTER THAN THE PLOT IT HOLDS (T11 sweep, 2026-08-17) ──────────
+  // The plot below has a 140px FLOOR, but the cap was `rows * 42 + 20` unconditionally — so at
+  // one row it was 62px and at two rows 104px, both under that floor, while `overflowY` is
+  // "visible" for anything up to 8 rows. Nothing clipped the difference, so the plot painted
+  // 78px (one row) or 36px (two) straight out of the bottom of its own box and over whatever
+  // followed. Measured live on Reports → Payments → Discounts → "Biggest discount days" with a
+  // single discount day: box 62px, plot 140px, and a hit-test on the sentence underneath
+  // ("These 1 day account for 100% of everything discounted this period") landed on
+  // svg.recharts-surface — the green bar was drawn on top of the words.
+  //
+  // Below 9 rows the cap does nothing useful anyway: `overflowY` is visible, so there is
+  // nothing to scroll and nothing to contain. So the cap is applied ONLY when the list really
+  // scrolls. Nine rows and up keep the exact height and scrolling they had; three to eight are
+  // unchanged (their cap was already above the floor); one and two now hold their own plot.
+  const scrolls = data.length > 8;
+  const plotH = Math.max(140, data.length * rowH);
   // `showValues` writes the amount just past the end of each bar. Used by
   // WhoEarnsMore, where this IS the only view once a portfolio passes 9 restaurants,
   // so the money has to be readable without hovering. The extra right margin is the
@@ -318,8 +334,8 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
   // bar can never grow over its own number. Off everywhere else, so the reports
   // pages and the dish ranking render exactly as before.
   return (
-    <div style={{ width: "100%", maxHeight: visible * rowH + 20, overflowY: data.length > 8 ? "auto" : "visible" }}>
-     <div style={{ width: "100%", height: Math.max(140, data.length * rowH) }}>
+    <div style={{ width: "100%", ...(scrolls ? { maxHeight: visible * rowH + 20, overflowY: "auto" as const } : null) }}>
+     <div style={{ width: "100%", height: plotH }}>
       <ResponsiveContainer>
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: showValues ? 58 : 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke={GRID} />

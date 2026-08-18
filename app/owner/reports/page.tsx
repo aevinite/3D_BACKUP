@@ -332,6 +332,12 @@ function PeriodDrop({ value, onChange }: { value: Range; onChange: (r: Range) =>
         .owr-pop button { display: flex; align-items: center; background: none; border: none; border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 12.5px; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
         .owr-pop button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
         .owr-pop button.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+        /* A thumb target on a phone — see the note in kit.tsx's ReportsStyles. The period
+           button measured 31px on an A35; desktop is untouched. */
+        @media (max-width: 640px) {
+          .owr-btn.main { min-height: 44px; padding: 7px 16px; }
+          .owr-pop button { min-height: 42px; }
+        }
       `}</style>
     </span>
   );
@@ -870,10 +876,29 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
   const showBrief = !rid && rests.length > 1;
   const [brief, setBrief] = useState<{ id: string; name: string; accent: string; revenue: number; orders: number }[] | null>(
     () => (showBrief && briefMemo.get(briefQs)) || null);
+  // Which `briefTick` we have already answered with a FORCED read — see the effect below.
+  const forcedTick = useRef(0);
   useEffect(() => {
     if (!showBrief) { setBrief(null); return; }
     let live = true;
-    fetch(`/api/owner/reports?${briefQs}`, { cache: "no-store" }).then((r) => r.json())
+    // REFRESH HAS TO REACH THESE CARDS TOO (T11 sweep, 2026-08-17 — sweep #5 F7).
+    // Every other fetch in refreshNow() passes `force`, which sends ?refresh=1 and makes the
+    // server recompute live instead of answering from the snapshot cache. This one only had
+    // its `briefTick` bumped, so it re-requested the SAME cached key: the big headline and the
+    // five KPI columns above updated to the live figures while the "By restaurant" cards
+    // underneath kept figures up to five minutes old (older still on an idle key) — so the
+    // cards stopped adding up to the headline, right after he pressed the button whose whole
+    // job is to give him the live numbers.
+    //
+    // Only the tick Refresh has just bumped forces a recompute. A later period change re-runs
+    // this effect with the same tick, and that must stay an ordinary cached read — forcing on
+    // every subsequent period change would make each one pay for a live recompute of the whole
+    // estate, which is the cost this snapshot cache exists to avoid.
+    const force = briefTick > 0 && forcedTick.current !== briefTick;
+    if (force) forcedTick.current = briefTick;
+    // The MEMO stays keyed on the plain query string, so the instant-repaint on the way back
+    // from a report still finds it whether the last read was forced or not.
+    fetch(`/api/owner/reports?${briefQs}${force ? "&refresh=1" : ""}`, { cache: "no-store" }).then((r) => r.json())
       .then((d) => { if (Array.isArray(d.rows)) { briefMemo.set(briefQs, d.rows); if (live) setBrief(d.rows); } }).catch(() => {});
     return () => { live = false; };
   }, [showBrief, briefQs, briefTick]);
@@ -1250,8 +1275,33 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
   // ── DAY SUMMARY ──
   if (bk === "daysummary") {
     if (!t) return <EmptyCard text="Nothing in this period yet." />;
-    const pays = (data.payments || []).map((p) => ({ ...p, method: canonPayMethod(p.method) })).filter((p) => p.revenue > 0);
+    // MERGE by canonical method, don't just relabel (T11 sweep, 2026-08-17). The database
+    // groups the settlement by the RAW `payment_method` string, so one method stored with two
+    // casings arrives as two rows — French House really holds both "Cash" and "cash". This
+    // line used to canonicalise the LABEL and stop there, so the 5 Aug 2026 sheet rendered
+    //     Cash · 4% · 7 bills   ₹1,838
+    //     Cash · 1% · 2 bills   ₹525
+    // one directly above the other, with two shares and two bars for one pile of cash — and
+    // because the row key IS the canonical name, React logged "two children with the same key"
+    // and was free to drop or duplicate one of them. The Payments report (below, l.1885-1891)
+    // and PaymentDonut have always merged; this panel is the one that never did, so the day
+    // sheet disagreed with the full report one click away. Merge FIRST, then drop the empty
+    // methods — otherwise a method split across two casings can be filtered out in halves.
+    const payMerged = new Map<string, PayRow>();
+    for (const p of data.payments || []) {
+      const method = canonPayMethod(p.method);
+      const row = payMerged.get(method) || { method, revenue: 0, orders: 0 };
+      row.revenue += p.revenue; row.orders += p.orders;
+      payMerged.set(method, row);
+    }
+    // Biggest first, which is both what the RPC's own `ORDER BY revenue DESC` intended and
+    // what the Payments report shows — merging can reorder, so the sort is what keeps the two
+    // screens reading the same way round.
+    const pays = [...payMerged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
+    // Bills the settlement reported at all, including any whose amount came back as zero — this is
+    // what tells an empty settlement apart from an unreadable one.
+    const payBills = [...payMerged.values()].reduce((a, p) => a + (Number(p.orders) || 0), 0);
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
     // ONE meaning of "orders placed" for the whole console (T5 sweep, 2026-08-11). `t.orders`
     // is COUNT(*) WHERE status <> 'cancelled', so it leaves the voided ones out — this sheet
@@ -1351,7 +1401,20 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Panel title="Settlement" hint="how the money arrived"
             right={<button type="button" className="rs-drill" onClick={() => onOpenReport("payments")} title="Open the Payment settlement report">Full report <i className="fas fa-arrow-right" aria-hidden /></button>}>
 
-            {pays.length === 0 ? <div className="rs-empty" style={{ padding: 20 }}>No payments recorded.</div> : (
+            {/* "No payments recorded" is only honest when there really were no bills. When bills
+                WERE settled but every amount against them reads zero, the settlement could not be
+                read — say that, rather than a sentence that means the opposite (T11 sweep,
+                2026-08-18). This is the shape the swapped-column fault printed for months: nine
+                bills settled, "No payments recorded", and a Total collected tile full of money. */}
+            {pays.length === 0 ? (
+              payBills > 0
+                ? <div className="rs-empty" style={{ padding: 20 }}>
+                    {nfmt(payBills)} bill{payBills === 1 ? "" : "s"} settled, but the amount against
+                    {payBills === 1 ? " it" : " them"} could not be read. The total above is right —
+                    press Refresh, and tell us if it stays like this.
+                  </div>
+                : <div className="rs-empty" style={{ padding: 20 }}>No payments recorded.</div>
+            ) : (
               <div className="rs-paylist">
                 {pays.map((p) => {
                   const c = payColor(p.method);
@@ -1991,8 +2054,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} spark={ordSeries.map((s) => s.value)} onClick={() => scrollToId("rs-hourly-table")} title="Jump to the hour-by-hour table" />
-          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} onClick={quietest ? () => scrollToId("rs-hourly-table") : undefined} title={quietest ? "Jump to the hour-by-hour table" : undefined} />
+          {/* `order` / `orders`, like every other count in this file (T11 sweep, 2026-08-17).
+              A quiet hour with exactly ONE order is the normal case for a quiet hour, so
+              "QUIETEST HOUR · 10 AM · ₹441 · 1 orders" was on screen most of the time. */}
+          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} order${peak.orders === 1 ? "" : "s"}`} spark={ordSeries.map((s) => s.value)} onClick={() => scrollToId("rs-hourly-table")} title="Jump to the hour-by-hour table" />
+          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} order${quietest.orders === 1 ? "" : "s"}` : "no orders yet"} onClick={quietest ? () => scrollToId("rs-hourly-table") : undefined} title={quietest ? "Jump to the hour-by-hour table" : undefined} />
           <Stat label="Total orders" tone="info" icon="fa-list-check" value={nfmt(totalOrders)} />
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
           {/* NOT called "Avg bill": this divides paid revenue by ALL orders in these hours, so
@@ -2065,7 +2131,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <div className="rs-kpis">
           <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={best.rev > 0 ? `${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}% of revenue` : "no data yet"} onClick={best.rev > 0 ? () => scrollToId("rs-daypart-breakdown") : undefined} title={best.rev > 0 ? "Jump to the day-part breakdown" : undefined} />
           <Stat label="Quietest part" tone="warn" icon="fa-arrow-trend-down" value={weakest ? weakest.label : "—"} sub={weakest ? `${inr(weakest.rev)} · ${totalRev ? Math.round((weakest.rev / totalRev) * 100) : 0}% of revenue` : ""} onClick={weakest ? () => scrollToId("rs-daypart-breakdown") : undefined} title={weakest ? "Jump to the day-part breakdown" : undefined} />
-          {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} orders`} />)}
+          {/* `order` / `orders` — see the Busy-hours tiles above. A quiet day part with one
+              order read "1 orders" on the four tiles the owner scans first. */}
+          {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} order${p.orders === 1 ? "" : "s"}`} />)}
         </div>
         {best.rev > 0 && (
           <p className="rs-note" style={{ marginBottom: 12 }}>

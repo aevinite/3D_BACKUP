@@ -4932,6 +4932,28 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
    white with dark text + hairline borders. Scoped to .adm.owx so the guest menu and
    other panels are untouched. Placed last in the owx section so source order wins. */
 @media print {
+  /* ── UN-CLIP THE DOCUMENT ITSELF, or the sheet is one screen tall (T11 sweep, 2026-08-18) ──
+     The app-shell rule at the top of this file — `html, body { height: 100%; overflow: hidden }`
+     — is what the panels need ON SCREEN. The block below already un-clips .adm.owx, .adm-body
+     and .adm-main, but nothing ever reset html/body, so the PRINTED document was still clipped
+     to exactly one viewport and everything past it was dropped: measured under print media on
+     Reports -> Sales -> 30 days, the report laid out to 1943px with its last table row at
+     y=1826 while documentElement.scrollHeight was 900. The "By period" table — the rows of
+     actual dated numbers — never printed. The same rule left html's background at the dark
+     --bg, which is what filled the surplus paper with ink.
+     Screen behaviour is untouched: this lives inside @media print.
+     The dark background needs the SAME specificity to beat: `html[data-staffdark="1"]` (line 94)
+     carries !important, so a plain `html` selector loses to it and the paper stayed dark even with
+     !important of its own. Both skin attributes are matched here; this block sits later in the
+     file, so equal specificity wins. */
+  html, body,
+  html[data-staffdark="1"], html[data-staffdark="1"] body,
+  html[data-theme="light"], html[data-theme="light"] body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
   .adm.owx,
   .adm.owx[data-skin="dark"],
   .adm.owx[data-skin="light"] {
