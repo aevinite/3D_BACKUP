@@ -102,8 +102,8 @@ console.log("The owner's cockpit — Menu, Team, Settings\n");
 }
 
 // ── 3 · "WHAT'S ENABLED" LISTS WHAT HE HAS, AND NEVER WHAT HE DOESN'T ────────────────────────
-// REJECTED (owner, 2026-08-18), R31: *"owner can't know which option are not given to them only
-// admin should know that"*. So the FIRST job of this section is to keep the off-state off the
+// REJECTED (owner, 2026-08-18) — row R31 in docs/REJECTED-IDEAS.md: *"owner can't know which option
+// are not given to them only admin should know that"*. So the FIRST job of this section is to keep the off-state off the
 // screen — no ✗, no greyed chip, no "6 of 9" count. What is withheld is the admin's business.
 //
 // The second job is the half that survived: the label map must still hold every section, because a
