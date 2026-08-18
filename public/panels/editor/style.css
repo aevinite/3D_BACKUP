@@ -226,8 +226,8 @@ body.nav-compact .tab {
    width keeps the drawer it already had, untouched. Collapsed shows icons with a tooltip and
    the real label still in the DOM for screen readers; the toggle expands it to full names and
    the choice is remembered. See syncNavRail() for the why. */
-body.nav-rail { --rail-w: 62px; }
-body.nav-rail.nav-rail-open { --rail-w: 208px; }
+body.nav-rail { --rail-w: 62px; --rail-w-open: 208px; }
+body.nav-rail.nav-rail-open { --rail-w: var(--rail-w-open); }
 body.nav-rail .tabs {
   /* The bar is NOT at y=0: the injected admin/owner "view" ribbon sits above it and publishes
      its height as --ribbon-h (see syncRibbonH). Starting the rail at a flat 50px slid it UP
@@ -256,7 +256,22 @@ body.nav-rail:not(.nav-rail-open) .rail-toggle .tab-lbl {
 }
 body.nav-rail:not(.nav-rail-open) .tab { justify-content: center; padding: 0 8px; }
 body.nav-rail .tab-badge { margin-left: auto; }
-body.nav-rail:not(.nav-rail-open) .tab-badge { position: absolute; margin: 0; transform: translate(12px, -12px); }
+/* THE COUNT SITS ON THE ICON'S TOP-RIGHT CORNER — IT NEVER REPLACES THE ICON (owner, 2026-08-18:
+   "when there is notification it hides emoji and show 1 … the red 1 should be top right of icon").
+   It used to be placed with `transform: translate(12px,-12px)`, and that could never work: the
+   badge also runs the badgePulse animation, whose keyframes set `transform: scale(…)` — an
+   animation beats a normal declaration, so the translate was thrown away on frame one and the red
+   pill dropped back onto its static spot, right over the emoji. Anchoring with top/right instead
+   leaves `transform` free for the pulse, so both work at once. The tab must be positioned for
+   that (it wasn't — the badge was measuring itself against the whole rail), and it keeps its
+   `overflow: hidden`, which is safe because the badge is inset from the corner, not hanging off it.
+   The ring is the rail's own background, so the pill reads as sitting ON TOP of the icon. */
+body.nav-rail .tab { position: relative; }
+body.nav-rail:not(.nav-rail-open) .tab-badge {
+  position: absolute; top: 4px; right: 6px; margin: 0;
+  min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px;
+  box-shadow: 0 0 0 2px var(--panel-2);
+}
 body.nav-rail .rail-toggle {
   display: flex; align-items: center; gap: 12px; margin-top: auto;
   background: transparent; border: 1px solid var(--line); color: var(--muted);
@@ -264,6 +279,36 @@ body.nav-rail .rail-toggle {
 }
 body.nav-rail:not(.nav-rail-open) .rail-toggle { justify-content: center; padding: 0 8px; }
 body.nav-rail .rail-toggle:hover { border-color: var(--gold); color: var(--text); }
+
+/* ══ HOVER TO PEEK — the names show themselves, no click needed ══════════════════════════════
+   Owner, 2026-08-18: "when I hover over the side it should expand and show what menu is it in
+   written". The rail widens OVER the page rather than pushing it: .layout keeps its margin-left
+   at the COLLAPSED --rail-w, so nothing underneath reflows — a floor of tables doesn't re-lay
+   itself out every time the mouse crosses the rail on its way somewhere else, which is the usual
+   cost of a push-style hover menu. Clicking » still PINS it open, and that is the remembered
+   choice; this is a look, and it ends when the pointer leaves.
+   (hover: hover) and (pointer: fine) fence it to real mice: on a touch screen :hover LATCHES
+   after a tap, which would leave Aangan's tablet holding a half-open rail nobody asked for. */
+@media (hover: hover) and (pointer: fine) {
+  body.nav-rail:not(.nav-rail-open) .tabs:hover {
+    width: var(--rail-w-open); box-shadow: 10px 0 30px rgba(0, 0, 0, .22);
+  }
+  /* Un-clip the label that the collapsed rule hid — every property that rule set has to be put
+     back, or the name renders as a 1px sliver. */
+  body.nav-rail:not(.nav-rail-open) .tabs:hover .tab-lbl,
+  body.nav-rail:not(.nav-rail-open) .tabs:hover .rail-toggle .tab-lbl {
+    position: static; width: auto; height: auto; padding: 0; margin: 0;
+    clip-path: none; overflow: hidden;
+  }
+  body.nav-rail:not(.nav-rail-open) .tabs:hover .tab,
+  body.nav-rail:not(.nav-rail-open) .tabs:hover .rail-toggle { justify-content: flex-start; padding: 0 12px; }
+  /* With a name beside it the count goes back to the end of the row — a corner pill on a wide
+     row would float in empty space. */
+  body.nav-rail:not(.nav-rail-open) .tabs:hover .tab-badge {
+    position: static; margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px;
+    font-size: 11px; box-shadow: none;
+  }
+}
 /* The content moves over to sit beside the rail. */
 body.nav-rail .layout { margin-left: var(--rail-w); transition: margin-left .16s ease; }
 /* The bar keeps only the brand and the actions, so it stops competing with the rail. */
