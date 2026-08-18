@@ -134,6 +134,73 @@ rate limits and the bot check were all read line by line and are correct.
 | `lib/panelGate.ts` | `requirePanel` / `panelAdminRid` / `requirePanelAt` call `userFromCookie()` bare | same shape as F1: a database flap renders a raw error page on `/manager`, `/kitchen`, `/tablet` instead of bouncing to the login door. Not my file; the fix is the same try/catch |
 | `app/r/[restaurant]/login/page.tsx` | same bare `userFromCookie()` call as F1 | the tenant-scoped sign-in door has the identical crash; my F1 fix covers `/login` only |
 | `lib/logTrail.ts` | give `kot_printed`, `kot_print_failed` and `admin_enter_panel` a place | **`npm run verify:read-guards` is RED on `origin/main` already** — not caused by this branch. Proven: the two files that check reads (`lib/logTrail.ts`, `components/admin/shared.tsx`) are byte-identical to `origin/main` in my tree. Those three codes were added on 2026-08-16 without a matching trail entry, so their Activity rows read "System › Other" — the exact thing the owner's 2026-08-12 rule forbids |
-| `supabase/migrations/**` (`lfh_staff_unmerge_table`) | separating two merged tables emits no realtime breadcrumb | **`npm run verify:write-paths` is RED on `origin/main` already** — "3664 SEPARATING them announces itself too — 0 crumb(s)". Merging emits 5; unmerging emits none, so the other devices' tiles only catch up on the 60s backstop. A database-function concern (T21–T23) |
-| `scripts/verify-write-paths.mjs` | its cleanup cannot work, and never could | the same gate's "cleanup: no ticket this test placed is left on the kitchen board" tries a **hard DELETE** of its own orders. Migration 190 (`trg_block_issued_delete`) deliberately refuses to hard-delete an order that is served, paid, or on a session with a `bill_no` — "a sale can be cancelled, a sale can never disappear". So every run of this gate, by every terminal, leaves tickets behind and reports itself failed. It should CANCEL them (what `closeSession` does, mig 232) instead, and it should check the delete's `.error` rather than ignoring it. **I cleared my own run's three live tickets by id** (kot 67/68/69 on French House, cancelled + archived — never deleted), and deliberately left other terminals' rows alone |
+| ~~`supabase/migrations/**` (`lfh_staff_unmerge_table`)~~ | **WITHDRAWN — I WAS WRONG, and the product was never broken.** See the correction below | |
+| ~~`scripts/verify-write-paths.mjs`~~ | **FIXED HERE instead of handed off** (owner, 2026-08-18: *"i didn't why it fails make it like many user no fail"*). See the correction below | |
 </content>
+
+
+---
+
+## CORRECTION — I reported `verify:write-paths` wrongly, and I am putting it right
+
+On 2026-08-17 I handed off "separating two merged tables emits no realtime breadcrumb" as a product
+gap. **That was wrong.** The owner asked why the gate fails at all, I went back into it properly,
+and the truth is that BOTH of that gate's failures were the test's own bugs. Neither was the
+product. Both are fixed here, and the gate is green.
+
+### 1. It was unmerging the wrong table
+
+`lfh_staff_merge_tables` keeps the **lower** table number as the parent (the owner's rule, mig 249)
+and returns `child_table` saying which one it actually dropped. The test passed its OWN `child`
+variable to the unmerge, so roughly half the time no live merge matched, the RPC correctly answered
+`{ok:false, reason:'not_merged'}`, nothing was emitted — and the test printed **"0 crumb(s)"**, which
+reads as "the product has stopped announcing an unmerge".
+
+It has not, and it never did: migration 299 writes the same four breadcrumbs there that every other
+merge path writes. Measured, after the fix: **`separating them actually happened — child 12 →
+{ok:true,...}` · `SEPARATING them announces itself too — 10 crumb(s)` · `naming BOTH tables again —
+named: 10,12`.**
+
+The galling part is that this is the EXACT mistake the comment at the top of that same block already
+describes — *"'no breadcrumb' was my test not merging, not the product failing"* — corrected for the
+merge half and left standing for the unmerge half. The test now asserts the RPC's own answer first,
+the same way, and unmerges the table the merge actually dropped.
+
+### 2. Its cleanup could never have worked
+
+The sweep-up tried a **hard DELETE** of its own orders. Migration 190 (`trg_block_issued_delete`)
+refuses to hard-delete an order that is served, paid, or on a session holding a `bill_no` — *"a sale
+can be cancelled, a sale can never disappear"* (COMPLIANCE §3.0). The delete's `.error` was never
+looked at, so the next line reported the rows as "left on the kitchen board": a red gate on every
+run, for every terminal, blaming the product for obeying its most important rule.
+
+It now does what the PRODUCT does when a party ends with work on it (mig 232): **cancels** the
+ticket and archives it, by the exact ids that run created — and it checks its own write.
+
+### 3. …and it failed on a shared database, which is the state that actually matters
+
+Two more things only show up when several sweeps share one dev database — which is the normal state
+here, not the exception:
+
+* **It treated a merged CHILD as a free table.** A child has no session of its own (its orders sit on
+  the parent's — mig 249/250), so it looked free, an order placed there silently joined the parent's
+  party, and the merge phase then merged a session it did not mean to. Both ends of every live merge
+  are now excluded.
+* **It leaked one open party per run.** Unmerging gives the child table a brand-new session (mig 299)
+  that nothing in the test ever created, so nothing ever closed it. After enough runs all 30 tables
+  read "occupied" and the file failed with `table null` — an assertion about nothing. The sweep-up now
+  also closes whatever is open on the tables that run seized, and a genuinely full floor throws a
+  sentence saying so instead of returning null.
+
+**Measured:** four consecutive runs green, and a controlled before/after of a single run shows
+**zero** change — 23 open sessions before and after, 10 tickets on the board before and after, same
+newest rows. It leaves nothing behind at all now. I also cleared the leftovers earlier runs had
+already left (by the test's own item notes — "merge parent" / "merge child" / "concurrency A/B" /
+"backdate"), cancelling the tickets rather than deleting them, and left every other terminal's and
+every older row untouched.
+
+### And the third handoff resolved itself
+
+`lib/logTrail.ts` (the three action codes with no place in the trail) **has since been fixed on
+`main`** — `origin/main` moved 99 commits while this branch was open and now carries `kot_printed`.
+Nothing needed from me; `verify:read-guards` goes green on this branch the moment it is up to date.
