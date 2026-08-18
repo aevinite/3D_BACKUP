@@ -143,6 +143,23 @@ const RULES = [
       /opts\.khata \? `<button[\s\S]{0,600}Pay Later<\/button>` : ""/,
     ],
   },
+  // ── ITEM 16 · `--border` IS A WHOLE BORDER, NOT A COLOUR ──────────────────────────────────────
+  // `app/globals.css` declares `--border: 1px solid #1d2430`, so `1px solid var(--border)` expands
+  // to `1px solid 1px solid #1d2430` — invalid, and thrown away by the browser. Measured 2026-08-18:
+  // the customers table's row separator computed to `0px none`, the ratings bar track to
+  // `rgba(0,0,0,0)`, and the EMPTY half of every star row to the same amber as the filled half — so
+  // every rating on the Feedback screen drew five gold stars and a 1★ complaint looked like a 5★
+  // compliment. `aria-label` said "1 out of 5" throughout, which is why no text check ever caught it.
+  // `--border-c` is the declared COLOUR. These three files may not use the shorthand as one.
+  ...[CUSTOMERS, KHATA, ISSUES].map((file) => ({
+    item: 16, file,
+    say: `${file.split("/")[2]}: no colour is taken from --border (it is a whole border, not a colour)`,
+    mustNot: [
+      /(?:border(?:-top|-bottom|-left|-right)?|borderTop|borderBottom|borderLeft|borderRight|border):\s*"?\d+px solid var\(--border[,)]/,
+      /(?:background|color):\s*"var\(--border[,)]/,
+      /color-mix\([^)]*var\(--border[,)]/,
+    ],
+  })),
   {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",

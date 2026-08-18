@@ -3,6 +3,17 @@
 // first/last seen), scoped server-side to the owner's restaurants and gated by the
 // admin-controlled "customers" entitlement. READ-ONLY and money-free. A 60s backstop
 // refresh (paused while hidden) keeps it fresh without a faster poll (egress rule).
+// ── `--border` IS A WHOLE BORDER, NOT A COLOUR (sweep 6 · T14, 2026-08-18) ───────────────────────
+// `app/globals.css` declares `--border: 1px solid #1d2430`. So every `1px solid var(--border)` in
+// this file expanded to `1px solid 1px solid #1d2430`, which is not a valid declaration — the
+// browser threw the whole line away. MEASURED, not guessed: the computed value of the customers
+// table's row separator was `0px none`, the ratings bar's track computed to `rgba(0,0,0,0)`, and the
+// "empty" half of a star row computed to the SAME amber as the filled half.
+// That last one is the one that mattered: every rating on the Feedback screen drew FIVE GOLD STARS,
+// so a 1★ complaint and a 5★ compliment looked identical. No text check could ever have caught it —
+// the `aria-label` said "1 out of 5" the whole time, which is exactly why it survived every sweep.
+// `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
+// wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
@@ -360,7 +371,7 @@ export default function OwnerCustomers() {
                     {rows.map((c) => (
                       <tr key={`${c.restaurant_id}:${c.phone}`} onClick={() => openDetail(c.phone)}
                         title="See this guest's visits and what they've spent"
-                        style={{ borderTop: "1px solid var(--border,#e5e7eb)", opacity: c.blocked ? 0.65 : 1, cursor: "pointer" }}>
+                        style={{ borderTop: "1px solid var(--border-c,#e5e7eb)", opacity: c.blocked ? 0.65 : 1, cursor: "pointer" }}>
                         <td style={{ padding: "9px 10px", fontWeight: 700 }}>
                           {c.name || <span className="adm-muted">Guest</span>}
                           {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented" style={{ marginLeft: 6, fontSize: 11, color: "var(--adm-ok,#16a34a)" }} />}

@@ -4,6 +4,17 @@
 // today / this month (by collection day). READ-ONLY; collecting happens in the manager
 // panel. Scoped + module-gated server-side (see /api/owner/khata). 60s backstop refresh
 // paused while hidden (egress rule); a search filters the loaded list client-side.
+// ── `--border` IS A WHOLE BORDER, NOT A COLOUR (sweep 6 · T14, 2026-08-18) ───────────────────────
+// `app/globals.css` declares `--border: 1px solid #1d2430`. So every `1px solid var(--border)` in
+// this file expanded to `1px solid 1px solid #1d2430`, which is not a valid declaration — the
+// browser threw the whole line away. MEASURED, not guessed: the computed value of the customers
+// table's row separator was `0px none`, the ratings bar's track computed to `rgba(0,0,0,0)`, and the
+// "empty" half of a star row computed to the SAME amber as the filled half.
+// That last one is the one that mattered: every rating on the Feedback screen drew FIVE GOLD STARS,
+// so a 1★ complaint and a 5★ compliment looked identical. No text check could ever have caught it —
+// the `aria-label` said "1 out of 5" the whole time, which is exactly why it survived every sweep.
+// `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
+// wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 // From lib/partialRead, NOT lib/ownerScope: this is a "use client" file, and ownerScope reaches
@@ -186,10 +197,10 @@ export default function OwnerKhata() {
                   </div>
                 </button>
                 {open.has(c.id) && (
-                  <div style={{ borderTop: "1px solid var(--border,#e5e7eb)", padding: "6px 14px 12px 38px" }}>
+                  <div style={{ borderTop: "1px solid var(--border-c,#e5e7eb)", padding: "6px 14px 12px 38px" }}>
                     {c.bills.map((b, i) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", fontSize: 13,
-                        borderBottom: i < c.bills.length - 1 ? "1px solid color-mix(in srgb, var(--border,#e5e7eb) 55%, transparent)" : "0" }}>
+                        borderBottom: i < c.bills.length - 1 ? "1px solid color-mix(in srgb, var(--border-c,#e5e7eb) 55%, transparent)" : "0" }}>
                         <span style={{ flex: 1 }} className="adm-muted">
                           {b.bill_no != null ? <b style={{ color: "var(--text,inherit)" }}>#{b.bill_no}</b> : "Bill"}{" · "}{fmt(b.khata_at)}{" · T"}{b.table_number || "?"}
                         </span>

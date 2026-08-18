@@ -7,6 +7,17 @@
 // (ratings / issues) — a tab hides itself if the admin switched that section off.
 // A 60s backstop refresh (paused while the tab is hidden) keeps new items appearing
 // without a manual Refresh; no faster poll (egress rule).
+// ── `--border` IS A WHOLE BORDER, NOT A COLOUR (sweep 6 · T14, 2026-08-18) ───────────────────────
+// `app/globals.css` declares `--border: 1px solid #1d2430`. So every `1px solid var(--border)` in
+// this file expanded to `1px solid 1px solid #1d2430`, which is not a valid declaration — the
+// browser threw the whole line away. MEASURED, not guessed: the computed value of the customers
+// table's row separator was `0px none`, the ratings bar's track computed to `rgba(0,0,0,0)`, and the
+// "empty" half of a star row computed to the SAME amber as the filled half.
+// That last one is the one that mattered: every rating on the Feedback screen drew FIVE GOLD STARS,
+// so a 1★ complaint and a 5★ compliment looked identical. No text check could ever have caught it —
+// the `aria-label` said "1 out of 5" the whole time, which is exactly why it survived every sweep.
+// `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
+// wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
 // Client-safe by design (lib/partialRead has zero imports) — see that file's header.
@@ -32,7 +43,7 @@ const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-
 const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
 const Stars = ({ n }: { n: number }) => (
   <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
-    {"★".repeat(n)}<span style={{ color: "var(--border, #ccc)" }}>{"★".repeat(5 - n)}</span>
+    {"★".repeat(n)}<span style={{ color: "var(--border-c, #ccc)" }}>{"★".repeat(5 - n)}</span>
   </span>
 );
 
@@ -273,7 +284,7 @@ export default function OwnerFeedback() {
                       <div key={star} style={{ display: "flex", alignItems: "center", gap: 8, margin: "3px 0", fontSize: 12.5 }}>
                         <span style={{ width: 12, textAlign: "right" }}>{star}</span>
                         <i className="fas fa-star" style={{ color: "#f5a623", fontSize: 11 }} aria-hidden="true" />
-                        <span style={{ flex: 1, height: 8, background: "var(--border,#e5e7eb)", borderRadius: 5, overflow: "hidden" }}>
+                        <span style={{ flex: 1, height: 8, background: "var(--border-c,#e5e7eb)", borderRadius: 5, overflow: "hidden" }}>
                           <span style={{ display: "block", height: "100%", width: `${pct}%`, background: "#f5a623" }} />
                         </span>
                         <span className="adm-muted" style={{ width: 34, textAlign: "right" }}>{c}</span>
@@ -383,7 +394,7 @@ export default function OwnerFeedback() {
                           non-http value can never become a clickable javascript: link. */}
                       {i.image_url && /^https?:\/\//i.test(i.image_url) && (
                         <a href={i.image_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: 10 }}>
-                          <img src={i.image_url} alt="Attached photo" style={{ maxWidth: 220, maxHeight: 180, borderRadius: 8, border: "1px solid var(--border,#ddd)", objectFit: "cover" }} />
+                          <img src={i.image_url} alt="Attached photo" style={{ maxWidth: 220, maxHeight: 180, borderRadius: 8, border: "1px solid var(--border-c,#ddd)", objectFit: "cover" }} />
                         </a>
                       )}
                       {i.audio_url && /^https?:\/\//i.test(i.audio_url) && (
