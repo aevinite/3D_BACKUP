@@ -502,6 +502,40 @@ export const SECTIONS: Section[] = [
             bind: { t: "setting", key: "qop_parcel_allowed" },
             what: "The big Parcel bar on the “where does it go?” step. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar, and QO/P sends to tables only. This switch is only about which destinations the QO/P screen offers — the Parcel feature itself is permanent and has no switch to turn off. With this AND “Quick order — send to a table” both off there is nothing left for QO/P to do, so the button simply isn't on the floor — the header keeps only the KOT menu, nothing is greyed out and nothing errors." },
         ] },
+      // ╔══════════════════════════════════════════════════════════════════════════════════════╗
+      // ║ THE THREE FLOOR FEATURES GET THEIR SWITCH BACK (owner, 2026-08-18)                    ║
+      // ╚══════════════════════════════════════════════════════════════════════════════════════╝
+      // His decision, in his words: "I want that toggle thing where you can able to check… I want to
+      // turn on and turn off the feature if the restaurant required or not required."
+      //
+      // WHY THEY HAD TO COME BACK. All three are REAL, LIVE GATES that never stopped working:
+      //   take_orders → refuses order placement at app/api/tablet and app/api/editor
+      //   table_ops   → the KOT ▾ menu (move a party, merge, move a ticket/dish, split, reprint)
+      //   table_tags  → the VIP / Family / Owner's-guest ribbon
+      // The 2026-07-31 rebuild deleted their rows on the theory that they were "permanently on for
+      // whoever's panel owns them". They were not: each is a stored `settings.<x>_allowed` column,
+      // and lib/settingsClone writes table_ops_allowed = false and table_tags_allowed = false into
+      // EVERY new restaurant. Measured on the backup database 2026-08-18: table_ops_allowed was
+      // false on burger-barn, sakura-sushi, demo-bistro, green-bowl, taco-fiesta, pizza-palace and
+      // spice-route — seven live restaurants whose managers had no KOT ▾ menu and whose waiters had
+      // no table operations, while Access → Waiter → "Move, merge or split a table" read ON and no
+      // screen anywhere could put it right. That is the exact screen-says-ON-server-says-NO the
+      // rebuild exists to abolish, caused by removing the switch and leaving the gate.
+      //
+      // So: three switches, on the one screen that owns them. Their `def` is what
+      // lib/settingsClone really writes for a new restaurant, so the ⓘ and the factory state agree.
+      // The `module:` bindings in lib/accessModel.ts STAY — they are correct again now that an admin
+      // can see and set the column they read.
+      { id: "take_orders", name: "Take a new order", def: true,
+        bind: { t: "module", key: "take_orders" },
+        confirm: "Switch order-taking OFF for this restaurant?\n\nNobody will be able to punch in a new dine-in order — not the manager panel's ＋ Take order, not the waiter tablet, not the ⚡ QO/P screen. The restaurant can still bill and close the tables it already has open.",
+        what: "Punching in a dine-in order at all: the ＋ Take order button on a table, the waiter tablet's order screen, and the tables half of ⚡ QO/P. Every restaurant needs this, so it starts ON — the switch is here so you can SEE that it is on, and take it away for a restaurant that only sells parcels. WHO may take an order is a separate thing: the manager's default and the waiter's are under Manager and Waiter." },
+      { id: "table_ops", name: "Move, merge & split tables", def: false,
+        bind: { t: "module", key: "table_ops" },
+        what: "The KOT ▾ menu on the floor: moving a party to another table, merging two tables into one bill, moving a whole kitchen ticket or a single dish, splitting a bill, and reprinting a ticket. OFF removes the whole menu from the manager panel AND the waiter tablet, and the server refuses those actions — so a restaurant with it off cannot move a party once the order has gone to the kitchen. A NEW restaurant starts with it OFF, which is why most of them have it off today; switch it on for any restaurant that runs a real floor." },
+      { id: "table_tags", name: "Table types (VIP / Family / Guest)", def: false,
+        bind: { t: "module", key: "table_tags" },
+        what: "Marking a table so the floor shows who is sitting there — VIP, Family, Owner's guest. OFF removes the ribbon and the marking menu from the manager panel and the waiter tablet. A NEW restaurant starts with it OFF. Pay later (khata) is NOT affected: it has had its own switch under Extra features since migration 235." },
       // ╔════════════════════════════════════════════════════════════════════════════════╗
       // ║ 🛵 ORDERS WITHOUT A TABLE — ONE FEATURE, PERMANENT, NO SWITCH (owner, 2026-08-03)║
       // ╚════════════════════════════════════════════════════════════════════════════════╝

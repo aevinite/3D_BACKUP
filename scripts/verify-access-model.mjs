@@ -765,22 +765,18 @@ else ok("the read/write route derives every allow-list from the model");
 // switch on the Access screen to go with it: a gate no admin can see is the dead switch the access
 // rebuild deleted."
 //
-// Three bindings were left behind when the rebuild removed their rows, and they are recorded here
-// by name rather than passed over in silence. Measured on the backup database, 2026-08-18:
-//   table_ops_allowed  = false on burger-barn, sakura-sushi, demo-bistro, green-bowl, taco-fiesta,
-//                        pizza-palace, spice-route  (true only on french-house and aangan)
-//   table_tags_allowed = false on the same seven minus pizza-palace
-// Watched on French House put into that state: Access -> Waiter -> "Move, merge or split a table"
-// reads ON while the manager panel is told effectivePowers.table_ops = false and the tablet is
-// told tablet_table_ops = "off".
+// Three bindings were left behind when the rebuild removed their rows. Measured on the backup
+// database, 2026-08-18: table_ops_allowed was false on burger-barn, sakura-sushi, demo-bistro,
+// green-bowl, taco-fiesta, pizza-palace and spice-route (true only on french-house and aangan), and
+// table_tags_allowed on the same seven minus pizza-palace — while Access → Waiter → "Move, merge or
+// split a table" read ON and no screen could put it right.
 //
-// The fix is the one parcel and platform already had (2026-08-03, mig 263) and spans three files,
-// so it is a HANDOFF, not a silent edit: make tableOpsLadder / tableTagsLadder / takeOrdersLadder
-// ALWAYS_ON in lib/tableTags.ts, make tableOpsEffectiveFromRow / takeOrdersEffectiveFromRow return
-// true in app/api/tablet/[...path]/route.ts (as parcelEffectiveFromRow already does), and drop the
-// `module:` binding from these three rows here. Take the names off this list in the same commit.
+// RESOLVED (owner, 2026-08-18): "I want that toggle thing where you can able to check… I want to
+// turn on and turn off the feature if the restaurant required or not required." All three now have
+// a switch in Main features, so their `module:` bindings are correct again and the list below is
+// empty. It stays as a list so a FOURTH module losing its row fails here immediately.
 {
-  const HANDOFF_PENDING = ["take_orders", "table_ops", "table_tags"];
+  const HANDOFF_PENDING = [];
   // ONE SLICE PER PERMISSION, anchored on its `{ id: "x", group: "y"` opening and ending at the
   // next one. A looser "id … within 900 characters … module:" scan reads across the boundary and
   // reports the module of the row BELOW (it blamed print_invoice for khata's binding while this
@@ -799,7 +795,9 @@ else ok("the read/write route derives every allow-list from the model");
     fail(`a module gate with NO switch on the Access screen — a stored false is unreachable for ever and the screen would show it ON: ${unexpected.map((p) => `${p.id} → settings.${p.mod}_allowed`).join(", ")}`);
   else if (healed.length)
     fail(`${healed.join(", ")} no longer needs its place on the T15 handoff list in this check — take the name(s) out of HANDOFF_PENDING in the same commit as the fix`);
-  else ok(`no NEW module gate is unreachable from the screen (${HANDOFF_PENDING.length} known, handed off: ${HANDOFF_PENDING.join(", ")})`);
+  else ok(HANDOFF_PENDING.length
+    ? `no NEW module gate is unreachable from the screen (${HANDOFF_PENDING.length} known and handed off: ${HANDOFF_PENDING.join(", ")})`
+    : `every one of the ${withModule.length} module gates has a switch on the Access screen`);
 }
 
 // ── 24 · THE SPEC'S MENU TABLE MUST LIST EVERY MENU ROW ─────────────────────
