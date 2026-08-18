@@ -1299,6 +1299,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     // screens reading the same way round.
     const pays = [...payMerged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
+    // Bills the settlement reported at all, including any whose amount came back as zero — this is
+    // what tells an empty settlement apart from an unreadable one.
+    const payBills = [...payMerged.values()].reduce((a, p) => a + (Number(p.orders) || 0), 0);
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
     // ONE meaning of "orders placed" for the whole console (T5 sweep, 2026-08-11). `t.orders`
     // is COUNT(*) WHERE status <> 'cancelled', so it leaves the voided ones out — this sheet
@@ -1398,7 +1401,20 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Panel title="Settlement" hint="how the money arrived"
             right={<button type="button" className="rs-drill" onClick={() => onOpenReport("payments")} title="Open the Payment settlement report">Full report <i className="fas fa-arrow-right" aria-hidden /></button>}>
 
-            {pays.length === 0 ? <div className="rs-empty" style={{ padding: 20 }}>No payments recorded.</div> : (
+            {/* "No payments recorded" is only honest when there really were no bills. When bills
+                WERE settled but every amount against them reads zero, the settlement could not be
+                read — say that, rather than a sentence that means the opposite (T11 sweep,
+                2026-08-18). This is the shape the swapped-column fault printed for months: nine
+                bills settled, "No payments recorded", and a Total collected tile full of money. */}
+            {pays.length === 0 ? (
+              payBills > 0
+                ? <div className="rs-empty" style={{ padding: 20 }}>
+                    {nfmt(payBills)} bill{payBills === 1 ? "" : "s"} settled, but the amount against
+                    {payBills === 1 ? " it" : " them"} could not be read. The total above is right —
+                    press Refresh, and tell us if it stays like this.
+                  </div>
+                : <div className="rs-empty" style={{ padding: 20 }}>No payments recorded.</div>
+            ) : (
               <div className="rs-paylist">
                 {pays.map((p) => {
                   const c = payColor(p.method);
