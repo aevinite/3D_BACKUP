@@ -167,9 +167,24 @@ const HELP_SHOTS: Record<string, string[]> = {
   // row is invisible: the row falls through to the derived names, finds no file, and the sheet says
   // "There wasn't a good picture for this one" — exactly what a key that was never written would do.
   // scripts/verify-access-model.mjs check 22 now fails on one. (sweep T15, 2026-08-18)
-  mgr_tab_editor: ["edit_menu"], own_menu: ["edit_menu"],
+  mgr_tab_editor: ["edit_menu"],
   mgr_tab_log: ["view_logs"],
-  mgr_tab_ratings: ["view_ratings"], own_ratings: ["view_ratings"],
+  mgr_tab_ratings: ["view_ratings"],
+  // ── THE OWNER'S ROWS SHOW THE OWNER'S OWN PANEL (owner, 2026-08-18: "you can do the 16th one
+  //    too") ──────────────────────────────────────────────────────────────────────────────────
+  // Five of these said "There wasn't a good picture for this one" although the app HAD a capture of
+  // that screen — of the MANAGER panel. Borrowing it would have broken his standing rule that a
+  // picture must be of the thing you are reading about, so scripts/shot-access-help.mjs grew an
+  // owner job per row instead and these are the owner's own pages, ringed on his own nav.
+  //
+  // `own_ratings` is deliberately NOT here, and it is the one row with no owner screen to
+  // photograph: the owner panel's nav has no Rating review page at all — its entitlement gates
+  // /api/owner/ratings only. Left unmapped, it derives `ratings.png`, which is the GUEST menu with
+  // the star row ringed. That is what a rating IS, so it represents the row honestly; it is simply
+  // not a picture of a page of his, because there is not one.
+  own_reports: ["own_reports"], own_customers: ["own_customers"], own_issues: ["own_issues"],
+  own_settings: ["own_settings"], own_audit: ["own_audit"], own_access: ["own_access"],
+  own_menu: ["own_menu"], own_manager_mode: ["own_manager_mode"],
 };
 
 /** The action rows (Give a discount, Mark a bill paid…) are named after their power flag on both
