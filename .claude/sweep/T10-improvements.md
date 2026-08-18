@@ -1,6 +1,6 @@
 # T10 improvements — guest & staff-panel API routes (phases P04501–P05000)
 
-Two 🟢 built in this branch (both inside the territory, both small, neither needing a migration,
+Four 🟢 built in this branch (two on 2026-08-17, two more on 2026-08-18 after he picked them) (both inside the territory, both small, neither needing a migration,
 a screen, a module or a permission). Four 🟡 listed for the owner to decide, with a
 recommendation on each.
 
@@ -63,7 +63,7 @@ recommendation on each.
 
 ## 🟡 NOT BUILT — these need a decision from him
 
-### I3 — the purchase form lets you add the same ingredient twice with no warning
+### ~~I3~~ — BUILT on 2026-08-18: the purchase form now asks first
 
 * **Where** — manager panel → Inventory → 🧾 New vendor bill / ⚡ Quick cash buy → the "+ item…"
   row. What he would SEE: two "Tomatoes" lines on one bill, with nothing saying so.
@@ -91,7 +91,7 @@ recommendation on each.
   the failure this file has already been fixed for twice; but it is his call, because it is his
   legacy shape.
 
-### I5 — a device blocked by staff can still READ the kitchen board
+### ~~I5~~ — BUILT on 2026-08-18: a blocked device goes completely black
 
 * **Where** — kitchen panel → the pass. What he would SEE: a screen he has blocked still showing
   live tickets, though it can no longer act on them.
@@ -117,3 +117,57 @@ recommendation on each.
   food. If it ever needs a ceiling it has to be per-outlet and generous, decided with the real
   traffic numbers in front of us — not guessed at now, on a route nobody is calling yet.
 </content>
+
+
+---
+
+# BUILT 2026-08-18 — the two he picked, and the gate he asked to stop failing
+
+## 🟢 I3 (was 🟡 #8) — the purchase form asks before the same ingredient goes on twice
+
+His words: **"can do the 8th one with ask first"** — so it ASKS, it does not refuse. Two crate sizes
+at two rates on one bill is a real thing a real bill does; the fault was only that it happened in
+silence.
+
+* **Where** — manager panel → Inventory → 🧾 New vendor bill / ⚡ Quick cash buy → "+ item…" → Add.
+* **What he'd SEE** — the panel's normal dialog: *"Tomatoes" is already on this bill (10 kg × ₹20).
+  Add another line for it?* with **Cancel** and **Add another line**.
+* **Driven, not assumed** — Inventory switched on for French House, a test ingredient created,
+  the popup opened through the panel's own controls: first add → 1 line · second add → the question
+  appears · **Cancel → still 1 line** · **Add another line → 2 lines**. Then the ingredient was
+  deleted by id and the three inventory switches restored to exactly what they were.
+* **Answering no still says so** ("Not added — the line was left as it is") — a tap may never vanish
+  in silence.
+
+## 🟢 I5 (was 🟡 #9) — a blocked device goes completely black
+
+His words: **"do 9th goees completely black"**.
+
+* **Where** — kitchen screen and waiter tablet, once staff have blocked that device.
+* **What he'd SEE** — the whole screen black, a ⛔, **"This device has been blocked"** and
+  *"Ask a manager to unblock it."* Nothing of the board shows through.
+* **Both halves** — the board READ now refuses with a code (`device_blocked`), and the panel paints
+  a full-viewport wall and **stops talking to the server altogether**, so a walled screen does not
+  sit there re-asking for a board it can never have.
+* **Done on the tablet as well as the kitchen**, deliberately: it is the same gap, a waiter's tablet
+  is the likelier thing to be blocked, and leaving one half done is exactly the twin-drift this
+  codebase keeps a guard for.
+* **Costs nothing on the hot path** — the answer is memoised for 30s (the same TTL the panel
+  entitlement cache uses), so a board read adds no per-request database query. A WRITE still checks
+  the live list every time. A block therefore takes hold within half a minute.
+* **Driven, not assumed** — a real block row created, both APIs answered `403 device_blocked`, and
+  the wall measured INSIDE the panel iframe: black, `z-index` at the ceiling, covering the viewport,
+  topmost at the centre of the screen. Screenshot read. The block row was then deleted by id.
+
+## 🟢 The write-path gate now passes for everyone
+
+His words: **"i didn't why it fails make it like many user no fail"**. Both of its failures were the
+TEST's own bugs — I had reported one of them as a product gap and that was wrong; the correction is
+written up in full in `T10-findings.md`. Four consecutive runs green, and a controlled single run
+now leaves **zero** trace: same open sessions, same tickets, same rows before and after.
+
+## 🟡 Still open, unchanged
+
+**#7** (an old saved guest order with no restaurant lands on restaurant #1) — he said he did not
+understand it, so it stays open and is explained again in plain words rather than decided.
+**#10** (a flood ceiling on the delivery-app webhook) — still recommended AGAINST.

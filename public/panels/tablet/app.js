@@ -117,7 +117,61 @@ const ridQ = (path) => {
   if (PANEL_AS) path += "&as=" + encodeURIComponent(PANEL_AS);
   return path;
 };
+// ── A DEVICE THE STAFF HAVE BLOCKED SHOWS NOTHING AT ALL (owner, 2026-08-18) ─────────────────────
+//
+// Blocking a device used to take away its BUTTONS and leave the board on screen: every write on
+// /api/<panel> has checked the block list since it shipped, but the READ never did — so a screen
+// somebody had deliberately blocked carried on showing live tickets, and the only way to silence it
+// was to pull it off the wifi. His answer when it was put to him was one line — **"do 9th goees
+// completely black"** — so it does.
+//
+// The server refuses the board read with `reason: "device_blocked"` (a CODE — this panel branches on
+// codes, never on wording, so the sentence can change without breaking the wall). This paints over
+// the whole viewport, once, and never takes it down. There is no retry and nothing to dismiss: the
+// point of a block is that this screen stops being a working screen until staff lift it.
+//
+// AND IT STOPS THE DEVICE TALKING. `blockedWallUp` is checked at the top of api() below, so the very
+// next call short-circuits before it reaches the network. Without that the panel would sit behind a
+// black screen re-asking for a board it can never have — every few seconds, for the rest of the
+// shift — which is the flavour of pointless traffic the egress rules exist to stop, and it would
+// fill the error log with a refusal nobody needs told twice.
+//
+// Plain words, and no detail: it says who to ask, and nothing about why. The person holding the
+// tablet is not always the person the block is about.
+let blockedWallUp = false;
+function showBlockedWall() {
+  if (blockedWallUp) return;
+  blockedWallUp = true;
+  const w = document.createElement("div");
+  w.id = "lfh-blocked-wall";
+  w.setAttribute("role", "alertdialog");
+  w.setAttribute("aria-label", "This device has been blocked");
+  // Inline styles on purpose: a blocked screen must go dark even if the panel's stylesheet is the
+  // thing that failed to load, and this is the one overlay that cannot afford to depend on CSS.
+  w.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:#000;color:#e5e7eb;"
+    + "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;"
+    + "text-align:center;padding:28px;font-family:system-ui,sans-serif;-webkit-user-select:none;user-select:none";
+  const icon = document.createElement("div");
+  icon.textContent = "\u26D4";
+  icon.style.cssText = "font-size:56px;line-height:1";
+  const head = document.createElement("div");
+  head.textContent = "This device has been blocked";
+  head.style.cssText = "font-size:21px;font-weight:800;letter-spacing:.01em";
+  const sub = document.createElement("div");
+  sub.textContent = "Ask a manager to unblock it.";
+  sub.style.cssText = "font-size:14.5px;color:#94a3b8;max-width:34ch;line-height:1.55";
+  w.appendChild(icon); w.appendChild(head); w.appendChild(sub);
+  document.body.appendChild(w);
+  // If a timer that was already in flight paints an overlay after us, put the wall back in front.
+  // Only when something genuinely landed on top — never an unconditional re-append every tick.
+  setInterval(() => { if (document.body.lastElementChild !== w) document.body.appendChild(w); }, 3000);
+}
+const blockedError = () => { const e = new Error("This device has been blocked by staff."); e.status = 403; e.blocked = true; return e; };
+
 const api = async (method, path, body, opts) => {
+  // Blocked by staff → this device has stopped being a working screen. Refuse before the network,
+  // so a walled panel never asks for anything again (see showBlockedWall above).
+  if (blockedWallUp) throw blockedError();
   // Writes go through the offline outbox: sent now if online, else saved on this
   // device and replayed on reconnect (at-most-once via X-LFH-Action-Id). GETs stay
   // a plain fetch. Same return/throw contract as before (see outbox.js send()).
@@ -141,6 +195,8 @@ const api = async (method, path, body, opts) => {
   // Live reply or the device's saved copy? The offline bar needs to know.
   if (window.LFH_OFF) window.LFH_OFF.noteResponse(r);
   const j = await r.json().catch(() => null);
+  // Blocked by staff → the whole screen goes dark and stays dark (see showBlockedWall above).
+  if (r.status === 403 && j && j.reason === "device_blocked") { showBlockedWall(); throw blockedError(); }
   // Attach the parsed body + status to the error so callers can read server flags like
   // duplicateWarning (#15) / needPin, which a bare message string would have dropped.
   if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; e.busy = (j && j.busy === true) || r.headers.get("X-LFH-Busy") === "1"; throw e; }

@@ -218,9 +218,19 @@ for (const [p, what] of [
   if (!src) { fail(`${p} is missing`); continue; }
   if (/withIdempotency\s*\(/.test(src)) ok(`${p} is wrapped in withIdempotency`);
   else fail(`${p} lost withIdempotency — ${what}`);
-  // A malformed restaurant must be REFUSED, never quietly filed under restaurant #1.
-  if (/unknown_restaurant/.test(src)) ok(`${p} refuses a malformed restaurant rather than defaulting to #1`);
+  // The restaurant must be REFUSED unless it is a real one — never quietly filed under #1.
+  //
+  // MISSING counts as malformed now (owner, 2026-08-18: "I agree to 7"). The old rule kept a
+  // fallback to restaurant #1 for a body with NO restaurantId field at all — the shape these routes
+  // shipped with when there was only one restaurant. On a multi-restaurant stack that was the last
+  // remaining way a real order and its money could land on somebody else's books, via an order saved
+  // by a build old enough to predate the field. Nothing that runs today can hit it:
+  // useRestaurantId() never returns undefined and every enqueue call site passes it.
+  if (/unknown_restaurant/.test(src)) ok(`${p} refuses a restaurant it cannot identify`);
   else fail(`${p} no longer refuses a malformed restaurant — a real order and its money land on the wrong restaurant's books`);
+  if (/DEFAULT_RID/.test(src) || /00000000-0000-0000-0000-000000000001/.test(src)) {
+    fail(`${p} has a hard-coded fallback to restaurant #1 again — a saved order that names no restaurant would be billed to the wrong one (owner agreed to remove this, 2026-08-18)`);
+  } else ok(`${p} has no fallback to restaurant #1 left to guess with`);
   // The database's own words must never travel to a diner.
   if (/error\.message/.test(src) && !/console\.(error|warn)\([^)]*error\.message/.test(src)) {
     fail(`${p} may be sending a database message to a diner — it must log the detail and answer a CODE`);
@@ -280,6 +290,91 @@ for (const p of ["app/api/tablet/[...path]/route.ts", "app/api/editor/[...path]/
   const src = read(p);
   if (/panelSafeSettings\s*\(/.test(src)) ok(`${p} strips the settings row through lib/panelSettings`);
   else fail(`${p} no longer calls panelSafeSettings — the delivery apps' keys ride out on a once-a-minute refresh`);
+}
+
+// ── 9. A DEVICE THE STAFF BLOCKED SHOWS NOTHING AT ALL (owner, 2026-08-18) ───────────────────────
+//
+// "do 9th goees completely black". Blocking used to take a device's BUTTONS away and leave the
+// board on screen, because every WRITE checked the block list and the READ never did. Both halves
+// are needed: the route has to refuse the read, and the panel has to paint over itself — a refusal
+// with no wall is just a broken-looking screen.
+function blockedReadIsGated(routePath, panelPath, who) {
+  const src = read(routePath);
+  if (!src) { fail(`${routePath} is missing`); return; }
+  // The check must be in the GET, not only in the write handler.
+  const getStart = src.indexOf("export async function GET");
+  const getBody = getStart >= 0 ? src.slice(getStart, getStart + 1200) : "";
+  if (/blockedForRead\s*\(/.test(getBody)) ok(`${routePath} refuses the board read for a blocked device`);
+  else fail(`${routePath} serves the board to a blocked ${who} again — blocking is back to taking away buttons only`);
+  if (/reason:\s*"device_blocked"/.test(src)) ok(`${routePath} says WHY with a code the panel can branch on`);
+  else fail(`${routePath} lost the device_blocked code — the panel cannot tell this refusal from any other 403`);
+  // Memoised, or a board read grows a database query on the hottest path in the panel.
+  if (/BLOCK_TTL_MS/.test(src) && /blockMemo/.test(src)) ok(`${routePath} memoises the block answer, so the hot path adds no per-request read`);
+  else fail(`${routePath} asks the database on every board read — that is the egress rule this memo exists for`);
+  // The WRITE must NOT be memoised: it still asks every time.
+  if (/await deviceBlocked\(dev, rid\)/.test(src)) ok(`${routePath} still checks a WRITE against the live list, unmemoised`);
+  else fail(`${routePath} no longer checks writes against the live block list`);
+
+  const panel = read(panelPath);
+  if (!panel) { fail(`${panelPath} is missing`); return; }
+  if (/showBlockedWall\s*\(\)/.test(panel) && /device_blocked/.test(panel)) ok(`${panelPath} paints the wall when the server says device_blocked`);
+  else fail(`${panelPath} no longer paints the blocked wall — the screen would just look broken`);
+  if (/if\s*\(blockedWallUp\)\s*throw/.test(panel)) ok(`${panelPath} stops talking once it is walled`);
+  else fail(`${panelPath} keeps polling behind the wall — a blocked screen would ask for a board it can never have, for ever`);
+  if (/background:#000/.test(panel) && /position:fixed;inset:0/.test(panel)) ok(`${panelPath}'s wall is black and covers the viewport`);
+  else fail(`${panelPath}'s wall is no longer a full-screen black cover — "completely black" was the whole ask`);
+}
+blockedReadIsGated("app/api/kitchen/[...path]/route.ts", "public/panels/kitchen/app.js", "kitchen screen");
+blockedReadIsGated("app/api/tablet/[...path]/route.ts", "public/panels/tablet/app.js", "waiter tablet");
+
+// ── 10. THE PURCHASE FORM ASKS BEFORE PUTTING AN INGREDIENT ON A BILL TWICE ──────────────────────
+//
+// Not refused — two crate sizes at two rates is a real bill — but never silent either
+// (owner, 2026-08-18: "can do the 8th one with ask first").
+{
+  const inv = read("public/panels/editor/inventory.js");
+  if (!inv) fail("public/panels/editor/inventory.js is missing");
+  else {
+    const idx = inv.indexOf("#ppAdd");
+    const handler = idx >= 0 ? inv.slice(idx, idx + 1400) : "";
+    // The rule asks for the LOOKUP, not just the variable: this guard's own negative test passed
+    // on `const already = [];`, which is the fault wearing the fixed code's name.
+    const looksUp = /lines\.filter\(\s*\(?\s*\w+\s*\)?\s*=>\s*\w+\.item_id\s*===\s*item_id/.test(handler);
+    if (looksUp && /already\.length/.test(handler) && /confirmDialog|window\.confirm/.test(handler)) {
+      ok("the purchase form asks before adding the same ingredient a second time");
+    } else {
+      fail("the purchase form adds a duplicate ingredient line silently again (owner asked for ask-first, 2026-08-18)");
+    }
+    // Answering NO must still SAY something — a tap may never vanish in silence.
+    if (/if\s*\(!said\)\s*\{\s*toastMsg/.test(handler)) ok("…and answering no says so, rather than the tap vanishing");
+    else fail("answering no to the duplicate question is silent — that is the never-drop-a-tap rule");
+    // It must ask, never refuse: a second line is legitimate.
+    if (/return toastMsg\("That ingredient is already/.test(handler)) {
+      fail("the purchase form now REFUSES a duplicate line — it was asked to ask, not to block (two rates on one bill is real)");
+    } else ok("…and a second line is still allowed once confirmed");
+  }
+}
+
+// ── 11. THE WRITE-PATH GATE MUST BE RUNNABLE ON A SHARED DATABASE ────────────────────────────────
+//
+// It was red for every terminal, twice over, and neither reason was the product (T10, 2026-08-18):
+// its cleanup hard-DELETEd orders, which migration 190 refuses by design, and it picked "free"
+// tables without excluding live merges — so it kept walking into another run's leftovers and
+// reporting the merge code as broken. A gate nobody can pass is a gate everybody learns to ignore.
+{
+  const wp = read("scripts/verify-write-paths.mjs");
+  if (!wp) fail("scripts/verify-write-paths.mjs is missing");
+  else {
+    if (/from\("orders"\)\.delete\(\)/.test(wp)) {
+      fail("verify-write-paths hard-deletes its orders again — migration 190 refuses that on purpose ('a sale can never disappear'), so the gate goes permanently red");
+    } else ok("verify-write-paths cancels its tickets instead of hard-deleting them");
+    if (/table_merges/.test(wp) && /busy\.add/.test(wp)) ok("verify-write-paths avoids tables caught in a live merge, so a shared database does not fail it");
+    else fail("verify-write-paths picks tables without excluding live merges — on a shared database it walks into another run's party and blames the product");
+    if (/u\.data\.ok === true/.test(wp)) ok("verify-write-paths asserts the unmerge's OWN answer before judging its breadcrumbs");
+    else fail("verify-write-paths judges unmerge breadcrumbs without checking the unmerge happened — that is how it reported '0 crumb(s)' for a working product");
+    if (/the sweep-up write itself succeeded/.test(wp)) ok("verify-write-paths checks its own cleanup write");
+    else fail("verify-write-paths ignores whether its cleanup worked — that is how this sat red for four sweeps");
+  }
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────

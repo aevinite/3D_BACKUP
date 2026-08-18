@@ -552,11 +552,35 @@
         $("#ppTotal", pop).textContent = inr(lines.reduce((s, l) => s + l.qty * l.rate, 0));
         pop.querySelectorAll(".inv-x").forEach((x) => { x.onclick = () => { lines.splice(Number(x.dataset.n), 1); redraw(); }; });
       };
-      $("#ppAdd", pop).onclick = () => {
+      // ── THE SAME INGREDIENT TWICE: ASK FIRST (owner, 2026-08-18 — "can do the 8th one with ask first")
+      //
+      // Nothing stopped a second "Tomatoes" line going on quietly. That IS sometimes what you want —
+      // two crate sizes at two rates, or a correction — so it is not refused; it is just no longer
+      // silent. The T10 sweep found the server was ALSO getting it wrong (both lines posted the
+      // first one's quantity and rate into stock); that half is fixed in app/api/inventory, so the
+      // stock ledger is right either way now. This is the other half: the person entering the bill
+      // gets told, before it lands, that this ingredient is already on it.
+      //
+      // confirmDialog() is the editor's own dialog (public/panels/editor/app.js) — a classic script
+      // sharing this page's global scope. Guarded by `typeof`, the same way this file already guards
+      // window.toast, because inventory.js must not assume anything about load order; a browser
+      // where it is genuinely absent falls back to the built-in confirm rather than losing the
+      // question. Never silently added either way — the tap always ends in something visible.
+      $("#ppAdd", pop).onclick = async () => {
         const item_id = sel.value, qty = Number($("#ppQty", pop).value), rate = Number($("#ppRate", pop).value);
         if (!item_id) return toastMsg("Pick an item");
         if (!(qty > 0)) return toastMsg("Enter the quantity");
         if (!(rate >= 0)) return toastMsg("Enter the rate");
+        const already = lines.filter((l) => l.item_id === item_id);
+        if (already.length) {
+          const it = itemById(item_id) || { name: "this ingredient", purchase_uom: "" };
+          const sofar = already.map((l) => `${l.qty} ${it.purchase_uom} × ₹${l.rate}`).join(" and ");
+          const ask = `"${it.name}" is already on this bill (${sofar}). Add another line for it?`;
+          const said = (typeof confirmDialog === "function")
+            ? await confirmDialog(ask, "Add another line")
+            : window.confirm(ask);
+          if (!said) { toastMsg("Not added — the line was left as it is"); return; }
+        }
         lines.push({ item_id, qty, rate });
         sel.value = ""; $("#ppQty", pop).value = ""; $("#ppRate", pop).value = ""; $("#ppUom", pop).textContent = "";
         redraw();
