@@ -67,10 +67,18 @@ export default function OrderTracker() {
     setOrders(list);
   };
 
-  // Load the saved orders, then listen for "order placed". Re-runs when the resolved restaurant changes — a soft, same-tab
-  // switch from /r/A to /r/B doesn't remount this widget (same route file), so without
-  // this it kept showing restaurant A's live-order strip over B until an event fired.
-  // read()/getCurrency() are tenant-scoped, so re-reading picks up B's own data.
+  // Load the saved orders, then listen for "order placed".
+  //
+  // RE-RUNS ON A RESTAURANT CHANGE, and that is the point: a soft, same-tab move from /r/A to /r/B
+  // does not remount this widget (GuestChrome lives in the root layout, same route file), so
+  // without `restaurantId` in the deps it kept showing restaurant A's live-order strip over B until
+  // some event happened to fire. read() is tenant-scoped, so re-reading picks up B's own data.
+  // (audit fix cart-3, 2026-07-08.)
+  //
+  // There were TWO effects here doing this, with the same dependency — this one and a bare
+  // `useEffect(() => { refresh(); }, [restaurantId])` right below it. Both fired on every tenant
+  // change, so the list was read twice each time. Nobody could see it, which is why it sat here;
+  // folded into one now that the owner asked for the list to be cleared. (2026-08-18)
   useEffect(() => {
     refresh();
     const onPlaced = () => refresh(); // a new order arrived (this tab or another)
@@ -81,12 +89,6 @@ export default function OrderTracker() {
       window.removeEventListener("storage", onPlaced);
     };
   }, [restaurantId]);
-
-  // Re-read on restaurant change: the tracker's orders are tenant-scoped, so switching
-  // restaurants in the SAME tab (client-side nav — GuestChrome lives in the root layout
-  // and doesn't remount) must re-read against THIS restaurant, else the previous
-  // restaurant's live strip lingered over the new one (audit fix cart-3, 2026-07-08).
-  useEffect(() => { refresh(); }, [restaurantId]);
 
   // Poll the kitchen for each order we're still following.
   // "Polling" = asking the server "any update?" on a repeating timer, because

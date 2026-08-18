@@ -1,6 +1,22 @@
 // Verify the order flow still works the same for legit orders, and that the
 // direct-insert hole is now closed. Places a test order via the new server
-// function, reads it back, then DELETES it. No lasting data change.
+// function, reads it back, then RETIRES it the way the law allows.
+//
+// WHY IT NO LONGER DELETES (sweep 6 T3, 2026-08-18)
+//   This used to finish with `DELETE FROM orders WHERE id = …`, and since the billing-compliance
+//   trigger landed, the database refuses that outright:
+//
+//     lfh: an issued bill cannot be hard-deleted — soft-delete it (deleted_at) instead
+//     HINT: Corrections use void / soft-delete; permanent erase only via the 90-day purge.
+//
+//   So the whole guard died on its own cleanup — it placed the order, proved everything, then threw
+//   on the last step and exited non-zero. `npm run verify:order` had been red for that reason alone.
+//
+//   The trigger is RIGHT and is not to be worked around: "a sale can be cancelled, a sale can never
+//   disappear" (docs/COMPLIANCE-GUARDRAILS.md §3.0). A test order is still a sale row once it
+//   exists, so it is retired down the same route a real one takes — cancelled, then soft-deleted
+//   with who/when/why stamped, exactly as lib/softDelete.ts does it. The row stays on record and
+//   off every live view, which is the compliant outcome AND the tidy one.
 //   Run with:  node scripts/verify-order.mjs
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -53,9 +69,32 @@ if (!r.ok) { console.error("✗ order did NOT place"); process.exit(1); }
 const row = await runSql(`SELECT subtotal, tax, total, jsonb_array_length(items) AS lines, status FROM orders WHERE id = '${r.order_id}';`);
 console.log("stored order:", JSON.stringify(row[0]));
 
-// 4) Clean up the test order so we leave no trace.
-await runSql(`DELETE FROM orders WHERE id = '${r.order_id}';`);
-console.log("✓ test order placed, verified, and deleted");
+// 4) Retire the test order the compliant way: cancel it, then soft-delete it with a reason.
+// Never a hard DELETE — see the note at the top of this file. The line items go (they are not the
+// sale record; the frozen `orders.items` payload is), the order row stays, marked and dated.
+await runSql(`DELETE FROM order_items WHERE order_id = '${r.order_id}';`);
+await runSql(`
+  UPDATE orders
+     SET status = 'cancelled',
+         deleted_at = NOW(),
+         delete_reason = 'verify-order.mjs self-test row — retired by the guard that created it'
+   WHERE id = '${r.order_id}';
+`);
+const [retired] = await runSql(`SELECT status, deleted_at IS NOT NULL AS soft_deleted FROM orders WHERE id = '${r.order_id}';`);
+if (!retired || retired.status !== "cancelled" || retired.soft_deleted !== true) {
+  console.error("✗ the test order was not retired — leaving it for a human rather than forcing it:", JSON.stringify(retired));
+  process.exit(1);
+}
+// Prove the compliance trigger is still standing: a hard delete of this row must STILL be refused.
+// If this ever succeeds, the safeguard has been weakened and that matters far more than this test.
+let hardDeleteRefused = false;
+try { await runSql(`DELETE FROM orders WHERE id = '${r.order_id}';`); }
+catch { hardDeleteRefused = true; }
+if (!hardDeleteRefused) {
+  console.error("✗ a hard delete of an issued bill SUCCEEDED — the append-only safeguard is gone. Fix that before anything else.");
+  process.exit(1);
+}
+console.log("✓ test order placed, verified, and retired (cancelled + soft-deleted); hard delete still refused");
 
 // 5) Prove the OLD hole is closed: a raw anon insert must now be rejected.
 const res = await fetch(`${URL_}/rest/v1/orders`, {

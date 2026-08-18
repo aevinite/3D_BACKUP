@@ -163,10 +163,16 @@ export default function CartPanel() {
       // responding at the ceiling while the menu card's "+" explained itself, so the
       // same limit was spelled out in one place and silent in the other — and the
       // silent one was the bill (guest sweep 2026-08-04). Same wording as FoodCard.
+      // A LIMIT IS NOT A SUCCESS (owner asked, 2026-08-18). Both copies of this message raised the
+      // toast with no `variant`, so ToastHost fell back to "success" and stamped it with a ✓ —
+      // a green tick for something that had just REFUSED to happen. `info` is the honest flavour:
+      // nothing went wrong and there is nothing to fix, the "+" simply has a ceiling and this says
+      // so. Kept byte-identical in FoodCard, because the whole point of these two strings is that
+      // the bill and the dish card explain the same limit the same way.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: "Maximum 99 per dish",
         subtitle: "that's the most we can add to one line",
-        kicker: "your order", duration: 1400,
+        kicker: "your order", variant: "info", duration: 1400,
       } }));
       return;
     }
