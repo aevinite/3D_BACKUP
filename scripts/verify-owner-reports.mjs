@@ -569,5 +569,109 @@ console.log("\nT11-B · the chart kit");
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// T11 SWEEP, ROUND 2 (2026-08-18) — the money at the source, printing, and the phone
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+console.log("\nT11-C · a report must read the takings, not the discount");
+{
+  // The fault: `hist` listed … net, dpg … and the live branch listed … dpg, net …, glued with
+  // `SELECT * FROM hist UNION ALL SELECT * FROM tail`. A UNION ALL takes its column NAMES from the
+  // FIRST branch only, so every live-tail row had its takings and its grossed discount swapped —
+  // the owner's dashboard, day sheet, payment split and 12-month report all printed the discount
+  // where the money should be, and the sales report's tax went large and NEGATIVE.
+  //
+  // The guard reads the TRUE LATEST definition of each function across the whole folder (they get
+  // renumbered when branches merge, so a hard-coded filename is worthless) and refuses a bare
+  // `SELECT *` on either side of the union.
+  const dir = join(root, "supabase/migrations");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+  const latestBodyOf = (fn) => {
+    let body = null;
+    for (const f of files) {                       // sorted, so the last hit wins
+      const src = readFileSync(join(dir, f), "utf8");
+      const at = src.indexOf(`CREATE OR REPLACE FUNCTION public.${fn}(`);
+      if (at < 0) continue;
+      const open = src.indexOf("AS $function$", at);
+      const end = src.indexOf("$function$;", open + 13);
+      if (open < 0 || end < 0) continue;
+      body = { file: f, text: src.slice(at, end) };
+    }
+    return body;
+  };
+  for (const fn of ["lfh_owner_revenue_timeseries", "lfh_owner_payment_breakdown", "lfh_owner_sales_report"]) {
+    const b = latestBodyOf(fn);
+    check(
+      `${fn} names its UNION ALL columns on both sides`,
+      !!b && !/SELECT \* FROM (hist|tail|mtail)/.test(b.text),
+      `${b ? b.file : "not found"} — this function stacks a rollup branch on a live branch. Both branches ` +
+        "must list the SAME named columns in the SAME order; a bare `SELECT *` lets column ORDER decide, " +
+        "and the two halves have already disagreed once (net/disc_gross swapped), which printed the " +
+        "discount as the day's takings and made the tax column negative.",
+    );
+  }
+  // …and the correction itself must still be present, i.e. SOMETHING defines them after 315/321.
+  const ts = latestBodyOf("lfh_owner_revenue_timeseries");
+  check(
+    "…and that latest definition is the corrected one",
+    !!ts && /SELECT restaurant_id, day, gp, dp, net, dpg, ao FROM hist/.test(ts.text),
+    "the newest lfh_owner_revenue_timeseries no longer carries the explicit hist column list — a later " +
+      "migration has re-introduced an older body. Take the TRUE LATEST definition before replacing one of these.",
+  );
+}
+
+console.log("\nT11-D · printing, and the phone");
+{
+  const css = read("app/globals.css");
+  const printBlocks = css.split("@media print");
+  const ownerPrint = printBlocks.find((b) => b.includes(".adm.owx") && b.includes("--accent: #047857"));
+  check(
+    "the owner print block un-clips html and body",
+    !!ownerPrint && /html,\s*body[^{]*\{[^}]*overflow:\s*visible\s*!important/s.test(ownerPrint),
+    "app/globals.css — the app-shell rule `html, body { height:100%; overflow:hidden }` also clips the " +
+      "PRINTED document, so Ctrl+P produced one page and dropped the by-period table. The owner print " +
+      "block must reset html/body height and overflow.",
+  );
+  check(
+    "…and paints the paper white at the specificity that actually wins",
+    !!ownerPrint && /html\[data-staffdark="1"\]/.test(ownerPrint),
+    "app/globals.css — `html[data-staffdark=\"1\"]` sets the dark background with !important, so a plain " +
+      "`html` selector loses to it and the surplus paper prints solid dark. Match its specificity.",
+  );
+  const kit = read("components/owner/reports/kit.tsx");
+  check(
+    "the report controls are a thumb target on a phone",
+    /@media \(max-width: 640px\)[^}]*\{[\s\S]{0,400}?\.rs-btn\s*\{\s*min-height:\s*44px/.test(kit),
+    "components/owner/reports/kit.tsx — under 640px the Refresh / Report / Export buttons must reach 44px. " +
+      "They measured 34px on an A35, and the day sheet's Today/Yesterday 27px.",
+  );
+  check(
+    "…including the period dropdown",
+    /@media \(max-width: 640px\)[\s\S]{0,300}?\.owr-btn\.main\s*\{[^}]*min-height:\s*44px/.test(reportsPage),
+    "app/owner/reports/page.tsx — the period control measured 31px on an A35.",
+  );
+}
+
+console.log("\nT11-E · saying so when a read failed");
+{
+  const dayBlock = reportsPage.slice(
+    reportsPage.indexOf('if (bk === "daysummary")'),
+    reportsPage.indexOf('if (bk === "sales")'),
+  );
+  check(
+    "an unreadable settlement is not reported as an empty one",
+    /payBills\s*>\s*0/.test(dayBlock),
+    "app/owner/reports/page.tsx — when the settlement returns BILLS but every amount reads zero, the panel " +
+      "must say the amount could not be read. Printing \"No payments recorded\" beside a Total collected tile " +
+      "full of money is what made the swapped-column fault read as a quiet day for months.",
+  );
+  const cache = read("lib/ownerCache.ts");
+  check(
+    "a forced Refresh cannot store an all-zero payload over a good one",
+    /prevRow/.test(cache) && /collapsedToZero\(payload,\s*prevRow\?\.payload\)/.test(cache),
+    "lib/ownerCache.ts — `force` skipped the read of the row it was about to replace, so the all-zero guard " +
+      "could never fire on the path most likely to need it (Refresh is pressed BECAUSE the numbers look wrong).",
+  );
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }
