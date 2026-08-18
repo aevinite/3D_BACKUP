@@ -109,10 +109,15 @@ check("no stale snapshot figure leaks through the switched-off state",
 check("no card claims to be loading once the section is known to be off",
   /const loadNote = offNote \?/.test(homeC) && (homeC.match(/\{loadNote\}/g) || []).length >= 12,
   "app/owner/page.tsx: the chart cards are back to a hardcoded \"Loading…\". Once the server has\n       said the section is switched off, no payload is coming and that promise is false — route\n       every placeholder through `loadNote` (12 of them at the time of writing).");
-check("the KPI tiles stop linking into Reports when Reports are off",
-  /const kpiHref = \(t: string\) => \(reportsOn \? reportHref\(t\) : undefined\)/.test(homeC)
-    && !/<Kpi[^>]*href=\{reportHref\(/.test(homeC),
-  "app/owner/page.tsx: a KPI tile is wired straight to `reportHref` again, so it stays a link for\n       an owner whose Reports section the admin removed. Use `kpiHref`, which returns undefined.");
+// The tiles open a popup now (owner, 2026-08-18), so "does it link" became "does it open at all":
+// with the section off, no tile may offer a way in, and the popup's own footer says so instead of
+// showing a live link into a hub that would refuse him.
+check("no tile opens its popup when Reports are off",
+  /onOpen=\{offNote \? undefined :/.test(homeC),
+  "app/owner/page.tsx: a KPI tile opens its popup unconditionally again. With Reports switched off\n       there is nothing to show and nowhere to send him — the tile must not be a button.");
+check("the popup's footer refuses instead of linking when Reports are off",
+  /reportsOn \? \(/.test(homeC) && /Reports are switched off for this restaurant/.test(home),
+  "app/owner/page.tsx: the tile popup's bottom button links into Reports even when the section is\n       switched off. Say so in the footer instead.");
 
 // ── 6. the removals money line names its own slice ──────────────────────────────────────────────
 check("the removals record says which slice its money figure covers",
@@ -182,6 +187,69 @@ check("the \"live\" pill mixes its ink toward the skin's own text",
   /\.ow2-live \{[^}]*color: color-mix\(in srgb, var\(--accent\)/.test(home),
   "app/owner/page.tsx: .ow2-live is back to a flat colour. It is only readable by accident while\n       every tile is a Link — a tile without an href applies the declared value and lands at 1.92:1\n       on a white card. Mix the accent toward var(--text), like .ow2-split .txt em does.");
 
+// ── 12. the tile row he asked for, 2026-08-18 ───────────────────────────────────────────────────
+// "we can keep revenue, orders, today so far, expenses, on hand money" and "everything should be in
+// the one line". Five tiles, in that order, and no sixth creeping back in.
+{
+  const labels = [...homeC.matchAll(/<Kpi k="([^"]+)"/g)].map((m) => m[1]);
+  check("the tile row is the five he asked for, in his order",
+    JSON.stringify(labels) === JSON.stringify(["Revenue", "Orders", "Today so far", "Expenses", "On hand"]),
+    `app/owner/page.tsx: the tile row is ${JSON.stringify(labels)}. He asked for exactly Revenue,\n       Orders, Today so far, Expenses, On hand — five, so they fit one line. "Avg order" belongs in\n       the Orders popup and cancellations/staff pay in the Expenses and Revenue popups.`);
+}
+check("the row is laid out five across",
+  /ow2-stats5/.test(homeC) && /repeat\(5, minmax\(0, 1fr\)\)/.test(home),
+  "app/owner/page.tsx: the five-across grid is gone, so the tiles wrap to two rows again — the exact\n       thing he asked to be fixed (\"right now it is top bottom two rows\").");
+check("the tile face shows the SHORT money form",
+  /compact && !loading/.test(homeC) && /compactINR\(v\)/.test(homeC),
+  "app/owner/page.tsx: the tiles print full rupees again. He asked for the short form on the face\n       (\"you can do, like, two point seven lakh\") with the whole number in the popup — it is also\n       what makes five tiles fit one line.");
+// ── 13. cancellations and discounts must NOT be added to Expenses ───────────────────────────────
+// Migration 315 makes revenue the NET figure and no rollup counts a cancelled order, so both are
+// already out of revenue. Adding either to Expenses and then subtracting Expenses from revenue would
+// count the same loss twice and read "on hand" lakhs too low. This is the one check here that guards
+// a NUMBER rather than a screen.
+check("Expenses is staff pay out only, not staff pay plus cancellations",
+  /const staffOut = kMain\?\.staffPay\?\.paidOut \?\? 0;/.test(homeC)
+    && /const onHand = \(kMain\?\.revenue \?\? 0\) - staffOut;/.test(homeC)
+    && !/staffOut \+ .*cancelledValue|cancelledValue \+ .*staffOut/.test(homeC),
+  "app/owner/page.tsx: something added cancellations or discounts into the Expenses total. Revenue\n       is already NET of discounts and never included a cancelled order (migration 315), so this\n       counts the same loss twice and makes \"On hand\" wrong by lakhs. They belong in the Revenue\n       popup under what he did not charge.");
+check("the Expenses popup says why cancellations are not in it",
+  /already has them taken out/.test(home),
+  "app/owner/page.tsx: the Expenses popup no longer explains why discounts and cancelled bills are\n       excluded. He asked for them \"under expenses\"; the screen owes him the reason they are not.");
+// ── 14. the detail opens on the scope and period on screen ──────────────────────────────────────
+check("the dashboard sends the VIEWED scope and the chosen range",
+  /q\.set\("view", activeRid \?\? "all"\)/.test(homeC) && /q\.set\("range", globalRange\)/.test(homeC),
+  "app/owner/page.tsx: the detail link stopped carrying `view` and `range`. Then it falls back to the\n       admin's own ?rid pin, and from the All-restaurants view every tile lands on ONE restaurant —\n       his bug of 2026-08-18.");
+{
+  const rep = read("app/owner/reports/page.tsx");
+  check("the reports page lets `view` beat the admin pin",
+    /viewPin/.test(rep) && /viewPin === "all" \? "" : viewPin/.test(rep),
+    "app/owner/reports/page.tsx: it forces its scope to ?rid again, so a link from the All-restaurants\n       dashboard lands on the one restaurant the admin console drilled into.");
+  check("the reports page honours the range it is handed",
+    /qs\.get\("range"\)/.test(rep) && /wanted === "week" \? "7d"/.test(rep),
+    "app/owner/reports/page.tsx: it ignores ?range, so opening a tile on \"This month\" hands him 30\n       days instead. The two screens have different period lists, so `week` needs its mapping.");
+  check("the reports hub finds the element that really scrolls",
+    /for \(const sel of \[".adm-main", ".adm"\]\)/.test(rep),
+    "app/owner/reports/page.tsx: `scroller()` is back to .adm-main alone, so keeping your place does\n       nothing at <=900px where .adm is the scroller.");
+}
+// ── 15. a way back you can SEE ──────────────────────────────────────────────────────────────────
+check("the dish view has a visible close control",
+  /own-dish-x/.test(homeC) && /width: 44px; height: 44px/.test(home),
+  "app/owner/page.tsx: the dish view's ✕ is gone or under 44px. The phone's BACK and the drawer both\n       work, but neither is visible, and the breadcrumb is display:none at 360px.");
+// ── 16. one wording for how long ago ────────────────────────────────────────────────────────────
+check("the dashboard uses the shared timeAgo, not its own copy",
+  /timeAgo/.test(homeC) && !/function timeAgo\(iso: string\)/.test(homeC),
+  "app/owner/page.tsx: a local timeAgo is back, so the dashboard says \"5 min ago\" while Audit & logs\n       and eleven admin screens say \"5m ago\".");
+// ── 17. the two handoffs in other owner files ───────────────────────────────────────────────────
+check("manager mode re-emits its breadcrumb after the shell is listening",
+  /requestAnimationFrame\(\(\) => emit\(tail\)\)/.test(read("components/owner/OwnerManagerMode.tsx")),
+  "components/owner/OwnerManagerMode.tsx: the single-emit is back. Child effects run before parent\n       effects, so on a hard load the tail is shouted before OwnerShell is listening and the pill\n       stays blank with a restaurant's floor on screen.");
+{
+  const ch = read("components/owner/Charts.tsx");
+  check("a long category label is trimmed with an ellipsis, not clipped",
+    /CAT_AXIS_W/.test(ch) && /label\.slice\(0, budget - 1\)/.test(ch),
+    "components/owner/Charts.tsx: CatTick draws the full label again. textAnchor=\"end\" means it runs\n       off the LEFT edge and loses the identifying first words, and its only rescue is a hover title\n       that a phone does not have.");
+}
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -192,4 +260,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 23 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 36 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
