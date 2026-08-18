@@ -787,6 +787,26 @@ else ok("the read/write route derives every allow-list from the model");
   else ok(`no NEW module gate is unreachable from the screen (${HANDOFF_PENDING.length} known, handed off: ${HANDOFF_PENDING.join(", ")})`);
 }
 
+// ── 24 · THE SPEC'S MENU TABLE MUST LIST EVERY MENU ROW ─────────────────────
+// docs/ACCESS-MODEL.md section A1 is a row-by-row table of what sits under Menu, and the next
+// session builds from it. It had drifted: "Prep time on a dish" had been on the screen for days
+// with no line in the table, and the table put Bubble effect above Design and styling and called
+// the latter "(last)" when it is not. A count check is enough to catch a row added or removed on
+// one side and not the other, and it needs no name matching between two vocabularies. (T15)
+{
+  const doc = read("docs/ACCESS-MODEL.md");
+  const a1 = (doc.match(/### A1 · Menu[\s\S]*?\n\| Sub-option \| Default \| What it does \|\n\|[-|\s]+\|\n([\s\S]*?)\n\n/) || [])[1];
+  const menuNode = ALL_NODES.find((n) => n.id === "menu");
+  if (!a1 || !menuNode) fail("could not read section A1's table, or the Menu row — if either moved, update this guard");
+  else {
+    const docRows = a1.split("\n").filter((l) => l.trim().startsWith("|")).length;
+    const treeRows = (menuNode.children || []).length;
+    if (docRows !== treeRows)
+      fail(`docs/ACCESS-MODEL.md A1 lists ${docRows} sub-options and Menu has ${treeRows} — the spec and the screen disagree about what is under Menu`);
+    else ok(`the spec's Menu table lists all ${treeRows} of the rows the screen shows`);
+  }
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
