@@ -1,8 +1,9 @@
 # T13 improvements — the owner's Menu editor, Team and Settings
 
-Two things were built (both fell out of a fix, both inside my territory, both well under 150 lines,
-no migration, no new screen, no new module, no new permission). Four are listed for him to decide,
-because each is a taste call with a real trade-off or a product decision that is his to make.
+**FIVE things are built.** Two fell out of a fix during the sweep (G1, G2); three more were built on
+**2026-08-18 after the owner read the list and picked them himself** (Y3, Y4, Y5). Two remain unbuilt
+(Y1, Y2) — he did not pick them, so they stay parked. He also **vetoed problem 3**; see the findings
+file and `docs/REJECTED-IDEAS.md` R31.
 
 ---
 
@@ -76,22 +77,5 @@ in the same file (table tiles 36px, tabs 40px) and one of them is "Remove", whic
 real trade-off on the screen he actually uses, and the phone layout here was already tuned once in
 the 2026-07-07 audit.
 
-### Y3 · No search on the Team roster
-**Phase:** P06491. Owner panel → Team.
-Seven people at French House, so it is not needed today. A restaurant with 40+ staff would want one.
-**Not built** — a new control on a screen that does not need it yet, and the shape of it (search
-only? filter by role? by disabled?) is a design decision.
-
-### Y4 · Active and disabled people are mixed in one list
-**Phase:** P06492. Owner panel → Team.
-A disabled person is dimmed and labelled, and sits wherever creation order put them. Grouping the
-disabled at the bottom would make the working team easier to read; keeping one list makes
-re-enabling someone easier to find. Genuinely either way. **Not built.**
-
-### Y5 · The refusal banner is headed "Something went wrong."
-**Phase:** P06211, noticed while fixing problem 1. Owner panel → Team.
-Now that the first-save-wins sentence actually reaches the screen, it arrives under a heading that
-frames it as a fault when it is a refusal ("someone else got there first" is the system working).
-Re-wording per-case would mean branching that heading on the reason code. **Not built** — the heading
-is shared by every error on the page, and getting it wrong the other way (a real failure headed
-softly) is worse.
+*(Y3, Y4 and Y5 used to be listed here. He approved all three on 2026-08-18 — they are
+BUILT, in the section above.)*
