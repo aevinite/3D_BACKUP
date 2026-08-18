@@ -836,13 +836,35 @@ phase("the access tree loads, and the model declares its sections", async () => 
   ok(!empty.length, `sections with no children: ${empty.join(", ")}`);
 });
 
+// The favourites chip's text comes from the app, never from a copy of it kept here (see the note
+// on the row below). Falls back to a plain heart if i18n.ts is ever unreadable, so a parsing slip
+// degrades to a loose check rather than a false red.
+const FAV_CHIP = (() => {
+  try {
+    const src = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
+    const words = [...new Set([...src.matchAll(/filterFav:\s*"([^"]+)"/g)].map((m) => m[1].replace(/^❤️\s*/, "")))]
+      .filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return words.length ? new RegExp("❤️\\s*(" + words.join("|") + ")") : /❤️/;
+  } catch { return /❤️/; }
+})();
+
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
 const GUEST_SWITCHES = [
   ["veg / non-veg mark", "diet_filter", /diet-badge/],
-  // The favourites control is a translated filter CHIP ("❤️ Favorites" / "❤️ Favoriten"),
-  // not a class called fav-btn — my first marker matched nothing anywhere, so this phase
-  // reported the feature missing while it was working perfectly.
-  ["favourites", "favorites", /❤️\s*Favorit/],
+  // The favourites control is a translated filter CHIP, not a class called fav-btn — the first
+  // marker here matched nothing anywhere, so this phase reported the feature missing while it was
+  // working perfectly.
+  //
+  // …AND THEN IT BROKE AGAIN THE SAME WAY (2026-08-18). The marker was hard-coded /❤️\s*Favorit/,
+  // the AMERICAN spelling. Commit cd93a77d ("fix(wording): the T15 batch") deliberately moved the
+  // English string to the British "❤️ Favourites" — Favo-U-rites — so the regex stopped matching the
+  // English page and this phase went red while the chip rendered perfectly. Hard-coding the six
+  // spellings instead would have gone red again the next time a language is added (Korean was
+  // already there and already unlisted).
+  // So the marker is DERIVED from the app's own strings: whatever `filterFav` says in lib/i18n.ts
+  // IS what the chip renders, so a new language can never break this phase again. That is what this
+  // file's own header means by asserting the RULE, not the SPELLING.
+  ["favourites", "favorites", FAV_CHIP],
   ["3D dish viewer", "model3d", /dish-4d-icon/],
 ];
 for (const [label, key, marker] of GUEST_SWITCHES) {
@@ -2134,7 +2156,12 @@ phase("favourites follow their switch", async () => {
   const st = await fhSettings();
   const on = (st.features?.favorites ?? true) !== false;
   const g = await guestMenu();
-  const shown = /❤️\s*Favorit|favourite|favorite/i.test(g.html);
+  // Same marker the switch phases use, derived from lib/i18n.ts (see FAV_CHIP) — plus a
+  // case-insensitive English fallback. Both require the ❤️: the old form had a bare
+  // `favourite|favorite` alternative not tied to the heart, so the word appearing anywhere in the
+  // page — a dish description, an attribute — read as "the chip is showing", which would have made
+  // the switched-OFF half of this check pass for the wrong reason.
+  const shown = FAV_CHIP.test(g.html) || /❤️\s*favou?rite/i.test(g.html);
   ok(on === shown, on ? "the switch is ON but the favourites chip is absent" : "the switch is off but favourites still show");
 });
 phase("the 3D dish viewer follows its switch", async () => {
@@ -2502,10 +2529,24 @@ phase("every stock item measures itself in a unit the app knows", async () => {
   // it is BOUGHT in (purchase_uom) and what a recipe calls for (recipe_uom).
   const rows = await dbGet("inv_items?select=id,name,base_uom,purchase_uom,recipe_uom&limit=400").catch(() => []);
   if (!rows.length) return ok(true);
-  const known = ["g", "kg", "ml", "l", "pc", "pcs", "unit", "units", "each", "ltr", "litre", "piece"];
-  const bad = rows.filter((r) => [r.base_uom, r.purchase_uom, r.recipe_uom]
-    .some((u) => u && !known.includes(String(u).toLowerCase())));
-  ok(!bad.length, `${bad.length} stock items use an unknown unit (e.g. ${bad[0]?.name}: ${JSON.stringify([bad[0]?.base_uom, bad[0]?.purchase_uom, bad[0]?.recipe_uom])})`);
+  // THE THREE UNITS ARE NOT INTERCHANGEABLE, so one flat list was the wrong check (2026-08-18).
+  // Migration 221 says it in the column comment: base_uom is "the smallest unit, high precision"
+  // — g | ml | pc — because every balance and every movement is stored in it. purchase_uom is what
+  // you BUY in, and a restaurant genuinely buys cheese in packs, oil in tins, eggs by the tray;
+  // those were being reported as unknown units, which is wrong.
+  // Flattening the two also HID the real fault: an item whose BASE unit is "pack" cannot express
+  // seven slices left out of twelve, so its stock count silently rounds to whole packs forever.
+  const FINE = ["g", "kg", "ml", "l", "pc", "pcs", "unit", "units", "each", "ltr", "litre", "piece"];
+  const BULK = ["pack", "packet", "box", "case", "crate", "tray", "bag", "bottle", "tin", "can", "jar", "dozen", "sack", "roll"];
+  const isFine = (u) => FINE.includes(String(u).toLowerCase());
+  const isBuyable = (u) => isFine(u) || BULK.includes(String(u).toLowerCase());
+  const badBase = rows.filter((r) => r.base_uom && !isFine(r.base_uom));
+  const badBuy = rows.filter((r) => [r.purchase_uom, r.recipe_uom].some((u) => u && !isBuyable(u)));
+  const bad = [...new Set([...badBase, ...badBuy])];
+  const why = badBase.length
+    ? `${badBase.length} stock item(s) are STORED in a bulk unit, so a part-used one cannot be counted (e.g. ${badBase[0]?.name}: base=${badBase[0]?.base_uom}) — base_uom must be a fine unit (${FINE.slice(0, 5).join("/")}…), migration 221`
+    : `${badBuy.length} stock items use an unknown unit (e.g. ${badBuy[0]?.name}: ${JSON.stringify([badBuy[0]?.base_uom, badBuy[0]?.purchase_uom, badBuy[0]?.recipe_uom])})`;
+  ok(!bad.length, why);
 });
 phase("no stock item holds a nonsense quantity or cost", async () => {
   const rows = await dbGet("inv_items?select=id,name,qty_base,avg_cost&limit=400").catch(() => []);
