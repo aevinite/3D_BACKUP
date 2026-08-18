@@ -172,7 +172,7 @@ const RULES = [
     say: "the estate roll-up is one cached backend pass, using the same summary the detail screen uses",
     must: [
       /sp\.get\("estate"\) === "1"/,
-      /cachedOwnerPayload\(\{[\s\S]{0,200}key: `investate:v1:/,        // …cached, so a normal open is one row read
+      /cachedOwnerPayload\(\{[\s\S]{0,300}key: `investate:v\d+:/,      // …cached, so a normal open is one row read
       /rd\(`sum:\$\{rid\}`, \(\) => sb\.rpc\("lfh_inv_report_summary"/, // …the SAME function the detail screen uses
       /for \(let i = 0; i < live\.length; i \+= 6\)/,                   // …in parallel chunks, never a full fan-out
       /if \(r\.unread\) return t;/,                                     // …and a figure nobody read is never summed
@@ -227,6 +227,21 @@ const RULES = [
       /caps: \{ expenses: 300, purchases: 100, low: 500, negative: 50 \}/,
       /key: `inv:v2:/,     // bump this whenever the payload shape changes — v1 snapshots served the
                            // old shape for hours and the new "showing N of M" line never appeared
+    ],
+  },
+  {
+    // ── ITEM 18 · NOTHING BEFORE THE CACHE THAT DOES NOT HAVE TO BE ──────────────────────────────
+    // "it should not load every time, so that egress can be saved… it should not take time to load."
+    // Which restaurants have stock switched on, and what they are called, were answered on the way
+    // PAST the cache — two round-trips paid on every open, including the ones served from the
+    // snapshot in a single row read. Both answers are already inside the stored payload, so both
+    // belong inside `compute`. Measured: the median cached open fell from 1362ms to ~420ms.
+    item: 18, file: INV_ROUTE,
+    say: "an already-computed estate open costs a row read, not a settings read and a names read",
+    must: [
+      /compute: async \(\) => \{[\s\S]{0,400}const eff = await inventoryEffectiveByRid\(ids\);/,
+      /compute: async \(\) => \{[\s\S]{0,900}const names = await restaurantNames\(live\);/,
+      /key: `investate:v2:\$\{scopeKeyOf\(null, !!scope\.all, ids\)\}/,   // keyed on the whole scope
     ],
   },
   {

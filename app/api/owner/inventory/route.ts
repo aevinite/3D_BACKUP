@@ -271,32 +271,39 @@ async function estate(
   catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
   if (!ids.length) return NextResponse.json({ month, estate: [], totals: emptyTotals() });
 
-  // Which of them actually have the module — ONE settings read for the whole estate.
-  const eff = await inventoryEffectiveByRid(ids);
-  const live = ids.filter((id) => eff[id]);
-  // `offCount` is not decoration: an owner with seven restaurants and three boxes needs to be told
-  // the other four are switched off, not left wondering where they went.
-  const offCount = ids.length - live.length;
-  if (!live.length) return NextResponse.json({ month, estate: [], totals: emptyTotals(), offCount });
-
-  const names = await restaurantNames(live);
-
+  // ── NOTHING BEFORE THE CACHE THAT DOES NOT HAVE TO BE (owner, 2026-08-18: "it should not load
+  // every time, so that egress can be saved… it should not take time to load") ────────────────────
+  // "Which restaurants have the module on" and "what are they called" used to be answered out here,
+  // on the way past — two database round-trips paid on EVERY open, including the ones that go on to
+  // be served from the snapshot in a single row read. Both answers are already IN the stored
+  // payload, so both belong inside `compute`, where they are paid for only when the figures are
+  // actually recalculated. The key and the change-detector work off the owner's whole scope instead
+  // of the live subset: a superset only ever means we notice a change we could have ignored, which
+  // is the safe direction, and it removes the last reason to look at `settings` up front.
   const fingerprint = async () => {
     const [mv, ex] = await Promise.all([
-      sb.from("inv_movements").select("id").in("restaurant_id", live).order("id", { ascending: false }).limit(1),
-      sb.from("expenses").select("created_at, voided_at").in("restaurant_id", live)
+      sb.from("inv_movements").select("id").in("restaurant_id", ids).order("id", { ascending: false }).limit(1),
+      sb.from("expenses").select("created_at, voided_at").in("restaurant_id", ids)
         .order("created_at", { ascending: false }).limit(1),
     ]);
     const m = (mv.data || [])[0]; const e = (ex.data || [])[0];
-    return [live.length, m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? ""].join("|");
+    return [ids.length, m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? ""].join("|");
   };
 
   try {
     const payload = await cachedOwnerPayload({
-      key: `investate:v1:${scopeKeyOf(null, !!scope.all, live)}:${month}`,
+      key: `investate:v2:${scopeKeyOf(null, !!scope.all, ids)}:${month}`,
       force,
       fingerprint,
       compute: async () => {
+        // Which of them actually have the module — ONE settings read for the whole estate.
+        const eff = await inventoryEffectiveByRid(ids);
+        const live = ids.filter((id) => eff[id]);
+        // `offCount` is not decoration: an owner with seven restaurants and three boxes needs to be
+        // told the other four are switched off, not left wondering where they went.
+        const offCount = ids.length - live.length;
+        if (!live.length) return { month, estate: [], totals: emptyTotals(), offCount, countedOf: { counted: 0, of: 0 } };
+        const names = await restaurantNames(live);
         const rows: Record<string, unknown>[] = [];
         const unread: string[] = [];
         for (let i = 0; i < live.length; i += 6) {
