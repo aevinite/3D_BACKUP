@@ -304,12 +304,22 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   };
   const [openSec, setOpenSec] = useState<Record<string, boolean>>(() => readOpen().sec);
   const [openNode, setOpenNode] = useState<Record<string, boolean>>(() => readOpen().node);
+  // WHICH RESTAURANT THE OPEN SET IN STATE BELONGS TO (sweep T15, 2026-08-18). Without it, picking
+  // a different restaurant carried the previous one's open sections across AND overwrote that
+  // restaurant's own memory: on the render where `rid` changes, this write effect runs BEFORE the
+  // read effect below has reset the state, so it saved restaurant A's open set under restaurant B's
+  // key — and the read effect then read exactly that back. The comment under it has always said the
+  // opposite ("otherwise picking one in the dropdown would open whatever the previous one had
+  // open"), and that is the "every dropdown is open" the owner asked to be rid of on 2026-07-31.
+  // Measured: open two sections, switch restaurant, both were still open.
+  const openFor = useRef(openKey);
   useEffect(() => {
+    if (openFor.current !== openKey) return;   // mid-switch: this state is the OTHER restaurant's
     try { sessionStorage.setItem(openKey, JSON.stringify({ sec: openSec, node: openNode })); } catch {}
   }, [openKey, openSec, openNode]);
   // A different restaurant has its own memory — otherwise picking one in the dropdown would open
   // whatever the previous one had open.
-  useEffect(() => { const o = readOpen(); setOpenSec(o.sec); setOpenNode(o.node); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rid]);
+  useEffect(() => { const o = readOpen(); setOpenSec(o.sec); setOpenNode(o.node); openFor.current = openKey; /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rid]);
   const [info, setInfo] = useState<Node | null>(null);
   const flash = useRef<number>(0);
 
