@@ -16,21 +16,21 @@ each is the honest completion of one:
    holds exactly what was remembered, and never touches one the guest typed into the bill itself.
    Part of FIX-5.
 
-## 🟡 Not built — these need a decision from the owner
+## 🟢 Closed after checking (owner asked, 2026-08-18)
 
-3. **The saved-orders chip disappears after a reload with no signal.**
-   The chip is a lazily-imported chunk. In production the service worker caches `/_next/static/`, so
-   it should come back; in dev there is no service worker and it does not. The order itself is
-   completely safe either way (proved: it survives in the phone's storage and sends on reconnect) —
-   this is only about whether the diner can SEE it during that window. Confirming it on the deployed
-   site, and precaching the chunk if not, is a service-worker change (`public/sw.js`) outside this
-   territory.
-   · **If yes:** a diner who reloads while offline still sees "1 order waiting to send".
-   · **If no:** nothing breaks and no order is lost; they just have no window onto it until the
-   signal returns. · **Effort:** ~1 hour including a deployed check. · **Risk:** low, but it touches
-   the service worker, which is the one file where a mistake is served from cache for a long time.
+3. **The saved-orders chip disappears after a reload with no signal — CHECKED ON THE LIVE SITE, NO
+   CHANGE NEEDED.** Measured on `3-d-backup.vercel.app`, guest menu, A35 emulation, offline: the
+   service worker is registered and controlling the page, the caches present are
+   `lfh-fallback-v9 / lfh-shell-v9 / lfh-asset-v9 / lfh-data-v9`, and after an offline reload the
+   chip **renders** ("1 waiting" also shows in the header badge) with the order still in the phone's
+   storage. The chip's lazily-imported chunk comes out of `lfh-asset-v9`, which is exactly what that
+   cache exists for. Its absence in dev is the dev server registering no service worker — an artefact
+   of how it is being tested, not a product fault. **Do not "fix" `public/sw.js` for this and do not
+   re-report it.**
 
-4. **The "Maximum 99 per dish" message reads as a success.**
+### Still 🟡
+
+4. **The "Maximum 99 per dish" message reads as a success.** — **BUILT 2026-08-18** (see below).
    It is raised with no `variant`, so it renders with a tick like a confirmation, for something that
    is a refusal. Deliberately identical to the wording on the dish card, which is why I did not
    change it unilaterally — matching those two was itself an earlier decision.
@@ -44,3 +44,21 @@ each is the honest completion of one:
    rules say to leave pure tidying alone. Listed only so the next sweep does not "find" it.
    · **If yes:** one fewer redundant effect. · **If no:** nothing breaks. · **Effort:** 2 minutes.
    · **Risk:** none.
+
+
+## 🟢 Built 2026-08-18, on the owner's instruction to finish what was left
+
+6. **"Maximum 99 per dish" is no longer stamped with a success tick.** Both copies (the bill's "+"
+   and the dish card's "+") raised the toast with no `variant`, so `ToastHost` fell back to
+   `success` and drew a green ✓ on something that had just refused to happen. Both now pass
+   `variant: "info"` — a neutral • — because nothing went wrong and there is nothing to fix: the "+"
+   simply has a ceiling and the message says so. Changed in BOTH places in the same commit, since the
+   whole point of these two strings is that the bill and the card explain the same limit identically.
+
+7. **`npm run verify:order` no longer breaks the billing-compliance rule to clean up after itself.**
+   It placed a test order and finished with a hard `DELETE`, which the append-only trigger correctly
+   refuses — so the guard died on its own last step and had been red for that reason alone. It now
+   retires the row the way the law allows and the trigger's own hint names: cancel, then soft-delete
+   with a reason, line items removed, the order row kept and dated. It then **asserts that a hard
+   delete of that row is STILL refused** — so if anyone ever weakens the safeguard, this guard is
+   what goes red. The safeguard itself was not touched.

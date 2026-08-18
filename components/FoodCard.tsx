@@ -199,7 +199,9 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     // 6-language menu"; asked directly, the owner chose *"No — English is fine for these"*. Do not
     // translate them and do not re-report them. See docs/REJECTED-IDEAS.md R15.
     if (delta > 0 && rawQty > 99) {
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Maximum 99 per dish", subtitle: "that's the most we can add to one line", kicker: "your order", duration: 1400 } }));
+      // A LIMIT IS NOT A SUCCESS (owner asked, 2026-08-18) — see the matching note in CartPanel.
+      // `info` (a neutral •) instead of the default success ✓, which was a green tick on a refusal.
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Maximum 99 per dish", subtitle: "that's the most we can add to one line", kicker: "your order", variant: "info", duration: 1400 } }));
     }
     if (newQty <= 0) {
       // Dropped to zero or below: remove the line entirely.
