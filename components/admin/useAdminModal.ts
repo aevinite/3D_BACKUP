@@ -8,14 +8,29 @@
 //   • the real scroll area behind it (.adm-main on desktop, .adm on mobile) is frozen so the
 //     page doesn't scroll under your finger while the modal is open.
 // Usage: give the dialog element a ref, then `useAdminModal(ref, "unique-id", onClose)`.
+//
+// `backLayer: false` — FOR A MODAL THAT IS ACTUALLY A PAGE (T13 handoff H3, 2026-08-19).
+// lib/backStack.ts says it plainly in its own header: "Real PAGES already have their own address,
+// so the browser handles their back for free — they need nothing here." Registering a layer for a
+// page gives ONE visible sheet TWO back-steps, and the first press then does nothing at all.
+// Measured before this existed, on the owner's /owner/staff/<id>: press 1 changed nothing, press 2
+// returned to the roster. Every other caller of this hook is a true overlay opened over a page
+// without navigating, so the default stays `true` and none of them change.
 import { useEffect, useRef } from "react";
 import { useBackClose } from "@/lib/backStack";
 
 const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
-export function useAdminModal(dialogRef: React.RefObject<HTMLElement | null>, id: string, onClose: () => void) {
-  // Phone Back → close (self-contained; works without the guest root dialog).
-  useBackClose(id, true, onClose);
+export function useAdminModal(
+  dialogRef: React.RefObject<HTMLElement | null>,
+  id: string,
+  onClose: () => void,
+  opts?: { backLayer?: boolean },
+) {
+  // Phone Back → close (self-contained; works without the guest root dialog). Skipped when this
+  // "modal" is really a route: the browser's own history entry is already the back-step, and adding
+  // ours on top is what made the first press dead. See the note above.
+  useBackClose(id, opts?.backLayer !== false, onClose);
 
   const closeRef = useRef(onClose);
   closeRef.current = onClose;

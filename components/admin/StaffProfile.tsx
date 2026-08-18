@@ -66,6 +66,13 @@ export type ProfileHost = {
   photo?: { upload: (f: File) => Promise<{ ok: boolean; error?: string }>; remove: () => Promise<{ ok: boolean; error?: string }> };
   /** absent = no danger zone */
   remove?: () => Promise<{ ok: boolean; error?: string }>;
+  /** TRUE when this profile IS a route of its own (the owner cockpit's /owner/staff/<id>) rather
+   *  than a modal opened over a page (Aevidine's console). A route already HAS a history entry, so
+   *  it must not also register a back layer — two back-steps for one visible sheet is what made the
+   *  phone's first Back press do nothing at all. lib/backStack.ts's header states the rule: "Real
+   *  PAGES already have their own address, so the browser handles their back for free."
+   *  (T13 handoff H3, 2026-08-19.) Absent/false = a modal, which is what every other host is. */
+  pageHosted?: boolean;
   can: {
     /** set or clear someone's manager PIN */
     pin: boolean;
@@ -191,7 +198,9 @@ export default function StaffProfile({ userId, onClose, onChanged, host }: {
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");           // the small "Saved" line under the header
   const dialogRef = useRef<HTMLDivElement>(null);
-  useAdminModal(dialogRef, "admin-staff-profile", onClose); // phone Back + Escape close it
+  // phone Back + Escape close it — except the back LAYER, which a page-hosted profile must not
+  // register (see ProfileHost.pageHosted). Escape and the ✕ are unaffected either way.
+  useAdminModal(dialogRef, "admin-staff-profile", onClose, { backLayer: !hostRef.pageHosted });
   // "A refresh leaves me where I am" (owner, 2026-08-02). Which profile is open is in the
   // URL — see the page that mounts this — and how far DOWN it was scrolled is remembered
   // here, per person, for this visit only. Without it a reload reopened the profile at the
