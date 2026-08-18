@@ -61,7 +61,7 @@ export async function pendingKotJobs(
   // panels simply never ask for them: `includeAuto` is opt-in from the caller's query string.
   if (!includeAuto) q = q.eq("reprint", true);
   if (opts?.minAgeMs) q = q.lt("created_at", new Date(Date.now() - opts.minAgeMs).toISOString());
-  const jobs = ((await q.order("created_at").limit(opts?.limit ?? 10)).data || []) as KotJobRow[];
+  const jobs = ((await q.order("created_at").limit(opts?.limit ?? 20)).data || []) as KotJobRow[];
   if (!jobs.length) return [];
 
   const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
@@ -69,20 +69,57 @@ export async function pendingKotJobs(
     // `.is("deleted_at", null)` — A TICKET REMOVED FROM THE BOOKS IS NOT PRINTED (T7 finding F11,
     // 2026-08-11). A soft delete leaves the row in place, so filtering it out here is the only way
     // the join can come back empty and the job be dropped below.
-    sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items")
+    // `status` rides along so a CANCELLED order can be told apart from a live one below.
+    sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items, status")
       .in("id", oids).eq("restaurant_id", rid).is("deleted_at", null),
     sb.from("order_items").select("id, order_id, title, qty, note, options, removed")
       .in("order_id", oids).eq("restaurant_id", rid).order("created_at"),
   ]);
   const byId = new Map(((jo.data || []) as { id: string }[]).map((o) => [o.id, o]));
   const items = (ji.data || []) as { order_id: string }[];
-  return jobs
-    .map((j) => ({
-      ...j,
-      order: (byId.get(j.order_id as string) || null) as Record<string, unknown> | null,
-      items: items.filter((r) => r.order_id === j.order_id) as Record<string, unknown>[],
-    }))
-    .filter((j) => j.order); // deleted or gone since the read → nothing to print
+  const withOrder = jobs.map((j) => ({
+    ...j,
+    order: (byId.get(j.order_id as string) || null) as Record<string, unknown> | null,
+    items: items.filter((r) => r.order_id === j.order_id) as Record<string, unknown>[],
+  }));
+
+  // ── A JOB WHOSE ORDER IS GONE IS RETIRED, NOT SKIPPED (found 2026-08-18, and it is serious) ────
+  // This used to end `.filter((j) => j.order)` — a silent skip. That was fine while the only jobs
+  // were the manager's occasional manual reprints. Since mig 335 EVERY order queues one, and a
+  // deleted bill (lib/softDelete.ts) leaves its ticket queued for an order this read is right to
+  // refuse. The read takes the OLDEST ten, so ten dead jobs sit at the head of the queue for ever
+  // and NOTHING PRINTS AGAIN — the tickets behind them are never even looked at. Measured exactly
+  // that on the dev stack: fourteen orphaned jobs, a fresh order queued and printed by nobody, and
+  // no error anywhere, because every layer was working as written.
+  //
+  // So they are closed as 'dismissed' — the state mig 269 already uses for "the manager handled this
+  // another way" — which takes them off both the kitchen's read and the manager's stuck-job strip. It
+  // is one small UPDATE, only on a pass that actually found an orphan.
+  //
+  // A CANCELLED order counts as gone too, and that is not a detail: an order can be cancelled in the
+  // seconds AFTER its ticket queued (a guest changes their mind, a waiter mis-rings a table), and
+  // nothing downstream was checking — so the kitchen would have printed a ticket for food nobody
+  // ordered and cooked it. The manual-reprint endpoint has refused a cancelled KOT since 2026-08-11
+  // ("that KOT was cancelled — there is nothing to reprint"); the automatic path had no such guard
+  // because until mig 335 it had no rows to guard.
+  const dead = (j: { order: Record<string, unknown> | null }) =>
+    !j.order || String((j.order as { status?: string }).status || "") === "cancelled";
+  const orphans = withOrder.filter(dead);
+  if (orphans.length) {
+    const gone = orphans.filter((j) => !j.order).map((j) => j.id);
+    const cancelled = orphans.filter((j) => j.order).map((j) => j.id);
+    if (gone.length) {
+      await sb.from("print_jobs")
+        .update({ status: "dismissed", done_at: new Date().toISOString(), error: "the order was deleted before this ticket printed" })
+        .in("id", gone).eq("restaurant_id", rid);
+    }
+    if (cancelled.length) {
+      await sb.from("print_jobs")
+        .update({ status: "dismissed", done_at: new Date().toISOString(), error: "the order was cancelled before this ticket printed" })
+        .in("id", cancelled).eq("restaurant_id", rid);
+    }
+  }
+  return withOrder.filter((j) => !dead(j));
 }
 
 /**

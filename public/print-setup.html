@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kitchen printer — the complete setup guide · Aevidine</title>
+<!--
+  THE RESTAURANT-FACING setup guide, served by the app so nobody has to be sent a file.
+  Reached from: manager panel → Settings → Kitchen printing (a button), and the kitchen
+  panel's 🖨❗ printer sheet. The engineering record of the same feature lives in
+  docs/KITCHEN-PRINT-SETUP.md — this page is the one a restaurant reads.
+  Self-contained on purpose: no CDN, no fonts to fetch, no script beyond two buttons, so it
+  opens on a slow restaurant connection and prints to PDF identically on every machine.
+-->
+<style>
+  :root{
+    --ink:#10151c; --ink-soft:#48566a; --line:#dfe5ee; --bg:#f6f8fb; --card:#fff;
+    --accent:#8b5cf6; --accent-soft:#f3ecff; --ok:#0d8a52; --ok-soft:#e7f7ee;
+    --warn:#a8570a; --warn-soft:#fff4e2; --bad:#b42318; --bad-soft:#fdeceb;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 20px 80px}
+  header.top{background:linear-gradient(135deg,#1b1035,#3b1d6e 55%,#5b2ca8);color:#fff;border-radius:18px;padding:30px 28px;margin-bottom:26px}
+  header.top h1{margin:0 0 8px;font-size:30px;line-height:1.2;letter-spacing:-.4px}
+  header.top p{margin:0;color:#e5d9ff;font-size:15.5px;max-width:64ch}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:#fff;color:#2b1259;border:0;border-radius:11px;
+    padding:11px 15px;font-size:14.5px;font-weight:650;text-decoration:none;cursor:pointer}
+  .btn.ghost{background:rgba(255,255,255,.14);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.34)}
+  .btn:hover{filter:brightness(.97)}
+  h2{font-size:22px;margin:34px 0 12px;letter-spacing:-.3px;scroll-margin-top:18px}
+  h3{font-size:17px;margin:24px 0 8px}
+  h4{font-size:15px;margin:18px 0 6px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em}
+  p,li{color:#1c2733}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:14px 0}
+  .lead{font-size:17px}
+  .plain{background:var(--accent-soft);border-left:4px solid var(--accent);border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0}
+  .plain b{color:#5b2ca8}
+  .ok{background:var(--ok-soft);border-left:4px solid var(--ok);border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0}
+  .warn{background:var(--warn-soft);border-left:4px solid var(--warn);border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0}
+  .bad{background:var(--bad-soft);border-left:4px solid var(--bad);border-radius:0 10px 10px 0;padding:12px 16px;margin:12px 0}
+  code{font-family:var(--mono);font-size:13.5px;background:#eef1f6;padding:2px 6px;border-radius:5px;word-break:break-word}
+  pre{font-family:var(--mono);font-size:13px;line-height:1.55;background:#0f1420;color:#e7ecf5;padding:14px 16px;
+    border-radius:11px;overflow-x:auto;margin:10px 0}
+  pre b{color:#a5f3c8;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#f0f3f8;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft)}
+  ol.steps{counter-reset:s;list-style:none;padding:0;margin:0}
+  ol.steps>li{counter-increment:s;position:relative;padding:2px 0 18px 46px;margin:0}
+  ol.steps>li::before{content:counter(s);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;
+    background:var(--accent);color:#fff;font-weight:700;font-size:15px;display:grid;place-items:center}
+  ol.steps>li>b:first-child{display:block;font-size:16.5px;margin-bottom:3px}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 20px}
+  .toc ol{margin:6px 0 0;padding-left:22px;columns:2;column-gap:26px}
+  .toc a{color:#3b1d6e;text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    padding:3px 8px;border-radius:999px;background:var(--accent-soft);color:#5b2ca8;vertical-align:middle}
+  .tag.mac{background:#e8f0fe;color:#14459c}.tag.win{background:#e9f7ee;color:#0d6b3f}
+  .kv{display:grid;grid-template-columns:190px 1fr;gap:2px 16px}
+  .kv dt{font-weight:650;color:#2b1259}.kv dd{margin:0 0 10px}
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-soft);font-size:13.5px}
+  @media (max-width:640px){.toc ol{columns:1}.kv{grid-template-columns:1fr}.kv dd{margin-bottom:14px}}
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    header.top{background:#1b1035 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;border-radius:0}
+    .btns,.toc{display:none}
+    .card,.plain,.ok,.warn,.bad,pre,table{break-inside:avoid}
+    h2{break-after:avoid;page-break-after:avoid}
+    pre{background:#f4f6fa;color:#10151c;border:1px solid #dfe5ee}
+    pre b{color:#0d6b3f}
+    a[href^="http"]::after{content:" (" attr(href) ")";font-size:11px;color:#666}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>Kitchen printer — the complete setup guide</h1>
+  <p>Everything needed to make kitchen tickets (KOTs) print by themselves, on a Mac or a Windows PC —
+     every step, every setting, and what to do when something goes wrong. Written for someone who has
+     never set up a printer before.</p>
+  <div class="btns">
+    <button class="btn" onclick="window.print()">🖨 Save this as a PDF / print it</button>
+    <a class="btn ghost" href="/print-station/print-station-mac.command" download>⬇ Download the Mac starter</a>
+    <a class="btn ghost" href="/print-station/print-station-windows.bat" download>⬇ Download the Windows starter</a>
+  </div>
+</header>
+
+<nav class="toc">
+  <b>On this page</b>
+  <ol>
+    <li><a href="#quick">The 6-step short version</a></li>
+    <li><a href="#why">Why printing used to stop</a></li>
+    <li><a href="#need">What you need to buy</a></li>
+    <li><a href="#mac">Setting up a Mac</a></li>
+    <li><a href="#win">Setting up a Windows PC</a></li>
+    <li><a href="#app">The three switches inside the app</a></li>
+    <li><a href="#who">Choosing WHICH screen prints</a></li>
+    <li><a href="#test">The test that actually matters</a></li>
+    <li><a href="#flags">Every setting in the starter file, explained</a></li>
+    <li><a href="#wrong">When something goes wrong</a></li>
+    <li><a href="#daily">The daily routine for staff</a></li>
+    <li><a href="#next">Better setups you can move to later</a></li>
+  </ol>
+</nav>
+
+<h2 id="quick">1 · The 6-step short version</h2>
+<div class="card">
+  <ol class="steps">
+    <li><b>Plug the thermal printer into the computer</b> and make it that computer's <b>default printer</b>.</li>
+    <li><b>Download the starter file</b> for that computer (the two buttons at the top of this page).
+        Mac → <code>print-station-mac.command</code>. Windows → <code>print-station-windows.bat</code>.</li>
+    <li><b>Open the starter file once and edit one line</b> — the <code>URL</code> line. Put <code>/kitchen</code>
+        at the end for a kitchen screen, or <code>/manager</code> for the counter screen. Save it.</li>
+    <li><b>Double-click the starter file.</b> A single Chrome window opens, full screen. Log in once — it stays
+        logged in from then on.</li>
+    <li><b>Turn it on in the app</b> — in the admin console's <b>🖨 KOT printing</b> card: switch auto-print
+        ON, and pick <b>which screen prints</b>. If you picked the counter screen, answer <b>Yes, print
+        here</b> on the strip that appears above that computer's Tables screen. (<a href="#app">details below</a>)</li>
+    <li><b>Test it:</b> send one order. Then <b>minimise that Chrome window</b> and send another. Both tickets
+        must come out. That second one is the whole point.</li>
+  </ol>
+</div>
+<div class="plain"><b>In simple words:</b> plug the printer in, open one special Chrome window that never falls
+  asleep, flick two switches in the app, and check it still prints when the window is hidden.</div>
+
+<h2 id="why">2 · Why printing used to stop (worth 60 seconds)</h2>
+<div class="card">
+  <p>Kitchen tickets used to be printed by the kitchen screen <i>watching</i> for new orders. That only works
+    while that screen is the window you are looking at. The moment it was minimised — <b>or simply covered by
+    any other app on the same computer</b> — the browser put it to sleep and <b>printing stopped completely</b>,
+    with nothing anywhere saying so.</p>
+  <p>That is fixed at the root now: <b>the order itself leaves a "print me" job on our server.</b> Any screen
+    that is set up to print picks the job up, prints it, and tells the server it is done. If no screen picks it
+    up, the job <b>waits</b> — it can no longer be lost — and after 90 seconds the manager's Tables screen
+    shows a warning with a <b>🖨 Print here instead</b> button.</p>
+  <div class="ok"><b>What this means for you:</b> the kitchen window can be minimised, covered, or on another
+    desktop, and tickets still print. If the computer is off, the tickets are waiting the moment it comes back on.</div>
+  <p>The starter files on this page are the second half of the fix: they open Chrome with the specific settings
+    that stop it dozing off behind other windows, and they keep the computer itself awake.</p>
+</div>
+
+<h2 id="need">3 · What you need to buy</h2>
+<div class="card">
+  <h3>The printer</h3>
+  <table>
+    <tr><th>Option</th><th>Roughly</th><th>Good because</th><th>Watch out</th></tr>
+    <tr><td><b>80mm USB thermal printer</b><br>(e.g. POS-80 / ZJ-80, Xprinter)</td><td>₹2,000–4,000</td>
+        <td>Cheapest. Works with everything here.</td>
+        <td>Must sit within a cable's reach of the computer. USB is only rated to about 5 m — a longer cable
+            is a real cause of half-printed tickets.</td></tr>
+    <tr><td><b>80mm LAN / Wi-Fi thermal printer</b><br>(e.g. Epson TM-T82X LAN)</td><td>₹8,000–12,000</td>
+        <td><b>Recommended.</b> No long cable — the printer sits in the kitchen on the same Wi-Fi and the
+            computer can be anywhere.</td>
+        <td>Needs the restaurant's Wi-Fi to be steady in the kitchen.</td></tr>
+    <tr><td><b>Cloud printer</b><br>(Star CloudPRNT, Epson Server Direct Print)</td><td>₹15,000–25,000</td>
+        <td>Needs <b>no computer at all</b> — the printer asks our server for tickets by itself.</td>
+        <td>Not switched on in the app yet — see <a href="#next">section 12</a>.</td></tr>
+  </table>
+  <h3>The computer</h3>
+  <p>Any Mac or Windows PC already in the restaurant is fine — it does not need to be fast. It needs three
+    things: it stays <b>switched on</b> during service, it is <b>on the internet</b>, and the printer is
+    <b>plugged into it</b> (or on the same network as it).</p>
+  <h3>Paper</h3>
+  <p><b>80mm thermal rolls.</b> Keep at least two spare. Thermal paper has no ink — if nothing prints, the
+    roll is either finished or in upside down.</p>
+</div>
+
+<h2 id="mac">4 · Setting up a Mac <span class="tag mac">macOS</span></h2>
+<div class="card">
+  <h3>4.1 · Install the printer</h3>
+  <p>Most cheap 80mm printers have <b>no macOS driver of their own</b>. For the POS-80 / ZJ-80 family, the
+    open-source <code>zj-58</code> driver works and is already installed on the owner's Mac. If you are setting
+    up a fresh Mac, this is the whole recipe (it needs an administrator password):</p>
+  <pre>git clone https://github.com/klirichek/zj-58
+cd zj-58 &amp;&amp; make
+<b>sudo</b> cp rastertozj /usr/libexec/cups/filter/
+<b>sudo</b> cp zj80.ppd /Library/Printers/PPDs/Contents/Resources/</pre>
+  <p>Then <b> → System Settings → Printers &amp; Scanners → Add Printer</b>, pick the USB printer, and choose
+    the <b>ZJ-80</b> driver. Name it something plain like <code>Printer_POS_80</code>.</p>
+  <h3>4.2 · The paper settings that matter</h3>
+  <p>These four are not decoration — each one was worked out against a real roll, and getting one wrong is how
+    you end up with 20 cm of blank paper before every ticket, or a cut through the middle of a line:</p>
+  <pre>lpadmin -p Printer_POS_80 \
+  -o <b>PageSize=X70MMY65MM</b> \
+  -o <b>CutMedia=EndOfJob</b> \
+  -o <b>FeedWhere=AfterJob</b> \
+  -o <b>FeedDist=9feed30mm</b> \
+  -o <b>OptionCutter=True</b></pre>
+  <dl class="kv">
+    <dt>PageSize=X70MMY65MM</dt><dd>A short receipt page. Chrome flows a long ticket across several of these
+      seamlessly and never slices a line of text in half.</dd>
+    <dt>CutMedia=EndOfJob</dt><dd>Cut <b>once</b>, after the ticket is finished. <code>EndOfPage</code> cuts
+      mid-ticket, because the cut happens before the final paper feed.</dd>
+    <dt>FeedWhere / FeedDist</dt><dd>Feed the paper out after the job so the ticket clears the tear bar and you
+      are not pulling the next one out of the machine.</dd>
+    <dt>OptionCutter=True</dt><dd>Only if your unit actually has a blade. If it doesn't, leave this out.</dd>
+  </dl>
+  <div class="warn"><b>Never set a paper size in the app's own print settings.</b> A pinned or landscape-shaped
+    page makes the printer turn the ticket sideways, and a size that doesn't match the roll pushes the whole
+    ticket to the bottom of an imaginary page — that is the 20 cm blank lead-in. The app already prints at the
+    right width (66 mm of ink on 80 mm paper); leave it alone.</div>
+  <h3>4.3 · Make it the default printer</h3>
+  <p><b>System Settings → Printers &amp; Scanners → Default printer → Printer_POS_80.</b> This matters: the
+    silent-print mode used by the starter file always sends to whatever the <i>default</i> printer is.</p>
+  <h3>4.4 · Stop the Mac sleeping</h3>
+  <p>The starter file does this for you while it is running (it holds the Mac awake and lets go when the window
+    closes). If you would rather set it permanently: <b>System Settings → Lock Screen</b> → set the display and
+    the machine never to sleep on power.</p>
+  <h3>4.5 · Open the print station</h3>
+  <ol class="steps">
+    <li><b>Download</b> <code>print-station-mac.command</code> (button at the top of this page).</li>
+    <li><b>Edit one line.</b> Right-click → Open With → TextEdit. Change:
+      <pre>URL="https://3-d-backup.vercel.app<b>/kitchen</b>"</pre>
+      Use <code>/kitchen</code> for a screen in/near the kitchen, or <code>/manager</code> for the counter
+      screen. Save and close.</li>
+    <li><b>Allow it to run, once.</b> In Terminal:
+      <pre>chmod +x ~/Downloads/print-station-mac.command</pre>
+      (If macOS says "cannot be opened because it is from an unidentified developer":
+      right-click the file → <b>Open</b> → <b>Open</b> again. Only needed the first time.)</li>
+    <li><b>Double-click it.</b> A small black Terminal window appears — <b>leave it open</b>, it is what keeps
+      the Mac awake — and one full-screen Chrome opens on the panel.</li>
+    <li><b>Log in once</b> with the restaurant's kitchen (or manager) username and password. This window has
+      its own private Chrome profile, so it stays logged in and your everyday Chrome is untouched.</li>
+  </ol>
+  <div class="ok"><b>To finish for the day:</b> press <b>⌘Q</b> in the Chrome window (or close the Terminal
+    window). The Mac is then free to sleep again.</div>
+</div>
+
+<h2 id="win">5 · Setting up a Windows PC <span class="tag win">Windows 10 / 11</span></h2>
+<div class="card">
+  <h3>5.1 · Install the printer</h3>
+  <p>Windows handles these printers much more easily than macOS. Plug it in — Windows usually finds it. If not,
+    install the driver from the CD or the maker's site (search the model name, e.g. "XP-80C driver"), then check
+    it appears in <b>Settings → Bluetooth &amp; devices → Printers &amp; scanners</b>.</p>
+  <p><b>Print a test page from Windows itself</b> before going any further. If Windows can't print, the app
+    certainly can't.</p>
+  <h3>5.2 · Make it the default printer</h3>
+  <p><b>Settings → Printers &amp; scanners</b> → click your printer → <b>Set as default</b>.<br>
+    Also turn <b>OFF</b> "Let Windows manage my default printer" on that same screen — otherwise Windows quietly
+    switches the default to whatever was used last, and tickets go to the wrong printer.</p>
+  <h3>5.3 · Paper size</h3>
+  <p><b>Printer properties → Preferences → Paper size:</b> pick the 80 mm × receipt option (its exact name
+    varies: <i>80(72.1)mm × Receipt</i>, <i>80mm × 297mm</i>, …). Do not choose A4.</p>
+  <h3>5.4 · Open the print station</h3>
+  <ol class="steps">
+    <li><b>Download</b> <code>print-station-windows.bat</code> (button at the top of this page).</li>
+    <li><b>Edit one line.</b> Right-click → <b>Edit</b> (or open it in Notepad). Change:
+      <pre>set "URL=https://3-d-backup.vercel.app<b>/kitchen</b>"</pre>
+      Save and close. <span class="tag">Tip</span> If Windows hid the <code>.bat</code> ending and the file is
+      called <code>print-station-windows.bat.txt</code>, rename it back so it ends in <b>.bat</b>.</li>
+    <li><b>Double-click it.</b> Windows may warn that it is a file from the internet — choose <b>More info →
+      Run anyway</b>. One full-screen Chrome opens; the file also tells Windows not to sleep or blank the
+      screen while on mains power.</li>
+    <li><b>Log in once.</b> Own Chrome profile, stays logged in, your normal Chrome untouched.</li>
+    <li><b>Make it start by itself (recommended).</b> Press <b>Win+R</b>, type <code>shell:startup</code>,
+      press Enter, and drag a <b>shortcut</b> to the <code>.bat</code> file into that folder. From now on the
+      print station opens whenever the PC starts, before anyone has to remember.</li>
+  </ol>
+  <div class="ok"><b>To finish for the day:</b> press <b>Alt+F4</b> in the Chrome window.</div>
+</div>
+
+<h2 id="app">6 · The switches inside the app</h2>
+<div class="card">
+  <p>Auto-print needs three things said yes. They are deliberately separate — one belongs to us, one
+    to the restaurant, one to the individual computer.</p>
+  <table>
+    <tr><th>#</th><th>Switch</th><th>Where it lives</th><th>Who sets it</th></tr>
+    <tr><td>1</td><td><b>Auto-print the KOT when a new order arrives</b></td>
+        <td>Admin console → the restaurant → <b>🖨 KOT printing</b></td><td>Aevidine (us)</td></tr>
+    <tr><td>2</td><td><b>Which screen prints the ticket?</b><br>
+        <i>The kitchen screen</i> · <i>The counter (manager) screen</i> · <i>Both — counter is the backup</i></td>
+        <td>Admin console → the restaurant → <b>🖨 KOT printing</b>, right under switch 1</td>
+        <td>Aevidine (us), at your word</td></tr>
+    <tr><td>3</td><td><b>“Yes, print here”</b> — once, on that computer</td>
+        <td>Manager panel → <b>Tables</b> → a strip above the floor asks the question by itself</td>
+        <td>Whoever is at that computer</td></tr>
+  </table>
+  <div class="plain"><b>In simple words:</b> we allow it, we pick whether the kitchen screen or the
+    counter screen prints, and then the computer itself is asked once whether it is the one with the
+    printer.</div>
+  <div class="warn"><b>Why the computer is asked at all.</b> The manager panel is also opened on
+    phones. If a phone printed, the ticket would go into a dialog nobody looks at and the kitchen
+    would never get paper. So a screen prints only after somebody has said yes on it — and you say
+    <b>No</b> on every phone, which it then never asks again.</div>
+  <div class="ok"><b>A kitchen screen needs no switch 3.</b> With switches 1 and 2 set to the kitchen,
+    a kitchen screen just prints.</div>
+  <p>There is also a <b>🖨 Preview a sample KOT</b> button next to switch 1. Use it to check the paper,
+    the width and the cut before service — it prints a fake ticket and never touches a real order.</p>
+</div>
+
+<h2 id="who">7 · Choosing WHICH screen prints</h2>
+<div class="card">
+  <table>
+    <tr><th>Your situation</th><th>Set this up</th></tr>
+    <tr><td>A screen and a printer in (or wired to) the kitchen</td>
+        <td>Switch 2 = <b>The kitchen screen</b>. Open the print station on it with <code>/kitchen</code>.
+            Nothing else needed.</td></tr>
+    <tr><td><b>No room for a computer in the kitchen</b> — the printer is at the counter, and that
+            screen is also used for billing</td>
+        <td>Switch 2 = <b>The counter (manager) screen</b>. Open the print station on the counter PC
+            with <code>/manager</code>, then answer <b>Yes, print here</b> on the strip that appears
+            above its Tables screen.</td></tr>
+    <tr><td>Kitchen screen exists, but you want a safety net</td>
+        <td>Switch 2 = <b>Both — the counter is the backup</b>. The kitchen prints as usual; the
+            counter screen prints anything still unprinted after 30 seconds.</td></tr>
+    <tr><td>Two kitchens / two printers</td>
+        <td>Open a print station on each. They share one queue, so <b>each ticket comes out once</b> —
+            whichever screen claims it first. (A per-printer split — starters here, mains there — is
+            not built yet.)</td></tr>
+  </table>
+  <div class="ok"><b>You cannot cause double tickets by leaving several screens on.</b> The server
+    hands each ticket to exactly one screen. The only ticket that prints twice is one you ask to
+    reprint, and that one comes out stamped <b>*** Reprint · Duplicate ***</b> so nobody cooks it
+    again.</div>
+</div>
+
+<h2 id="test">8 · The test that actually matters</h2>
+<div class="card">
+  <ol class="steps">
+    <li><b>Send a real order</b> from the waiter tablet (or the guest menu) to a test table. A ticket should come
+      out within a few seconds.</li>
+    <li><b>Now minimise the print-station window</b> — or better, open any other app full screen on top of it.
+      This is exactly what used to kill printing.</li>
+    <li><b>Send a second order.</b> A ticket must come out while the window is still hidden. <b>This is the
+      test.</b> If this one prints, you are done.</li>
+    <li><b>Close the print station completely and send a third order.</b> Nothing prints — correct. Now open the
+      print station again: <b>the ticket you missed prints straight away.</b> Nothing was lost.</li>
+    <li><b>Cancel your test orders</b> so they don't reach a real bill (manager panel → the table → cancel).</li>
+  </ol>
+  <div class="plain"><b>In simple words:</b> print one, hide the window and print another, then close everything
+    and prove the missed ticket comes out when you re-open. That covers every way it used to fail.</div>
+</div>
+
+<h2 id="flags">9 · Every setting in the starter file, explained</h2>
+<div class="card">
+  <p>You do not need to understand these to use it — but nothing here is magic, so here is exactly what each
+    line does and which problem it removes.</p>
+  <table>
+    <tr><th>Setting</th><th>In plain words</th></tr>
+    <tr><td><code>--kiosk</code></td><td>Full screen, no address bar, no tabs. Nobody can wander off to
+        another website on the printing computer.</td></tr>
+    <tr><td><code>--kiosk-printing</code></td><td><b>Print with no dialog.</b> Without it, every ticket waits
+        for someone to click "Print".</td></tr>
+    <tr><td><code>--disable-background-timer-throttling</code></td><td>Chrome slows down a window that isn't in
+        front. This stops it.</td></tr>
+    <tr><td><code>--disable-backgrounding-occluded-windows</code></td><td><b>The important one.</b> Chrome treats
+        a window that another window <i>covers</i> as if it were closed. This is why "opening another app killed
+        printing", and this setting is what fixes it.</td></tr>
+    <tr><td><code>--disable-renderer-backgrounding</code></td><td>Same idea, one layer deeper: don't put the page
+        itself to sleep.</td></tr>
+    <tr><td><code>--disable-features=CalculateNativeWinOcclusion</code></td><td>The Windows version of the
+        covered-window problem.</td></tr>
+    <tr><td><code>--user-data-dir=…</code></td><td>Its own private Chrome profile. It stays logged in, and your
+        everyday browsing, bookmarks and logins are completely separate.</td></tr>
+    <tr><td><code>--no-first-run --no-default-browser-check</code></td><td>Skip the "make Chrome your default
+        browser?" questions, which would otherwise sit on the screen waiting for an answer.</td></tr>
+    <tr><td><code>--autoplay-policy=no-user-gesture-required</code></td><td>Lets the new-order chime sound without
+        someone tapping the screen first.</td></tr>
+    <tr><td><code>caffeinate</code> (Mac) / <code>powercfg</code> (Windows)</td><td>Keep the computer awake. A
+        sleeping computer prints nothing, and this is the most common cause of "it stopped overnight".</td></tr>
+  </table>
+</div>
+
+<h2 id="wrong">10 · When something goes wrong</h2>
+<div class="card">
+  <table>
+    <tr><th>What you see</th><th>What it means</th><th>What to do</th></tr>
+    <tr><td><b>Nothing prints at all, ever</b></td><td>One of the three switches is off, or the printer isn't the
+        computer's default.</td><td>Check <a href="#app">section 6</a> in order, then press <b>🖨 Preview a sample
+        KOT</b>. If the sample prints and real tickets don't, switch 2 is off.</td></tr>
+    <tr><td><b>Nothing prints on the counter screen</b></td>
+        <td>Either switch 2 still says "the kitchen screen", or nobody answered <b>Yes, print here</b> on
+        that computer.</td><td>Check the admin console's <b>Which screen prints</b> choice, then look for
+        the strip above that screen's Tables grid. If it is not there, the choice has not been made yet.</td></tr>
+    <tr><td><b>A dialog box appears asking to print</b></td><td>Chrome was opened normally, not by the starter
+        file.</td><td>Close it and open the starter file instead. Silent printing only happens with
+        <code>--kiosk-printing</code>.</td></tr>
+    <tr><td><b>It printed while I watched, stopped when I looked away</b></td><td>Chrome was opened normally, so the
+        covered-window settings are missing.</td><td>Use the starter file. This is the exact problem it exists for.</td></tr>
+    <tr><td><b>Blank paper, or a huge gap before each ticket</b></td><td>Paper size. Almost always A4 selected, or a
+        paper size forced in the app.</td><td>Set the receipt paper size on the printer
+        (<a href="#mac">4.2</a> / <a href="#win">5.3</a>). Never set a page size in the app.</td></tr>
+    <tr><td><b>Ticket cut through the middle</b></td><td>The cut is happening before the paper feed.</td>
+        <td>Mac: <code>CutMedia=EndOfJob</code>, not <code>EndOfPage</code>. Windows: turn off "cut per page" in
+        the driver's preferences.</td></tr>
+    <tr><td><b>Right-hand edge of every line is missing</b></td><td>The ticket is being printed too wide.</td>
+        <td>The app prints 66 mm on purpose. Check nothing has forced 80 mm in the printer driver, and that the
+        roll really is 80 mm.</td></tr>
+    <tr><td><b>Half a ticket, or random characters</b></td><td>Usually a too-long USB cable, or a loose one.</td>
+        <td>Shorten the cable (under 5 m), or move to a LAN/Wi-Fi printer. Then tap <b>🖨❗ → Ticket came out
+        half</b> on the kitchen screen so the manager knows.</td></tr>
+    <tr><td><b>Two identical tickets</b></td><td>Almost always a genuine reprint.</td><td>Look at the paper: a
+        reprint says <b>*** Reprint · Duplicate ***</b> across the top. If two clean copies came out, tell us —
+        that should not be possible.</td></tr>
+    <tr><td><b>The manager's Tables screen shows "a reprint hasn't printed"</b></td><td>A ticket has been waiting
+        more than 90 seconds.</td><td>Either open the print station (the ticket then prints itself), or press
+        <b>🖨 Print here instead</b> on that warning.</td></tr>
+    <tr><td><b>Paper roll finished mid-service</b></td><td>—</td><td>Change the roll, then tap <b>🖨❗ → Paper roll
+        finished</b> on the kitchen screen. The warning clears itself the moment a ticket prints successfully.</td></tr>
+    <tr><td><b>The internet went down</b></td><td>Orders are saved on the device that took them.</td><td>Nothing to
+        do. When the connection returns, the orders arrive and their tickets print.</td></tr>
+  </table>
+</div>
+
+<h2 id="daily">11 · The daily routine for staff</h2>
+<div class="card">
+  <h4>Opening</h4>
+  <ul>
+    <li>Switch the computer on. If the starter file is in Startup (Windows), the print station opens by itself —
+      otherwise double-click it.</li>
+    <li>Check the paper roll. Press <b>🖨 Preview a sample KOT</b> once if you want to be sure.</li>
+    <li>Leave the window alone. It is fine if other apps sit on top of it.</li>
+  </ul>
+  <h4>During service</h4>
+  <ul>
+    <li>Paper out, jam, or half a ticket → tap <b>🖨❗</b> on the kitchen screen and pick what happened. The
+      manager is told immediately.</li>
+    <li>Need a ticket again → the <b>🖨</b> button on that ticket. It comes out marked as a duplicate, on purpose.</li>
+  </ul>
+  <h4>Closing</h4>
+  <ul>
+    <li>Close the print-station window (⌘Q / Alt+F4). Nothing is lost if an order arrives after that — its ticket
+      prints when you open again.</li>
+  </ul>
+</div>
+
+<h2 id="next">12 · Better setups you can move to later</h2>
+<div class="card">
+  <p>What is on this page uses a browser window as the printer. It works, and with these settings it works
+    reliably — but there are two setups with fewer moving parts, and the app is already built to accept both.</p>
+  <table>
+    <tr><th>Setup</th><th>What changes</th><th>Why it is better</th></tr>
+    <tr><td><b>A small print helper program</b></td><td>A tiny program runs in the background instead of a Chrome
+        window. No window, nothing to close, starts with the computer.</td>
+        <td>Chrome stops being involved at all. This is what the big POS systems really do behind the scenes.</td></tr>
+    <tr><td><b>A cloud printer</b></td><td>The printer itself asks our server for tickets every few seconds.</td>
+        <td><b>No computer in the kitchen at all.</b> Plug it into power and Wi-Fi and it prints.</td></tr>
+  </table>
+  <p>Neither is switched on yet — both are a decision about money and hardware, not about code. Ask us when you
+    want one.</p>
+</div>
+
+<footer>
+  <p><b>Aevidine — kitchen printing.</b> This page is served by the app itself, so it is always the version that
+    matches what you are running. Reach it any time from <b>manager panel → Settings → Kitchen printing</b>, or
+    from the kitchen screen's <b>🖨❗</b> button.</p>
+  <p>Use the <b>🖨 Save this as a PDF</b> button at the top to keep a copy or print it for the wall — in the
+    print dialog, choose <b>Save as PDF</b> as the destination.</p>
+</footer>
+
+</div>
+</body>
+</html>

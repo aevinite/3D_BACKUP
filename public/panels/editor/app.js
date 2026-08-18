@@ -2486,7 +2486,7 @@ function formGeneral(s) {
     <button type="button" class="btn" id="kotPreviewBtn" style="margin-top:14px">🖨 Preview a sample KOT</button>
     <p style="color:var(--muted);font-size:12px;margin:8px 0 0">Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
   </div>
-  ${printHereCardHtml(s)}`;
+`;
   }
   if (sec === "sessions") {
     return `
@@ -6135,22 +6135,6 @@ function bindEditor() {
 
   // Kitchen settings: "Preview a sample KOT" test-print button.
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
-  // Off / Print here / Backup only — a per-device choice (see printHereCardHtml). Saved the instant
-  // it is tapped (no Save button to forget), and it prints straight away if something is waiting, so
-  // switching it on IS the test that it works.
-  document.querySelectorAll("[data-printhere-mode]").forEach((b) => (b.onclick = () => {
-    const v = b.dataset.printhereMode;
-    lsSet(PRINT_HERE_KEY, PRINT_HERE_MODES.includes(v) ? v : "off");
-    renderEditor();
-    if (v === "off") toast("This screen will not print kitchen tickets.", "ok");
-    else {
-      toast(v === "backup"
-        ? "This screen will print a ticket the kitchen hasn't printed within 30 seconds."
-        : "This screen now prints every new kitchen ticket.", "ok");
-      managerPrintPass();
-    }
-  }));
-
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
   // boxes it depends on — the mode AND the price typed above it. A stale example is worse
   // than none: it would show ₹294 while the box says ₹500 and quietly teach the wrong rule.
@@ -8938,7 +8922,7 @@ function floorHtml() {
   // sideways any more — owner, 2026-08-15: "there shouldn't be horizontal scroll anywhere" — so the
   // chip, its wrapper and syncFloorMore()'s measuring pass went with the scroll they described.)
   const gridBlock = gridHtml;
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${printStationStripHtml()}${planNote}${gridBlock}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -9242,6 +9226,9 @@ function bindFloor() {
     } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
   }));
   ed.querySelectorAll("[data-prhere]").forEach((b) => (b.onclick = () => printJobHere(b.dataset.prhere, b)));
+  // "Should this screen print the kitchen tickets?" — the print-station strip beside the printer-
+  // problem one (mig 336). Bound on the same pass so a repaint never leaves a dead button.
+  bindPrintStationStrip(ed);
   // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
   // and everything that lived in it are gone. A table opens as a popup, full stop.)
   // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
@@ -12148,55 +12135,71 @@ async function printJobHere(id, btn) {
 // prints totally stop. What I want is auto-print in the manager panel — when you turn that on, the
 // ticket prints there instead of the kitchen."
 //
-// Since mig 335 a new order QUEUES A ROW (print_jobs) instead of being noticed by one tab, so this
-// screen can simply be a second claimant on the same queue. The atomic claim on the server means
-// the kitchen screen and this one can both be watching and a ticket still comes out exactly once.
+// Since mig 335 a ticket is a ROW, so this screen can simply be a second claimant on the same queue;
+// the atomic claim means the kitchen screen and this one can both watch and a ticket still comes out
+// exactly once.
 //
-// The choice is PER DEVICE and lives in this browser, not in the database — the counter PC prints,
-// the manager's phone must not, and both are logged in as the same person, so a restaurant-wide
-// setting could not tell them apart. Three positions:
-//   off     — nothing prints here (the default; nothing changes for anyone).
-//   on      — this screen claims tickets the moment they are queued. Use it when the printer is at
-//             the counter and the kitchen has no screen at all.
-//   backup  — this screen only takes a ticket the KITCHEN hasn't printed within 30 seconds. Use it
-//             when the kitchen screen is the main printer and this is the safety net.
-// "backup" is enforced on the SERVER as well (lib/printQueue → claimKotJobs minAgeMs), so a stale
-// tab can never jump the kitchen's queue.
-const PRINT_HERE_KEY = "lfh_print_here";
-const PRINT_HERE_MODES = ["off", "on", "backup"];
-const printHereMode = () => { const v = lsGet(PRINT_HERE_KEY, "off"); return PRINT_HERE_MODES.includes(v) ? v : "off"; };
-// Auto-print has to be on for the RESTAURANT (admin entitlement + owner toggle, mig 107) before any
-// screen prints anything automatically. Without this a device switch would look like it worked and
-// the server would answer `off: true` forever.
-const autoPrintLiveHere = () => {
-  const st = (state.data && state.data.settings) || {};
-  return st.auto_print_kot === true && st.auto_print_kot_allowed === true;
-};
-let lastPrintedHere = null;   // { kot, table, at } — so the card can say it is genuinely working
-function printHereCardHtml(s) {
-  const mode = printHereMode();
-  const live = s.auto_print_kot === true && s.auto_print_kot_allowed === true;
-  const btn = (v, label, hint) => `<button type="button" class="btn${mode === v ? " primary" : ""}" data-printhere-mode="${v}" title="${esc(hint)}">${esc(label)}</button>`;
-  const last = lastPrintedHere
-    ? `<p style="color:var(--muted);font-size:12px;margin:10px 0 0">Last ticket printed on this screen: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}</p>`
-    : "";
-  return `
-  <div class="card"><h3>Print kitchen tickets on THIS screen</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
-      A setting for <b>this device only</b> — not for the restaurant. Turn it on where the printer
-      actually is (usually the counter PC). Every new order is queued by the server, so whichever
-      screen is switched on prints it; two screens can never print the same ticket twice, and a
-      ticket nobody printed waits in the queue instead of being lost.
-    </p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${btn("off", "Off", "Nothing prints on this screen")}
-      ${btn("on", "Print here", "This screen prints every new kitchen ticket")}
-      ${btn("backup", "Backup only", "Prints here only if the kitchen screen hasn't within 30 seconds")}
-    </div>
-    ${live ? "" : `<div class="hint" style="margin-top:12px">Auto-print is switched OFF for this restaurant, so nothing will print here yet — turn on “Auto-print the KOT” above (and ask your admin if it isn't offered).</div>`}
-    ${last}
-  </div>`;
+// TWO GATES, and both are needed:
+//
+//  1. THE ADMIN says whether a counter screen may print at all — /aevinite → the restaurant → 🖨 KOT
+//     printing → "Which screen prints" (mig 336: kitchen | counter | both). It is not a control in
+//     THIS panel: the Settings → Kitchen printing section is hidden from everyone here on purpose
+//     (owner, 2026-07-31 — *"there shouldn't be grayed out option also"*), which is exactly why the
+//     first version of this feature sat somewhere nobody could reach.
+//
+//  2. THIS DEVICE says yes, once, on the floor screen. Not optional and not a nicety: the manager
+//     panel is also opened on PHONES. A phone that claimed a ticket would "print" it into a dialog
+//     nobody looks at and report it done — a LOST ticket, caused by the feature meant to save it. So
+//     a device that has not answered never claims, and the honest default is no.
+const PRINT_HERE_KEY = "lfh_print_here";        // "on" | "off" — this device's answer, this browser
+const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v === "on" || v === "off" ? v : ""; };
+// What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
+// read, so the strip only ever asks a question the admin has actually opened.
+let printTargetSays = null;
+let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
+
+// The one-question strip, above the floor grid, in the same visual grammar as the printer-problem
+// strip that already lives there (mig 269) — a restaurant should not have to learn a second one.
+function printStationStripHtml() {
+  if (!printTargetSays || !printTargetSays.mayPrint) return "";
+  const ans = printHereAnswer();
+  if (ans === "off") return "";                       // answered no: never ask again on this device
+  if (ans === "on") {
+    const last = lastPrintedHere
+      ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
+      : (printTargetSays.target === "both"
+          ? "Waiting — it prints anything the kitchen hasn't within 30 seconds."
+          : "Waiting for the next order.");
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">This screen is printing the kitchen tickets<small>${last}</small></span>
+      <a class="btn" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Guide</a>
+      <button class="btn" data-printhere-set="off">Stop printing here</button>
+    </div></div>`;
+  }
+  return `<div class="prstrip"><div class="prstrip-row">
+    <span class="prstrip-ico">🖨</span>
+    <span class="prstrip-txt">Should <b>this screen</b> print the kitchen tickets?<small>${
+      printTargetSays.target === "both"
+        ? "Your admin has set the counter screen as the BACKUP printer — it prints anything the kitchen hasn't within 30 seconds. Say yes only on the computer the printer is attached to."
+        : "Your admin has set kitchen tickets to print on the counter screen. Say yes only on the computer the printer is attached to — never on a phone."
+    }</small></span>
+    <button class="btn primary" data-printhere-set="on">Yes, print here</button>
+    <button class="btn" data-printhere-set="off">No</button>
+  </div></div>`;
 }
+// Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
+// a yes prints anything already waiting straight away — so answering IS the test that it works.
+function bindPrintStationStrip(root) {
+  (root || document).querySelectorAll("[data-printhere-set]").forEach((b) => (b.onclick = () => {
+    const v = b.dataset.printhereSet === "on" ? "on" : "off";
+    lsSet(PRINT_HERE_KEY, v);
+    if (v === "on") { toast("This screen will print the kitchen tickets ✓", "ok"); managerPrintPass(); }
+    else toast("This screen will not print kitchen tickets.", "ok");
+    if (state.tab === "tables") renderEditor();   // repaint the strip in place (there is no renderTables)
+  }));
+}
+
 // One pass of the queue: what is waiting → claim it → print it → say what happened.
 //
 // Called on every ops breadcrumb (so a ticket prints the instant the order lands) and by a 20s
@@ -12205,18 +12208,26 @@ function printHereCardHtml(s) {
 // reported failed and requeued rather than lost.
 let printPassBusy = false;
 async function managerPrintPass() {
-  const mode = printHereMode();
-  if (mode === "off" || printPassBusy || !autoPrintLiveHere()) return;
+  if (printPassBusy) return;
+  // A device that has said NO never asks the server anything. A device that has not answered yet asks
+  // ONCE (so the strip can appear at all) and prints nothing until it is answered.
+  const ans = printHereAnswer();
+  if (ans === "off") return;
   printPassBusy = true;
   try {
-    const r = await api("GET", "/print-jobs/pending" + (mode === "backup" ? "?mode=backup" : ""));
+    const r = await api("GET", "/print-jobs/pending");
+    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen" };
+    const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target;
+    printTargetSays = says;
+    if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
+    if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet
     const jobs = (r && r.jobs) || [];
     if (!jobs.length) return;
     // The CLAIM is a plain fetch, never the offline outbox: a claim replayed hours later would print
     // a stale ticket behind everyone's back. A claim that fails simply waits for the next pass.
     const cr = await fetch("/api/editor" + ridQ("/print-jobs/claim"), {
       method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
-      body: JSON.stringify({ ids: jobs.map((j) => j.id), mode }),
+      body: JSON.stringify({ ids: jobs.map((j) => j.id) }),
     });
     if (!cr.ok) return;
     const won = new Set(((await cr.json().catch(() => ({}))).won) || []);
@@ -12242,7 +12253,7 @@ async function managerPrintPass() {
         lastPrintedHere = { kot: o.kot_no ?? null, table: o.table_number != null ? tablePrintLabel(o.table_number) : null, at: new Date().toISOString() };
         // Repaint the card if the person happens to be looking at it, so "is this thing working?"
         // is answered on screen instead of by walking to the printer.
-        if (document.querySelector("[data-printhere-mode]")) renderEditor();
+        if (state.tab === "tables") renderEditor();   // the strip shows the ticket it just printed
       } else {
         // Tell the manager once a minute at most — the same discipline the kitchen panel uses.
         notePrintTroubleHere();
@@ -16196,13 +16207,22 @@ function applyHierarchyView() {
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
   }
-  // A real manager who raced the whoami hide and parked on an admin-only settings section
-  // (billing/kitchen/dining sessions) is bounced back to General so they never sit on cards
-  // whose sidebar row is now hidden. One-shot: after the hop the condition self-clears.
-  // (No longer "!higher": those rows are hidden for EVERYONE in this panel now, so an admin
-  // parked on one would be looking at a section with no way back to it.)
-  if (state.tab === "general" && (state.settingsSection === "billing" || state.settingsSection === "kitchen" || state.settingsSection === "sessions")) {
-    state.settingsSection = "general";
+  // Anyone parked on an ADMIN-OWNED settings section (billing / KOT printing / dining sessions) is
+  // bounced off it, because its sidebar row is hidden for EVERYONE in this panel — owner and admin
+  // included. That is a decision, not an oversight (owner, 2026-07-31, looking at the tinted rows:
+  // *"there shouldn't be grayed out option also"*): nobody can ever grant them to a manager, so the
+  // rows are gone and the three sections are edited in the admin console instead
+  // (components/admin/RestaurantSettings.tsx). Do NOT "fix" this by making the rows visible again.
+  //
+  // ONE REAL BUG FIXED HERE, 2026-08-18: it hopped to `"general"`, an id that NO LONGER EXISTS (the
+  // General section was removed on 2026-08-01). formGeneral() has no branch for it, so it fell
+  // through to its default arm and drew the two cards that section used to hold — "Menu maintenance"
+  // and "Bubble effect" — controls deliberately moved to Access & permissions. So clicking a row
+  // that raced the hide showed you the DELETED General page, on the live site. It now lands on the
+  // first section this viewer actually has.
+  const ADMIN_ONLY_SETTINGS_SECS = ["billing", "kitchen", "sessions"];
+  if (state.tab === "general" && ADMIN_ONLY_SETTINGS_SECS.includes(state.settingsSection)) {
+    state.settingsSection = (settingsSections().find((x) => !ADMIN_ONLY_SETTINGS_SECS.includes(x.id)) || { id: "tables" }).id;
     renderList();
     renderEditor();
   }

@@ -50,6 +50,10 @@ const KEYS = [
   "banquet_tax_components", "banquet_paper", "banquet_paper_size", "banquet_paper_top",
   "banquet_paper_bot", "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign",
   "banquet_paper_fill", "floor_per_row", "floor_layout_mode",
+  // WHICH screen prints the kitchen ticket (mig 336). Must be listed here — the Save button builds
+  // its patch from this array, and a field missing from it looks editable and saves nothing (which
+  // is exactly what happened when the banquet card was first added).
+  "kot_print_target",
 ] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -948,6 +952,48 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         <div style={{ marginTop: 12 }}>
           <button className="adm-btn" onClick={previewKot}>🖨 Preview a sample KOT</button>
           <p className="hint" style={{ margin: "8px 0 0" }}>Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
+        </div>
+
+        {/* ═══ WHICH SCREEN PRINTS (mig 336) ═══
+            The owner's ask of 2026-08-17: the kitchen has no room for a PC, the printer lives at the
+            counter, and the staff need the MANAGER panel on that screen for billing — so the counter
+            screen has to be allowed to print. It is set HERE and not in the manager panel because
+            that panel's Kitchen-printing section is hidden from everyone by his own 2026-07-31
+            decision ("there shouldn't be grayed out option also"). A counter device also confirms
+            once on its own floor screen, so a manager's PHONE can never claim a ticket. */}
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
+          <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>Which screen prints the ticket?</h3>
+          <p className="hint" style={{ margin: "0 0 10px" }}>
+            Only takes effect while auto-print above is ON. A counter screen also has to answer
+            <b> “Yes, print here”</b> once, on its own Tables screen — so a manager&apos;s phone can never
+            take a ticket.
+          </p>
+          {choiceCards("kot_print_target", String(draft.kot_print_target || "kitchen"), [
+            { value: "kitchen", label: "The kitchen screen",
+              ex: "The normal setup: a screen in (or wired to) the kitchen prints every ticket. Nothing else can." },
+            { value: "counter", label: "The counter (manager) screen",
+              ex: "For a kitchen with no computer in it — the printer sits at the counter and the manager screen there prints. The kitchen screen prints nothing." },
+            { value: "both", label: "Both — the counter is the backup",
+              ex: "The kitchen prints as usual, and a counter screen prints anything the kitchen has not printed within 30 seconds. Belt and braces for a flaky kitchen PC." },
+          ])}
+        </div>
+
+        {/* ═══ THE SETUP GUIDE, IN THE APP (owner, 2026-08-18) ═══
+            "Where is this setup in the app? Make it downloadable… link every single key and step…
+            or you can make HTML, it will open a whole page." It is a page the app serves, so it is
+            always the version that matches the running code, and it carries the two starter files. */}
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
+          <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>📖 How to set the printer up</h3>
+          <p className="hint" style={{ margin: "0 0 10px" }}>
+            Every step for a <b>Mac</b> or a <b>Windows</b> PC — the printer, the paper settings, the one
+            Chrome window that keeps printing when it is minimised or covered, these switches, the test,
+            and what to do when something goes wrong. Opens as its own page and can be saved as a PDF.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Open the setup guide</a>
+            <a className="adm-btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter file</a>
+            <a className="adm-btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter file</a>
+          </div>
         </div>
       </div>
       )}

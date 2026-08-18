@@ -516,6 +516,14 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
     "public/panels/editor/index.html",      // the manager panel
     "public/panels/kitchen/index.html",     // the kitchen screen
     "public/panels/tablet/index.html",      // the waiter panel
+    // The printer setup guide (owner, 2026-08-18: "where is this setup in the app… make it
+    // downloadable… or you can make HTML, it will open a whole page"). It MUST be served: the admin
+    // console and the kitchen panel's 🖨❗ sheet both link to it, and a page the app serves is always
+    // the version that matches the running code — which a file emailed to a restaurant never is.
+    // Public-by-URL is fine and was considered: it holds a Chrome command line, printer paper
+    // settings and the app's own panel paths (all login-gated), and no secret, no data, no key.
+    // The two starter files beside it (public/print-station/*) are the same call for the same reason.
+    "public/print-setup.html",              // the kitchen-printer setup guide (linked from admin + kitchen)
   ]);
   const found = [];
   const walk = (dir) => {
