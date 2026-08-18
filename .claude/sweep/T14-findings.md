@@ -97,3 +97,51 @@ its last-4-only records), the khata aggregates, the ratings summary, the scope p
 gates on all five screens, every 60s backstop, the back-button registration, both skins on all five
 screens, and the whole of Manager mode's estate resolution — including the paged sibling lookup —
 came back clean.
+
+---
+
+## Round 2 & 3 — what he asked for after reading the above (2026-08-18)
+
+His verdicts first: **item 4 is not a real problem** (reverted, R31) and **item 13 is not wanted** (R32).
+Both are recorded in `docs/REJECTED-IDEAS.md` and as `REJECTED (owner, …)` comments at the code site,
+and item 4's guard rule is inverted so it now fails if the hiding branch comes back.
+
+Five more faults were found while building what he asked for. All are guarded by
+`npm run verify:owner-money` (items 14–18).
+
+**F9 · A 1-star rating drew five gold stars** (item 16) — `--border` is declared as a whole border,
+not a colour, so `1px solid var(--border)` was invalid and dropped. Measured: the Customers table had
+**no row separators**, the ratings bars had **no track**, and the empty half of every star row
+computed to the same amber as the filled half. `aria-label` said "1 out of 5" throughout, which is
+why five sweeps of text assertions never caught it. Person worse off: the owner, who could not tell a
+complaint from a compliment at a glance. **confirmed, screenshotted before and after.**
+
+**F10 · Raw database dates on the Inventory screen** (item 17) — `2026-08-18` printed in a panel where
+every other date reads "18 Aug".
+
+**F11 · Nothing on the Inventory screen tied a card back to the figure above it** (item 17) — every
+card was headed with a count and no money, so an owner had to add the rows up himself to check they
+agreed. Each card now carries the DATABASE's month total, never a sum of the rows it is holding.
+
+**F12 · Capped lists that never said they were capped** (item 17) — 300 expense slips, 100 bills. The
+route was already being told the true counts by `lfh_inv_report_summary` and was throwing them away.
+
+**F13 · A stored snapshot kept serving an OLD payload shape** (item 17) — the payload gained three
+fields; snapshots are served as-is until their fingerprint moves, so every restaurant already opened
+once kept handing the screen the previous shape and the new "showing 100 of 412" line never appeared
+— on exactly the busy restaurants that need it. Caught only by checking the CACHED reply rather than
+the forced one. Fixed by bumping the cache key to `v2`; the guard now requires the bump.
+
+**F14 · Two database round-trips were paid before the cache was even consulted** (item 18) — "which
+restaurants have stock on" and "what are they called" were answered on the way past, on every open,
+including ones then served from the snapshot in one row read. Both answers are already in the
+snapshot. **Median estate open: 1362ms → 419ms.**
+
+### Verified against the running app — every instruction he gave, 21/21
+
+Pay Later never hides itself · the pay-later option is absent on a restaurant with the module off and
+present on one with it on (checked on two real restaurants, nothing switched) · 7 boxes, each matching
+`lfh_inv_report_summary` exactly, totals equal to the sum of the boxes · one request per open, served
+from the snapshot · tap into a restaurant and back out · no raw dates anywhere · the phone card list
+with the dates moved into the guest's record (which now shows first AND last visit) · a tapped figure
+showing exactly the people it counted.
