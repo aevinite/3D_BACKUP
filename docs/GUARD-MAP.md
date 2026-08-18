@@ -85,6 +85,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
 | ↳ a DATE, a TIME or a DAY on any printed document, or the rows that explain a bill's money | `verify:print-paper` ← every document must read the SAME on every device (it re-renders under five time zones), an MRP line is counted once, and a printed percentage describes the rupees beside it | nothing | no |
 | ↳ auto-print itself — WHO prints and WHETHER it prints at all | `verify:print-queue` ← a ticket is a ROW (mig 335), the print path never refuses a hidden/covered window, the targeted slice carries the queue, and one shared claim serves both panels | nothing | no |
+| releasing everything to AV live (the client site) | `node scripts/release-avlive.mjs --dry-run "<his words>"` ← says what it WOULD do (files, migrations, order) and changes nothing; the real run needs his own AV-live deny rules lifted, on purpose | `.env.AV.live` + the live folder | no |
 | joining / merging tables | `verify:merge`, `verify:merge-who`, `verify:merge-keeps-mark`, `verify:void-party` | mixed | some **YES** |
 | the waiter rota | `verify:rota-clash` | `.env.local` | **YES** |
 | a customer / CRM field | `verify:customers`, `verify:customer-erase`, `verify:personal-data` | `.env.local` | **YES** |
