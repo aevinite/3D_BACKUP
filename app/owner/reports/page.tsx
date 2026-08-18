@@ -379,9 +379,21 @@ export default function OwnerReports() {
     return map[k] ?? null;
   };
   useEffect(() => {
-    const open = new URLSearchParams(window.location.search).get("open");
+    const qs = new URLSearchParams(window.location.search);
+    const open = qs.get("open");
     const a = open && openAlias(open);
     if (a) { setSel(a.sel); if (a.sub) setSub(a.sub); if (a.pay) setPayDetail(a.pay); }
+    // ── THE PERIOD TRAVELS TOO (owner, 2026-08-18) ─────────────────────────────────────────────
+    // "for example I'm at thirty days all restaurant, and I open the detail view of orders, then it
+    // should be also open in thirty days and all restaurant." This page used to open on its own
+    // default of 30 days whatever the dashboard was showing, so anyone reading "This month" on the
+    // dashboard and tapping through was quietly handed a different period.
+    //   The two screens do not share a vocabulary: the dashboard has "This week", this page has
+    // "Last 12 months", "This financial year", "Custom" and "One day". So only a value THIS page
+    // really has is accepted, and the dashboard's "week" maps to its nearest neighbour here.
+    const wanted = qs.get("range");
+    const mapped = wanted === "week" ? "7d" : wanted;
+    if (mapped && RANGES.some((r) => r.k === mapped)) setRange(mapped as Range);
   }, []);
 
   // ── Scroll memory (owner 2026-07-26: "when I click back it takes me to the top — it
@@ -443,7 +455,23 @@ export default function OwnerReports() {
   // Pin the scope from the URL (admin act-as ?rid) after hydration — not in the initial
   // state (that mismatches SSR). Runs once on mount, before `ready`, so the gated fetch
   // already sees the pinned rid.
-  useEffect(() => { if (scopePin) setRid(scopePin); }, [scopePin]);
+  //
+  // ── …BUT `?view=` BEATS THE PIN (owner, 2026-08-18) ──────────────────────────────────────────
+  // His bug, in his words: "whenever I click on order, it takes me to the order of a particular
+  // restaurant. But actually I am in a tab for all the restaurant." On an ADMIN tab the URL always
+  // carries ?rid=<the restaurant the console drilled into>, and this line forced the reports scope
+  // to it — so opening a tile from the dashboard's "All restaurants" view landed on one restaurant.
+  //
+  // The dashboard now says which scope it was showing in `?view=` (`all`, or a restaurant id), and
+  // that wins here. `rid` keeps its old meaning untouched — it is the admin's AUTHORISATION pin and
+  // still travels to the server as `scope=`; `view` is only a filter, and the server honours it only
+  // for a restaurant already inside that scope, so this can narrow and never widen.
+  const viewPin = useMemo(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("view"), []);
+  useEffect(() => {
+    if (viewPin) setRid(viewPin === "all" ? "" : viewPin);
+    else if (scopePin) setRid(scopePin);
+  }, [scopePin, viewPin]);
 
   // ── Instant-paint (owner 2026-07-26): last-seen report payloads from THIS tab paint at
   // ~0ms with the usual count-up/chart animations, then the normal fetch revalidates and
