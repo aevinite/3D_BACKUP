@@ -20,7 +20,7 @@
 //   · Report ▾ (top right): Print / CSV / Excel of what's currently on screen.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { inr, useActiveAutoRefresh, actLabel, panelLabel } from "@/components/admin/shared";
+import { inr, useActiveAutoRefresh, actLabel, panelLabel, timeAgo } from "@/components/admin/shared";
 import { asSuffix, asValue } from "@/lib/ownerPin";
 import {
   AreaTrend, TimeBar, LeaderBar, WhoEarnsMore, CategoryDonut, PaymentDonut, canonPayMethod,
@@ -247,15 +247,14 @@ function errText(e: unknown): string {
   }
   return String(e);
 }
-function timeAgo(iso: string): string {
-  const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
-  if (s < 45) return "just now";
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} hr ago`;
-  return `${Math.round(h / 24)} d ago`;
-}
+// HOW LONG AGO — ONE WORDING (owner, 2026-08-18, approving the sweep's 🟡 4).
+// This file used to carry its own copy that wrote "5 min ago" / "3 hr ago", while Audit & logs one
+// click away — and every one of the eleven admin-console screens — wrote "5m ago" from the shared
+// helper. Same fact, two wordings, on two screens he moves between constantly. The SHORT form wins
+// because it is already the wording on twelve screens: changing those instead would mean editing the
+// one file the whole admin console shares, for a bigger blast radius and no better answer. So the
+// local copy is gone and `timeAgo` below is the shared one, imported with `inr` and the log
+// translators from components/admin/shared.
 
 // WHICH ELEMENT ACTUALLY SCROLLS on the owner console (T12 sweep, 2026-08-17).
 // At >900px it is `.adm-main`; at <=900px globals.css gives `.adm-main` `overflow-y: visible` and
@@ -1899,9 +1898,22 @@ export default function OwnerDashboard() {
               </button>
             </div>
           ) : (<>
+            {/* ── A WAY BACK YOU CAN SEE (owner, 2026-08-18: "for the problem eight, have you add
+                the cross button or do stuff like that?") ────────────────────────────────────────
+                The phone's BACK and the sidebar's Dashboard link both work now, but neither is
+                visible, and at 360px the top-strip breadcrumb is display:none — so on his phone
+                nothing on the screen said "go back". A ✕ in the corner of the dish header, sized
+                past the 44px guideline so a thumb catches it, and it goes UP ONE LEVEL: back to the
+                restaurant on a multi-restaurant estate, back to the dashboard for one restaurant. */}
             <div className="own-dish-h" style={{ ["--rcol" as string]: GREEN }}>
-              <div className="own-dish-name">{dishView.d.title}</div>
-              <div className="adm-muted">{RANGE_LABEL[globalRange]}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="own-dish-name">{dishView.d.title}</div>
+                <div className="adm-muted">{RANGE_LABEL[globalRange]}</div>
+              </div>
+              <button type="button" className="own-dish-x"
+                onClick={() => setView(single ? { level: "home" } : { level: "restaurant", rid: (view as { rid: string }).rid })}
+                aria-label={single ? "Back to the dashboard" : "Back to the restaurant"}
+                title={single ? "Back to the dashboard" : "Back to the restaurant"}>✕</button>
             </div>
             <div className="adm-stats" style={{ marginTop: 14 }}>
               <div className="adm-stat"><div className="k">Revenue</div><div className="v"><AnimatedNumber value={dishView.d.revenue} money /></div></div>
@@ -2069,7 +2081,12 @@ export default function OwnerDashboard() {
         .hq-table .go i { color: var(--muted); font-size: 11px; }
         .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
         /* dish view bits reused */
-        .own-dish-h { border-left: 4px solid var(--rcol); padding-left: 12px; }
+        .own-dish-h { display: flex; align-items: flex-start; gap: 12px; border-left: 4px solid var(--rcol); padding-left: 12px; }
+        /* 44x44 — the tap-target guideline, and the reason this is not the 25x22 the panel sheets
+           use (he judged those fine because the phone BACK also closes them; here BACK is exactly
+           what was missing, so this one has to be catchable). */
+        .own-dish-x { flex: none; width: 44px; height: 44px; border-radius: 12px; border: var(--border); background: var(--bg); color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
+        .own-dish-x:hover { color: var(--accent); border-color: var(--accent); }
         .own-dish-name { font-size: 22px; font-weight: 800; }
         .rv-sort { display: inline-flex; gap: 2px; }
         .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
