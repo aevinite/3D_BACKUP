@@ -1,5 +1,14 @@
 # T11 findings — the owner's reports & charts
 
+> **UPDATE 2026-08-19 — all three handoffs below are now FIXED and merged** (PR #1016, `e1060db1`),
+> at the owner's instruction, along with both improvements. Terminals 16–30 never ran, so
+> `supabase/migrations/` and `app/globals.css` were unowned — nothing was taken from another
+> terminal. Migration **337** names the union columns explicitly; the print block resets `html/body`
+> at `html[data-staffdark="1"]` specificity; the phone controls are 44px. Pass 3 re-ran the whole
+> suite against merged main: **184 automated assertions + 103 static guard checks, 0 failures.**
+> Every day now returns exactly `SUM(net_amount)` from the bills, and the settlement reconciles to
+> the rupee. Details in `LEDGER/T11.md` → "PASS 3".
+
 **Phases:** 500 / 500 (P05001–P05500) · pass 2 = 494 ✅ · 6 ⏭ (each with a written reason)
 **Problems:** 7 — **3 high**, 3 medium, 1 low.
 **Fixed in `sweep6/t11-owner-reports-charts`:** 4 (every one that lives inside T11's territory).
