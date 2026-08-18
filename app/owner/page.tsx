@@ -1167,7 +1167,11 @@ export default function OwnerDashboard() {
       if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${hour12(busiest.hour)} — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
       const total = p.dishes.reduce((a, d) => a + d.revenue, 0);
       if (p.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${p.dishes[0].title} makes ${Math.round((p.dishes[0].revenue / total) * 100)}% of dish revenue` });
-      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${RANGE_LABEL[globalRange]}` });
+      // NO "₹X lost to cancellations" LINE (owner, 2026-08-18). It read as money the restaurant
+      // lost, and a cancellation is not that — nothing was charged. It also quoted the money
+      // rollup's count, which disagrees with the Audit's by 3x on the same window (measured:
+      // 1,124/₹8,28,096 here against 394/₹1,85,766 there, because the two count different sets).
+      // The Audit's own risk strip answers this properly, on the screen that owns the record.
       const payRows = (p.paymentMethods ?? []).map((x) => ({ ...x, method: canonPayMethod(x.method) }));
       const pay = payRows.filter((x) => x.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
       const payTotal = payRows.reduce((a, x) => a + x.revenue, 0);
@@ -1183,7 +1187,7 @@ export default function OwnerDashboard() {
       const top = p.restaurantRevenue[0];
       if (top && total > 0 && p.restaurantRevenue.length > 1)
         out.push({ icon: "fa-trophy", text: `${top.name} leads with ${Math.round((top.revenue / total) * 100)}% of revenue ${rl}` });
-      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to cancellations ${RANGE_LABEL[globalRange]}` });
+      // …and the same for the group view, for the same reason.
       if (money && money !== "err" && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
     }
     return out.slice(0, 4);
@@ -1452,7 +1456,7 @@ export default function OwnerDashboard() {
   // A row is [label, value, hint?, isTotal?]. `isTotal` is EXPLICIT rather than "the last row",
   // because on the Revenue popup the last row is "Cancelled bills" — which is emphatically not a
   // total, and styling it as one made a figure that is deliberately excluded look like the answer.
-  const tileDetail = (): { title: string; sub: string; rows: [string, string, (string | undefined)?, boolean?][]; note?: string; open: string } | null => {
+  const tileDetail = (): { title: string; sub: string; rows: [string, string, (string | undefined)?, boolean?][]; note?: string; audit?: boolean; open: string } | null => {
     const per = RANGE_LABEL[globalRange];
     switch (tileOpen) {
       case "revenue": return {
@@ -1462,10 +1466,25 @@ export default function OwnerDashboard() {
           ["Paid orders", (kMain?.paidOrders ?? 0).toLocaleString("en-IN"), "bills that have been settled"],
           ["Average per paid order", inr(kMain?.avg ?? 0)],
           ...(kMain?.prev ? [["The period before", inr(kMain.prev.revenue), PREV_LABEL[globalRange]] as [string, string, string]] : []),
-          // WHAT HE DIDN'T CHARGE — the honest home for these two (see the money model above).
-          ...(mt && mt.discount > 0 ? [["Discounts given", inr(mt.discount), "already taken off the revenue above"] as [string, string, string]] : []),
-          ...(mt && mt.cancelledValue > 0 ? [["Cancelled bills", inr(mt.cancelledValue), `${mt.cancelledOrders} bill${mt.cancelledOrders === 1 ? "" : "s"} — never charged, so never in the revenue above`] as [string, string, string]] : []),
+          // A DISCOUNT IS MONEY; A CANCELLATION IS NOT (owner, 2026-08-18) ─────────────────────
+          // He said it plainly: a cancelled order "will [be] in [the] audit, so there would not even
+          // be [a] cancellation, only if you see" — i.e. it is a record you go and look at, not a
+          // figure to put on this screen. The database agrees and always has:
+          // `lfh_audit_risk()` calls `discount_given` MONEY and lets `order_cancelled` fall through
+          // to RECORD, and the Audit screen prints record rows as "of food, never charged".
+          //
+          // So the discount stays as a money line — it really is money the restaurant gave away, and
+          // it is already off the revenue above. The cancellation quotes NO figure at all, and here
+          // is the measured reason why that matters: on the same restaurant and the same 30 days, the
+          // money rollup behind this screen said 1,124 cancelled worth ₹8,28,096, while the Audit
+          // said 394 worth ₹1,85,766 — because the rollup counts every order row marked cancelled
+          // and the Audit holds only the ones recorded with a reason. Both are true about different
+          // sets, so any number printed here would contradict the record one click away. The screen
+          // says what a cancellation means for revenue, and sends him to the record for the rest.
+          ...(mt && mt.discount > 0 ? [["Discounts given", inr(mt.discount), "money you gave away — already taken off the revenue above"] as [string, string, string]] : []),
         ],
+        note: "A cancelled bill is not money you lost — nothing was ever charged for it, so it was never in the revenue above. Cancellations are kept as a record, with the reason and the person, in Audit & logs.",
+        audit: true,
         open: "sales",
       };
       case "orders": return {
@@ -1496,7 +1515,8 @@ export default function OwnerDashboard() {
           ["Staff pay out", inr(staffOut), hasPayroll ? `${kMain!.staffPay!.entries} payment${kMain!.staffPay!.entries === 1 ? "" : "s"} to ${kMain!.staffPay!.people} ${kMain!.staffPay!.people === 1 ? "person" : "people"}` : "nothing recorded in this period"],
           ["Total expenses", inr(staffOut), undefined, true],
         ],
-        note: "Discounts and cancelled bills are NOT counted here. Your revenue figure already has them taken out, so counting them again would make this number — and your money on hand — wrong. You will find both inside the Revenue tile.",
+        note: "A discount is not counted here either — your revenue already has it taken off, so counting it again would make this number, and your money on hand, wrong. And a cancelled bill is not an expense at all: nothing was charged for it. Cancellations live in Audit & logs, with the reason and the person.",
+        audit: true,
         open: "team",
       };
       case "onhand": return {
@@ -1954,7 +1974,21 @@ export default function OwnerDashboard() {
                   </div>
                 ))}
               </div>
-              {d.note ? <p className="note"><i className="fas fa-circle-info" aria-hidden="true" /> {d.note}</p> : null}
+              {d.note ? (
+                <p className="note">
+                  <i className="fas fa-circle-info" aria-hidden="true" />
+                  <span>
+                    {d.note}
+                    {/* Straight to the record, so "cancellations live in Audit & logs" is a door and
+                        not just a sentence. Gated on the SAME `logs` entitlement the sidebar and
+                        /api/owner/oplog use — if the admin has taken the log away there is nothing
+                        to send him to, and the sentence stands on its own. */}
+                    {d.audit && ov?.entitlements?.logs !== false ? (
+                      <>{" "}<Link className="nlink" href={withPin("/owner/activity")}>Open Audit &amp; logs <i className="fas fa-arrow-right" aria-hidden="true" /></Link></>
+                    ) : null}
+                  </span>
+                </p>
+              ) : null}
               <footer>
                 {/* "at the below there will be a click for a seen proper detail, and that will take
                     me to that particular page" — and it carries the scope and the range (detailHref). */}
@@ -2167,7 +2201,10 @@ export default function OwnerDashboard() {
         .ow2-tile .r .l i { font-style: normal; font-size: 10.5px; color: var(--muted); font-weight: 500; line-height: 1.35; }
         .ow2-tile .r .v { flex: none; font-size: 14.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
         .ow2-tile .note { display: flex; gap: 8px; margin: 12px 18px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); font-size: 11.5px; line-height: 1.45; color: var(--muted); }
-        .ow2-tile .note i { margin-top: 2px; opacity: .8; }
+        .ow2-tile .note > i { margin-top: 2px; opacity: .8; flex: none; }
+        :global(.ow2-tile .note .nlink) { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-weight: 800; color: color-mix(in srgb, var(--accent) 80%, var(--text)) !important; text-decoration: none; white-space: nowrap; }
+        :global(.ow2-tile .note .nlink:hover) { text-decoration: underline; }
+        :global(.ow2-tile .note .nlink i) { font-size: 9px; }
         .ow2-tile footer { padding: 14px 18px 16px; }
         :global(.ow2-tile .full) { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a !important; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; text-decoration: none; }
         :global(.ow2-tile .full:hover) { filter: brightness(1.08); }

@@ -213,8 +213,32 @@ check("Expenses is staff pay out only, not staff pay plus cancellations",
     && !/staffOut \+ .*cancelledValue|cancelledValue \+ .*staffOut/.test(homeC),
   "app/owner/page.tsx: something added cancellations or discounts into the Expenses total. Revenue\n       is already NET of discounts and never included a cancelled order (migration 315), so this\n       counts the same loss twice and makes \"On hand\" wrong by lakhs. They belong in the Revenue\n       popup under what he did not charge.");
 check("the Expenses popup says why cancellations are not in it",
-  /already has them taken out/.test(home),
+  /not an expense at all/.test(homeC),
   "app/owner/page.tsx: the Expenses popup no longer explains why discounts and cancelled bills are\n       excluded. He asked for them \"under expenses\"; the screen owes him the reason they are not.");
+// ── 13b. THE DASHBOARD QUOTES NO CANCELLATION FIGURE (owner, 2026-08-18) ────────────────────────
+// "the order which is been cancel but how you will calculate that bcz like it will in [the] audit so
+// there would not even be [a] cancellation, only if you see." A cancellation is a RECORD you go and
+// look at, and the database has always agreed: lfh_audit_risk() classifies `order_cancelled` as
+// `record`, never `money`.
+// It is also unquotable here. Measured on one restaurant over one 30-day window: the money rollup
+// behind this screen said 1,124 cancelled worth ₹8,28,096 while the Audit said 394 worth ₹1,85,766 —
+// the rollup counts every order row marked cancelled, the Audit holds only the ones recorded with a
+// reason. Both are true about different sets, so ANY figure printed here contradicts the record one
+// click away. The screen explains what a cancellation means for revenue and links to the record.
+// The `MoneyTotals` type still DECLARES cancelledValue — it mirrors what /api/owner/reports sends,
+// and that is not a rendering. Drop the type line, then ban every remaining use.
+check("no cancellation figure is printed on the dashboard",
+  !/cancelledValue/.test(homeC.replace(/^type MoneyTotals =.*$/m, "")),
+  "app/owner/page.tsx: a cancellation amount is being printed again. It cannot be: the money rollup\n       and the Audit disagree 3x on the same window because they count different sets, so a figure\n       here contradicts the record one click away. Explain it and link to Audit & logs instead.");
+check("the dashboard does not call a cancellation money lost",
+  !/lost to cancel/i.test(homeC),
+  "app/owner/page.tsx: \"lost to cancellations\" is back. Nothing was charged for a cancelled bill, so\n       no money was lost — lfh_audit_risk() calls it `record`, not `money`.");
+check("a discount IS still shown as money given away",
+  /Discounts given/.test(home),
+  "app/owner/page.tsx: the discount line went with the cancellation line. A discount really is money\n       the restaurant gave away — lfh_audit_risk() calls `discount_given` MONEY — so it stays, said\n       plainly as already off the revenue.");
+check("the cancellation note offers a door to the record",
+  /d\.audit && ov\?\.entitlements\?\.logs !== false/.test(homeC),
+  "app/owner/page.tsx: the popup note says cancellations live in Audit & logs but no longer links\n       there — and the link must stay gated on the same `logs` entitlement the sidebar uses.");
 // ── 14. the detail opens on the scope and period on screen ──────────────────────────────────────
 check("the dashboard sends the VIEWED scope and the chosen range",
   /q\.set\("view", activeRid \?\? "all"\)/.test(homeC) && /q\.set\("range", globalRange\)/.test(homeC),
@@ -260,4 +284,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 36 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 40 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
