@@ -20,7 +20,6 @@ import { invalidateFloor } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
 const isUuid = (v: unknown) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 // A replayed offline order can still trip the guest_order limit inside the RPC. The online path
@@ -144,12 +143,26 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // order onto whoever is sitting at that table NOW, or onto a bill that has already been
   // settled. (The session path above doesn't need it — lfh_place_order validates the
   // guest's own session token and answers `session_closed` itself.)
-  // WHICH RESTAURANT. This used to fall back to restaurant #1 whenever the field was missing,
-  // which on a stack serving many restaurants quietly puts a real order — and its money — on the
-  // wrong restaurant's floor and books. A saved order that lost its restaurant is refused instead
-  // and shown to the diner. The fallback is kept ONLY for a body that names no restaurant at all,
-  // which is the single-restaurant shape this route shipped with; a malformed value is refused.
-  const publicRid = b.restaurantId === undefined ? DEFAULT_RID : (isUuid(b.restaurantId) ? b.restaurantId : "");
+  // WHICH RESTAURANT — AND THERE IS NO LONGER A GUESS (owner, 2026-08-18: "I agree to 7").
+  //
+  // This used to read: no `restaurantId` field at all → restaurant #1. That fallback was the shape
+  // these routes shipped with, back when there was only ever one restaurant, and it was deliberately
+  // kept when a MALFORMED value was made a refusal. On a stack serving many restaurants it is the one
+  // remaining way a real order — and its money — can land on somebody else's floor and somebody
+  // else's books: an order saved on a phone by a build old enough to predate the field replays here
+  // months later and is filed under #1.
+  //
+  // Nothing that runs today can hit this. `useRestaurantId()` (lib/restaurant-context.tsx) always
+  // returns a real id — it defaults to #1 itself and is never undefined — and every call site that
+  // queues a guest action passes it (components/CartPanel.tsx, ChefPopup.tsx, SessionGate.tsx). So the
+  // only body that reaches this branch is one saved before the field existed, which is exactly the
+  // body we must not guess about. Checked before changing it: guessing was the whole risk, and
+  // refusing costs a genuinely ancient saved order that would otherwise have been billed to the wrong
+  // restaurant.
+  //
+  // The diner is TOLD, not silently dropped: lib/guestOutbox.ts already words `unknown_restaurant` as
+  // "We couldn't tell which restaurant this order was for." No client change was needed.
+  const publicRid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
   if (!publicRid) return NextResponse.json({ ok: false, reason: "unknown_restaurant" }, { status: 400 });
   // A QR that encodes a nonsense table must not create an order nobody can reach on the floor.
   // A CODE, not the helper's sentence: the client owns the wording (lib/guestOutbox.ts

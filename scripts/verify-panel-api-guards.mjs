@@ -218,9 +218,19 @@ for (const [p, what] of [
   if (!src) { fail(`${p} is missing`); continue; }
   if (/withIdempotency\s*\(/.test(src)) ok(`${p} is wrapped in withIdempotency`);
   else fail(`${p} lost withIdempotency — ${what}`);
-  // A malformed restaurant must be REFUSED, never quietly filed under restaurant #1.
-  if (/unknown_restaurant/.test(src)) ok(`${p} refuses a malformed restaurant rather than defaulting to #1`);
+  // The restaurant must be REFUSED unless it is a real one — never quietly filed under #1.
+  //
+  // MISSING counts as malformed now (owner, 2026-08-18: "I agree to 7"). The old rule kept a
+  // fallback to restaurant #1 for a body with NO restaurantId field at all — the shape these routes
+  // shipped with when there was only one restaurant. On a multi-restaurant stack that was the last
+  // remaining way a real order and its money could land on somebody else's books, via an order saved
+  // by a build old enough to predate the field. Nothing that runs today can hit it:
+  // useRestaurantId() never returns undefined and every enqueue call site passes it.
+  if (/unknown_restaurant/.test(src)) ok(`${p} refuses a restaurant it cannot identify`);
   else fail(`${p} no longer refuses a malformed restaurant — a real order and its money land on the wrong restaurant's books`);
+  if (/DEFAULT_RID/.test(src) || /00000000-0000-0000-0000-000000000001/.test(src)) {
+    fail(`${p} has a hard-coded fallback to restaurant #1 again — a saved order that names no restaurant would be billed to the wrong one (owner agreed to remove this, 2026-08-18)`);
+  } else ok(`${p} has no fallback to restaurant #1 left to guess with`);
   // The database's own words must never travel to a diner.
   if (/error\.message/.test(src) && !/console\.(error|warn)\([^)]*error\.message/.test(src)) {
     fail(`${p} may be sending a database message to a diner — it must log the detail and answer a CODE`);
