@@ -332,6 +332,12 @@ function PeriodDrop({ value, onChange }: { value: Range; onChange: (r: Range) =>
         .owr-pop button { display: flex; align-items: center; background: none; border: none; border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 12.5px; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
         .owr-pop button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
         .owr-pop button.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+        /* A thumb target on a phone — see the note in kit.tsx's ReportsStyles. The period
+           button measured 31px on an A35; desktop is untouched. */
+        @media (max-width: 640px) {
+          .owr-btn.main { min-height: 44px; padding: 7px 16px; }
+          .owr-pop button { min-height: 42px; }
+        }
       `}</style>
     </span>
   );

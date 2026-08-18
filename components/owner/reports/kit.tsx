@@ -466,6 +466,19 @@ export function ReportsStyles() {
         .rs-ov-kpis { gap: 20px; }
       }
 
+      /* ── A THUMB TARGET ON A PHONE (T11 sweep, 2026-08-18) ─────────────────────────────────
+         Measured on a Samsung A35 (360x780): Refresh / Report / Export sat at 34px and the day
+         sheet's Today / Yesterday at 27px. Every tap I drove did land, so nothing was BROKEN —
+         but they are the controls he uses most one-handed, and 44px is the size a thumb expects.
+         Raised only under 640px, so the desktop console is pixel-for-pixel unchanged; the extra
+         height comes from min-height, not padding, so nothing re-flows sideways. */
+      @media (max-width: 640px) {
+        .rs-btn { min-height: 44px; padding: 0 15px; }
+        .rs-seg { padding: 4px; }
+        .rs-seg button { min-height: 38px; padding: 6px 14px; }
+        .rs-date { min-height: 38px; }
+      }
+
       /* The masthead and closing note are invisible on screen; they only paint in @media print. */
       .rs-printhead, .rs-printfoot { display: none; }
 
