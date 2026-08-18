@@ -101,14 +101,57 @@ export default function OwnerAuditLogs() {
   // which reads as "no activity" rather than "you are past the end".
   useEffect(() => { setPage(1); }, [qDebounced, level]);
 
+  // ── WHICH RESTAURANT THIS RECORD IS ABOUT (owner, 2026-08-18, approving the sweep's 🟡 3) ─────
+  // Picking a restaurant in the cockpit's top switcher used to throw a multi-restaurant owner OUT of
+  // this page and onto the dashboard, while Reports and Manager mode re-scope in place. Now this page
+  // listens on the same channel Reports does, so the record narrows where he is standing.
+  //   `pickRid` is the FILTER; `scopePin` stays the admin's authorisation pin and is a separate
+  // thing (it travels as `scope=`). "" means every restaurant this owner has, which is the default
+  // for EVERYONE — and that is a deliberate change from sending `rid = scopePin` on an admin tab.
+  // Two reasons, both checked:
+  //   · lib/ownerScope resolves an admin pin to ALL the restaurants that restaurant's OWNER owns,
+  //     "so the admin's owner-cockpit view matches the real owner's". Sending `rid = pin` narrowed
+  //     THIS page to one restaurant while the dashboard next door showed the whole estate.
+  //   · With the pill now mirroring the scope, a filter nobody chose made the pill disagree with the
+  //     list under it: measured on arrival — pill "All restaurants" over rows from one restaurant.
+  // A real owner is unaffected: they have no pin, so they never sent `rid` and always saw everything.
+  const [pickRid, setPickRid] = useState<string>("");
+  const [pickName, setPickName] = useState<string>("");
+  useEffect(() => {
+    const onScope = (e: Event) => {
+      const d = (e as CustomEvent<{ rid: string | null; name?: string }>).detail;
+      setPickRid(d?.rid ?? "");
+      setPickName(d?.rid ? (d?.name ?? "") : "");
+      // A narrower record has fewer pages, so page 5 of everything would answer with nothing —
+      // the same reason picking a type resets the paging.
+      setAudPage(1); setPage(1);
+    };
+    window.addEventListener("lfh:owner-scope", onScope);
+    return () => window.removeEventListener("lfh:owner-scope", onScope);
+  }, []);
+  // Tell the cockpit bar which restaurant is on screen, the way the dashboard and Reports do, so the
+  // top pill stops disagreeing with the list under it. Emitted on the next frame as well, because
+  // child effects run before the shell's listener is attached on a hard load (the OwnerManagerMode
+  // lesson, same day).
+  useEffect(() => {
+    const emit = (tail: string[]) => window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
+    const tail = pickName ? [pickName] : [];
+    emit(tail);
+    const again = requestAnimationFrame(() => emit(tail));
+    return () => { cancelAnimationFrame(again); emit([]); };
+  }, [pickName]);
+
   const scopeParams = useCallback(() => {
     const params = new URLSearchParams();
     // scope = the admin act-as auth pin (per-tab, can't be hijacked); rid = the narrowing
     // filter so a single selected restaurant shows ONLY its own rows (mirrors the Reports
-    // page, which sends both). Without rid the server falls back to the owner's full set.
-    if (scopePin) { params.set("scope", scopePin); params.set("rid", scopePin); const a = asValue(); if (a) params.set("as", a); }
+    // page, which sends both). Without rid the server falls back to the owner's full set, and
+    // both endpoints honour `rid` only for a restaurant already inside the caller's scope — so it
+    // can narrow and never widen.
+    if (scopePin) { params.set("scope", scopePin); const a = asValue(); if (a) params.set("as", a); }
+    if (pickRid) params.set("rid", pickRid);
     return params;
-  }, [scopePin]);
+  }, [scopePin, pickRid]);
 
   const loadAudit = useCallback(async () => {
     const p = scopeParams();
@@ -183,10 +226,10 @@ export default function OwnerAuditLogs() {
         <div className="adm-card"><div className="adm-empty">Audit &amp; logs isn&rsquo;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : view === "audit" && !audDisabled ? (
         <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} counts={audCounts} kind={audKind} setKind={pickAudKind} onReload={loadAudit} onOpenRemoval={setRemovalId}
-          page={audPage} pages={audPages} total={audTotal} onPage={setAudPage} />
+          page={audPage} pages={audPages} total={audTotal} onPage={setAudPage} scopeName={pickName} />
       ) : (
         <ActivityView rows={rows} err={err} level={level} setLevel={setLevel} q={q} setQ={setQ} onReload={loadActivity} onOpen={setDetailRow}
-          page={page} pages={pages} total={total} onPage={setPage} />
+          page={page} pages={pages} total={total} onPage={setPage} scopeName={pickName} />
       )}
 
       {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
@@ -201,7 +244,7 @@ export default function OwnerAuditLogs() {
 }
 
 // ── Audit (removals) ─────────────────────────────────────────────────────────
-function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, onOpenRemoval, page, pages, total, onPage }: {
+function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, onOpenRemoval, page, pages, total, onPage, scopeName }: {
   removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void;
   /** Per-type counts over EVERY page, from the database. Null = count the page and say so. */
   counts: { kind: string; n: number; amount: number; risk?: string }[] | null;
@@ -213,6 +256,10 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
   // Paging (owner, 2026-08-12) — the same strip the Activity log uses, so the two halves of this
   // page behave identically.
   page: number; pages: number; total: number; onPage: (p: number) => void;
+  /** The restaurant this record is narrowed to, or "" for all of them. Only used to say WHOSE
+   *  record is empty — "nothing has been removed yet" reads as "nowhere, ever" when the switcher
+   *  has quietly narrowed the page to one restaurant (owner, 2026-08-18). */
+  scopeName: string;
 }) {
   // SORT + FILTER BY TYPE (owner, 2026-08-11: "make something like sort thing where everything can
   // be sorted, like what is list of what"). Both come from /panels/auditsort.js — the SAME module the
@@ -352,7 +399,9 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
             ? "Nothing matches that."
             : activeKind
               ? <>Nothing of that kind. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setKind("")}>Show all</button></>
-              : "Nothing has been removed yet — this list fills itself as it happens."}
+              : scopeName
+                ? `Nothing has been removed at ${scopeName} — pick another restaurant above, or All restaurants, to see the rest.`
+                : "Nothing has been removed yet — this list fills itself as it happens."}
         </div>
       ) : (
         <div className="adm-logwrap aud-stack">
@@ -400,12 +449,14 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
 }
 
 // ── Activity log (severity chips, search, paging, click for the full trail) ──
-function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, page, pages, total, onPage }: {
+function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, page, pages, total, onPage, scopeName }: {
   rows: Action[] | null; err: string | null;
   level: "" | "error" | "warn" | "info"; setLevel: (v: "" | "error" | "warn" | "info") => void;
   q: string; setQ: (v: string) => void; onReload: () => void; onOpen: (a: Action) => void;
   // Paging (owner, 2026-08-12) — the list owns the strip, the page state lives with the fetch.
   page: number; pages: number; total: number; onPage: (p: number) => void;
+  /** The restaurant this feed is narrowed to, or "" — see the note on AuditView's copy. */
+  scopeName: string;
 }) {
   // PHONE LAYOUT COMES FROM `aud-stack` (globals.css), and this list is the one that never opted
   // into it. Without that class `.adm-logrow` keeps its `min-width: 540px` on a narrow screen and
@@ -495,7 +546,9 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
       ) : rows === null ? (
         <div className="adm-empty">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="adm-empty">No staff activity yet — it appears here as your team works.</div>
+        <div className="adm-empty">{scopeName
+          ? `No staff activity at ${scopeName} yet — pick another restaurant above, or All restaurants, to see the rest.`
+          : "No staff activity yet — it appears here as your team works."}</div>
       ) : !list || list.length === 0 ? (
         /* Narrowed to nothing. "Nothing of that kind" and "nothing has happened" are different
            facts, and a narrowed type needs a way back out of it — the same three-state treatment

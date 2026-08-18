@@ -274,6 +274,31 @@ check("manager mode re-emits its breadcrumb after the shell is listening",
     "components/owner/Charts.tsx: CatTick draws the full label again. textAnchor=\"end\" means it runs\n       off the LEFT edge and loses the identifying first words, and its only rescue is a hover title\n       that a phone does not have.");
 }
 
+// ── 18. Audit & logs narrows in place (owner, 2026-08-18, approving the sweep's 🟡 3) ───────────
+// Picking a restaurant in the cockpit switcher used to throw a multi-restaurant owner OUT of this
+// page onto the dashboard — the one page of the three that did.
+check("Audit & logs re-scopes in place instead of navigating away",
+  /path === "\/owner\/reports" \|\| path === "\/owner\/activity"/.test(shellC),
+  "components/owner/OwnerShell.tsx: /owner/activity left the in-place branch, so picking a restaurant\n       there throws the owner back to the dashboard again.");
+check("the switcher sends the restaurant NAME as well as its id",
+  /name: rid \? \(myRests\.find/.test(shellC),
+  "components/owner/OwnerShell.tsx: the scope event no longer carries the name, so Audit & logs cannot\n       put the restaurant in the crumb without a lookup of its own.");
+check("the top pill mirrors the scope on Audit & logs",
+  /path === "\/owner\/activity"\n?\s*\?? \(crumbTail\[0\]|owner\/activity"$/m.test(shellC) || /\|\| path === "\/owner\/activity"\s*\n\s*\? \(crumbTail\[0\]/.test(shellC),
+  "components/owner/OwnerShell.tsx: the pill stopped following the scope on Audit & logs, so it can\n       say one restaurant while the list under it shows another.");
+check("the audit page filters by the picked restaurant",
+  /if \(pickRid\) params\.set\("rid", pickRid\)/.test(auditC) && /lfh:owner-scope/.test(auditC),
+  "app/owner/activity/page.tsx: the page no longer listens for the scope pick, or no longer sends it\n       as `rid`, so the switcher does nothing there.");
+check("the filter starts at ALL restaurants for everyone",
+  /const \[pickRid, setPickRid\] = useState<string>\(""\)/.test(auditC),
+  "app/owner/activity/page.tsx: the filter is seeded from the admin pin again. lib/ownerScope resolves\n       that pin to the whole OWNER's estate, so seeding it narrowed this page while the dashboard next\n       door showed everything — and the pill then disagreed with the list under it.");
+check("picking a restaurant resets the paging",
+  /setAudPage\(1\); setPage\(1\)/.test(auditC),
+  "app/owner/activity/page.tsx: narrowing the scope no longer resets the paging, so page 5 of the whole\n       estate answers with nothing for one restaurant and reads as \"no records\".");
+check("an empty record says WHICH restaurant it is empty for",
+  /Nothing has been removed at \$\{scopeName\}/.test(audit) && /No staff activity at \$\{scopeName\}/.test(audit),
+  "app/owner/activity/page.tsx: the empty states are back to \"Nothing has been removed yet\", which reads\n       as \"nowhere, ever\" when the switcher has narrowed the page to one restaurant.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -284,4 +309,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 40 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 47 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");

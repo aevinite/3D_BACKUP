@@ -283,14 +283,21 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       setRestOpen(false);
       setNavOpen(false); // no navigation happens on the home page → close explicitly
       window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
-    } else if (path === "/owner/reports") {
+    } else if (path === "/owner/reports" || path === "/owner/activity") {
       // On Reports the switcher re-scopes the reports IN PLACE (owner 2026-07-27:
       // "toggle on top to all restaurants" must work here without bouncing back to the
       // dashboard). The reports page listens for lfh:owner-scope and sets its rid — same
       // event-driven, no-new-fetch idea the dashboard uses for its own switcher.
+      //
+      // AUDIT & LOGS JOINED THIS BRANCH (owner, 2026-08-18). Picking a restaurant there used to
+      // throw him out to the dashboard — the one page of the three that did. It now listens on the
+      // same channel. The NAME rides along so that page can put it in the crumb without a lookup of
+      // its own; Reports ignores it and finds its own.
       setRestOpen(false);
       setNavOpen(false);
-      window.dispatchEvent(new CustomEvent("lfh:owner-scope", { detail: { rid } }));
+      window.dispatchEvent(new CustomEvent("lfh:owner-scope", {
+        detail: { rid, name: rid ? (myRests.find((r) => r.id === rid)?.name ?? "") : "" },
+      }));
     } else if (path === "/owner/manager") {
       // Manager mode re-scopes IN PLACE too. It used to throw you back to the owner home, which
       // is why the page carried its own switch row — a second switcher, and a 47px band of chrome
@@ -508,7 +515,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                   aria-haspopup="menu" aria-expanded={restOpen} title="Switch restaurant">
                   <span className="dot" aria-hidden="true" />
                   <span className="lbl">{
-                    path === "/owner" || path.startsWith("/owner/reports") || path === "/owner/manager"
+                    // The pages that re-scope IN PLACE announce their scope as the head of the crumb
+                    // tail, so the pill mirrors it. Audit & logs joined them on 2026-08-18.
+                    path === "/owner" || path.startsWith("/owner/reports") || path === "/owner/manager" || path === "/owner/activity"
                       ? (crumbTail[0] || "All restaurants")
                       : adminViewing ? shownName : "Owner overview"
                   }</span>
