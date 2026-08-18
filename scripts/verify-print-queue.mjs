@@ -80,6 +80,20 @@ check(/minAgeMs/.test(lib) && /claimKotJobs[\s\S]{0,600}minAgeMs/.test(lib),
   "the backup-printer window is enforced at the CLAIM, server-side (a stale tab can't jump the kitchen's queue)",
   "claimKotJobs no longer enforces minAgeMs — 'backup only' would be a client-side promise");
 
+// ── 2b. a ticket nobody can cook LEAVES the queue (both found on 2026-08-18) ────────────────────
+check(/the order was deleted before this ticket printed/.test(lib),
+  "a job whose ORDER IS GONE is retired, not silently skipped",
+  "orphaned jobs are skipped again — the read takes the OLDEST rows, so a handful of dead ones sit at the head of the queue and NOTHING PRINTS AGAIN (measured: 14 dead jobs, a fresh order printed by nobody, no error anywhere)");
+check(/the order was cancelled before this ticket printed/.test(lib) && /=== "cancelled"/.test(lib),
+  "a job whose order was CANCELLED is retired too — the kitchen never cooks a cancelled ticket",
+  "a cancelled order's ticket can reach the printer again; an order cancelled seconds after it queued would be cooked");
+check(/kitchenMayAuto/.test(kroute) && /kot_print_target/.test(kroute),
+  "the KITCHEN route honours who-prints as well, so 'counter' does not print in both rooms",
+  "the kitchen route ignores kot_print_target — with the counter chosen, a kitchen screen left open prints the same ticket in the other room (measured)");
+check(/reprint/.test(kroute) && /A MANUAL REPRINT IS DIFFERENT/.test(kroute),
+  "…while a MANUAL reprint still always reaches the kitchen printer",
+  "the kitchen's manual reprint is now routed by the automatic setting — the manager pressing 'Reprint in kitchen' is naming that printer on purpose");
+
 // ── 3. the panels no longer refuse to print while hidden ────────────────────────────────────────
 // CODE ONLY. The first version of this check read the function WITH its comments and failed on the
 // comment that EXPLAINS why the refusal was removed ("this used to return early on document.hidden")
@@ -121,16 +135,49 @@ check(/keepAlive: \(\) => !!state\.autoPrintKot/.test(kpanel),
   "only a screen with auto-print ON holds the socket open (the egress rule still applies to displays)",
   "the kitchen holds its socket open unconditionally — that is the connection budget the owner asked us to protect");
 
-// ── 6. the manager's own printer switch ─────────────────────────────────────────────────────────
-check(/PRINT_HERE_KEY = "lfh_print_here"/.test(epanel) && /data-printhere-mode/.test(epanel),
-  "the manager panel still offers the per-device switch (Off / Print here / Backup only)",
-  "the manager's print-here switch is gone — the owner asked for exactly this");
-check(/print-jobs" && path\[1\] === "pending"/.test(eroute) && /auto_print_kot_allowed/.test(eroute),
-  "the manager's pending-jobs read exists and is gated on auto-print being live for the restaurant",
-  "the manager's pending endpoint is missing or ungated");
+// ── 6. WHO may print: the admin's choice + the device's own answer (mig 336) ─────────────────────
+const mig336 = read("supabase/migrations/336_which_screen_prints_the_ticket.sql");
+const admin = read("components/admin/RestaurantSettings.tsx");
+const adminRoute = read("app/api/admin/restaurants/settings/route.ts");
+check(/kot_print_target/.test(mig336) && /'kitchen', 'counter', 'both'/.test(mig336),
+  "mig 336 defines who may print (kitchen | counter | both) with a CHECK constraint",
+  "mig 336 no longer constrains kot_print_target — a typo could take a restaurant's printing away");
+check(/kot_print_target/.test(admin) && /Which screen prints the ticket/.test(admin),
+  "the choice lives in the ADMIN console's KOT printing card",
+  "the 'which screen prints' choice has left the admin console — and it cannot go in the manager panel: that Settings section is hidden from EVERYONE there (owner, 2026-07-31)");
+check(/"kot_print_target",/.test(admin),
+  "…and the key is in the admin form's saved-keys list (a missing key looks editable and saves nothing)",
+  "kot_print_target is missing from SETTINGS_KEYS — the control would silently save nothing");
+check(/"kot_print_target",/.test(adminRoute) && /\["kitchen", "counter", "both"\]\.includes/.test(adminRoute),
+  "the admin route accepts only the three answers the queue understands",
+  "the admin settings route no longer sanitises kot_print_target");
+check(/async function counterPrintTarget/.test(eroute) && (eroute.match(/counterPrintTarget\(rid\)/g) || []).length >= 2,
+  "the editor route re-asks WHO may print at the claim as well as at the read (never trusts the panel)",
+  "the counter-print gate is asked once or not at all — a screen left open from before the setting changed would keep claiming tickets");
 check(/BACKUP_PRINTER_MS = 30000/.test(eroute),
-  "'backup only' means 30 seconds, in one named place",
+  "'the counter is the backup' means 30 seconds, in one named place",
   "the backup window is no longer a named constant in the editor route");
+check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
+  "the manager panel ASKS the device once, on the floor screen (a phone must never claim a ticket)",
+  "the per-device question is gone — the manager panel is opened on phones, and a phone that claims a ticket loses it");
+check(/if \(ans === "off"\) return;/.test(epanel) && /ans !== "on"\) return;/.test(epanel),
+  "a device that has not answered YES never prints (the honest default is no)",
+  "the manager panel prints without the device having agreed to be the printer");
+check(/\$\{printerStripHtml\(\)\}\$\{printStationStripHtml\(\)\}/.test(epanel),
+  "the strip is rendered on the floor, right beside the printer-problem strip",
+  "the print-station strip is not rendered on the floor — the question would never be asked, so a counter screen could never be switched on");
+
+// ── 7. the setup guide is IN the app, and reachable from a screen that is not hidden ────────────
+const guide = read("public/print-setup.html");
+check(guide.length > 20000 && /Setting up a Mac/.test(guide) && /Setting up a Windows PC/.test(guide),
+  "the in-app setup guide covers both a Mac and a Windows PC",
+  "public/print-setup.html has lost one of the two platforms");
+check(/print-station-mac\.command/.test(guide) && /print-station-windows\.bat/.test(guide) && /window\.print\(\)/.test(guide),
+  "…and it carries both starter files as downloads plus a save-as-PDF button",
+  "the guide no longer offers the starter files or the PDF button the owner asked for");
+check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel),
+  "it is reachable from the ADMIN console and from the kitchen screen's 🖨❗ sheet",
+  "the guide is not linked from a reachable screen — the first attempt put it in the manager panel's hidden Kitchen section");
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`

@@ -30,10 +30,12 @@ longer be lost just because a window was covered.
 | One shared queue implementation (read · claim · report) | `lib/printQueue.ts` |
 | Kitchen screen: gets jobs on every board read, prints, reports | `app/api/kitchen/[...path]/route.ts` (`/board?autojobs=1`, `?jobs=1` on the targeted slice) + `public/panels/kitchen/app.js` (`processPrintJobs`) |
 | Manager screen as a printer | `app/api/editor/[...path]/route.ts` (`/print-jobs/pending`, `/claim`, `/:id/done`) + `public/panels/editor/app.js` (`managerPrintPass`) |
-| The per-device switch | manager panel → **Settings → Kitchen printing → "Print kitchen tickets on THIS screen"** |
+| **WHO prints** (kitchen / counter / both) | **admin console → the restaurant → 🖨 KOT printing** (mig 336). NOT the manager panel: its Settings → Kitchen printing section is hidden from everyone there by the owner's 2026-07-31 decision, which is how the first attempt shipped an unreachable control. |
+| The per-device confirmation | manager panel → **Tables** → the strip above the floor asks once, and only a device that answers YES ever claims (a phone must never claim a ticket) |
 | The live socket stays open while a screen is the printer | `public/panels/realtime.js` (`keepAlive`) |
-| The kiosk launcher | `scripts/print-station/print-station-mac.command` · `…-windows.bat` |
+| The kiosk launcher | `public/print-station/print-station-mac.command` · `…-windows.bat` (served, so the panels can offer them as downloads) |
 | Problems / stuck tickets | manager panel → **Tables** → the strip above the floor grid (mig 269) |
+| **The restaurant-facing guide** | `public/print-setup.html` — served at `/print-setup.html`, linked from manager → Settings → Kitchen printing and from the kitchen's 🖨❗ sheet. THIS file is the engineering record; that page is what a restaurant reads. Keep them honest with each other. |
 
 ---
 
@@ -50,13 +52,14 @@ longer be lost just because a window was covered.
    `print-station-mac.command` (Mac) or `print-station-windows.bat` (Windows). Change the `URL` line
    in it first: `/kitchen` for a kitchen screen, `/manager` for the counter. Log in once; that
    window keeps its own Chrome profile and stays logged in.
-5. **On that same screen, choose who prints:** manager panel → Settings → Kitchen printing → *Print
-   kitchen tickets on THIS screen*:
-   - **Off** — this screen never prints (the default).
-   - **Print here** — this screen prints every new ticket. Use it when the printer is at the counter
-     and the kitchen has no screen.
-   - **Backup only** — prints here only if the kitchen hasn't within 30 seconds.
-   The kitchen panel needs no switch: with auto-print on for the restaurant, it prints.
+5. **Choose WHICH screen prints** — admin console → the restaurant → **🖨 KOT printing → "Which
+   screen prints the ticket?"**: *the kitchen screen* (default) · *the counter (manager) screen* ·
+   *both — the counter is the backup* (30s). This is an ADMIN choice, deliberately: the manager
+   panel's Kitchen-printing section is hidden from everyone there (owner, 2026-07-31).
+6. **If you chose the counter:** on that computer, the manager panel's **Tables** screen shows a strip
+   asking *"Should this screen print the kitchen tickets?"* — answer **Yes, print here**. Answer **No**
+   on phones. A device that has never answered never claims a ticket, which is what stops a phone
+   "printing" into a dialog nobody sees.
 6. **Test it:** send one order from the tablet, then MINIMISE the window and send another. Both
    tickets must come out. That second one is the whole point of this work.
 
@@ -107,3 +110,26 @@ the right page, and it keeps the computer awake while it is open.
 Migration 335 and these panel changes are **on the backup stack only**. AV live needs its own asked-
 first release, exactly like mig 238 and mig 269 before it. Until then, AV live keeps printing the old
 way (the panel there still diffs its own board) — which is why the kitchen panel keeps its net.
+
+---
+
+## 7. Two faults found ON TOP of the original one (2026-08-18) — do not undo either
+
+1. **A dead job starved the whole queue.** `pendingKotJobs` took the OLDEST rows and silently SKIPPED
+   any whose order had been deleted. Harmless while only manual reprints existed; fatal once every
+   order queues one — a handful of orphans sat at the head of the queue and nothing printed again,
+   with no error anywhere, because every layer was behaving as written. Orphans are now **retired**
+   (`dismissed`, with the reason on the row), which also clears them off the manager's stuck-job strip.
+2. **A cancelled order's ticket could still be cooked.** An order can be cancelled in the seconds after
+   its ticket queued. The manual-reprint endpoint has refused a cancelled KOT since 2026-08-11; the
+   automatic path had no such guard because until mig 335 it had no rows to guard. Same treatment now.
+
+Both are covered by `npm run verify:print-queue`, and both were measured on the dev stack before and
+after — 33 cancelled-order tickets retired themselves on the next two board reads.
+
+## 8. Where the setup guide lives
+
+`public/print-setup.html`, served at **`/print-setup.html`**. Linked from the admin console's 🖨 KOT
+printing card and from the kitchen panel's 🖨❗ sheet, and it carries the two starter files as
+downloads plus its own save-as-PDF button. THIS file is the engineering record; that page is what a
+restaurant reads — keep them honest with each other.

@@ -423,3 +423,10 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 .prsheet-sub { color: var(--muted); font-size: 13px; margin: 6px 0 12px; }
 .prsheet-row { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 8px; padding: 12px 14px; min-height: 48px; text-align: left; font-size: 15px; }
 .prsheet-row span { font-size: 18px; }
+/* The setup-guide LINK at the bottom of the same sheet (owner, 2026-08-18). It is an <a>, not a
+   report button, so it is separated by a rule and quieter: nobody standing at a jammed printer should
+   mistake "how to set this up" for "tell the manager". Keeps the 48px finger target the rest of the
+   sheet uses — a cook is tapping this with a wet hand, like everything else on this screen. */
+.prsheet-help { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px;
+  color: var(--muted); font-size: 14px; text-decoration: none; }
+.prsheet-help:hover { color: var(--fg); }

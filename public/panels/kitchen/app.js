@@ -1296,7 +1296,13 @@ function openPrinterSheet() {
   ov.id = "prSheet"; ov.className = "prsheet-ov";
   ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer problem</h3><button class="btn" data-prclose>✕</button></div>
     <p class="prsheet-sub">One tap — the manager is told right away.</p>
-    ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}</div>`;
+    ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}
+    <!-- THE SETUP GUIDE LIVES HERE ON THIS SCREEN (owner, 2026-08-18: "where is this setup in the app").
+         The kitchen panel has no settings screen and its top bar is deliberately fought over to the pixel
+         (see buildMoreMenu) — so the guide goes where somebody standing at a misbehaving printer already
+         reaches: the 🖨❗ sheet. A link, not a button that does something, so a cook cannot mistake it for a
+         report. The full switches live in the manager panel's Settings → Kitchen printing. -->
+    <a class="btn prsheet-row prsheet-help" href="/print-setup.html" target="_blank" rel="noopener"><span>📖</span> How to set this printer up (full guide)</a></div>`;
   document.body.appendChild(ov);
   const close = () => { ov.remove(); if (prSheetOff) { const off = prSheetOff; prSheetOff = null; off(); } };
   prSheetOff = window.LFH_BACK ? LFH_BACK.layer("printer-problem", close) : null;

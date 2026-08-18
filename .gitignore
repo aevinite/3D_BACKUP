@@ -61,7 +61,7 @@ yarn-error.log*
 *.bat
 # …EXCEPT the print-station launcher, which is a shipped deliverable: a restaurant's Windows counter
 # PC double-clicks it to open the kiosk print window (docs/KITCHEN-PRINT-SETUP.md).
-!scripts/print-station/*.bat
+!public/print-station/*.bat
 
 # typescript
 *.tsbuildinfo

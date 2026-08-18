@@ -47,6 +47,17 @@ import { pendingKotJobs, claimKotJobs, finishKotJob } from "@/lib/printQueue";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
+// May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
+// Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
+// mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
+async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string }> {
+  const st = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target")
+    .eq("restaurant_id", rid).maybeSingle()).data as
+    { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+  const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
+  const target = String(st?.kot_print_target || "kitchen");
+  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target };
+}
 import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
@@ -1874,11 +1885,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // first refusal and this screen is the safety net rather than the main path. The age test is
     // enforced again at the claim, server-side, so a stale tab cannot jump the queue.
     if (path[0] === "print-jobs" && path[1] === "pending") {
-      const st = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle()).data as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
-      if (!(st?.auto_print_kot === true && st?.auto_print_kot_allowed === true)) return ok({ jobs: [], off: true });
-      const backup = new URL(req.url).searchParams.get("mode") === "backup";
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: backup ? BACKUP_PRINTER_MS : 0 }) });
+      const t = await counterPrintTarget(rid);
+      // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
+      // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
+      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target });
+      // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
+      // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target });
     }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
@@ -4291,8 +4304,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "print-jobs" && b === "claim") {
       const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).map(String).slice(0, 20) : [];
       if (!ids.length) return ok({ won: [] });
-      const backup = body?.mode === "backup";
-      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: backup ? BACKUP_PRINTER_MS : 0 }) });
+      // WHO MAY PRINT IS RE-ASKED HERE, not taken from the caller. A counter screen left open from
+      // before the admin changed the setting would otherwise keep claiming tickets the kitchen is
+      // now supposed to print — the classic "the screen said yes, the server says no" fault.
+      const t = await counterPrintTarget(rid);
+      if (!t.mayPrint) return ok({ won: [], off: true });
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }) });
     }
 
     if (a === "print-jobs" && c === "done") {

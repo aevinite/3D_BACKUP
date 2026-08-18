@@ -170,7 +170,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // kitchen shows it on the ticket AND prints it on the KOT — a cook/waiter must read the
         // SAME table label the floor uses, not the raw number (owner 2026-07-29). Small JSONB,
         // one row, table-agnostic — the targeted ?table=N slice never re-reads it.
-        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, kot_print_target, platform_channels, table_names").eq("restaurant_id", rid).maybeSingle(),
         // THIS restaurant's identity, so the kitchen header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
@@ -214,13 +214,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // (verify:panel-cache / docs: "Staff can run a WEEKS-OLD panel"), so this has to be safe by
       // construction rather than by everyone updating at once.
       const autoJobs = new URL(req.url).searchParams.get("autojobs") === "1";
-      const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs });
+      // ── AND WHETHER THIS ROOM IS THE ONE THAT PRINTS (mig 336) ────────────────────────────
+      // `kot_print_target` says which screen may claim an AUTOMATIC ticket: kitchen | counter | both.
+      // Set to 'counter' — a kitchen with no computer in it, the printer at the till — a kitchen
+      // screen must NOT also print, or the same ticket comes out in two rooms (measured: a kitchen
+      // panel left open on the same restaurant printed every ticket the counter was set to print).
+      // A MANUAL REPRINT IS DIFFERENT and always reaches the kitchen: the manager pressing "Reprint
+      // in kitchen" is naming this printer on purpose, whatever the automatic routing says.
+      const kotTarget = String((must(settings) || {} as { kot_print_target?: string }).kot_print_target || "kitchen");
+      const kitchenMayAuto = kotTarget === "kitchen" || kotTarget === "both";
+      const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs && kitchenMayAuto });
       // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
       // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
       // it: on a database that has not had mig 335 yet, nothing is queued, the panel sees these
       // orders are unclaimed by anyone and prints them the old way instead of going quiet.
       const autoOn = !!((must(settings) || {}).auto_print_kot && (must(settings) || {}).auto_print_kot_allowed);
-      const queuedFor = autoJobs && autoOn
+      // The net must also stand down when this room isn't the printer, or it would "heal" a ticket
+      // the counter is about to print.
+      const queuedFor = autoJobs && autoOn && kitchenMayAuto
         ? await ordersAlreadyQueued(rid, (live.orders as { id: string; status?: string }[])
             .filter((o) => o.status === "received" || o.status === "preparing").map((o) => o.id))
         : [];
@@ -231,7 +242,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
         // Auto-print KOT is ON only when the ADMIN allowed it AND the owner toggled it on
         // (mig 107). The kitchen panel prints a ticket for each brand-new order when true.
-        autoPrintKot: !!((must(settings) || {}).auto_print_kot && (must(settings) || {}).auto_print_kot_allowed),
+        // Auto-print is ON for this SCREEN only when the restaurant has it on AND this room is the
+        // one the admin chose to print (mig 336). The panel uses it for the printer heartbeat too —
+        // a kitchen screen that isn't printing goes back to being an ordinary display.
+        autoPrintKot: autoOn && kitchenMayAuto,
+        kotPrintTarget: kotTarget,
         // { "1": "A1", … } — display names only; every id/bill still uses the number.
         tableNames: ((must(settings) || {}) as { table_names?: Record<string, string> }).table_names || {},
         // { "6": "vip", … } — which tables are marked, so a cook can see a priority ticket.
