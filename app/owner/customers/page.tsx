@@ -31,6 +31,32 @@ type Detail = {
 const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: IST });
 
+// One summary figure. When it names a `seg` it is a real button that puts the list on that
+// segment — and it says so, both to a screen reader (aria-pressed) and to the eye (the pointer,
+// a soft outline while it is the active one). Without a `seg` it is exactly the tile it always was.
+function Tile({ label, value, loading, seg, on, pick }: {
+  label: string; value?: number; loading: boolean;
+  seg?: string; on?: string; pick?: (s: string) => void;
+}) {
+  const body = (
+    <>
+      <div className="k">{label}</div>
+      <div className="v"><AnimatedNumber value={value ?? 0} loading={loading} format={nfmt} /></div>
+    </>
+  );
+  if (!seg || !pick) return <div className="adm-stat">{body}</div>;
+  const active = on === seg;
+  return (
+    <button type="button" className="adm-stat" aria-pressed={active}
+      title={`Show ${label.toLowerCase()}`}
+      onClick={() => pick(seg)}
+      style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
+        outline: active ? "2px solid var(--accent, #16a34a)" : undefined, outlineOffset: -2 }}>
+      {body}
+    </button>
+  );
+}
+
 export default function OwnerCustomers() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
@@ -194,12 +220,21 @@ export default function OwnerCustomers() {
         <div className="adm-card"><div className="adm-empty">Customers isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : (
         <>
-          {/* Summary tiles */}
+          {/* ── Summary tiles — and three of them are the filter (owner, 2026-08-18) ──────────────
+              "We can do the twelfth one also." Tapping a figure shows you the people behind it.
+              ONLY where the tile's number and the segment's number are THE SAME QUESTION, because a
+              tile that opens a list with a different count in it is worse than a tile you can't tap:
+                · Total customers  ⇄ Everyone   — both the whole scope
+                · Regulars         ⇄ Regulars   — both "visits ≥ 2"
+                · Blocked          ⇄ Blocked    — both "blocked = true"
+                · New (last 30 days) has NO segment: it counts who FIRST CAME in 30 days, while
+                  "First-timers" counts who has been once. Different people, different number. It
+                  stays a plain figure until the list can be asked that question server-side. */}
           <div className="adm-stats" style={{ marginBottom: 14 }}>
-            <div className="adm-stat"><div className="k">Total customers</div><div className="v"><AnimatedNumber value={summary?.total ?? 0} loading={!summary} format={nfmt} /></div></div>
-            <div className="adm-stat"><div className="k">Regulars (came back)</div><div className="v"><AnimatedNumber value={summary?.returning ?? 0} loading={!summary} format={nfmt} /></div></div>
-            <div className="adm-stat"><div className="k">New (last 30 days)</div><div className="v"><AnimatedNumber value={summary?.newThisMonth ?? 0} loading={!summary} format={nfmt} /></div></div>
-            <div className="adm-stat"><div className="k">Blocked</div><div className="v"><AnimatedNumber value={summary?.blocked ?? 0} loading={!summary} format={nfmt} /></div></div>
+            <Tile label="Total customers" value={summary?.total} loading={!summary} seg="all" on={seg} pick={setSeg} />
+            <Tile label="Regulars (came back)" value={summary?.returning} loading={!summary} seg="regulars" on={seg} pick={setSeg} />
+            <Tile label="New (last 30 days)" value={summary?.newThisMonth} loading={!summary} />
+            <Tile label="Blocked" value={summary?.blocked} loading={!summary} seg="blocked" on={seg} pick={setSeg} />
           </div>
 
           {partial.length > 0 && (
