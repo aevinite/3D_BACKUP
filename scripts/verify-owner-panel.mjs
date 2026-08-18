@@ -349,6 +349,53 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
   }
 }
 
+// ── 10 · THE TWO HANDOFFS, CLOSED 2026-08-19 ─────────────────────────────────────────────────
+// H3 · a profile that IS a route must not also register a phone-Back layer, or the first press does
+//      nothing. H4 · the reads that do not depend on each other must START together.
+{
+  const host = read("components/owner/ownerProfileHost.ts");
+  const modal = read("components/admin/useAdminModal.ts");
+  const prof = read("components/admin/StaffProfile.tsx");
+  const page = read(PERSON);
+  const route = read("app/api/owner/staff/route.ts");
+
+  if (host && /pageHosted:\s*true/.test(code(host)))
+    ok("H3 — the owner's profile host declares itself page-hosted");
+  else bad("H3 — the owner's host no longer says `pageHosted: true`, so the route registers a back "
+    + "layer again and the phone's FIRST Back press goes dead");
+  if (modal && /backLayer\?:\s*boolean/.test(code(modal)) && /opts\?\.backLayer !== false/.test(code(modal)))
+    ok("H3 — useAdminModal still offers the opt-out, and still defaults to ON for every real modal");
+  else bad("H3 — useAdminModal's backLayer opt-out is gone (or its default flipped, which would strip "
+    + "phone-Back from all 13 admin modals)");
+  if (prof && /backLayer:\s*!hostRef\.pageHosted/.test(code(prof)))
+    ok("H3 — StaffProfile passes the host's answer through to the modal hook");
+  else bad("H3 — StaffProfile no longer passes `backLayer` through, so the host's answer is ignored");
+  if (page && /router\.replace\(/.test(code(page)) && !/router\.push\(/.test(code(page)))
+    ok("H3 — closing the profile REPLACES the detour instead of stacking another entry");
+  else bad("H3 — the profile close is back to `router.push`, so ✕ then Back re-opens what was closed");
+
+  if (route) {
+    const rc = code(route);
+    const started = /const treeQ = accessStateFor\(/.test(rc) && /const logsOnQ =/.test(rc) && /const visQ = loadLogVisibility\(/.test(rc);
+    const awaited = /await treeQ/.test(rc) && /await logsOnQ/.test(rc) && /await visQ/.test(rc);
+    if (started && awaited) ok("H4 — the profile's restaurant-wide reads are started together and awaited later");
+    else bad(`H4 — the profile's reads are sequential again (started=${started} awaited=${awaited}); `
+      + "each one is a round trip to Mumbai and the screen sits on \"Opening…\" for every one of them");
+    // the gates must STILL come first — firing these for a kitchen login is reads for a thrown-away answer
+    const gateAt = rc.indexOf("if (!hasProfile(u.role))");
+    const startAt = rc.indexOf("const treeQ = accessStateFor(");
+    if (gateAt > -1 && startAt > -1 && gateAt < startAt)
+      ok("H4 — they start AFTER the kitchen/module gates, so a kitchen login still costs nothing extra");
+    else bad("H4 — the parallel reads now start before the early returns, so a kitchen login pays for "
+      + "an answer the route throws away");
+    // floating promises must not be able to take the process down
+    if (/accessStateFor\(u\.restaurant_id\)\.catch\(/.test(rc) && /loadLogVisibility\([^)]*\)\s*\n?\s*\.catch\(/.test(rc.replace(/\r/g,"")))
+      ok("H4 — every started-early promise carries a catch, so one cannot fell the whole request");
+    else bad("H4 — a started-early promise has no catch; if it ever rejects while un-awaited it takes "
+      + "the process with it, not just this request");
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) console.log("\n❌ FAIL — the owner's cockpit is telling him something that did not happen.");
 else console.log("\n✅ PASS — Menu, Team and Settings each say what actually happened");
