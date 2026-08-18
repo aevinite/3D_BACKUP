@@ -245,6 +245,12 @@ check("the dashboard sends the VIEWED scope and the chosen range",
   "app/owner/page.tsx: the detail link stopped carrying `view` and `range`. Then it falls back to the\n       admin's own ?rid pin, and from the All-restaurants view every tile lands on ONE restaurant —\n       his bug of 2026-08-18.");
 {
   const rep = read("app/owner/reports/page.tsx");
+  // AND IT MUST BE READ IN AN EFFECT, NOT IN RENDER. As a useMemo it worked for a TYPED address and
+  // failed for a CLICKED link — the component renders before an App Router navigation commits the new
+  // URL, so it read the previous page's query and fell back to the pin, permanently.
+  check("the reports page reads `view` after the URL has committed",
+    /useEffect\(\(\) => \{ setViewPin\(new URLSearchParams/.test(rep),
+    "app/owner/reports/page.tsx: `view` is being read during render again (useMemo). On a clicked link\n       that reads the PREVIOUS page's query, so the scope silently falls back to the admin pin —\n       measured: url said view=all, the selector said Burger Barn, at 1s and at 16s.");
   check("the reports page lets `view` beat the admin pin",
     /viewPin/.test(rep) && /viewPin === "all" \? "" : viewPin/.test(rep),
     "app/owner/reports/page.tsx: it forces its scope to ?rid again, so a link from the All-restaurants\n       dashboard lands on the one restaurant the admin console drilled into.");
@@ -309,4 +315,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 47 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 48 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");

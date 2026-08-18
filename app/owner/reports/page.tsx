@@ -480,8 +480,18 @@ export default function OwnerReports() {
   // that wins here. `rid` keeps its old meaning untouched — it is the admin's AUTHORISATION pin and
   // still travels to the server as `scope=`; `view` is only a filter, and the server honours it only
   // for a restaurant already inside that scope, so this can narrow and never widen.
-  const viewPin = useMemo(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("view"), []);
+  // ── READ IT IN AN EFFECT, NOT IN RENDER (measured 2026-08-18) ────────────────────────────────
+  // This started life as a useMemo over window.location.search and it worked when the address was
+  // TYPED and failed when the link was CLICKED — which is the way anybody actually arrives. Measured:
+  // the URL read /owner/reports?rid=…&view=all&range=30d&open=volume and the scope selector still
+  // said "Burger Barn", at 1s and still at 16s. A useMemo runs during RENDER, and on an App Router
+  // client-side navigation the component renders before the new URL has committed, so it read the
+  // PREVIOUS page's query (which carries `rid` but no `view`) and fell back to the pin — for ever,
+  // because the memo has no dependency that would make it try again. The sibling effect below that
+  // reads `open` and `range` was never affected: effects run after the commit, which is exactly why
+  // the report and the period arrived correctly while the scope did not.
+  const [viewPin, setViewPin] = useState<string | null>(null);
+  useEffect(() => { setViewPin(new URLSearchParams(window.location.search).get("view")); }, []);
   useEffect(() => {
     if (viewPin) setRid(viewPin === "all" ? "" : viewPin);
     else if (scopePin) setRid(scopePin);
