@@ -78,6 +78,23 @@ export default function OwnerCustomers() {
   // left staring at a list that had stopped telling him whose guests they were, with no reason
   // given and nothing to press. Cleared on every load, so a passing blip disappears by itself.
   const [partial, setPartial] = useState<string[]>([]);
+  // ── ON A PHONE THE LIST IS CARDS, NOT AN EIGHT-COLUMN TABLE (owner, 2026-08-18) ─────────────────
+  // "We can do the eleventh one, but it will be showing in a customer tab only where all the history
+  // of, like, number and all that data has been stored at that tab only."
+  // So the phone list carries only what identifies a guest — name, number, how many visits, whether
+  // they are a regular or blocked — and the DATES move into that guest's own record, which is one
+  // tap away and is where their whole history already lives. Before this, four of the eight columns
+  // (first visit, last visit, the chip and the erase button) sat off the right edge behind a
+  // sideways scroll nobody signposted. Measured with matchMedia rather than a CSS breakpoint because
+  // every style on this page is inline; the list only renders after the first load, so there is no
+  // wrong-shape flash to see.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const sync = () => setNarrow(mq.matches);
+    sync(); mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   const filt = useRef({ search, rid, seg, sort }); filt.current = { search, rid, seg, sort };
   const searchRef = useRef(search); searchRef.current = search;
 
@@ -279,6 +296,51 @@ export default function OwnerCustomers() {
               <div className="adm-empty">Loading customers…</div>
             ) : rows.length === 0 ? (
               <div className="adm-empty">{search ? "No customers match that search." : "No customers yet. They appear here once guests dine in and share a name/phone."}</div>
+            ) : narrow ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                {rows.map((c) => (
+                  <div key={`${c.restaurant_id}:${c.phone}`}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px",
+                      border: "1px solid var(--border-c,#e5e7eb)", borderRadius: 13, opacity: c.blocked ? 0.65 : 1 }}>
+                    <button type="button" onClick={() => openDetail(c.phone)}
+                      aria-label={`Open ${c.name || "this guest"}'s record`}
+                      style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: 0,
+                        color: "inherit", font: "inherit", padding: 0, cursor: "pointer" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                        <b style={{ fontSize: 14.5 }}>{c.name || <span className="adm-muted">Guest</span>}</b>
+                        {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented"
+                          style={{ fontSize: 10.5, color: "var(--adm-ok,#16a34a)" }} />}
+                        {c.blocked ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>
+                          : c.returning ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-ok,#16a34a) 16%, transparent)", color: "var(--adm-ok,#16a34a)" }}>regular</span>
+                          : <span className="adm-chip">new</span>}
+                      </div>
+                      <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontFamily: "ui-monospace, monospace" }}>{showPhone(c.phone)}</span>
+                        <span>· {c.visits ?? 0} visit{(c.visits ?? 0) === 1 ? "" : "s"}</span>
+                        {rests.length > 1 && <span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span>}
+                      </div>
+                      {/* The dates are NOT here on purpose — they live in the record this opens. */}
+                      <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 3 }}>Tap for their visits, dates and bills</div>
+                    </button>
+                    <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${c.name || c.phone}`}
+                      disabled={erasing === `${c.restaurant_id}:${c.phone}`}
+                      onClick={(e) => { e.stopPropagation(); erase(c); }}
+                      style={{ flex: "none", padding: "9px 11px", fontSize: 13, color: "var(--muted)", background: "transparent",
+                        border: "1px solid transparent", minWidth: 40, minHeight: 40 }}>
+                      {erasing === `${c.restaurant_id}:${c.phone}` ? "…" : <i className="fas fa-trash-can" aria-hidden="true" />}
+                    </button>
+                  </div>
+                ))}
+                {search ? (
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
+                  </div>
+                ) : summary && summary.total > summary.shown ? (
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
+                  </div>
+                ) : null}
+              </div>
             ) : (
               <div className="adm-tablewrap" style={{ overflow: "auto" }}>
                 <table className="adm-table" style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -389,8 +451,11 @@ export default function OwnerCustomers() {
                         <div key={r.restaurant_id} style={{ border: "var(--border)", borderRadius: 11, padding: "9px 12px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           <b style={{ fontSize: 13 }}>{r.restaurantName}</b>
                           {r.blocked && <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>}
-                          <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-                            {r.visits} visit{r.visits === 1 ? "" : "s"} · since {fmt(r.first_seen_at)}
+                          {/* First AND last visit live here now — on a phone the list no longer
+                              carries the dates, so this record has to be complete on its own. */}
+                          <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12, textAlign: "right" }}>
+                            {r.visits} visit{r.visits === 1 ? "" : "s"}<br />
+                            first {fmt(r.first_seen_at)} · last {fmt(r.last_seen_at)}
                           </span>
                         </div>
                       ))}
