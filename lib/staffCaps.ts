@@ -41,6 +41,13 @@ export type Cap = {
   pin: boolean;
   /** can ONE person be given a different answer, or is this a restaurant-wide setting? */
   perPerson: boolean;
+  /** A SWITCH is on/off (or on/off/PIN); a VALUE is a thing you read — a % ceiling, a date reach.
+   *  A value row has no "Can do this" verdict, because there is nothing to be able to do. */
+  kind?: "switch" | "value";
+  /** The nearest row ABOVE this one that carries a Feature half. A sub-option belongs to its
+   *  parent's feature: with the Editor tab switched off for the restaurant, its nine parts must
+   *  vanish with it rather than sit there describing a tab nobody has. */
+  featureFrom?: Node;
 };
 
 // THE GROUP NAMES ARE THE ACCESS SCREEN'S OWN (owner, 2026-08-02: "in the permission, also,
@@ -71,13 +78,35 @@ export function capsForRole(role: string): Cap[] {
     // Three folders, three blocks — the SAME structure as Access → Manager (owner, 2026-08-02:
     // "if we add any feature in the manager section, it should be added in the user also").
     // Walking the folders (not a hard-coded row list) is what makes that automatic.
+    // EVERY ROW ACCESS SHOWS, not just the six a person can be given their own answer to (owner,
+    // 2026-08-18: "in the manager and any of the user access, everything should be set on default,
+    // and default will be given by me from the main access and permission"). A manager's page used
+    // to list 9 rows where Access → Manager lists 23 — the nine Edit-menu parts, the three log
+    // views, the dashboard reach, the bills reach and the two ceilings were simply absent, so the
+    // one screen that is supposed to answer "what may this person do?" told a smaller truth than
+    // the screen beside it. The owner's own page has mirrored its sub-rows since 2026-08-10; this
+    // is the manager's half of the same rule.
+    //
+    // The extra rows are restaurant-wide (they live in access_config, which has no per-person
+    // path), so they are shown READ-ONLY with the value the Access screen holds — never a dropdown
+    // that would save a key nothing reads.
     const mgr = section("mgrMenu")?.children ?? [];
-    const walk = (nodes: Node[], group: string) => {
+    const walk = (nodes: Node[], group: string, featureFrom?: Node) => {
       for (const n of nodes) {
+        const via = n.featureBind ? n : featureFrom;
         if (n.bind.t === "grant") {
-          add({ key: n.bind.flag, group, node: n, pin: false, perPerson: true });
+          add({ key: n.bind.flag, group, node: n, pin: false, perPerson: true, kind: "switch", featureFrom });
+        } else if (n.bind.t === "opt") {
+          add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group, node: n, pin: false,
+                perPerson: false, kind: n.choices?.length ? "value" : "switch", featureFrom: via });
+        } else if (n.bind.t === "limit") {
+          add({ key: `limit:${n.bind.id}.${n.bind.side}`, group, node: n, pin: false,
+                perPerson: false, kind: "value", featureFrom: via });
         }
-        if (n.children?.length && n.bind.t === "none") walk(n.children, group);
+        // …and INTO everything. A sub-option lives under the row it belongs to (the nine Edit-menu
+        // parts hang off a grant row, the ceilings off the action they cap), so stopping at a
+        // folder is what left them all out.
+        if (n.children?.length) walk(n.children, group, via);
       }
     };
     walk(mgr.find((n) => n.id === "mgr_menu_group")?.children ?? [], GROUP_MENUS);
@@ -86,7 +115,7 @@ export function capsForRole(role: string): Cap[] {
     // .mgrset, no per-person path), so shown READ-ONLY like the owner's pages: the structure
     // matches the Access screen without minting a dropdown that would save a key nothing reads.
     for (const n of section("mgrMenu")?.children.find((x) => x.id === "mgr_manage")?.children ?? []) {
-      if (n.bind.t === "tab") add({ key: `mgrset:${n.bind.key}`, group: GROUP_MGRSET, node: n, pin: false, perPerson: false });
+      if (n.bind.t === "tab") add({ key: `mgrset:${n.bind.key}`, group: GROUP_MGRSET, node: n, pin: false, perPerson: false, kind: "switch" });
     }
     return out;
   }
@@ -101,11 +130,16 @@ export function capsForRole(role: string): Cap[] {
     // restaurant-wide switch on the Access screen and no per-person row anywhere: the doc's rule
     // is "a person's rows are exactly the rows Access has for their role", and it wasn't true.
     const waiter = section("waiter")?.children ?? [];
-    const walkWaiter = (nodes: Node[], group: string) => {
+    const walkWaiter = (nodes: Node[], group: string, featureFrom?: Node) => {
       for (const n of nodes) {
-        if (n.bind.t === "tablet") add({ key: n.bind.key, group, node: n, pin: !!n.pin, perPerson: true });
-        else if (n.bind.t === "capTablet") add({ key: `cap:${n.bind.id}`, group, node: n, pin: !!n.pin, perPerson: true });
-        if (n.children?.length && n.bind.t === "none") walkWaiter(n.children, group);
+        const via = n.featureBind ? n : featureFrom;
+        if (n.bind.t === "tablet") add({ key: n.bind.key, group, node: n, pin: !!n.pin, perPerson: true, kind: "switch", featureFrom });
+        else if (n.bind.t === "capTablet") add({ key: `cap:${n.bind.id}`, group, node: n, pin: !!n.pin, perPerson: true, kind: "switch", featureFrom });
+        // …and the ceilings under them, read-only, for the same reason as the manager's (owner,
+        // 2026-08-18). A waiter's discount cap is restaurant-wide, so it is shown, not offered.
+        else if (n.bind.t === "limit") add({ key: `limit:${n.bind.id}.${n.bind.side}`, group, node: n, pin: false, perPerson: false, kind: "value", featureFrom: via });
+        else if (n.bind.t === "opt") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group, node: n, pin: false, perPerson: false, kind: n.choices?.length ? "value" : "switch", featureFrom: via });
+        if (n.children?.length) walkWaiter(n.children, group, via);
       }
     };
     walkWaiter(waiter.find((n) => n.id === "wtr_money")?.children ?? [], GROUP_WAITER_MONEY);
@@ -127,7 +161,7 @@ export function capsForRole(role: string): Cap[] {
     // A folder is not a permission; walk through it.
     const walkOwner = (nodes: Node[]) => {
       for (const n of nodes) {
-        if (n.bind.t === "section") add({ key: `section:${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
+        if (n.bind.t === "section") add({ key: `section:${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false, kind: "switch" });
         // THE TWO VIEW ROWS INSIDE "Audit & logs" (fixed by sweep T6, 2026-08-10). They are `opt`
         // binds — access_config.view_logs.owner_opts.{removals,activity} — not section keys, so
         // this walked straight past them while the comment right here claimed the opposite. The
@@ -135,8 +169,8 @@ export function capsForRole(role: string): Cap[] {
         // stated rule ("a person's rows are EXACTLY the rows Access has for their role"). Nothing
         // was ever mis-granted, because an owner's rows are read-only either way; the profile
         // simply told a smaller truth than the screen it is supposed to mirror.
-        else if (n.bind.t === "opt") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
-        else if (n.bind.t === "none" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
+        else if (n.bind.t === "opt") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false, kind: n.choices?.length ? "value" : "switch" });
+        else if (n.bind.t === "none" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false, kind: "switch" });
         // Walk INTO everything, folder or page: the sub-views inside "Audit & logs" are pages the
         // owner does or doesn't get, so they belong on their profile too (read-only, like the rest).
         if (n.children?.length) walkOwner(n.children);
@@ -181,9 +215,12 @@ export const isCapValue = (v: unknown, pin: boolean): v is CapValue =>
  *  while its feature is off, and it reappears the moment the feature comes back on.
  *  No feature half (Dashboard, the mgrset sections) or no loaded state yet → visible. */
 export function capVisible(cap: Cap, st: TreeState | null): boolean {
-  const fb = cap.node.featureBind;
+  // A sub-option inherits its parent's Feature half — with the Editor tab off for the restaurant,
+  // its nine parts go with it rather than describing a tab nobody has. (sweep T15, 2026-08-18)
+  const owner = cap.node.featureBind ? cap.node : cap.featureFrom;
+  const fb = owner?.featureBind;
   if (!fb || !st) return true;
-  return nodeValue({ ...cap.node, bind: fb }, st) === true;
+  return nodeValue({ ...owner!, bind: fb }, st) === true;
 }
 
 /** What the RESTAURANT gives this role for a row — the "(on)" inside "Default (on)". */
@@ -193,6 +230,17 @@ export function roleDefault(cap: Cap, st: TreeState | null): "on" | "off" | "pin
   const v = nodeValue(cap.node, st);
   if (typeof v === "string") return v === "pin" ? "pin" : v === "on" ? "on" : "off";
   return v ? "on" : "off";
+}
+
+/** A VALUE row's answer, in the words the Access screen uses for it — "Today only", "50%".
+ *  Never on/off: there is nothing here to be able to do, only a number or a choice to read. */
+export function roleValueLabel(cap: Cap, st: TreeState | null): string | null {
+  if (!st) return null;
+  const v = nodeValue(cap.node, st);
+  const picked = cap.node.choices?.find((c) => c.value === String(v));
+  if (picked) return picked.label;
+  if (cap.node.unit !== undefined) return `${v}${cap.node.unit}`;
+  return v === true ? "On" : v === false ? "Off" : String(v ?? "—");
 }
 
 /** What this person ACTUALLY has: their own setting if they have one, else the restaurant's. */

@@ -32,7 +32,7 @@ import { openRestaurantPanel, actLabel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
 import { expectHeader, type TreeState } from "@/lib/accessTree";
 import {
-  capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, countOverrides,
+  capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, roleValueLabel, countOverrides,
   type Cap, type CapValue,
 } from "@/lib/staffCaps";
 import {
@@ -604,7 +604,15 @@ function PermRow({ cap, tree, perms, onSet }: {
         <div className="ds">{cap.node.what}</div>
       </div>
       <div className="stp-perm-c">
-        {cap.perPerson ? (
+        {cap.kind === "value" ? (
+          // A VALUE, not a switch — a % ceiling or a date reach. There is nothing here to be able
+          // to do, so it gets no on/off chip and no "Can do this" underneath, just the answer the
+          // Access screen holds. (sweep T15, 2026-08-18)
+          <div className="stp-fixed">
+            <span className="stp-chip mut">{roleValueLabel(cap, tree) ?? "…"}</span>
+            <span className="hint">set for the restaurant</span>
+          </div>
+        ) : cap.perPerson ? (
           <select className="stp-sel" value={value} onChange={(e) => onSet(cap, e.target.value as CapValue)} aria-label={cap.node.name}>
             {capStates(cap.pin).map((s) => (
               <option key={s} value={s}>
@@ -613,16 +621,18 @@ function PermRow({ cap, tree, perms, onSet }: {
             ))}
           </select>
         ) : (
-          // Restaurant-wide row (an owner's pages): show the truth, don't offer a switch that
-          // would save nothing. The link goes to the screen that actually owns it.
+          // Restaurant-wide row (an owner's pages, a manager's sub-options): show the truth, don't
+          // offer a switch that would save nothing. The note above says where it is set.
           <div className="stp-fixed">
             <span className={`stp-chip ${eff === "on" ? "ok" : "bad"}`}>{eff ? STATE_LABEL[eff] : "—"}</span>
             <span className="hint">set for the restaurant</span>
           </div>
         )}
-        <span className={`stp-eff ${eff === "off" ? "no" : "yes"}`}>
-          {eff === "off" ? "Cannot do this" : eff ? "Can do this" : ""}
-        </span>
+        {cap.kind === "value" ? null : (
+          <span className={`stp-eff ${eff === "off" ? "no" : "yes"}`}>
+            {eff === "off" ? "Cannot do this" : eff ? "Can do this" : ""}
+          </span>
+        )}
       </div>
     </div>
   );
