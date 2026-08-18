@@ -45,6 +45,7 @@
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "npm run -s verify:clash-coverage",
     "verify:owner-clash": "node scripts/verify-owner-clash.mjs",
+    "verify:owner-panel": "node scripts/verify-owner-panel.mjs",
     "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
     "verify:outbound": "node scripts/verify-outbound-honesty.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
