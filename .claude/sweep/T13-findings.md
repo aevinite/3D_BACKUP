@@ -167,6 +167,45 @@ changes them the guard fails until the form agrees again.
 
 ## 🔗 HANDOFF — the real fix lives in another terminal's file
 
+### H3 · The first phone-Back press on a person's profile does nothing — `lib/backStack.ts` / `components/admin/useAdminModal.ts`
+
+**Where:** owner panel → Team → "Open profile" → press the phone's Back button, on a phone.
+**Phase:** P06366. **Found** 2026-08-18 in the post-merge pass, by driving it.
+
+Measured on 360×780, logging each press: **press 1 changes nothing** — same URL, sheet still open.
+Press 2 returns to the roster. Escape and the ✕ both close it on the first try, so nobody is stuck;
+it is one wasted press, every time, on the control a phone user reaches for first.
+
+**Cause:** `/owner/staff/<id>` is a ROUTE, so opening it is already one history step. `StaffProfile`
+then ALSO registers a back layer through `useAdminModal` → `useBackClose` — which is right in the
+Aevidine console, where that profile is a modal opened over a page without navigating. In the owner
+cockpit it is a page, so there are two back-steps for one visible layer.
+
+**Why I did not fix it:** the swallowed press is consumed inside `lib/backStack.ts` and
+`components/admin/useAdminModal.ts`. Neither is my territory, and the change carries a trade-off I
+should not pick alone — making the layer's close use `router.back()` fixes the double press but
+strands anyone who reached the profile from a typed or bookmarked URL with no roster behind it.
+
+**Change needed:** let a back layer opt out of pushing its own buffer entry when the thing it closes
+is a ROUTE rather than an overlay — or have `StaffProfile` skip that layer when its host says it is
+page-hosted (`ProfileHost` already carries a `can` capability bag that could say so).
+**Severity:** low-medium. Nothing is lost or wrong; it is one dead press on every profile close.
+
+### H4 · Opening one person's profile takes 4–10 seconds — `app/api/owner/staff/route.ts`
+
+**Where:** owner panel → Team → "Open profile". **Measured** five times: 3.9s, 6.4s, 7.0s, 8.7s,
+10.1s to the person's name appearing. One `?staff=` request, status 200, no console errors.
+
+It is **honest** while it waits — the sheet paints "Staff profile" with "Opening…" and a working ✕ —
+so this is slowness, not a lie, which is why it is not one of the numbered problems. But the detail
+endpoint does a lot per open: the person, the pay summaries, a `lfh_staff_performance` RPC, the
+activity feed, `accessStateFor`, `payrollByRid` and `loadLogVisibility`. Several already run in
+parallel; the RPCs look like the long pole.
+
+**Change needed:** measure which read dominates, and consider deferring the performance RPC and the
+activity feed until after first paint — the name, role and pay setup are what the owner opened it for.
+**Not mine:** that route is another terminal's file.
+
 ### H1 · `app/owner/layout.tsx` — a stale comment, and a first-ever blip lands on the error page
 
 Line ~50 says `enabledOwnedRestaurantIds` *"swallows a read error into an empty list rather than
