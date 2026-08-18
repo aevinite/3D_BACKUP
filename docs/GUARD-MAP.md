@@ -84,6 +84,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | the tax on a real bill, end to end (incl. an MRP bottle) | `verify:tax-mode-e2e`, `test:totals` (client maths vs the server's, to the cent) | `.env.local` | `verify:tax-mode-e2e` **YES** |
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
 | ↳ a DATE, a TIME or a DAY on any printed document, or the rows that explain a bill's money | `verify:print-paper` ← every document must read the SAME on every device (it re-renders under five time zones), an MRP line is counted once, and a printed percentage describes the rupees beside it | nothing | no |
+| ↳ auto-print itself — WHO prints and WHETHER it prints at all | `verify:print-queue` ← a ticket is a ROW (mig 335), the print path never refuses a hidden/covered window, the targeted slice carries the queue, and one shared claim serves both panels | nothing | no |
 | joining / merging tables | `verify:merge`, `verify:merge-who`, `verify:merge-keeps-mark`, `verify:void-party` | mixed | some **YES** |
 | the waiter rota | `verify:rota-clash` | `.env.local` | **YES** |
 | a customer / CRM field | `verify:customers`, `verify:customer-erase`, `verify:personal-data` | `.env.local` | **YES** |

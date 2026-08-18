@@ -2485,7 +2485,8 @@ function formGeneral(s) {
       : `<div class="hint">Auto-print isn't enabled for this restaurant yet — ask your admin to turn it on.</div>`}
     <button type="button" class="btn" id="kotPreviewBtn" style="margin-top:14px">🖨 Preview a sample KOT</button>
     <p style="color:var(--muted);font-size:12px;margin:8px 0 0">Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
-  </div>`;
+  </div>
+  ${printHereCardHtml(s)}`;
   }
   if (sec === "sessions") {
     return `
@@ -6134,6 +6135,21 @@ function bindEditor() {
 
   // Kitchen settings: "Preview a sample KOT" test-print button.
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
+  // Off / Print here / Backup only — a per-device choice (see printHereCardHtml). Saved the instant
+  // it is tapped (no Save button to forget), and it prints straight away if something is waiting, so
+  // switching it on IS the test that it works.
+  document.querySelectorAll("[data-printhere-mode]").forEach((b) => (b.onclick = () => {
+    const v = b.dataset.printhereMode;
+    lsSet(PRINT_HERE_KEY, PRINT_HERE_MODES.includes(v) ? v : "off");
+    renderEditor();
+    if (v === "off") toast("This screen will not print kitchen tickets.", "ok");
+    else {
+      toast(v === "backup"
+        ? "This screen will print a ticket the kitchen hasn't printed within 30 seconds."
+        : "This screen now prints every new kitchen ticket.", "ok");
+      managerPrintPass();
+    }
+  }));
 
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
   // boxes it depends on — the mode AND the price typed above it. A stale example is worse
@@ -11937,6 +11953,9 @@ function kotLineHtml(r) { return LFH_BILLDOC.kotLineHtml(r); }
 function kotTicketHtml(o) { return LFH_BILLDOC.kotDocHtml(o); }
 
 // Print a ticket through a hidden iframe — no pop-up to allow, nothing left on screen.
+// Answers false when the print could not even be started (billdoc missing after a bad deploy, the
+// iframe blocked). The manager print station reports that to the server, which requeues the job —
+// so a swallowed failure is no longer a silently lost ticket. Existing callers ignore the value.
 function printTicketHtml(html) {
   try {
     const ifr = document.createElement("iframe");
@@ -11956,7 +11975,8 @@ function printTicketHtml(html) {
       try { w.focus(); w.print(); } catch (e) {}
       setTimeout(cleanup, 60000);
     }, 250);
-  } catch (e) { /* printing must NEVER break the panel */ }
+    return true;
+  } catch (e) { return false; /* printing must NEVER break the panel */ }
 }
 // Reprint ONE order's kitchen ticket, on THIS device.
 //
@@ -12121,6 +12141,122 @@ async function printJobHere(id, btn) {
     toast("Printed here ✓ — the kitchen job is closed.", "ok");
     await pollOrders();
   } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
+}
+
+// ── THIS SCREEN CAN BE THE PRINTER (owner, 2026-08-17) ──────────────────────────────────────────
+// "In the kitchen they can't keep a PC… if you minimize, or open another app on the same PC, the KOT
+// prints totally stop. What I want is auto-print in the manager panel — when you turn that on, the
+// ticket prints there instead of the kitchen."
+//
+// Since mig 335 a new order QUEUES A ROW (print_jobs) instead of being noticed by one tab, so this
+// screen can simply be a second claimant on the same queue. The atomic claim on the server means
+// the kitchen screen and this one can both be watching and a ticket still comes out exactly once.
+//
+// The choice is PER DEVICE and lives in this browser, not in the database — the counter PC prints,
+// the manager's phone must not, and both are logged in as the same person, so a restaurant-wide
+// setting could not tell them apart. Three positions:
+//   off     — nothing prints here (the default; nothing changes for anyone).
+//   on      — this screen claims tickets the moment they are queued. Use it when the printer is at
+//             the counter and the kitchen has no screen at all.
+//   backup  — this screen only takes a ticket the KITCHEN hasn't printed within 30 seconds. Use it
+//             when the kitchen screen is the main printer and this is the safety net.
+// "backup" is enforced on the SERVER as well (lib/printQueue → claimKotJobs minAgeMs), so a stale
+// tab can never jump the kitchen's queue.
+const PRINT_HERE_KEY = "lfh_print_here";
+const PRINT_HERE_MODES = ["off", "on", "backup"];
+const printHereMode = () => { const v = lsGet(PRINT_HERE_KEY, "off"); return PRINT_HERE_MODES.includes(v) ? v : "off"; };
+// Auto-print has to be on for the RESTAURANT (admin entitlement + owner toggle, mig 107) before any
+// screen prints anything automatically. Without this a device switch would look like it worked and
+// the server would answer `off: true` forever.
+const autoPrintLiveHere = () => {
+  const st = (state.data && state.data.settings) || {};
+  return st.auto_print_kot === true && st.auto_print_kot_allowed === true;
+};
+let lastPrintedHere = null;   // { kot, table, at } — so the card can say it is genuinely working
+function printHereCardHtml(s) {
+  const mode = printHereMode();
+  const live = s.auto_print_kot === true && s.auto_print_kot_allowed === true;
+  const btn = (v, label, hint) => `<button type="button" class="btn${mode === v ? " primary" : ""}" data-printhere-mode="${v}" title="${esc(hint)}">${esc(label)}</button>`;
+  const last = lastPrintedHere
+    ? `<p style="color:var(--muted);font-size:12px;margin:10px 0 0">Last ticket printed on this screen: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}</p>`
+    : "";
+  return `
+  <div class="card"><h3>Print kitchen tickets on THIS screen</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      A setting for <b>this device only</b> — not for the restaurant. Turn it on where the printer
+      actually is (usually the counter PC). Every new order is queued by the server, so whichever
+      screen is switched on prints it; two screens can never print the same ticket twice, and a
+      ticket nobody printed waits in the queue instead of being lost.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${btn("off", "Off", "Nothing prints on this screen")}
+      ${btn("on", "Print here", "This screen prints every new kitchen ticket")}
+      ${btn("backup", "Backup only", "Prints here only if the kitchen screen hasn't within 30 seconds")}
+    </div>
+    ${live ? "" : `<div class="hint" style="margin-top:12px">Auto-print is switched OFF for this restaurant, so nothing will print here yet — turn on “Auto-print the KOT” above (and ask your admin if it isn't offered).</div>`}
+    ${last}
+  </div>`;
+}
+// One pass of the queue: what is waiting → claim it → print it → say what happened.
+//
+// Called on every ops breadcrumb (so a ticket prints the instant the order lands) and by a 20s
+// timer as the backstop. It deliberately does NOT check document.hidden: this screen being covered
+// by another window is exactly the situation the owner reported, and a print that does not happen is
+// reported failed and requeued rather than lost.
+let printPassBusy = false;
+async function managerPrintPass() {
+  const mode = printHereMode();
+  if (mode === "off" || printPassBusy || !autoPrintLiveHere()) return;
+  printPassBusy = true;
+  try {
+    const r = await api("GET", "/print-jobs/pending" + (mode === "backup" ? "?mode=backup" : ""));
+    const jobs = (r && r.jobs) || [];
+    if (!jobs.length) return;
+    // The CLAIM is a plain fetch, never the offline outbox: a claim replayed hours later would print
+    // a stale ticket behind everyone's back. A claim that fails simply waits for the next pass.
+    const cr = await fetch("/api/editor" + ridQ("/print-jobs/claim"), {
+      method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+      body: JSON.stringify({ ids: jobs.map((j) => j.id), mode }),
+    });
+    if (!cr.ok) return;
+    const won = new Set(((await cr.json().catch(() => ({}))).won) || []);
+    for (const j of jobs.filter((x) => won.has(x.id))) {
+      const o = j.order || {};
+      const rows = (j.items && j.items.length) ? j.items : (Array.isArray(o.items) ? o.items : []);
+      // A retry says so on the paper (`attempts > 0`) — see the same rule in the kitchen panel.
+      const okPrint = printTicketHtml(kotTicketHtml({
+        title: `KOT ${o.kot_no ?? "—"}`,
+        rname: (state.data.restaurant || {}).name || "Kitchen",
+        head: "KITCHEN TICKET",
+        kot: o.kot_no ?? "—",
+        tableLabel: tablePrintLabel(o.table_number),
+        when: LFH_BILLDOC.kotWhen(o.created_at),
+        lines: rows,
+        allergies: Array.isArray(o.allergies) ? o.allergies : [],
+        reprint: j.reprint !== false || (j.attempts || 0) > 0,
+      })) !== false;
+      // The done report DOES ride the outbox — it is idempotent, and losing it would let the
+      // two-minute reclaim print the same ticket again.
+      api("POST", `/print-jobs/${j.id}/done`, { ok: okPrint, error: okPrint ? undefined : "print call failed on the manager screen" }).catch(() => {});
+      if (okPrint) {
+        lastPrintedHere = { kot: o.kot_no ?? null, table: o.table_number != null ? tablePrintLabel(o.table_number) : null, at: new Date().toISOString() };
+        // Repaint the card if the person happens to be looking at it, so "is this thing working?"
+        // is answered on screen instead of by walking to the printer.
+        if (document.querySelector("[data-printhere-mode]")) renderEditor();
+      } else {
+        // Tell the manager once a minute at most — the same discipline the kitchen panel uses.
+        notePrintTroubleHere();
+      }
+      await new Promise((res) => setTimeout(res, 400));   // serialized: a burst can't stack dialogs
+    }
+  } catch (e) { /* offline / busy — the next pass retries, and the job is still queued */ }
+  finally { printPassBusy = false; }
+}
+let lastPrintTroubleHereAt = 0;
+function notePrintTroubleHere() {
+  if (Date.now() - lastPrintTroubleHereAt < 60000) return;
+  lastPrintTroubleHereAt = Date.now();
+  toast("A kitchen ticket wouldn't print on this screen — check the printer.", "err");
 }
 
 // SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
@@ -14429,6 +14565,10 @@ function startOrderWatch() {
         // order moved — and LFH_INV.live() self-guards on "tab actually visible / no popup open /
         // not backgrounded" and coalesces a rush, so an idle floor pays nothing. (T13, 2026-08-05)
         if (state.tab === "inventory" && window.LFH_INV && window.LFH_INV.live) window.LFH_INV.live();
+        // Is THIS screen the printer? Then an ops breadcrumb is also "a ticket may be waiting" — the
+        // same event the kitchen screen prints on (mig 335 deliberately gives an auto job NO
+        // breadcrumb of its own; it rides the order's). A no-op unless the device switch is on.
+        managerPrintPass();
       },
       // `menu` carries dish/category/filter/settings edits AND — since mig 299 — a change to this
       // restaurant's permissions. So re-read who we are alongside the menu: refreshWhoami() is one
@@ -14439,6 +14579,11 @@ function startOrderWatch() {
       menu: () => { refreshWhoami(); if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
     setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 60000); // backup sync; skip on a hidden/backgrounded tab (realtime refetches on wake) so an idle tab stops costing egress (B18)
+    // The print station's own backstop, and it runs even while the tab is HIDDEN — being covered by
+    // another window is precisely the case this feature exists for. It is a tiny scoped read and it
+    // returns immediately unless this device is switched on to print.
+    setInterval(() => { managerPrintPass(); }, 20000);
+    managerPrintPass();   // …and once on boot, so a ticket queued while this screen was shut prints now
     // CATCH UP WHILE THE SOCKET IS DOWN BUT READS STILL WORK (sweep 2026-08-04).
     // The 60s timer above was the ONLY backstop for a socket that is connected-but-dead — a
     // blocked websocket (restaurant wifi, a proxy) or a drop the browser hasn't noticed. So a

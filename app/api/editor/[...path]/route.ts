@@ -40,6 +40,13 @@ import { auditForReader, forReader } from "@/lib/auditActor";
 import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
+// The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
+// claim from the same rows, and one implementation is what stops them drifting into two ideas of
+// "claimed" — which would be a ticket printed twice.
+import { pendingKotJobs, claimKotJobs, finishKotJob } from "@/lib/printQueue";
+// How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
+// gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
+const BACKUP_PRINTER_MS = 30000;
 import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
@@ -1851,6 +1858,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         merges,
         ...(printer ? { printer } : {}),
       });
+    }
+
+    // ── print-jobs/pending — THIS SCREEN IS A PRINTER TOO (owner, 2026-08-17) ───────────────────
+    // "Add auto-print in the manager panel — when you turn that on, the ticket prints there instead
+    // of the kitchen." The kitchen PC could not be trusted to keep its Chrome tab in front, and the
+    // ticket was lost when it wasn't; since mig 335 every new order queues a ROW, so the honest fix
+    // is to let a SECOND screen claim the same rows. Whichever screen is awake prints; the atomic
+    // claim in lib/printQueue.ts means they can never both print the same ticket.
+    //
+    // Asked for ONLY by a device whose own "print tickets on this screen" switch is on (it is a
+    // per-device choice, kept in that browser — the counter PC prints, the manager's phone must not),
+    // and only while auto-print is switched on for the restaurant at all. `?mode=backup` is the
+    // gentler setting: it asks for jobs at least 30 seconds old, so the KITCHEN printer always gets
+    // first refusal and this screen is the safety net rather than the main path. The age test is
+    // enforced again at the claim, server-side, so a stale tab cannot jump the queue.
+    if (path[0] === "print-jobs" && path[1] === "pending") {
+      const st = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle()).data as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+      if (!(st?.auto_print_kot === true && st?.auto_print_kot_allowed === true)) return ok({ jobs: [], off: true });
+      const backup = new URL(req.url).searchParams.get("mode") === "backup";
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: backup ? BACKUP_PRINTER_MS : 0 }) });
     }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
@@ -4252,6 +4280,42 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }));
       await log("editor", "kot_reprint_sent", { order_id: orderId, detail: `KOT #${o.kot_no ?? "—"}`, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
+    }
+
+    // ── print-jobs/claim + /done — the manager screen as a printer (owner, 2026-08-17) ──────────
+    // The same two steps the kitchen screen has always used, on the same shared implementation
+    // (lib/printQueue.ts): win the row with ONE filtered UPDATE, print, then say what happened. A
+    // claim is a PLAIN fetch on the panel side, never the offline outbox — a claim replayed hours
+    // later would print a stale ticket behind everyone's back — while the done report does ride the
+    // outbox, because it is idempotent and losing it would let the 2-minute reclaim reprint.
+    if (a === "print-jobs" && b === "claim") {
+      const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).map(String).slice(0, 20) : [];
+      if (!ids.length) return ok({ won: [] });
+      const backup = body?.mode === "backup";
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: backup ? BACKUP_PRINTER_MS : 0 }) });
+    }
+
+    if (a === "print-jobs" && c === "done") {
+      const okPrint = !!(body && body.ok === true);
+      const r = await finishKotJob(rid, String(b), okPrint, body?.error ? String(body.error) : undefined);
+      if (!r.found) return err("That print job is gone.", 404);
+      // Same two diary lines the kitchen writes, so the Activity log reads the same whichever screen
+      // the paper came out of — it names the panel, and that is the only difference.
+      if (okPrint) {
+        await log("editor", "kot_printed", {
+          order_id: r.orderId, table_number: r.tableNumber, device_id: dev, restaurant_id: rid,
+          detail: `${r.reprint ? "reprinted" : "printed"} KOT${r.kotNo != null ? ` #${r.kotNo}` : ""} on this screen`,
+        });
+        return ok({ ok: true });
+      }
+      await log("editor", "kot_print_failed", {
+        order_id: r.orderId, device_id: dev, restaurant_id: rid,
+        level: r.parked ? "warn" : "info",
+        detail: r.parked
+          ? `gave up after ${r.attempts} tries — ${String(body?.error || "print failed").slice(0, 120)}`
+          : `try ${r.attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
+      });
+      return ok({ ok: true, attempts: r.attempts });
     }
 
     // print-jobs/:id/dismiss — the manager handled a stuck/failed reprint another way

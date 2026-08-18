@@ -23,6 +23,9 @@ import { worthLogging } from "@/lib/dbRefusal";
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
+// The print queue itself (mig 269 + 335) — shared with the manager route so two panels can never
+// drift into two different ideas of what "claimed" means.
+import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued } from "@/lib/printQueue";
 
 export const dynamic = "force-dynamic";
 
@@ -133,11 +136,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // badge only appears on the next full refresh (up to 60s later), which is the whole
         // point of the mark. It's a two-column read of a table that only holds MARKED tables,
         // so it is far smaller than the orders it travels with.
-        const [live, tags] = await Promise.all([
+        // ── AND THE PRINT QUEUE, WHEN THIS SCREEN IS THE PRINTER (mig 335, ?jobs=1) ──────────
+        // A NEW ORDER'S BREADCRUMB NAMES ITS TABLE, so a new order is answered by THIS targeted
+        // slice — not by a full board read. That is the right thing for egress and it was silently
+        // wrong for printing: the queued ticket was only seen on the next FULL pass, i.e. up to 60
+        // seconds later on the 60s backstop (measured, 2026-08-18, while building this). A KOT that
+        // reaches the pass a minute after the order does is not auto-printing.
+        // So the slice carries the queue too — but only when the panel says it is printing
+        // (`jobs=1`, sent only while auto-print is on for this restaurant), so an ordinary kitchen
+        // display's targeted refetch is exactly as cheap as it was. One indexed read
+        // (print_jobs_active_idx) on the one device per restaurant that prints.
+        const wantJobs = new URL(req.url).searchParams.get("jobs") === "1";
+        const [live, tags, sliceJobs] = await Promise.all([
           liveOrdersAndItems(rid, [tbl], true),
           tableTagMap(rid),
+          wantJobs ? pendingKotJobs(rid, { includeAuto: true }) : Promise.resolve([]),
         ]);
-        return ok({ orders: live.orders, items: live.items, tableTags: tags });
+        return ok({ orders: live.orders, items: live.items, tableTags: tags, printJobs: sliceJobs });
       }
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
@@ -184,41 +199,33 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (platL.effective) { if (kOn("zomato")) kSources.add("zomato"); if (kOn("swiggy")) kSources.add("swiggy"); if (kOn("website")) kSources.add("takeaway"); }
       if (parcL.effective) kSources.add("parcel");
       const platformRows = ((must(platform) || []) as { source?: string }[]).filter((r) => kSources.has(String(r.source)));
-      // ── PRINT JOBS WAITING FOR THIS KITCHEN SCREEN (mig 269) ──────────────────────
-      // The durable reprint queue: the manager's "Reprint in kitchen" is a row, and this
-      // ride-along is how it reaches the printer — on the very board read the insert's
-      // breadcrumb already triggers, so there is NO new poll and nothing to time. A job
-      // 'printing' for over 2 minutes is offered again: that means a tab died mid-print
-      // (closed, crashed, power), and abandoning it silently would lose the ticket.
-      // Orders + item rows ride along too (only when jobs exist — the common board read
-      // pays nothing): a reprint may be for a KOT that has LEFT the active board (served),
-      // so the panel's own state cannot be trusted to still hold it.
-      const staleIso = new Date(Date.now() - 120000).toISOString();
-      const jobs = (await sb.from("print_jobs")
-        .select("id, order_id, reprint, attempts, status, created_at")
-        .eq("restaurant_id", rid).eq("kind", "kot")
-        .or(`status.eq.queued,and(status.eq.printing,claimed_at.lt.${staleIso})`)
-        .order("created_at").limit(10)).data || [];
-      let printJobs: unknown[] = [];
-      if (jobs.length) {
-        const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
-        const [jo, ji] = await Promise.all([
-          // `.is("deleted_at", null)` — A TICKET REMOVED FROM THE BOOKS IS NOT PRINTED (2026-08-11,
-          // T7 finding F11). The filter below reads "an order deleted since the request has nothing
-          // to print", but it only drops a job whose order ROW is gone, and a soft delete never
-          // removes the row — so a bill deleted between queueing the reprint and the kitchen
-          // claiming it still came out of the printer. Excluded in the query, so a deleted order
-          // simply has no `order` and the existing filter does the rest.
-          sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").in("id", oids).eq("restaurant_id", rid).is("deleted_at", null),
-          sb.from("order_items").select("id, order_id, title, qty, note, options, removed").in("order_id", oids).eq("restaurant_id", rid).order("created_at"),
-        ]);
-        const byId = new Map(((jo.data || []) as { id: string }[]).map((o) => [o.id, o]));
-        printJobs = jobs
-          .map((j) => ({ ...j, order: byId.get(j.order_id as string) || null, items: ((ji.data || []) as { order_id: string }[]).filter((r) => r.order_id === j.order_id) }))
-          .filter((j) => j.order); // deleted or gone since the request → nothing to print
-      }
+      // ── PRINT JOBS WAITING FOR THIS KITCHEN SCREEN (mig 269, widened by mig 335) ───
+      // The durable queue: a ticket to print is a ROW, and this ride-along is how it reaches the
+      // printer — on the very board read the order's own breadcrumb already triggers, so there is
+      // NO new poll and nothing to time. A job 'printing' for over two minutes is offered again:
+      // that means a tab died mid-print (closed, crashed, power), and abandoning it silently would
+      // lose the ticket. The reading/claiming/reporting itself now lives in lib/printQueue.ts,
+      // shared with the manager route so a second claimant can never drift from this one.
+      //
+      // `?autojobs=1` IS A PANEL-VERSION HANDSHAKE, not a preference. A kitchen panel from before
+      // mig 335 prints new orders by diffing its own board; hand that panel the new auto rows as
+      // well and every ticket comes out twice. Only a panel that has GIVEN UP its board diff asks
+      // for them — and staff can legitimately be running a weeks-old panel
+      // (verify:panel-cache / docs: "Staff can run a WEEKS-OLD panel"), so this has to be safe by
+      // construction rather than by everyone updating at once.
+      const autoJobs = new URL(req.url).searchParams.get("autojobs") === "1";
+      const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs });
+      // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
+      // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
+      // it: on a database that has not had mig 335 yet, nothing is queued, the panel sees these
+      // orders are unclaimed by anyone and prints them the old way instead of going quiet.
+      const autoOn = !!((must(settings) || {}).auto_print_kot && (must(settings) || {}).auto_print_kot_allowed);
+      const queuedFor = autoJobs && autoOn
+        ? await ordersAlreadyQueued(rid, (live.orders as { id: string; status?: string }[])
+            .filter((o) => o.status === "received" || o.status === "preparing").map((o) => o.id))
+        : [];
       return ok({
-        printJobs,
+        printJobs, queuedFor,
         orders: live.orders, items: live.items, dishes: must(dishes),
         platform: platformRows,
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
@@ -518,13 +525,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "print-jobs" && b === "claim") {
       const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).map(String).slice(0, 20) : [];
       if (!ids.length) return ok({ won: [] });
-      const staleIso = new Date(Date.now() - 120000).toISOString();
-      const won = must(await sb.from("print_jobs")
-        .update({ status: "printing", claimed_at: nowIso() })
-        .in("id", ids).eq("restaurant_id", rid)
-        .or(`status.eq.queued,and(status.eq.printing,claimed_at.lt.${staleIso})`)
-        .select("id"));
-      return ok({ won: (won || []).map((r: { id: string }) => r.id) });
+      return ok({ won: await claimKotJobs(rid, ids) });
     }
 
     // ── print-jobs/:id/done — the printed/failed report closes the loop ──────────────
@@ -534,53 +535,37 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the job parks as 'failed', which is what the manager's floor strip surfaces.
     if (a === "print-jobs" && c === "done") {
       const okPrint = !!(body && body.ok === true);
+      // One shared implementation (lib/printQueue.ts) does the row work and hands back what was on
+      // the paper, so the diary line can name the KOT and the table instead of a job uuid nobody
+      // can look up.
+      const r = await finishKotJob(rid, String(b), okPrint, body?.error ? String(body.error) : undefined);
+      if (!r.found) return err("That print job is gone.", 404);
       if (okPrint) {
-        // What was on the paper — read BEFORE the row is closed, so the diary line can name the KOT
-        // and the table instead of a job uuid nobody can look up. One tiny by-id read on a path that
-        // fires once per printed ticket.
-        const job = (await sb.from("print_jobs").select("order_id, reprint").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
-          { order_id?: string | null; reprint?: boolean } | null;
-        must(await sb.from("print_jobs").update({ status: "done", done_at: nowIso(), error: null }).eq("id", b).eq("restaurant_id", rid));
-        await sb.from("printer_events").update({ status: "resolved", resolved_at: nowIso() }).eq("restaurant_id", rid).eq("status", "open");
         // ── A TICKET COMING OUT OF THE PRINTER IS AN EVENT WORTH KEEPING (owner, 2026-08-14) ─────
         // The printer had exactly one kind of Activity row — `printer_problem`, raised by a person
         // tapping "paper out". So the log could say the printer was complained about and never that
         // it worked, which makes "was the printer playing up on Saturday?" unanswerable from the one
-        // screen built to answer questions like that. Now both ends are recorded, and the Activity
-        // log's new Printer chip has something on both sides of the story.
+        // screen built to answer questions like that.
         // Deliberately `info`: a ticket printing is normal service, not a notable event, so it never
         // colours a row or rings the bell — it is there to be counted and filtered.
-        const ord = job?.order_id
-          ? (await sb.from("orders").select("kot_no, table_number").eq("id", job.order_id).eq("restaurant_id", rid).maybeSingle()).data as
-            { kot_no?: number | null; table_number?: string | null } | null
-          : null;
         await logAction("kitchen", "kot_printed", {
-          ...adminMark, order_id: job?.order_id ?? null, table_number: ord?.table_number ?? null,
+          ...adminMark, order_id: r.orderId, table_number: r.tableNumber,
           device_id: dev, restaurant_id: rid,
-          detail: `${job?.reprint ? "reprinted" : "printed"} KOT${ord?.kot_no != null ? ` #${ord.kot_no}` : ""}`,
+          detail: `${r.reprint ? "reprinted" : "printed"} KOT${r.kotNo != null ? ` #${r.kotNo}` : ""}`,
         });
         return ok({ ok: true });
       }
-      const cur = must(await sb.from("print_jobs").select("attempts, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      if (!cur) return err("That print job is gone.", 404);
-      const attempts = (cur.attempts || 0) + 1;
-      const parked = attempts >= 5;
-      must(await sb.from("print_jobs").update({
-        status: parked ? "failed" : "queued",
-        attempts, claimed_at: null,
-        error: String(body?.error || "print failed").slice(0, 300),
-      }).eq("id", b).eq("restaurant_id", rid));
       // The other half of the same story. `warn` once it has given up after five tries — that IS
       // notable, it means a ticket never reached the pass — and plain `info` while it is still
       // retrying, so a flaky first attempt doesn't colour the log red.
       await logAction("kitchen", "kot_print_failed", {
-        ...adminMark, order_id: (cur.order_id as string) ?? null, device_id: dev, restaurant_id: rid,
-        level: parked ? "warn" : "info",
-        detail: parked
-          ? `gave up after ${attempts} tries — ${String(body?.error || "print failed").slice(0, 120)}`
-          : `try ${attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
+        ...adminMark, order_id: r.orderId, device_id: dev, restaurant_id: rid,
+        level: r.parked ? "warn" : "info",
+        detail: r.parked
+          ? `gave up after ${r.attempts} tries — ${String(body?.error || "print failed").slice(0, 120)}`
+          : `try ${r.attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
       });
-      return ok({ ok: true, attempts });
+      return ok({ ok: true, attempts: r.attempts });
     }
 
     // ── printer-events — a printer problem, reported by a person or by the code ──────
