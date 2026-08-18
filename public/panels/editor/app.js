@@ -2236,6 +2236,14 @@ const SETTINGS_SECTIONS = [
   { id: "access", label: "Sections", sub: "who serves which table", icon: "fa-users-rectangle", title: "Waiter sections" },
   { id: "billing", label: "Billing", sub: "invoice & tax", icon: "fa-file-invoice", title: "Billing settings" },
   { id: "kitchen", label: "Kitchen", sub: "KOT printing", icon: "fa-fire-burner", title: "Kitchen settings" },
+  // PRINTING IS ITS OWN ROW, AND IT IS VISIBLE TO EVERYONE (owner, 2026-08-18: the printer setup
+  // "should be shown in kitchen panel able to see the whole thing inside the setting, manager also
+  // and owner"). It is NOT the "kitchen" row above: that one holds the admin-owned switches and is
+  // hidden from everyone in this panel by his 2026-07-31 decision. This row holds no admin setting —
+  // it SHOWS where printing stands (in plain words, read-only), lets THIS DEVICE agree to be the
+  // printer, and opens the full setup guide. Nothing here can change the restaurant's settings, so
+  // there is nothing to hide.
+  { id: "printing", label: "Printing", sub: "printer & setup guide", icon: "fa-print", title: "Printing & printer setup" },
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
 ];
 
@@ -2471,6 +2479,7 @@ function formGeneral(s) {
     </div>
   </div>`;
   }
+  if (sec === "printing") return formPrinting(s);
   if (sec === "kitchen") {
     return `
   <div class="card"><h3>Kitchen printing</h3>
@@ -6135,6 +6144,9 @@ function bindEditor() {
 
   // Kitchen settings: "Preview a sample KOT" test-print button.
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
+  // Settings → Printing offers the same per-device Yes/No the floor strip does, so it is bound on the
+  // same helper — one handler, two places, no chance of one of them going dead.
+  bindPrintStationStrip(ed);
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
   // boxes it depends on — the mode AND the price typed above it. A stale example is worse
   // than none: it would show ₹294 while the box says ₹500 and quietly teach the wrong rule.
@@ -12151,6 +12163,12 @@ async function printJobHere(id, btn) {
 //     panel is also opened on PHONES. A phone that claimed a ticket would "print" it into a dialog
 //     nobody looks at and report it done — a LOST ticket, caused by the feature meant to save it. So
 //     a device that has not answered never claims, and the honest default is no.
+// The setup guide the app serves (public/print-setup.html) — one constant, because it is linked from
+// the floor strip AND from Settings → Printing, and a second copy of a path is how one of them rots.
+// (This declaration was lost once while the print-station code was being reshaped, leaving both links
+// referencing a name that no longer existed — a ReferenceError on every floor render. verify:print-queue
+// caught it; that is what the check is for.)
+const PRINT_SETUP_URL = "/print-setup.html";
 const PRINT_HERE_KEY = "lfh_print_here";        // "on" | "off" — this device's answer, this browser
 const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v === "on" || v === "off" ? v : ""; };
 // What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
@@ -12198,6 +12216,77 @@ function bindPrintStationStrip(root) {
     else toast("This screen will not print kitchen tickets.", "ok");
     if (state.tab === "tables") renderEditor();   // repaint the strip in place (there is no renderTables)
   }));
+}
+
+// ── SETTINGS → PRINTING: where printing stands, and how to set a printer up ──────────────────────
+// Owner, 2026-08-18: "tell me how the printer will work and inside the setting how it will be —
+// every single bit of thing, how we're gonna print. It should be shown in kitchen panel… manager
+// also and owner. Also a quick written guide… it should take me to the page."
+//
+// So this screen answers three questions in the order a person asks them: is printing on? which
+// screen prints? and is it THIS screen? Then it hands over the guide. The two admin-owned answers are
+// shown as plain sentences with who sets them — never as dead controls (owner, 2026-07-31: "there
+// shouldn't be grayed out option also").
+function formPrinting(s) {
+  const on = s.auto_print_kot === true && s.auto_print_kot_allowed === true;
+  const target = String(s.kot_print_target || "kitchen");
+  const targetWord = target === "counter" ? "the counter (manager) screen"
+    : target === "both" ? "the kitchen screen, with a counter screen as the 30-second backup"
+    : "the kitchen screen";
+  const ans = printHereAnswer();
+  const mayPrintHere = on && (target === "counter" || target === "both");
+  const row = (label, value, who) => `<div style="display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)">
+      <span style="min-width:190px;color:var(--muted);font-size:13px">${esc(label)}</span>
+      <b style="font-size:14px">${value}</b>
+      <span class="muted" style="font-size:12px;margin-left:auto">${esc(who)}</span>
+    </div>`;
+  const lastLine = lastPrintedHere
+    ? `Last ticket printed on this screen: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
+    : "Nothing has printed on this screen yet.";
+  return `
+  <div class="card"><h3>🖨 How printing stands right now</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      A kitchen ticket is queued by the server the moment an order is placed, so it can never be lost —
+      it waits until a screen prints it. These three answers decide which screen that is.
+    </p>
+    ${row("Automatic printing", on ? "ON — every new order prints a ticket" : "OFF — nothing prints by itself", "set by your admin")}
+    ${row("Which screen prints", esc(targetWord), "set by your admin")}
+    ${row("This screen", ans === "on" ? "printing tickets" : mayPrintHere ? "not printing — you can turn it on below" : "not printing", "this device only")}
+    <p style="color:var(--muted);font-size:12.5px;margin:12px 0 0">${lastLine}</p>
+    ${!on ? `<div class="hint" style="margin-top:12px">Automatic printing is switched off for this restaurant. Ask your admin to turn on <b>Auto-print the KOT</b> — nothing on this page will print anything until then.</div>` : ""}
+  </div>
+  <div class="card"><h3>Should this screen print the kitchen tickets?</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
+      A choice for <b>this device only</b>, kept in this browser. Say yes on the computer the printer is
+      attached to. <b>Say no on phones</b> — a phone that took a ticket would put it in a print dialog
+      nobody looks at, and the kitchen would never get the paper.
+    </p>
+    ${mayPrintHere
+      ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn${ans === "on" ? " primary" : ""}" data-printhere-set="on">🖨 Yes, print here</button>
+          <button type="button" class="btn${ans === "off" ? " primary" : ""}" data-printhere-set="off">No</button>
+        </div>`
+      : `<div class="hint">Your admin has set tickets to print on <b>${esc(targetWord)}</b>, so this screen is not offered as a printer. A kitchen screen needs no switch — with automatic printing on, it simply prints.</div>`}
+  </div>
+  <div class="card"><h3>📖 Setting a printer up — the full written guide</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      Opens as its own page, with every step for <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a
+      <b>Raspberry Pi</b> — the printer itself, the paper settings, the one window to open so printing
+      never stops when it is minimised, what each setting does, a what-went-wrong table, and which
+      devices can never be the printer (phones and iPads). It has a button to save it as a PDF.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn primary" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Open the setup guide</a>
+      <a class="btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter</a>
+      <a class="btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter</a>
+      <a class="btn" href="/print-station/print-station-linux.sh" download>⬇ Linux / Pi starter</a>
+    </div>
+    <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+      A “starter” opens one Chrome window that prints silently and doesn't fall asleep behind other
+      windows. Download the one for that computer, change the single <code>URL</code> line inside it, and
+      double-click it. The guide explains every line.
+    </p>
+  </div>`;
 }
 
 // One pass of the queue: what is waiting → claim it → print it → say what happened.

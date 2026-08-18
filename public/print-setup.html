@@ -84,13 +84,14 @@
 
 <header class="top">
   <h1>Kitchen printer — the complete setup guide</h1>
-  <p>Everything needed to make kitchen tickets (KOTs) print by themselves, on a Mac or a Windows PC —
+  <p>Everything needed to make kitchen tickets (KOTs) print by themselves — on <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a <b>Raspberry Pi</b> (and which devices can never do it) —
      every step, every setting, and what to do when something goes wrong. Written for someone who has
      never set up a printer before.</p>
   <div class="btns">
     <button class="btn" onclick="window.print()">🖨 Save this as a PDF / print it</button>
     <a class="btn ghost" href="/print-station/print-station-mac.command" download>⬇ Download the Mac starter</a>
     <a class="btn ghost" href="/print-station/print-station-windows.bat" download>⬇ Download the Windows starter</a>
+    <a class="btn ghost" href="/print-station/print-station-linux.sh" download>⬇ Download the Linux / Pi starter</a>
   </div>
 </header>
 
@@ -102,6 +103,8 @@
     <li><a href="#need">What you need to buy</a></li>
     <li><a href="#mac">Setting up a Mac</a></li>
     <li><a href="#win">Setting up a Windows PC</a></li>
+    <li><a href="#linux">Setting up Linux (incl. Raspberry Pi)</a></li>
+    <li><a href="#other">Android tablet, iPad, Chromebook — what works</a></li>
     <li><a href="#app">The three switches inside the app</a></li>
     <li><a href="#who">Choosing WHICH screen prints</a></li>
     <li><a href="#test">The test that actually matters</a></li>
@@ -266,6 +269,80 @@ cd zj-58 &amp;&amp; make
       print station opens whenever the PC starts, before anyone has to remember.</li>
   </ol>
   <div class="ok"><b>To finish for the day:</b> press <b>Alt+F4</b> in the Chrome window.</div>
+</div>
+
+<h2 id="linux">5b · Setting up Linux — including a Raspberry Pi <span class="tag">Ubuntu · Debian · Raspberry Pi OS</span></h2>
+<div class="card">
+  <p>Linux is the cheapest way to run a print station that nobody ever touches: a <b>Raspberry Pi
+    (₹4,000–5,000)</b> screwed to the wall behind the till, the printer in the kitchen on the network,
+    and it starts itself when the power comes back after a cut.</p>
+  <h3>5b.1 · Install the printer (CUPS)</h3>
+  <p>Linux prints through <b>CUPS</b>, which is already installed on Raspberry Pi OS and Ubuntu. Plug
+    the printer in and:</p>
+  <pre>sudo apt update &amp;&amp; sudo apt install -y cups printer-driver-escpr
+sudo usermod -aG lpadmin $USER      # lets you add printers without being root
+lpinfo -v                           # shows the printer's address, e.g. usb://Zjiang/POS-80</pre>
+  <p>Add it, name it plainly, and make it the default:</p>
+  <pre>sudo lpadmin -p POS80 -E -v "usb://Zjiang/POS-80" -m raw
+sudo lpoptions -d POS80             # default printer for this machine
+echo "hello" | lp -d POS80          # a one-line test print</pre>
+  <p><b><code>-m raw</code> is deliberate.</b> An 80mm thermal printer speaks ESC/POS; “raw” means CUPS
+    passes the job through untouched, which is what Chrome's own output needs. If your model has a
+    proper PPD (Epson's <code>escpr</code> driver covers many), use that instead of <code>raw</code>.</p>
+  <h3>5b.2 · A NETWORK printer instead of USB (recommended on a Pi)</h3>
+  <pre>lpadmin -p POS80 -E -v socket://192.168.1.50:9100 -m raw</pre>
+  <p>Port <b>9100</b> is the standard raw-printing port. Give the printer a fixed address in your
+    router first, or it will move and printing will stop for no visible reason.</p>
+  <h3>5b.3 · Paper settings</h3>
+  <pre>lpadmin -p POS80 -o PageSize=Custom.72x200mm -o fit-to-page=false</pre>
+  <p>Same rule as the Mac: <b>never</b> force A4, and never let the app set a page size. If tickets come
+    out with a long blank lead-in, the page size is wrong — nothing else causes that.</p>
+  <h3>5b.4 · The print station</h3>
+  <p>Chrome (or Chromium, which Raspberry Pi OS ships) takes the same flags. Save this as
+    <code>print-station.sh</code>, <code>chmod +x</code> it, and run it:</p>
+  <p>Or just download <b>print-station-linux.sh</b> from the top of this page — it is the same script,
+    already written, and it finds Chromium or Chrome by itself:</p>
+  <pre>#!/bin/sh
+URL="https://3-d-backup.vercel.app<b>/kitchen</b>"          # or /manager for the counter screen
+PROFILE="$HOME/.aevidine-print-station"
+xset s off; xset -dpms; xset s noblank                # never blank the screen
+exec chromium-browser --kiosk --kiosk-printing \
+  --user-data-dir="$PROFILE" \
+  --disable-background-timer-throttling \
+  --disable-backgrounding-occluded-windows \
+  --disable-renderer-backgrounding \
+  --no-first-run --no-default-browser-check \
+  --autoplay-policy=no-user-gesture-required "$URL"</pre>
+  <p>On Ubuntu use <code>google-chrome</code> in place of <code>chromium-browser</code>.</p>
+  <h3>5b.5 · Start it on boot (the part that makes it maintenance-free)</h3>
+  <pre>mkdir -p ~/.config/autostart
+cat &gt; ~/.config/autostart/print-station.desktop &lt;&lt;EOF
+[Desktop Entry]
+Type=Application
+Name=Aevidine print station
+Exec=/home/pi/print-station.sh
+X-GNOME-Autostart-enabled=true
+EOF</pre>
+  <div class="ok"><b>Why a Pi is a good idea:</b> it costs less than a month of a POS subscription, uses
+    3 watts, has no fan to clog with kitchen grease, and after a power cut it comes back by itself —
+    which is the one thing a Windows PC at the till never does.</div>
+</div>
+
+<h2 id="other">5c · Android tablet, iPad, Chromebook — what works and what doesn't</h2>
+<div class="card">
+  <table>
+    <tr><th>Device</th><th>Can it be the print station?</th><th>What to know</th></tr>
+    <tr><td><b>Windows PC</b></td><td>✅ Yes — the usual choice</td><td><a href="#win">Section 5</a>. Turn OFF “let Windows manage my default printer”.</td></tr>
+    <tr><td><b>Mac</b></td><td>✅ Yes</td><td><a href="#mac">Section 4</a>. Needs the open-source driver for cheap 80mm printers.</td></tr>
+    <tr><td><b>Linux PC / Raspberry Pi</b></td><td>✅ Yes — cheapest and most reliable unattended</td><td><a href="#linux">Section 5b</a>.</td></tr>
+    <tr><td><b>Chromebook</b></td><td>⚠️ Usually</td><td>Add the printer in <i>Settings → Printing</i> (network printers work; many USB thermal printers do not). Chrome's kiosk flags are not available, so it will show a print dialog — fine as a backup screen, not as the main printer.</td></tr>
+    <tr><td><b>Android tablet / phone</b></td><td>❌ Not as the automatic printer</td><td>Android Chrome has no silent-print mode, so every ticket would wait for a tap. Use the tablet for taking orders (which is what it is for) and let a computer print. A Bluetooth printer app (RawBT) can print manually if you ever need it.</td></tr>
+    <tr><td><b>iPad / iPhone</b></td><td>❌ No</td><td>Same reason, and AirPrint does not cover ESC/POS thermal printers.</td></tr>
+    <tr><td><b>A cloud printer</b></td><td>✅ Best of all — <b>no computer at all</b></td><td>Not switched on in the app yet. <a href="#next">Section 12</a>.</td></tr>
+  </table>
+  <div class="warn"><b>Never make a phone the printer.</b> The app deliberately asks each screen
+    “should this screen print?” and you should answer <b>No</b> on phones — a phone that took a ticket
+    would put it in a dialog nobody looks at, and the kitchen would never get the paper.</div>
 </div>
 
 <h2 id="app">6 · The switches inside the app</h2>

@@ -427,6 +427,15 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
    report button, so it is separated by a rule and quieter: nobody standing at a jammed printer should
    mistake "how to set this up" for "tell the manager". Keeps the 48px finger target the rest of the
    sheet uses — a cook is tapping this with a wet hand, like everything else on this screen. */
+/* The plain "where printing stands" block at the top of the 🖨 sheet (owner, 2026-08-18). Rows of
+   label + answer, not switches: the two answers belong to the admin, and a dead control is worse
+   than a sentence (his rule of 2026-07-31). */
+.prsheet-status { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0 4px; }
+.prsheet-status > div { display: flex; align-items: baseline; gap: 10px; font-size: 13.5px; padding: 3px 0; }
+.prsheet-status > div > span { color: var(--muted); min-width: 130px; }
+.prsheet-status > div > b { margin-left: auto; text-align: right; }
+.prsheet-status > p { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; line-height: 1.45; }
+
 .prsheet-help { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px;
   color: var(--muted); font-size: 14px; text-decoration: none; }
 .prsheet-help:hover { color: var(--fg); }

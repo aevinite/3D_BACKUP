@@ -175,9 +175,27 @@ check(guide.length > 20000 && /Setting up a Mac/.test(guide) && /Setting up a Wi
 check(/print-station-mac\.command/.test(guide) && /print-station-windows\.bat/.test(guide) && /window\.print\(\)/.test(guide),
   "…and it carries both starter files as downloads plus a save-as-PDF button",
   "the guide no longer offers the starter files or the PDF button the owner asked for");
-check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel),
-  "it is reachable from the ADMIN console and from the kitchen screen's 🖨❗ sheet",
-  "the guide is not linked from a reachable screen — the first attempt put it in the manager panel's hidden Kitchen section");
+const ownerSettings = read("app/owner/settings/page.tsx");
+// The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
+// rather than the literal — asserting the spelling of code that legitimately changed shape is how
+// this repo's guards have gone red twice (see verify-static's header).
+const managerReaches = /PRINT_SETUP_URL = "\/print-setup\.html"/.test(epanel) && /href="\$\{PRINT_SETUP_URL\}"/.test(epanel);
+check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel) && managerReaches && /print-setup\.html/.test(ownerSettings),
+  "it is reachable from ALL FOUR: admin console · kitchen 🖨 sheet · manager Settings → Printing · owner Settings",
+  "the guide has lost one of its four doors (owner, 2026-08-18: it must be visible in the kitchen panel, the manager settings AND the owner panel) — the first attempt put it in the manager panel's hidden Kitchen section, which is how being reachable stopped being obvious");
+check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
+  "the manager panel has its own VISIBLE Printing section (the admin-only Kitchen one stays hidden)",
+  "the manager panel's Printing section is gone — the printing status and the device answer would be unreachable there again");
+check(/prsheet-status/.test(kpanel) && /kotPrintTarget/.test(kpanel),
+  "the kitchen screen's 🖨 sheet SHOWS where printing stands (on/off, and which screen prints)",
+  "the kitchen sheet no longer says whether this screen is even meant to be printing — a cook at a silent printer has to ask someone");
+const guideFiles = ["public/print-station/print-station-mac.command", "public/print-station/print-station-windows.bat", "public/print-station/print-station-linux.sh"];
+check(guideFiles.every((f) => { try { read(f); return true; } catch { return false; } }),
+  "all three starter files exist (Windows · Mac · Linux/Pi)",
+  "a starter file is missing — the guide offers it as a download and the link would 404");
+check(/id="linux"/.test(guide) && /Raspberry Pi/.test(guide) && /id="other"/.test(guide),
+  "the guide covers Linux and a Raspberry Pi, and says which devices can NEVER be the printer",
+  "the guide has lost the Linux / device-support sections the owner asked for");
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`
