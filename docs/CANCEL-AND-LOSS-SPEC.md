@@ -68,6 +68,41 @@ Read `docs/COMPLIANCE-GUARDRAILS.md` §3.0 first. This feature only ever **adds*
 | **P5** | **The money** | The food-loss expense reaches the Expenses tile, the inventory expense report and the day book |
 | **P6** | **Prove it** | Seeded on backup: cook-and-bin, mis-key-and-cancel, an unanswered row, then classify it. Stock, expense, audit tag and the owner's tiles all checked, and every row created is deleted by id afterwards |
 
+## 4b. Where it ended up — all six phases done, 2026-08-19
+
+Migration **337**. Guards: `npm run verify:cancel-loss` (the database, 18 checks) and
+`npm run verify:cancel-made` (through the real manager endpoint, 13 checks); `verify:audit` grew to 87
+and now asserts the tag map's two halves agree; `verify:owner-screen` to 55. Full pass: **17 of 17**.
+
+**Faults this work found that were already in the product**
+
+* Cancelling reversed no stock, so a mis-keyed order ate its ingredients for ever.
+* `consumption_reversal` was a dead movement kind the manager panel already labelled "Order cancelled".
+* Wasted food never became a cost anywhere.
+
+**Faults this work introduced and then fixed** — kept here because each one is a trap worth knowing
+
+1. The classifier was called from inside the cancel block, *before* the row is updated at the bottom of
+   the handler, so the RPC correctly refused an order that was not cancelled yet — and said nothing.
+   A refusal is logged now.
+2. The loss was written to `deletion_audit.amount`, which the Audit screens SUM per kind, so one
+   ₹200.60 loss answered twice read ₹401.20 in the record-only total. `amount` stays NULL.
+3. The previous answer was read off the `order_cancelled` row, where answers do not live, so a
+   correction was never marked as one.
+4. The answer lived *only* on the correction row, so a row that had just been answered still showed
+   "Not answered yet". The current answer is merged onto the cancellation row as a read convenience;
+   the history is untouched.
+5. The loss expense was dated by the calendar day while every report window filters by the **business**
+   day, so food cooked after midnight fell outside the window: the tile showed 2 of 3 losses and a
+   total that happened to look plausible (₹1,800 of ₹3,600). Migration 294 already set the rule.
+6. `removal_classified` rows appeared in a list headed "everything taken out of the system" and were
+   counted in its total. Filtered out of both removals lists, and out of the chips to match.
+
+## 5b. The one question he has not answered
+
+Who may **change** an answer later. Built on the stated default: whoever cancels answers, and only
+`void_bills` (manager and above) may correct it from the Audit. Say the word and it moves.
+
 ## 5. Open questions for him (do not guess)
 
 1. **Who may answer?** Anyone who can cancel (waiter included), or manager+ only? Default proposed:
