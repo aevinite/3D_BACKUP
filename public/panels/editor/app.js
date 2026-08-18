@@ -14549,7 +14549,10 @@ function syncNavRail() {
     const word = open ? "Collapse menu" : "Expand menu";
     btn.setAttribute("aria-label", word);
     btn.setAttribute("title", word);
-    const lbl = btn.querySelector(".tab-lbl"); if (lbl) lbl.textContent = "Collapse";
+    // The word has to follow the state, not be fixed: hovering a COLLAPSED rail now shows every
+    // label (see "HOVER TO PEEK" in style.css), and this row read "Collapse" while sitting in a
+    // rail that was already collapsed — the one button whose name said the opposite of its job.
+    const lbl = btn.querySelector(".tab-lbl"); if (lbl) lbl.textContent = open ? "Collapse" : "Keep open";
     const ico = btn.querySelector(".tab-ico"); if (ico) ico.textContent = open ? "«" : "»";
     if (!btn.__railWired) {
       btn.__railWired = true;
