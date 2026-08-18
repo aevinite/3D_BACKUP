@@ -400,7 +400,21 @@ export default function OwnerReports() {
   // should keep me where I was"). The owner panel scrolls INSIDE `.adm-main`, not the
   // window, so save/restore THAT element's scrollTop. Opening a report jumps to the top of
   // the report; going back to the hub restores exactly where the owner was browsing.
-  const scroller = () => (typeof document === "undefined" ? null : document.querySelector<HTMLElement>(".adm-main"));
+  // ── WHICH ELEMENT ACTUALLY SCROLLS (T12 sweep, 2026-08-18) ───────────────────────────────────
+  // `.adm-main` alone was wrong on a phone. At >900px it is the scroller; at <=900px globals.css
+  // gives it `overflow-y: visible` and makes `.adm` the 100dvh scroller instead — so this whole
+  // save/restore silently did nothing there, and "when I click back it should keep me where I was"
+  // was lost on the device he actually uses. Measured at 360x780: `.adm` 4109/780 while `.adm-main`
+  // is 4052/4052. The window never scrolls at either width. Same helper as the dashboard's
+  // scrollPort() and as `port()` in app/aevinite/restaurants/page.tsx, which solved this first.
+  const scroller = () => {
+    if (typeof document === "undefined") return null;
+    for (const sel of [".adm-main", ".adm"]) {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (el && el.scrollHeight > el.clientHeight + 2) return el;
+    }
+    return document.querySelector<HTMLElement>(".adm-main");
+  };
   const hubScroll = useRef(0);
   const openReport = useCallback((k: RKey, opts?: OpenOpts) => {
     setSel((cur) => { if (cur === "") { const el = scroller(); if (el) hubScroll.current = el.scrollTop; } return k; });
