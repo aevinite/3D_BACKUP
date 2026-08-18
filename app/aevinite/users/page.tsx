@@ -67,6 +67,35 @@ export default function AdminUsers() {
   // button so the SEARCH is the hero. Opens on demand.
   const [addOpen, setAddOpen] = useState(false);
 
+  // ── WHICH TABLES A NEW WAITER WILL SERVE (sweep T15, 2026-08-18) ────────────────────────────
+  // Waiter sections (migs 222-225, owner 2026-07-30: "new tablet user will have to choose …
+  // there should be just a select all option"). A waiter's tablet shows ONLY the tables they were
+  // given, so newWaiterTables() REFUSES a create with an empty pick — for every restaurant, with
+  // no module check.
+  //
+  // This form never sent `tables`, so creating a waiter from the admin console was IMPOSSIBLE: the
+  // form submitted, the server answered "Pick at least one table for this waiter … Use 'Select
+  // all' for the whole floor", and there was no such control anywhere on the screen. The owner's
+  // own roster (/owner/staff) has had this picker since 2026-07-30; this is the same control, in
+  // the one place it was missing, so the two screens ask the same question the same way.
+  const [newTables, setNewTables] = useState<number[]>([]);
+  const [tableCount, setTableCount] = useState<number | null>(null);
+  const needsTables = nu.role === "tablet";
+  useEffect(() => {
+    // Only when it is about to be asked for — the floor of a restaurant nobody is adding a waiter
+    // to is nothing this screen needs to know.
+    if (!addOpen || !needsTables || !nu.restaurant_id) return;
+    let alive = true;
+    setTableCount(null);
+    setNewTables([]);
+    fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(nu.restaurant_id)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { if (alive) setTableCount(Math.max(0, Number(d?.settings?.table_count) || 0)); })
+      .catch(() => { if (alive) setTableCount(0); });
+    return () => { alive = false; };
+  }, [addOpen, needsTables, nu.restaurant_id]);
+  const allTables = Array.from({ length: tableCount || 0 }, (_, i) => i + 1);
+
   const scopedName = filterRid ? restaurants.find((r) => r.id === filterRid)?.name : "";
 
   // When the admin scopes to ONE restaurant, lock the "Add a user" form to it so a
@@ -117,11 +146,17 @@ export default function AdminUsers() {
     creatingRef.current = true;
     setErr(""); setCreating(true);
     try {
-      const r = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nu) });
+      // `tables` only for a waiter — the server ignores it for anyone else, and sending it would
+      // read as though a manager had a section too.
+      const r = await fetch("/api/admin/users", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(needsTables ? { ...nu, tables: newTables } : nu),
+      });
       const j = await r.json();
       if (!r.ok) { setErr(j.error || "Could not create user."); return; }
       setReveal({ name: j.name || j.username, password: j.password });
       setNu((n) => ({ role: "manager", restaurant_id: n.restaurant_id, name: "", phone: "", password: "" }));
+      setNewTables([]);
       setShowNewPw(false);
       load();
     } catch { setErr("Network error."); }
@@ -229,7 +264,44 @@ export default function AdminUsers() {
               </button>
             </span>
           </label>
-          <button type="submit" disabled={creating} style={{ ...btn("#22c55e"), padding: "11px 14px", opacity: creating ? 0.7 : 1 }}>
+          {/* A WAITER'S TABLES. Shown only for the waiter role, because only a waiter has a
+              section — and shown BEFORE the button, because the button is disabled until it is
+              answered. "Select all" is the whole floor in one tap, exactly as on /owner/staff. */}
+          {needsTables ? (
+            <div className="usp-tables">
+              <div className="usp-tables-head">
+                <b>Tables this waiter will serve</b>
+                <button type="button" className="usp-btn ghost sm" disabled={!allTables.length}
+                  onClick={() => setNewTables(allTables)}>Select all</button>
+                <button type="button" className="usp-btn ghost sm" disabled={!newTables.length}
+                  onClick={() => setNewTables([])}>Clear</button>
+                <span className="cnt">
+                  {tableCount === null ? "counting the floor…" : `${newTables.length} of ${tableCount} picked`}
+                </span>
+              </div>
+              {tableCount === null ? null : allTables.length ? (
+                <div className="usp-tgrid">
+                  {allTables.map((i) => {
+                    const on = newTables.includes(i);
+                    return (
+                      <button key={i} type="button" className={on ? "on" : ""} aria-pressed={on}
+                        onClick={() => setNewTables((cur) => (on ? cur.filter((x) => x !== i) : [...cur, i].sort((a, b) => a - b)))}>
+                        {on ? "✓ " : ""}T{i}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="usp-tables-warn">This restaurant has no tables set up yet — add them under Access &amp; permissions → Table before adding a waiter.</div>
+              )}
+              {allTables.length && !newTables.length ? (
+                <div className="usp-tables-warn">Pick at least one — their tablet shows only the tables you give them.</div>
+              ) : null}
+            </div>
+          ) : null}
+          <button type="submit" disabled={creating || (needsTables && !newTables.length)}
+            title={needsTables && !newTables.length ? "Pick at least one table for this waiter first" : ""}
+            style={{ ...btn("#22c55e"), padding: "11px 14px", opacity: creating || (needsTables && !newTables.length) ? 0.6 : 1 }}>
             {creating ? "Creating…" : "Create user"}
           </button>
         </form>
@@ -332,6 +404,17 @@ function UsersStyle() {
   .usp-add.open { background:#374151; box-shadow:none; }
   .usp-addpanel { border-radius:16px; padding:18px; margin-bottom:16px; border:1px solid color-mix(in srgb, var(--ub) 40%, var(--border)); background:var(--card); }
   .usp-formhint { font-size:12px; color:var(--muted); margin:10px 0 0; }
+  /* A new waiter's section — the same control /owner/staff has had since 2026-07-30. */
+  .usp-tables { grid-column:1/-1; border:var(--border); border-radius:12px; padding:11px 12px; background:var(--bg); }
+  .usp-tables-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:9px; font-size:13px; }
+  .usp-tables-head .cnt { margin-left:auto; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .usp-btn.sm { padding:5px 10px; font-size:12px; min-height:0; }
+  .usp-btn.ghost:disabled { opacity:.45; cursor:not-allowed; }
+  .usp-tgrid { display:flex; flex-wrap:wrap; gap:6px; max-height:190px; overflow-y:auto; }
+  .usp-tgrid button { min-height:32px; padding:0 11px; border-radius:9px; border:var(--border); background:var(--card);
+    color:var(--muted); font-size:12.5px; font-weight:700; cursor:pointer; }
+  .usp-tgrid button.on { border-color:var(--ub); background:color-mix(in srgb,var(--ub) 15%,transparent); color:var(--text); }
+  .usp-tables-warn { margin-top:9px; font-size:12.5px; font-weight:700; color:var(--adm-danger,#f87171); }
   .usp-count { font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:6px 2px 10px; }
   .usp-empty { padding:30px; text-align:center; color:var(--muted); border:var(--border); border-radius:14px; background:var(--card); }
   .usp-results { display:flex; flex-direction:column; gap:18px; }

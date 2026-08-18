@@ -807,6 +807,32 @@ else ok("the read/write route derives every allow-list from the model");
   }
 }
 
+// ── 25 · THE ADMIN MUST BE ABLE TO CREATE A WAITER ──────────────────────────
+// THE FAULT THIS EXISTS TO KILL (sweep T15, 2026-08-18). newWaiterTables() in lib/tableAssign.ts
+// REFUSES a waiter created with an empty table pick — for every restaurant, with no module check
+// (owner, 2026-07-30: "block it — must pick at least one"). POST /api/admin/users calls it for
+// every `tablet` role. The admin's own Add-a-user form never sent `tables` and had no control for
+// one, so creating a waiter from /aevinite → Users was IMPOSSIBLE: the form submitted and the
+// server answered "Pick at least one table for this waiter … Use 'Select all' for the whole
+// floor", naming a control that was not on the screen. Watched happen, then watched work.
+//
+// Two halves, and both have to hold: the server still demands it, and the form still asks for it.
+{
+  const assign = read("lib/tableAssign.ts");
+  const form = read("app/aevinite/users/page.tsx");
+  const route = read("app/api/admin/users/route.ts");
+  const demanded = /Pick at least one table for this waiter/.test(assign) && /newWaiterTables/.test(route);
+  const bad = [];
+  if (demanded) {
+    if (!/tables:\s*newTables/.test(form)) bad.push("the admin's Add-a-user form does not send `tables`, so every waiter create is refused");
+    if (!/Tables this waiter will serve/.test(form)) bad.push("the admin's Add-a-user form has no table picker, so there is no way to answer the question the server asks");
+    if (!/Select all/.test(form)) bad.push('the form has no "Select all" — the owner\'s one-tap whole floor (2026-07-30)');
+  }
+  if (!demanded) ok("waiter creation: the server no longer demands a table pick, so the form need not ask");
+  else if (bad.length) fail(`the admin cannot create a waiter: ${bad.join("; ")}`);
+  else ok("the admin's Add-a-user form asks which tables a new waiter serves, which is what the server demands");
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
