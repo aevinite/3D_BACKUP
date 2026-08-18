@@ -4882,6 +4882,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       if (patch.payment_status === "pending") { patch.paid_at = null; patch.tip = 0; }
       if (patch.archived === true) patch.archived_at = new Date().toISOString();
       if (patch.archived === false) patch.archived_at = null;
+      // The person's answer to "was the food made?", acted on AFTER the update below (see the note in
+      // the cancel block). null = it was not asked, which stays UNANSWERED rather than being guessed.
+      let classifyMade: boolean | null = null;
       // Whether the ✕ below was forced by the archive rather than asked for directly — it goes
       // into the audit row so a later reader knows this was "table freed with food unpaid",
       // not somebody deliberately cancelling a ticket.
@@ -4936,6 +4939,24 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
           tableNumber: cur.table_number != null ? String(cur.table_number) : null,
           meta: { was_paid: cur.payment_status === "paid", ...(archiveForcedTheCancel ? { auto: "unpaid food archived off the floor" } : {}) },
         });
+        // ── WAS THE FOOD ACTUALLY MADE? (owner, 2026-08-18 — docs/CANCEL-AND-LOSS-SPEC.md) ────────
+        // A cancelled order is two different events wearing one name. The panel now asks, in red, and
+        // the answer travels WITH the cancel so one round trip does everything:
+        //   true  → the food was cooked. The kitchen-fire consumption stands (the stock really is
+        //           gone) and the ingredient cost becomes a `food_loss` expense.
+        //   false → never started. The consumption is reversed line for line, so the ingredients go
+        //           back on the shelf — which is what NOTHING did before this: cancelling reversed
+        //           nothing, so a mis-keyed order ate its ingredients for ever.
+        // An absent answer is left UNANSWERED on purpose rather than guessed — an old row, an offline
+        // replay from a panel that predates this, or lib/sessionClose's automatic archive all land
+        // there, and the Audit screen is where a person fixes it (P3).
+        // ORDER OF OPERATIONS, and it cost me a wrong test to find: at THIS point the row has not
+        // been updated yet — the UPDATE runs at the bottom of this handler. lfh_cancel_classify
+        // refuses an order that is not cancelled yet, which is the right guard, so calling it here
+        // returned {ok:false,'not_cancelled'} and did nothing. So only REMEMBER the answer here and
+        // act on it after the write lands.
+        const madeAns = (body as { made?: unknown } | null)?.made;
+        if (typeof madeAns === "boolean") classifyMade = madeAns;
         // …and, once a day at most, tell the owner when the day's voids look unusual (lib/cancelWatch.ts).
         // Cancel is the ONLY way a bill leaves the working list now, so the level of cancelling is
         // the thing worth watching — but this never blocks or questions the cancel itself, which is
@@ -4947,6 +4968,28 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
       const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
+      // ── NOW the row is cancelled, so the answer can do its work (mig 336) ──────────────────────
+      // made=true keeps the kitchen-fire consumption and prices it as a food_loss expense;
+      // made=false reverses the consumption so the ingredients go back on the shelf. Best-effort: the
+      // cancel itself has already succeeded and must never look failed because the costing hiccuped —
+      // but a refusal is LOGGED rather than swallowed, because a silent one is what hid the ordering
+      // mistake this comment exists to explain.
+      if (classifyMade !== null) {
+        const cls = await sb.rpc("lfh_cancel_classify", {
+          p_restaurant: rid, p_order: id, p_made: classifyMade,
+          p_actor: g.user?.name || g.user?.username || "Admin (Aevidine)",
+          p_actor_id: g.user?.id ?? null, p_actor_role: g.user?.role || "admin", p_audit_id: null,
+        });
+        const bad = cls.error ? cls.error.message : (cls.data as { ok?: boolean; reason?: string } | null)?.ok === false
+          ? `refused: ${(cls.data as { reason?: string }).reason}` : null;
+        if (bad) {
+          await log("editor", "cancel_classify_failed", {
+            restaurant_id: rid, order_id: id, level: "error",
+            detail: `could not record whether the food was made — ${bad}`,
+            device_id: deviceIdFrom(req),
+          });
+        }
+      }
       return ok({ ok: true });
     }
 

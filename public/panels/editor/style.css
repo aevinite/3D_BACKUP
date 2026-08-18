@@ -4022,6 +4022,31 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .rr-htxt h3 { margin: 0 0 3px; font-size: 18px; }
 .rr-htxt p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
 .rr-body { padding: 16px 18px 4px; }
+/* ── "Was the food actually made?" (owner, 2026-08-18) ─────────────────────────────────────────
+   The first question on a cancel, above the reason, because it is the one that decides whether this
+   is a loss. Framed in RED — his word — because the danger is the LEFT choice: "yes, it was cooked"
+   means the ingredients are gone and the money is spent. Both options are full-width rows rather than
+   a tight pair, so a thumb mid-service cannot catch the wrong one. */
+.rr-made { border: 1.5px solid color-mix(in srgb, var(--danger, #dc2626) 55%, transparent);
+  background: color-mix(in srgb, var(--danger, #dc2626) 8%, var(--panel-2));
+  border-radius: 12px; padding: 11px 12px; margin-bottom: 12px; }
+.rr-made-q { font-size: 13px; font-weight: 800; margin-bottom: 8px;
+  color: color-mix(in srgb, var(--danger, #dc2626) 72%, var(--text)); }
+.rr-made-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rr-made-opt { text-align: left; padding: 11px 12px; border-radius: 11px; border: 1.5px solid var(--line);
+  background: var(--panel); color: var(--text); cursor: pointer; line-height: 1.25; min-height: 46px;
+  transition: border-color .12s ease, background .12s ease, transform .1s ease; }
+.rr-made-opt b { display: block; font-size: 13px; font-weight: 800; }
+.rr-made-opt small { display: block; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.rr-made-opt:hover { border-color: var(--danger, #dc2626); }
+.rr-made-opt:active { transform: scale(.985); }
+/* the chosen one is unmistakable either way — a wrong answer here moves stock and money */
+.rr-made-opt.sel { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 16%, var(--panel));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 20%, transparent); }
+.rr-made-opt.danger.sel { border-color: var(--danger, #dc2626);
+  background: color-mix(in srgb, var(--danger, #dc2626) 18%, var(--panel));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger, #dc2626) 22%, transparent); }
+@media (max-width: 480px) { .rr-made-opts { grid-template-columns: 1fr; } }
 .rr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .rr-opt { text-align: left; padding: 11px 12px; border-radius: 12px; border: 1.5px solid var(--line);
   background: var(--panel-2); color: var(--text); cursor: pointer; line-height: 1.25;

@@ -140,6 +140,9 @@ export const ACT_LABEL: Record<string, string> = {
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
   order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
+  // An error-level row: the cancel itself went through, but the "was the food made?" answer could
+  // not be recorded, so the stock and the cost were not adjusted. It needs fixing from the Audit.
+  cancel_classify_failed: "Couldn't record whether the food was made",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
   khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
   audit_record_failed: "Audit record FAILED",

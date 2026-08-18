@@ -3743,7 +3743,11 @@ async function setOrderStatus(id, status, reason) {
   renderEditor();
   renderTablePanel();
   try {
-    await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}) }); // sync in the background
+    // `made` rides along with the cancel so ONE round trip records the reason, the audit row, the
+    // stock and the cost. Sent only when it was actually asked — an absent answer stays UNANSWERED on
+    // the server rather than being guessed at as "never made", which would silently put ingredients
+    // back that a cook had really used.
+    await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}), ...(reason && typeof reason.made === "boolean" ? { made: reason.made } : {}) }); // sync in the background
     toast("Order updated → " + status, "ok");
   } catch (e) {
     if (o && prev !== null) o.status = prev;         // server said no -> undo
@@ -3766,7 +3770,7 @@ async function cancelOrder(id) {
   // A cancelled ticket must say WHY (mig 251). The reason ask replaces the old yes/no confirm — it
   // is a confirmation in itself, and one tap fewer than asking twice.
   const o0 = (state.data.orders || []).find((x) => x.id === id);
-  const reason = await askRemovalReason(`KOT #${o0 && o0.kot_no != null ? o0.kot_no : "—"}${o0 && o0.table_number ? ` · T${o0.table_number}` : ""} — it will be voided, no charge to the guest.`);
+  const reason = await askRemovalReason(`KOT #${o0 && o0.kot_no != null ? o0.kot_no : "—"}${o0 && o0.table_number ? ` · T${o0.table_number}` : ""} — it will be voided, no charge to the guest.`, { askMade: true });
   if (!reason) return;
   // The reason travels WITH the cancel; the server writes the audit row (see setOrderStatus).
   await setOrderStatus(id, "cancelled", reason);
@@ -6707,6 +6711,9 @@ const OP_ACTION_LABELS = {
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
   order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
+  // An error-level row: the cancel itself went through, but the "was the food made?" answer could
+  // not be recorded, so the stock and the cost were not adjusted. It needs fixing from the Audit.
+  cancel_classify_failed: "Couldn't record whether the food was made",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
   khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
   audit_record_failed: "Audit record FAILED",
@@ -7454,13 +7461,35 @@ function askReopenReason(what) {
     setTimeout(() => wrap.querySelector(".rr-opt").focus(), 50);
   });
 }
-function askRemovalReason(what) {
+// askRemovalReason(what, opts)
+//
+// `opts.askMade` adds a SECOND required question, for a cancellation only (owner, 2026-08-18:
+// "while kot delete button there will be one thing order was mode and order was not made like in red
+// they have to choose"). It is required because the two answers do completely different things and
+// neither may be guessed:
+//   · cooked        → the ingredients are really gone. The kitchen-fire consumption stands and its
+//                     cost becomes a food-loss expense.
+//   · never started → the consumption is reversed and the ingredients go back on the shelf. NOTHING
+//                     did this before: cancelling reversed nothing, so a mis-keyed order ate its
+//                     ingredients for ever, with no record of why the shelf was short.
+// Only cancelOrder passes it. Deleting a bill and removing a dish are different actions and keep the
+// dialog they had.
+function askRemovalReason(what, opts) {
+  const askMade = !!(opts && opts.askMade);
   return new Promise((resolve) => {
     const wrap = el(`<div class="sx-modal-overlay rr-overlay"><div class="sx-modal rr-modal">
       <div class="rr-head"><div class="rr-ico">🗑</div><div class="rr-htxt">
         <h3>Why are you removing this?</h3><p>${esc(what || "")}</p></div>
         <button class="tbl-modal-close rr-x" aria-label="Close">✕</button></div>
-      <div class="rr-body"><div class="rr-grid">
+      <div class="rr-body">${askMade ? `<div class="rr-made">
+        <div class="rr-made-q">Was the food actually made?</div>
+        <div class="rr-made-opts">
+          <button type="button" class="rr-made-opt danger" data-made="1">
+            <b>Yes — it was cooked</b><small>The ingredients are gone. It counts as a loss.</small></button>
+          <button type="button" class="rr-made-opt" data-made="0">
+            <b>No — never started</b><small>The ingredients go back into stock.</small></button>
+        </div>
+      </div>` : ""}<div class="rr-grid">
         ${REMOVAL_REASONS.map(([code, label, hint]) => `<button type="button" class="rr-opt" data-code="${code}">
           <b>${esc(label)}</b>${hint ? `<small>${esc(hint)}</small>` : ""}</button>`).join("")}
       </div>
@@ -7473,12 +7502,20 @@ function askRemovalReason(what) {
     </div></div>`);
     document.body.appendChild(wrap);
     const note = wrap.querySelector(".rr-note"), go = wrap.querySelector(".rr-go");
-    let code = null;
-    const sync = () => { go.disabled = !code || (code === "other" && !note.value.trim()); };
+    let code = null, made = null;
+    // Both questions must be answered when both are asked. "Unanswered" is a real state the Audit can
+    // fix later (an old row, an offline replay, the automatic archive at table-close) — but it must
+    // never be created by somebody standing right here with the answer.
+    const sync = () => { go.disabled = !code || (code === "other" && !note.value.trim()) || (askMade && made === null); };
     wrap.querySelectorAll(".rr-opt").forEach((b) => (b.onclick = () => {
       code = b.dataset.code;
       wrap.querySelectorAll(".rr-opt").forEach((x) => x.classList.toggle("sel", x === b));
       sync(); if (code === "other") note.focus();
+    }));
+    wrap.querySelectorAll(".rr-made-opt").forEach((b) => (b.onclick = () => {
+      made = b.dataset.made === "1";
+      wrap.querySelectorAll(".rr-made-opt").forEach((x) => x.classList.toggle("sel", x === b));
+      sync();
     }));
     note.addEventListener("input", sync);
     // ONE BACK LAYER, AND IT ANSWERS THE CALLER (sweep 2026-08-04).
@@ -7496,8 +7533,8 @@ function askRemovalReason(what) {
     wrap.querySelector(".rr-cancel").onclick = () => done(null);
     wrap.querySelector(".rr-x").onclick = () => done(null);
     wrap.onclick = (e) => { if (e.target === wrap) done(null); };
-    go.onclick = () => { if (go.disabled) return; done({ code, note: note.value.trim() }); };
-    setTimeout(() => wrap.querySelector(".rr-opt").focus(), 50);
+    go.onclick = () => { if (go.disabled) return; done({ code, note: note.value.trim(), ...(askMade ? { made } : {}) }); };
+    setTimeout(() => { const f = wrap.querySelector(askMade ? ".rr-made-opt" : ".rr-opt"); if (f) f.focus(); }, 50);
   });
 }
 // THE PANEL NO LONGER RECORDS REMOVALS ITSELF (2026-08-02). It used to POST /audit after each
