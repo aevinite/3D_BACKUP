@@ -475,8 +475,11 @@ export function ReportsStyles() {
       @media (max-width: 640px) {
         .rs-btn { min-height: 44px; padding: 0 15px; }
         .rs-seg { padding: 4px; }
-        .rs-seg button { min-height: 38px; padding: 6px 14px; }
-        .rs-date { min-height: 38px; }
+        .rs-seg button { min-height: 44px; padding: 6px 14px; }
+        .rs-date { min-height: 44px; }
+        /* The hub's Report button and the Export menu are the shared .adm-btn, which the whole
+           admin console uses — so raise it only INSIDE the Reports actions, never globally. */
+        .rs-actions .adm-btn, .rs-actions button { min-height: 44px; }
       }
 
       /* The masthead and closing note are invisible on screen; they only paint in @media print. */
