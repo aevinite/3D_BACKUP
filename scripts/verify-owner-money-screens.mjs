@@ -72,12 +72,13 @@ const RULES = [
     ],
   },
   {
+    // ITEM 4 WAS REVERTED ON HIS WORD (2026-08-18) — see docs/REJECTED-IDEAS.md R31. The rule is
+    // inverted on purpose: the page must NEVER hide itself or claim Pay Later is off, so this now
+    // guards the absence rather than the presence.
     item: 4, file: KHATA,
-    say: "Pay Later says it is switched off rather than \"no one owes anything\"",
-    must: [
-      /setModuleOff\(!!j\.moduleOff\)/,
-      /Pay Later isn&apos;t enabled for your restaurant/,
-    ],
+    say: "Pay Later never hides itself or claims the feature is off (R31)",
+    must: [/REJECTED \(owner, 2026-08-18\)[\s\S]{0,900}R31/],
+    mustNot: [/setModuleOff/, /Pay Later isn&apos;t enabled/],
   },
   {
     item: 5, file: CUSTOMERS,
