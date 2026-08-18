@@ -194,6 +194,42 @@ const RULES = [
     ],
   },
   {
+    // ── ITEM 17 · THE INSIDE OF ONE RESTAURANT (owner, 2026-08-18) ────────────────────────────────
+    // "make a good UI also for the owner of inventory management and all that. and all correct UI.
+    //  Like, every number should match and all that stuff."
+    // The three things that were actually wrong were all about trust: raw database dates on screen,
+    // cards headed with a count and no money so nothing tied back to the tile above, and capped
+    // lists that never said they were capped. Each card's total now comes from the SUMMARY — the
+    // database's figure for the month — never from adding up the rows the card happens to hold.
+    item: 17, file: INV_UI,
+    say: "inside a restaurant: every card carries the database's own total, and dates read as words",
+    must: [
+      /const shortDate = /,                       // …and it is used, per the mustNot below
+      /title="Wasted" total=\{s\.waste\}/,
+      /title="Expenses by kind" total=\{s\.expenses\}/,
+      /title="Expense book" total=\{s\.expenses\}/,
+      /title="Bills & cash buys" total=\{s\.purchases\}/,
+      /Running low \(\$\{s\.lowCount\}\)/,        // the count is the database's, not the list length
+      /data\.expenses\.length >= \(data\.caps\?\.expenses \?\? 300\)/,   // a capped list says so
+      /\(s\.purchasesCount \?\? data\.purchases\.length\) !== data\.purchases\.length/,
+    ],
+    mustNot: [
+      /\{e\.expense_date\}/,   // a raw ISO date must never reach the screen
+      /\{p\.bill_date\}/,
+    ],
+  },
+  {
+    item: 17, file: INV_ROUTE,
+    say: "…and the route sends the true month counts, with a cache key that moves when the shape does",
+    must: [
+      /purchasesCount: Number\(sum\.purchases_count \|\| 0\)/,
+      /wasteCount: Number\(sum\.waste_count \|\| 0\)/,
+      /caps: \{ expenses: 300, purchases: 100, low: 500, negative: 50 \}/,
+      /key: `inv:v2:/,     // bump this whenever the payload shape changes — v1 snapshots served the
+                           // old shape for hours and the new "showing N of M" line never appeared
+    ],
+  },
+  {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
     must: [/className="adm-page-h">Manager mode/],

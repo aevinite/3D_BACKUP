@@ -81,7 +81,14 @@ export async function GET(req: NextRequest) {
 
   try {
     const payload = await cachedOwnerPayload({
-      key: `inv:v1:${scopeKeyOf(rid, false, [rid])}:${month}`,
+      // ── v2, NOT v1 (2026-08-18) ──────────────────────────────────────────────────────────────
+      // The payload gained `purchasesCount`, `wasteCount` and `caps` today. A stored snapshot is
+      // served as-is until its fingerprint moves, so every restaurant that had been opened once kept
+      // handing the screen the OLD shape — and the screen's new "showing 100 of 412" line silently
+      // never appeared, on exactly the busy restaurants that need it. Caught by checking the cached
+      // reply rather than the forced one. Bump this string whenever the shape changes; the old rows
+      // age out on their own.
+      key: `inv:v2:${scopeKeyOf(rid, false, [rid])}:${month}`,
       force,
       fingerprint,
       compute: async () => {
@@ -206,7 +213,18 @@ export async function GET(req: NextRequest) {
             purchases: Number(sum.purchases_amt || 0),
             waste: Number(sum.wasted_val || 0),
             expenses: Number(sum.expenses_amt || 0),
+            // ── HOW MANY THERE REALLY ARE (owner, 2026-08-18: "every number should match") ──────
+            // The lists below are capped reads. `lfh_inv_report_summary` already counts the month's
+            // bills and waste slips in the DATABASE, over the same window, and this route was
+            // throwing both counts away — so a card headed "Purchases (100)" could not tell an owner
+            // whether that was all of them or the first hundred of four hundred. The screen now
+            // compares the true count against the rows it holds and says so when they differ.
+            purchasesCount: Number(sum.purchases_count || 0),
+            wasteCount: Number(sum.waste_count || 0),
           },
+          // The caps this reply was built with, so the screen never has to guess them (and cannot
+          // drift out of step with them the way a hard-coded 200 on a page always eventually does).
+          caps: { expenses: 300, purchases: 100, low: 500, negative: 50 },
           low, negative,
           // Expense slips get a short-lived signed link, not the permanent public one
           // (lib/mediaLinks.ts). Figures above were summed from the raw rows.
