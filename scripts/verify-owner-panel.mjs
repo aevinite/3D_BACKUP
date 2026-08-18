@@ -102,7 +102,7 @@ console.log("The owner's cockpit — Menu, Team, Settings\n");
 }
 
 // ── 3 · "WHAT'S ENABLED" LISTS WHAT HE HAS, AND NEVER WHAT HE DOESN'T ────────────────────────
-// REJECTED (owner, 2026-08-18) — row R31 in docs/REJECTED-IDEAS.md: *"owner can't know which option
+// REJECTED (owner, 2026-08-18) — row R34 in docs/REJECTED-IDEAS.md: *"owner can't know which option
 // are not given to them only admin should know that"*. So the FIRST job of this section is to keep the off-state off the
 // screen — no ✗, no greyed chip, no "6 of 9" count. What is withheld is the admin's business.
 //
@@ -133,18 +133,18 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     const labels = labelBlock
       ? Object.fromEntries([...labelBlock[1].matchAll(/(\w+)\s*:\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]))
       : {};
-    // R31 — the off-state must not exist on this screen at all.
+    // R34 — the off-state must not exist on this screen at all.
     const card = code(src);
     const cardBlock = card.slice(card.indexOf("What&apos;s enabled"), card.indexOf("Your restaurants"));
-    if (!/fa-xmark/.test(cardBlock)) ok("R31 — no ✗ chip: the card never shows what is switched off");
-    else bad("R31 BROKEN — the card shows a ✗ for a withheld section (owner, 2026-08-18: \"owner can't "
+    if (!/fa-xmark/.test(cardBlock)) ok("R34 — no ✗ chip: the card never shows what is switched off");
+    else bad("R34 BROKEN — the card shows a ✗ for a withheld section (owner, 2026-08-18: \"owner can't "
       + "know which option are not given to them only admin should know that\")");
     if (/filter\(\(k\) => data\.sections\[k\] !== false\)/.test(cardBlock))
-      ok("R31 — the card filters to the sections that are ON before rendering");
-    else bad("R31 — the card no longer filters to ON-only sections before rendering");
+      ok("R34 — the card filters to the sections that are ON before rendering");
+    else bad("R34 — the card no longer filters to ON-only sections before rendering");
     if (!/of \$\{?Object\.keys\(SECTION_LABEL\)/.test(cardBlock) && !/\bof 9\b/.test(cardBlock))
-      ok("R31 — no \"N of M\" count, which would leak the total he does not have");
-    else bad("R31 — the card counts against the full list, which reveals what is withheld");
+      ok("R34 — no \"N of M\" count, which would leak the total he does not have");
+    else bad("R34 — the card counts against the full list, which reveals what is withheld");
 
     const missing = sectionKeys.filter((k) => !(k in labels));
     if (!missing.length) ok(`the label map covers every section, so one he HAS is never missing (${sectionKeys.length})`);
