@@ -87,6 +87,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | joining / merging tables | `verify:merge`, `verify:merge-who`, `verify:merge-keeps-mark`, `verify:void-party` | mixed | some **YES** |
 | the waiter rota | `verify:rota-clash` | `.env.local` | **YES** |
 | a customer / CRM field | `verify:customers`, `verify:customer-erase`, `verify:personal-data` | `.env.local` | **YES** |
+| the owner's Customers / Pay Later / Inventory / Complaints / Manager-mode screens | `verify:owner-money` ← every fault these five screens had was the same shape: the ROUTE did the careful thing (a true head-count, a `moduleOff` flag, a `partial` list, a `?refresh=1` escape hatch, the month's real counts) and the SCREEN quietly ignored it. Also pins the owner's 2026-08-18 decisions (R34: Pay Later never hides itself) and the rendering rule that `--border` is a whole border, not a colour — a 1★ rating drew five gold stars for months because of it. | nothing | no |
 | a login in the recycle bin | `verify:recycle-name` | nothing | no |
 | opening a table that had a join request (the "Attend" flash) | `verify:no-attend-flash`, `verify:open-request-guard` | nothing | no |
 | a parcel, or the 🛵 Platform / 🥡 Parcels tab appearing/disappearing | `verify:parcel-home` ← a parcel has ONE home; the floor must never grow a parcel strip again (owner, 2026-08-14) | nothing | no |

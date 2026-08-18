@@ -49,7 +49,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   if (!selected) {
     return (
       <div className="adm-page">
-        <h1 className="adm-page-title">Menu</h1>
+        <h1 className="adm-page-h">Menu</h1>
         {/* Two different reasons land here — no restaurant yet, or the section switched off —
             so the line says both instead of leaving an owner guessing which one it is. */}
         <p className="adm-page-sub">

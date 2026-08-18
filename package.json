@@ -55,6 +55,7 @@
     "verify:guest-recovery": "node scripts/verify-guest-recovery.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
+    "verify:owner-money": "node scripts/verify-owner-money-screens.mjs",
     "check:current": "node scripts/check-folder-current.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "verify:tax-mode": "node --experimental-strip-types --no-warnings scripts/verify-tax-mode.mjs",

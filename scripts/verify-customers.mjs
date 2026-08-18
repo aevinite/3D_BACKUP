@@ -335,8 +335,18 @@ for (const [label, ctx2, url] of [["admin", actx, "/aevinite/customers"], ["owne
   const ph = await ctx2.newPage();
   await ph.setViewportSize({ width: 390, height: 850 });
   await ph.goto(BASE + url, { waitUntil: "domcontentloaded" });
-  // wait for real CONTENT before judging the layout — an empty page always "fits"
-  const rows = await until(async () => (await ph.evaluate(() => document.querySelectorAll("table tbody tr").length)) || null, 20000);
+  // wait for real CONTENT before judging the layout — an empty page always "fits".
+  // A GUEST ON A PHONE IS A CARD, NOT A TABLE ROW (owner, 2026-08-18). The owner's Customers list
+  // stops being an eight-column table below 640px and becomes one card per guest, with the dates
+  // moved into that guest's own record — so counting `table tbody tr` here found nothing and called
+  // a working screen a failure. Count whichever shape this width is supposed to be in; the thing
+  // being checked has not changed, and is still the real one: there are guests on the screen AND
+  // the page does not scroll sideways.
+  const rows = await until(async () => (await ph.evaluate(() => {
+    const t = document.querySelectorAll("table tbody tr").length;
+    if (t) return t;
+    return document.querySelectorAll('[aria-label^="Open "][aria-label$="record"]').length;
+  })) || null, 20000);
   const wide = await ph.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2);
   ok(`${label} page fits a phone with rows on it, no sideways scroll`, !wide && !!rows, (rows || 0) + " rows");
   await ph.close();

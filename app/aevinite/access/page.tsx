@@ -91,7 +91,7 @@ export default function AccessPage() {
 
       <header className="acc2-head">
         <div>
-          <h1 className="adm-page-title" style={{ margin: 0 }}>Access &amp; permissions</h1>
+          <h1 className="adm-page-h" style={{ margin: 0 }}>Access &amp; permissions</h1>
           <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>
             {rest?.name ? `${rest.name} · ` : ""}the only screen that decides what anyone can do.
           </p>

@@ -4,6 +4,17 @@
 // today / this month (by collection day). READ-ONLY; collecting happens in the manager
 // panel. Scoped + module-gated server-side (see /api/owner/khata). 60s backstop refresh
 // paused while hidden (egress rule); a search filters the loaded list client-side.
+// ── `--border` IS A WHOLE BORDER, NOT A COLOUR (sweep 6 · T14, 2026-08-18) ───────────────────────
+// `app/globals.css` declares `--border: 1px solid #1d2430`. So every `1px solid var(--border)` in
+// this file expanded to `1px solid 1px solid #1d2430`, which is not a valid declaration — the
+// browser threw the whole line away. MEASURED, not guessed: the computed value of the customers
+// table's row separator was `0px none`, the ratings bar's track computed to `rgba(0,0,0,0)`, and the
+// "empty" half of a star row computed to the SAME amber as the filled half.
+// That last one is the one that mattered: every rating on the Feedback screen drew FIVE GOLD STARS,
+// so a 1★ complaint and a 5★ compliment looked identical. No text check could ever have caught it —
+// the `aria-label` said "1 out of 5" the whole time, which is exactly why it survived every sweep.
+// `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
+// wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 // From lib/partialRead, NOT lib/ownerScope: this is a "use client" file, and ownerScope reaches
@@ -27,6 +38,23 @@ const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "n
 const ageDays = (iso: string) => {
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
   return d <= 0 ? "today" : d === 1 ? "1 day" : `${d} days`;
+};
+
+// ── AN OLD TAB IS THE ONE THAT GETS FORGOTTEN (sweep 6 · T14, 2026-08-18) ────────────────────────
+// The list is ordered by how much is owed, which is right — but it means a ₹120 tab from three
+// months ago sits quietly at the bottom under a ₹4,000 one from Tuesday, and a credit book is how a
+// small restaurant loses money without noticing. Age now carries its own colour past 30 and 60 days.
+// The WORDS do not change ("oldest 92 days"), so the colour adds emphasis rather than carrying the
+// meaning on its own, and a fresh tab looks exactly as it always did.
+const OldestTab = ({ iso }: { iso: string }) => {
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  const tone = d >= 60 ? "var(--adm-danger, #e5484d)" : d >= 30 ? "var(--adm-warn, #c98a2b)" : null;
+  return (
+    <span style={tone ? { color: tone, fontWeight: 700 } : undefined}
+      title={tone ? "This tab has been open a long time" : undefined}>
+      oldest {ageDays(iso)}
+    </span>
+  );
 };
 
 export default function OwnerKhata() {
@@ -76,6 +104,11 @@ export default function OwnerKhata() {
 
   return (
     <>
+      {/* REJECTED (owner, 2026-08-18): do NOT make this page hide itself, grey itself out or say
+          "Pay Later isn't enabled" when the module reads off. Built once as sweep-6 item 4 and taken
+          straight back out on his word — *"if the feature is on by me, it will stay on"*. The page
+          shows the book; it never decides whether Pay Later exists. `/api/owner/khata` does send
+          `moduleOff`, and it stays deliberately unread here. docs/REJECTED-IDEAS.md → R34. */}
       <h1 className="adm-page-h">Pay Later</h1>
       <p className="adm-page-sub">Money guests still owe on a tab, and how much you&apos;ve collected. Staff collect a tab from the manager panel; this is your live view of what&apos;s outstanding.</p>
 
@@ -107,6 +140,12 @@ export default function OwnerKhata() {
 
       <div className="adm-card">
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          {/* REJECTED (owner, 2026-08-18): no "oldest first" ordering control here. Offered as sweep-6
+              item 13 and refused — *"We don't need the thirteenth one."* The book stays ordered by how
+              much is owed. (It could not have been done honestly from this screen anyway: the list is
+              bounded to the biggest 500 debts, so "oldest" of that slice is not the oldest on the book
+              — the order would have to move into `lfh_khata_outstanding`.) The age colouring on each
+              row is the part that IS wanted. docs/REJECTED-IDEAS.md → R35. */}
           <input className="adm-input" style={{ flex: 1, minWidth: 200 }} placeholder="Search by name or phone…"
             value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search people who owe" />
           <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
@@ -122,7 +161,19 @@ export default function OwnerKhata() {
         {customers === null && !err ? (
           <div className="adm-empty">Loading Pay Later…</div>
         ) : rows.length === 0 ? (
-          <div className="adm-empty">{q ? "No one matches that search." : "No one owes anything right now. Parked (pay-later) bills show up here until they're collected."}</div>
+          // A SEARCH THAT FOUND NOBODY MUST SAY WHERE IT LOOKED (sweep 6 · T14, 2026-08-18). This box
+          // filters the list already on the page, and that list is the biggest `shown.showing` debts
+          // — so on a long book "No one matches that search" was a claim about the whole book that
+          // this screen had no way of making. An owner reading it would conclude the person had
+          // already paid. Only shown when the list really is capped; on an ordinary book the old
+          // sentence is the true one and is what still appears.
+          <div className="adm-empty">
+            {!q
+              ? "No one owes anything right now. Parked (pay-later) bills show up here until they're collected."
+              : shown
+                ? `No one matches that search among the ${shown.showing.toLocaleString("en-IN")} people who owe the most. There are ${shown.of.toLocaleString("en-IN")} people on the book in all.`
+                : "No one matches that search."}
+          </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {rows.map((c) => (
@@ -140,14 +191,16 @@ export default function OwnerKhata() {
                   </div>
                   <div style={{ textAlign: "right", flex: "none" }}>
                     <div style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{inr(c.outstanding)}</div>
-                    <div className="adm-muted" style={{ fontSize: 11.5 }}>{c.billCount} bill{c.billCount === 1 ? "" : "s"} · oldest {ageDays(c.oldestKhataAt)}</div>
+                    <div className="adm-muted" style={{ fontSize: 11.5 }}>
+                      {c.billCount} bill{c.billCount === 1 ? "" : "s"} · <OldestTab iso={c.oldestKhataAt} />
+                    </div>
                   </div>
                 </button>
                 {open.has(c.id) && (
-                  <div style={{ borderTop: "1px solid var(--border,#e5e7eb)", padding: "6px 14px 12px 38px" }}>
+                  <div style={{ borderTop: "1px solid var(--border-c,#e5e7eb)", padding: "6px 14px 12px 38px" }}>
                     {c.bills.map((b, i) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", fontSize: 13,
-                        borderBottom: i < c.bills.length - 1 ? "1px solid color-mix(in srgb, var(--border,#e5e7eb) 55%, transparent)" : "0" }}>
+                        borderBottom: i < c.bills.length - 1 ? "1px solid color-mix(in srgb, var(--border-c,#e5e7eb) 55%, transparent)" : "0" }}>
                         <span style={{ flex: 1 }} className="adm-muted">
                           {b.bill_no != null ? <b style={{ color: "var(--text,inherit)" }}>#{b.bill_no}</b> : "Bill"}{" · "}{fmt(b.khata_at)}{" · T"}{b.table_number || "?"}
                         </span>
