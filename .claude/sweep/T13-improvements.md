@@ -33,7 +33,32 @@ Result: 40/40 against port 4113, cleaning up its own rows and its own rate-limit
 
 ---
 
-## 🟡 Listed — his call, not mine
+## ✅ His ruling, 2026-08-18
+
+He read the list and answered. **Y3, Y4 and Y5 were approved and are BUILT** — see the section below
+each one. **Y1 and Y2 he did not pick, so they are not built.** He also **vetoed problem 3** in the
+findings file (recorded as R31 in `docs/REJECTED-IDEAS.md`).
+
+## 🟢 Built on his instruction (2026-08-18)
+
+### Y3 · Find someone on the Team roster — BUILT
+*"can do this"*. A search box at the end of the tab strip that filters every restaurant card at once,
+matching name, login, phone and role — including the word the row actually SHOWS, so "waiter" finds
+a tablet login. Filters the list already on screen; fetches nothing. Add form stays usable, the card
+header says "1 of 8 shown", and no match says so instead of "No staff yet". Guard §9.
+
+### Y4 · Working people first, disabled under their own heading — BUILT
+*"can do this too"*. A disabled login used to sit wherever creation order put it. Now: the people on
+shift, then "Disabled · N — cannot sign in", same card, still one tap from Enable. Both groups render
+through ONE row function — two copies of a hundred-line row is how twin surfaces drift. Guard §9.
+
+### Y5 · The banner is headed by the reason — BUILT
+*"can do this too"*. "Someone got there first." for a clash (amber, not danger red), "That didn't go
+through." for a refusal, "Something went wrong." only for a real failure. The kind is attached where
+the error is thrown, and every message goes through one door so the heading can never disagree with
+the text under it. Guard §9.
+
+## 🟡 Not picked — left alone
 
 ### Y1 · Nothing explains why a kitchen row looks emptier than the others
 **Phase:** P06482. Owner panel → Team → any kitchen row.

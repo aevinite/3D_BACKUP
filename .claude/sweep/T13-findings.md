@@ -52,7 +52,17 @@ ledger protects, and for a duplicate username.
 **Fix:** the same scroll-into-view the password card uses.
 **Guard:** §2.
 
-## 3 · "What's enabled" could not explain a single one of three missing sections — MEDIUM · confirmed
+## 3 · ⚠️ VETOED BY THE OWNER (2026-08-18) — the disclosure half is REJECTED, R31
+
+> *"owner can't know which option are not given to them only admin should know that"*
+>
+> What is withheld from a restaurant is Aevidine's business alone. The card now lists ONLY what is
+> ON — no ✗, no greyed chip, no count — and a section he does not have is simply not mentioned.
+> **What survives:** the label map covers all nine sections, so a section he genuinely HAS can never
+> be missing a chip (it held six of nine, which under-reported what he had). Do not offer the
+> off-state again; see `docs/REJECTED-IDEAS.md` R31.
+
+### The original finding, kept for the record
 
 **Where:** owner panel → Settings → the "What's enabled" card.
 **Phases:** P06193, P06194, P06371, P06399, P06462, P06464b, P06488.
