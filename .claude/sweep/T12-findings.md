@@ -68,3 +68,7 @@ He kept all 12 fixes. He also found a 13th problem himself, and turned the parke
 **The three handoffs became fixes** (`59559518`, `794ee3eb`, `1f8dda6b`) — he said "you can do this
 3 also", so I worked outside the original sweep fence on `OwnerManagerMode.tsx`,
 `app/owner/reports/page.tsx` and `components/owner/Charts.tsx`.
+
+| # | where | what | commit |
+|---|---|---|---|
+| 14 | owner → Dashboard → the "Lost to cancellations" tile, and the insight strip | the dashboard called a cancelled order money lost and printed a figure for it. The database classifies `order_cancelled` as `record`, never `money`, and the two sources disagree 3× on the same window (rollup 1,124/₹8,28,096 vs Audit 394/₹1,85,766) because they count different sets. His catch. The dashboard now quotes nothing and links to the record | `3eb58929` |
