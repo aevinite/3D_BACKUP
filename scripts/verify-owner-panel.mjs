@@ -67,7 +67,11 @@ console.log("The owner's cockpit — Menu, Team, Settings\n");
     const catchIdx = body.indexOf("catch");
     const tail = catchIdx > -1 ? body.slice(catchIdx) : "";
     const loadAt = tail.indexOf("await load()");
-    const errAt = tail.search(/setErr\(/);
+    // The message may be put on screen through any of the page's reporting calls — `fail(e)` keeps
+    // the thrown error's own kind (clash / refused / fault, added 2026-08-18), `say(...)` is for one
+    // we make ourselves, and `setErr` is the raw setter underneath both. Whichever is used, it has
+    // to come AFTER the reload, or the reload's `setErr(null)` erases it.
+    const errAt = tail.search(/\b(setErr|fail|say)\(/);
     if (loadAt > -1 && errAt > -1 && loadAt < errAt) {
       ok("a refused rename refreshes FIRST and then says why — the sentence survives the reload");
     } else {
@@ -97,7 +101,15 @@ console.log("The owner's cockpit — Menu, Team, Settings\n");
   }
 }
 
-// ── 3 · "WHAT'S ENABLED" DESCRIBES THE PANEL IT IS PART OF ───────────────────────────────────
+// ── 3 · "WHAT'S ENABLED" LISTS WHAT HE HAS, AND NEVER WHAT HE DOESN'T ────────────────────────
+// REJECTED (owner, 2026-08-18), R31: *"owner can't know which option are not given to them only
+// admin should know that"*. So the FIRST job of this section is to keep the off-state off the
+// screen — no ✗, no greyed chip, no "6 of 9" count. What is withheld is the admin's business.
+//
+// The second job is the half that survived: the label map must still hold every section, because a
+// section he DOES have must never be missing a chip. Before 2026-08-17 the map held six of nine, so
+// a restaurant with Menu, Audit & logs or Manager mode switched ON simply did not list them on a
+// card headed "the sections Aevidine has switched on for you" — it under-reported what he had.
 // The card is the only place an owner can confirm "that section is off on purpose". It listed six
 // of the twelve keys the API answers, so Menu, Audit & logs and Manager mode had no chip at all —
 // verified live: with `menu` off, the sidebar item vanished, /owner/menu said "ask your
@@ -121,10 +133,23 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     const labels = labelBlock
       ? Object.fromEntries([...labelBlock[1].matchAll(/(\w+)\s*:\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]))
       : {};
+    // R31 — the off-state must not exist on this screen at all.
+    const card = code(src);
+    const cardBlock = card.slice(card.indexOf("What&apos;s enabled"), card.indexOf("Your restaurants"));
+    if (!/fa-xmark/.test(cardBlock)) ok("R31 — no ✗ chip: the card never shows what is switched off");
+    else bad("R31 BROKEN — the card shows a ✗ for a withheld section (owner, 2026-08-18: \"owner can't "
+      + "know which option are not given to them only admin should know that\")");
+    if (/filter\(\(k\) => data\.sections\[k\] !== false\)/.test(cardBlock))
+      ok("R31 — the card filters to the sections that are ON before rendering");
+    else bad("R31 — the card no longer filters to ON-only sections before rendering");
+    if (!/of \$\{?Object\.keys\(SECTION_LABEL\)/.test(cardBlock) && !/\bof 9\b/.test(cardBlock))
+      ok("R31 — no \"N of M\" count, which would leak the total he does not have");
+    else bad("R31 — the card counts against the full list, which reveals what is withheld");
+
     const missing = sectionKeys.filter((k) => !(k in labels));
-    if (!missing.length) ok(`every switchable section has a chip (${sectionKeys.length})`);
-    else bad(`"What's enabled" has no chip for: ${missing.join(", ")} — the one card that explains a `
-      + "missing section cannot explain those");
+    if (!missing.length) ok(`the label map covers every section, so one he HAS is never missing (${sectionKeys.length})`);
+    else bad(`"What's enabled" has no label for: ${missing.join(", ")} — a restaurant with that section `
+      + "switched ON would not see it listed on a card that claims to list what is on");
     const extra = Object.keys(labels).filter((k) => !allKeys.includes(k));
     if (!extra.length) ok("no chip names something that is not a real section key");
     else bad(`"What's enabled" shows chips for keys the server never answers: ${extra.join(", ")}`);
@@ -265,6 +290,62 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     // Owners configure no features (owner, 2026-07-31) — the API still answers `modules`; nothing renders it.
     if (!/modules\.map|modules\?\.map/.test(code(settings))) ok("the settings page still renders no feature toggle");
     else bad("the settings page is rendering feature toggles again — every switch is the admin's");
+  }
+}
+
+// ── 9 · THE THREE THINGS HE ASKED FOR ON 2026-08-18 ──────────────────────────────────────────
+// He picked these off the 🟡 list himself ("can do this"), so they are not taste any more — losing
+// one silently in a later refactor would be losing something he chose.
+{
+  const src = code(read(ROSTER));
+  if (src) {
+    // 12 · find a person. It must filter what the row SHOWS (the badge says "waiter"), the login,
+    // and the phone — and it must not fetch anything.
+    const hasBox = /className="ost-find"/.test(src) && /type="search"/.test(src);
+    const filters = /includes\(needle\)/.test(src);
+    const searchesWaiter = /s\.role === "tablet" \? "waiter"/.test(src) && /\[s\.name[\s\S]{0,160}needle/.test(src);
+    if (hasBox && filters) ok("12 — the Team roster has a search box that filters the list");
+    else bad(`12 — the roster's search is gone (box=${hasBox} filter=${filters})`);
+    if (searchesWaiter) ok("12 — searching the word on the badge (\"waiter\") finds a tablet login");
+    else bad("12 — the search no longer matches the role word the row actually shows");
+    if (!/fetch\([^)]*q\b/.test(src)) ok("12 — the search is a view filter, it queries nothing");
+    else bad("12 — the search is issuing a request; it must only filter the list already loaded");
+
+    // 13 · working people first, disabled under their own heading, sharing ONE row renderer.
+    const grouped = /const working = team\.filter\(\(s\) => s\.active\)/.test(src)
+      && /const disabled = team\.filter\(\(s\) => !s\.active\)/.test(src);
+    const heading = /ost-offhead/.test(src) && /cannot sign in/.test(src);
+    const oneRow = (src.match(/const personRow = /g) || []).length === 1
+      && /working\.map\(personRow\)/.test(src) && /disabled\.map\(personRow\)/.test(src);
+    if (grouped) ok("13 — the roster splits people who can sign in from people who cannot");
+    else bad("13 — the disabled people are back in one mixed list");
+    if (heading) ok("13 — the disabled group has its own heading, and it says they cannot sign in");
+    else bad("13 — the disabled group has no heading of its own");
+    if (oneRow) ok("13 — both groups render through ONE row function, so they cannot drift apart");
+    else bad("13 — the person row is duplicated per group; two copies is how twin surfaces drift");
+
+    // 14 · the banner is headed by the reason, and a clash is not painted as danger.
+    const kinds = /type ErrKind = "clash" \| "refused" \| "fault"/.test(src);
+    const heads = /ERR_HEAD\[errKind\]/.test(src) && /got there first/.test(src) && /didn't go through/.test(src);
+    const amber = /errKind === "clash" \? "var\(--adm-warn\)"/.test(src);
+    const labelled = /throw new CallError\([\s\S]{0,120}"clash"\)/.test(src);
+    if (kinds && heads) ok("14 — the banner is headed by WHY it is there, not always \"Something went wrong\"");
+    else bad(`14 — the banner heading no longer follows the reason (kinds=${kinds} heads=${heads})`);
+    if (amber) ok("14 — a clash is amber, not danger red: nothing is broken and nothing was lost");
+    else bad("14 — a clash is painted as danger again");
+    if (labelled) ok("14 — a 409 clash is labelled at the point it is thrown, not guessed at later");
+    else bad("14 — the clash is no longer labelled where it is thrown, so the heading cannot know");
+    // …and every message on the page still goes through the ONE door, or a heading can disagree with
+    // the text under it. `say` and `fail` ARE that door, so their own two bodies are cut out first —
+    // counting them would make the check fail on its own fix.
+    const doorStart = src.indexOf("const say = useCallback");
+    const doorEnd = src.indexOf("}, []);", src.indexOf("const fail = useCallback"));
+    const outside = doorStart > -1 && doorEnd > -1
+      ? src.slice(0, doorStart) + src.slice(doorEnd)
+      : src;
+    const raw = (outside.match(/setErr\((?!null\))/g) || []).length;
+    if (raw === 0) ok("14 — messages go through one door, so the heading can never disagree with the text");
+    else bad(`14 — ${raw} place(s) set a message directly, bypassing the reason — use say() or fail()`);
   }
 }
 

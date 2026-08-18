@@ -32,6 +32,20 @@ type Staff = { id: string; username: string; role: string; name: string | null; 
   in_payroll?: boolean };
 type PayAccess = { moduleOn: boolean; canSeePay: boolean; canRecordPay: boolean; canEditProfile: boolean; canEditJobPay: boolean };
 
+// Why a message is on screen — see `errKind` below. Kept a plain union so the banner can never be
+// headed by a string somebody typed twice.
+type ErrKind = "clash" | "refused" | "fault";
+const ERR_HEAD: Record<ErrKind, string> = {
+  clash: "Someone got there first.",
+  refused: "That didn't go through.",
+  fault: "Something went wrong.",
+};
+/** An error that remembers whether it was a refusal or a real failure. */
+class CallError extends Error {
+  kind: ErrKind;
+  constructor(message: string, kind: ErrKind) { super(message); this.kind = kind; }
+}
+
 // WAITER_CAPS + OVR_MODES lived here — a private copy of the waiter permission list. Deleted
 // 2026-08-04 with the controls that used them: lib/staffCaps.ts is the one list now, and the admin
 // Access screen is the one screen. Do not reintroduce a role's permission list in a panel.
@@ -44,10 +58,19 @@ export default function OwnerStaffPage() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [actor, setActor] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
+  // WHY the message exists, so the banner can be headed honestly (owner, 2026-08-18).
+  //   clash   — someone else got there first. The system worked; nothing is broken.
+  //   refused — we said no to what was typed (name too short, username taken, pay history).
+  //   fault   — it genuinely failed (no internet, the server fell over).
+  // Before this, all three were headed "Something went wrong.", which called the first two a
+  // fault. That mattered more once the clash sentence actually started reaching the screen.
+  const [errKind, setErrKind] = useState<ErrKind>("fault");
   const [loading, setLoading] = useState(true);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [notEnabled, setNotEnabled] = useState<string | null>(null); // calm "section off" state, not an error
+  // What the owner typed into "Find someone" — a view filter over the list already loaded, never a query.
+  const [q, setQ] = useState("");
   const pwRef = useRef<HTMLInputElement>(null);
   const revealRef = useRef<HTMLDivElement>(null);
   const errRef = useRef<HTMLDivElement>(null);
@@ -105,6 +128,16 @@ export default function OwnerStaffPage() {
   // is where the switch actually lives. A handler that can never fire is a promise the next
   // reader would believe.
 
+  // ONE door for every message on this page, so the heading always matches the reason.
+  // `say` is for something we refuse ourselves (a name too short); `fail` is for a thrown error,
+  // which knows its own kind — a network throw has no kind at all, and that really is a fault.
+  const say = useCallback((msg: string, kind: ErrKind = "refused") => { setErrKind(kind); setErr(msg); }, []);
+  const fail = useCallback((e: unknown) => {
+    const kind: ErrKind = e instanceof CallError ? e.kind : "fault";
+    setErrKind(kind);
+    setErr(e instanceof Error ? e.message : String(e));
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const r = await fetch(withScope("/api/owner/staff"), { cache: "no-store" }).then((x) => x.json());
@@ -114,9 +147,9 @@ export default function OwnerStaffPage() {
       if (r.error) throw new Error(r.error);
       setNotEnabled(null);
       setRestaurants(r.restaurants || []); setStaff(r.staff || []); setActor(r.actor || ""); setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { fail(e); }
     finally { setLoading(false); }
-  }, [withScope]);
+  }, [withScope, fail]);
   useEffect(() => { load(); }, [load]);
 
   // When a new one-time password appears, bring the reveal card into view (it renders at the
@@ -146,6 +179,7 @@ export default function OwnerStaffPage() {
 
   const canEditPowers = actor === "owner" || actor === "admin";
 
+
   async function call(path: string, init: RequestInit): Promise<any> {
     setBusy(true);
     try {
@@ -155,7 +189,9 @@ export default function OwnerStaffPage() {
       // than a bare code, so the person knows their value did NOT land (T9 sweep, 2026-08-05).
       if (!r.ok) {
         const c = d?.clash as { plain?: string; todo?: string } | undefined;
-        throw new Error(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : (d.error || `Request failed (${r.status})`));
+        // A clash says so itself; a 4xx is us refusing; a 5xx (or an unreadable reply) is a fault.
+        if (c?.plain) throw new CallError(`${c.plain}${c.todo ? ` ${c.todo}` : ""}`, "clash");
+        throw new CallError(d.error || `Request failed (${r.status})`, r.status >= 500 ? "fault" : "refused");
       }
       return d;
     } finally { setBusy(false); }
@@ -171,7 +207,7 @@ export default function OwnerStaffPage() {
     try {
       await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s2.id, action: "set_payroll", in_payroll: on }) });
       await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { fail(e); }
   }
 
   async function addStaff(rid: string, form: HTMLFormElement) {
@@ -182,7 +218,7 @@ export default function OwnerStaffPage() {
       const name = String(fd.get("name") || "").trim();
       const role = String(fd.get("role") || "manager");
       const password = String(fd.get("password") || "").trim();
-      if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
+      if (name.length < 2) { say("Name must be at least 2 characters."); return; }
       // Optional details typed on the same form. Only non-empty ones are sent, so a bare
       // add is exactly the request it always was.
       const opt: Record<string, unknown> = {};
@@ -195,14 +231,14 @@ export default function OwnerStaffPage() {
       const fullName = String(fd.get("full_name") || "").trim();
       if (fullName) opt.profile = { full_name: fullName };
       const tables = role === "tablet" ? (newTables[rid] || []) : undefined;
-      if (role === "tablet" && !tables!.length) { setErr("Pick at least one table for this waiter."); return; }
+      if (role === "tablet" && !tables!.length) { say("Pick at least one table for this waiter."); return; }
       const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid, tables, ...opt }) });
       setReveal({ name: d.name, password: d.password }); setCopied(false);
       form.reset();
       setNewRole((m) => ({ ...m, [rid]: "manager" }));
       setNewTables((m) => ({ ...m, [rid]: [] }));
       await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { fail(e); }
     finally { addingRef.current = false; }
   }
 
@@ -226,7 +262,7 @@ export default function OwnerStaffPage() {
   async function saveEdit(s: Staff) {
     if (!editing || editing.id !== s.id) return;
     const name = editing.name.trim(); const phone = editing.phone.trim();
-    if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
+    if (name.length < 2) { say("Name must be at least 2 characters."); return; }
     try {
       // What the row said when this inline editor opened — so a second person renaming the same
       // person is refused instead of silently overwritten (T9 sweep, 2026-08-05).
@@ -256,9 +292,8 @@ export default function OwnerStaffPage() {
       // So: refresh FIRST (the row must show the value that really landed), then say why. The
       // editor deliberately stays open with the draft in it, which is what `clash.todo` tells them
       // to do — "look at what it says now and redo yours if it's still right".
-      const why = e instanceof Error ? e.message : String(e);
       await load();
-      setErr(why);
+      fail(e);
     }
   }
 
@@ -267,14 +302,14 @@ export default function OwnerStaffPage() {
     try {
       const d = await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "reset_password" }) });
       setReveal({ name: s.name || s.username, password: d.password }); setCopied(false);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { fail(e); }
   }
   async function setActive(s: Staff, active: boolean) {
     // Disabling bumps their token → instant logout mid-shift, so confirm first (a mis-click
     // used to kick a working staffer off with no prompt). Re-enabling is harmless, no confirm.
     if (!active && !confirm(`Disable ${s.name || s.username}? They'll be logged out immediately and can't sign in until re-enabled.`)) return;
     try { await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_active", active }) }); await load(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { fail(e); }
   }
   async function setRole(s: Staff, role: string) {
     if (role === s.role) return;
@@ -287,12 +322,12 @@ export default function OwnerStaffPage() {
       return;
     }
     try { await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_role", role }) }); await load(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { fail(e); }
   }
   async function del(s: Staff) {
     if (!confirm(`Remove ${s.name || s.username} for good? This can't be undone.`)) return;
     try { await call(withScope(`/api/owner/staff?id=${encodeURIComponent(s.id)}`), { method: "DELETE" }); await load(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { fail(e); }
   }
 
   return (
@@ -313,11 +348,32 @@ export default function OwnerStaffPage() {
           <i className="fas fa-users" /> Team
           <span className="ost-tcount">{staff.filter((s) => s.active).length}</span>
         </button>
+        {/* FIND A PERSON (owner, 2026-08-18). Seven people needs no search; forty does, and a
+            restaurant that size is exactly where scrolling to the right row costs real time
+            mid-service. It filters EVERY restaurant card at once (a multi-restaurant owner would
+            otherwise have to search each one), matches name, login, phone and role, and never
+            hides the Add form — you can still add someone while a search is on. Nothing is
+            fetched: this is the list already on screen. */}
+        {staff.length > 0 && (
+          <label className="ost-find">
+            <i className="fas fa-magnifying-glass" aria-hidden="true" />
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Find someone — name, phone or role" aria-label="Find someone on your team" />
+            {q && <button type="button" className="ost-x" onClick={() => setQ("")}>clear</button>}
+          </label>
+        )}
       </div>
 
       {err && (
-        <div className="adm-card" ref={errRef} style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}>
-          <b>Something went wrong.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span>
+        <div className="adm-card" ref={errRef} role="status" aria-live="polite"
+          style={{ borderColor: errKind === "clash" ? "var(--adm-warn)" : "var(--adm-danger)", marginBottom: 14 }}>
+          {/* THE HEADING TELLS THE TRUTH ABOUT WHAT HAPPENED (owner, 2026-08-18). All three used to
+              read "Something went wrong.", which framed the system working correctly as a fault —
+              "someone else changed this while you had it open" is not something going wrong, and
+              neither is "that username is taken". It mattered more once that first sentence
+              actually started reaching the screen. A clash is amber, not danger red: nothing is
+              broken and nothing was lost, the other person simply got there first. */}
+          <b>{ERR_HEAD[errKind]}</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span>
           {/* The server now answers 503 "please try again" when it couldn't READ your setup
               (instead of wrongly saying the feature is off), so this banner needs a retry. */}
           <button className="ost-mini" style={{ marginLeft: 10 }} disabled={busy}
@@ -340,12 +396,133 @@ export default function OwnerStaffPage() {
       {!loading && !notEnabled && restaurants.length === 0 && <div className="adm-empty">No restaurants are assigned to you yet. Ask the admin to assign one.</div>}
 
       {!notEnabled && restaurants.map((r) => {
-        const team = staff.filter((s) => s.restaurant_id === r.id);
+        const all = staff.filter((s) => s.restaurant_id === r.id);
+        // The search matches what the row SHOWS (the badge says "waiter", so "waiter" must find one)
+        // as well as the stored login and the phone number.
+        const needle = q.trim().toLowerCase();
+        const team = needle
+          ? all.filter((s) => [s.name || "", s.username, s.phone || "", s.role, s.role === "tablet" ? "waiter" : ""]
+              .join(" ").toLowerCase().includes(needle))
+          : all;
+        // WORKING PEOPLE FIRST, DISABLED ONES UNDER THEIR OWN HEADING (owner, 2026-08-18).
+        // A disabled login sat wherever creation order happened to put it, so on a roster with a
+        // few of them the people actually on shift were interleaved with people who cannot sign
+        // in. They are still on the same card and still one tap from Enable — they are just no
+        // longer mixed into the list you read during service. Order within each group is
+        // unchanged (the server sends oldest first).
+        const working = team.filter((s) => s.active);
+        const disabled = team.filter((s) => !s.active);
+        // ONE row, rendered for both groups. Extracted rather than duplicated: this block is a
+        // hundred lines long, and two copies of it is exactly how twin surfaces drift apart.
+        const personRow = (s: Staff) => (
+                  <div key={s.id} className={`ost-row ${s.active ? "" : "off"}`}>
+                    <div className="ost-who">
+                      <span className="ost-rolebadge" data-role={s.role}>{s.role === "tablet" ? "waiter" : s.role}</span>
+                      <span className="ost-pn">{s.name || s.username}</span>
+                      {s.phone && <span className="adm-muted" style={{ fontSize: 11.5 }}>{s.phone}</span>}
+                      {!s.active && <span className="ost-disabled">disabled</span>}
+                      {/* How complete their record is, and where their money stands. Kitchen rows
+                          show neither — they have no profile (owner's call 2026-07-29). */}
+                      {s.profileEligible && s.completeness && (
+                        <a className="ost-prog" href={withRid(`/owner/staff/${s.id}`)}
+                           title={`${s.completeness.filled} of ${s.completeness.total} details filled — open their profile`}>
+                          <span className={`ost-bar ${s.completeness.filled < s.completeness.total ? "part" : ""}`}>
+                            <i style={{ width: `${Math.round((s.completeness.filled / Math.max(1, s.completeness.total)) * 100)}%` }} />
+                          </span>
+                          <span className="adm-muted" style={{ fontSize: 11 }}>
+                            {s.completeness.filled === s.completeness.total ? "complete" : `${s.completeness.filled} of ${s.completeness.total} filled`}
+                          </span>
+                        </a>
+                      )}
+                      {/* Pay only exists for people ON the pay list. Off-list people show a
+                          plain invitation instead of a misleading "pay not set". */}
+                      {s.profileEligible && !s.payHidden && !s.in_payroll && (
+                        canEditPowers
+                          ? <button className="ost-mini paylist" disabled={busy} onClick={() => setPayroll(s, true)}
+                              title="Put this person on the pay list so you can set a rate and record payments">
+                              <i className="fas fa-plus" /> Add to pay list
+                            </button>
+                          : <span className="ost-nopay">not on the pay list</span>
+                      )}
+                      {s.profileEligible && !s.payHidden && s.in_payroll && (s.pay_amount ? (
+                        <span className="adm-muted" style={{ fontSize: 11.5 }}>
+                          {money(s.pay_amount)}{s.pay_type === "monthly" ? "/mo" : s.pay_type === "daily" ? "/day" : s.pay_type === "hourly" ? "/hr" : ""}
+                          {/* The RATE above is stored on the person, so it is always readable. What
+                              needed reading is this month's PAYMENTS — say so rather than print ₹0. */}
+                          {s.payUnread ? (
+                            <span style={{ color: "var(--adm-warn)" }}>{" · "}couldn&rsquo;t read this month&rsquo;s pay — refresh</span>
+                          ) : (
+                            <>
+                              {" · "}<b style={{ color: s.paidThisMonth ? "var(--adm-ok)" : "var(--muted)" }}>{money(s.paidThisMonth)}</b> paid this month
+                              {s.advanceOutstanding ? <span style={{ color: "var(--adm-warn)" }}> · {money(s.advanceOutstanding)} advance</span> : null}
+                            </>
+                          )}
+                        </span>
+                      ) : <span className="ost-nopay">on pay list · rate not set</span>)}
+                    </div>
+                    <div className="ost-actions">
+                      {s.profileEligible && (
+                        <a className="ost-mini open" href={withRid(`/owner/staff/${s.id}`)}>
+                          <i className="fas fa-id-card" /> Open profile
+                        </a>
+                      )}
+                      {/* Two DIFFERENT things, kept apart (owner 2026-07-29): "Open profile" is the
+                          person's record; this opens the PANEL, in a new tab so you don't lose your
+                          place in the roster. It says "the panel", not "their panel": a person-pinned
+                          view (?as=) only works for Aevidine support (lib/viewAsPerson re-checks the
+                          admin cookie), so for an owner this opens it with THEIR OWN access. It
+                          promised the staff member's own view until 2026-08-05 and never gave it. */}
+                      {(s.role === "manager" || s.role === "tablet") && (
+                        <a className="ost-mini" href={s.role === "manager" ? "/manager" : "/tablet"} target="_blank" rel="noopener"
+                          title={`Opens the ${s.role === "manager" ? "manager" : "waiter"} panel with your own access — not ${s.name || s.username}'s view of it`}>
+                          <i className="fas fa-up-right-from-square" /> Open {s.role === "manager" ? "manager" : "waiter"} panel
+                        </a>
+                      )}
+                      <select className="ost-mini" value={s.role} disabled={busy} onChange={(e) => setRole(s, e.target.value)} aria-label="Role">
+                        {/* "waiter", not the storage word "tablet" — the badge on the left of this very
+                            row says WAITER, and the Add form below already translated it. */}
+                        {ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}
+                      </select>
+                      <button className="ost-mini" disabled={busy} onClick={() => setEditing(editing?.id === s.id ? null : { id: s.id, name: s.name || s.username, phone: s.phone || "" })}>Rename / edit phone</button>
+                      <button className="ost-mini" disabled={busy} onClick={() => resetPw(s)}>Reset password</button>
+                      <button className="ost-mini" disabled={busy} onClick={() => setActive(s, !s.active)}>{s.active ? "Disable" : "Enable"}</button>
+                      <button className="ost-mini danger" disabled={busy} onClick={() => del(s)}>Remove</button>
+                    </div>
+                    {editing?.id === s.id && (
+                      <div className="ost-editrow">
+                        <input className="ost-in" value={editing.name} autoFocus placeholder="Username (their login)" autoComplete="off" maxLength={80}
+                          onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+                        <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off" maxLength={20}
+                          onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+                        <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
+                        <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+                      </div>
+                    )}
+                    {/* PER-USER WAITER PERMISSIONS WERE REMOVED FROM HERE (owner, 2026-08-04).
+                        Nine tri-state controls used to sit on this row — mark paid, discount,
+                        invoice, take orders, parcel, table ops, table type, khata, banquet — written
+                        straight to staff_users.permissions from a PRIVATE list in this file.
+                        Three things were wrong with that, and they are the whole reason it is gone:
+                          • "Only the admin holds permissions" (CLAUDE.md / docs/ACCESS-MODEL.md):
+                            the owner panel configures none. This was the last screen that did.
+                          • Eight of its nine keys had no row on the Access screen at all, so it was
+                            a second, larger permission list quietly disagreeing with the canonical
+                            one (lib/staffCaps) — a waiter's per-person list is ONE row there.
+                          • It broke two of the screen's own rules: a capability the admin hadn't
+                            enabled rendered greyed at 0.45 opacity ("no greyed-out ghosts"), and the
+                            whole block was hidden whenever the payroll module was ON — so switching
+                            payroll on made the only way to grant these disappear.
+                        Waiter permissions now live in exactly one place, for every restaurant:
+                        /aevinite → Access & permissions → Waiter (and its Per-person tab). */}
+                  </div>
+        );
         return (
           <div key={r.id} className="adm-card ost-card" style={{ ["--rcol" as string]: r.accentColor }}>
             <span className="ost-accent" aria-hidden="true" />
             <div className="ost-head">
-              <div><div className="ost-name">{r.name}</div><div className="adm-muted" style={{ fontSize: 12 }}>{r.slug} · {team.length} staff</div></div>
+              <div><div className="ost-name">{r.name}</div><div className="adm-muted" style={{ fontSize: 12 }}>
+                {r.slug} · {needle ? `${team.length} of ${all.length} shown` : `${all.length} staff`}
+              </div></div>
             </div>
 
 
@@ -353,110 +530,23 @@ export default function OwnerStaffPage() {
             {tab === "team" && <>
             <div className="ost-section-t" style={{ marginTop: 16 }}>Team</div>
             <div className="ost-team">
-              {team.length === 0 && <div className="adm-empty" style={{ padding: "10px 0" }}>No staff yet — add the first below.</div>}
-              {team.map((s) => (
-                <div key={s.id} className={`ost-row ${s.active ? "" : "off"}`}>
-                  <div className="ost-who">
-                    <span className="ost-rolebadge" data-role={s.role}>{s.role === "tablet" ? "waiter" : s.role}</span>
-                    <span className="ost-pn">{s.name || s.username}</span>
-                    {s.phone && <span className="adm-muted" style={{ fontSize: 11.5 }}>{s.phone}</span>}
-                    {!s.active && <span className="ost-disabled">disabled</span>}
-                    {/* How complete their record is, and where their money stands. Kitchen rows
-                        show neither — they have no profile (owner's call 2026-07-29). */}
-                    {s.profileEligible && s.completeness && (
-                      <a className="ost-prog" href={withRid(`/owner/staff/${s.id}`)}
-                         title={`${s.completeness.filled} of ${s.completeness.total} details filled — open their profile`}>
-                        <span className={`ost-bar ${s.completeness.filled < s.completeness.total ? "part" : ""}`}>
-                          <i style={{ width: `${Math.round((s.completeness.filled / Math.max(1, s.completeness.total)) * 100)}%` }} />
-                        </span>
-                        <span className="adm-muted" style={{ fontSize: 11 }}>
-                          {s.completeness.filled === s.completeness.total ? "complete" : `${s.completeness.filled} of ${s.completeness.total} filled`}
-                        </span>
-                      </a>
-                    )}
-                    {/* Pay only exists for people ON the pay list. Off-list people show a
-                        plain invitation instead of a misleading "pay not set". */}
-                    {s.profileEligible && !s.payHidden && !s.in_payroll && (
-                      canEditPowers
-                        ? <button className="ost-mini paylist" disabled={busy} onClick={() => setPayroll(s, true)}
-                            title="Put this person on the pay list so you can set a rate and record payments">
-                            <i className="fas fa-plus" /> Add to pay list
-                          </button>
-                        : <span className="ost-nopay">not on the pay list</span>
-                    )}
-                    {s.profileEligible && !s.payHidden && s.in_payroll && (s.pay_amount ? (
-                      <span className="adm-muted" style={{ fontSize: 11.5 }}>
-                        {money(s.pay_amount)}{s.pay_type === "monthly" ? "/mo" : s.pay_type === "daily" ? "/day" : s.pay_type === "hourly" ? "/hr" : ""}
-                        {/* The RATE above is stored on the person, so it is always readable. What
-                            needed reading is this month's PAYMENTS — say so rather than print ₹0. */}
-                        {s.payUnread ? (
-                          <span style={{ color: "var(--adm-warn)" }}>{" · "}couldn&rsquo;t read this month&rsquo;s pay — refresh</span>
-                        ) : (
-                          <>
-                            {" · "}<b style={{ color: s.paidThisMonth ? "var(--adm-ok)" : "var(--muted)" }}>{money(s.paidThisMonth)}</b> paid this month
-                            {s.advanceOutstanding ? <span style={{ color: "var(--adm-warn)" }}> · {money(s.advanceOutstanding)} advance</span> : null}
-                          </>
-                        )}
-                      </span>
-                    ) : <span className="ost-nopay">on pay list · rate not set</span>)}
-                  </div>
-                  <div className="ost-actions">
-                    {s.profileEligible && (
-                      <a className="ost-mini open" href={withRid(`/owner/staff/${s.id}`)}>
-                        <i className="fas fa-id-card" /> Open profile
-                      </a>
-                    )}
-                    {/* Two DIFFERENT things, kept apart (owner 2026-07-29): "Open profile" is the
-                        person's record; this opens the PANEL, in a new tab so you don't lose your
-                        place in the roster. It says "the panel", not "their panel": a person-pinned
-                        view (?as=) only works for Aevidine support (lib/viewAsPerson re-checks the
-                        admin cookie), so for an owner this opens it with THEIR OWN access. It
-                        promised the staff member's own view until 2026-08-05 and never gave it. */}
-                    {(s.role === "manager" || s.role === "tablet") && (
-                      <a className="ost-mini" href={s.role === "manager" ? "/manager" : "/tablet"} target="_blank" rel="noopener"
-                        title={`Opens the ${s.role === "manager" ? "manager" : "waiter"} panel with your own access — not ${s.name || s.username}'s view of it`}>
-                        <i className="fas fa-up-right-from-square" /> Open {s.role === "manager" ? "manager" : "waiter"} panel
-                      </a>
-                    )}
-                    <select className="ost-mini" value={s.role} disabled={busy} onChange={(e) => setRole(s, e.target.value)} aria-label="Role">
-                      {/* "waiter", not the storage word "tablet" — the badge on the left of this very
-                          row says WAITER, and the Add form below already translated it. */}
-                      {ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}
-                    </select>
-                    <button className="ost-mini" disabled={busy} onClick={() => setEditing(editing?.id === s.id ? null : { id: s.id, name: s.name || s.username, phone: s.phone || "" })}>Rename / edit phone</button>
-                    <button className="ost-mini" disabled={busy} onClick={() => resetPw(s)}>Reset password</button>
-                    <button className="ost-mini" disabled={busy} onClick={() => setActive(s, !s.active)}>{s.active ? "Disable" : "Enable"}</button>
-                    <button className="ost-mini danger" disabled={busy} onClick={() => del(s)}>Remove</button>
-                  </div>
-                  {editing?.id === s.id && (
-                    <div className="ost-editrow">
-                      <input className="ost-in" value={editing.name} autoFocus placeholder="Username (their login)" autoComplete="off" maxLength={80}
-                        onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-                      <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off" maxLength={20}
-                        onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
-                      <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
-                      <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
-                    </div>
-                  )}
-                  {/* PER-USER WAITER PERMISSIONS WERE REMOVED FROM HERE (owner, 2026-08-04).
-                      Nine tri-state controls used to sit on this row — mark paid, discount,
-                      invoice, take orders, parcel, table ops, table type, khata, banquet — written
-                      straight to staff_users.permissions from a PRIVATE list in this file.
-                      Three things were wrong with that, and they are the whole reason it is gone:
-                        • "Only the admin holds permissions" (CLAUDE.md / docs/ACCESS-MODEL.md):
-                          the owner panel configures none. This was the last screen that did.
-                        • Eight of its nine keys had no row on the Access screen at all, so it was
-                          a second, larger permission list quietly disagreeing with the canonical
-                          one (lib/staffCaps) — a waiter's per-person list is ONE row there.
-                        • It broke two of the screen's own rules: a capability the admin hadn't
-                          enabled rendered greyed at 0.45 opacity ("no greyed-out ghosts"), and the
-                          whole block was hidden whenever the payroll module was ON — so switching
-                          payroll on made the only way to grant these disappear.
-                      Waiter permissions now live in exactly one place, for every restaurant:
-                      /aevinite → Access & permissions → Waiter (and its Per-person tab). */}
+              {team.length === 0 && (
+                <div className="adm-empty" style={{ padding: "10px 0" }}>
+                  {needle ? `Nobody here matches “${q.trim()}”.` : "No staff yet — add the first below."}
                 </div>
-              ))}
+              )}
+              {working.map(personRow)}
             </div>
+            {disabled.length > 0 && (
+              <>
+                {/* Their own heading, so the list you read during service is only people who can
+                    actually sign in. Still the same card, still one tap from Enable. */}
+                <div className="ost-section-t ost-offhead">
+                  Disabled <span className="adm-muted">· {disabled.length} — cannot sign in</span>
+                </div>
+                <div className="ost-team">{disabled.map(personRow)}</div>
+              </>
+            )}
 
             {/* Add staff */}
             <form className="ost-add" onSubmit={(e) => { e.preventDefault(); addStaff(r.id, e.currentTarget); }}>
@@ -594,6 +684,21 @@ export default function OwnerStaffPage() {
         .ost-tab { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
         .ost-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
         .ost-tcount { min-width: 18px; padding: 0 5px; border-radius: 6px; background: var(--muted2); font-size: 10.5px; }
+        /* Find someone — sits at the right end of the tab strip on a wide screen and drops onto its
+           own full-width line on a phone (the tab strip already wraps). 40px tall, like the tab. */
+        .ost-find { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-height: 40px;
+          padding: 0 11px; border: var(--border); border-radius: 10px; background: var(--card); color: var(--muted); font-size: 12.5px; }
+        .ost-find:focus-within { border-color: var(--accent); }
+        .ost-find input { font: inherit; font-size: 13px; border: 0; outline: none; background: none; color: var(--fg, inherit); min-width: 0; width: 210px; }
+        .ost-find input::-webkit-search-cancel-button { filter: grayscale(1); opacity: .6; }
+        .ost-find .ost-x { margin-left: 0; }
+        @media (max-width: 560px) {
+          .ost-find { margin-left: 0; flex-basis: 100%; margin-bottom: 8px; }
+          .ost-find input { width: auto; flex: 1 1 auto; }
+        }
+        /* The disabled group's heading. Amber-muted rather than red: these people are not a problem,
+           they are simply not working right now. */
+        .ost-offhead { margin-top: 14px; color: var(--muted); }
         .ost-prog { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
         .ost-bar { display: block; width: 74px; height: 6px; border-radius: 99px; background: var(--muted2); overflow: hidden; }
         .ost-bar i { display: block; height: 100%; background: var(--adm-ok, #34d399); }
