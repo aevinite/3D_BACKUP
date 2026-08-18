@@ -85,8 +85,14 @@ async function run() {
   await new Promise((r) => setTimeout(r, 900));
   const cons = await sb.from("inv_movements").select("id, qty_base, unit_cost")
     .eq("ref_id", orderId).eq("kind", "consumption");
-  ok("the order consumed its ingredients at kitchen-fire", (cons.data ?? []).length === 1,
-    `${(cons.data ?? []).length} movement(s), ${(cons.data ?? [])[0]?.qty_base}g @ ₹${(cons.data ?? [])[0]?.unit_cost}`);
+  // MEASURE, never assume a count or a price. The dish may have any number of recipe lines — and did,
+  // once four earlier seed runs had each added one, which failed this guard on its own leftovers
+  // rather than on the product. The expected loss is whatever the LEDGER says came out.
+  const consRows = cons.data ?? [];
+  const expectLoss = consRows.reduce((a, m) => a + -Number(m.qty_base) * Number(m.unit_cost), 0);
+  const expectQty = consRows.reduce((a, m) => a + Number(m.qty_base), 0);
+  ok("the order consumed its ingredients at kitchen-fire", consRows.length >= 1,
+    `${consRows.length} movement(s), ₹${expectLoss.toFixed(2)} of ingredients`);
 
   // ── CANCEL THROUGH THE REAL ENDPOINT, answering "it was cooked" ─────────────────────────────
   const res = await fetch(`${BASE}/api/editor/orders/${orderId}`, {
@@ -102,7 +108,8 @@ async function run() {
   if (e) cleanup.push(async () => { await sb.from("expenses").delete().eq("id", e.id); });
   ok("a food-loss expense appears, from the endpoint", !!e && e.category === "food_loss" && !e.voided_at,
     e ? `₹${e.amount} "${e.title}"` : "none");
-  ok("its amount is the ingredient cost (3 × 100g × ₹2)", !!e && Math.abs(Number(e.amount) - 600) < 0.02, e ? `₹${e.amount}` : "");
+  ok("its amount is exactly what the ledger says was consumed", !!e && Math.abs(Number(e.amount) - expectLoss) < 0.02,
+    e ? `expense ₹${e.amount} vs ledger ₹${expectLoss.toFixed(2)}` : "no expense");
   const rev = await sb.from("inv_movements").select("id").eq("ref_id", orderId).eq("kind", "consumption_reversal");
   ok("made=true leaves the stock deducted", (rev.data ?? []).length === 0, `${(rev.data ?? []).length} reversal(s)`);
 
@@ -124,8 +131,10 @@ async function run() {
   ok("it can be corrected to never-made", !fix.error && (fix.data as any)?.ok === true, fix.error?.message ?? "");
   const rev2 = await sb.from("inv_movements").select("id, qty_base").eq("ref_id", orderId).eq("kind", "consumption_reversal");
   for (const m of rev2.data ?? []) cleanup.push(async () => { await sb.from("inv_movements").delete().eq("id", m.id); });
-  ok("the ingredients come back", (rev2.data ?? []).length === 1 && Number((rev2.data ?? [])[0].qty_base) === 300,
-    `${(rev2.data ?? []).length} reversal of ${(rev2.data ?? [])[0]?.qty_base}g`);
+  const back = (rev2.data ?? []).reduce((a, m) => a + Number(m.qty_base), 0);
+  ok("the ingredients come back, line for line and to the gram",
+    (rev2.data ?? []).length === consRows.length && Math.abs(back + expectQty) < 0.0001,
+    `${(rev2.data ?? []).length} reversal(s) for ${consRows.length} consumption(s); out ${expectQty}, back ${back}`);
   const exp2 = await sb.from("expenses").select("voided_at").eq("note", `order:${orderId}`);
   ok("the loss expense is struck out", (exp2.data ?? []).every((x) => !!x.voided_at));
   const da2 = await sb.from("deletion_audit").select("id, kind, meta").eq("order_id", orderId).eq("kind", "removal_classified");

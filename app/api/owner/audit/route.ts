@@ -24,7 +24,10 @@ import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
-const COLS = "id, at, kind, reason_code, reason_note, actor, actor_role, table_number, bill_no, invoice_no, kot_no, item_title, qty, amount, restaurant_id";
+// `made` is the ONE scalar out of meta (owner, 2026-08-18) — never meta itself, which carries a whole
+// order snapshot; 200 of those for rows nobody opened is the board-wide read the egress rules exist to
+// prevent. It is what lets the row wear its "food lost / nothing lost / not answered" tag.
+const COLS = "id, at, kind, reason_code, reason_note, actor, actor_role, table_number, bill_no, invoice_no, kot_no, item_title, qty, amount, restaurant_id, order_id, made:meta->>made";
 
 export async function GET(req: NextRequest) {
   let scope = await ownerScope(req);
@@ -94,6 +97,11 @@ export async function GET(req: NextRequest) {
   const page = Math.max(parseInt(url.searchParams.get("page") || "1", 10) || 1, 1);
   const start = (page - 1) * limit;
   let q = sb.from("deletion_audit").select(COLS, { count: "exact" })
+    // A REMOVALS record shows REMOVALS. 'removal_classified' is the answer to "was the food made?",
+    // not a thing taken out of the system, so it would put "Cancellation answered" rows into a list
+    // headed "what was removed and why" and count them in its total. The current answer rides on the
+    // cancellation row itself (see `made` in COLS); the trail of who answered stays in the table.
+    .neq("kind", "removal_classified")
     .order("at", { ascending: false }).range(start, start + limit - 1);
   // Optional ?rid= — narrow to ONE selected restaurant. Only honoured when that id is already
   // in the caller's scope, so it can only NARROW, never widen (mirrors /api/owner/oplog).
@@ -143,7 +151,7 @@ export async function GET(req: NextRequest) {
   // Measured on the dev data the day this went in: 220 cancelled tickets and 14 deleted bills existed
   // where a 200-row page showed 178 and 10.
   const countScope = pinRid ? [pinRid] : (scope.all ? null : scope.ids);
-  let kindCounts: { kind: string; n: number; amount: number; risk?: string }[] | null = null;
+  let kindCounts: { kind: string; n: number; amount: number; risk?: string; tags?: string[] }[] | null = null;
   if (countScope && countScope.length) {
     const kc = await sb.rpc("lfh_audit_kind_counts", { p_restaurant_ids: countScope, p_from: null, p_to: null });
     // A failed count is reported ABSENT, never as zeroes: the screen then counts what it holds and
@@ -154,8 +162,13 @@ export async function GET(req: NextRequest) {
     // (lfh_audit_risk) so the strip on the screen cannot classify a row differently from the manager
     // panel's copy of the same record. An older database without the column simply sends nothing and
     // the screen falls back to auditsort.js's map, which is the same map.
-    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number; risk?: string }[])
-      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0, ...(x.risk ? { risk: x.risk } : {}) }));
+    // `tags` (mig 336) rides along the same way, from lfh_audit_tags — one answer for all three
+    // screens. And 'removal_classified' is dropped to MATCH THE LIST: the list excludes it because it
+    // is an answer, not a removal, so leaving it in the counts would offer a chip that filters to
+    // nothing — the "never a 0 chip to tap" rule this screen already keeps.
+    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number; risk?: string; tags?: string[] }[])
+      .filter((x) => x.kind !== "removal_classified")
+      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0, ...(x.risk ? { risk: x.risk } : {}), ...(Array.isArray(x.tags) ? { tags: x.tags } : {}) }));
   }
   return NextResponse.json({
     removals,

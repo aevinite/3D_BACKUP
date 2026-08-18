@@ -143,6 +143,7 @@ export const ACT_LABEL: Record<string, string> = {
   // An error-level row: the cancel itself went through, but the "was the food made?" answer could
   // not be recorded, so the stock and the cost were not adjusted. It needs fixing from the Audit.
   cancel_classify_failed: "Couldn't record whether the food was made",
+  cancel_classified: "Answered: was the food made?",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
   khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
   audit_record_failed: "Audit record FAILED",

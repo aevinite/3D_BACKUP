@@ -102,7 +102,10 @@ type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow
   // Named figures the server could NOT read this time (lib/partialRead). A chart built from only
   // SOME of the group is still drawn — but it must say so, or a total that is too small reads as
   // fact (T9 finding F18, 2026-08-07).
-  partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null };
+  partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null;
+  // Food cooked and then binned, priced at what the ingredients cost (mig 336). null = the read
+  // failed, which is reported rather than shown as a zero — a silent 0 would say he wasted nothing.
+  foodLoss?: { amount: number; entries: number } | null };
 type Dish = { title: string; qty: number; revenue: number };
 type Records = {
   bestDay?: { date: string; revenue: number } | null;
@@ -121,6 +124,8 @@ type RestA = {
   // Staff pay that LEFT in this window (mig 221). null = this restaurant doesn't have the
   // Staff-profiles-&-pay module, so no such tile is drawn at all.
   staffPay?: { paidOut: number; people: number; entries: number } | null;
+  /** Food cooked and then binned, at ingredient cost (mig 336). See the group type above. */
+  foodLoss?: { amount: number; entries: number } | null;
   timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
@@ -894,12 +899,12 @@ export default function OwnerDashboard() {
     const p = pl(range);
     if (!p) return null;
     if (p.scope === "restaurant") {
-      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null };
+      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null, foodLoss: p.foodLoss ?? null };
     }
     const revenue = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
     const orders = p.restaurantRevenue.reduce((a, r) => a + r.orders, 0);
     const paidOrders = p.paymentMethods.reduce((a, m) => a + (m.orders || 0), 0);
-    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null };
+    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null, foodLoss: p.foodLoss ?? null };
   }, [pl]);
 
   // Sparkline points (per bucket) for a range — group sums across restaurants.
@@ -1418,7 +1423,13 @@ export default function OwnerDashboard() {
   //   is the honest home for them: they are the answer to "why isn't revenue higher?".
   const staffOut = kMain?.staffPay?.paidOut ?? 0;
   const hasPayroll = !!kMain?.staffPay;
-  const onHand = (kMain?.revenue ?? 0) - staffOut;
+  // FOOD COOKED AND THEN BINNED (owner, 2026-08-18: "the cancelinging amout go up expensis goes up").
+  // Priced at what the ingredients really cost, not at what the bill would have been — the bill value
+  // is revenue he never earned and was never in the revenue figure to begin with (mig 315).
+  const foodLost = kMain?.foodLoss?.amount ?? 0;
+  const foodLostRows = kMain?.foodLoss?.entries ?? 0;
+  const expensesOut = staffOut + foodLost;
+  const onHand = (kMain?.revenue ?? 0) - expensesOut;
   const mt = money === "err" ? undefined : (money as MoneyTotals | undefined);
   // ── WHEN REPORTS ARE SWITCHED OFF ────────────────────────────────────────────────────────────
   // `offNote` means no analytics payload is ever coming, so every tile prints an em dash and says
@@ -1435,8 +1446,11 @@ export default function OwnerDashboard() {
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
       <Kpi k="Today so far" onOpen={() => setTileOpen("today")} v={todayRev} money compact loading={!ov} pill="● live"
         sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
-      <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : staffOut} money compact loading={!offNote && !kMain}
-        sub={offNote ? offSub : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
+      <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
+        sub={offNote ? offSub
+          : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"
+          : foodLost > 0 ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where food was made`
+          : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
       <Kpi k="On hand" onOpen={offNote ? undefined : () => setTileOpen("onhand")} v={offNote ? "—" : onHand} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub : "revenue minus expenses"} />
     </div>
@@ -1510,12 +1524,17 @@ export default function OwnerDashboard() {
         open: "daysummary",
       };
       case "expenses": return {
-        title: "Expenses", sub: `money that left the business · ${per}`,
+        title: "Expenses", sub: `what the period cost you · ${per}`,
         rows: [
           ["Staff pay out", inr(staffOut), hasPayroll ? `${kMain!.staffPay!.entries} payment${kMain!.staffPay!.entries === 1 ? "" : "s"} to ${kMain!.staffPay!.people} ${kMain!.staffPay!.people === 1 ? "person" : "people"}` : "nothing recorded in this period"],
-          ["Total expenses", inr(staffOut), undefined, true],
+          ["Food made then binned", inr(foodLost), kMain?.foodLoss == null
+            ? "couldn't read this — the figure above may be short"
+            : foodLostRows
+              ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where the kitchen had already cooked it — at what the ingredients cost`
+              : "none — every cancellation was caught before the kitchen started"],
+          ["Total expenses", inr(expensesOut), undefined, true],
         ],
-        note: "A discount is not counted here either — your revenue already has it taken off, so counting it again would make this number, and your money on hand, wrong. And a cancelled bill is not an expense at all: nothing was charged for it. Cancellations live in Audit & logs, with the reason and the person.",
+        note: "This is what the period COST you, not what left your bank. Food is counted when it is used, not when it was bought. A discount is not here — your revenue already has it taken off. And a cancelled bill's value is not here either: nothing was charged for it, so it was never money you had. Cancellations live in Audit & logs, with the reason and the person.",
         audit: true,
         open: "team",
       };
@@ -1523,10 +1542,11 @@ export default function OwnerDashboard() {
         title: "On hand", sub: `what is left of the period · ${per}`,
         rows: [
           ["Revenue", inr(kMain?.revenue ?? 0)],
-          ["Less expenses", "− " + inr(staffOut), "money that left the business"],
+          ["Less staff pay", "− " + inr(staffOut)],
+          ["Less food made then binned", "− " + inr(foodLost)],
           ["Money on hand", inr(onHand), undefined, true],
         ],
-        note: "This is takings minus what went out. It is not a bank balance — rent, bills and stock you have not recorded here are not in it.",
+        note: "Takings minus what the period cost you. It is not a bank balance — rent, bills and any stock you have not recorded here are not in it, and food is counted when it is used rather than when it was bought.",
         open: "team",
       };
       default: return null;

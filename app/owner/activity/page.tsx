@@ -36,6 +36,11 @@ type Removal = {
   bill_no: number | null; invoice_no: string | null; kot_no: number | null;
   item_title: string | null; qty: number | null; amount: string | number | null;
   restaurant_id: string | null; restaurant_name: string | null;
+  // The answer to "was the food made?" (owner, 2026-08-18), sent as a TEXT scalar out of meta so the
+  // list never carries a whole order snapshot per row. null = nobody has answered yet, which is a real
+  // state and never guessed at.
+  made?: string | boolean | null;
+  order_id?: string | null;
 };
 // The words + glyph come from the removal-detail card this list opens, so a row and its card can
 // never say two different things about the same event (T15 sweep). Shape kept as [icon, label]
@@ -429,6 +434,36 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                   <span aria-hidden="true" style={{ marginRight: 6 }}>{ico}</span>
                   <b>{label}</b>
                   {bits ? <span className="adm-muted"> · {bits}</span> : null}
+                  {/* ── THE TAGS (owner, 2026-08-18: "make tags for all kind of audit and stuff") ──
+                      From the SAME module the manager panel and the admin console read, so one row
+                      wears one set of words everywhere. For a cancellation the last tag is the answer
+                      to "was the food made?" — and READ-ONLY here: /api/owner/audit is GET-only and
+                      always answers canRestore:false (owner rule, 2026-08-04), so the owner SEES
+                      whether food was lost and changes nothing. A manager settles it in their panel. */}
+                  {(() => {
+                    const madeVal = r.made === true || r.made === "true" ? true
+                      : r.made === false || r.made === "false" ? false : null;
+                    const tags: string[] = AUDITSORT.tagsOf
+                      ? AUDITSORT.tagsOf({ kind: r.kind, meta: { made: madeVal, loss_cost: r.amount } })
+                      : [];
+                    if (!tags.length) return null;
+                    return (
+                      <span style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
+                        {tags.map((t) => (
+                          <span key={t} style={{
+                            fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
+                            whiteSpace: "nowrap",
+                            background: t === "loss" ? "color-mix(in srgb, var(--adm-danger) 16%, transparent)"
+                              : t === "no-loss" ? "color-mix(in srgb, var(--adm-ok) 14%, transparent)"
+                              : t === "unanswered" ? "color-mix(in srgb, var(--adm-warn) 18%, transparent)"
+                              : "color-mix(in srgb, var(--accent) 10%, transparent)",
+                            color: t === "loss" ? "var(--adm-danger)" : t === "no-loss" ? "var(--adm-ok)"
+                              : t === "unanswered" ? "var(--adm-warn)" : "var(--muted)",
+                          }}>{AUDITSORT.tagIcon(t)} {AUDITSORT.tagLabel(t)}</span>
+                        ))}
+                      </span>
+                    );
+                  })()}
                   {r.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{r.restaurant_name}</span> : null}
                 </div>
                 <div style={{ minWidth: 0 }}>

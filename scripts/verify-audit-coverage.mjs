@@ -407,8 +407,17 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
   }
   const adminAudit = read("app/api/admin/audit/route.ts");
   const ownerAudit = read("app/api/owner/audit/route.ts");
-  !/^const COLS[^\n]*meta/m.test(adminAudit) && !/^const COLS[^\n]*meta/m.test(ownerAudit)
-    ? ok("the audit LIST still does not carry meta (the snapshot is fetched only on a click)")
+  // The rule is "no SNAPSHOT in the list", not "no mention of meta". Since 2026-08-18 the list also
+  // sends ONE scalar out of meta — `made:meta->>made`, whether a cancelled order's food was cooked —
+  // which is a text field per row, not an order snapshot, and is what lets a row wear its loss tag
+  // without anything being opened. So a JSON-path selection is allowed and the bare column is not.
+  const shipsSnapshot = (src) => {
+    const line = (src.match(/^const COLS[^\n]*/m) || [""])[0];
+    // strip every `meta->>x` / `meta->x` path, then look for a bare `meta`
+    return /\bmeta\b/.test(line.replace(/meta\s*->>?\s*[a-z_]+/gi, ""));
+  };
+  !shipsSnapshot(adminAudit) && !shipsSnapshot(ownerAudit)
+    ? ok("the audit LIST still carries no snapshot — only the one scalar, the rest on a click")
     : fail("the audit list now ships every snapshot — that is a whole-board read on a screen nobody has opened");
 
   // ONLY THE ADMIN CHANGES ANYTHING. The owner sees the identical evidence and gets no write path.
@@ -673,6 +682,39 @@ if (!HOOK) for (const m of oks) console.log("  ok   " + m);
   disagree.length === 0
     ? ok("the database and the screens agree, kind by kind, on which rows are about money")
     : fail(`lfh_audit_risk and auditsort.js KIND_RISK disagree on: ${disagree.join(", ")} — the money strip would contradict the list below it`);
+  // ── AND THE TAG MAP HAS ONE ANSWER TOO (owner, 2026-08-18: "make tags for all kind of audit") ──
+  // Same shape, same reason as the risk map above: the tags exist twice — KIND_TAGS in
+  // auditsort.js (what the chips on all three screens read) and lfh_audit_tags() in migration 336
+  // (what the per-type counts are grouped by). Two answers to "what is this row about" is how one
+  // screen's chips start disagreeing with another's.
+  const sqlTags = migrationSrcWith("lfh_audit_tags");
+  const jsTags = {};
+  const tblock = shared.match(/var KIND_TAGS = \{([\s\S]*?)\n  \};/);
+  if (tblock) for (const m of tblock[1].matchAll(/([a-z_]+)\s*:\s*\[([^\]]*)\]/g)) {
+    jsTags[m[1]] = m[2].split(",").map((x) => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean).sort();
+  }
+  const sqlTagNamed = {};
+  for (const m of sqlTags.matchAll(/WHEN\s+'([a-z_]+)'\s+THEN\s+ARRAY\[([^\]]*)\]/g)) {
+    sqlTagNamed[m[1]] = m[2].split(",").map((x) => x.trim().replace(/^'|'$/g, "")).filter(Boolean).sort();
+  }
+  const tagKinds = Object.keys(jsTags);
+  tagKinds.length >= 13
+    ? ok(`the screens' tag map covers all ${tagKinds.length} kinds`)
+    : fail(`public/panels/auditsort.js KIND_TAGS only covers ${tagKinds.length} kinds — every kind needs its tags`);
+  const tagDisagree = tagKinds.filter((k) => (sqlTagNamed[k] || []).join("|") !== jsTags[k].join("|"));
+  tagDisagree.length === 0 && tagKinds.length > 0
+    ? ok("the database and the screens agree, kind by kind, on the tags a row carries")
+    : fail(`lfh_audit_tags and auditsort.js KIND_TAGS disagree on: ${tagDisagree.join(", ") || "(nothing parsed — did the map move?)"} — one screen's chips would contradict another's`);
+  // The answer tags are the point of the feature: a cancellation must be able to say it lost food,
+  // lost nothing, or has not been answered — and "unanswered" must never quietly become "no loss".
+  const jsShared = shared;
+  /loss"?\s*:\s*"Food lost"/.test(jsShared) && /unanswered"?\s*:\s*"Not answered yet"/.test(jsShared)
+    ? ok("a cancellation can say it lost food, lost nothing, or is not answered yet")
+    : fail("auditsort.js lost the loss / no-loss / unanswered tag words — the whole point of asking");
+  /made === true \? "loss" : made === false \? "no-loss" : "unanswered"/.test(jsShared)
+    ? ok("an unanswered cancellation stays unanswered, never guessed as \"nothing lost\"")
+    : fail("auditsort.js tagsOf() no longer keeps \"unanswered\" as its own state — guessing it as no-loss would hide a real food loss");
+
   // The one the owner asked for by name: an edit after the bill must NOT count as money.
   jsRisk.bill_annotated === "record" && (sqlNamed.bill_annotated || "record") === "record"
     ? ok("a note/allergy changed after settling is recorded as MINOR, never as money moved")

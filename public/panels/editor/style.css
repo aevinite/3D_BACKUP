@@ -4124,8 +4124,40 @@ html[data-theme="light"] .au-side-r.au-hot > b { color: #96690f; }
   .au-sides { grid-template-columns: minmax(0, 1fr); }
 }
 .au-rows { display: flex; flex-direction: column; gap: 8px; }
-.au-row { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 12px;
-  background: var(--panel-2); border: 1px solid var(--line); }
+/* ── the row became a CARD (owner, 2026-08-18) ────────────────────────────────────────────────
+   It holds two things now: the record itself (still one tap into the full story) and, for a
+   cancellation, the answer to "was the food made?". The answer buttons must NOT be inside the row's
+   own click target, or answering would also open the detail popup — hence .au-main. */
+.au-row { display: flex; flex-direction: column; gap: 0; border-radius: 12px;
+  background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.au-main { display: flex; align-items: center; gap: 12px; padding: 11px 13px; }
+/* the tags a row wears — the same words and glyphs the owner and admin screens use */
+.au-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.au-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 12%, transparent); color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--gold) 22%, transparent); white-space: nowrap; }
+/* the three that carry a consequence read differently from the descriptive ones */
+.au-tag-loss { background: color-mix(in srgb, #ef4444 16%, transparent); color: #b91c1c;
+  border-color: color-mix(in srgb, #ef4444 34%, transparent); }
+.au-tag-no-loss { background: color-mix(in srgb, #16a34a 14%, transparent); color: #15803d;
+  border-color: color-mix(in srgb, #16a34a 30%, transparent); }
+.au-tag-unanswered { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #b45309;
+  border-color: color-mix(in srgb, #f59e0b 38%, transparent); }
+/* the answer strip. Quiet once answered; unmistakable while it is still open, because an
+   unanswered cancellation means stock and money are both still wrong. */
+.au-ask { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 8px 13px; border-top: 1px dashed var(--line); background: var(--panel); }
+.au-ask.open { background: color-mix(in srgb, #f59e0b 10%, var(--panel));
+  border-top: 1px solid color-mix(in srgb, #f59e0b 40%, transparent); }
+.au-ask-q { font-size: 11.5px; font-weight: 800; color: var(--muted); }
+.au-ask.open .au-ask-q { color: #b45309; }
+.au-ask-b { font-size: 11.5px; font-weight: 700; padding: 5px 10px; border-radius: 9px; min-height: 32px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.au-ask-b:hover { border-color: var(--gold); }
+.au-ask-b.on { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 18%, var(--panel-2)); }
+.au-ask-b.on.danger { border-color: #ef4444; background: color-mix(in srgb, #ef4444 18%, var(--panel-2)); color: #b91c1c; }
+.au-ask-b:disabled { opacity: .6; cursor: default; }
+@media (max-width: 560px) { .au-ask { gap: 6px; } .au-ask-b { flex: 1 1 40%; } }
 .au-ico { width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center;
   font-size: 15px; background: color-mix(in srgb, #ef4444 12%, transparent);
   border: 1px solid color-mix(in srgb, #ef4444 30%, var(--line)); }
@@ -4141,10 +4173,14 @@ html[data-theme="light"] .au-side-r.au-hot > b { color: #96690f; }
 
 /* A removal row is CLICKABLE now — it opens the full record (owner, 2026-08-04). Give it the
    affordance, or a row that responds to a tap looks like one that shouldn't have. */
-.au-row[data-au-open] { cursor: pointer; transition: border-color .14s ease, background .14s ease; }
-.au-row[data-au-open]:hover,
-.au-row[data-au-open]:focus-visible { border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
+.au-main[data-au-open] { cursor: pointer; transition: border-color .14s ease, background .14s ease; }
+/* the hover/focus lift belongs to the clickable HALF now, but the border it lifts is the CARD's —
+   so the hover paints the inner half and the card keeps its own frame. */
+.au-main[data-au-open]:hover,
+.au-main[data-au-open]:focus-visible {
   background: color-mix(in srgb, var(--gold) 5%, var(--panel-2)); outline: none; }
+.au-row:has(.au-main[data-au-open]:hover),
+.au-row:has(.au-main[data-au-open]:focus-visible) { border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 
 /* The full record. Same field order and wording as the admin's and the owner's panels
    (components/admin/RemovalDetail.tsx) so one removal never reads differently on two screens. */

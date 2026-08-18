@@ -59,6 +59,10 @@
        ALREADY settled. It moves no money at all — see KIND_RISK below, which is what keeps it out
        of the money figures. */
     bill_annotated: "Note or allergy changed after settling",
+    /* Not a removal — the append-only answer to "was the food made?" on an earlier cancellation, or a
+       correction of that answer. Recorded so the record shows the history of the answer, not just the
+       answer (owner, 2026-08-18; migration 336). */
+    removal_classified: "Cancellation answered: was the food made?",
   };
   /* The glyph each type wears, beside the words so the two cannot drift. Plain text symbols only —
      the manager panel renders these into its own markup and a couple of its rows print to paper. */
@@ -67,7 +71,7 @@
     qty_reduced: "\u2796", menu_item_deleted: "\uD83D\uDCD5", invoice_voided: "\u21A9\uFE0F",
     discount_given: "\uFF05", payment_reverted: "\u21BA", on_the_house: "\uD83C\uDF81",
     bill_changed_after_reopen: "\u21C4", order_restored: "\u267B\uFE0F",
-    bill_annotated: "\u270E",
+    bill_annotated: "\u270E", removal_classified: "\u2753",
   };
   /* HOW RISKY IS THIS ROW — the ONE answer, for all three panels (owner, 2026-08-13:
      "it should also show whole risk like money wise and all that, how much money is there which
@@ -98,7 +102,72 @@
     order_restored: "record",            // the reversal of a removal — it puts money back, never takes it
     bill_annotated: "record",            // a note / allergy after settling: touches no total, tax or discount
     customer_erased: "data",             // a person's details, erased on request, irreversibly
+    removal_classified: "record",        // the ANSWER to a cancellation, not a removal — it moves nothing
   };
+  /* WHAT KIND OF THING IS THIS ROW — the tags (owner, 2026-08-18: "make tags for all kind of audit
+     and stuff"). The database half is lfh_audit_tags() in migration 336 and verify:audit asserts the
+     two agree, exactly as it already does for KIND_RISK — two answers to "what is this row" is how
+     one screen's chips start disagreeing with another's.
+
+     Tags are ADDITIVE labels a person can filter by. They are deliberately NOT a second risk model:
+     risk answers "did money move", a tag answers "what area of the restaurant is this about". */
+  var KIND_TAGS = {
+    order_cancelled: ["cancellation", "kitchen"],
+    order_deleted: ["bill", "money"],
+    dish_removed: ["order", "kitchen"],
+    qty_reduced: ["order", "kitchen"],
+    menu_item_deleted: ["menu"],
+    invoice_voided: ["bill", "reopen"],
+    discount_given: ["money", "discount"],
+    payment_reverted: ["money", "payment"],
+    on_the_house: ["money", "discount"],
+    bill_changed_after_reopen: ["bill", "reopen", "money"],
+    order_restored: ["order", "restored"],
+    bill_annotated: ["bill", "note"],
+    customer_erased: ["guest", "privacy"],
+    removal_classified: ["correction"],
+  };
+  /* The words a person reads for each tag, and the glyph beside them. One spelling everywhere, for the
+     same reason the kind labels are shared. */
+  var TAG_LABEL = {
+    cancellation: "Cancellations", kitchen: "Kitchen", bill: "Bills", money: "Money moved",
+    order: "Orders", menu: "Menu", reopen: "Reopened", discount: "Discounts", payment: "Payments",
+    restored: "Put back", note: "Notes", guest: "Guest data", privacy: "Privacy",
+    correction: "Answer corrected", other: "Other",
+    loss: "Food lost", "no-loss": "Nothing lost", unanswered: "Not answered yet",
+    "cost-unknown": "Cost unknown",
+  };
+  var TAG_ICON = {
+    cancellation: "\uD83C\uDFAB", kitchen: "\uD83D\uDC68\u200D\uD83C\uDF73", bill: "\uD83E\uDDFE",
+    money: "\uD83D\uDCB8", order: "\uD83C\uDF7D", menu: "\uD83D\uDCD5", reopen: "\u21A9\uFE0F",
+    discount: "\uFF05", payment: "\u21BA", restored: "\u267B\uFE0F", note: "\u270E",
+    guest: "\uD83D\uDC64", privacy: "\uD83E\uDDF9", correction: "\u2753", other: "\u2022",
+    loss: "\uD83D\uDD25", "no-loss": "\u2705", unanswered: "\u2754", "cost-unknown": "\u2696\uFE0F",
+  };
+  /* The tags for ONE row — its kind's tags, plus, for a cancellation, whether the food was made. That
+     second part is the answer he asked to be able to see and filter by: an unanswered cancellation is
+     its own state, never guessed at. Mirrors lfh_audit_tags() exactly. */
+  function tagsOf(row) {
+    var r = row || {}, meta = r.meta || {};
+    var out = (KIND_TAGS[r.kind] || ["other"]).slice();
+    if (r.kind === "order_cancelled") {
+      var made = meta.made;
+      out.push(made === true ? "loss" : made === false ? "no-loss" : "unanswered");
+      if (made === true && num(meta.loss_cost) === 0) out.push("cost-unknown");
+    }
+    return out;
+  }
+  /* Every tag present in a set of rows, with how many carry it — for the chip strip. Built from the
+     WHOLE feed like the kind chips, so a chip's count does not change when you tap it. */
+  function tagCountsFrom(rows) {
+    var seen = {};
+    (rows || []).forEach(function (r) {
+      tagsOf(r).forEach(function (t) { seen[t] = (seen[t] || 0) + 1; });
+    });
+    return Object.keys(seen).sort().map(function (t) {
+      return { tag: t, count: seen[t], label: TAG_LABEL[t] || t, icon: TAG_ICON[t] || "\u2022" };
+    });
+  }
   /* The one-tap reasons, for the same reason — the search matches on the WORDS a screen shows, so a
      third spelling of "By mistake" would make typing it find nothing on one panel and rows on another. */
   var REASON_LABEL = {
@@ -376,6 +445,14 @@
     KIND_RISK: KIND_RISK,
     riskOf: function (kind) { return KIND_RISK[kind] || "record"; },
     KIND_ICON: KIND_ICON,
+    // ── the TAGS (owner, 2026-08-18) — the client half of lfh_audit_tags() ─────────────────────
+    KIND_TAGS: KIND_TAGS,
+    TAG_LABEL: TAG_LABEL,
+    TAG_ICON: TAG_ICON,
+    tagsOf: tagsOf,
+    tagCountsFrom: tagCountsFrom,
+    tagLabel: function (t) { return TAG_LABEL[t] || t; },
+    tagIcon: function (t) { return TAG_ICON[t] || "\u2022"; },
     REASON_LABEL: REASON_LABEL,
     SORTS: SORTS,
     DEFAULT_SORT: DEFAULT_SORT,

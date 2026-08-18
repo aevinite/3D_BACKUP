@@ -159,7 +159,14 @@ BEGIN
         VALUES (p_restaurant, 'food_loss',
                 'Food made then cancelled' || COALESCE(' · table ' || v_order.table_number::text, ''),
                 ROUND(v_cost, 2),
-                (COALESCE(v_order.created_at, now()) AT TIME ZONE 'Asia/Kolkata')::date,
+                -- THE BUSINESS DAY, NOT THE CALENDAR DAY (measured, 2026-08-19). A restaurant's day
+                -- runs 05:00 IST to 05:00 IST, and every document date in this system follows that —
+                -- migration 294 exists for exactly this and gives the rule as lfh_doc_date_hi(): step
+                -- back the 5-hour offset BEFORE taking the date. Dated by the calendar day instead,
+                -- food cooked at 01:00 was stamped tomorrow and then fell outside the window the
+                -- dashboard filters by, so the Expenses tile showed 2 of 3 losses and a total that
+                -- happened to look plausible (₹1,800 of ₹3,600). Same arithmetic as the helper.
+                ((COALESCE(v_order.created_at, now()) - interval '5 hours') AT TIME ZONE 'Asia/Kolkata')::date,
                 'order:' || p_order::text, p_actor, p_actor_id)
         RETURNING id INTO v_expense;
       END IF;
@@ -200,6 +207,18 @@ BEGIN
             'of', p_audit_id, 'made', p_made, 'was', v_prev,
             'loss_cost', ROUND(v_cost, 2), 'lines', v_lines,
             'expense_id', v_expense, 'corrected', (v_prev IS NOT NULL AND v_prev <> p_made::text)));
+
+  -- ── AND THE ROW A SCREEN ACTUALLY LISTS CARRIES THE CURRENT ANSWER ──────────────────────────
+  -- The trail of answers lives in the 'removal_classified' rows above and is never touched. But the
+  -- Audit LISTS the 'order_cancelled' row, and a list cannot afford a sub-query per line to find the
+  -- latest answer — measured: without this the panel showed "Not answered yet" on a row that had just
+  -- been answered, because it was reading the cancellation's own meta.
+  -- So the answer is MERGED onto the cancellation row as a read convenience. This erases nothing: the
+  -- who/when/from-what history is still one row per answer, and `corrected` still marks a change.
+  UPDATE deletion_audit
+     SET meta = COALESCE(meta, '{}'::jsonb)
+                || jsonb_build_object('made', p_made, 'loss_cost', ROUND(v_cost, 2))
+   WHERE restaurant_id = p_restaurant AND kind = 'order_cancelled' AND order_id = p_order;
 
   RETURN jsonb_build_object('ok', true, 'made', p_made, 'lossCost', ROUND(v_cost, 2),
                             'lines', v_lines, 'expenseId', v_expense,

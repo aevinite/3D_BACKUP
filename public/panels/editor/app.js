@@ -6714,6 +6714,7 @@ const OP_ACTION_LABELS = {
   // An error-level row: the cancel itself went through, but the "was the food made?" answer could
   // not be recorded, so the stock and the cost were not adjusted. It needs fixing from the Audit.
   cancel_classify_failed: "Couldn't record whether the food was made",
+  cancel_classified: "Answered: was the food made?",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
   khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
   audit_record_failed: "Audit record FAILED",
@@ -7207,11 +7208,35 @@ function auditHtml() {
         r.bill_no != null ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
         r.item_title ? esc(r.item_title) + (r.qty > 1 ? " ×" + esc(r.qty) : "") : "",
         r.amount != null ? inr(parseFloat(r.amount) || 0) : ""].filter(Boolean).join(" · ");
-      return `<div class="au-row" data-au-open="${esc(r.id)}" role="button" tabindex="0" title="See exactly what was removed">
-        <span class="au-ico" title="${esc(label)}">${ico}</span>
-        <div class="au-mid"><b>${esc(label)}</b><span class="au-bits">${bits || "—"}</span>
-          <span class="au-reason">${esc(reasonTxt(r))}</span></div>
-        <div class="au-who"><b>${esc(r.actor || "—")}</b><small>${esc(r.actor_role || "")}</small><small>${esc(when(r.at))}</small></div>
+      // ── THE TAGS, AND THE ONE QUESTION THAT MAY STILL BE OPEN (owner, 2026-08-18) ───────────
+      // Tags come from the shared module, so this row wears the same words as the owner console and
+      // the admin console. For a cancellation the answer tag is the one that matters: `unanswered`
+      // is a real state — an old row, the tablet emptying an order dish by dish, or the automatic
+      // archive when a table closes — and it is settled right here rather than being guessed.
+      // The list sends the answer as a TEXT scalar (made:meta->>made) rather than the whole meta —
+      // see the endpoint's note on why meta stays lazy. Normalise it before the shared tag map sees
+      // it, so one row cannot read "unanswered" here and "no loss" on the owner's screen.
+      const madeVal = r.made === true || r.made === "true" ? true : r.made === false || r.made === "false" ? false : null;
+      const tags = AS && AS.tagsOf ? AS.tagsOf({ kind: r.kind, meta: { made: madeVal, loss_cost: r.amount } }) : [];
+      const tagHtml = tags.length
+        ? `<span class="au-tags">${tags.map((t) => `<span class="au-tag au-tag-${esc(t)}">${AS.tagIcon(t)} ${esc(AS.tagLabel(t))}</span>`).join("")}</span>`
+        : "";
+      const made = madeVal;
+      const canAsk = r.kind === "order_cancelled" && r.order_id;
+      const askHtml = canAsk ? `<div class="au-ask${made === null ? " open" : ""}">
+        <span class="au-ask-q">${made === null ? "Was the food made?" : "Food made?"}</span>
+        <button class="au-ask-b${made === true ? " on danger" : ""}" data-au-made="1" data-au-order="${esc(r.order_id)}"
+          title="The food was cooked — it counts as a loss and the ingredients stay used">Yes, cooked</button>
+        <button class="au-ask-b${made === false ? " on" : ""}" data-au-made="0" data-au-order="${esc(r.order_id)}"
+          title="Never started — the ingredients go back into stock">No, never started</button>
+      </div>` : "";
+      return `<div class="au-row" role="group">
+        <div class="au-main" data-au-open="${esc(r.id)}" role="button" tabindex="0" title="See exactly what was removed">
+          <span class="au-ico" title="${esc(label)}">${ico}</span>
+          <div class="au-mid"><b>${esc(label)}</b><span class="au-bits">${bits || "—"}</span>
+            <span class="au-reason">${esc(reasonTxt(r))}</span>${tagHtml}</div>
+          <div class="au-who"><b>${esc(r.actor || "—")}</b><small>${esc(r.actor_role || "")}</small><small>${esc(when(r.at))}</small></div>
+        </div>${askHtml}
       </div>`;
     }).join("")}</div>`
     : `<div class="empty">${q ? "Nothing matches that." : auKind ? "Nothing of that kind — tap All to see everything." : "Nothing has been removed yet — this list fills itself as it happens."}</div>`}`;
@@ -7235,6 +7260,32 @@ function bindAudit() {
     const open = () => openRemovalDetail(el2.dataset.auOpen);
     el2.onclick = open;
     el2.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
+  });
+  // ── ANSWERING "was the food made?" FROM HERE (owner, 2026-08-18) ─────────────────────────────
+  // The tap must never vanish: it is held while the server works (tapGuard), it says what happened
+  // either way, and it reloads the record so the tag on the row matches the answer that was just
+  // given. The buttons live OUTSIDE the row's own click target, so answering never also opens the
+  // detail popup.
+  document.querySelectorAll("[data-au-made]").forEach((b) => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      const made = b.dataset.auMade === "1";
+      const orderId = b.dataset.auOrder;
+      if (b.disabled) return;
+      b.disabled = true;
+      const was = b.textContent;
+      b.textContent = "Saving…";
+      try {
+        const r2 = await api("POST", "/audit/classify", { order_id: orderId, made });
+        toast(made
+          ? "Recorded as a loss" + (r2 && r2.lossCost ? " of " + inr(r2.lossCost) : "") + " — the ingredients stay used"
+          : "Recorded — the ingredients go back into stock", "ok");
+        state.audit = null; renderEditor(); loadAudit();
+      } catch (err) {
+        b.disabled = false; b.textContent = was;
+        toast("Couldn't record that: " + (err && err.message ? err.message : "try again"), "err");
+      }
+    };
   });
 }
 

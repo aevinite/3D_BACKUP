@@ -207,13 +207,18 @@ check("the tile face shows the SHORT money form",
 // already out of revenue. Adding either to Expenses and then subtracting Expenses from revenue would
 // count the same loss twice and read "on hand" lakhs too low. This is the one check here that guards
 // a NUMBER rather than a screen.
-check("Expenses is staff pay out only, not staff pay plus cancellations",
+// THE INVARIANT, restated for the P5 shape (2026-08-18). Expenses legitimately includes the INGREDIENT
+// COST of food that was cooked and then binned — that is a real cost. What it must never include is the
+// cancelled BILL's value, or a discount: revenue is already net of discounts and never counted a
+// cancelled order (mig 315), so either would count the same loss twice and read "On hand" lakhs low.
+// The two are easy to confuse because both are "cancellations", which is exactly why this is guarded.
+check("no cancelled-bill value or discount is added into the money maths",
   /const staffOut = kMain\?\.staffPay\?\.paidOut \?\? 0;/.test(homeC)
-    && /const onHand = \(kMain\?\.revenue \?\? 0\) - staffOut;/.test(homeC)
-    && !/staffOut \+ .*cancelledValue|cancelledValue \+ .*staffOut/.test(homeC),
-  "app/owner/page.tsx: something added cancellations or discounts into the Expenses total. Revenue\n       is already NET of discounts and never included a cancelled order (migration 315), so this\n       counts the same loss twice and makes \"On hand\" wrong by lakhs. They belong in the Revenue\n       popup under what he did not charge.");
-check("the Expenses popup says why cancellations are not in it",
-  /not an expense at all/.test(homeC),
+    && !/cancelledValue/.test(homeC.replace(/^type MoneyTotals =.*$/m, ""))
+    && !/expensesOut[^\n]*discount|discount[^\n]*expensesOut/.test(homeC),
+  "app/owner/page.tsx: a cancelled bill's value or a discount is feeding the Expenses / On hand maths.\n       Revenue is already net of discounts and never included a cancelled order (mig 315), so this\n       counts the same loss twice. Only the PRICED ingredient cost (foodLoss) belongs there.");
+check("the Expenses popup says why a cancelled bill's VALUE is not in it",
+  /never money you had/.test(homeC),
   "app/owner/page.tsx: the Expenses popup no longer explains why discounts and cancelled bills are\n       excluded. He asked for them \"under expenses\"; the screen owes him the reason they are not.");
 // ── 13b. THE DASHBOARD QUOTES NO CANCELLATION FIGURE (owner, 2026-08-18) ────────────────────────
 // "the order which is been cancel but how you will calculate that bcz like it will in [the] audit so
@@ -305,6 +310,38 @@ check("an empty record says WHICH restaurant it is empty for",
   /Nothing has been removed at \$\{scopeName\}/.test(audit) && /No staff activity at \$\{scopeName\}/.test(audit),
   "app/owner/activity/page.tsx: the empty states are back to \"Nothing has been removed yet\", which reads\n       as \"nowhere, ever\" when the switcher has narrowed the page to one restaurant.");
 
+// ── 19. food cooked and then binned reaches the Expenses tile (P5, owner 2026-08-18) ────────────
+// "the cancelinging amout go up expensis goes up." The tile must add the ingredient cost of food that
+// was made and then cancelled — and must NOT add the cancelled bill's value, which was never money he
+// had (mig 315: revenue is net and never counted a cancelled order).
+check("Expenses = staff pay + food made then binned",
+  /const expensesOut = staffOut \+ foodLost;/.test(homeC) && /const onHand = \(kMain\?\.revenue \?\? 0\) - expensesOut;/.test(homeC),
+  "app/owner/page.tsx: the Expenses tile stopped adding the food loss, or On hand stopped subtracting\n       the same total — the three tiles then no longer reconcile on screen.");
+check("the food loss comes from the analytics payload, not the bill value",
+  /foodLost = kMain\?\.foodLoss\?\.amount \?\? 0/.test(homeC) && !/foodLost[^\n]*cancelledValue/.test(homeC),
+  "app/owner/page.tsx: the food loss is being taken from somewhere other than the priced `foodLoss`\n       figure. The cancelled BILL value is not a cost and must never feed this tile.");
+{
+  const an = read("app/api/owner/analytics/route.ts");
+  check("the loss is priced from real expense rows, scoped and capped",
+    /category", "food_loss"/.test(an) && /is\("voided_at", null\)/.test(an) && /\.in\("restaurant_id", ids\)/.test(an),
+    "app/api/owner/analytics/route.ts: the food-loss read lost its scope, its voided filter or its\n       category — a struck-out loss must not still count, and it must never read past this owner.");
+  check("the loss window follows the BUSINESS day, both ends",
+    /gte\("expense_date", istDateOf\(from\)\)/.test(an) && /lte\("expense_date", businessDateHi\(to\)\)/.test(an),
+    "app/api/owner/analytics/route.ts: the food-loss window stopped using businessDateHi. A restaurant's\n       day ends at 05:00 IST, so a calendar bound drops today's losses — measured: the tile showed 2 of\n       3 and a total that happened to look plausible.");
+  check("a failed loss read is reported ABSENT, never as zero",
+    /food-loss read failed[\s\S]{0,80}return null/.test(an),
+    "app/api/owner/analytics/route.ts: a failed food-loss read now returns 0, which tells him he wasted\n       nothing. It must be absent so the popup can say it could not be read.");
+}
+{
+  const mig = read("supabase/migrations/336_was_the_food_actually_made.sql");
+  check("the loss expense is dated by the business day",
+    /- interval '5 hours'\) AT TIME ZONE 'Asia\/Kolkata'\)::date/.test(mig),
+    "supabase/migrations/336: the food-loss expense is dated by the calendar day again. Migration 294\n       set the rule — step back the 5-hour offset first — or food cooked after midnight is stamped\n       tomorrow and falls outside the window the dashboard filters by.");
+  check("answering is append-only: a correction adds a row, never edits one",
+    /INSERT INTO deletion_audit[\s\S]{0,400}'removal_classified'/.test(mig),
+    "supabase/migrations/336: a classification no longer writes its own row. The history of who answered\n       what, and what they changed it from, is the record — it may never be overwritten.");
+}
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -315,4 +352,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 48 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 55 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");

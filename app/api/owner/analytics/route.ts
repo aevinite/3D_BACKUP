@@ -285,6 +285,39 @@ export async function GET(req: NextRequest) {
     if (!r) return { paidOut: 0, people: 0, entries: 0 };
     return { paidOut: num(r.paid_out), people: Number(r.people) || 0, entries: Number(r.entries) || 0 };
   };
+  // ── FOOD MADE THEN BINNED (owner, 2026-08-18 — docs/CANCEL-AND-LOSS-SPEC.md) ─────────────────
+  // "the cancelinging amout go up expensis goes up." A cancellation where the food WAS cooked writes
+  // a `food_loss` expense priced at what the ingredients really cost (migration 336). This is the
+  // figure that reaches his Expenses tile.
+  //
+  // It is NOT the cancelled bill's value: that is revenue he never earned and it was never in the
+  // revenue figure to begin with (mig 315 — revenue is net, and cancelled orders are never counted).
+  // The ingredient cost is a real cost; the bill value is not. Keeping those two apart is the whole
+  // reason this exists.
+  //
+  // Read directly rather than through an RPC: it is a handful of rows, filtered on the indexed
+  // restaurant_id, with the columns named and voided rows excluded. Same window rule as staff pay —
+  // a business day ends at 05:00 IST, so businessDateHi, never istDateOf.
+  const foodLossExpense = async (): Promise<{ amount: number; entries: number } | null> => {
+    let ids: string[];
+    try {
+      ids = (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scope.ids).filter(Boolean) as string[];
+    } catch { return null; }   // an unreadable list must not print a figure that is too small
+    if (!ids.length) return null;
+    const q = await sb.from("expenses")
+      .select("amount")
+      .in("restaurant_id", ids)
+      .eq("category", "food_loss")
+      .is("voided_at", null)
+      .gte("expense_date", istDateOf(from))
+      .lte("expense_date", businessDateHi(to))
+      .limit(5000);
+    // A FAILED read is reported as ABSENT, never as zero — a silent 0 here would tell him he wasted
+    // nothing, which is the wrong way for this to fail (the same rule staff pay above follows).
+    if (q.error) { console.error("[owner/analytics] food-loss read failed:", q.error.message); return null; }
+    const rows = q.data || [];
+    return { amount: rows.reduce((a, r) => a + num((r as { amount: unknown }).amount), 0), entries: rows.length };
+  };
   // ── THE KEY MUST CARRY THE RESOLVED WINDOW, NOT JUST ITS NAME (T5 sweep, 2026-08-06) ──────
   // This used to be the bare range name, so "today" and "30d" were the SAME cache key today as
   // yesterday. Snapshots are served stale-while-revalidate — the stored value ships first and
@@ -463,6 +496,7 @@ export async function GET(req: NextRequest) {
       }));
       return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev,
         staffPay: await staffPayExpense(),
+        foodLoss: await foodLossExpense(),
         ...(partial.length ? { partial } : {}) };
         },
       });
@@ -548,6 +582,7 @@ export async function GET(req: NextRequest) {
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, topDish: dishRows[0]?.title || "—" },
       staffPay: await staffPayExpense(),
+      foodLoss: await foodLossExpense(),
       timeseries: tsRows,
       timeseriesPrev: tsPrevRows,
       dishes: dishRows,

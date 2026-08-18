@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=e3aa6303" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=ded9dfd0" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -169,9 +169,9 @@
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
   <script src="/panels/billdoc.js?v=a1759a47"></script>
-  <script src="/panels/auditsort.js?v=2684f18c"></script>
+  <script src="/panels/auditsort.js?v=9d4879f0"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=0eeefc40"></script>
+  <script src="/panels/editor/app.js?v=36d42585"></script>
 </body>
 </html>
