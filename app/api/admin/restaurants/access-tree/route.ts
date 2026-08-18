@@ -91,7 +91,15 @@ function describeAccessPatch(patch: Record<string, any>): string {
   for (const [k, v] of Object.entries(obj(patch.settings))) {
     const label = nameOfBind((b) => (b.t === "setting" || b.t === "tablet" || b.t === "choice" || b.t === "list" || b.t === "text") && b.key === k)
       || nameOfBind((b) => b.t === "module" && `${b.key}_allowed` === k);
-    say(label, k, Array.isArray(v) ? v.join("/") : v);
+    // A WAITER'S TRI-STATE IS SAID IN WORDS, like the capTablet branch forty lines below already
+    // does (owner, 2026-08-18). Six of the eight waiter rows are column-bound and came through
+    // here, so the "Recent changes here" strip read "Mark a bill paid: pin" — a word that appears
+    // nowhere on the screen the admin is looking at, on a strip whose whole job is telling them in
+    // English what they just changed. The other two rows have said "on, with a manager PIN" all
+    // along, so the same save could describe the same idea two different ways. (sweep T15)
+    const isWaiterCap = !!nameOfBind((b) => b.t === "tablet" && b.key === k);
+    const said = isWaiterCap && v === "pin" ? "on, with a manager PIN" : Array.isArray(v) ? v.join("/") : v;
+    say(label, k, said);
   }
   for (const [panel, keys] of Object.entries(obj(patch.tabs)))
     for (const [k, v] of Object.entries(obj(keys))) say(nameOfBind((b) => b.t === "tab" && b.panel === panel && b.key === k), `${panel}.${k}`, v);

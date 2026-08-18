@@ -904,6 +904,24 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("a refused save keeps its explanation on screen after the reload it triggers");
 }
 
+// ── 28 · THE ACTIVITY LINE SAYS A WAITER'S PIN STATE IN WORDS ───────────────
+// The "Recent changes here" strip is the only place an admin sees what they just did, and the
+// owner's standing rule is that the log reads as English. A waiter's tri-state came through the
+// plain settings loop, so it wrote "Mark a bill paid: pin" — a word that is on no screen — while
+// the capTablet branch of the SAME function said "on, with a manager PIN" for the same idea. Six of
+// the eight waiter rows are column-bound, so the wrong form was the common one. (T15, 2026-08-18)
+{
+  // CODE ONLY — the loop EXPLAINS this rule in a comment, and a naive search reads its own
+  // documentation and passes over the very line that was wrong (it did, on the first draft).
+  const route = read("app/api/admin/restaurants/access-tree/route.ts")
+    .replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const settingsLoop = (route.match(/for \(const \[k, v\] of Object\.entries\(obj\(patch\.settings\)\)\) \{[\s\S]*?\n  \}/) || [""])[0];
+  if (!settingsLoop) fail("could not find describeAccessPatch's settings loop — if it moved, update this guard");
+  else if (!/manager PIN/.test(settingsLoop))
+    fail('the activity line writes a waiter tri-state raw, so the Recent-changes strip says "pin" instead of "on, with a manager PIN"');
+  else ok("the activity line says a waiter's PIN state in words, the same way both of its branches do");
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
