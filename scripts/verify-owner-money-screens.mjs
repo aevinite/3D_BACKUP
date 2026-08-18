@@ -254,6 +254,27 @@ const RULES = [
 
 console.log("The owner's money screens must use what the server already tells them\n");
 
+// ── ITEM 7, WIDENED · a class the stylesheet does not define must not exist anywhere ─────────────
+// `adm-page-title` is declared in NO stylesheet, so any heading using it silently falls back to the
+// browser's own h1 (~32px with browser margins) beside a cockpit whose headings are 22px. Three
+// pages had it. Checking one file would have let the other two rot, so this walks the whole app.
+{
+  const hits = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== "node_modules") walk(f); continue; }
+      if (!/\.(tsx|ts)$/.test(e.name)) continue;
+      const src = fs.readFileSync(f, "utf8");
+      // the string inside a className, not the word inside an explaining comment
+      if (/className="[^"]*\badm-page-title\b/.test(src)) hits.push(f);
+    }
+  };
+  try { walk("app"); } catch { /* no app dir — nothing to check */ }
+  if (!hits.length) ok("item 7 · no page uses `adm-page-title`, a class the stylesheet never defines");
+  else { bad("item 7 · a page uses `adm-page-title`, which no stylesheet defines"); for (const h of hits) console.log(`        ${h}`); }
+}
+
 for (const r of RULES) {
   const src = read(r.file);
   if (src === null) { bad(`item ${r.item}: ${r.file} not found (if it moved, update this guard)`); continue; }
