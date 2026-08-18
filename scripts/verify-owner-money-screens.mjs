@@ -27,6 +27,8 @@ const INVENTORY = "app/owner/inventory/page.tsx";
 const MANAGER = "app/owner/manager/page.tsx";
 const PANEL_MGR = "public/panels/editor/app.js";
 const PANEL_TAB = "public/panels/tablet/app.js";
+const INV_ROUTE = "app/api/owner/inventory/route.ts";
+const INV_UI = "components/owner/OwnerInventory.tsx";
 
 // { item, file, say, must: [RegExp], mustNot: [RegExp] }
 const RULES = [
@@ -160,6 +162,37 @@ const RULES = [
       /color-mix\([^)]*var\(--border[,)]/,
     ],
   })),
+  {
+    // ── ITEM 15 · ONE BOX PER RESTAURANT (owner, 2026-08-18) ──────────────────────────────────────
+    // "when there are two or more restaurant, it should show boxes of restaurants… it should not
+    // load every time, so that egress can be saved… everything should be in the back end
+    // calculating… it should not take time to load."
+    // All four promises are checkable from the source, so all four are checked.
+    item: 15, file: INV_ROUTE,
+    say: "the estate roll-up is one cached backend pass, using the same summary the detail screen uses",
+    must: [
+      /sp\.get\("estate"\) === "1"/,
+      /cachedOwnerPayload\(\{[\s\S]{0,200}key: `investate:v1:/,        // …cached, so a normal open is one row read
+      /rd\(`sum:\$\{rid\}`, \(\) => sb\.rpc\("lfh_inv_report_summary"/, // …the SAME function the detail screen uses
+      /for \(let i = 0; i < live\.length; i \+= 6\)/,                   // …in parallel chunks, never a full fan-out
+      /if \(r\.unread\) return t;/,                                     // …and a figure nobody read is never summed
+    ],
+  },
+  {
+    item: 15, file: INV_UI,
+    say: "the estate screen draws a box per restaurant and its totals come from those same boxes",
+    must: [
+      /where === "estate"/,
+      /est\.totals\.stockValue/,
+      /setRid\(r\.rid\); setData\(null\); setWhere\("one"\)/,   // a box opens that restaurant
+      /if \(estInFlight\.current && !force\) return;/,           // never two estate reads at once
+      /Couldn&apos;t read this one/,                              // an unread box says so instead of showing zero
+    ],
+    mustNot: [
+      /<span className="k">/,   // the label must be a block, or it runs into its own value
+      />\s*All restaurants\s*\n?\s*<\/button>/,  // must not repeat the shell's own nav wording
+    ],
+  },
   {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
