@@ -1237,6 +1237,26 @@ export function nodeExpect(n: Node, s: TreeState, rid: string):
   }
 }
 
+/** The `X-LFH-Expect` header value for an expectation - JSON, with every character above U+00FF
+ *  escaped, so the string is pure ASCII.
+ *
+ *  THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). A header value must be ISO-8859-1, and
+ *  `fetch()` REFUSES THE WHOLE REQUEST if it is not - it throws before anything leaves the browser:
+ *  "Failed to read the 'headers' property from 'RequestInit': String contains non ISO-8859-1 code
+ *  point." The expectation carries the row's NAME as its label, and two rows on the Access screen
+ *  are named with an em dash. Both were therefore IMPOSSIBLE to save: the toggle did not move, no
+ *  request was made, and the screen said "Not saved" with no explanation. The same trap was waiting
+ *  on a staff profile, where the fields are a person's own typing - a designation with a curly
+ *  apostrophe would have done it.
+ *
+ *  JSON.stringify does NOT escape non-ASCII by default; escaping it here costs nothing and the
+ *  server's own JSON.parse gives back the identical string, em dash and all, so the refusal message
+ *  still reads exactly as it should. */
+export function expectHeader(expect: unknown): string {
+  return JSON.stringify(expect).replace(/[\u0080-\uffff]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 /** The patch that sets this node to `v`. Shaped exactly like TreeState, so the client
  *  can merge it locally for an instant repaint and POST the identical object. */
 export function nodePatch(n: Node, v: any): TreePatch {

@@ -16,7 +16,7 @@
  * .at-* set for the tree indentation. */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch, nodeExpect,
+  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch, nodeExpect, expectHeader,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 import { useToast } from "@/components/admin/toast";
@@ -344,7 +344,10 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
       // X-LFH-Expect = "this is what the row said when I tapped it" — the ONE clash gate
       // (lib/clash.ts) refuses the save if somebody else has moved it since. Sent only where the
       // row can honestly say what it saw; see nodeExpect. (sweep T6, 2026-08-10)
-      headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": JSON.stringify(expect) } : {}) },
+      // expectHeader(), not JSON.stringify(): a header must be ISO-8859-1, and fetch() throws away
+      // the WHOLE request if it is not. Two rows here are named with an em dash and could not be
+      // saved at all because of it. See lib/accessTree.ts. (sweep T15, 2026-08-18)
+      headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": expectHeader(expect) } : {}) },
       body: JSON.stringify({ restaurant_id: rid, patch }),
     })
       .then(async (r) => {

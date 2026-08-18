@@ -30,7 +30,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { openRestaurantPanel, actLabel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
-import type { TreeState } from "@/lib/accessTree";
+import { expectHeader, type TreeState } from "@/lib/accessTree";
 import {
   capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, countOverrides,
   type Cap, type CapValue,
@@ -97,7 +97,10 @@ const adminHost = (userId: string): ProfileHost => ({
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        ...(expect ? { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
+        // expectHeader(), not JSON.stringify(): these fields are a PERSON'S OWN TYPING, and a header
+        // must be ISO-8859-1 — a designation with a curly apostrophe or an em dash would make fetch()
+        // throw away the whole request, so Save would do nothing at all. (sweep T15, 2026-08-18)
+        ...(expect ? { "X-LFH-Expect": expectHeader({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
       },
       body: JSON.stringify({ id: userId, ...payload }),
     });

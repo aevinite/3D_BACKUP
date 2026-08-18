@@ -25,6 +25,7 @@ const {
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
+  nodeExpect, expectHeader,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -844,6 +845,45 @@ else ok("the read/write route derives every allow-list from the model");
   if (!demanded) ok("waiter creation: the server no longer demands a table pick, so the form need not ask");
   else if (bad.length) fail(`the admin cannot create a waiter: ${bad.join("; ")}`);
   else ok("the admin's Add-a-user form asks which tables a new waiter serves, which is what the server demands");
+}
+
+// ── 26 · AN EXPECTATION HEADER MUST BE PURE ASCII, OR NOTHING IS SENT AT ALL ──
+// THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). A header value must be ISO-8859-1, and
+// fetch() throws away the WHOLE request if it is not: "String contains non ISO-8859-1 code point".
+// The X-LFH-Expect header carries the row's NAME as its label, and two rows on the Access screen are
+// named with an em dash — "Quick order — send to a table" and "Parcel — send it out". Both were
+// therefore impossible to save from the screen at all: the toggle did not move, no request was made,
+// and the save line read "Not saved" with nothing to explain it. Every other check in this file
+// passed straight over it, because the ROW, the KEY, the ROUTE and the ALLOW-LIST were all perfect.
+//
+// The staff profile had the same trap waiting, where the fields are a person's own typing.
+{
+  const bad = [];
+  for (const [file, src] of [["components/admin/AccessTree.tsx", read("components/admin/AccessTree.tsx")],
+                             ["components/admin/StaffProfile.tsx", read("components/admin/StaffProfile.tsx")]]) {
+    if (!/X-LFH-Expect/.test(src)) continue;
+    if (/"X-LFH-Expect":\s*JSON\.stringify/.test(src))
+      bad.push(`${file} builds the header with a bare JSON.stringify — one em dash in a row name or in a person's typing and the whole save is thrown away by the browser`);
+    else if (!/"X-LFH-Expect":\s*expectHeader\(/.test(src))
+      bad.push(`${file} no longer builds the header with expectHeader()`);
+  }
+  if (!/export function expectHeader/.test(tree)) bad.push("expectHeader() is gone from lib/accessTree.ts");
+  // …and prove it on the real rows: every expectation this model can produce must escape to ASCII.
+  const st = { features: {}, settings: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {} };
+  for (const n of ALL_NODES) {
+    const b = n.bind;
+    if (b.t === "feature") st.features[b.key] = true;
+    else if (["setting", "choice", "text", "list", "tablet"].includes(b.t)) st.settings[b.key] = "x";
+    else if (b.t === "module") st.settings[`${b.key}_allowed`] = true;
+    else if (b.t === "grant") st.grants[b.flag] = true;
+    else if (b.t === "section") st.sections[b.key] = true;
+  }
+  const notAscii = ALL_NODES.map((n) => [n, nodeExpect(n, st, "rid")]).filter(([, e]) => e)
+    .filter(([, e]) => [...expectHeader(e)].some((c) => c.charCodeAt(0) > 127))
+    .map(([n]) => n.id);
+  if (notAscii.length) bad.push(`expectHeader() still leaves a non-ASCII character in the header for: ${notAscii.join(", ")}`);
+  if (bad.length) fail(`a save the browser will refuse to send: ${bad.join("; ")}`);
+  else ok(`every expectation header is pure ASCII, for all ${ALL_NODES.length} rows and for a person's own typing`);
 }
 
 // ── report ─────────────────────────────────────────────────────────────────
