@@ -42,8 +42,11 @@ try {
   t("P01429", "…with the head role, so the panels show who opened the tab", memA?.role === "owner");
 
   await A.locator(".mini-cart").click(); await A.waitForTimeout(1400);
+  // Only the id that APPEARS after this tap is mine — a shared table's tracker legitimately holds
+  // other diners' orders, and treating the whole list as mine once deleted another terminal's row.
+  const beforeIds = new Set(await A.evaluate(() => JSON.parse(localStorage.getItem("lfh_active_orders:french-house") || "[]").map((o) => o.id)));
   await A.locator(".btn-gold", { hasText: /place order/i }).first().click(); await A.waitForTimeout(9000);
-  const ids = await A.evaluate(() => JSON.parse(localStorage.getItem("lfh_active_orders:french-house") || "[]").map((o) => o.id));
+  const ids = (await A.evaluate(() => JSON.parse(localStorage.getItem("lfh_active_orders:french-house") || "[]").map((o) => o.id))).filter((i) => !beforeIds.has(i));
   ids.forEach((i) => mine.orders.push(i));
   const ord = ids.length ? (await sb.from("orders").select("id, table_number, status, total, session_id").in("id", ids)).data || [] : [];
   t("P01430", "the guest's order reaches the kitchen's own table", ord.length >= 1);
