@@ -21,55 +21,35 @@ Territory: `app/aevinite/access/**` · `app/aevinite/users/**` · `components/ad
 
 ## 🔗 HANDOFF — the fix lives in another terminal's files
 
-### H1 · a module gate with no switch on the screen — table_ops and table_tags (HIGH)
+### H1 · a module gate with no switch — RESOLVED by the owner, 2026-08-18
 
-**Measured on the backup database, 2026-08-18.** `settings.table_ops_allowed` is **false** on
-`burger-barn`, `sakura-sushi`, `demo-bistro`, `green-bowl`, `taco-fiesta`, `pizza-palace` and
-`spice-route` — true only on `french-house` and `aangan`. `table_tags_allowed` is false on the same
-seven minus `pizza-palace`.
+He chose the toggle: *"I want that toggle thing where you can able to check… I want to turn on and
+turn off the feature if the restaurant required or not required."* Three rows are back on **Main
+features** (`take_orders`, `table_ops`, `table_tags`), so the `module:` bindings in
+`lib/accessModel.ts` are correct again and no other terminal's file was touched.
+`scripts/verify-access-model.mjs` check 23's handoff list is empty and it still fails the day a
+FOURTH module loses its row. Commit `b6fb6d89`.
 
-`lib/accessModel.ts` still carries a `module:` binding for both, so `app/api/editor`'s whoami forces
-`effectivePowers.table_ops = false` and `app/api/tablet` forces `tablet_table_ops = "off"`. The
-2026-07-31 rebuild deleted those module switches, so a stored `false` is unreachable from every
-screen — the owner's settings page only offers a module whose `_owner_control` is on, and it writes
-`_enabled`, not `_allowed`.
+**Still true, and worth him knowing:** seven restaurants are stored OFF for `table_ops` and six for
+`table_tags`, and a NEW restaurant is born with both off (`lib/settingsClone.ts`). The switch shows
+that honestly now; turning them on is a decision per restaurant, not a code change.
 
-**Watched, on French House put into that state and put back:** Access & permissions → Waiter →
-"Move, merge or split a table" reads **On**, while the manager panel is told
-`effectivePowers.table_ops = false` (the KOT ▾ menu — move a party, merge two tables, move a ticket,
-move a dish, split a bill, reprint a KOT — is gone) and the tablet is told `tablet_table_ops = "off"`.
-`table_tags` is worse: the manager is refused while the tablet is still told "on", so the two panels
-disagree with each other as well as with the screen.
+### H2 · the Recent-changes strip said "pin" — DONE, 2026-08-18
 
-**The change, and it is the one parcel and platform already had (2026-08-03, mig 263):**
+He approved it directly. `describeAccessPatch` now says "on, with a manager PIN" for a column-bound
+waiter row, matching the `capTablet` branch below it. Commit `24f1b7e2` —
+`app/api/admin/restaurants/access-tree/route.ts` is another terminal's file and was edited on his
+instruction.
 
-1. `lib/tableTags.ts` — `tableOpsLadder`, `tableTagsLadder` and `takeOrdersLadder` return `ALWAYS_ON`,
-   exactly as `parcelLadder` / `takeawayLadder` do.
-2. `app/api/tablet/[...path]/route.ts` — `tableOpsEffectiveFromRow` and `takeOrdersEffectiveFromRow`
-   return `true`, exactly as `parcelEffectiveFromRow` already does (its comment states the reason:
-   "an old row may say false — reading it again would let a retired switch take a live feature away").
-3. `lib/accessModel.ts` *(T15's own file — deliberately left undone, because doing only this half
-   would fix the manager and leave the tablet refusing)* — drop the `module:` binding from
-   `take_orders`, `table_ops` and `table_tags`, as the file's own note at the parcel/platform rows
-   instructs: *"Do not re-add a module binding without a switch on the Access screen to go with it."*
-4. Take those three names out of `HANDOFF_PENDING` in `scripts/verify-access-model.mjs` check 23 in
-   the same commit — the guard fails if they are left there after the bindings go.
+## A second round of problems, found while checking that every toggle works (2026-08-18)
 
-**The alternative, if the owner would rather keep the gate:** put the two module switches back on
-the Access screen (Extra features) instead. Either way the screen and the server must stop
-disagreeing. This is listed for him as 🟡 D2.
+| # | severity | state | what | where it lives | commit |
+|---|----------|-------|------|----------------|--------|
+| P11 | HIGH | fixed | **Two switches could not be saved at all.** "Quick order — send to a table" and "Parcel — send it out" did nothing when tapped: no request left the browser, and the save line read "Not saved". A header must be ISO-8859-1 and `fetch()` throws away the whole request if it is not — the `X-LFH-Expect` clash header carries the row's NAME, and both contain an em dash. The gate meant to protect a save was making it impossible. The staff profile had the same trap waiting on a person's own typing. `confirmed`. | admin console → Access & permissions → Main features → Quick order / Parcel → its two rows | `835ad550` |
+| P12 | MEDIUM | fixed | A refused save on the Access screen showed its reason for one frame. The 409 path sets the sentence and reloads the row on the same line, and the reload cleared it — sampled every 100ms: there at +0ms, gone by +100ms. The switch snapped back with nothing to explain it. `confirmed`. | admin console → Access & permissions → any switch, when a second admin has moved it first | `6470d38f` |
 
-### H2 · the Recent-changes strip says "pin", not English (LOW)
+**Everything else on that screen works.** 83 switchable rows were tapped in the browser and read
+back from the server, one at a time, each put straight back: 73 in one sequential pass, and all 11
+the pass could not reach — each a child of a row it had just switched off, so the greyed block
+correctly refused the tap — worked when re-tested with the parent on.
 
-`app/api/admin/restaurants/access-tree/route.ts` → `describeAccessPatch`. A `tablet` bind's value is
-written raw, so the strip reads **"Mark a bill paid: pin"**. The `capTablet` branch of the same
-function, twenty lines below, correctly says "on, with a manager PIN". Six of the eight waiter rows
-are column-bound, so this is the common case. It also writes no section prefix, although the comment
-in `components/admin/AccessTree.tsx` describing the log claims the format is
-"Menu → 3D dish viewer: off · Manager → Delete a bill: on".
-
-**The change:** in the `patch.settings` loop, route a `tablet`-bound key through the same wording the
-`capTablet` branch uses (`"pin"` → `"on, with a manager PIN"`).
-
-**Where the owner would see it:** admin console → Access & permissions → "Recent changes here",
-the strip at the top of the tree.
