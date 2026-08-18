@@ -162,7 +162,7 @@ export async function GET(req: NextRequest) {
     // (lfh_audit_risk) so the strip on the screen cannot classify a row differently from the manager
     // panel's copy of the same record. An older database without the column simply sends nothing and
     // the screen falls back to auditsort.js's map, which is the same map.
-    // `tags` (mig 336) rides along the same way, from lfh_audit_tags — one answer for all three
+    // `tags` (mig 337) rides along the same way, from lfh_audit_tags — one answer for all three
     // screens. And 'removal_classified' is dropped to MATCH THE LIST: the list excludes it because it
     // is an answer, not a removal, so leaving it in the counts would offer a chip that filters to
     // nothing — the "never a 0 chip to tap" rule this screen already keeps.

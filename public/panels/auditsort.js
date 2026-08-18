@@ -61,7 +61,7 @@
     bill_annotated: "Note or allergy changed after settling",
     /* Not a removal — the append-only answer to "was the food made?" on an earlier cancellation, or a
        correction of that answer. Recorded so the record shows the history of the answer, not just the
-       answer (owner, 2026-08-18; migration 336). */
+       answer (owner, 2026-08-18; migration 337). */
     removal_classified: "Cancellation answered: was the food made?",
   };
   /* The glyph each type wears, beside the words so the two cannot drift. Plain text symbols only —
@@ -105,7 +105,7 @@
     removal_classified: "record",        // the ANSWER to a cancellation, not a removal — it moves nothing
   };
   /* WHAT KIND OF THING IS THIS ROW — the tags (owner, 2026-08-18: "make tags for all kind of audit
-     and stuff"). The database half is lfh_audit_tags() in migration 336 and verify:audit asserts the
+     and stuff"). The database half is lfh_audit_tags() in migration 337 and verify:audit asserts the
      two agree, exactly as it already does for KIND_RISK — two answers to "what is this row" is how
      one screen's chips start disagreeing with another's.
 

@@ -1,4 +1,4 @@
--- 336_was_the_food_actually_made.sql
+-- 337_was_the_food_actually_made.sql
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- P1 of docs/CANCEL-AND-LOSS-SPEC.md — the owner, 2026-08-18:
 --   "while kot delete button there will be one thing order was mode and order was not made like in

@@ -103,7 +103,7 @@ type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow
   // SOME of the group is still drawn — but it must say so, or a total that is too small reads as
   // fact (T9 finding F18, 2026-08-07).
   partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null;
-  // Food cooked and then binned, priced at what the ingredients cost (mig 336). null = the read
+  // Food cooked and then binned, priced at what the ingredients cost (mig 337). null = the read
   // failed, which is reported rather than shown as a zero — a silent 0 would say he wasted nothing.
   foodLoss?: { amount: number; entries: number } | null };
 type Dish = { title: string; qty: number; revenue: number };
@@ -124,7 +124,7 @@ type RestA = {
   // Staff pay that LEFT in this window (mig 221). null = this restaurant doesn't have the
   // Staff-profiles-&-pay module, so no such tile is drawn at all.
   staffPay?: { paidOut: number; people: number; entries: number } | null;
-  /** Food cooked and then binned, at ingredient cost (mig 336). See the group type above. */
+  /** Food cooked and then binned, at ingredient cost (mig 337). See the group type above. */
   foodLoss?: { amount: number; entries: number } | null;
   timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];

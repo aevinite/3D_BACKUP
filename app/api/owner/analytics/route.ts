@@ -287,7 +287,7 @@ export async function GET(req: NextRequest) {
   };
   // ── FOOD MADE THEN BINNED (owner, 2026-08-18 — docs/CANCEL-AND-LOSS-SPEC.md) ─────────────────
   // "the cancelinging amout go up expensis goes up." A cancellation where the food WAS cooked writes
-  // a `food_loss` expense priced at what the ingredients really cost (migration 336). This is the
+  // a `food_loss` expense priced at what the ingredients really cost (migration 337). This is the
   // figure that reaches his Expenses tile.
   //
   // It is NOT the cancelled bill's value: that is revenue he never earned and it was never in the

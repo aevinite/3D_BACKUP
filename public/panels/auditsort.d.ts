@@ -62,7 +62,7 @@ export function riskOf(kind: string): "money" | "record" | "data";
 /** ── THE TAGS (owner, 2026-08-18: "make tags for all kind of audit and stuff") ────────────────────
  *  Additive labels a person can filter by — deliberately NOT a second risk model: risk answers "did
  *  money move", a tag answers "what area of the restaurant is this about". The database half is
- *  lfh_audit_tags() (migration 336) and `verify:audit` asserts the two agree, kind by kind. */
+ *  lfh_audit_tags() (migration 337) and `verify:audit` asserts the two agree, kind by kind. */
 export const KIND_TAGS: Record<string, string[]>;
 export const TAG_LABEL: Record<string, string>;
 export const TAG_ICON: Record<string, string>;

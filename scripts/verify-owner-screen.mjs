@@ -333,13 +333,13 @@ check("the food loss comes from the analytics payload, not the bill value",
     "app/api/owner/analytics/route.ts: a failed food-loss read now returns 0, which tells him he wasted\n       nothing. It must be absent so the popup can say it could not be read.");
 }
 {
-  const mig = read("supabase/migrations/336_was_the_food_actually_made.sql");
+  const mig = read("supabase/migrations/337_was_the_food_actually_made.sql");
   check("the loss expense is dated by the business day",
     /- interval '5 hours'\) AT TIME ZONE 'Asia\/Kolkata'\)::date/.test(mig),
-    "supabase/migrations/336: the food-loss expense is dated by the calendar day again. Migration 294\n       set the rule — step back the 5-hour offset first — or food cooked after midnight is stamped\n       tomorrow and falls outside the window the dashboard filters by.");
+    "supabase/migrations/337: the food-loss expense is dated by the calendar day again. Migration 294\n       set the rule — step back the 5-hour offset first — or food cooked after midnight is stamped\n       tomorrow and falls outside the window the dashboard filters by.");
   check("answering is append-only: a correction adds a row, never edits one",
     /INSERT INTO deletion_audit[\s\S]{0,400}'removal_classified'/.test(mig),
-    "supabase/migrations/336: a classification no longer writes its own row. The history of who answered\n       what, and what they changed it from, is the record — it may never be overwritten.");
+    "supabase/migrations/337: a classification no longer writes its own row. The history of who answered\n       what, and what they changed it from, is the record — it may never be overwritten.");
 }
 
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────

@@ -684,7 +684,7 @@ if (!HOOK) for (const m of oks) console.log("  ok   " + m);
     : fail(`lfh_audit_risk and auditsort.js KIND_RISK disagree on: ${disagree.join(", ")} — the money strip would contradict the list below it`);
   // ── AND THE TAG MAP HAS ONE ANSWER TOO (owner, 2026-08-18: "make tags for all kind of audit") ──
   // Same shape, same reason as the risk map above: the tags exist twice — KIND_TAGS in
-  // auditsort.js (what the chips on all three screens read) and lfh_audit_tags() in migration 336
+  // auditsort.js (what the chips on all three screens read) and lfh_audit_tags() in migration 337
   // (what the per-type counts are grouped by). Two answers to "what is this row about" is how one
   // screen's chips start disagreeing with another's.
   const sqlTags = migrationSrcWith("lfh_audit_tags");

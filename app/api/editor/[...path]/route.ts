@@ -5152,7 +5152,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
       const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
-      // ── NOW the row is cancelled, so the answer can do its work (mig 336) ──────────────────────
+      // ── NOW the row is cancelled, so the answer can do its work (mig 337) ──────────────────────
       // made=true keeps the kitchen-fire consumption and prices it as a food_loss expense;
       // made=false reverses the consumption so the ingredients go back on the shelf. Best-effort: the
       // cancel itself has already succeeded and must never look failed because the costing hiccuped —
