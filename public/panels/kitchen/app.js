@@ -1350,8 +1350,23 @@ function openPrinterSheet() {
   ];
   const ov = document.createElement("div");
   ov.id = "prSheet"; ov.className = "prsheet-ov";
-  ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer problem</h3><button class="btn" data-prclose>✕</button></div>
-    <p class="prsheet-sub">One tap — the manager is told right away.</p>
+  // ── WHERE PRINTING STANDS, ON THE KITCHEN SCREEN ITSELF (owner, 2026-08-18) ─────────────────
+  // "It should be shown in kitchen panel, able to see the whole thing." A cook at a silent printer
+  // should not have to ask anyone whether this screen is even meant to be printing — the two answers
+  // that decide it are the admin's, so they are shown as plain sentences, never as dead switches.
+  const tgt = state.kotPrintTarget || "kitchen";
+  const where = tgt === "counter" ? "the counter screen — not this one"
+    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
+    : "this screen";
+  const status = `<div class="prsheet-status">
+      <div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
+      <div><span>Tickets print on</span><b>${esc(where)}</b></div>
+      ${!state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
+      ${tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}
+    </div>`;
+  ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer</h3><button class="btn" data-prclose>✕</button></div>
+    ${status}
+    <p class="prsheet-sub">Something wrong? One tap — the manager is told right away.</p>
     ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}
     <!-- THE SETUP GUIDE LIVES HERE ON THIS SCREEN (owner, 2026-08-18: "where is this setup in the app").
          The kitchen panel has no settings screen and its top bar is deliberately fought over to the pixel
@@ -1547,6 +1562,9 @@ async function loadImpl() {
     autoPrintNet(!!data.autoPrintKot, data.orders, data.items, data.restaurant, data.queuedFor);
   }
   state.autoPrintKot = !!data.autoPrintKot;
+  // Which screen the admin chose (mig 336) — shown on the 🖨 sheet so a cook standing at a silent
+  // printer can see whether this screen is even supposed to be printing.
+  state.kotPrintTarget = data.kotPrintTarget || "kitchen";
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
   // Reprints the manager sent to THIS kitchen's printer (mig 269) — claim, print with the

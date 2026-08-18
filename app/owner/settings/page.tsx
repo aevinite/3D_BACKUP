@@ -118,6 +118,37 @@ export default function OwnerSettings() {
         </div>
       </div>
 
+      {/* ═══ KITCHEN PRINTING (owner, 2026-08-18) ═══
+          "Tell me how the printer will work and inside the setting how it will be… it should be shown
+          in kitchen panel… manager also and owner. Also a quick written guide… it should take me to
+          the page." The owner panel holds NO printing controls on purpose — automatic printing and
+          which screen prints are the admin's, and the per-device answer belongs to the computer with
+          the printer, not to this account. What belongs here is the DOOR to the guide, which is the
+          thing an owner actually needs when a new restaurant is being set up. */}
+      <div className="adm-card" style={{ marginBottom: 14 }}>
+        <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Kitchen printing</div>
+        <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+          A kitchen ticket is queued by the server the moment an order is placed, so it can never be
+          lost — it waits until a screen prints it. The full written guide covers setting a printer up
+          on <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a <b>Raspberry Pi</b>: the printer itself, the
+          paper settings, the one window to open so printing never stops when it is minimised, and what
+          to do when something goes wrong. It opens as its own page and can be saved as a PDF.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
+            <i className="fas fa-book-open" aria-hidden="true" /> Open the printer setup guide
+          </a>
+          <a className="adm-btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter</a>
+          <a className="adm-btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter</a>
+          <a className="adm-btn" href="/print-station/print-station-linux.sh" download>⬇ Linux / Pi starter</a>
+        </div>
+        <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
+          Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is
+          done for you by Aevidine — ask and it is one switch. Your manager screen shows where it stands
+          under <b>Settings → Printing</b>.
+        </p>
+      </div>
+
       {/* Change password */}
       {data?.canChangePassword && (
         <div className="adm-card" style={{ marginBottom: 14 }}>
