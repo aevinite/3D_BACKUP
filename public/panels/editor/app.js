@@ -2879,17 +2879,17 @@ function mergedOrderCardHtml(g) {
     // generate invoice and print ... once the bill is printed, the invoice has been generated").
     // Invoice-first still holds — nothing prints without a number — but a waiter handing over a
     // bill now taps once instead of learning which of two buttons comes first.
-    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-print-issue="${esc(sid)}" data-print-group="${esc(sessKey)}">🖨 Print bill</button>` : "";
+    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-print-issue="${esc(sid)}" data-print-group="${esc(sessKey)}">${billPrintLabel(null, g, "bill")}</button>` : "";
   } else if (sid && invoiced) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
-    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button><button class="ord-btn ghost" data-credit-note="${esc(sid)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`;
+    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">${billPrintLabel(null, g)}</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button><button class="ord-btn ghost" data-credit-note="${esc(sid)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`;
   } else {
     // Legacy non-session order (no session to invoice): still honour invoice-first —
     // Print only once the bill is SETTLED (paid = finalised). Before that, Mark paid only,
     // so no naked Print appears next to a running tab (owner 2026-07-24).
     billBtns = anyUnpaid
       ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>`
-      : `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">🖨 Print</button>`;
+      : `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">${billPrintLabel(null, g)}</button>`;
   }
   // No "🪑 Free table" button (owner, 2026-07-31): a settled table leaves the floor by
   // itself the moment its bill is paid and served, so a button for it is one more thing
@@ -3440,7 +3440,7 @@ function openBillModal(key) {
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
-        <button class="btn primary" data-bm-print>🖨 Print</button>
+        <button class="btn primary" data-bm-print>${billPrintLabel(null, g)}</button>
         ${canRestore
           ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
           : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
@@ -3476,7 +3476,7 @@ function openBillModal(key) {
         // just stops offering it. The plain 🖨 Print above still prints the CANCELLED sheet, which
         // is the piece of paper a voided bill legitimately has.
         // `liveOrders` is the non-cancelled set this modal already computed for its item rows.
-        if (sid2 && o0.invoice_no == null && liveOrders.length) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">🖨 Print bill</button>`);
+        if (sid2 && o0.invoice_no == null && liveOrders.length) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">${billPrintLabel(null, g, "bill")}</button>`);
         // Reopen: only an ISSUED invoice can be reopened (the server enforces the window +
         // permission; voiding is recorded). A voided/never-issued bill has nothing to reopen.
         if (invoiced2) acts.push(`<button class="btn ghost" data-void-invoice="${esc(sid2)}">↩ Reopen bill</button>`);
@@ -5000,6 +5000,48 @@ new MutationObserver(() => {
 // untouched: the kitchen ticket is a log of what was fired, the bill is what the guest owes.
 // combineBillLines(): one bill line per dish — shared, see /panels/billdoc.js.
 function combineBillLines(entries) { return LFH_BILLDOC.combineBillLines(entries); }
+
+// ── "Print" the first time, "Reprint" after that ────────────────────────────────────────────
+// Owner, 2026-08-19: "after once print the button will just show reprint instead of print,
+// works same". ONE reader for the whole panel, because the word has to agree on every screen
+// that can print the same bill — the Tables floor card, the bill popup, and the Bills record.
+//
+// The answer comes off the BILL (sessions.bill_printed_at, mig 333, which rides on every order
+// row), never off this device: the manager prints at the till and the waiter's tablet must read
+// "Reprint" too. WORKS THE SAME — same handler, same sheet, no extra question, and nothing
+// recorded. REJECTED (owner, 2026-08-19): do not turn this into a warning, a confirm, a badge,
+// a count, or an Audit row — "it's not any kind of problem which needs to be audited".
+// Bills this device has printed in this session, by session id. The server row is the real
+// answer, but a refresh that lands between the print and the stamp coming back would re-render
+// the button as "Print" on a bill whose paper is already in the guest's hand — which is exactly
+// the moment the word matters. So what we KNOW locally is remembered and never un-known.
+const _billPrintedHere = new Set();
+function billPrintedBefore(sess, os) {
+  if (sess && sess.bill_printed_at) return true;
+  if ((os || []).some((o) => o && o.bill_printed_at)) return true;
+  const sid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  return !!sid && _billPrintedHere.has(sid);
+}
+// The label a print button wears. `suffix` is the trailing word some buttons carry ("bill"),
+// so "🖨 Print bill" becomes "🖨 Reprint bill" and nothing else about the button changes.
+// data-bill-print-btn is what lets the label flip the instant paper comes out, without a
+// re-render that would rebuild the card under the finger that just tapped it.
+function billPrintLabel(sess, os, suffix) {
+  return `<span data-bill-print-btn>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
+}
+// First print just happened → say so on the buttons already on screen, and on the rows this
+// panel is holding, so nothing waits for the next refresh to catch up.
+function markBillPrintedLocally(sid) {
+  if (!sid) return;
+  _billPrintedHere.add(sid);
+  const at = new Date().toISOString();
+  (state.data.orders || []).forEach((o) => { if (o && o.session_id === sid && !o.bill_printed_at) o.bill_printed_at = at; });
+  ((state.board && state.board.sessions) || []).forEach((s) => { if (s && s.id === sid && !s.bill_printed_at) s.bill_printed_at = at; });
+  document.querySelectorAll("[data-bill-print-btn]").forEach((b) => {
+    // \b before Print, so a button that already reads "Reprint" is left alone.
+    b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
+  });
+}
 function printBill(t, sess, os, opts = {}) {
   // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
   // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
@@ -5020,26 +5062,38 @@ function printBill(t, sess, os, opts = {}) {
   const tnum = (t || "").toString().trim();
   const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
 
-  // A SECOND COPY SAYS SO (mig 333, owner 2026-08-17). The kitchen ticket has branded reprints
-  // since 2026-08-04; the bill did not, so one sale could be represented by two identical sheets.
-  // The answer comes off the BILL, never off this device — the manager prints at the till and a
-  // waiter may reprint the same bill from the tablet, where a local "already printed" flag would
-  // be wrong and would hand out an unbranded duplicate.
+  // REJECTED (owner, 2026-08-19): the SHEET says nothing about being a second copy. A
+  // `reprint: printedBefore` flag was passed here 2026-08-17 → 2026-08-19 and drew a
+  // "Reprint · Duplicate" band; he removed it — "I don't even want the reprinted bill shown in
+  // the bill". Don't pass a reprint flag from here again; billdoc.js no longer has one.
+  // `printedBefore` still matters, for the two things he DID ask for: the button on screen reads
+  // "Reprint" once paper exists (billPrintedBefore(), used by every print button in this panel),
+  // and the first print is stamped once so every device agrees which one was the first.
   const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
     money: billMath(os), session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
-    reprint: printedBefore,
   }));
-  // Tell the server this bill has now been on paper, so the NEXT copy — from any device — is
-  // branded. Idempotent server-side, so calling it after every print is free and a retry is safe;
+  // Tell the server this bill has now been on paper, so every panel's button reads "Reprint" from
+  // here on. Idempotent server-side, so calling it after every print is free and a retry is safe;
   // fire-and-forget because a failed stamp must never stop a guest getting their bill.
+  // It writes NOTHING to the Audit, on purpose (owner, 2026-08-19: "I don't want reprinted bill
+  // shown anywhere like on audit … it's not any kind of problem which needs to be audited").
   const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  // Remembered the moment the paper goes out, NOT when the server answers: the window above is
+  // already written, so this bill has been printed whatever the network does next.
+  if (printedSid) _billPrintedHere.add(printedSid);
   if (printedSid && !printedBefore) {
     try {
       api("POST", `/sessions/${printedSid}/bill-printed`)
-        .then(() => { if (sess) sess.bill_printed_at = new Date().toISOString(); })
+        .then(() => {
+          // Mark the rows this screen is already built from, so the button beside the person's
+          // finger flips to "Reprint" now rather than after the next refresh (owner, 2026-08-19:
+          // "after once print the button will just show reprint instead of print, works same").
+          markBillPrintedLocally(printedSid);
+          if (sess) sess.bill_printed_at = new Date().toISOString();
+        })
         .catch(() => {});
     } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
   }
@@ -9954,13 +10008,13 @@ function tablePanelParts(t, host = "float") {
   // untouched: an issued invoice still locks the bill (no discount until ↩ Reopen voids it, which
   // is recorded), and nothing here can erase a sale.
   const printBtn = !billableOs.length ? "" : (invoicedNow
-    ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
+    ? `<button class="btn" id="sxPrint">${billPrintLabel(sess, os)}</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
     // ONE button (owner, 2026-08-05: "print means generate invoice and print ... once the bill is
     // printed, the invoice has been generated"). Print already issues-then-prints; a second
     // button that ONLY issues was the thing making people ask which one comes first, and it
     // could leave a numbered invoice with no paper. Nothing about compliance changes — the
     // invoice is still issued before anything prints, and it still locks the bill.
-    : `<button class="btn primary" id="sxPrint" title="Issues the tax invoice, then prints the bill">🖨 Print bill</button>`);
+    : `<button class="btn primary" id="sxPrint" title="Issues the tax invoice, then prints the bill">${billPrintLabel(sess, os, "bill")}</button>`);
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
@@ -10246,7 +10300,7 @@ async function openBillPreview(t) {
       <div class="bm-actions">
         ${/* Print below already issues-then-prints; a separate issue-only button is the confusion
              the owner removed on 2026-08-05. */ ""}
-        <button class="btn primary" data-bp-print>🖨 Print</button>
+        <button class="btn primary" data-bp-print>${billPrintLabel(sess, live())}</button>
         ${invoiced && anyUnpaid ? `<button class="btn green" data-bp-pay${anyReceived ? ` disabled title="Accept the order first — a bill can only be paid once the order is accepted."` : ""}>💳 Mark paid</button>` : ""}
         <button class="btn confirm-cancel" data-bp-close>Close</button>
       </div>
@@ -14243,19 +14297,26 @@ async function askBillCustomer(sid, sess) {
 }
 async function generateInvoice(sid) {
   if (_invBusy.has(sid)) return false;
-  // A RE-issue (a number already exists → the previous was voided) must say WHY — the
-  // reason is recorded in the invoice history. A first-ever issue needs no reason.
+  // REJECTED (owner, 2026-08-19): PRINTING NEVER ASKS WHY. From 2026-08-05 to 2026-08-19 a
+  // re-issue (a number already exists → the previous was voided) stopped here and demanded a typed
+  // reason. The owner killed it: "when I click print bill why it show like I wanna reopen the bill
+  // and stuff, it should not happen like this … reprinting should also not ask any question".
+  // The reason was ALREADY given, one step earlier, in the reopen picker (askReopenReason, which
+  // is required and IS recorded) — so this was the same question a second time, worded as if
+  // pressing Print were itself a reopen. Reopening a bill and printing a bill are different acts,
+  // and only the first one is an event.
+  // Nothing is lost from the record: the server now takes the reopen's own reason as the re-issue
+  // reason (route.ts, sessions/:id/invoice), the new invoice number is still logged, and the
+  // before → after "bill changed after a reopen" row is still written. Do not add a prompt,
+  // a confirm, or an "are you sure" to any print path here.
   const ss = (state.board.sessions || []).find((s) => s.id === sid);
   const isReissue = ss && ss.invoice_no != null;
-  let reason = null;
-  if (isReissue) {
-    reason = await promptDialog("This invoice was voided. Re-issuing assigns a NEW number — why are you re-issuing it?", { confirmLabel: "Re-issue invoice", placeholder: "corrected GST, fixed items…", required: true });
-    if (reason == null) return false; // cancelled
-  }
   // Who is this bill for? (owner, 2026-07-30 — mobile first, name auto-fills for a
-  // returning number, and no bill at all without both when the restaurant requires it).
-  // A bill that ALREADY carries a customer (re-issue after a void) doesn't ask again.
-  const body = reason ? { reason } : {};
+  // returning number). This one STAYS on a re-issue and he confirmed why (2026-08-19):
+  // "reopening can also change name and number … when you click print after reopen it asks for
+  // no and name again and the old one is autofilled". It is not a "why did you do this" question
+  // — it is the bill's own field, pre-filled, and changing it is a legitimate reason to reopen.
+  const body = {};
   const cust = await askBillCustomer(sid, ss);
   if (cust === null) return false;         // cancelled — nothing is issued
   if (cust) { body.cust_phone = cust.phone; body.cust_name = cust.name; }
