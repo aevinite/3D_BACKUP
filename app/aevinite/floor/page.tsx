@@ -556,7 +556,13 @@ export default function AdminFloor() {
         .floor-gate-ic { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 16px; display: grid; place-items: center; font-size: 24px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
         .floor-gate h2 { font-size: 18px; font-weight: 800; margin: 0 0 8px; }
         .floor-gate p { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 0 auto 20px; max-width: 440px; }
-        .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
+        /* THIS BUTTON ASKED FOR 44px AND GOT 40 (T16 sweep, 2026-08-19). It is the only thing to
+           press on an otherwise empty screen, so it was given a 44px floor — but on a phone
+           globals.css sets ".adx .adm-btn { min-height: 40px }" inside a media query, which is a
+           two-class selector and therefore beats a one-class ".floor-gate-btn". The declaration
+           was live, readable and doing nothing; measured 40px on an A35 at 360px. Three classes
+           wins it back without touching the platform-wide 40px every other admin button uses. */
+        .adx .floor-gate .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
         .adm-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
         .adm-btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
         .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
