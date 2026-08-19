@@ -244,7 +244,22 @@ export default function AdminRestaurants() {
               >
                 <span style={{ fontWeight: 700 }}>{r.name}</span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
-                <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ownerName || "—"}</span>
+                {/* AN OWNER WHO CANNOT SIGN IN IS STILL AN OWNER (T16 sweep, 2026-08-19).
+                    /api/admin/restaurants only lists ACTIVE owners, and a suspended one — or one
+                    in the recycle bin, which always goes through suspend first — is therefore not
+                    in that list, so `ownerName` came back "—" and this column read exactly like a
+                    restaurant nobody owns. The Owners page already went to the trouble of naming a
+                    binned primary holder for this very reason; this column had the same hole. */}
+                {(() => {
+                  const known = r.ownerUserId ? owners.find((o) => o.id === r.ownerUserId) : null;
+                  const label = !r.ownerUserId ? "—" : known ? known.name : "assigned · not active";
+                  return (
+                    <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={r.ownerUserId && !known ? "This restaurant has an owner, but that account is suspended or in the recycle bin — open Owners to see who." : undefined}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 {(() => {
                   const hs = healthStatus(r.active, health[r.id], r.createdAt);
                   return (
@@ -1015,6 +1030,9 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
   const [msg, setMsg] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [newName, setNewName] = useState("");
+  // An owner IS assigned, but they are not in the (active-only) owners list — see the note on the
+  // select below. `sel` is the truth; `owners` is only who can be picked.
+  const assignedUnknown = !!sel && !owners.some((o) => o.id === sel);
 
   const assign = async (ownerId: string) => {
     setBusy(true); setMsg(null);
@@ -1043,10 +1061,25 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
         <select value={sel} disabled={busy} onChange={(e) => assign(e.target.value)}
           style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
           <option value="">— no owner —</option>
+          {/* A SELECT WITH NO MATCHING OPTION SHOWS ITS FIRST ONE (T16 sweep, 2026-08-19). The
+              owners list is active-only, so a restaurant whose owner is suspended or sitting in
+              the recycle bin had no option to select and this box displayed "— no owner —" for a
+              restaurant that HAS one. The admin would then pick somebody and quietly replace an
+              owner they were never told about. An explicit option for the real assignee makes the
+              truth visible, and leaves replacing them a deliberate act. */}
+          {assignedUnknown && <option value={sel}>— currently assigned (suspended or in the recycle bin) —</option>}
           {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
+      {assignedUnknown && (
+        <p className="hint" style={{ margin: "8px 0 0" }}>
+          <i className="fas fa-circle-info" style={{ marginRight: 7 }} aria-hidden="true" />
+          This restaurant already has an owner, but that account is <b>suspended or in the recycle bin</b>, so
+          it isn&rsquo;t in the list above. <a href="/aevinite/owners">Open Owners</a> to see who it is —
+          picking somebody here replaces them.
+        </p>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
         <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New owner username"
           style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
