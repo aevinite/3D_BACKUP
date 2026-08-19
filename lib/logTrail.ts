@@ -92,6 +92,10 @@ const PLACE: Record<string, Place> = {
   // the opposite of the owner's rule that the Activity log must read as English.
   kot_printed: { area: "Orders & bills", screen: "Kitchen tickets" },
   kot_print_failed: { area: "Orders & bills", screen: "Kitchen tickets" },
+  // Which screen is the printer (mig 338) — a settings-shaped decision made on a device, so it files
+  // under the printing screen rather than under the tickets themselves.
+  print_station_take: { area: "Settings & features", screen: "Printing" },
+  print_station_release: { area: "Settings & features", screen: "Printing" },
   order_move: { area: "Orders & bills", screen: "Move an order" },
   order_delete: { area: "Orders & bills", screen: "Billing" },
   orders_delete: { area: "Orders & bills", screen: "Billing" },

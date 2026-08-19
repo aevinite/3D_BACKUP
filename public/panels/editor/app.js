@@ -2217,7 +2217,9 @@ function openTableHolderPicker(i) {
 // section is not the guard on its own — the endpoints behind each one refuse too (editor route).
 function settingsSections() {
   const off = (typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.settingsOff) || [];
-  return SETTINGS_SECTIONS.filter((x) => !off.includes(x.id));
+  const st = (state.data && state.data.settings) || {};
+  const printingOn = st.auto_print_kot === true && st.auto_print_kot_allowed === true;
+  return SETTINGS_SECTIONS.filter((x) => !off.includes(x.id) && (x.onlyWhen !== "printing" || printingOn));
 }
 
 const SETTINGS_SECTIONS = [
@@ -2243,7 +2245,10 @@ const SETTINGS_SECTIONS = [
   // it SHOWS where printing stands (in plain words, read-only), lets THIS DEVICE agree to be the
   // printer, and opens the full setup guide. Nothing here can change the restaurant's settings, so
   // there is nothing to hide.
-  { id: "printing", label: "Printing", sub: "printer & setup guide", icon: "fa-print", title: "Printing & printer setup" },
+  // Shown only while automatic printing is ON for the restaurant (owner, 2026-08-19: "if that thing is
+  // off then no option should show"). settingsSections() filters it out otherwise, so the row is
+  // absent — not greyed, not explaining itself. The admin turns printing on first; then it appears.
+  { id: "printing", label: "Printing", sub: "printer & setup guide", icon: "fa-print", title: "Printing & printer setup", onlyWhen: "printing" },
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
 ];
 
@@ -6726,6 +6731,9 @@ const OP_ACTION_LABELS = {
   kot_reprint_sent: "Reprinted a KOT", printer_problem: "Printer problem",
   // Both ends of a print — see the same pair in components/admin/shared.tsx (owner, 2026-08-14).
   kot_printed: "KOT printed", kot_print_failed: "KOT didn't print",
+  // WHICH SCREEN IS THE PRINTER (mig 338). Worth a row: "why did tickets start coming out at the
+  // counter?" is answered by a name and a time, not by asking the shift who touched what.
+  print_station_take: "Started printing on a screen", print_station_release: "Stopped printing on a screen",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
@@ -12182,7 +12190,22 @@ function printStationStripHtml() {
   if (!printTargetSays || !printTargetSays.mayPrint) return "";
   const ans = printHereAnswer();
   if (ans === "off") return "";                       // answered no: never ask again on this device
-  if (ans === "on") {
+  const stnS = printTargetSays.station || null;
+  // ANOTHER SCREEN HOLDS IT — shown whatever this device answered. The first version only told a
+  // screen that had said "no", which left the confusing case out: a counter screen switched ON but
+  // NOT holding the station showed "this screen is printing" while the paper came out elsewhere.
+  if (stnS && stnS.active && !stnS.mine && !stnS.stale) {
+    // Another screen holds printing: say so once, with the one tap that moves it here. Not a warning —
+    // this is the normal state on every screen that is not the printer.
+    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"));
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">Kitchen tickets are printing on <b>${who}</b><small>If the printer is actually at this screen, take it over — one tap, and that screen stops.</small></span>
+      <button class="btn" data-station-set="take">Print here instead</button>
+      <button class="btn" data-printhere-set="off">Not this screen</button>
+    </div></div>`;
+  }
+  if (ans === "on" && stnS && stnS.mine) {
     const last = lastPrintedHere
       ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
       : (printTargetSays.target === "both"
@@ -12193,6 +12216,16 @@ function printStationStripHtml() {
       <span class="prstrip-txt">This screen is printing the kitchen tickets<small>${last}</small></span>
       <a class="btn" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Guide</a>
       <button class="btn" data-printhere-set="off">Stop printing here</button>
+    </div></div>`;
+  }
+  if (ans === "on") {
+    // Said yes, holds nothing (nobody does): one tap to actually become the printer. Without this the
+    // screen sat saying "yes" with no station and no explanation of why nothing printed.
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">This screen is ready to print — nothing has taken the printer yet<small>Press once on the computer the printer is attached to.</small></span>
+      <button class="btn primary" data-station-set="take">🖨 Print on this screen</button>
+      <button class="btn" data-printhere-set="off">Not this screen</button>
     </div></div>`;
   }
   return `<div class="prstrip"><div class="prstrip-row">
@@ -12209,6 +12242,24 @@ function printStationStripHtml() {
 // Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
 // a yes prints anything already waiting straight away — so answering IS the test that it works.
 function bindPrintStationStrip(root) {
+  // 🖨 take over / stop — the server decides and answers with the new state, so the screen never
+  // shows itself as the printer on the strength of its own click (mig 338).
+  (root || document).querySelectorAll("[data-station-set]").forEach((b) => (b.onclick = async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const take = b.dataset.stationSet === "take";
+    try {
+      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
+      if (r && r.station && printTargetSays) printTargetSays.station = r.station;
+      if (take) lsSet(PRINT_HERE_KEY, "on");     // taking it IS the answer to "should this screen print?"
+      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.", "ok");
+      if (state.tab === "tables") renderEditor(); else if (state.tab === "general") renderEditor();
+      if (take) managerPrintPass();              // anything already waiting prints straight away
+    } catch (e) {
+      b.disabled = false;
+      toast("Couldn't change that: " + (e.message || "try again"), "err");
+    }
+  }));
   (root || document).querySelectorAll("[data-printhere-set]").forEach((b) => (b.onclick = () => {
     const v = b.dataset.printhereSet === "on" ? "on" : "off";
     lsSet(PRINT_HERE_KEY, v);
@@ -12235,6 +12286,15 @@ function formPrinting(s) {
     : "the kitchen screen";
   const ans = printHereAnswer();
   const mayPrintHere = on && (target === "counter" || target === "both");
+  // WHO IS PRINTING (mig 338). The server's answer, not this screen's guess — the whole point is that
+  // one screen holds it and every other screen can SEE which.
+  const stn = (printTargetSays && printTargetSays.station) || null;
+  const printingHere = !!(stn && stn.mine);
+  const heldByOther = !!(stn && stn.active && !stn.mine && !stn.stale);
+  const holderName = stn && stn.active
+    ? `${esc(stn.active.label || (stn.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"))}${stn.active.claimed_by ? " · " + esc(stn.active.claimed_by) : ""}`
+    : "";
+  const stationWord = printingHere ? "<b>THIS screen</b>" : stn && stn.active ? (holderName + (stn.stale ? " (gone quiet)" : "")) : "no screen yet";
   const row = (label, value, who) => `<div style="display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)">
       <span style="min-width:190px;color:var(--muted);font-size:13px">${esc(label)}</span>
       <b style="font-size:14px">${value}</b>
@@ -12251,7 +12311,8 @@ function formPrinting(s) {
     </p>
     ${row("Automatic printing", on ? "ON — every new order prints a ticket" : "OFF — nothing prints by itself", "set by your admin")}
     ${row("Which screen prints", esc(targetWord), "set by your admin")}
-    ${row("This screen", ans === "on" ? "printing tickets" : mayPrintHere ? "not printing — you can turn it on below" : "not printing", "this device only")}
+    ${row("Printing right now", stationWord, "one screen at a time")}
+    ${row("This screen", ans === "on" ? (printingHere ? "printing tickets" : "ready — but another screen holds it") : mayPrintHere ? "not printing — you can turn it on below" : "not printing", "this device only")}
     <p style="color:var(--muted);font-size:12.5px;margin:12px 0 0">${lastLine}</p>
     ${!on ? `<div class="hint" style="margin-top:12px">Automatic printing is switched off for this restaurant. Ask your admin to turn on <b>Auto-print the KOT</b> — nothing on this page will print anything until then.</div>` : ""}
   </div>
@@ -12263,9 +12324,12 @@ function formPrinting(s) {
     </p>
     ${mayPrintHere
       ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button type="button" class="btn${ans === "on" ? " primary" : ""}" data-printhere-set="on">🖨 Yes, print here</button>
-          <button type="button" class="btn${ans === "off" ? " primary" : ""}" data-printhere-set="off">No</button>
-        </div>`
+          ${printingHere
+            ? `<button type="button" class="btn" data-station-set="release">Stop printing on this screen</button>`
+            : `<button type="button" class="btn primary" data-station-set="take">🖨 ${heldByOther ? "Print here instead" : "Print on this screen"}</button>`}
+          ${ans === "on" && !printingHere ? "" : `<button type="button" class="btn${ans === "off" ? " primary" : ""}" data-printhere-set="off">No, never on this screen</button>`}
+        </div>
+        ${heldByOther ? `<p class="hint" style="margin-top:10px">Tickets are coming out at <b>${holderName}</b>. Taking over stops that screen printing immediately — nothing is lost either way, a ticket waits in the queue until a screen prints it.</p>` : ""}`
       : `<div class="hint">Your admin has set tickets to print on <b>${esc(targetWord)}</b>, so this screen is not offered as a printer. A kitchen screen needs no switch — with automatic printing on, it simply prints.</div>`}
   </div>
   <div class="card"><h3>📖 Setting a printer up — the full written guide</h3>
@@ -12305,11 +12369,17 @@ async function managerPrintPass() {
   printPassBusy = true;
   try {
     const r = await api("GET", "/print-jobs/pending");
-    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen" };
-    const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target;
+    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen", station: (r && r.station) || null };
+    const stationKey = (v) => v && v.station && v.station.active ? `${v.station.active.device_id}:${v.station.mine}:${v.station.stale}` : String(!!(v && v.station));
+    const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target
+      || stationKey(printTargetSays) !== stationKey(says);
     printTargetSays = says;
     if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
     if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet
+    // ONE SCREEN PRINTS (mig 338). A live station elsewhere means this screen shows "printing happens
+    // there · print here instead" and takes NOTHING — the server would refuse the claim anyway; not
+    // asking is what stops two screens fighting over every ticket.
+    if (says.station && says.station.active && !says.station.mine && !says.station.stale) return;
     const jobs = (r && r.jobs) || [];
     if (!jobs.length) return;
     // The CLAIM is a plain fetch, never the offline outbox: a claim replayed hours later would print

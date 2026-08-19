@@ -439,3 +439,42 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 .prsheet-help { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px;
   color: var(--muted); font-size: 14px; text-decoration: none; }
 .prsheet-help:hover { color: var(--fg); }
+
+/* ── ☰ MENU + SETTINGS (owner, 2026-08-19) ───────────────────────────────────────────────────────
+   The kitchen screen had no way to sign out and nowhere to see how printing was set up. Both live
+   here now, in the same shape the waiter tablet uses (☰ → Settings → Sign out), so a cook who has
+   used one panel recognises the other. 44px targets: this is tapped with a wet hand, like everything
+   else on this screen. */
+.hamburger { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 10px;
+  min-width: 44px; height: 44px; font-size: 18px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
+.hamburger:hover { border-color: var(--accent, #8b5cf6); }
+.kds-dw-backdrop { position: fixed; inset: 0; background: rgba(3,7,16,.6); z-index: 40; }
+.kds-dw { position: fixed; top: 0; left: 0; bottom: 0; width: min(86vw, 320px); z-index: 41; overflow-y: auto;
+  background: var(--bg); border-right: 1px solid var(--line); color: var(--text);
+  padding: calc(14px + var(--sat)) 14px calc(14px + var(--sab)) calc(14px + var(--sal)); display: flex; flex-direction: column; gap: 10px; }
+.kds-dw h3 { margin: 0; font-size: 16px; }
+.kds-dw .dw-close { align-self: flex-end; background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 10px; width: 44px; height: 44px; font-size: 16px; cursor: pointer; }
+.kds-dw .dw-sub { color: var(--muted); font-size: 12px; }
+.kds-dw .dw-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 10px 12px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; color: var(--text);
+  font-size: 14.5px; text-align: left; cursor: pointer; text-decoration: none; }
+.kds-dw .dw-row:hover { border-color: var(--accent, #8b5cf6); }
+.kds-dw .dw-foot { margin-top: auto; color: var(--muted); font-size: 11.5px; }
+/* The Settings sheet itself — one column of plain sections, readable on a 360px phone and on a
+   1080p kitchen display without changing shape. */
+.kset-ov { position: fixed; inset: 0; background: rgba(3,7,16,.66); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 14px; }
+.kset { width: min(94vw, 460px); max-height: 92vh; overflow-y: auto; background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px calc(16px + var(--sab)); }
+.kset-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.kset-head h3 { margin: 0; font-size: 17px; flex: 1; }
+.kset-sec { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.kset-sec:first-of-type { border-top: 0; margin-top: 4px; }
+.kset-sec h4 { margin: 0 0 8px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.kset-line { display: flex; align-items: baseline; gap: 10px; font-size: 13.5px; padding: 4px 0; }
+.kset-line > span { color: var(--muted); min-width: 132px; }
+.kset-line > b { margin-left: auto; text-align: right; }
+.kset-note { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 8px 0 0; }
+.kset-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.kset-btns .btn, .kset-btns a.btn { min-height: 44px; }
+.kset-danger { background: #7f1d1d; border-color: #b91c1c; color: #fff; }

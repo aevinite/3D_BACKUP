@@ -169,12 +169,14 @@ check(/\$\{printerStripHtml\(\)\}\$\{printStationStripHtml\(\)\}/.test(epanel),
 
 // ── 7. the setup guide is IN the app, and reachable from a screen that is not hidden ────────────
 const guide = read("public/print-setup.html");
-check(guide.length > 20000 && /Setting up a Mac/.test(guide) && /Setting up a Windows PC/.test(guide),
-  "the in-app setup guide covers both a Mac and a Windows PC",
-  "public/print-setup.html has lost one of the two platforms");
-check(/print-station-mac\.command/.test(guide) && /print-station-windows\.bat/.test(guide) && /window\.print\(\)/.test(guide),
-  "…and it carries both starter files as downloads plus a save-as-PDF button",
-  "the guide no longer offers the starter files or the PDF button the owner asked for");
+// The three-OS structure is asserted by SECTION ID below (the headings are numbered and worded for a
+// reader, and re-asserting their prose is how a guard goes red over an edit that improved the page).
+check(guide.length > 30000,
+  `the in-app setup guide is a real guide (${Math.round(guide.length / 1024)} KB)`,
+  "public/print-setup.html has shrunk to a stub");
+check(/\/api\/print-station\/mac/.test(guide) && /\/api\/print-station\/windows/.test(guide) && /\/api\/print-station\/linux/.test(guide) && /window\.print\(\)/.test(guide),
+  "…offering all three generated starters plus a save-as-PDF button",
+  "the guide no longer offers a starter download or the PDF button the owner asked for");
 const ownerSettings = read("app/owner/settings/page.tsx");
 // The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
 // rather than the literal — asserting the spelling of code that legitimately changed shape is how
@@ -206,9 +208,57 @@ check(/disable-backgrounding-occluded-windows/.test(station) && /kiosk-printing/
 check(/Gatekeeper|could not verify/i.test(guide) && /bash ~\/Downloads/.test(guide),
   "the guide answers the macOS block a real Mac shows (and the old right-click trick is gone)",
   "the guide no longer explains 'Apple could not verify' — the owner hit exactly that dialog, and the instructions told him to right-click → Open, which macOS Sequoia removed");
-check(/id="linux"/.test(guide) && /Raspberry Pi/.test(guide) && /id="other"/.test(guide),
-  "the guide covers Linux and a Raspberry Pi, and says which devices can NEVER be the printer",
-  "the guide has lost the Linux / device-support sections the owner asked for");
+check(["windows", "mac", "linux", "devices", "switches", "which", "test", "wrong"].every((id) => guide.includes(`<h2 id="${id}"`)),
+  "the guide is the three-OS structure he asked for (Windows · Mac · Linux/Pi) with who-prints, the test and the fault table",
+  "the guide has lost one of its main sections — he asked for THREE OS sections plus which-screen-prints, the test and the fault table");
+check(/Save as type/.test(guide) && /Make Plain Text/.test(guide) && /nano ~\/print-station\.sh/.test(guide),
+  "each OS section also teaches making the file BY HAND (Notepad · TextEdit plain text · nano)",
+  "the by-hand instructions are gone. The owner asked for them precisely because a download can be blocked (macOS) or saved wrong (.bat.txt) — 'tell me all step by step everything, how I have to make that file'");
+check(/data-site-url/.test(guide) && /location\.origin/.test(guide),
+  "…and every command carries THIS site's address, written in by the page itself",
+  "the guide no longer fills in the site address — 'where I have to put URL and which URL' was the question, and a guessed stack is why a launcher silently did nothing");
+check(/one screen prints at a time|One printer at a time/i.test(guide) && /Print here instead/.test(guide),
+  "the guide explains that ONE screen prints and how to move it",
+  "the guide does not explain the one-printer-at-a-time rule, which is the thing a restaurant with two screens will hit first");
+
+// ── 8. ONE SCREEN IS THE PRINTER (mig 338) ──────────────────────────────────────────────────────
+const mig338 = read("supabase/migrations/338_one_screen_is_the_printer.sql");
+check(/CREATE UNIQUE INDEX IF NOT EXISTS print_stations_one_active[\s\S]{0,120}WHERE active/.test(mig338),
+  "the database itself allows only ONE active print station per restaurant",
+  "the one-active-station index is gone — two screens could hold printing at once and which one printed would be a coin flip again");
+check(/STATION_STALE_MS/.test(lib) && /stale/.test(lib),
+  "a station that has gone quiet can be taken over without asking",
+  "the staleness rule is gone: a kitchen screen that is switched off would hold the restaurant's printing for ever");
+check(/export async function mayClaim/.test(lib) && (kroute.match(/mayClaim\(/g) || []).length >= 1 && (eroute.match(/mayClaim\(/g) || []).length >= 1,
+  "BOTH routes ask one gate (mayClaim) before handing a ticket to a screen",
+  "a route claims without asking who the station is — that is how two screens start fighting over every ticket");
+check(/print-station" && b === "take"/.test(kroute) && /print-station" && b === "take"/.test(eroute),
+  "both the kitchen and the counter screen can TAKE printing in one tap",
+  "a panel lost its take-over endpoint, so a person standing at the right printer cannot move printing to it");
+check(/data-station-set/.test(epanel) && /data-kstation/.test(kpanel),
+  "…and both panels offer that tap on screen",
+  "the take-over button is missing from a panel");
+check(/onlyWhen: "printing"/.test(epanel) && /x\.onlyWhen !== "printing" \|\| printingOn/.test(epanel),
+  "the manager's Printing row is ABSENT when automatic printing is off (not greyed)",
+  "the Printing row shows when printing is off — the owner's rule is that no option appears at all");
+check(/data\?\.printing && data\.printing\.length/.test(ownerSettings),
+  "the owner's printing card renders only for a restaurant that HAS printing on",
+  "the owner card shows even when printing is off everywhere");
+
+// ── 9. THE KITCHEN SCREEN'S OWN MENU (owner, 2026-08-19) ────────────────────────────────────────
+const khtml = read("public/panels/kitchen/index.html");
+check(/id="hamburger"/.test(khtml) && /function openKitchenMenu/.test(kpanel),
+  "the kitchen screen has a ☰ menu",
+  "the kitchen's ☰ menu is gone — it was the screen's only way to reach Settings");
+check(/function openKitchenSettings/.test(kpanel) && /action="\/api\/panel-logout"/.test(kpanel),
+  "…with a Settings sheet that can SIGN OUT (this screen had no way to, before 2026-08-19)",
+  "the kitchen can no longer sign out, or its Settings sheet is gone");
+check(/method="post"/.test(kpanel) && /panel-logout/.test(kpanel),
+  "sign-out is a POST form, so nothing that merely points at the URL can end a cook's session mid-service",
+  "the kitchen sign-out is a link again — a GET that ends a session fires from anything that touches the URL");
+check(!/PROFILE_ROLES|My profile/.test(kpanel.slice(kpanel.indexOf("function openKitchenMenu"), kpanel.indexOf("function openKitchenMenu") + 2500)),
+  "…and the menu offers NO profile — the kitchen has none, and that has been ruled three times",
+  "a profile appeared in the kitchen menu: ruled out 2026-07-29, re-confirmed 2026-08-05 and again in lib/staffProfileShared.ts. Do not add it");
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`
