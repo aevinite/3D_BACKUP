@@ -14,7 +14,7 @@
 // a hard limit — never a whole-table read.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";

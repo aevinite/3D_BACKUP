@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";

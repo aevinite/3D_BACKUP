@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";

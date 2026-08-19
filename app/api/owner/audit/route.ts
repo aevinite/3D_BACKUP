@@ -13,7 +13,7 @@
 // hard limit — never a whole-table read. deletion_audit is indexed (restaurant_id, at DESC).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 // The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
 import { auditForReader, forReader } from "@/lib/auditActor";

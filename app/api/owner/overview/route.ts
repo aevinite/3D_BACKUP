@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { getOwnerEntitlementsUnion, mergeOwnerEntitlements, entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers

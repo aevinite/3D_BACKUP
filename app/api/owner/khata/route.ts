@@ -9,7 +9,7 @@
 // mig-184 RPCs as the manager panel, so the two views can never disagree on what's owed.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, type PartialKey } from "@/lib/ownerScope";
 import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { restaurantNames } from "@/lib/restaurantNames";

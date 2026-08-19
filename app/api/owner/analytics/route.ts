@@ -19,7 +19,7 @@
 // the wrong thing. Corrected in the T9 sweep, 2026-08-06.)
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";

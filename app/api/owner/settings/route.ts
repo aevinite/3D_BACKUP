@@ -6,7 +6,7 @@
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, ownerScopeOr503, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, verifySecret } from "@/lib/userAuth";

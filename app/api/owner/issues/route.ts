@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, ownerScopeOr503, inScope, type OwnerScope, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
