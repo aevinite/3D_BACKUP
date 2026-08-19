@@ -84,6 +84,14 @@ export function ownerProfileHost(userId: string, scopePin: string | null, asPin:
     // `visitAsPerson` needs /api/admin/act-as/go and an admin cookie; `accessLink` points into
     // /aevinite. Neither exists for an owner, so neither is offered — the profile shows a plain
     // link to the panel instead, with a title that admits whose access it opens with.
+    // THIS PROFILE IS A ROUTE, NOT A MODAL (T13 handoff H3, 2026-08-19). The owner cockpit opens it
+    // at /owner/staff/<id>, so the browser already has a history entry for it and the phone's Back
+    // button closes it for free. Registering a back layer on top gave one visible sheet TWO
+    // back-steps: measured on a 360×780 phone, press 1 did nothing at all and press 2 returned to
+    // the roster. lib/backStack.ts's own header states the rule — "Real PAGES already have their own
+    // address … they need nothing here." Aevidine's console opens the SAME component as a modal over
+    // a page, so it leaves this absent and keeps its layer.
+    pageHosted: true,
     can: { pin: false, signIn: false, role: false, visitAsPerson: false, accessLink: false },
   };
 }

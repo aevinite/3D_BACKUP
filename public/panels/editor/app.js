@@ -2217,7 +2217,9 @@ function openTableHolderPicker(i) {
 // section is not the guard on its own — the endpoints behind each one refuse too (editor route).
 function settingsSections() {
   const off = (typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.settingsOff) || [];
-  return SETTINGS_SECTIONS.filter((x) => !off.includes(x.id));
+  const st = (state.data && state.data.settings) || {};
+  const printingOn = st.auto_print_kot === true && st.auto_print_kot_allowed === true;
+  return SETTINGS_SECTIONS.filter((x) => !off.includes(x.id) && (x.onlyWhen !== "printing" || printingOn));
 }
 
 const SETTINGS_SECTIONS = [
@@ -2236,6 +2238,17 @@ const SETTINGS_SECTIONS = [
   { id: "access", label: "Sections", sub: "who serves which table", icon: "fa-users-rectangle", title: "Waiter sections" },
   { id: "billing", label: "Billing", sub: "invoice & tax", icon: "fa-file-invoice", title: "Billing settings" },
   { id: "kitchen", label: "Kitchen", sub: "KOT printing", icon: "fa-fire-burner", title: "Kitchen settings" },
+  // PRINTING IS ITS OWN ROW, AND IT IS VISIBLE TO EVERYONE (owner, 2026-08-18: the printer setup
+  // "should be shown in kitchen panel able to see the whole thing inside the setting, manager also
+  // and owner"). It is NOT the "kitchen" row above: that one holds the admin-owned switches and is
+  // hidden from everyone in this panel by his 2026-07-31 decision. This row holds no admin setting —
+  // it SHOWS where printing stands (in plain words, read-only), lets THIS DEVICE agree to be the
+  // printer, and opens the full setup guide. Nothing here can change the restaurant's settings, so
+  // there is nothing to hide.
+  // Shown only while automatic printing is ON for the restaurant (owner, 2026-08-19: "if that thing is
+  // off then no option should show"). settingsSections() filters it out otherwise, so the row is
+  // absent — not greyed, not explaining itself. The admin turns printing on first; then it appears.
+  { id: "printing", label: "Printing", sub: "printer & setup guide", icon: "fa-print", title: "Printing & printer setup", onlyWhen: "printing" },
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
 ];
 
@@ -2471,6 +2484,7 @@ function formGeneral(s) {
     </div>
   </div>`;
   }
+  if (sec === "printing") return formPrinting(s);
   if (sec === "kitchen") {
     return `
   <div class="card"><h3>Kitchen printing</h3>
@@ -2865,17 +2879,17 @@ function mergedOrderCardHtml(g) {
     // generate invoice and print ... once the bill is printed, the invoice has been generated").
     // Invoice-first still holds — nothing prints without a number — but a waiter handing over a
     // bill now taps once instead of learning which of two buttons comes first.
-    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-print-issue="${esc(sid)}" data-print-group="${esc(sessKey)}">🖨 Print bill</button>` : "";
+    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-print-issue="${esc(sid)}" data-print-group="${esc(sessKey)}">${billPrintLabel(null, g, "bill")}</button>` : "";
   } else if (sid && invoiced) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
-    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button><button class="ord-btn ghost" data-credit-note="${esc(sid)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`;
+    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">${billPrintLabel(null, g)}</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button><button class="ord-btn ghost" data-credit-note="${esc(sid)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`;
   } else {
     // Legacy non-session order (no session to invoice): still honour invoice-first —
     // Print only once the bill is SETTLED (paid = finalised). Before that, Mark paid only,
     // so no naked Print appears next to a running tab (owner 2026-07-24).
     billBtns = anyUnpaid
       ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>`
-      : `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">🖨 Print</button>`;
+      : `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">${billPrintLabel(null, g)}</button>`;
   }
   // No "🪑 Free table" button (owner, 2026-07-31): a settled table leaves the floor by
   // itself the moment its bill is paid and served, so a button for it is one more thing
@@ -3426,7 +3440,7 @@ function openBillModal(key) {
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
-        <button class="btn primary" data-bm-print>🖨 Print</button>
+        <button class="btn primary" data-bm-print>${billPrintLabel(null, g)}</button>
         ${canRestore
           ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
           : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
@@ -3462,7 +3476,7 @@ function openBillModal(key) {
         // just stops offering it. The plain 🖨 Print above still prints the CANCELLED sheet, which
         // is the piece of paper a voided bill legitimately has.
         // `liveOrders` is the non-cancelled set this modal already computed for its item rows.
-        if (sid2 && o0.invoice_no == null && liveOrders.length) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">🖨 Print bill</button>`);
+        if (sid2 && o0.invoice_no == null && liveOrders.length) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">${billPrintLabel(null, g, "bill")}</button>`);
         // Reopen: only an ISSUED invoice can be reopened (the server enforces the window +
         // permission; voiding is recorded). A voided/never-issued bill has nothing to reopen.
         if (invoiced2) acts.push(`<button class="btn ghost" data-void-invoice="${esc(sid2)}">↩ Reopen bill</button>`);
@@ -4990,6 +5004,48 @@ new MutationObserver(() => {
 // untouched: the kitchen ticket is a log of what was fired, the bill is what the guest owes.
 // combineBillLines(): one bill line per dish — shared, see /panels/billdoc.js.
 function combineBillLines(entries) { return LFH_BILLDOC.combineBillLines(entries); }
+
+// ── "Print" the first time, "Reprint" after that ────────────────────────────────────────────
+// Owner, 2026-08-19: "after once print the button will just show reprint instead of print,
+// works same". ONE reader for the whole panel, because the word has to agree on every screen
+// that can print the same bill — the Tables floor card, the bill popup, and the Bills record.
+//
+// The answer comes off the BILL (sessions.bill_printed_at, mig 333, which rides on every order
+// row), never off this device: the manager prints at the till and the waiter's tablet must read
+// "Reprint" too. WORKS THE SAME — same handler, same sheet, no extra question, and nothing
+// recorded. REJECTED (owner, 2026-08-19): do not turn this into a warning, a confirm, a badge,
+// a count, or an Audit row — "it's not any kind of problem which needs to be audited".
+// Bills this device has printed in this session, by session id. The server row is the real
+// answer, but a refresh that lands between the print and the stamp coming back would re-render
+// the button as "Print" on a bill whose paper is already in the guest's hand — which is exactly
+// the moment the word matters. So what we KNOW locally is remembered and never un-known.
+const _billPrintedHere = new Set();
+function billPrintedBefore(sess, os) {
+  if (sess && sess.bill_printed_at) return true;
+  if ((os || []).some((o) => o && o.bill_printed_at)) return true;
+  const sid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  return !!sid && _billPrintedHere.has(sid);
+}
+// The label a print button wears. `suffix` is the trailing word some buttons carry ("bill"),
+// so "🖨 Print bill" becomes "🖨 Reprint bill" and nothing else about the button changes.
+// data-bill-print-btn is what lets the label flip the instant paper comes out, without a
+// re-render that would rebuild the card under the finger that just tapped it.
+function billPrintLabel(sess, os, suffix) {
+  return `<span data-bill-print-btn>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
+}
+// First print just happened → say so on the buttons already on screen, and on the rows this
+// panel is holding, so nothing waits for the next refresh to catch up.
+function markBillPrintedLocally(sid) {
+  if (!sid) return;
+  _billPrintedHere.add(sid);
+  const at = new Date().toISOString();
+  (state.data.orders || []).forEach((o) => { if (o && o.session_id === sid && !o.bill_printed_at) o.bill_printed_at = at; });
+  ((state.board && state.board.sessions) || []).forEach((s) => { if (s && s.id === sid && !s.bill_printed_at) s.bill_printed_at = at; });
+  document.querySelectorAll("[data-bill-print-btn]").forEach((b) => {
+    // \b before Print, so a button that already reads "Reprint" is left alone.
+    b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
+  });
+}
 function printBill(t, sess, os, opts = {}) {
   // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
   // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
@@ -5010,26 +5066,38 @@ function printBill(t, sess, os, opts = {}) {
   const tnum = (t || "").toString().trim();
   const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
 
-  // A SECOND COPY SAYS SO (mig 333, owner 2026-08-17). The kitchen ticket has branded reprints
-  // since 2026-08-04; the bill did not, so one sale could be represented by two identical sheets.
-  // The answer comes off the BILL, never off this device — the manager prints at the till and a
-  // waiter may reprint the same bill from the tablet, where a local "already printed" flag would
-  // be wrong and would hand out an unbranded duplicate.
+  // REJECTED (owner, 2026-08-19): the SHEET says nothing about being a second copy. A
+  // `reprint: printedBefore` flag was passed here 2026-08-17 → 2026-08-19 and drew a
+  // "Reprint · Duplicate" band; he removed it — "I don't even want the reprinted bill shown in
+  // the bill". Don't pass a reprint flag from here again; billdoc.js no longer has one.
+  // `printedBefore` still matters, for the two things he DID ask for: the button on screen reads
+  // "Reprint" once paper exists (billPrintedBefore(), used by every print button in this panel),
+  // and the first print is stamped once so every device agrees which one was the first.
   const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
     money: billMath(os), session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
-    reprint: printedBefore,
   }));
-  // Tell the server this bill has now been on paper, so the NEXT copy — from any device — is
-  // branded. Idempotent server-side, so calling it after every print is free and a retry is safe;
+  // Tell the server this bill has now been on paper, so every panel's button reads "Reprint" from
+  // here on. Idempotent server-side, so calling it after every print is free and a retry is safe;
   // fire-and-forget because a failed stamp must never stop a guest getting their bill.
+  // It writes NOTHING to the Audit, on purpose (owner, 2026-08-19: "I don't want reprinted bill
+  // shown anywhere like on audit … it's not any kind of problem which needs to be audited").
   const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  // Remembered the moment the paper goes out, NOT when the server answers: the window above is
+  // already written, so this bill has been printed whatever the network does next.
+  if (printedSid) _billPrintedHere.add(printedSid);
   if (printedSid && !printedBefore) {
     try {
       api("POST", `/sessions/${printedSid}/bill-printed`)
-        .then(() => { if (sess) sess.bill_printed_at = new Date().toISOString(); })
+        .then(() => {
+          // Mark the rows this screen is already built from, so the button beside the person's
+          // finger flips to "Reprint" now rather than after the next refresh (owner, 2026-08-19:
+          // "after once print the button will just show reprint instead of print, works same").
+          markBillPrintedLocally(printedSid);
+          if (sess) sess.bill_printed_at = new Date().toISOString();
+        })
         .catch(() => {});
     } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
   }
@@ -5038,7 +5106,10 @@ function printBill(t, sess, os, opts = {}) {
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
   // saying which — so the old "close on afterprint" also threw the bill away on Cancel. The window
   // closes only from its own ✕ Close, and a NAMED target means the next bill reuses it.
-  const w = window.open("", "lfh_bill_print", "width=380,height=680");
+  // Opened tall on purpose: the bill sizes itself to fit the window (billdoc.js zFit), so a taller
+  // window means a bigger, easier-to-read bill rather than a scrollbar. A REUSED window keeps its
+  // own size, so this is the first-open default only.
+  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
   try { w.document.open(); } catch (e) {} // reused window: start from a blank document
   w.document.write(html);
@@ -5306,7 +5377,7 @@ async function printZReport() {
   try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
   const di = z.dineIn;
   const row = (l, v, b) => `<div class="zr${b ? " b" : ""}"><span>${esc(l)}</span><span>${v}</span></div>`;
-  const w = window.open("", "_blank", "width=380,height=720");
+  const w = window.open("", "_blank", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups to print the report", "err"); return; }
   w.document.write(`<!doctype html><title>Day-close Z report — ${esc(z.date)}</title>
 <style>
@@ -6139,6 +6210,9 @@ function bindEditor() {
 
   // Kitchen settings: "Preview a sample KOT" test-print button.
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
+  // Settings → Printing offers the same per-device Yes/No the floor strip does, so it is bound on the
+  // same helper — one handler, two places, no chance of one of them going dead.
+  bindPrintStationStrip(ed);
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
   // boxes it depends on — the mode AND the price typed above it. A stale example is worse
   // than none: it would show ₹294 while the box says ₹500 and quietly teach the wrong rule.
@@ -6718,6 +6792,9 @@ const OP_ACTION_LABELS = {
   kot_reprint_sent: "Reprinted a KOT", printer_problem: "Printer problem",
   // Both ends of a print — see the same pair in components/admin/shared.tsx (owner, 2026-08-14).
   kot_printed: "KOT printed", kot_print_failed: "KOT didn't print",
+  // WHICH SCREEN IS THE PRINTER (mig 338). Worth a row: "why did tickets start coming out at the
+  // counter?" is answered by a name and a time, not by asking the shift who touched what.
+  print_station_take: "Started printing on a screen", print_station_release: "Stopped printing on a screen",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
@@ -10022,13 +10099,13 @@ function tablePanelParts(t, host = "float") {
   // untouched: an issued invoice still locks the bill (no discount until ↩ Reopen voids it, which
   // is recorded), and nothing here can erase a sale.
   const printBtn = !billableOs.length ? "" : (invoicedNow
-    ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
+    ? `<button class="btn" id="sxPrint">${billPrintLabel(sess, os)}</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
     // ONE button (owner, 2026-08-05: "print means generate invoice and print ... once the bill is
     // printed, the invoice has been generated"). Print already issues-then-prints; a second
     // button that ONLY issues was the thing making people ask which one comes first, and it
     // could leave a numbered invoice with no paper. Nothing about compliance changes — the
     // invoice is still issued before anything prints, and it still locks the bill.
-    : `<button class="btn primary" id="sxPrint" title="Issues the tax invoice, then prints the bill">🖨 Print bill</button>`);
+    : `<button class="btn primary" id="sxPrint" title="Issues the tax invoice, then prints the bill">${billPrintLabel(sess, os, "bill")}</button>`);
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
@@ -10314,7 +10391,7 @@ async function openBillPreview(t) {
       <div class="bm-actions">
         ${/* Print below already issues-then-prints; a separate issue-only button is the confusion
              the owner removed on 2026-08-05. */ ""}
-        <button class="btn primary" data-bp-print>🖨 Print</button>
+        <button class="btn primary" data-bp-print>${billPrintLabel(sess, live())}</button>
         ${invoiced && anyUnpaid ? `<button class="btn green" data-bp-pay${anyReceived ? ` disabled title="Accept the order first — a bill can only be paid once the order is accepted."` : ""}>💳 Mark paid</button>` : ""}
         <button class="btn confirm-cancel" data-bp-close>Close</button>
       </div>
@@ -12239,6 +12316,12 @@ async function printJobHere(id, btn) {
 //     panel is also opened on PHONES. A phone that claimed a ticket would "print" it into a dialog
 //     nobody looks at and report it done — a LOST ticket, caused by the feature meant to save it. So
 //     a device that has not answered never claims, and the honest default is no.
+// The setup guide the app serves (public/print-setup.html) — one constant, because it is linked from
+// the floor strip AND from Settings → Printing, and a second copy of a path is how one of them rots.
+// (This declaration was lost once while the print-station code was being reshaped, leaving both links
+// referencing a name that no longer existed — a ReferenceError on every floor render. verify:print-queue
+// caught it; that is what the check is for.)
+const PRINT_SETUP_URL = "/print-setup.html";
 const PRINT_HERE_KEY = "lfh_print_here";        // "on" | "off" — this device's answer, this browser
 const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v === "on" || v === "off" ? v : ""; };
 // What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
@@ -12252,7 +12335,22 @@ function printStationStripHtml() {
   if (!printTargetSays || !printTargetSays.mayPrint) return "";
   const ans = printHereAnswer();
   if (ans === "off") return "";                       // answered no: never ask again on this device
-  if (ans === "on") {
+  const stnS = printTargetSays.station || null;
+  // ANOTHER SCREEN HOLDS IT — shown whatever this device answered. The first version only told a
+  // screen that had said "no", which left the confusing case out: a counter screen switched ON but
+  // NOT holding the station showed "this screen is printing" while the paper came out elsewhere.
+  if (stnS && stnS.active && !stnS.mine && !stnS.stale) {
+    // Another screen holds printing: say so once, with the one tap that moves it here. Not a warning —
+    // this is the normal state on every screen that is not the printer.
+    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"));
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">Kitchen tickets are printing on <b>${who}</b><small>If the printer is actually at this screen, take it over — one tap, and that screen stops.</small></span>
+      <button class="btn" data-station-set="take">Print here instead</button>
+      <button class="btn" data-printhere-set="off">Not this screen</button>
+    </div></div>`;
+  }
+  if (ans === "on" && stnS && stnS.mine) {
     const last = lastPrintedHere
       ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
       : (printTargetSays.target === "both"
@@ -12263,6 +12361,16 @@ function printStationStripHtml() {
       <span class="prstrip-txt">This screen is printing the kitchen tickets<small>${last}</small></span>
       <a class="btn" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Guide</a>
       <button class="btn" data-printhere-set="off">Stop printing here</button>
+    </div></div>`;
+  }
+  if (ans === "on") {
+    // Said yes, holds nothing (nobody does): one tap to actually become the printer. Without this the
+    // screen sat saying "yes" with no station and no explanation of why nothing printed.
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">This screen is ready to print — nothing has taken the printer yet<small>Press once on the computer the printer is attached to.</small></span>
+      <button class="btn primary" data-station-set="take">🖨 Print on this screen</button>
+      <button class="btn" data-printhere-set="off">Not this screen</button>
     </div></div>`;
   }
   return `<div class="prstrip"><div class="prstrip-row">
@@ -12279,6 +12387,24 @@ function printStationStripHtml() {
 // Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
 // a yes prints anything already waiting straight away — so answering IS the test that it works.
 function bindPrintStationStrip(root) {
+  // 🖨 take over / stop — the server decides and answers with the new state, so the screen never
+  // shows itself as the printer on the strength of its own click (mig 338).
+  (root || document).querySelectorAll("[data-station-set]").forEach((b) => (b.onclick = async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const take = b.dataset.stationSet === "take";
+    try {
+      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
+      if (r && r.station && printTargetSays) printTargetSays.station = r.station;
+      if (take) lsSet(PRINT_HERE_KEY, "on");     // taking it IS the answer to "should this screen print?"
+      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.", "ok");
+      if (state.tab === "tables") renderEditor(); else if (state.tab === "general") renderEditor();
+      if (take) managerPrintPass();              // anything already waiting prints straight away
+    } catch (e) {
+      b.disabled = false;
+      toast("Couldn't change that: " + (e.message || "try again"), "err");
+    }
+  }));
   (root || document).querySelectorAll("[data-printhere-set]").forEach((b) => (b.onclick = () => {
     const v = b.dataset.printhereSet === "on" ? "on" : "off";
     lsSet(PRINT_HERE_KEY, v);
@@ -12286,6 +12412,92 @@ function bindPrintStationStrip(root) {
     else toast("This screen will not print kitchen tickets.", "ok");
     if (state.tab === "tables") renderEditor();   // repaint the strip in place (there is no renderTables)
   }));
+}
+
+// ── SETTINGS → PRINTING: where printing stands, and how to set a printer up ──────────────────────
+// Owner, 2026-08-18: "tell me how the printer will work and inside the setting how it will be —
+// every single bit of thing, how we're gonna print. It should be shown in kitchen panel… manager
+// also and owner. Also a quick written guide… it should take me to the page."
+//
+// So this screen answers three questions in the order a person asks them: is printing on? which
+// screen prints? and is it THIS screen? Then it hands over the guide. The two admin-owned answers are
+// shown as plain sentences with who sets them — never as dead controls (owner, 2026-07-31: "there
+// shouldn't be grayed out option also").
+function formPrinting(s) {
+  const on = s.auto_print_kot === true && s.auto_print_kot_allowed === true;
+  const target = String(s.kot_print_target || "kitchen");
+  const targetWord = target === "counter" ? "the counter (manager) screen"
+    : target === "both" ? "the kitchen screen, with a counter screen as the 30-second backup"
+    : "the kitchen screen";
+  const ans = printHereAnswer();
+  const mayPrintHere = on && (target === "counter" || target === "both");
+  // WHO IS PRINTING (mig 338). The server's answer, not this screen's guess — the whole point is that
+  // one screen holds it and every other screen can SEE which.
+  const stn = (printTargetSays && printTargetSays.station) || null;
+  const printingHere = !!(stn && stn.mine);
+  const heldByOther = !!(stn && stn.active && !stn.mine && !stn.stale);
+  const holderName = stn && stn.active
+    ? `${esc(stn.active.label || (stn.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"))}${stn.active.claimed_by ? " · " + esc(stn.active.claimed_by) : ""}`
+    : "";
+  const stationWord = printingHere ? "<b>THIS screen</b>" : stn && stn.active ? (holderName + (stn.stale ? " (gone quiet)" : "")) : "no screen yet";
+  const row = (label, value, who) => `<div style="display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)">
+      <span style="min-width:190px;color:var(--muted);font-size:13px">${esc(label)}</span>
+      <b style="font-size:14px">${value}</b>
+      <span class="muted" style="font-size:12px;margin-left:auto">${esc(who)}</span>
+    </div>`;
+  const lastLine = lastPrintedHere
+    ? `Last ticket printed on this screen: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
+    : "Nothing has printed on this screen yet.";
+  return `
+  <div class="card"><h3>🖨 How printing stands right now</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      A kitchen ticket is queued by the server the moment an order is placed, so it can never be lost —
+      it waits until a screen prints it. These three answers decide which screen that is.
+    </p>
+    ${row("Automatic printing", on ? "ON — every new order prints a ticket" : "OFF — nothing prints by itself", "set by your admin")}
+    ${row("Which screen prints", esc(targetWord), "set by your admin")}
+    ${row("Printing right now", stationWord, "one screen at a time")}
+    ${row("This screen", ans === "on" ? (printingHere ? "printing tickets" : "ready — but another screen holds it") : mayPrintHere ? "not printing — you can turn it on below" : "not printing", "this device only")}
+    <p style="color:var(--muted);font-size:12.5px;margin:12px 0 0">${lastLine}</p>
+    ${!on ? `<div class="hint" style="margin-top:12px">Automatic printing is switched off for this restaurant. Ask your admin to turn on <b>Auto-print the KOT</b> — nothing on this page will print anything until then.</div>` : ""}
+  </div>
+  <div class="card"><h3>Should this screen print the kitchen tickets?</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
+      A choice for <b>this device only</b>, kept in this browser. Say yes on the computer the printer is
+      attached to. <b>Say no on phones</b> — a phone that took a ticket would put it in a print dialog
+      nobody looks at, and the kitchen would never get the paper.
+    </p>
+    ${mayPrintHere
+      ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${printingHere
+            ? `<button type="button" class="btn" data-station-set="release">Stop printing on this screen</button>`
+            : `<button type="button" class="btn primary" data-station-set="take">🖨 ${heldByOther ? "Print here instead" : "Print on this screen"}</button>`}
+          ${ans === "on" && !printingHere ? "" : `<button type="button" class="btn${ans === "off" ? " primary" : ""}" data-printhere-set="off">No, never on this screen</button>`}
+        </div>
+        ${heldByOther ? `<p class="hint" style="margin-top:10px">Tickets are coming out at <b>${holderName}</b>. Taking over stops that screen printing immediately — nothing is lost either way, a ticket waits in the queue until a screen prints it.</p>` : ""}`
+      : `<div class="hint">Your admin has set tickets to print on <b>${esc(targetWord)}</b>, so this screen is not offered as a printer. A kitchen screen needs no switch — with automatic printing on, it simply prints.</div>`}
+  </div>
+  <div class="card"><h3>📖 Setting a printer up — the full written guide</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      Opens as its own page, with every step for <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a
+      <b>Raspberry Pi</b> — the printer itself, the paper settings, the one window to open so printing
+      never stops when it is minimised, what each setting does, a what-went-wrong table, and which
+      devices can never be the printer (phones and iPads). It has a button to save it as a PDF.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn primary" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Open the setup guide</a>
+      <a class="btn" href="${PRINT_SETUP_URL}#windows" target="_blank" rel="noopener">🪟 Windows steps</a>
+      <a class="btn" href="${PRINT_SETUP_URL}#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
+      <a class="btn" href="${PRINT_SETUP_URL}#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
+    </div>
+    <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+      Each menu walks you through making one small file on that computer — open the text editor, press
+      <b>Copy</b> on the code, paste it, save it. That file opens one Chrome window which prints silently
+      and does not fall asleep behind other windows. <b>Nothing is downloaded:</b> a downloaded script is
+      blocked by macOS ("Apple could not verify...") and warned about by Windows, while a file you typed
+      yourself simply opens. Your site address is already filled into every command.
+    </p>
+  </div>`;
 }
 
 // One pass of the queue: what is waiting → claim it → print it → say what happened.
@@ -12304,11 +12516,17 @@ async function managerPrintPass() {
   printPassBusy = true;
   try {
     const r = await api("GET", "/print-jobs/pending");
-    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen" };
-    const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target;
+    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen", station: (r && r.station) || null };
+    const stationKey = (v) => v && v.station && v.station.active ? `${v.station.active.device_id}:${v.station.mine}:${v.station.stale}` : String(!!(v && v.station));
+    const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target
+      || stationKey(printTargetSays) !== stationKey(says);
     printTargetSays = says;
     if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
     if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet
+    // ONE SCREEN PRINTS (mig 338). A live station elsewhere means this screen shows "printing happens
+    // there · print here instead" and takes NOTHING — the server would refuse the claim anyway; not
+    // asking is what stops two screens fighting over every ticket.
+    if (says.station && says.station.active && !says.station.mine && !says.station.stale) return;
     const jobs = (r && r.jobs) || [];
     if (!jobs.length) return;
     // The CLAIM is a plain fetch, never the offline outbox: a claim replayed hours later would print
@@ -14172,19 +14390,26 @@ async function askBillCustomer(sid, sess) {
 }
 async function generateInvoice(sid) {
   if (_invBusy.has(sid)) return false;
-  // A RE-issue (a number already exists → the previous was voided) must say WHY — the
-  // reason is recorded in the invoice history. A first-ever issue needs no reason.
+  // REJECTED (owner, 2026-08-19): PRINTING NEVER ASKS WHY. From 2026-08-05 to 2026-08-19 a
+  // re-issue (a number already exists → the previous was voided) stopped here and demanded a typed
+  // reason. The owner killed it: "when I click print bill why it show like I wanna reopen the bill
+  // and stuff, it should not happen like this … reprinting should also not ask any question".
+  // The reason was ALREADY given, one step earlier, in the reopen picker (askReopenReason, which
+  // is required and IS recorded) — so this was the same question a second time, worded as if
+  // pressing Print were itself a reopen. Reopening a bill and printing a bill are different acts,
+  // and only the first one is an event.
+  // Nothing is lost from the record: the server now takes the reopen's own reason as the re-issue
+  // reason (route.ts, sessions/:id/invoice), the new invoice number is still logged, and the
+  // before → after "bill changed after a reopen" row is still written. Do not add a prompt,
+  // a confirm, or an "are you sure" to any print path here.
   const ss = (state.board.sessions || []).find((s) => s.id === sid);
   const isReissue = ss && ss.invoice_no != null;
-  let reason = null;
-  if (isReissue) {
-    reason = await promptDialog("This invoice was voided. Re-issuing assigns a NEW number — why are you re-issuing it?", { confirmLabel: "Re-issue invoice", placeholder: "corrected GST, fixed items…", required: true });
-    if (reason == null) return false; // cancelled
-  }
   // Who is this bill for? (owner, 2026-07-30 — mobile first, name auto-fills for a
-  // returning number, and no bill at all without both when the restaurant requires it).
-  // A bill that ALREADY carries a customer (re-issue after a void) doesn't ask again.
-  const body = reason ? { reason } : {};
+  // returning number). This one STAYS on a re-issue and he confirmed why (2026-08-19):
+  // "reopening can also change name and number … when you click print after reopen it asks for
+  // no and name again and the old one is autofilled". It is not a "why did you do this" question
+  // — it is the bill's own field, pre-filled, and changing it is a legitimate reason to reopen.
+  const body = {};
   const cust = await askBillCustomer(sid, ss);
   if (cust === null) return false;         // cancelled — nothing is issued
   if (cust) { body.cust_phone = cust.phone; body.cust_name = cust.name; }

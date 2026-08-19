@@ -164,10 +164,14 @@ for (const [what, ts] of INSTANTS) {
   }
 }
 
-// ── 3c. A SECOND COPY SAYS SO, AND A FIRST COPY NEVER DOES ────────────────────────────────────
-// The kitchen ticket has branded reprints since 2026-08-04; the bill gained the same band on
-// 2026-08-17. A first print marked DUPLICATE would be a lie on paper, which is the failure mode
-// that matters — so both directions are pinned.
+// ── 3c. THE BILL NEVER SAYS IT IS A SECOND COPY — THE TICKET ALWAYS DOES ──────────────────────
+// REJECTED (owner, 2026-08-19): a bill band existed 2026-08-17 → 2026-08-19 and he removed it —
+// "I don't even want the reprinted bill shown in the bill … make the guard also in code like never
+// change that to reprint thing". A guest asking for their bill again is service, not an incident.
+// R37 in docs/REJECTED-IDEAS.md.
+// The KITCHEN TICKET keeps its banner (owner, 2026-08-04, re-confirmed 2026-08-19 — "bill only,
+// keep kot banner"): a cook who mistakes a duplicate for a fresh order cooks the food twice.
+// The deeper guard, including the panels and the Audit, is scripts/verify-bill-reprint-is-silent.mjs.
 {
   const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
   const os = [{ status: "served", subtotal: 620, taxable_base: 620, nontax_amount: 0, discount: 0, tax_rate: 0.05,
@@ -175,19 +179,18 @@ for (const [what, ts] of INSTANTS) {
   const mk = (a) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {}, orders: os, session: { bill_no: 41 }, autoPrint: false, ...a }));
   const bands = (h) => [...h.matchAll(/<div class="vband">([^<]*)</g)].map((m) => m[1]);
   bands(mk({})).length === 0
-    ? ok("a first print of a bill carries no duplicate band")
-    : bad("a FIRST print is branded a duplicate", "a sheet marked DUPLICATE that is really the original is a lie on paper");
-  /Reprint/i.test(bands(mk({ reprint: true }))[0] || "")
-    ? ok("a reprinted bill carries the Reprint · Duplicate band")
-    : bad("a reprinted bill is indistinguishable from the original", "pass reprint:true — the ticket has had this since 2026-08-04");
-  bands(mk({ reprint: true })).length === 1 && mk({ reprint: true }).indexOf('class="vband"') < mk({ reprint: true }).indexOf('class="kind"')
-    ? ok("  …at the top, above the document's name")
-    : bad("the bill's duplicate band is not at the top", "it has to be the first thing read");
+    ? ok("a bill carries no duplicate band")
+    : bad("a bill is branded a duplicate", "the owner removed this on 2026-08-19 — a reprint of a bill is not an event");
+  // …and it stays silent even if a caller insists, so a stray `reprint: true` left in a panel
+  // can never put the word back on a guest's bill.
+  !/reprint/i.test(mk({ reprint: true }))
+    ? ok("  …even when a caller passes reprint:true — the bill has no such flag any more")
+    : bad("a reprint flag still reaches the bill sheet", "billdoc.js must ignore it entirely; see the REJECTED note there");
   // and the KOT's own banner still works, both ways
   /class="rp"/.test(BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [], reprint: true }))
     && !/class="rp"/.test(BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [] }))
     ? ok("the kitchen ticket still brands a reprint, and only a reprint")
-    : bad("the ticket's duplicate banner regressed", "one flag, three documents");
+    : bad("the ticket's duplicate banner regressed", "the KOT banner is the one he kept");
 }
 
 // ── 3d. THE VERIFICATION LINE (mig 332) ───────────────────────────────────────────────────────

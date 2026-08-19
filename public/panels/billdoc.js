@@ -342,7 +342,23 @@
 + "     · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the\n"
 + "       left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */\n"
 + "  @page{margin:0}\n"
-+ "  @media print{body{margin:0 !important;padding:2mm 5mm !important}\n"
+// ── THE PAPER'S FULL SAFE WIDTH, CENTRED (owner, 2026-08-19 — measured, not guessed) ─────────────
+// Ground truth, taken by pushing a real bill through this Mac's own CUPS chain (Chrome PDF →
+// cgpdftoraster with the queue's PPD → the printer's rastertozj filter) and decoding the ESC/POS the
+// printer would receive: the raster is 560 dots = 70.1mm wide, and the bill's ink ran from x=0 to
+// x=482 — **60mm of ink, flush against the left edge, with 10mm of paper unused on the right.**
+// `padding:2mm 5mm` was meant to inset it; the filter chain drops that left inset, so the bill ended
+// up narrower AND off-centre — which is exactly how his printed copy looked next to the preview.
+//
+// So the width is stated as a WIDTH and centred, instead of hoping padding survives: 66mm is the
+// documented safe maximum for an 80mm head (the July note: "Content ≤66mm CENTERED — the 80mm head
+// only prints ~70mm, offset ~5mm from the left paper edge; a full-width 80mm body loses ~8mm of every
+// line on the right"). 66mm instead of 60mm is 10% more line length, so fewer lines wrap — which is
+// the only honest way to bring the paper closer to the preview, because 80mm paper can never be as
+// wide as a browser window.
+//
+// This is PRINT ONLY. The preview is untouched: he asked for the previous view back and it is back.
++ "  @media print{body{margin:0 auto !important;padding:2mm 0 !important;width:66mm !important;box-sizing:border-box !important}\n"
 + "    /* a bill spanning several printer pages: print the ITEM header ONCE (browsers\n"
 + "       otherwise repeat <thead> on every page — it showed up mid-bill), and never split\n"
 + "       a row across a page boundary (a fragmented flex row shifted every amount one\n"
@@ -358,21 +374,64 @@
 + "     Nothing below 10.5px and no italics — both smear at 203 dpi. */\n"
 + "  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}\n"
 + "  body{font-family:'Helvetica Neue',Helvetica,Arial,'Liberation Sans',sans-serif;\n"
-+ "       font-size:12.5px;line-height:1.44;margin:22px 30px;color:#000;font-weight:400;\n"
-+ "       font-variant-numeric:tabular-nums}\n"
+// ── THE PREVIEW *IS* THE PRINT (owner, 2026-08-19: "go back to preview that exactly match the print,
+//    I want preview and print same") ────────────────────────────────────────────────────────────────
+// The screen now uses the printer's own column, to the millimetre: the same 66mm width and the same
+// 2mm top/bottom padding the @media print rule above uses. Not "about the same" — the identical
+// numbers, so a line that wraps on paper wraps on screen at the same word.
+//
+// WHY 66mm AND NOT 70: measured from the printer's own bytes on 2026-08-19 (Chrome PDF → this Mac's
+// cgpdftoraster with the queue's PPD → the printer's rastertozj filter → decoded ESC/POS). The head
+// images 560 dots = 70.1mm, the chain CROPS TO THE INK AND LEFT-ALIGNS IT (which is why the old
+// padding:2mm 5mm silently vanished and the bill printed off-centre), and 66mm is the documented safe
+// maximum for an 80mm head. Declaring 70 or 72 changed nothing — the crop saturates.
+//
+// ZOOM IS WHY THIS IS READABLE. 66mm on a monitor is a ~250px strip. `zoom` scales every used length
+// together — font size, padding, borders — so the layout is mathematically identical and only the
+// display size changes: same wraps, same rhythm, just big enough to read. It is SCREEN ONLY; print
+// resets it to 1, so nothing about the paper is affected.
++ "       font-size:12.5px;line-height:1.55;color:#000;font-weight:400;\n"
++ "       font-variant-numeric:tabular-nums;\n"
++ "       width:66mm;margin:0 auto;padding:2mm 0;box-sizing:border-box}\n"
+// The white sheet is shown 72mm wide with the 66mm of INK centred inside it, because that is what the
+// roll actually is: 80mm of paper, ~70mm of printable head, 66mm of ink. With border-box the content
+// column stays exactly 66mm — the same number the print rule uses — so the line breaks are identical;
+// only the visible paper edge is added. Without it the ink ran to the very edge and the preview looked
+// like a bill with its margins cut off.
+// HOW BIG THE PREVIEW IS SHOWN — FITTED TO THE WINDOW, NOT A FIXED NUMBER (owner, 2026-08-19:
+// "make sure the preview looks in a small screen … I could able to see the whole bill in preview
+// … maybe some more zoom out. Don't change anything in the code because the bill printed right
+// now is exactly like the format"). So NOTHING below the @media print rule moved: the paper is
+// finished and this is display size only.
+//
+// A fixed 2x was right for a short bill and wrong for a real one — his 4-dish Aangan bill is
+// 178mm of paper (measured off the printer's own bytes), which at 2x is ~1340px and does not fit
+// any bill window, so he was handed a preview he had to scroll to judge. The number below is now
+// only the fallback for a frame where scripts cannot run (the Audit card's sandboxed iframe);
+// wherever the page CAN run, zFit() measures the document at 1x and picks the zoom that shows all
+// of it, then -/+ nudge it and the choice is remembered.
++ "  @media screen{html{background:#e9e9ec;min-height:100%}\n"
++ "    body{zoom:1.35;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2);width:72mm;padding:2mm 3mm;\n"
++ "         margin:10px auto 30px;padding-top:calc(2mm + 34px)}}\n"
++ "  @media print{body{zoom:1 !important}}\n"
 + "  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}\n"
-+ "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;margin:0 0 4px}\n"
-+ "  .sub{text-align:center;font-size:11px;line-height:1.5}\n"
-+ "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;\n"
+// 60-odd millimetres holds about 20 uppercase characters at this size, so a real name — "AANGAN GARDEN
+// RESTAURANT" is 24 — takes two lines on paper AND now in the preview. It was inheriting the body's
+// 1.44 leading, which left those two lines sitting in 14.5mm of loose air; 1.12 makes them read as one
+// block. The SIZE is deliberately unchanged: the name is the biggest thing on a customer's bill.
++ "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;\n"
++ "     line-height:1.18;margin:0 0 6px}\n"
++ "  .sub{text-align:center;font-size:11.5px;line-height:1.55}\n"
++ "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:12px 0 10px;padding:5px 0;\n"
 + "        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}\n"
 // The cancelled band — same one ink, same double border the KOT's DUPLICATE banner uses, so
 // a voided bill is as unmistakable on paper as a reprinted ticket is.
 + "  .vband{text-align:center;font-weight:700;font-size:15px;letter-spacing:1.5px;\n"
 + "         border:3px double #000;padding:5px 2px;margin:8px 0 2px;text-transform:uppercase}\n"
-+ "  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:1.5px 0}\n"
++ "  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3.5px 0}\n"
 + "  .kv span:first-child{font-size:11px;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}\n"
 + "  .kv b{font-weight:400;text-align:right}\n"
-+ "  .dash{border-top:1px solid #000;margin:8px 0}\n"
++ "  .dash{border-top:1px solid #000;margin:11px 0}\n"
 + "  /* fixed columns, sized from THIS bill's own figures (see widest{}) so a ₹1,07,880 line\n"
 + "     and a long dish name can never crowd each other */\n"
 + "  table{width:100%;border-collapse:collapse;margin-top:2px;table-layout:fixed}\n"
@@ -380,11 +439,11 @@
 + "     border-bottom:1px solid #000;padding:0 0 4px}\n"
 + "  th.c,td.c{text-align:center;padding-left:4px}\n"
 + "  th.r,td.r{text-align:right;padding-left:7px}\n"
-+ "  td{font-size:12.5px;padding:5px 0;vertical-align:top;border:0}\n"
++ "  td{font-size:12.5px;padding:6.5px 0;vertical-align:top;border:0}\n"
 + "  td.n{padding-right:4px;word-break:break-word}\n"
 + "  tr.ex td{font-size:11px;padding:0 0 5px 9px}\n"
 + "  tbody tr:last-child td{padding-bottom:6px}\n"
-+ "  .t{display:flex;justify-content:space-between;font-size:12px;padding:2.5px 0}\n"
++ "  .t{display:flex;justify-content:space-between;font-size:12px;padding:3.5px 0}\n"
 + "  .t.tx{border-top:1px solid #000;margin-top:4px;padding-top:5px}\n"
 + "  /* The MRP stamp and the note under the total. Boxed outline rather than a shade —\n"
 + "     a thermal head has no grey (see the ONE INK note above), so a tint would print as\n"
@@ -403,8 +462,16 @@
 + "     Cancel are indistinguishable to the page — see closeBill() below), so this bar is how it\n"
 + "     goes away, and how a second copy is printed without rebuilding the bill. It is hidden\n"
 + "     from the paper by display:none AND excluded from the page-length measurement below. */\n"
-+ "  .bar{position:sticky;top:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
-+ "       margin:-22px -30px 14px;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}\n"
+// FIXED to the window, not sticky inside a 66mm column where the buttons would be squeezed. It sits
+// inside the zoomed body, so its own zoom is wound back to keep the buttons a normal size.
++ "  .bar{position:fixed;top:0;left:0;right:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
++ "       margin:0;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc;zoom:.74}\n"
+// .74 is 1/1.35 — the inverse of the fallback body zoom above, so the buttons come out life-size
+// when no script runs. zApply() overwrites it with the inverse of whatever zoom is actually in use.
++ "  .bar .zg{margin-right:auto;display:flex;align-items:center;gap:4px}\n"
++ "  .bar .zg button{padding:6px 10px;font-size:13px;min-width:32px}\n"
++ "  .bar .zl{font:12px/1 system-ui,sans-serif;color:#3a3a42;min-width:44px;text-align:center;\n"
++ "           background:#fff;border:1px solid #d8d8dc;border-radius:7px;padding:6px 4px;cursor:pointer}\n"
 + "  .bar button{font:inherit;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;\n"
 + "              border:1px solid #b9b9c0;background:#fff;color:#000}\n"
 + "  .bar button.x{background:#111;color:#fff;border-color:#111}\n"
@@ -422,26 +489,36 @@
    (the panel's own tap rule), so the caller can leave the chrome off. Nothing else passes noBar, so
    every real bill and every preview keeps its bar exactly as before. */
 + (d.noBar ? "" : '<div class="bar">'
+/* Zoom out / in / fit. Deliberately on the LEFT and quiet: the two things that DO something to a
+   bill — print it, close it — keep the right-hand end where every panel puts its actions. The
+   middle chip shows the current size and is itself the "fit the whole bill" button, so three
+   controls cover all of it without a fourth. They touch nothing but the display size. */
++   '<span class="zg"><button title="Show it smaller" onclick="zStep(-1)">\u2212</button>'
++   '<span class="zl" title="Fit the whole bill in the window" onclick="zFit(1)">100%</span>'
++   '<button title="Show it bigger" onclick="zStep(1)">+</button></span>'
 +   (d.note ? '<span class="note">' + esc(d.note) + "</span>" : "")
 +   '<button onclick="printAgain()">🖨 Print' + (d.autoPrint ? " again" : " this") + "</button>"
 +   '<button class="x" onclick="closeBill()">✕ Close</button></div>') + "\n"
 + (d.logo ? '<img class="logo" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
 + "\n<h2>" + name + "</h2>\n"
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
-/* A SECOND COPY OF A BILL SAYS SO (owner, 2026-08-17: "do both 11 and 12").
-   The KITCHEN TICKET has carried a big DUPLICATE banner since 2026-08-04 — the owner's own ask, so
-   a cook can never mistake a reprint for a fresh order. The BILL had nothing, so a re-issued copy
-   was indistinguishable from the original: two identical sheets for one sale, and no way for the
-   person holding either to tell which is which. That is the one gap left where this product's paper
-   can mislead someone, on the document that carries the money.
-   Same flag name and same band as everywhere else ('.vband', the double border the cancelled sheet
-   uses), so all three documents brand a duplicate identically. A first print is never branded — a
-   sheet marked DUPLICATE that is actually the original would be a lie on paper, which is the same
-   reasoning that keeps 'reprint' off a fresh KOT.
-   A cancelled bill that is ALSO reprinted shows both bands: both statements are true, and the
-   cancellation is the one that goes first because it is the one that changes what is owed. */
+/* REJECTED (owner, 2026-08-19): the BILL never says it is a reprint. There was a
+   "Reprint · Duplicate" band here from 2026-08-17 to 2026-08-19; the owner removed it —
+   "in the printing bill I don't even want the reprinted bill shown in the bill … and make the
+   guard also in code like never change that to reprint thing and stuff". A second copy of a bill
+   is a service action, not an incident: the guest asks for the paper again, or the first sheet
+   jammed. Branding it made the guest's own copy look like a lesser document.
+   Do NOT re-add a band, a watermark, a "(copy)" suffix in the doc name, or a small-print line
+   here. Bill data carries no reprint flag at all any more, for exactly that reason, and
+   scripts/verify-bill-reprint-is-silent.mjs fails the build if the word comes back onto this
+   sheet. The one record of a re-print is where it belongs: sessions.bill_printed_at (mig 333,
+   re-commented by mig 339) is what makes the panels' button read 'Reprint', and reopening a bill
+   is a different act entirely — that one IS recorded in the Audit, and stays so.
+   The KITCHEN TICKET keeps its big DUPLICATE banner (owner, 2026-08-04, re-confirmed
+   2026-08-19: "bill only keep kot banner") — a cook mistaking a duplicate for a fresh order
+   cooks the food twice, which is a real kitchen fault, not a piece of paperwork.
+   The cancelled band below is unrelated and stays: it changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
-+ (d.reprint ? '<div class="vband">Reprint · Duplicate</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 + (d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
@@ -683,22 +760,68 @@
      it just does not fire the dialog by itself. */
   function pageScript(autoPrint) {
     return "<script>\n"
-+ "function measure(){\n"
-+ "  // The toolbar is screen-only, but scrollHeight measures the SCREEN layout — leaving it in\n"
-+ "  // would declare a page ~11mm longer than the bill and feed that much blank roll after every\n"
-+ "  // print. Hide it for the measurement, then put it back.\n"
-+ "  var bar = document.querySelector(\".bar\"), prev = bar ? bar.style.display : \"\";\n"
-+ "  if (bar) bar.style.display = \"none\";\n"
-+ "  try{\n"
-+ "    var mm = 96/25.4, h = Math.ceil(document.body.scrollHeight/mm) + 6;\n"
-+ "    var st = document.getElementById(\"pagesize\") || document.createElement(\"style\");\n"
-+ "    st.id = \"pagesize\";\n"
-+ "    st.textContent = \"@media print{@page{size:80mm \" + h + \"mm;margin:0}}\";\n"
-+ "    document.head.appendChild(st);\n"
-+ "  }catch(e){}\n"
-+ "  if (bar) bar.style.display = prev;\n"
-+ "}\n"
-+ "function printAgain(){ measure(); print(); }\n"
+// ── NO PAGE SIZE IS DECLARED. THIS FUNCTION IS DELIBERATELY EMPTY (owner, 2026-08-19, with a photo) ──
+// It used to measure the bill and inject `@page{size:80mm <content height>mm}` so the roll would be
+// fed exactly the bill's length. On a real thermal queue that is the wrong instruction, and the
+// failure it produced is the one he photographed: **the bill printed sideways and at half size.**
+//
+// The numbers, measured rather than guessed: an 8-line bill declares `size:80mm 134mm`. The queue's
+// media is a SHORT receipt page (70mm x 65mm — the recipe validated in July). To put an 80x134mm page
+// on 70x65mm media the driver must scale to min(70/80, 65/134) = 0.49 — half size — and it rotates the
+// job to fit the better axis, which is the landscape. Meanwhile the KOT, which declares NOTHING, is
+// perfect: the queue's own short page paginates it and Chrome never slices a line.
+//
+// So the bill now does exactly what the KOT does. The rule was already written 340 lines above this
+// one — "NO @page size override — a forced size smaller/squarer than the paper gets rotated or
+// bottom-anchored by CUPS (sideways prints + 20cm blank lead-ins)" — and this code contradicted it.
+// The blank-tail worry it was written for is handled by the QUEUE (FeedWhere=AfterJob,
+// FeedDist=9feed30mm), which is where paper feed belongs.
+//
+// It is kept as a no-op rather than deleted because `printAgain()` is called from the bill's own
+// toolbar button and from the onload path, and a missing function would break both.
+// Guarded by verify:print-format so it cannot come back.
++ "function measure(){ /* intentionally nothing — see the note in billdoc.js */ }\n"
+/* ── SEE THE WHOLE BILL (owner, 2026-08-19) ────────────────────────────────────────────────────
+   The paper column is 66mm — about a 250px strip on a monitor — so the preview has always been
+   DISPLAYED zoomed. The zoom is now fitted to the window instead of fixed: measure the document at
+   1x, then show it at the largest size that still fits, floor 0.6 (below that a 10.5px label stops
+   being readable and a scrollbar is the better answer) and ceiling 2.
+   CSS 'zoom' scales every used length together — font size, padding, borders, the 66mm column — so
+   the LAYOUT IS UNTOUCHED at any of these numbers: the same words wrap where the paper wraps them.
+   Print resets it to 1 with the 'body{zoom:1 !important}' rule above, which an inline style cannot
+   beat, so none of this can reach the printer.
+   His nudge is remembered per browser, and remembering it is the point: a bill window is opened
+   dozens of times a shift and nobody wants to re-zoom every time. The word 'fit' is stored so a
+   longer bill still fits later, rather than freezing today's percentage. */
++ "var ZKEY = \"lfh_bill_zoom\", ZMIN = .6, ZMAX = 2, Zn = 0;\n"
++ "function zApply(z){ Zn = z; try{ document.body.style.zoom = z; }catch(e){}\n"
++ "  try{ var b = document.querySelector(\".bar\"); if (b) b.style.zoom = (1 / z).toFixed(3); }catch(e){}\n"
++ "  try{ var l = document.querySelector(\".zl\"); if (l) l.textContent = Math.round(z * 100) + \"%\"; }catch(e){} }\n"
+// WHAT "THE HEIGHT OF THE BILL" MEANS, measured twice before it was right:
+//   · body.scrollHeight  — too SHORT: it leaves out body's own margin:10px auto 30px (the white
+//     paper edge above and below the sheet), so the fit left 40 zoomed pixels hanging over the
+//     bottom of the window and the bill still scrolled by a hair.
+//   · documentElement.scrollHeight — too TALL: html carries min-height:100%, so it can never
+//     report less than the window. Every bill then fitted at ~99% and a SHORT one could never use
+//     the room it had. A min-height on the measured box turns a fit into a no-op.
+// So the content is measured as what it is: the sheet plus its own two margins.
++ "function zRoom(){ /* what the document needs at 1x, and what the window has to give */\n"
++ "  var b = document.body, was = b.style.zoom; b.style.zoom = 1;\n"
++ "  var cs = getComputedStyle(b), w = b.offsetWidth || 272;\n"
++ "  var h = b.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);\n"
++ "  b.style.zoom = was; if (!(h > 0)) h = 740;\n"
++ "  return { z: Math.min(((innerWidth || 380) - 14) / w, ((innerHeight || 680) - 10) / h) }; }\n"
++ "function zFit(remember){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round(zRoom().z * 100) / 100));\n"
++ "  zApply(z); if (remember) { try{ localStorage.setItem(ZKEY, \"fit\"); }catch(e){} } }\n"
++ "function zStep(d){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round((Zn + d * .15) * 100) / 100));\n"
++ "  zApply(z); try{ localStorage.setItem(ZKEY, String(z)); }catch(e){} }\n"
++ "function zStart(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "  var n = parseFloat(v); if (v && v !== \"fit\" && n >= ZMIN && n <= ZMAX) zApply(n); else zFit(0); }\n"
+// A bill window is REUSED for the next bill, so this runs per document, and the fit is redone when
+// the window is resized — but only while he has not set a size of his own, or a drag would undo it.
++ "addEventListener(\"resize\", function(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "  if (!v || v === \"fit\") zFit(0); });\n"
++ "function printAgain(){ print(); }\n"
 + "function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }\n"
 + "// NOTHING here closes this window. Print and Cancel look identical to the page (one afterprint\n"
 + "// event, no flag), so closing on that event also destroyed the bill when the person pressed\n"
@@ -709,6 +832,9 @@
 + "// the ✕ Close button, so the moment the dialog goes away Enter/Space/Esc dismisses the bill.\n"
 + "addEventListener(\"keydown\", function(e){ if (e.key === \"Escape\") closeBill(); });\n"
 + "onafterprint = function(){ try{ var b = document.querySelector(\".bar .x\"); if (b) b.focus(); }catch(e){} };\n"
+// Sized BEFORE the print dialog opens on the auto-print path: the dialog is modal, so a bill left
+// at the wrong size until it closed would be the first thing he saw behind it.
++ "zStart();\n"
 + (autoPrint ? "setTimeout(printAgain, 300);\n" : "setTimeout(measure, 300);\n")
 + "<\/script>";
   }
@@ -1145,11 +1271,11 @@
       invNo: sess.invoice_no == null ? ""
         : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) + (voidedAll ? " — voided" : ""),
       billNo: sess.bill_no != null ? sess.bill_no : "",
-      // A SECOND COPY SAYS SO. The panel is the only thing that knows whether this sheet has been
-      // printed before, so it passes the flag; assembling it here keeps the panels' change to one
-      // word and keeps the decision about what a duplicate LOOKS like in the document, with the
-      // ticket's identical band.
-      reprint: !!a.reprint,
+      // REJECTED (owner, 2026-08-19): NO `reprint` field on bill data, deliberately. A `reprint`
+      // flag existed here 2026-08-17 → 2026-08-19 and drew a band on the sheet; the owner removed
+      // the whole idea, so the flag is gone rather than left accepted-and-ignored — a field that
+      // silently does nothing is how a band gets drawn again by the next person who finds it.
+      // The KOT's own `reprint` flag (kotDocHtml) is untouched and still brands the ticket.
       // The signed chain (mig 332), straight off the session row when the server sends it. Absent
       // today on every caller, so nothing prints until the columns are exposed — and then every
       // panel gets the verification line at once, with no second format to keep in step.

@@ -169,15 +169,121 @@ check(/\$\{printerStripHtml\(\)\}\$\{printStationStripHtml\(\)\}/.test(epanel),
 
 // ── 7. the setup guide is IN the app, and reachable from a screen that is not hidden ────────────
 const guide = read("public/print-setup.html");
-check(guide.length > 20000 && /Setting up a Mac/.test(guide) && /Setting up a Windows PC/.test(guide),
-  "the in-app setup guide covers both a Mac and a Windows PC",
-  "public/print-setup.html has lost one of the two platforms");
-check(/print-station-mac\.command/.test(guide) && /print-station-windows\.bat/.test(guide) && /window\.print\(\)/.test(guide),
-  "…and it carries both starter files as downloads plus a save-as-PDF button",
-  "the guide no longer offers the starter files or the PDF button the owner asked for");
-check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel),
-  "it is reachable from the ADMIN console and from the kitchen screen's 🖨❗ sheet",
-  "the guide is not linked from a reachable screen — the first attempt put it in the manager panel's hidden Kitchen section");
+// The three-OS structure is asserted by SECTION ID below (the headings are numbered and worded for a
+// reader, and re-asserting their prose is how a guard goes red over an edit that improved the page).
+check(guide.length > 30000,
+  `the in-app setup guide is a real guide (${Math.round(guide.length / 1024)} KB)`,
+  "public/print-setup.html has shrunk to a stub");
+check(/window\.print\(\)/.test(guide),
+  "…with the save-as-PDF button he asked for",
+  "the guide lost the save-as-PDF button");
+// NOTHING IS OFFERED AS A DOWNLOAD any more, anywhere. On a Mac a downloaded script is the
+// "Apple could not verify… / Move to Bin" dialog with no way past it on Sequoia; on Windows it is
+// SmartScreen. A file the person pastes into Notepad/TextEdit/nano themselves has neither.
+check(!/api\/print-station\/(mac|windows|linux)/.test(guide) && !/download>/.test(guide),
+  "the guide offers NO file to download — every OS menu is taught by hand instead",
+  "a starter download is back on the guide: on a Mac that is the 'Apple could not verify' dialog with only Done / Move to Bin, which is exactly what the owner hit");
+check([["win", "windows"], ["mac", "mac"], ["linux", "linux"]].every(([id, anchor]) =>
+    new RegExp(`<section class="os" data-osid="${id}">\\s*<h2 id="${anchor}"`).test(guide)) &&
+  ["win", "mac", "linux"].every((id) => guide.includes(`data-pick="${id}"`)) &&
+  /body\[data-os="win"\] section\.os:not\(\[data-osid="win"\]\)/.test(guide),
+  "…and the three menus are pickable: one section per OS plus the chooser that hides the other two",
+  "the per-OS menu chooser is gone — he asked for '3 diff menu for all 3 diff os' so a restaurant reads only its own steps");
+// The chooser HIDES two thirds of the page, so both ways out of a hidden menu are guarded as well.
+check(/body\[data-os\] section\.os\{display:block !important\}/.test(guide) &&
+  /document\.body\.dataset\.os !== os\) show\(os, false\)/.test(guide),
+  "…a saved PDF still holds all three, and a link into a hidden menu opens it first",
+  "picking one OS can hide a menu that a contents-list link or the printed PDF still needs — a link that appears to do nothing");
+const ownerSettings = read("app/owner/settings/page.tsx");
+// The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
+// rather than the literal — asserting the spelling of code that legitimately changed shape is how
+// this repo's guards have gone red twice (see verify-static's header).
+const managerReaches = /PRINT_SETUP_URL = "\/print-setup\.html"/.test(epanel) && /href="\$\{PRINT_SETUP_URL\}"/.test(epanel);
+check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel) && managerReaches && /print-setup\.html/.test(ownerSettings),
+  "it is reachable from ALL FOUR: admin console · kitchen 🖨 sheet · manager Settings → Printing · owner Settings",
+  "the guide has lost one of its four doors (owner, 2026-08-18: it must be visible in the kitchen panel, the manager settings AND the owner panel) — the first attempt put it in the manager panel's hidden Kitchen section, which is how being reachable stopped being obvious");
+check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
+  "the manager panel has its own VISIBLE Printing section (the admin-only Kitchen one stays hidden)",
+  "the manager panel's Printing section is gone — the printing status and the device answer would be unreachable there again");
+check(/prsheet-status/.test(kpanel) && /kotPrintTarget/.test(kpanel),
+  "the kitchen screen's 🖨 sheet SHOWS where printing stands (on/off, and which screen prints)",
+  "the kitchen sheet no longer says whether this screen is even meant to be printing — a cook at a silent printer has to ask someone");
+// The guide is the ONLY source of the launcher now: lib/printStation.ts and its download route were
+// DELETED on 2026-08-19 along with the download itself (owner, with the screenshot: "print-station-mac
+// .command Not Opened — Apple could not verify… / Move to Bin", then "make 3 diff menu for all 3 diff
+// os setup and tell me in each every step… bcz dwl it and clicking it shows this error"). A file the
+// person types themselves carries no quarantine flag, so no security layer can object to it. So the two
+// flags that make automatic printing work at all are asserted in each of the three PASTEABLE blocks.
+const osMenu = (id) => {
+  const m = guide.match(new RegExp(`<section class="os" data-osid="${id}">[\\s\\S]*?</section>`));
+  return m ? m[0] : "";
+};
+check(["win", "mac", "linux"].every((id) => {
+    const sec = osMenu(id);
+    return /--kiosk-printing/.test(sec) && /--disable-backgrounding-occluded-windows/.test(sec);
+  }),
+  "the two flags that make this work at all are in all three pasteable blocks",
+  "an OS menu lost --kiosk-printing or --disable-backgrounding-occluded-windows — the first means every ticket waits for a click, the second is the whole covered-window bug");
+// The site address has to be INSIDE a Copy block, not merely somewhere on the page: what the person
+// pastes is the block, and Windows has exactly one block, so a count of two would have been wrong.
+check(["win", "mac", "linux"].every((id) =>
+  /<pre data-copy>(?:(?!<\/pre>)[\s\S])*data-site-url(?:(?!<\/pre>)[\s\S])*<\/pre>/.test(osMenu(id))),
+  "…every menu carries THIS site's address inside a Copy-button block",
+  "an OS menu has lost its site address or its Copy buttons — a hand-retyped Chrome command line is how a flag goes missing, and a guessed stack is why a launcher silently did nothing");
+check(/Gatekeeper|could not verify/i.test(guide) && /bash ~\/Downloads/.test(guide),
+  "the guide still names the macOS block by its real dialog, and rescues a file already sitting in Downloads",
+  "the guide no longer explains 'Apple could not verify' — the owner hit exactly that dialog, and the instructions told him to right-click → Open, which macOS Sequoia removed");
+check(["windows", "mac", "linux", "devices", "switches", "which", "test", "wrong"].every((id) => guide.includes(`<h2 id="${id}"`)),
+  "the guide is the three-OS structure he asked for (Windows · Mac · Linux/Pi) with who-prints, the test and the fault table",
+  "the guide has lost one of its main sections — he asked for THREE OS sections plus which-screen-prints, the test and the fault table");
+check(/Save as type/.test(guide) && /Make Plain Text/.test(guide) && /nano ~\/print-station\.sh/.test(guide),
+  "each OS menu teaches making the file BY HAND (Notepad · TextEdit plain text · nano)",
+  "the by-hand instructions are gone. The owner asked for them precisely because a download can be blocked (macOS) or saved wrong (.bat.txt) — 'tell me all step by step everything, how I have to make that file'");
+check(/data-site-url/.test(guide) && /location\.origin/.test(guide),
+  "…and every command carries THIS site's address, written in by the page itself",
+  "the guide no longer fills in the site address — 'where I have to put URL and which URL' was the question, and a guessed stack is why a launcher silently did nothing");
+check(/one screen prints at a time|One printer at a time/i.test(guide) && /Print here instead/.test(guide),
+  "the guide explains that ONE screen prints and how to move it",
+  "the guide does not explain the one-printer-at-a-time rule, which is the thing a restaurant with two screens will hit first");
+
+// ── 8. ONE SCREEN IS THE PRINTER (mig 338) ──────────────────────────────────────────────────────
+const mig338 = read("supabase/migrations/338_one_screen_is_the_printer.sql");
+check(/CREATE UNIQUE INDEX IF NOT EXISTS print_stations_one_active[\s\S]{0,120}WHERE active/.test(mig338),
+  "the database itself allows only ONE active print station per restaurant",
+  "the one-active-station index is gone — two screens could hold printing at once and which one printed would be a coin flip again");
+check(/STATION_STALE_MS/.test(lib) && /stale/.test(lib),
+  "a station that has gone quiet can be taken over without asking",
+  "the staleness rule is gone: a kitchen screen that is switched off would hold the restaurant's printing for ever");
+check(/export async function mayClaim/.test(lib) && (kroute.match(/mayClaim\(/g) || []).length >= 1 && (eroute.match(/mayClaim\(/g) || []).length >= 1,
+  "BOTH routes ask one gate (mayClaim) before handing a ticket to a screen",
+  "a route claims without asking who the station is — that is how two screens start fighting over every ticket");
+check(/print-station" && b === "take"/.test(kroute) && /print-station" && b === "take"/.test(eroute),
+  "both the kitchen and the counter screen can TAKE printing in one tap",
+  "a panel lost its take-over endpoint, so a person standing at the right printer cannot move printing to it");
+check(/data-station-set/.test(epanel) && /data-kstation/.test(kpanel),
+  "…and both panels offer that tap on screen",
+  "the take-over button is missing from a panel");
+check(/onlyWhen: "printing"/.test(epanel) && /x\.onlyWhen !== "printing" \|\| printingOn/.test(epanel),
+  "the manager's Printing row is ABSENT when automatic printing is off (not greyed)",
+  "the Printing row shows when printing is off — the owner's rule is that no option appears at all");
+check(/data\?\.printing && data\.printing\.length/.test(ownerSettings),
+  "the owner's printing card renders only for a restaurant that HAS printing on",
+  "the owner card shows even when printing is off everywhere");
+
+// ── 9. THE KITCHEN SCREEN'S OWN MENU (owner, 2026-08-19) ────────────────────────────────────────
+const khtml = read("public/panels/kitchen/index.html");
+check(/id="hamburger"/.test(khtml) && /function openKitchenMenu/.test(kpanel),
+  "the kitchen screen has a ☰ menu",
+  "the kitchen's ☰ menu is gone — it was the screen's only way to reach Settings");
+check(/function openKitchenSettings/.test(kpanel) && /action="\/api\/panel-logout"/.test(kpanel),
+  "…with a Settings sheet that can SIGN OUT (this screen had no way to, before 2026-08-19)",
+  "the kitchen can no longer sign out, or its Settings sheet is gone");
+check(/method="post"/.test(kpanel) && /panel-logout/.test(kpanel),
+  "sign-out is a POST form, so nothing that merely points at the URL can end a cook's session mid-service",
+  "the kitchen sign-out is a link again — a GET that ends a session fires from anything that touches the URL");
+check(!/PROFILE_ROLES|My profile/.test(kpanel.slice(kpanel.indexOf("function openKitchenMenu"), kpanel.indexOf("function openKitchenMenu") + 2500)),
+  "…and the menu offers NO profile — the kitchen has none, and that has been ruled three times",
+  "a profile appeared in the kitchen menu: ruled out 2026-07-29, re-confirmed 2026-08-05 and again in lib/staffProfileShared.ts. Do not add it");
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — read this file's header before 'fixing' the code\n`

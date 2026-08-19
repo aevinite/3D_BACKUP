@@ -8,7 +8,7 @@
 //     but the top of the domain is EXACTLY the data max — no headroom.
 // Series colour = each restaurant's own accent. ₹ tooltips. All charts sit in
 // fixed-height responsive boxes so cards never jump while loading.
-import { useState, useId, Fragment, type CSSProperties } from "react";
+import { useState, useId, useRef, useEffect, Fragment, type CSSProperties } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { compactINR, roundTicks } from "@/lib/money";
 import {
@@ -328,6 +328,22 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
   // Ranking bars: comfortable row height, but past ~8 rows the card would grow
   // unbounded — cap the visible height and scroll instead of stretching the page.
   const rowH = 42, visible = Math.min(data.length, 8);
+  // ── THE CAP MUST NEVER BE TIGHTER THAN THE PLOT IT HOLDS (T11 sweep, 2026-08-17) ──────────
+  // The plot below has a 140px FLOOR, but the cap was `rows * 42 + 20` unconditionally — so at
+  // one row it was 62px and at two rows 104px, both under that floor, while `overflowY` is
+  // "visible" for anything up to 8 rows. Nothing clipped the difference, so the plot painted
+  // 78px (one row) or 36px (two) straight out of the bottom of its own box and over whatever
+  // followed. Measured live on Reports → Payments → Discounts → "Biggest discount days" with a
+  // single discount day: box 62px, plot 140px, and a hit-test on the sentence underneath
+  // ("These 1 day account for 100% of everything discounted this period") landed on
+  // svg.recharts-surface — the green bar was drawn on top of the words.
+  //
+  // Below 9 rows the cap does nothing useful anyway: `overflowY` is visible, so there is
+  // nothing to scroll and nothing to contain. So the cap is applied ONLY when the list really
+  // scrolls. Nine rows and up keep the exact height and scrolling they had; three to eight are
+  // unchanged (their cap was already above the floor); one and two now hold their own plot.
+  const scrolls = data.length > 8;
+  const plotH = Math.max(140, data.length * rowH);
   // `showValues` writes the amount just past the end of each bar. Used by
   // WhoEarnsMore, where this IS the only view once a portfolio passes 9 restaurants,
   // so the money has to be readable without hovering. The extra right margin is the
@@ -335,8 +351,8 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
   // bar can never grow over its own number. Off everywhere else, so the reports
   // pages and the dish ranking render exactly as before.
   return (
-    <div style={{ width: "100%", maxHeight: visible * rowH + 20, overflowY: data.length > 8 ? "auto" : "visible" }}>
-     <div style={{ width: "100%", height: Math.max(140, data.length * rowH) }}>
+    <div style={{ width: "100%", ...(scrolls ? { maxHeight: visible * rowH + 20, overflowY: "auto" as const } : null) }}>
+     <div style={{ width: "100%", height: plotH }}>
       <ResponsiveContainer>
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: showValues ? 58 : 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke={GRID} />
@@ -463,60 +479,166 @@ const sharePct = (v: number, total: number) => {
 
 // ── CategoryDonut ───────────────────────────────────────────────────────────
 const PALETTE =["#34d399", "#5b8def", "#e0b341", "#e2607a", "#a36bd4", "#4bbdc9", "#e3935b", "#9aa84a"];
-export function CategoryDonut({ data }: { data: { category: string; revenue: number }[] }) {
+const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+/** Mix a hex toward white (amt > 0) or black (amt < 0). Used to tell PALETTE repeats apart. */
+function shade(hex: string, amt: number): string {
+  const t = amt > 0 ? 255 : 0, k = Math.abs(amt);
+  const n = parseInt(hex.slice(1), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => Math.round(c + (t - c) * k));
+  return "#" + ch.map((c) => c.toString(16).padStart(2, "0")).join("");
+}
+// 25 categories over 8 colours meant three different wedges wore the SAME green — the legend
+// named them, the ring could not tell them apart. Each time the palette wraps, the hue comes
+// back as a lighter then a darker tint of itself, so a repeat is still recognisably related
+// but never identical. Both tints keep their contrast on the dark AND the light skin.
+const slice = (i: number) => {
+  const base = PALETTE[i % PALETTE.length], cycle = Math.floor(i / PALETTE.length) % 3;
+  return cycle === 0 ? base : cycle === 1 ? shade(base, 0.34) : shade(base, -0.3);
+};
+/**
+ * Revenue split — a ring plus a legend that MEASURES ITS CARD AND FILLS IT (owner,
+ * 2026-08-19). The card beside this one (revenue · this month vs last) is what sets the row
+ * height, so a fixed 190x210 ring next to a legend capped at 230px left a wide band of dead
+ * space under the donut whenever the neighbour was taller — which it always is on the
+ * dashboard.
+ *
+ * Nothing here is a constant any more. A ResizeObserver reads the box, and the column count,
+ * the text size, the row gap, the swatch size and the ring's diameter are all derived from
+ * (height x width x how many categories there are):
+ *   · few categories  → bigger text, wider gaps, a bigger ring — the space is SPENT, not left blank;
+ *   · many categories → a second column joins, rows tighten, text steps down;
+ *   · only when even the tightest layout still overflows does a column become a scroller.
+ * The measured element is a position:relative shell whose contents are absolutely positioned,
+ * so the layout can never feed its own height back into the measurement (that loop is how a
+ * ResizeObserver ends up thrashing).
+ */
+export function CategoryDonut({ data, minHeight = 230 }: { data: { category: string; revenue: number }[]; minHeight?: number }) {
+  const box = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r) return;
+      // Ignore sub-pixel noise — a state write per repaint is what makes an observer expensive.
+      setSize((s) => (Math.abs(s.w - r.width) < 2 && Math.abs(s.h - r.height) < 2 ? s : { w: Math.round(r.width), h: Math.round(r.height) }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // A category that took NO money is not a slice — it's a legend row to read past, and a
   // zero-width wedge (PaymentDonut has always filtered this; this one didn't). Sort FIRST,
   // then colour, so the palette follows the ranking instead of the caller's row order.
   const rows = data.filter((d) => (Number(d.revenue) || 0) > 0).sort((a, b) => b.revenue - a.revenue);
-  if (!rows.length) return <Empty />;
-  // DYNAMIC legend (owner round-5): the old bottom legend wrapped into a wall of
-  // text with 25+ categories and squeezed the donut. Now the legend fills the RIGHT
-  // column first; past its capacity a LEFT column joins; past both, the text steps
-  // down a size. The donut always keeps the middle. Sorted by revenue so the labels
-  // an owner actually cares about are always at the top of the columns.
-  const sorted = rows.map((d, i) => ({ ...d, color: PALETTE[i % PALETTE.length] }));
+  const sorted = rows.map((d, i) => ({ ...d, color: slice(i) }));
   const n = sorted.length;
-  const perCol = 9;                                   // comfortable rows per side column
-  const twoCols = n > perCol;
-  const small = n > perCol * 2;                       // both sides full → smaller text
+  const total = sorted.reduce((a, d) => a + d.revenue, 0) || 1;
+
+  // ── the whole layout, computed from the measured box ──────────────────────
+  // Before the first measurement (and in a card that gives no height of its own, e.g. the
+  // Reports "Share of sales" panel) these fall back to the size this chart has always had.
+  const W = size.w || 560;
+  const GAP_X = 12;
+  const MIN_COL = 150;                                // the column width the ring gives way to first
+  const TIGHT_COL = 110;                              // …and the narrowest one still worth splitting into
+  // THE HEIGHT THIS LEGEND ACTUALLY WANTS, from the row count alone — never from the measured
+  // height, so it can never feed back into itself. It is applied as a min-height: where a card
+  // hands down a height (the dashboard), that height wins and nothing moves; where nothing does
+  // (a phone, where each card is auto-height), the card GROWS to show the rows instead of
+  // hiding two thirds of them in an inner scroller. Capped, so a huge menu can't run away.
+  // NARROW CARD (a phone) → the ring goes ON TOP and the legend gets the full width beneath it.
+  // Side by side, a 330px card leaves the ring 150px and the legend one thin column, with the
+  // whole top-left of the card empty; stacked, the ring is half again as big and the legend can
+  // still run two columns. Same rules either way — only the direction changes.
+  const stacked = W < 380;
+  const ringTop = Math.round(clampN(W * 0.6, 126, 240));      // the stacked ring, from WIDTH alone
+  const legendW = stacked ? W : W - 126 - GAP_X * 2;          // width the columns will share
+  const canSplit = n > 8 && (legendW - (stacked ? GAP_X : 0)) / 2 >= TIGHT_COL;
+  const wantCols = canSplit ? 2 : 1;
+  const natural = clampN(Math.ceil(n / wantCols) * 20 + (stacked ? ringTop + 10 : 0), minHeight, 620);
+  const H = Math.max(size.h || natural, natural, 140);
+  const legendH = stacked ? Math.max(60, H - ringTop - 10) : H;
+  // ONE column unless it genuinely cannot hold the rows: a single list reads more easily than
+  // two, keeps full category names (a second column is narrow enough to ellipsis them) and
+  // leaves the ring its size. So the split is NEED-based — it happens only when every row at
+  // the smallest allowed text still would not fit down one side.
+  const oneColFits = n * 17 + (n - 1) * 2 <= legendH;
+  const twoCols = canSplit && !oneColFits;
+  const cols = twoCols ? 2 : 1;
+  // The ring takes the height it is offered, but never at the legend's expense: what the
+  // columns need is subtracted FIRST. A fixed 190px ring beside a fixed legend is exactly what
+  // used to force 25 categories into a scroller while the card had room to spare.
+  const ring = stacked
+    ? Math.round(clampN(Math.min(ringTop, H * 0.5), 110, 240))
+    : Math.round(clampN(Math.min(H, W - cols * MIN_COL - GAP_X * 2), 126, 280));
+  const rowsPerCol = Math.max(1, Math.ceil(n / cols));
+  const slot = legendH / rowsPerCol;                  // vertical space each legend row may take
+  // 11px is the FLOOR, not 9.5: below that the legend is decoration, not something an owner
+  // reads. A crowded card scrolls the last few rows instead of shrinking into unreadability.
+  const fs = clampN(slot * 0.5, 11, 13.5);            // text grows into a roomy card, tightens in a full one
+  // WHOLE pixels, and the row is GIVEN that height below — otherwise the maths says "it fits"
+  // while the browser rounds every line up and clips the last row by a few pixels.
+  const rowH = Math.ceil(fs * 1.5);
+  const gapY = Math.round(clampN(slot - rowH, 2, 14));
+  const dot = Math.round(clampN(fs * 0.78, 7, 11));
+  const scroll = rowsPerCol * rowH + (rowsPerCol - 1) * gapY > legendH;
   // SPLIT IN HALF, don't interleave (T5 sweep, 2026-08-11). This used to be `i % 2`, which
   // fills both columns evenly but scatters the ranking: measured live, the LEFT column (which
   // is rendered first, so it is read first) began at pasta 17% while the biggest category —
-  // salads 29% — sat at the top of the RIGHT one. The comment below already claimed the sort
-  // existed "so the labels an owner actually cares about are always at the top of the columns";
-  // that is only true of a column each reader can read in order. Halves give the same two
-  // columns AND keep 1,2,3… running down the left and continuing down the right.
+  // salads 29% — sat at the top of the RIGHT one. Halves give the same two columns AND keep
+  // 1,2,3… running down the left and continuing down the right.
   const half = Math.ceil(n / 2);
   const left = twoCols ? sorted.slice(0, half) : [];
   const right = twoCols ? sorted.slice(half) : sorted;
-  const total = sorted.reduce((a, d) => a + d.revenue, 0) || 1;
-  const legendCol = (items: typeof sorted) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: small ? 3 : 5, minWidth: 0, flex: "1 1 0", maxHeight: 230, overflowY: "auto" }}>
+  // An odd count leaves the right column one row short, and two centred columns of different
+  // lengths sit half a row out of step with each other — which reads as a misalignment, not as
+  // a rounding. One invisible row at the foot of the short column keeps the two in step.
+  const padRows = twoCols ? half - right.length : 0;
+  const legendCol = (items: typeof sorted, key: string, pad = 0) => (
+    <div key={key} style={{ display: "flex", flexDirection: "column", justifyContent: scroll ? "flex-start" : "center", gap: gapY, minWidth: 0, flex: "1 1 0", maxWidth: 260, height: "100%", overflowY: scroll ? "auto" : "hidden",
+      // A hard cut through the last row reads as a rendering fault; a fade reads as "there is
+      // more below" — which is the only hint a touch scroller inside a scrolling page gets.
+      ...(scroll ? { maskImage: "linear-gradient(to bottom, #000 calc(100% - 16px), transparent)", WebkitMaskImage: "linear-gradient(to bottom, #000 calc(100% - 16px), transparent)" } : null) }}>
       {items.map((d) => (
         <span key={d.category} title={`${d.category} · ${inr(d.revenue)} · ${sharePct(d.revenue, total)}`}
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: small ? 10 : 11.5, fontWeight: 600, color: "var(--muted)", minWidth: 0 }}>
-          <span style={{ width: small ? 8 : 9, height: small ? 8 : 9, borderRadius: 3, background: d.color, flexShrink: 0 }} aria-hidden="true" />
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: fs, height: rowH, lineHeight: `${rowH}px`, fontWeight: 600, color: "var(--muted)", minWidth: 0, flexShrink: 0 }}>
+          <span style={{ width: dot, height: dot, borderRadius: 3, background: d.color, flexShrink: 0 }} aria-hidden="true" />
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.category}</span>
           {/* A real-but-tiny share reads "<1%", never a flat "0%" beside a non-zero amount. */}
           <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--text)", flexShrink: 0 }}>{sharePct(d.revenue, total)}</span>
         </span>
       ))}
+      {pad > 0 && Array.from({ length: pad }, (_, i) => <span key={`pad${i}`} aria-hidden="true" style={{ height: rowH, flexShrink: 0 }} />)}
     </div>
   );
+  // Nothing to draw still has to FILL the card — an "empty" line parked at the top of a
+  // stretched card looks like the chart failed to paint (owner's rule, same as above).
+  if (!n) return <div style={{ flex: "1 1 auto", minHeight: 120, display: "grid", placeItems: "center" }}><Empty /></div>;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
-      {left.length > 0 && legendCol(left)}
-      <div style={{ width: 190, height: 210, flexShrink: 0 }}>
-        <ResponsiveContainer>
-          <PieChart>
-            <Pie data={sorted} dataKey="revenue" nameKey="category" innerRadius={52} outerRadius={86} paddingAngle={2} stroke="var(--card)">
-              {sorted.map((d, i) => <Cell key={i} fill={d.color} />)}
-            </Pie>
-            <Tooltip content={<MoneyTip />} />
-          </PieChart>
-        </ResponsiveContainer>
+    // flex:1 + minHeight is the whole trick on the card side: in a flex-column card this box
+    // TAKES the leftover height (so there is nothing left to sit blank under it); anywhere
+    // else it simply falls back to minHeight and behaves exactly as it did before.
+    <div ref={box} style={{ position: "relative", flex: "1 1 auto", minHeight: natural, width: "100%" }}>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: stacked ? "column" : "row", alignItems: "center", justifyContent: "center", gap: stacked ? 10 : GAP_X }}>
+        {!stacked && left.length > 0 && legendCol(left, "l")}
+        <div style={{ width: ring, height: ring, flexShrink: 0 }}>
+          <ResponsiveContainer>
+            <PieChart>
+              <Pie data={sorted} dataKey="revenue" nameKey="category" innerRadius="58%" outerRadius="97%" paddingAngle={2} stroke="var(--card)">
+                {sorted.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Pie>
+              <Tooltip content={<MoneyTip />} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        {stacked
+          ? <div style={{ display: "flex", gap: GAP_X, width: "100%", flex: "1 1 auto", minHeight: 0 }}>
+              {left.length > 0 && legendCol(left, "l")}
+              {legendCol(right, "r", padRows)}
+            </div>
+          : legendCol(right, "r", padRows)}
       </div>
-      {legendCol(right)}
     </div>
   );
 }

@@ -46,7 +46,13 @@ export default function OwnerPersonPage() {
       rid ? `rid=${encodeURIComponent(rid)}` : "",
       as ? `as=${encodeURIComponent(as)}` : "",
     ].filter(Boolean).join("&");
-    router.push(q ? `/owner/staff?${q}` : "/owner/staff");
+    // REPLACE, not push (T13 handoff H3, 2026-08-19). A person's profile is a detour off the
+    // roster, so closing it should REMOVE the detour rather than stack another entry on top: with
+    // `push`, tapping ✕ and then pressing Back re-opened the profile you had just closed. The
+    // phone's Back button no longer comes through here at all — the profile stopped registering a
+    // back layer (see components/owner/ownerProfileHost.ts → pageHosted), so Back pops this route's
+    // own history entry and the browser returns to the roster natively, on the FIRST press.
+    router.replace(q ? `/owner/staff?${q}` : "/owner/staff");
   }, [router, rid, as]);
 
   if (!id) return <div className="adm-empty">No person named.</div>;

@@ -168,10 +168,10 @@
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
-  <script src="/panels/billdoc.js?v=49bc4266"></script>
+  <script src="/panels/billdoc.js?v=3324eb7a"></script>
   <script src="/panels/auditsort.js?v=3503e514"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=6bd7587c"></script>
+  <script src="/panels/editor/app.js?v=505cc43f"></script>
 </body>
 </html>

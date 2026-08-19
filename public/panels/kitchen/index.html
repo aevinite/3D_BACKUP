@@ -6,13 +6,19 @@
   <title>Kitchen — live orders</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=a4c1fd1d">
+  <link rel="stylesheet" href="style.css?v=32b50411">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
 <body>
   <!-- Top bar: title, the live clock, sound toggle, and the 86 (sold-out) board. -->
   <header class="topbar">
+    <!-- ☰ MENU (owner, 2026-08-19: "kitchen will have whole separate menu for setup named setting,
+         make 3 line thing so that kitchen user can logout and all that stuff too"). Same grammar as
+         the waiter tablet's drawer — ☰ on the left, Settings inside it, Sign out inside Settings —
+         because a cook and a waiter should not have to learn two different panels. It is also the
+         kitchen's FIRST way to sign out: until now there was none anywhere on this screen. -->
+    <button id="hamburger" class="hamburger" type="button" aria-label="Menu &amp; settings">☰</button>
     <div class="brand">🍳 Kitchen <span class="sub">live orders</span> <span id="restName" class="rest-name"></span></div>
     <div class="top-actions">
       <span id="clock" class="clock"></span>
@@ -81,7 +87,7 @@
   <script src="/panels/fitnums.js?v=3bf875b3" data-fit=".kot"></script>
   <!-- billdoc: THE kitchen ticket, written down once (LFH_BILLDOC) and shared with the manager
        panel and the admin's sample, so a ticket can never look different in two places. -->
-  <script src="/panels/billdoc.js?v=49bc4266"></script>
-  <script src="app.js?v=cdb58df2"></script>
+  <script src="/panels/billdoc.js?v=3324eb7a"></script>
+  <script src="app.js?v=7f1211f9"></script>
 </body>
 </html>

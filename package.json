@@ -49,6 +49,9 @@
     "verify:clash": "npm run -s verify:clash-coverage",
     "verify:owner-clash": "node scripts/verify-owner-clash.mjs",
     "verify:owner-panel": "node scripts/verify-owner-panel.mjs",
+    "verify:owner-territory": "node scripts/verify-owner-territory.mjs",
+    "verify:owner-territory-live": "node scripts/verify-owner-territory-live.mjs",
+    "verify:pay-history-delete": "node scripts/verify-pay-history-delete.mjs",
     "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
     "verify:outbound": "node scripts/verify-outbound-honesty.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
@@ -80,6 +83,7 @@
     "verify:panel-secrets": "node scripts/verify-panel-secrets.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:print-queue": "node scripts/verify-print-queue.mjs",
+    "compare:schemas": "node scripts/compare-schemas.mjs",
     "verify:merged-floor": "node scripts/verify-merged-floor.mjs",
     "verify:xray": "node scripts/verify-xray-marks.mjs",
     "verify:menu-parts": "node scripts/verify-menu-parts.mjs",
@@ -138,7 +142,8 @@
     "verify:clash-coverage": "node scripts/verify-clash-coverage.mjs",
     "db:replace-demo-history": "node scripts/reset-demo-history.mjs",
     "db:vacuum-rebuild": "node scripts/db-maintain.mjs",
-    "verify:print-paper": "node scripts/verify-billdoc-paper.mjs"
+    "verify:print-paper": "node scripts/verify-billdoc-paper.mjs",
+    "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",

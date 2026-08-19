@@ -212,13 +212,18 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   //     aren't readable. Grants are the one thing that drifted silently on both databases at
   //     once (mig 267 found 17), so being able to ask the live stack the same question is the
   //     point of the guard. Read-only still has to be announced in chat by the person running it.
+  // BY DESIGN these DO name the live stack — and since 2026-08-19 the four AV-live OPERATIONAL scripts
+  // live here too, because "AV live is identical to backup" cannot be true while the live repo carries
+  // four files backup has never had. They are release tooling, not tests: each refuses unless the
+  // credentials it finds are AV live's, and none of them runs as part of any test. compare-schemas.mjs
+  // is the read-only shape comparison that answers "are the two databases the same".
   // BY DESIGN these DO name the live stack: two compare the two databases, one resolves a live fix
   // request, one checks live grants — and release-avlive.mjs IS the release (owner, 2026-08-18:
   // "make avlive fully where the backup is"). The release script is not a test and never runs as
   // part of one: it demands his authorising words, refuses unless the live folder is clean, and its
   // real run is still blocked by his own AV-live deny rules, which it says out loud rather than
   // walking around. This guard's job is to stop a TEST touching paying clients; a release must.
-  const BY_DESIGN = /verify-db-parity\.mjs|verify-avlive-offline-complete\.mjs|resolve-fix-request\.mjs|verify-db-grants\.mjs|release-avlive\.mjs/;
+  const BY_DESIGN = /verify-db-parity\.mjs|verify-avlive-offline-complete\.mjs|resolve-fix-request\.mjs|verify-db-grants\.mjs|release-avlive\.mjs|apply-migration-avlive\.mjs|apply-migration-prod\.mjs|copy-demo-to-prod\.mjs|reset-prod-owner-pw\.mjs|compare-schemas\.mjs/;
   // "This file already refuses to run anywhere but a dev database" — in either of the two ways a
   // script can say it.
   //

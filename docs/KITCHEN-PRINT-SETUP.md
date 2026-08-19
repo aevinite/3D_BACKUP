@@ -133,3 +133,66 @@ after — 33 cancelled-order tickets retired themselves on the next two board re
 printing card and from the kitchen panel's 🖨❗ sheet, and it carries the two starter files as
 downloads plus its own save-as-PDF button. THIS file is the engineering record; that page is what a
 restaurant reads — keep them honest with each other.
+
+## 9. macOS blocks a downloaded script — and the URL trap behind it (2026-08-19)
+
+The owner downloaded the Mac starter and got **“print-station-mac.command” Not Opened — Apple could
+not verify it is free of malware**, with only *Done* or *Move to Bin*. Gatekeeper refuses any script
+downloaded from the web that Apple hasn't notarised, and **the old right-click → Open escape is gone on
+macOS Sequoia**. The guide said to right-click → Open. It was wrong.
+
+There was a quieter second fault in the same file: its `URL=` line pointed at the **backup** site, so
+every restaurant had to find and edit it. **A wrong URL and a blocked file look identical to the person
+standing at the printer** — "nothing happens".
+
+Both are fixed by generating the starters instead of shipping them:
+
+- `lib/printStation.ts` holds the three scripts, once. `app/api/print-station/[file]/route.ts` fills in
+  **the host it was downloaded from** (`x-forwarded-host`) and the panel (`?panel=manager` for a
+  counter screen, which also names the file `print-station-counter-…`). Nothing to edit, ever.
+- The Mac script's own header now tells the reader what to do if macOS blocks it —
+  `bash ~/Downloads/print-station-mac.command`, or `xattr -d com.apple.quarantine` once to make it
+  double-clickable for ever.
+- The guide leads with a **one-line Terminal command** (no file at all, so no Gatekeeper), keeps the
+  file route as option B, and has a **Copy button on every command block** — a hand-retyped Chrome
+  command line is how a flag goes missing.
+- Windows SmartScreen and Linux `chmod` are answered in the same troubleshooting table.
+
+Guarded by `verify:print-queue`: the generator must cover all three platforms, must fill in the
+requesting host, must keep `--kiosk-printing` and `--disable-backgrounding-occluded-windows`, and the
+guide must still answer the "could not verify" dialog.
+
+## 10. One screen is the printer (mig 338, 2026-08-19)
+
+Owner: *"divide whole printing in both manager as well as owner and kitchen — from one only printer
+will be connect at one time; if connect at manager and kitchen panel it show printing happening in
+manager, wanna switch"*.
+
+`print_stations` holds **exactly one active row per restaurant**, enforced by a partial unique index —
+not by app code. `lib/printQueue.ts → mayClaim()` is the single gate both routes ask before handing a
+ticket to a screen, and it does all four jobs at once: the master switch (mig 107), the room (mig 336),
+the station, and taking the station when it is free.
+
+| Situation | What happens |
+|---|---|
+| No station | The first entitled screen that asks becomes it. **A kitchen that has always "just printed" keeps doing exactly that** — no set-up. |
+| A live station elsewhere | Every other screen is *told where* and offers **🖨 Print here instead** — one tap hands it over and the loser stops on its next read. |
+| The station has gone quiet (> 3 min) | Any entitled screen may take it **without asking**, so a kitchen screen that gets switched off never holds printing hostage. |
+| No device cookie | Never becomes a station (there would be nothing to hand over later). |
+
+Where it shows: kitchen **☰ → Settings → 🖨 Printing** and the 🖨 sheet · manager **Settings → Printing**
+plus a floor strip · owner **Settings → Kitchen printing** (read-only, one line per restaurant).
+
+**Everything printing-related disappears when the master switch is off** — the manager's Printing row is
+filtered out of the sidebar, the kitchen's Settings has no printing section, the owner's card does not
+render. His rule of 2026-07-31: not greyed, absent.
+
+### The kitchen screen finally has a ☰ menu
+
+It had **no way to sign out at all** before this. `☰ → Settings` now holds printing, the three
+per-device preferences (sound · layout · theme, clicked through to the existing bar buttons, never
+re-implemented) and **Sign out**. No profile: the kitchen has none and that has been ruled three times.
+
+**`target="_top"` on the sign-out form is load-bearing.** These panels run inside an iframe, so a plain
+submit signs out only the FRAME and leaves the page around it — the person looks signed out and is not.
+The waiter tablet had the same bug since its drawer was built; both are fixed.

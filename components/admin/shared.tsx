@@ -102,6 +102,9 @@ export const ACT_LABEL: Record<string, string> = {
   // Both ends of a print, so the Activity log's Printer chip can answer "did it actually come
   // out?" and not just "somebody complained" (owner, 2026-08-14).
   kot_printed: "KOT printed", kot_print_failed: "KOT didn't print",
+  // WHICH SCREEN IS THE PRINTER (mig 338). Worth a row: "why did tickets start coming out at the
+  // counter?" is answered by a name and a time, not by asking the shift who touched what.
+  print_station_take: "Started printing on a screen", print_station_release: "Stopped printing on a screen",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit

@@ -171,8 +171,19 @@ export async function cachedOwnerPayload<T extends object>(opts: {
     }
   };
 
-  const existing = force ? null
-    : (await sb.from(TABLE).select("payload, computed_at, fingerprint").eq("cache_key", key).maybeSingle()).data;
+  // A FORCED read still has to read the row it is about to replace (T11 sweep, 2026-08-18).
+  //
+  // `force` means "don't SERVE the stored value" — it was also skipping the read entirely, so the
+  // cold/forced store below had no `prev` and the all-zero guard above could never fire on it. That
+  // left the one path most likely to need it unguarded: Refresh is the button he presses BECAUSE
+  // the numbers already look wrong, so a blip during it could write ₹0 over a good snapshot and
+  // every other viewer would see zeroes for the next five minutes with nothing saying so.
+  //
+  // The read is one indexed row on a path that is already the slow one, and it changes nothing
+  // about what THIS caller gets back — the freshly computed payload is returned either way. It only
+  // decides whether we are allowed to overwrite.
+  const prevRow = (await sb.from(TABLE).select("payload, computed_at, fingerprint").eq("cache_key", key).maybeSingle()).data;
+  const existing = force ? null : prevRow;
 
   if (existing?.payload) {
     void sb.from(TABLE).update({ last_viewed_at: nowIso() }).eq("cache_key", key).then(() => {}, () => {});
@@ -197,8 +208,13 @@ export async function cachedOwnerPayload<T extends object>(opts: {
     fingerprint ? fingerprint().catch(() => null) : Promise.resolve(null),
   ]);
   const now = nowIso();
-  // Same rule on the cold path: hand this caller the partial answer, store nothing.
-  if (!isPartial(payload)) {
+  // Same two rules on the cold/forced path: hand this caller the answer either way, but store
+  // neither a partial one nor an all-zero one over a snapshot that had real money in it.
+  if (isPartial(payload)) {
+    // nothing stored — see isPartial
+  } else if (collapsedToZero(payload, prevRow?.payload)) {
+    console.warn(`[ownerCache] refused to store an all-zero payload over a non-zero one (forced): ${key}`);
+  } else {
     await sb.from(TABLE).upsert(
       { cache_key: key, payload, fingerprint: fp, computed_at: now, last_viewed_at: now },
       { onConflict: "cache_key" },

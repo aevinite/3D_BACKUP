@@ -1334,6 +1334,163 @@ function processPrintJobs(jobs) {
   }).catch(() => fresh.forEach((j) => jobsInFlight.delete(j.id))); // offline/busy — next board pass retries
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// ☰ MENU → ⚙️ SETTINGS → SIGN OUT, and the printer set-up (owner, 2026-08-19)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// "Kitchen will have whole separate menu for setup named setting, make 3 line thing so that kitchen
+// user can logout and so all that stuff too… all should be linked with the access and control in
+// autoprint on and off — make sure if that thing is off then no option should show."
+//
+// Two things this screen never had: a way to SIGN OUT (there was none, anywhere), and anywhere to see
+// how printing is set up. Both live behind ☰ now, in the same shape the waiter tablet uses — ☰ on the
+// left, Settings inside it, Sign out inside Settings — so a cook who has used one panel recognises the
+// other. Everything about printing DISAPPEARS when automatic printing is off for the restaurant: not
+// greyed, not explained, absent (his standing rule of 2026-07-31 about dead controls).
+//
+// NO PROFILE HERE, deliberately: the kitchen has none and that has been ruled three times
+// (2026-07-29, 2026-08-05, and again in lib/staffProfileShared.ts → PROFILE_ROLES). Do not add one.
+let kdsDrawerOff = null;
+function openKitchenMenu() {
+  if (document.querySelector(".kds-dw")) return;
+  const back = document.createElement("div"); back.className = "kds-dw-backdrop";
+  const dw = document.createElement("aside"); dw.className = "kds-dw"; dw.setAttribute("aria-label", "Menu and settings");
+  const rest = restDisplayName(state.restaurant).replace(/\*/g, "") || "this restaurant";
+  dw.innerHTML = `<button class="dw-close" type="button" aria-label="Close menu">✕</button>
+    <h3>🍳 Kitchen</h3>
+    <div class="dw-sub">${esc(rest)}</div>
+    <button class="dw-row" type="button" data-kdw="settings">⚙️ Settings</button>
+    <button class="dw-row" type="button" data-kdw="printer">🖨 Printer</button>
+    <button class="dw-row" type="button" data-kdw="issue">🚩 Report an issue</button>
+    <a class="dw-row" href="/print-setup.html" target="_blank" rel="noopener">📖 Printer setup guide</a>
+    <div class="dw-foot" id="kdsBuild"></div>`;
+  document.body.appendChild(back); document.body.appendChild(dw);
+  const close = () => { back.remove(); dw.remove(); if (kdsDrawerOff) { const o = kdsDrawerOff; kdsDrawerOff = null; o(); } };
+  kdsDrawerOff = window.LFH_BACK ? LFH_BACK.layer("kitchen-menu", close) : null;
+  back.onclick = close;
+  dw.querySelector(".dw-close").onclick = close;
+  dw.querySelectorAll("[data-kdw]").forEach((b) => (b.onclick = () => {
+    const what = b.dataset.kdw; close();
+    if (what === "settings") openKitchenSettings();
+    else if (what === "printer") openPrinterSheet();
+    else if (what === "issue" && window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m) });
+  }));
+  // The build tag READS the code (never a typed string): app.js is loaded with its own content hash,
+  // so it changes exactly when the file does — which is the only honest answer to "is this screen
+  // running the latest code?" (the tablet learned this the hard way, 2026-08-06).
+  try {
+    const me = [...document.querySelectorAll('script[src*="app.js"]')].pop();
+    const v = me ? (new URL(me.src, location.href).searchParams.get("v") || "") : "";
+    dw.querySelector("#kdsBuild").textContent = v ? "kitchen " + v : "kitchen (unknown)";
+  } catch (e) {}
+}
+
+// ── ⚙️ Settings ─────────────────────────────────────────────────────────────────────────────────
+// Printing · this screen's own preferences · sign out. Re-rendered in place whenever a board read
+// brings news (so "who is printing" can never sit stale while somebody reads it).
+let kdsSetOff = null;
+function openKitchenSettings() {
+  if (document.querySelector(".kset-ov")) return;
+  const ov = document.createElement("div"); ov.className = "kset-ov";
+  ov.innerHTML = `<div class="kset" role="dialog" aria-label="Kitchen settings"></div>`;
+  document.body.appendChild(ov);
+  window.__kdsSettingsOpen = true;
+  const close = () => {
+    window.__kdsSettingsOpen = false;
+    if (kdsSetOff) { const o = kdsSetOff; kdsSetOff = null; o(); }
+    ov.remove();
+  };
+  kdsSetOff = window.LFH_BACK ? LFH_BACK.layer("kitchen-settings", close) : null;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  window.__kdsSettingsClose = close;
+  renderKitchenSettings();
+}
+function renderKitchenSettings() {
+  const box = document.querySelector(".kset-ov .kset");
+  if (!box) return;
+  const auto = !!state.autoPrintKot;                       // this SCREEN may print (feature on AND this room)
+  const tgt = state.kotPrintTarget || "kitchen";
+  const st = state.station || null;
+  const printingHere = !!(st && st.mine);
+  const heldByOther = !!(st && st.active && !st.mine && !st.stale);
+  const holder = st && st.active
+    ? `${esc(st.active.label || (st.active.panel === "editor" ? "A counter screen" : "A kitchen screen"))}${st.active.claimed_by ? " · " + esc(st.active.claimed_by) : ""}`
+    : "";
+  const where = tgt === "counter" ? "the counter screen" : tgt === "both" ? "the kitchen screen, counter as backup" : "the kitchen screen";
+  // PRINTING IS ABSENT, NOT GREYED, WHEN IT IS OFF FOR THE RESTAURANT (owner's rule). `auto` is
+  // already "on AND this room prints", so a counter-only restaurant sees the explanation once, not a
+  // set of controls it can never use.
+  const printSection = (!auto && tgt !== "counter") ? "" : `
+    <div class="kset-sec">
+      <h4>🖨 Printing</h4>
+      ${tgt === "counter" && !auto ? `<p class="kset-note">Kitchen tickets print on <b>the counter screen</b> for this restaurant, so this screen prints nothing automatically. The 🖨 button on a ticket still prints here if this screen has a printer of its own.</p>` : `
+      <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>
+      <div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
+      <div class="kset-line"><span>Printing right now</span><b>${printingHere ? "THIS screen" : st && st.active ? (st.stale ? holder + " (gone quiet)" : holder) : "no screen yet"}</b></div>
+      ${printingHere
+        ? `<p class="kset-note">Tickets are coming out of this screen's printer. It keeps working when this window is minimised or covered — that is what the setup guide's launcher is for.</p>
+           <div class="kset-btns"><button class="btn" type="button" data-kstation="release">Stop printing on this screen</button>
+           <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`
+        : heldByOther
+          ? `<p class="kset-note">Tickets are coming out at <b>${holder}</b>. If the printer is actually here, take it over — the other screen stops printing straight away.</p>
+             <div class="kset-btns"><button class="btn primary" type="button" data-kstation="take">🖨 Print here instead</button>
+             <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`
+          : `<p class="kset-note">No screen is printing yet. Turn it on here, on the computer the printer is attached to.</p>
+             <div class="kset-btns"><button class="btn primary" type="button" data-kstation="take">🖨 Print on this screen</button>
+             <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`}
+      `}
+    </div>`;
+  box.innerHTML = `
+    <div class="kset-head"><h3>⚙️ Settings</h3><button class="btn" type="button" data-kset-close aria-label="Close">✕</button></div>
+    ${printSection}
+    <div class="kset-sec">
+      <h4>This screen</h4>
+      <div class="kset-btns">
+        <button class="btn" type="button" data-kset-click="muteBtn">🔔 New-order sound</button>
+        <button class="btn" type="button" data-kset-click="viewBtn">▦ Board layout</button>
+        <button class="btn" type="button" data-kset-click="themeToggle">🌗 Light / dark</button>
+      </div>
+      <p class="kset-note">These three are remembered on this device only.</p>
+    </div>
+    <div class="kset-sec">
+      <h4>Account</h4>
+      <!-- A FORM, not a link: /api/panel-logout is POST-only, because a GET that ends a session fires
+           from anything that merely POINTS at the URL — a cook could be signed out mid-service. The
+           route answers 303 → /login, so this works with no JavaScript at all. -->
+      <!-- target="_top" IS THE WHOLE POINT (measured 2026-08-19). This panel runs inside an IFRAME on
+           /kitchen (and /tablet), so a plain form submit navigates the FRAME: the login page loads
+           inside the panel while the page around it, and its URL, stay exactly where they were. It
+           looks almost right, which is why it survived — the person appears signed out and is not.
+           Posting to _top signs the whole window out, which is what "Sign out" says. -->
+      <form method="post" action="/api/panel-logout" target="_top" style="margin:0">
+        <button type="submit" class="btn kset-danger" style="width:100%">Sign out</button>
+      </form>
+      <p class="kset-note">Signing out returns this screen to the login page. The board keeps running for everyone else.</p>
+    </div>`;
+  box.querySelector("[data-kset-close]").onclick = () => window.__kdsSettingsClose && window.__kdsSettingsClose();
+  // The three device preferences are the SAME buttons the top bar owns — clicked through, never
+  // re-implemented, so there is one place that changes each one (the ⋯ MORE menu does the same).
+  box.querySelectorAll("[data-kset-click]").forEach((b) => (b.onclick = () => {
+    const el = document.getElementById(b.dataset.ksetClick);
+    if (el) el.click();
+    renderKitchenSettings();
+  }));
+  box.querySelectorAll("[data-kstation]").forEach((b) => (b.onclick = async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const take = b.dataset.kstation === "take";
+    try {
+      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
+      if (r && r.station) state.station = r.station;
+      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
+      renderKitchenSettings();
+      if (take) load().catch(() => {});     // anything already waiting prints straight away
+    } catch (e) {
+      b.disabled = false;
+      toast("Couldn't change that: " + (e.message || "try again"));
+    }
+  }));
+}
+
 // ── One-tap printer problem report (owner, 2026-08-04) ──────────────────────────────
 // Paper out, a half-printed ticket, a jam — faults a browser cannot see — reach the
 // manager's floor with one tap. Same overlay discipline as the 86 board: registered as a
@@ -1350,19 +1507,42 @@ function openPrinterSheet() {
   ];
   const ov = document.createElement("div");
   ov.id = "prSheet"; ov.className = "prsheet-ov";
-  ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer problem</h3><button class="btn" data-prclose>✕</button></div>
-    <p class="prsheet-sub">One tap — the manager is told right away.</p>
+  // ── WHERE PRINTING STANDS, ON THE KITCHEN SCREEN ITSELF (owner, 2026-08-18) ─────────────────
+  // "It should be shown in kitchen panel, able to see the whole thing." A cook at a silent printer
+  // should not have to ask anyone whether this screen is even meant to be printing — the two answers
+  // that decide it are the admin's, so they are shown as plain sentences, never as dead switches.
+  const tgt = state.kotPrintTarget || "kitchen";
+  const where = tgt === "counter" ? "the counter screen — not this one"
+    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
+    : "this screen";
+  // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
+  const stn = state.station || null;
+  const nowPrinting = stn && stn.mine ? "THIS screen"
+    : stn && stn.active ? (esc(stn.active.label || (stn.active.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (stn.stale ? " (gone quiet)" : ""))
+    : "no screen yet";
+  const status = `<div class="prsheet-status">
+      <div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
+      <div><span>Tickets print on</span><b>${esc(where)}</b></div>
+      <div><span>Printing right now</span><b>${nowPrinting}</b></div>
+      ${!state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
+      ${tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}
+    </div>`;
+  ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer</h3><button class="btn" data-prclose>✕</button></div>
+    ${status}
+    <p class="prsheet-sub">Something wrong? One tap — the manager is told right away.</p>
     ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}
     <!-- THE SETUP GUIDE LIVES HERE ON THIS SCREEN (owner, 2026-08-18: "where is this setup in the app").
          The kitchen panel has no settings screen and its top bar is deliberately fought over to the pixel
          (see buildMoreMenu) — so the guide goes where somebody standing at a misbehaving printer already
          reaches: the 🖨❗ sheet. A link, not a button that does something, so a cook cannot mistake it for a
          report. The full switches live in the manager panel's Settings → Kitchen printing. -->
+    <button class="btn prsheet-row prsheet-help" type="button" data-prsettings><span>⚙️</span> Printer settings on this screen</button>
     <a class="btn prsheet-row prsheet-help" href="/print-setup.html" target="_blank" rel="noopener"><span>📖</span> How to set this printer up (full guide)</a></div>`;
   document.body.appendChild(ov);
   const close = () => { ov.remove(); if (prSheetOff) { const off = prSheetOff; prSheetOff = null; off(); } };
   prSheetOff = window.LFH_BACK ? LFH_BACK.layer("printer-problem", close) : null;
   ov.querySelector("[data-prclose]").onclick = close;
+  { const sb2 = ov.querySelector("[data-prsettings]"); if (sb2) sb2.onclick = () => { close(); openKitchenSettings(); }; }
   ov.onclick = (e) => { if (e.target === ov) close(); };
   ov.querySelectorAll("[data-prkind]").forEach((b) => (b.onclick = async () => {
     if (b.disabled) return;
@@ -1547,6 +1727,14 @@ async function loadImpl() {
     autoPrintNet(!!data.autoPrintKot, data.orders, data.items, data.restaurant, data.queuedFor);
   }
   state.autoPrintKot = !!data.autoPrintKot;
+  // Which screen the admin chose (mig 336) — shown on the 🖨 sheet so a cook standing at a silent
+  // printer can see whether this screen is even supposed to be printing.
+  state.kotPrintTarget = data.kotPrintTarget || "kitchen";
+  // WHO IS PRINTING (mig 338): { active: {label,panel,claimed_by,last_seen_at}|null, mine, stale }.
+  // Shown in ☰ → Settings and on the 🖨 sheet, so "where is the paper coming out?" is answered on
+  // the screen instead of by walking to the printer.
+  state.station = data.station || null;
+  if (window.__kdsSettingsOpen) renderKitchenSettings();   // the sheet is open: keep it truthful
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
   // Reprints the manager sent to THIS kitchen's printer (mig 269) — claim, print with the
@@ -1611,6 +1799,7 @@ $("#boardBtn").onclick = openDrawer;
 { const pb = $("#printerBtn"); if (pb) pb.onclick = openPrinterSheet; }
 // 🚩 Report an issue (subject + optional photo + live voice note) — shared widget.
 { const _ib = document.getElementById("reportIssueBtn"); if (_ib) _ib.onclick = () => { if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m) }); }; }
+{ const ham = $("#hamburger"); if (ham) ham.onclick = openKitchenMenu; }
 $("#drawerClose").onclick = closeDrawer;
 $("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") closeDrawer(); };
 $("#dishSearch").oninput = renderDishes;

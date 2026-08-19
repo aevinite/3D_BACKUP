@@ -236,7 +236,7 @@ export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpe
             maxHeight={400} footer={footer} emptyText="No category matches your search."
           />
         </Panel>
-        <Panel title="Share of sales"><CategoryDonut data={byRev.map((c) => ({ category: c.category, revenue: c.revenue }))} /></Panel>
+        <Panel title="Share of sales" fill><CategoryDonut data={byRev.map((c) => ({ category: c.category, revenue: c.revenue }))} /></Panel>
       </div>
     </>
   );

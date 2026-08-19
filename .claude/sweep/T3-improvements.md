@@ -28,7 +28,7 @@ each is the honest completion of one:
    of how it is being tested, not a product fault. **Do not "fix" `public/sw.js` for this and do not
    re-report it.**
 
-### Still 🟡
+### Nothing is still 🟡 — everything below was built (2026-08-18/19)
 
 4. **The "Maximum 99 per dish" message reads as a success.** — **BUILT 2026-08-18** (see below).
    It is raised with no `variant`, so it renders with a tick like a confirmation, for something that

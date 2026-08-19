@@ -315,7 +315,8 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // object — so unsaved edits still show and there is no second copy left to drift.
   const previewBill = () => {
     const html = billPreviewHtml(draft, "bill", restForDoc());
-    const w = window.open("", "lfh_bill_preview", "width=420,height=700");
+    // Tall by default: the document fits itself to the window, so height buys readability.
+    const w = window.open("", "lfh_bill_preview", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
     if (!w) { setErr("Allow pop-ups to preview the bill."); return; }
     try { w.document.open(); } catch { /* reused window: start blank */ }
     w.document.write(html); w.document.close();
@@ -981,18 +982,23 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         {/* ═══ THE SETUP GUIDE, IN THE APP (owner, 2026-08-18) ═══
             "Where is this setup in the app? Make it downloadable… link every single key and step…
             or you can make HTML, it will open a whole page." It is a page the app serves, so it is
-            always the version that matches the running code, and it carries the two starter files. */}
+            always the version that matches the running code. The starter DOWNLOADS are gone (owner,
+            2026-08-19: the Mac one showed "Apple could not verify… Move to Bin") — the guide now teaches
+            the file by hand in three per-OS menus, which no security layer can block. */}
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
           <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>📖 How to set the printer up</h3>
           <p className="hint" style={{ margin: "0 0 10px" }}>
-            Every step for a <b>Mac</b> or a <b>Windows</b> PC — the printer, the paper settings, the one
+            Every step for <b>Windows</b>, a <b>Mac</b> or <b>Linux / a Raspberry Pi</b> — the printer, the paper settings, the one
             Chrome window that keeps printing when it is minimised or covered, these switches, the test,
             and what to do when something goes wrong. Opens as its own page and can be saved as a PDF.
+            One menu per operating system, every step by hand with a Copy button on the code — nothing is
+            downloaded, because a downloaded script is blocked by macOS and warned about by Windows.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Open the setup guide</a>
-            <a className="adm-btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter file</a>
-            <a className="adm-btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter file</a>
+            <a className="adm-btn" href="/print-setup.html#windows" target="_blank" rel="noopener">🪟 Windows steps</a>
+            <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
+            <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
           </div>
         </div>
       </div>

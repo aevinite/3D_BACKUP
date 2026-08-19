@@ -522,7 +522,7 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
     // the version that matches the running code — which a file emailed to a restaurant never is.
     // Public-by-URL is fine and was considered: it holds a Chrome command line, printer paper
     // settings and the app's own panel paths (all login-gated), and no secret, no data, no key.
-    // The two starter files beside it (public/print-station/*) are the same call for the same reason.
+    // (The starter files that used to sit beside it are gone — the guide teaches the file by hand now.)
     "public/print-setup.html",              // the kitchen-printer setup guide (linked from admin + kitchen)
   ]);
   const found = [];
