@@ -278,8 +278,32 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     if (!/set_permissions/.test(code(src))) ok("the roster still writes no permission of any kind");
     else bad("the roster is writing permissions again — only the admin holds those");
     // Kitchen has no profile, ruled three times. The roster must not decide that for itself.
-    if (!/role\s*===\s*"kitchen"/.test(code(src))) ok("the roster does not branch on the kitchen role itself (it trusts profileEligible)");
-    else bad("the roster branches on the kitchen role directly — one source decides who has a profile");
+    // ONE SOURCE DECIDES WHO HAS A PROFILE — and that is `profileEligible`, from the server.
+    // This used to forbid the string `role === "kitchen"` outright. That was the WORDING, not the
+    // rule: on 2026-08-19 the roster gained a line explaining why a kitchen row is shorter, and it
+    // needs the role to word that sentence — a waiter who is ineligible because the payroll module is
+    // off must not be told "kitchen screen only". So the real rule is what is asserted now: every
+    // place that decides whether to SHOW profile UI keys off profileEligible, and the role may only
+    // ever pick words. (This file's own advice: assert the rule, not the spelling.)
+    const bareR = code(src);
+    const roleUses = [...bareR.matchAll(/s\.role === "kitchen"/g)].map(m => bareR.slice(Math.max(0, m.index - 120), m.index + 40));
+    const allWordingOnly = roleUses.every(w => /!s\.profileEligible/.test(w));
+    if (allWordingOnly) ok(`the role is used for wording only (${roleUses.length}×); profileEligible still decides who has a profile`);
+    else bad("the roster decides profile UI from the kitchen ROLE — that decision belongs to the "
+      + "server's profileEligible, which also covers a restaurant whose payroll module is off");
+    // Checked by LINE PROXIMITY, the way the JSX actually reads: each of these three elements sits a
+    // few lines under its own `{s.profileEligible && …}` guard. A single flat regex over the whole
+    // file kept matching across unrelated blocks, which is how a guard ends up red on working code.
+    const rl = src.split("\n");
+    const ungated = [];
+    for (const cls of ['className="ost-prog"', 'className="ost-mini open"', 'className="ost-nopay"']) {
+      const i = rl.findIndex((l) => l.includes(cls));
+      if (i === -1) continue;                       // element gone; other checks cover that
+      if (!rl.slice(Math.max(0, i - 8), i).some((l) => /s\.profileEligible/.test(l))) ungated.push(cls);
+    }
+    if (!ungated.length) ok("…and every profile/pay element on the row still sits behind profileEligible");
+    else bad(`these row elements lost their profileEligible gate: ${ungated.join(", ")} — a kitchen `
+      + "login would then be offered a profile, which he has refused three times");
     // "waiter", never the storage word, on every one of the three places it is shown.
     const waiterLabels = (code(src).match(/\?\s*"waiter"\s*:/g) || []).length;
     if (waiterLabels >= 3) ok(`"tablet" is shown as "waiter" in all ${waiterLabels} places`);
@@ -394,6 +418,85 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     else bad("H4 — a started-early promise has no catch; if it ever rejects while un-awaited it takes "
       + "the process with it, not just this request");
   }
+}
+
+// ── 11 · THE FOUR HE ASKED FOR ON 2026-08-19 ("fix all") ─────────────────────────────────────
+{
+  const src = read(ROSTER);
+  if (src) {
+    const bare = code(src), txt = plain(code(src));
+    // (a) the dead Powers-tab CSS must stay dead — and the note explaining that must stay too, or the
+    //     next reader has no idea why a styled screen has no styles for those names.
+    const deadRules = (bare.match(/\.(ost-perms|ost-perm|reach-chip|reach-legend)[\s.:,{]/g) || []).length;
+    if (deadRules === 0) ok("the Powers-tab CSS is still gone (12 rules matching no element)");
+    else bad(`${deadRules} Powers-tab CSS rule(s) are back — they styled controls removed in the access `
+      + "rebuild and match nothing on this page; the switches live on /aevinite → Access and permissions");
+    if (/THE POWERS-TAB CSS WAS DELETED HERE/.test(src)) ok("…and the note saying why is still there");
+    else bad("the note explaining the deleted Powers-tab CSS is gone — without it the next sweep re-finds it");
+    // (b) the kitchen row explains itself, quietly, and NEVER offers a profile (R7)
+    const hasLine = /ost-nokitchen/.test(bare) && /kitchen screen only/.test(txt);
+    if (hasLine) ok("a kitchen row explains why it is shorter");
+    else bad("the kitchen row's explanation is gone — every sweep then re-asks why that row looks empty");
+    if (/!s\.profileEligible && s\.role === "kitchen"/.test(bare))
+      ok("…shown ONLY for a kitchen login that genuinely has no profile");
+    else bad("the kitchen line's condition changed — it must never appear on a person who HAS a profile");
+    // R7: it must stay a plain statement. A link, a button or a "soon" is the thing he refused 3×.
+    // JUST THE ELEMENT, not 400 characters of whatever follows it — a wider window ran straight into
+    // the completeness link below and reported the profile <a> as if the kitchen line had become one.
+    const nkStart = bare.indexOf('<span className="ost-nokitchen"');
+    const block = nkStart > -1 ? bare.slice(nkStart, bare.indexOf("</span>", nkStart) + 7) : "";
+    if (!/<a |<button|onClick|href=/.test(block)) ok("…and it is plain text: no link, no button, no promise (R7)");
+    else bad("the kitchen line has become a link or a button — R7 forbids offering the kitchen a profile "
+      + "in any form; he has refused it three times");
+    if (!/coming soon|not yet|later/i.test(block)) ok("…and it promises nothing for later");
+    else bad("the kitchen line hints at a future profile — that is R7 wearing a different hat");
+    // (c) 36px tap targets on a phone, matching the table tiles rather than a made-up number
+    const phone = bare.slice(bare.indexOf("@media (max-width: 560px)"));
+    if (/\.ost-actions \.ost-mini, \.ost-actions select \{ min-height: 36px; \}/.test(phone))
+      ok("the roster's action controls are ≥36px on a phone");
+    else bad("the phone tap-target floor is gone — they measured 26–28px before, shorter than every "
+      + "other target in this file, and one of them is Remove");
+    if (/\.ost-editrow[^{]*\{ min-height: 36px; \}/.test(phone)) ok("…and so are the rename editor's own controls");
+    else bad("the rename editor's controls lost their phone tap-target floor");
+    const tile = (bare.match(/\.ost-tgrid button \{[^}]*min-height:\s*(\d+)px/) || [])[1];
+    if (tile === "36") ok("…and 36 still matches the table tiles, so the number is not invented");
+    else bad(`the table tiles are now ${tile}px while the actions target 36px — pick one floor, not two`);
+  }
+}
+
+// ── 12 · TAKING SOMEONE OFF THE PAY LIST ASKS FIRST ──────────────────────────────────────────
+// Found 2026-08-19 while turning ledger row P06359 from a skip into a real check. The profile sheet's
+// pay-list control was a bare toggle: one tap, no question — and that tap changes the month's staff
+// cost in the owner's reports AND nulls payroll_added_at / payroll_added_by, so the record of when
+// the person was enrolled and by whom is destroyed. Toggling back stamps today instead. Everything
+// else about it is recoverable; that stamp is not.
+//
+// The careful sentence already existed, in the OWNER ROSTER's own setPayroll — unreachable there,
+// because the roster only ever offers ADD. So the screen that does the removal was the one not asking.
+{
+  const prof = read("components/admin/StaffProfile.tsx");
+  const route = read("app/api/owner/staff/route.ts");
+  if (!prof) bad("components/admin/StaffProfile.tsx not found (if it moved, update this guard)");
+  else {
+    const bare = code(prof);
+    const fn = bare.slice(bare.indexOf("async function setPayroll"));
+    const body = fn.slice(0, fn.indexOf("async function", 1) > -1 ? fn.indexOf("async function", 1) : 1200);
+    if (/if \(!on && !confirm\(/.test(body)) ok("taking someone off the pay list asks first");
+    else bad("the pay-list toggle removes someone with NO question — one tap changes the reports and "
+      + "destroys the note of who enrolled them");
+    if (/past payments stay/.test(body)) ok("…and the question says the past payments stay on the record");
+    else bad("…the question does not reassure that nothing is erased, which is the first thing he would ask");
+    if (/when they were added/.test(body)) ok("…and warns that the enrolment note is cleared");
+    else bad("…the question does not mention the one thing that is NOT recoverable");
+    // it must ask on the way OFF only — a confirm to ADD someone would be noise
+    if (!/if \(on && !confirm/.test(body)) ok("…and it does not ask on the way ON, where nothing is lost");
+    else bad("adding someone to the pay list now asks a question too — that is noise, not a guard");
+  }
+  // and the server still clears the stamp, which is WHY the question has to mention it
+  if (route && /payroll_added_at: on \? new Date\(\)\.toISOString\(\) : null/.test(code(route)))
+    ok("the server still nulls the enrolment stamp on removal, so the warning stays true");
+  else bad("the server no longer nulls payroll_added_at — re-word the confirm, it is now telling him "
+    + "something that does not happen");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
