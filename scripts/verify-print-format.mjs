@@ -566,6 +566,35 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
   }
 }
 
+// ── THE THERMAL DOCUMENTS DECLARE NO PAGE SIZE (owner, 2026-08-19, with a photo of the failure) ────
+// The bill used to measure itself and inject `@page{size:80mm <content height>mm}`. On a real thermal
+// queue whose media is a SHORT receipt page (70x65mm) that instruction forces the driver to fit a
+// 134mm page onto 65mm — it scales to about half size and rotates the job. That is precisely what he
+// photographed: "the bill came out landscape instead of portrait and very small". The KOT, which
+// declares nothing, was perfect on the same printer at the same moment.
+//
+// So neither thermal document may declare a page SIZE. `@page{margin:0}` is required and stays (it is
+// what removes the browser's own header/footer). The A4/A5 banquet sheet is a different document on a
+// tray printer and legitimately sets a size — it is not checked here.
+{
+  const doc = read(DOC);
+  const thermal = doc.slice(0, doc.indexOf("A5/A4 sheet print recipe") > 0 ? doc.indexOf("A5/A4 sheet print recipe") : doc.length);
+  // CODE ONLY. The note in billdoc.js that EXPLAINS this failure quotes the bad pattern, and the first
+  // version of this check failed on that note — a guard that trips on its own explanation teaches
+  // people to delete explanations. Comments are stripped before the test; the real CSS lives inside
+  // quoted strings, so it survives.
+  const codeOnly = thermal
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const injects = /@page\{\s*size\s*:/.test(codeOnly.replace(/\\n/g, "\n"));
+  injects
+    ? bad("the thermal bill/KOT declares an @page SIZE again — a page bigger or squarer than the roll makes the driver scale and ROTATE the job (measured: 80x134mm onto 70x65mm = 0.49x, sideways). Only @page{margin:0} belongs here; paper feed is the queue's job (FeedWhere/FeedDist).")
+    : ok("neither thermal document declares an @page size — the queue's own receipt page paginates them");
+  /@page\{margin:0\}/.test(thermal.replace(/\\n/g, "\n"))
+    ? ok("…and @page{margin:0} is still there, so no browser header/footer reaches the paper")
+    : bad("@page{margin:0} has gone from the thermal document — the browser's own header, footer and page numbers will print on the roll");
+}
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the bill or the ticket has more than one description again.`
   : "\nAll checks passed — one bill, one ticket, one file, one numbering series, and it adds up.");

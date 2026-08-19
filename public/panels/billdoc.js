@@ -683,22 +683,28 @@
      it just does not fire the dialog by itself. */
   function pageScript(autoPrint) {
     return "<script>\n"
-+ "function measure(){\n"
-+ "  // The toolbar is screen-only, but scrollHeight measures the SCREEN layout — leaving it in\n"
-+ "  // would declare a page ~11mm longer than the bill and feed that much blank roll after every\n"
-+ "  // print. Hide it for the measurement, then put it back.\n"
-+ "  var bar = document.querySelector(\".bar\"), prev = bar ? bar.style.display : \"\";\n"
-+ "  if (bar) bar.style.display = \"none\";\n"
-+ "  try{\n"
-+ "    var mm = 96/25.4, h = Math.ceil(document.body.scrollHeight/mm) + 6;\n"
-+ "    var st = document.getElementById(\"pagesize\") || document.createElement(\"style\");\n"
-+ "    st.id = \"pagesize\";\n"
-+ "    st.textContent = \"@media print{@page{size:80mm \" + h + \"mm;margin:0}}\";\n"
-+ "    document.head.appendChild(st);\n"
-+ "  }catch(e){}\n"
-+ "  if (bar) bar.style.display = prev;\n"
-+ "}\n"
-+ "function printAgain(){ measure(); print(); }\n"
+// ── NO PAGE SIZE IS DECLARED. THIS FUNCTION IS DELIBERATELY EMPTY (owner, 2026-08-19, with a photo) ──
+// It used to measure the bill and inject `@page{size:80mm <content height>mm}` so the roll would be
+// fed exactly the bill's length. On a real thermal queue that is the wrong instruction, and the
+// failure it produced is the one he photographed: **the bill printed sideways and at half size.**
+//
+// The numbers, measured rather than guessed: an 8-line bill declares `size:80mm 134mm`. The queue's
+// media is a SHORT receipt page (70mm x 65mm — the recipe validated in July). To put an 80x134mm page
+// on 70x65mm media the driver must scale to min(70/80, 65/134) = 0.49 — half size — and it rotates the
+// job to fit the better axis, which is the landscape. Meanwhile the KOT, which declares NOTHING, is
+// perfect: the queue's own short page paginates it and Chrome never slices a line.
+//
+// So the bill now does exactly what the KOT does. The rule was already written 340 lines above this
+// one — "NO @page size override — a forced size smaller/squarer than the paper gets rotated or
+// bottom-anchored by CUPS (sideways prints + 20cm blank lead-ins)" — and this code contradicted it.
+// The blank-tail worry it was written for is handled by the QUEUE (FeedWhere=AfterJob,
+// FeedDist=9feed30mm), which is where paper feed belongs.
+//
+// It is kept as a no-op rather than deleted because `printAgain()` is called from the bill's own
+// toolbar button and from the onload path, and a missing function would break both.
+// Guarded by verify:print-format so it cannot come back.
++ "function measure(){ /* intentionally nothing — see the note in billdoc.js */ }\n"
++ "function printAgain(){ print(); }\n"
 + "function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }\n"
 + "// NOTHING here closes this window. Print and Cancel look identical to the page (one afterprint\n"
 + "// event, no flag), so closing on that event also destroyed the bill when the person pressed\n"
