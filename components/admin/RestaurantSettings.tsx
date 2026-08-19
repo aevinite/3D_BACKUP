@@ -991,8 +991,8 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Open the setup guide</a>
-            <a className="adm-btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter file</a>
-            <a className="adm-btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter file</a>
+            <a className="adm-btn" href="/api/print-station/mac" download>⬇ Mac starter file</a>
+            <a className="adm-btn" href="/api/print-station/windows" download>⬇ Windows starter file</a>
           </div>
         </div>
       </div>

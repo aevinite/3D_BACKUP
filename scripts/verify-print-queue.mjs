@@ -189,10 +189,23 @@ check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
 check(/prsheet-status/.test(kpanel) && /kotPrintTarget/.test(kpanel),
   "the kitchen screen's 🖨 sheet SHOWS where printing stands (on/off, and which screen prints)",
   "the kitchen sheet no longer says whether this screen is even meant to be printing — a cook at a silent printer has to ask someone");
-const guideFiles = ["public/print-station/print-station-mac.command", "public/print-station/print-station-windows.bat", "public/print-station/print-station-linux.sh"];
-check(guideFiles.every((f) => { try { read(f); return true; } catch { return false; } }),
-  "all three starter files exist (Windows · Mac · Linux/Pi)",
-  "a starter file is missing — the guide offers it as a download and the link would 404");
+// The starters are GENERATED per request now, with the URL of the site they were downloaded from —
+// they were static files until 2026-08-19, when the Mac one turned out to be blocked by Gatekeeper AND
+// pointing at the wrong stack (two failures that look identical to the person at the printer).
+const station = read("lib/printStation.ts");
+const stationRoute = read("app/api/print-station/[file]/route.ts");
+check(/mac:/.test(station) && /windows:/.test(station) && /linux:/.test(station),
+  "one source generates all three starters (Windows · Mac · Linux/Pi)",
+  "a starter is missing from lib/printStation.ts — a screen offers it as a download and the link would 404");
+check(/x-forwarded-host/.test(stationRoute) && /Content-Disposition/.test(stationRoute),
+  "…each download arrives pointed at the site it came from, as an attachment (nothing to edit)",
+  "the starter route no longer fills in the requesting site — every restaurant would have to find and edit the URL line, and a wrong URL looks exactly like a blocked file");
+check(/disable-backgrounding-occluded-windows/.test(station) && /kiosk-printing/.test(station),
+  "the two flags that make this work at all are in the generated scripts",
+  "a starter lost --kiosk-printing or --disable-backgrounding-occluded-windows — the first means every ticket waits for a click, the second is the whole covered-window bug");
+check(/Gatekeeper|could not verify/i.test(guide) && /bash ~\/Downloads/.test(guide),
+  "the guide answers the macOS block a real Mac shows (and the old right-click trick is gone)",
+  "the guide no longer explains 'Apple could not verify' — the owner hit exactly that dialog, and the instructions told him to right-click → Open, which macOS Sequoia removed");
 check(/id="linux"/.test(guide) && /Raspberry Pi/.test(guide) && /id="other"/.test(guide),
   "the guide covers Linux and a Raspberry Pi, and says which devices can NEVER be the printer",
   "the guide has lost the Linux / device-support sections the owner asked for");
