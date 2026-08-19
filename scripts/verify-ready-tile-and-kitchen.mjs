@@ -181,5 +181,95 @@ const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? read
   }
 }
 
+// ── (G) A SURGICAL PATCH MUST TELL THE RECONCILER IT NO LONGER KNOWS THE CARD ────────────────────
+// (T6 re-check, 2026-08-19.) reconcileList() decides whether to repaint a card by comparing the
+// desired html to `__kdsHtml`, the html that card was last BUILT from. Two paths edit a card in
+// place instead of rebuilding it — the ✓ turning a line into "ready", and that being taken back.
+// Neither may re-stamp __kdsHtml (they never built the card), so both must CLEAR it. Miss that and
+// the reconciler compares against a stamp older than the edit, matches, and reuses a node the edit
+// already changed: the dish reads `preparing` on the server and everywhere else, and the cook has
+// no ✓ to re-send it with. A single-dish ticket hides it (finishing moves the card to Ready, and
+// moveCardToReady rebuilds it); a ticket with two cooking dishes does not.
+{
+  // The model: what the reconciler does with a stamp that predates a surgical edit.
+  const reconcile = (node, desiredHtml) => (node.__kdsHtml === desiredHtml) ? node : { html: desiredHtml, __kdsHtml: desiredHtml };
+  const built = { html: "<tick>", __kdsHtml: "<tick>" };
+  const patched = { ...built, html: "<ready>" };                       // the ✓ edited the DOM only
+  check("OLD: a restored dish reuses the node the tap had already changed (bug reproduced)",
+    reconcile(patched, "<tick>").html === "<ready>");
+  const forgotten = { ...patched, __kdsHtml: null };                   // …after forgetCardHtml()
+  check("FIXED: forgetting the stamp forces the card to be repainted from the truth",
+    reconcile(forgotten, "<tick>").html === "<tick>");
+  check("FIXED: a card nobody patched is still reused, so nothing else starts churning",
+    reconcile(built, "<tick>") === built);
+}
+
+// ── (H) THE TABLE MARKS MUST BE READABLE — computed, not a hard-coded hex ────────────────────────
+// The marks are drawn with inline colours, so one value covers both skins and no stylesheet can
+// rescue them. 👑 VIP measured 4.23:1 at 10px/800 — the only one of the three that missed, and the
+// one that means "pull this forward". Computing the ratio here means a future colour change is
+// checked too, instead of this guard pinning one hex nobody remembers the reason for.
+{
+  const lum = (hex) => { const n = parseInt(hex.slice(1), 16), c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+  const ratio = (a, b) => { const L1 = lum(a), L2 = lum(b); return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05); };
+  check("the badge contrast maths is right (white on black is 21:1)", Math.round(ratio("#ffffff", "#000000")) === 21);
+  check("OLD: the VIP violet was under the line (bug reproduced)", ratio("#ffffff", "#8b5cf6") < 4.5);
+}
+
+// ── DRIFT CHECKS for (G) and (H), plus the tablet-sized top bar ──────────────────────────────────
+{
+  const js = readIf("public/panels/kitchen/app.js");
+  if (js) {
+    check("kitchen: there is one helper that forgets a card's stamp",
+      /function forgetCardHtml\(orderId\)[\s\S]{0,400}?card\.__kdsHtml = null/.test(js),
+      "reconcileList compares against __kdsHtml; a path that patches a card in place has to invalidate it.");
+    const mi = (js.match(/function markItemReady\([\s\S]*?\n\}/) || [])[0] || "";
+    check("kitchen: a refused ✓ lets its card redraw",
+      /\.catch\(\([^)]*\)\s*=>\s*\{[\s\S]{0,2600}?forgetCardHtml\(/.test(mi),
+      "otherwise the dish is restored in the data and the ✓ never comes back on screen.");
+    // the marks, as the panel actually ships them
+    const m = js.match(/TAG_BADGE = \{ vip: \["[^"]*", "(#[0-9a-f]{6})"\], family: \["[^"]*", "(#[0-9a-f]{6})"\], guest: \["[^"]*", "(#[0-9a-f]{6})"\] \}/i);
+    check("kitchen: the three table marks are still declared where this guard can read them", !!m);
+    if (m) {
+      const lum = (hex) => { const n = parseInt(hex.slice(1), 16), c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+        const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+      const ratio = (a, b) => { const L1 = lum(a), L2 = lum(b); return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05); };
+      // guest is the one drawn with dark ink; the other two are white (see the tagBadge template)
+      const marks = [["VIP", m[1], "#ffffff"], ["FAMILY", m[2], "#ffffff"], ["GUEST", m[3], "#1c2230"]];
+      for (const [name, bg, ink] of marks) {
+        const r = ratio(ink, bg);
+        check(`kitchen: the ${name} mark is readable (${r.toFixed(2)}:1)`, r >= 4.5,
+          `10px/800 is small text, so it needs 4.5:1 — ${ink} on ${bg} measures ${r.toFixed(2)}:1.`);
+      }
+    }
+  }
+  const css = readIf("public/panels/kitchen/style.css");
+  if (css) {
+    const btn = (css.match(/\n\.btn \{[^}]*\}/) || [])[0] || "";
+    check("kitchen: a top-bar button is a 44px target at every width",
+      /min-height:\s*44px/.test(btn),
+      "measured 43px on a 1194x834 kitchen tablet — only the phone block ever set a minimum, and 🚫 Sold out and 🖨❗ printer problem are pressed during service.");
+    // …and the way that 44px is reached must not set `display` on .btn. `.kds-more-btn{display:none}`
+    // is what keeps the phone-only ⋯ button off a desktop bar; it has the same specificity and comes
+    // EARLIER, so a `display` in .btn silently wins and ⋯ appears at every width. That happened while
+    // making this very fix, and only a measurement at four widths caught it.
+    check("kitchen: the base .btn rule sets no display, so it cannot unhide the phone-only ⋯",
+      !/display\s*:/.test(btn),
+      "a <button> is inline-block already — min-height alone is enough, and adding display here overrides .kds-more-btn.");
+    const moreHide = css.indexOf(".kds-more-btn { display: none; }");
+    check("kitchen: the ⋯ button is still hidden by default", moreHide >= 0);
+    const tt = (css.match(/\.theme-toggle\{[^}]*\}/) || [])[0] || "";
+    check("kitchen: the theme toggle matches the row it sits in",
+      /width:44px;\s*height:44px/.test(tt), "it was 40x40 in a row of 44s.");
+    // and nothing may quietly shrink them again
+    const shrink = [...css.matchAll(/\.(?:top-actions \.btn|btn|theme-toggle)[^{]*\{[^}]*min-height:\s*(\d+)px/g)]
+      .map((x) => +x[1]).filter((n) => n < 44);
+    check("kitchen: no later rule shrinks a bar control back below 44px", shrink.length === 0, "found: " + shrink.join(", "));
+  }
+}
+
 console.log("\n" + (pass ? "ALL PASS" : "SOME FAILED"));
 process.exit(pass ? 0 : 1);

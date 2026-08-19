@@ -35,6 +35,18 @@
      resolve to 0px and nothing moves at all. */
   --sal: max(env(safe-area-inset-left, 0px), var(--safe-l, 0px));
   --sar: max(env(safe-area-inset-right, 0px), var(--safe-r, 0px));
+  /* DECLARED, BECAUSE THEY WERE ALREADY BEING READ (T6 re-check, 2026-08-19). The kitchen menu
+     and the printer sheet that arrived with the print-queue work read --panel-2 and --fg, and
+     neither was ever declared anywhere this panel can see — and neither read carries a fallback,
+     so `background: var(--panel-2)` resolved to nothing at all: the hamburger button, the drawer's
+     close button and the sheet's status box shipped with no surface under them, in both skins.
+     That is the same shape as the undeclared token that once left a screen stuck on one skin.
+     Declared as aliases of what the file already has, so nothing new has to be kept in step and
+     both skins follow automatically. --accent is read WITH a fallback, so it was never broken;
+     it is named here anyway so the accent is the house gold rather than a stray violet. */
+  --panel-2: #2b2118;   /* a second surface, one step off --panel */
+  --fg: var(--text);
+  --accent: var(--blue);
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -70,9 +82,26 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .kds-more-row + .kds-more-row { margin-top: 2px; }
 .kds-more-row .kmr-label { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--text); }
 /* A menu row is a comfortable target even though the control inside is an icon. */
-.kds-more-row .btn, .kds-more-row .theme-toggle { min-height: 40px; min-width: 46px; justify-content: center; }
+/* 44px here too. This rule is later AND more specific than `.btn`, so its old 40px silently
+   undid the bar's new minimum for the four controls the phone moves INTO this menu. */
+.kds-more-row .btn, .kds-more-row .theme-toggle { min-height: 44px; min-width: 46px; justify-content: center; }
 .clock { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 15px; }
-.btn { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
+/* FINGER-SIZED ON A TABLET TOO (T6 re-check, 2026-08-19). Measured on the top bar at 1194x834 —
+   the actual kitchen tablet — and at 1280 and 768: every button came out 43px tall and the
+   Wall-view toggle 37px, because only the phone block below ever set a minimum. 37px is the same
+   figure the T14 tablet sweep called a fault on the 86 board's toggles, for the same reason: a
+   kitchen screen is a TOUCH screen at 1194px exactly as much as at 360px, and two of these —
+   🚫 Sold out and 🖨❗ printer problem — are pressed during service with wet hands. This is the
+   same 44px I gave the ticket's 🖨 button and then failed to check one row higher up. The
+   padding does the growing, so the bar looks unchanged. */
+.btn { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 14px; font-size: 14px; cursor: pointer; font-family: inherit;
+  min-height: 44px; }
+/* NOTE the absence of `display` above, and do not add it back. A button is inline-block already,
+   so min-height alone does the job and the label stays centred. Setting `display: inline-flex`
+   here — the first attempt — reads as harmless and is not: `.kds-more-btn { display: none }`
+   further up is the rule that keeps the phone-only ⋯ button off a desktop bar, it carries the
+   same specificity, and this rule comes later, so ⋯ appeared on every screen. Caught by the
+   re-test measuring the bar at four widths, not by looking at it. (T6 re-check, 2026-08-19.) */
 .btn:hover { border-color: var(--blue); }
 /* The two buttons whose WORDS drop on a phone are built as an icon span + a word span. The space
    that used to sit between "▦" and "Wall view" in the markup went with that change, so the desktop
@@ -316,7 +345,7 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
    ═══════════════════════════════════════════════════════════════════════ */
 .theme-toggle{
   -webkit-appearance:none; appearance:none; cursor:pointer;
-  width:40px; height:40px; flex:0 0 auto; padding:0;
+  width:44px; height:44px; flex:0 0 auto; padding:0;   /* 40px was the odd one out in a 44px row (T6 re-check) */
   display:inline-flex; align-items:center; justify-content:center;
   font-size:18px; line-height:1; border-radius:10px;
   border:1px solid var(--line); background:var(--panel); color:var(--text);
@@ -331,6 +360,7 @@ html[data-theme="light"]{
      floor legend, the seat counts, the filter buttons and the take-order dish price
      (T11 sweep, 2026-08-13). Same hue, one step deeper: 5.37:1 / 4.53:1. */
   --bg:#f1ebe1; --panel:#ffffff; --line:#e6dcc9; --text:#2c2219; --muted:#77694c;
+  --panel-2:#f7f2e9;   /* the light skin's second surface (--fg and --accent alias tokens that already flip) */
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
   /* --blue (the house gold) is a FILL/BORDER colour. On white it measured 2.81:1, so anything
      drawn with it as TEXT was the faintest thing on the board — including .tbl, the TABLE NUMBER,
