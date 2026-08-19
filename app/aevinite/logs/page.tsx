@@ -113,6 +113,11 @@ export default function AdminLogs() {
   // ignored searchParams entirely): the notification bell links here with ?level=error
   // and the Repair page's "Full activity log" links with ?restaurant_id=<id>. Read once
   // on mount from location.search (no Suspense boundary needed, matching this page's style).
+  // `seeded` gates the first fetch until the URL has been read. Without it the load effect fired
+  // once with the DEFAULT filters and again with the seeded ones, so following "Full activity log"
+  // from the Repair page pulled 200 rows for EVERY restaurant and then 200 more for the one asked
+  // for — twice the data for the same screen (T17 sweep, 2026-08-19).
+  const [seeded, setSeeded] = useState(false);
   useEffect(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -121,8 +126,9 @@ export default function AdminLogs() {
       const r = p.get("restaurant_id");
       if (r) setRid(r);
       const query = p.get("q");
-      if (query) setQ(query);
+      if (query) { setQ(query); setQDebounced(query); }
     } catch {}
+    setSeeded(true);
   }, []);
 
   const loadOps = useCallback(async () => {
@@ -193,10 +199,11 @@ export default function AdminLogs() {
   // search changes. No setTimeout here — the debounce lives in qDebounced above, so a
   // severity/restaurant click fetches immediately (instant filter, no laggy "both blue").
   useEffect(() => {
+    if (!seeded) return;
     setOps(null); setCust(null); setAud(null);
     if (tab === "ops") loadOps(); else if (tab === "aud") loadAud(); else loadCust();
-  }, [tab, loadOps, loadCust, loadAud]);
-  useEffect(() => { loadCount(); }, [loadCount]);
+  }, [seeded, tab, loadOps, loadCust, loadAud]);
+  useEffect(() => { if (seeded) loadCount(); }, [seeded, loadCount]);
 
   const runCleanup = async () => {
     if (!pending) return;
