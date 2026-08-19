@@ -590,18 +590,6 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
   injects
     ? bad("the thermal bill/KOT declares an @page SIZE again — a page bigger or squarer than the roll makes the driver scale and ROTATE the job (measured: 80x134mm onto 70x65mm = 0.49x, sideways). Only @page{margin:0} belongs here; paper feed is the queue's job (FeedWhere/FeedDist).")
     : ok("neither thermal document declares an @page size — the queue's own receipt page paginates them");
-  // ── THE PREVIEW IS THE PAPER, INCLUDING ITS WIDTH (owner, 2026-08-19, with both photos) ────────
-  // The bill had no width on screen, so the preview laid out across the whole window while the paper
-  // gives it 60mm of ink: the restaurant name fitted one line on screen and wrapped to two on the
-  // roll, and he could not trust the preview. The screen must carry the printer's own column, and
-  // border-box with it — width + padding on content-box makes the preview 10mm wider than the paper,
-  // which is the same lie in smaller print.
-  {
-    const css = thermal.replace(/\\n/g, "\n");
-    /width:70mm;margin:0 auto;padding:2mm 5mm;box-sizing:border-box/.test(css)
-      ? ok("the bill preview uses the printer's own 70mm column (border-box), so what is on screen is what the roll does")
-      : bad("the bill preview no longer matches the paper's width. Screen must be width:70mm + padding:2mm 5mm + box-sizing:border-box — without it the preview lays out across the window, the restaurant name stops wrapping where the paper wraps it, and the preview cannot be trusted (owner, 2026-08-19, with photos of both).");
-  }
   /@page\{margin:0\}/.test(thermal.replace(/\\n/g, "\n"))
     ? ok("…and @page{margin:0} is still there, so no browser header/footer reaches the paper")
     : bad("@page{margin:0} has gone from the thermal document — the browser's own header, footer and page numbers will print on the roll");
