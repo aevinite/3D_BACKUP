@@ -82,12 +82,11 @@ export interface BillDocData {
    *  caller could not render this document at all — on the one flag the whole sheet's identity
    *  turns on. */
   cancelled?: boolean;
-  /** true = this is a SECOND copy of a bill already printed, so it carries the "Reprint ·
-   *  Duplicate" band across the top — the same band and the same flag name the kitchen ticket has
-   *  used since 2026-08-04, so all three documents brand a duplicate identically. A first print must
-   *  never set it: a sheet marked DUPLICATE that is really the original is a lie on paper.
-   *  A bill that is both cancelled AND reprinted shows both bands. */
-  reprint?: boolean;
+  /* REJECTED (owner, 2026-08-19): there is no `reprint` on a BILL. The band was live 2026-08-17 →
+   * 2026-08-19 and the owner removed it — a second copy of a bill is a service action, not an
+   * incident. Declaring the flag again is what would let a caller pass it, so it stays undeclared.
+   * The kitchen TICKET keeps its own `reprint` (BillDocKot below) — that one he confirmed.
+   * R37 in docs/REJECTED-IDEAS.md. */
   /** The bill's position in the signed chain (mig 332) and its `chain_hash`. Supply BOTH or the
    *  verification line does not print at all. The document takes the first 12 characters of the
    *  hash — enough to identify one bill, short enough for a 66mm roll — and formats the line
@@ -224,9 +223,8 @@ export function billData(a: {
   tableDisp?: string;
   logo?: string;
   parcel?: boolean;
-  /** true = the panel has printed this bill before, so the sheet carries the Reprint · Duplicate
-   *  band. Only the panel knows this, which is why it is passed in rather than derived. */
-  reprint?: boolean;
+  /* REJECTED (owner, 2026-08-19): no `reprint` argument. See the note on BillDocData above —
+   * a bill sheet is identical on the tenth copy and the first. */
   autoPrint?: boolean;
   now?: string | number | Date;
 }): BillDocData;

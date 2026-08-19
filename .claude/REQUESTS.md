@@ -567,6 +567,45 @@ Owner reviewed all 20 items and chose. Order: 1 → 2 → 6 → 3 → 5 → 4.
 
 ---
 
+## 2026-08-19 — Printing a bill again is not an event (owner: "reprinting should also not ask any question")
+
+His words: *"in the printing bill I don't even want the reprinted bill shown in the bill as well as
+I don't want reprinted bill shown anywhere like on audit also bcz it's not any kind of probelm which
+needs to be audited … reprinting should also not ask any question … and make the guard also in code
+like never change that to reprint thing … after once print the button will just show reprint instead
+of print works same"* — and, on the reopen half: *"reopen will be noted in the audit also but
+printing again will not"*, *"reopening can also chnage name and number … the old one is autofilled"*.
+
+- [x] **The printed BILL never says it is a second copy.** The "Reprint · Duplicate" band (shipped
+  2026-08-17, mig 333) is gone from `public/panels/billdoc.js`; bill data has no `reprint` field at
+  all, so no caller can put it back. **Verified in Chrome**: printed the same bill three times from
+  the manager panel on the dev stack — all three sheets identical, none branded.
+- [x] **The KITCHEN TICKET keeps its banner** (his own ask, 2026-08-04, re-confirmed the same day:
+  *"bill only keep kot banner and kot banner also show in audit"*). Untouched, and still audited.
+- [x] **A reprint reaches no log, anywhere.** `sessions/:id/bill-printed` writes nothing to the
+  Activity log or the Audit. **Verified**: two reprints in a row produced zero rows.
+- [x] **Printing asks nothing.** Removed the "This invoice was voided. Re-issuing assigns a NEW
+  number — why are you re-issuing it?" prompt that fired when a reopened bill was printed — the
+  reason had already been given, and required, in the reopen picker. The server now takes the
+  reopen's own reason as the re-issue reason, so the record is unchanged. **Verified**: reopen →
+  Reprint raised no question at all; the Activity log shows `invoice_generate · Bill #2 · Reopened:
+  Adding more items`.
+- [x] **Reopening a bill is still recorded, exactly as before** — reason still required, still
+  audited (`invoice_voided`), new number still logged, before → after row still written.
+  **Verified** on the same bill.
+- [x] **The "who is this bill for?" sheet still comes back after a reopen, pre-filled** — his ask.
+  **Verified**: mobile and name came back filled in.
+- [x] **After the first print the button reads "Reprint"** — same button, same job, no extra step.
+  Every bill-print button in the manager panel and the waiter tablet reads it from one place
+  (`billPrintLabel`), off the BILL (`sessions.bill_printed_at`), so the till and the tablet agree.
+  **Verified**: "🖨 Print bill" → print → "🖨 Reprint", immediately.
+- [x] **Guarded in code, as he asked.** `npm run verify:bill-reprint`
+  (`scripts/verify-bill-reprint-is-silent.mjs`, 28 checks) fails the build if the band, the prompt
+  or an audit row comes back, if the kitchen ticket's banner is lost, or if the button stops
+  relabelling. It runs automatically after any edit to the four files the rule lives in. Recorded
+  as **R37 / R38 / R39** in `docs/REJECTED-IDEAS.md`, with the matching `REJECTED` comments in the
+  code, and re-commented in the database by migration 339.
+
 ## ✅ Done and shipped — collapsed (2026-08-15)
 
 These asks were delivered and verified live. Their full item-by-item text is in this file's git

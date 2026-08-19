@@ -1246,9 +1246,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
         // `bill_printed_at` rides along (mig 333) so the panel knows a bill has ALREADY been on
-        // paper and can brand the next copy "Reprint · Duplicate". It has to come from the row,
+        // paper and can label its button "Reprint" instead of "Print". It has to come from the row,
         // not from the device that printed: the case that matters is the manager printing at the
-        // till and a WAITER reprinting from the tablet a minute later.
+        // till and a WAITER reprinting from the tablet a minute later, whose own screen would
+        // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
+        // the paper or in the Audit — it changes one word on one button, nothing else.
         const [sessQ, memQ, chainQ] = await Promise.all([
           sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
@@ -1276,7 +1278,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
-            // Has this bill already been on paper? (mig 333) — the next copy says "Reprint".
+            // Has this bill already been on paper? (mig 333) — the BUTTON then says "Reprint".
             o.bill_printed_at = s.bill_printed_at;
             // The verification line the bill prints (mig 332). Named the way billdoc's billData
             // reads them off the session, so no panel has to reshape anything.
@@ -3441,7 +3443,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // an issued invoice always carries its customer.
       const custSave = await saveBillCustomer(sb, rid, b as string, body);
       if (!custSave.ok) return err(custSave.message, 400);
-      const genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      let genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       // ── the AFTER half of a reopen ────────────────────────────────────────────────────────
       // A reopen records what the bill was worth when it was reopened. Until now nothing recorded
       // what it became — so a bill reopened to ADD food showed only the lower, earlier number and
@@ -3454,10 +3456,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // before/after row was never written — invisible in code review, caught the first time a
       // real bill was driven through the server (T15, 2026-08-05).
       const priorVoid = (await sb.from("deletion_audit")
-        .select("id, at, meta")
+        .select("id, at, reason_code, reason_note, meta")
         .eq("restaurant_id", rid).eq("session_id", b).eq("kind", "invoice_voided")
-        .order("at", { ascending: false }).limit(1)).data as { id: number; at: string; meta: Record<string, unknown> | null }[] | null;
+        .order("at", { ascending: false }).limit(1)).data as
+          { id: number; at: string; reason_code: string | null; reason_note: string | null; meta: Record<string, unknown> | null }[] | null;
       const reopened = priorVoid && priorVoid[0];
+      // THE REASON COMES FROM THE REOPEN, NOT FROM A SECOND QUESTION (owner, 2026-08-19:
+      // "reprinting should also not ask any question"). The panel used to stop on Print and demand
+      // a typed re-issue reason — the same question the reopen picker had already REQUIRED one step
+      // earlier, worded as if pressing Print were itself a reopen. The prompt is gone, so the
+      // record takes the answer he actually gave: this bill was reopened for <reason>, therefore
+      // it is being re-issued for <reason>. Nothing about the trail gets thinner, and a caller that
+      // does send its own reason still wins.
+      // The typed note if there is one, otherwise the picked reason in plain words ("add items").
+      const reopenWhy = (reopened?.reason_note || "").trim() || (reopened?.reason_code || "").replace(/_/g, " ").trim();
+      if (!genReason && reopenWhy) genReason = `Reopened: ${reopenWhy}`.slice(0, 200);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
       if (error) {
         if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409);

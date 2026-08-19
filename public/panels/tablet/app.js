@@ -723,6 +723,25 @@ function banquetRate() {
   return comps.length ? comps.reduce((a, c) => a + c.rate, 0) / 100 : effRate();
 }
 
+// "Print" the first time, "Reprint" after that (owner, 2026-08-19: "after once print the button
+// will just show reprint instead of print works same"). Same rule and same wording as the manager
+// panel's billPrintLabel — the answer comes off the BILL (sessions.bill_printed_at, mig 333), so
+// the manager printing at the till makes THIS screen say "Reprint" a minute later.
+// WORKS THE SAME: same handler, same sheet, no question asked, nothing recorded.
+// Same remembered set as the manager panel, for the same reason: a refresh landing between the
+// print and the server's stamp must never turn "Reprint" back into "Print" on a bill whose paper
+// the guest is already holding.
+const _billPrintedHere = new Set();
+function billPrintedBefore(sess, os) {
+  if (sess && sess.bill_printed_at) return true;
+  if ((os || []).some((o) => o && o.bill_printed_at)) return true;
+  const sid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  return !!sid && _billPrintedHere.has(sid);
+}
+function billPrintLabel(sess, os, suffix) {
+  return `<span data-bill-print-btn>🖨 ${billPrintedBefore(sess, os) ? "Reprint" : "Print"}${suffix ? " " + suffix : ""}</span>`;
+}
+
 // printTableBill(t): give the guest their bill FROM THE WAITER'S HANDHELD.
 //
 // This panel could do every step of issuing a tax invoice except produce it: take the money, split
@@ -754,17 +773,28 @@ function printTableBill(t) {
     // value would otherwise render a broken image on a guest's bill.
     logo: /^https?:\/\//i.test(String((state.data.restaurant || {}).logo_url || "")) ? String(state.data.restaurant.logo_url) : "",
     autoPrint: true,
-    // A SECOND COPY SAYS SO (mig 333). This is the device the case was built for: the manager
-    // prints at the till, the guest asks for another copy, and a waiter reprints it HERE. The flag
-    // lives on the bill, so this panel knows what the other one already did.
-    reprint: !!(sess.bill_printed_at || os.some((o) => o && o.bill_printed_at)),
+    // REJECTED (owner, 2026-08-19): the bill sheet says NOTHING about being a second copy. A
+    // `reprint` flag was passed here 2026-08-17 → 2026-08-19 and drew a "Reprint · Duplicate" band;
+    // he removed it — a guest asking for their bill again is service, not an incident. billdoc.js
+    // has no such flag any more, and scripts/verify-bill-reprint-is-silent.mjs keeps it that way.
   }));
-  // Stamp the first print, so the next copy from ANY device is branded. Idempotent on the server;
-  // fire-and-forget, because a failed stamp must never stand between a guest and their bill.
+  // Stamp the first print, so this bill's button reads "Reprint" on EVERY panel from now on —
+  // that is the only thing the stamp does. Idempotent on the server; fire-and-forget, because a
+  // failed stamp must never stand between a guest and their bill. Nothing is written to the Audit.
+  // Remembered as printed the moment the window is written, not when the server answers.
+  if (sess.id) _billPrintedHere.add(sess.id);
   if (sess.id && !sess.bill_printed_at) {
     try {
       api("POST", `/sessions/${sess.id}/bill-printed`)
-        .then(() => { sess.bill_printed_at = new Date().toISOString(); })
+        .then(() => {
+          _billPrintedHere.add(sess.id);
+          sess.bill_printed_at = new Date().toISOString();
+          os.forEach((o) => { if (o && !o.bill_printed_at) o.bill_printed_at = sess.bill_printed_at; });
+          // Relabel the button already under the waiter's finger, without a redraw of the panel.
+          document.querySelectorAll("[data-bill-print-btn]").forEach((b) => {
+            b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
+          });
+        })
         .catch(() => {});
     } catch (e) { /* offline — the paper still came out */ }
   }
@@ -2008,7 +2038,7 @@ function renderPanel() {
       <!-- PRINT THE BILL. Deliberately not behind a new switch: it shows the guest exactly what this
            screen already shows the waiter, so there is nothing extra to permit — and a waiter who
            can settle a table but cannot hand over its bill is the gap this closes (T7 F9). -->
-      ${s && os.length ? `<button class="btn" id="printBillBtn">🖨 Print bill</button>` : ""}
+      ${s && os.length ? `<button class="btn" id="printBillBtn">${billPrintLabel(s, os, "bill")}</button>` : ""}
       <!-- A DISABLED BUTTON EATS THE TAP, AND THIS IS A TOUCH PANEL (T7 sweep, 2026-08-17). While an
            order on this table is still un-accepted the bill cannot be settled — true, and the button
            used to be rendered disabled with the reason in a title attribute. A title needs a HOVER,
