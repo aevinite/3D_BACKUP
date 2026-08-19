@@ -48,6 +48,18 @@ export default function AdminBilling() {
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
+  // WHAT "COLLECTED THIS YEAR" LEAVES OUT (T16 sweep, 2026-08-19). The server deliberately sums
+  // only the restaurants billed in INR, because adding two currencies together would be a made-up
+  // number - but the tile said "Collected this year" flat, so a restaurant billed in anything else
+  // had its payments disappear from the admin's own income figure with nothing saying so. Same
+  // rows the table already has, grouped by currency, so the tile can name what it counted and what
+  // it did not.
+  const otherCollected = (rows || []).reduce((m, r) => {
+    const c = (r.currency || "INR").toUpperCase();
+    if (c !== "INR" && r.paidThisYear > 0) m.set(c, (m.get(c) || 0) + r.paidThisYear);
+    return m;
+  }, new Map<string, number>());
+
   const needle = q.trim().toLowerCase();
   const filtered = (rows || []).filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle));
   const todayStr = today();
@@ -68,7 +80,15 @@ export default function AdminBilling() {
         <div className="adm-stat"><div className="k">Active</div><div className="v">{summary?.statusCounts.active || 0}</div></div>
         <div className="adm-stat"><div className="k">Trial</div><div className="v">{summary?.statusCounts.trial || 0}</div></div>
         <div className="adm-stat"><div className="k">Paused / cancelled</div><div className="v">{(summary?.statusCounts.paused || 0) + (summary?.statusCounts.cancelled || 0)}</div></div>
-        <div className="adm-stat"><div className="k">Collected this year</div><div className="v">{summary ? money(summary.totalCollectedThisYear, "INR") : "…"}</div></div>
+        <div className="adm-stat" title={otherCollected.size ? "Only the restaurants billed in rupees are added up - mixing currencies would be a made-up total." : undefined}>
+          <div className="k">Collected this year{otherCollected.size ? " · rupees" : ""}</div>
+          <div className="v">{summary ? money(summary.totalCollectedThisYear, "INR") : "…"}</div>
+          {otherCollected.size > 0 && (
+            <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 3, lineHeight: 1.4 }}>
+              not counted above: {[...otherCollected].map(([c, n]) => money(n, c)).join(" · ")}
+            </div>
+          )}
+        </div>
         <div className="adm-stat"><div className="k">Due in 30 days</div><div className="v" style={summary && summary.overdue > 0 ? { color: "var(--adm-danger)" } : undefined}>{summary?.dueSoon ?? "…"}{summary && summary.overdue > 0 ? ` (${summary.overdue} overdue)` : ""}</div></div>
       </div>
 
