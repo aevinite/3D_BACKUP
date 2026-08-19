@@ -72,3 +72,26 @@ He kept all 12 fixes. He also found a 13th problem himself, and turned the parke
 | # | where | what | commit |
 |---|---|---|---|
 | 14 | owner → Dashboard → the "Lost to cancellations" tile, and the insight strip | the dashboard called a cancelled order money lost and printed a figure for it. The database classifies `order_cancelled` as `record`, never `money`, and the two sources disagree 3× on the same window (rollup 1,124/₹8,28,096 vs Audit 394/₹1,85,766) because they count different sets. His catch. The dashboard now quotes nothing and links to the record | `3eb58929` |
+
+
+---
+
+## Beyond the sweep — the cancellation feature (2026-08-18/19)
+
+Not a sweep finding: work he asked for after reading the list. Spec and closing notes in
+`docs/CANCEL-AND-LOSS-SPEC.md`; migration **337**; guards `verify:cancel-loss` (18, database) and
+`verify:cancel-made` (13, through the real endpoint).
+
+It uncovered three faults that were ALREADY in the product, which is why it is recorded here too:
+
+| # | where | what | fixed in |
+|---|---|---|---|
+| 15 | manager panel → the floor → cancel a KOT · backend effect | cancelling reversed NO stock, so an order keyed by mistake ate its ingredients for ever with nothing recording why the shelf was short | mig 337 + `P2` |
+| 16 | manager panel → Inventory → the movement ledger | `consumption_reversal` was a declared movement kind the panel already LABELLED "Order cancelled", and nothing had ever written one — a dead kind | mig 337 |
+| 17 | owner → Dashboard → Expenses · owner → Inventory & expenses | food cooked and then thrown away never became a cost anywhere | mig 337 + `P5` |
+
+Who may answer it: **owner or manager** (his instruction, 2026-08-19) — the manager in their panel
+gated on `void_bills`, the owner in Audit & logs gated on the `logs` section. A narrow, deliberate
+exception to the owner-read-only rule of 2026-08-04: `canRestore: false` still stands, no route puts a
+bill back, and `verify:audit`'s "GET-only" check was NARROWED (the owner write handler may call exactly
+one RPC — the classifier) rather than dropped.
