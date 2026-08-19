@@ -158,6 +158,35 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   else fail("LogDetailModal no longer shows the path — 'from where did this happen' is unanswered again");
 }
 
+// ── 5. A LIST THAT *IS* THE PAGE MUST NOT BE SILENTLY EMPTY (T20 sweep, 2026-08-19) ─────────────
+// /api/owner/settings builds its whole answer from one restaurant list: `modIds` (the feature
+// switches), `nameOf` (what each row is called) and the printing block all read it. Its `.error` was
+// never inspected in the REAL OWNER's branch, so a blip returned a page with no restaurants, no
+// switches and no printing rows — and nothing saying why.
+//
+// That is finding F16 in the branch F16 did not cover: F16 (2026-08-12) filled the list for the
+// ADMIN's scope.all view and left the `else` branch — the majority case — reading as before. Both
+// branches are checked here so the next fix cannot cover one and miss the other again.
+{
+  const set = read("app/api/owner/settings/route.ts");
+  if (!set) fail("app/api/owner/settings/route.ts is missing");
+  else {
+    // The read that fills `restaurants` for a real owner must answer for its own failure.
+    const ownerBranch = set.slice(set.indexOf("const settingsIds"), set.indexOf("const canChangePassword"));
+    if (/dbFail\(|incompleteListResponse\(|return err\(/.test(ownerBranch)) {
+      ok("owner/settings answers for a failed restaurant-list read instead of rendering an empty page");
+    } else {
+      fail("owner/settings' real-owner branch ignores its restaurant-list error again — the page silently loses every restaurant, every feature switch and every printing row (F16's other half)");
+    }
+    // The ADMIN branch must keep going through the paged helper (F16 itself).
+    if (/scopedRestaurantIds\(scope\)/.test(set)) ok("owner/settings still pages the admin's whole-platform list (F16)");
+    else fail("owner/settings no longer pages the admin's restaurant list — the tail past the row cap disappears (F16)");
+    // And the module-switch chunks must keep their own answer.
+    if (/if\s*\(part\.error\)\s*return dbFail\(/.test(set)) ok("owner/settings answers for a failed module-switch chunk rather than hiding a transferred switch");
+    else fail("owner/settings swallows a module-switch read error — a switch the admin handed over would silently not be on the page");
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {

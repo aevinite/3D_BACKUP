@@ -66,7 +66,22 @@ export async function GET(req: NextRequest) {
     // restaurant's appearance/config that the admin withheld. Union above still decides
     // whether the nav item exists at all; this decides WHICH restaurants appear inside.
     const settingsIds = scope.admin ? scope.ids : await entitledSubset(scope.ids, "settings");
-    const r = await sb.from("restaurants").select("id, name").in("id", settingsIds.length ? settingsIds : [" "]).order("name");
+    // ── A BLIP MUST NOT EMPTY THE PAGE (T20 sweep, 2026-08-19) ──────────────────────────────────
+    // `r.error` was never inspected, so a failed read left `restaurants` as `[]` — and everything
+    // below is keyed off that list: `modIds`, so the module-toggle block is skipped; `nameOf`, so
+    // any surviving row is nameless; and the printing block, which reads `restaurants` directly. The
+    // owner opened Settings and saw a page with no restaurants, no feature switches and no printing
+    // rows, with nothing saying why.
+    //
+    // This is EXACTLY finding F16 (2026-08-12) in the branch F16 did not cover: that fix filled the
+    // list for the ADMIN's `scope.all` view and left the real owner's `else` branch — the majority
+    // case — reading the same way it always had. The list is the page here, so a failed read is a
+    // retryable answer, not a shorter page (the same rule `part.error` follows a few lines down).
+    const r = await sb.from("restaurants").select("id, name")
+      .in("id", settingsIds.length ? settingsIds : [" "]).order("name").limit(Math.max(settingsIds.length, 1));
+    if (r.error) return dbFail("owner/settings.restaurants", r.error, {
+      message: "Couldn't load your restaurants just now — please try again.",
+    });
     restaurants = (r.data || []) as { id: string; name: string }[];
   }
   // Only a REAL logged-in owner (not the admin act-as, which has no password row here) may
