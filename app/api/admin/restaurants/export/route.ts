@@ -60,10 +60,21 @@ export async function GET(req: NextRequest) {
     restaurant: restQ.data,
   };
   const truncated: string[] = [];
+  // ── A BACKUP THAT IS INCOMPLETE MUST SAY SO AT THE TOP (T20 sweep, 2026-08-19) ─────────────────
+  // A failed table read already put `{ error: … }` in place of that table's rows, which is right —
+  // this file is what you rebuild a restaurant from, so whoever reads it needs to know which table
+  // came back empty and why. But it was only visible if you happened to scroll to that key in a
+  // hundred-thousand-line JSON: `_meta` listed `truncated` and said nothing about tables that failed
+  // outright. So the download looked like a complete backup, with a 200 and a filename, while a
+  // table's worth of the restaurant was quietly missing.
+  //
+  // Same reasoning as `truncated` itself and as the owner-panel `partial` rule: an answer that could
+  // not be complete has to name what is missing rather than let the reader assume it is all there.
+  const failed: string[] = [];
 
   for (const t of TABLES) {
     const q = await sb.from(t).select("*").eq("restaurant_id", rid).limit(CAP);
-    if (q.error) { backup[t] = { error: q.error.message }; continue; }
+    if (q.error) { backup[t] = { error: q.error.message }; failed.push(t); continue; }
     // THE SETTINGS ROW CARRIES A CREDENTIAL, AND THIS FILE LEAVES THE BUILDING (T17 sweep,
     // 2026-08-13, finding F3). `settings.platform_channels` holds the delivery apps' connection
     // keys (mig 209) — the two admin screens that manage them deliberately never hand the value
@@ -83,8 +94,19 @@ export async function GET(req: NextRequest) {
     .select("id, username, name, role, restaurant_id, phone, active, profile_confirmed, permissions, created_at")
     .eq("restaurant_id", rid).limit(CAP);
   backup.staff_users = staffQ.error ? { error: staffQ.error.message } : (staffQ.data || []);
+  if (staffQ.error) failed.push("staff_users");
 
-  (backup._meta as Record<string, unknown>).truncated = truncated;
+  const meta = backup._meta as Record<string, unknown>;
+  meta.truncated = truncated;
+  meta.failed = failed;
+  // The one line a person reads before trusting the file. `complete: false` is what a restore script
+  // would branch on; the note is what a human would.
+  meta.complete = failed.length === 0;
+  if (failed.length) {
+    meta.note = `INCOMPLETE BACKUP — ${failed.length} table${failed.length === 1 ? "" : "s"} could not be read `
+      + `(${failed.join(", ")}). Each one holds an "error" instead of its rows. Take the backup again before `
+      + `relying on this file. Contains financial records — store securely.`;
+  }
 
   const slug = (restQ.data as { slug?: string }).slug || rid;
   const stamp = new Date().toISOString().slice(0, 10);

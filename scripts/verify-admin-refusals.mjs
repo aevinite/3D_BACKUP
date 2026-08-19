@@ -223,5 +223,44 @@ const NOT_YET = new Map([
     stale.length === 0, stale.join("; "));
 }
 
+// ── 6 · AN ANSWER THAT COULD NOT BE COMPLETE SAYS SO AT THE TOP ──────────────────────────────────
+// The recovery backup is offered as the thing you rebuild a restaurant from, and it is downloaded
+// before a permanent purge. A table that failed to read already left `{ error: … }` in place of its
+// rows — correct — but `_meta` said nothing, so the file looked complete: a 200, a filename, and a
+// table's worth of the restaurant quietly missing unless you scrolled to that key in a
+// hundred-thousand-line JSON. Same rule as `truncated`, which was already there.
+{
+  const rel = "app/api/admin/restaurants/export/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    check("the recovery backup still records which tables hit the row cap", /meta\.truncated\s*=|truncated\s*=\s*\[\]/.test(src));
+    check("…and which tables could not be READ at all", /failed\.push\(/.test(src) && /meta\.failed\s*=/.test(src),
+      "a failed table is invisible unless the reader scrolls to that key — the file looks complete and is not");
+    check("…and it carries one flag a restore script can branch on", /meta\.complete\s*=/.test(src));
+    check("…and the staff table is counted too, not just the looped ones", /staffQ\.error\)\s*failed\.push/.test(src));
+  }
+}
+
+// ── 7 · A PAGED WHOLE-PLATFORM READ HAPPENS ONCE PER REQUEST, NOT ONCE PER TILE ───────────────────
+// `scopedRestaurantIds()` pages the whole `restaurants` table a thousand rows at a time. On the
+// admin's all-restaurants dashboard two tiles each resolved the scope for themselves, so the same
+// paged read ran twice on every recompute — and the two awaits sat one after another, so the second
+// waited on the first. One call site per file is the property; more than one means a tile is paying
+// for a list another tile already has.
+{
+  const rel = "app/api/owner/analytics/route.ts";
+  const src = code(rel);
+  check(`${rel} exists`, !!src);
+  if (src) {
+    const calls = (src.match(/scopedRestaurantIds\(scope\)/g) || []).length;
+    check("the owner dashboard resolves the whole-platform restaurant list at most once per request",
+      calls <= 1, `${calls} call site(s) — memoise it (see tileIds()) rather than asking again per tile`);
+    check("…and the two expense tiles are fetched together, not one after the other",
+      /Promise\.all\(\[staffPayExpense\(\), foodLossExpense\(\)\]\)/.test(src),
+      "awaiting them in sequence inside the returned object makes the second wait on the first");
+  }
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);
