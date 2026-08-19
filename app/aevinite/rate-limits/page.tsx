@@ -120,6 +120,21 @@ export default function AdminRateLimits() {
     if (res.ok) { setHits((prev) => prev.filter((x) => x.id !== h.id)); toast("Blocked from the admin panel."); load(); }
     else toast(res.error || "Couldn't block.", "err");
   };
+  // "Let them try again" — the answer for a GENUINE person who mistyped (the owner forgetting his
+  // own admin password is the everyday case). It lifts the short login lockout on that device and
+  // marks the alert handled. The note at the bottom of "The limits" has promised this button since
+  // it was written; only "Block this device" was ever rendered, so the one screen dedicated to
+  // limits offered the harsh answer and not the kind one — while the Repair hub offered both
+  // (T17 sweep, 2026-08-19).
+  const clearHit = async (h: Hit) => {
+    setHits((prev) => prev.filter((x) => x.id !== h.id));
+    const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "clear", event_id: h.id }),
+    });
+    if (res.ok) toast("Cleared — that device can try the admin password again now.");
+    else { toast(res.error || "Couldn't clear that.", "err"); load(); }
+  };
   const unblock = async (b: Blocked) => {
     setBlocked((prev) => prev.filter((x) => x.key !== b.key));
     setRequests((prev) => prev.filter((x) => x.key !== b.key)); // any request for that device is now moot
@@ -212,9 +227,14 @@ export default function AdminRateLimits() {
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
                   {h.key === "admin_login" ? (
-                    <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => blockHit(h)} title="Bar this device/IP from reaching the admin panel">
-                      <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
-                    </button>
+                    <>
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => clearHit(h)} title="Genuine person — clear the short lockout so they can try the password again now">
+                        <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Let them try again
+                      </button>
+                      <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => blockHit(h)} title="Bar this device/IP from reaching the admin panel">
+                        <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => allowHit(h)} title="This was a real customer — reset their counter so they get through now">
