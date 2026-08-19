@@ -19,6 +19,11 @@ export interface AuditRow {
   item_title?: string | null;
   qty?: number | null;
   amount?: string | number | null;
+  /** The answer to "was the food made?" on a cancellation (owner, 2026-08-18). Sent by the list
+   *  endpoints as a TEXT scalar out of `meta` so a list never carries a whole order snapshot per row;
+   *  absent/null means nobody has answered yet, which is a real state and never guessed at. */
+  made?: string | boolean | null;
+  order_id?: string | null;
   restaurant_id?: string | null;
   restaurant_name?: string | null;
 }
@@ -53,6 +58,23 @@ export const KIND_ICON: Record<string, string>;
  *  summary starts disagreeing with the list printed above it. */
 export const KIND_RISK: Record<string, "money" | "record" | "data">;
 export function riskOf(kind: string): "money" | "record" | "data";
+
+/** ── THE TAGS (owner, 2026-08-18: "make tags for all kind of audit and stuff") ────────────────────
+ *  Additive labels a person can filter by — deliberately NOT a second risk model: risk answers "did
+ *  money move", a tag answers "what area of the restaurant is this about". The database half is
+ *  lfh_audit_tags() (migration 337) and `verify:audit` asserts the two agree, kind by kind. */
+export const KIND_TAGS: Record<string, string[]>;
+export const TAG_LABEL: Record<string, string>;
+export const TAG_ICON: Record<string, string>;
+/** The tags for ONE row: its kind's tags, plus — for a cancellation — whether the food was made
+ *  (`loss` / `no-loss` / `unanswered`, and `cost-unknown` when a made loss prices at zero because the
+ *  dish has no recipe). An unanswered cancellation stays unanswered; it is never guessed. */
+export function tagsOf(row: { kind?: string; meta?: { made?: boolean | null; loss_cost?: unknown } | null }): string[];
+/** Every tag present across a set of rows, with how many carry it — for a chip strip. Built from the
+ *  WHOLE feed, so a chip's count does not change when you tap it. */
+export function tagCountsFrom(rows: unknown[]): { tag: string; count: number; label: string; icon: string }[];
+export function tagLabel(tag: string): string;
+export function tagIcon(tag: string): string;
 export const REASON_LABEL: Record<string, string>;
 export const SORTS: AuditSort[];
 export const DEFAULT_SORT: string;

@@ -24,7 +24,10 @@ import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
-const COLS = "id, at, kind, reason_code, reason_note, actor, actor_role, table_number, bill_no, invoice_no, kot_no, item_title, qty, amount, restaurant_id";
+// `made` is the ONE scalar out of meta (owner, 2026-08-18) — never meta itself, which carries a whole
+// order snapshot; 200 of those for rows nobody opened is the board-wide read the egress rules exist to
+// prevent. It is what lets the row wear its "food lost / nothing lost / not answered" tag.
+const COLS = "id, at, kind, reason_code, reason_note, actor, actor_role, table_number, bill_no, invoice_no, kot_no, item_title, qty, amount, restaurant_id, order_id, made:meta->>made";
 
 export async function GET(req: NextRequest) {
   let scope = await ownerScope(req);
@@ -94,6 +97,11 @@ export async function GET(req: NextRequest) {
   const page = Math.max(parseInt(url.searchParams.get("page") || "1", 10) || 1, 1);
   const start = (page - 1) * limit;
   let q = sb.from("deletion_audit").select(COLS, { count: "exact" })
+    // A REMOVALS record shows REMOVALS. 'removal_classified' is the answer to "was the food made?",
+    // not a thing taken out of the system, so it would put "Cancellation answered" rows into a list
+    // headed "what was removed and why" and count them in its total. The current answer rides on the
+    // cancellation row itself (see `made` in COLS); the trail of who answered stays in the table.
+    .neq("kind", "removal_classified")
     .order("at", { ascending: false }).range(start, start + limit - 1);
   // Optional ?rid= — narrow to ONE selected restaurant. Only honoured when that id is already
   // in the caller's scope, so it can only NARROW, never widen (mirrors /api/owner/oplog).
@@ -143,7 +151,7 @@ export async function GET(req: NextRequest) {
   // Measured on the dev data the day this went in: 220 cancelled tickets and 14 deleted bills existed
   // where a 200-row page showed 178 and 10.
   const countScope = pinRid ? [pinRid] : (scope.all ? null : scope.ids);
-  let kindCounts: { kind: string; n: number; amount: number; risk?: string }[] | null = null;
+  let kindCounts: { kind: string; n: number; amount: number; risk?: string; tags?: string[] }[] | null = null;
   if (countScope && countScope.length) {
     const kc = await sb.rpc("lfh_audit_kind_counts", { p_restaurant_ids: countScope, p_from: null, p_to: null });
     // A failed count is reported ABSENT, never as zeroes: the screen then counts what it holds and
@@ -154,8 +162,13 @@ export async function GET(req: NextRequest) {
     // (lfh_audit_risk) so the strip on the screen cannot classify a row differently from the manager
     // panel's copy of the same record. An older database without the column simply sends nothing and
     // the screen falls back to auditsort.js's map, which is the same map.
-    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number; risk?: string }[])
-      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0, ...(x.risk ? { risk: x.risk } : {}) }));
+    // `tags` (mig 337) rides along the same way, from lfh_audit_tags — one answer for all three
+    // screens. And 'removal_classified' is dropped to MATCH THE LIST: the list excludes it because it
+    // is an answer, not a removal, so leaving it in the counts would offer a chip that filters to
+    // nothing — the "never a 0 chip to tap" rule this screen already keeps.
+    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number; risk?: string; tags?: string[] }[])
+      .filter((x) => x.kind !== "removal_classified")
+      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0, ...(x.risk ? { risk: x.risk } : {}), ...(Array.isArray(x.tags) ? { tags: x.tags } : {}) }));
   }
   return NextResponse.json({
     removals,
@@ -163,4 +176,65 @@ export async function GET(req: NextRequest) {
     ...(kindCounts ? { kindCounts } : {}),
     ...(names.partial ? { partial: ["restaurantNames"] } : {}),
   });
+}
+
+// ── POST /api/owner/audit — answer "was the food made?" on a cancellation ─────────────────────────
+// Owner, 2026-08-19, asked directly: "can be change by owner or manager". So the owner may answer it
+// here, and a manager may answer it in their own panel (/api/editor/audit/classify).
+//
+// THIS IS A NARROW, DELIBERATE EXCEPTION TO THE READ-ONLY RULE ABOVE, and the distinction matters:
+// the 2026-08-04 rule is that an owner can never RESTORE or UNDO a removal — `canRestore: false`
+// stands, there is no route here that puts a bill back, and nothing about the removal row is edited.
+// Answering whether the kitchen had already cooked the food is not undoing anything: it is recording
+// an operational fact that only a person present can know, and it is append-only — a new
+// `removal_classified` row naming who answered and what they changed it from (migration 337).
+// What it DOES move is stock and one expense row, which is the whole point.
+//
+// Gated three ways, all of which the GET above already establishes: a real owner only sees their own
+// restaurants (ownerScope), the Audit & logs section must still be switched on for that restaurant
+// (`logs` + the removals view), and the order must be inside the caller's scope.
+export async function POST(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => null) as { order_id?: unknown; made?: unknown } | null;
+  const orderId = typeof body?.order_id === "string" ? body.order_id : "";
+  const made = body?.made;
+  if (!/^[0-9a-f-]{36}$/i.test(orderId)) return NextResponse.json({ error: "which order?" }, { status: 400 });
+  if (typeof made !== "boolean") return NextResponse.json({ error: "say whether the food was made" }, { status: 400 });
+
+  // WHICH RESTAURANT is it? Read it from the order itself rather than trusting the caller, then check
+  // that restaurant is in scope — the same "narrow, never widen" rule ?rid= follows on the GET.
+  const ord = await sb.from("orders").select("restaurant_id, status").eq("id", orderId).maybeSingle();
+  if (ord.error) return dbFail("owner/audit.classify", ord.error, { message: "Couldn't read that order just now — please try again." });
+  const rid = ord.data?.restaurant_id as string | undefined;
+  if (!rid) return NextResponse.json({ error: "That order no longer exists." }, { status: 404 });
+  if (!scope.all && !inScope(scope, rid)) return NextResponse.json({ error: "That order isn't one of yours." }, { status: 403 });
+  if (ord.data?.status !== "cancelled") {
+    return NextResponse.json({ error: "That order isn't cancelled, so there is nothing to answer." }, { status: 409 });
+  }
+  // Hiding the page is never the only guard — the section has to be ON for a real owner, exactly as
+  // the GET requires. The admin's own session is never gated (it is X-ray).
+  if (!scope.all && !scope.admin) {
+    const allowed = await logViewSubset(await entitledSubset([rid], "logs"), "removals");
+    if (!allowed.length) {
+      return NextResponse.json({ error: "The removals record isn't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    }
+  }
+
+  const r = await sb.rpc("lfh_cancel_classify", {
+    p_restaurant: rid, p_order: orderId, p_made: made,
+    p_actor: scope.admin ? "Admin (Aevidine)" : "Owner",
+    p_actor_id: scope.all ? null : (scope as { ownerId?: string }).ownerId ?? null,
+    p_actor_role: scope.admin ? "admin" : "owner", p_audit_id: null,
+  });
+  if (r.error) return dbFail("owner/audit.classify", r.error, { message: "Couldn't record that answer just now — please try again." });
+  const out = r.data as { ok?: boolean; reason?: string; lossCost?: number; tags?: string[] } | null;
+  // A refusal is an answer the screen must show, never a silent no-op — the mistake the cancel path
+  // made on 2026-08-18, when it called this RPC before the row was cancelled and nothing said so.
+  if (!out || out.ok !== true) {
+    return NextResponse.json({ error: out?.reason === "order_not_found" ? "That order no longer exists."
+      : "Couldn't record that answer — try again." }, { status: 409 });
+  }
+  return NextResponse.json({ ok: true, made, lossCost: out.lossCost ?? 0, tags: out.tags ?? [] });
 }

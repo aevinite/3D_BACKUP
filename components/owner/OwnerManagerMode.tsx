@@ -56,13 +56,24 @@ export default function OwnerManagerMode({
   // reports do it (lfh:owner-crumb). Without this the top pill kept saying the restaurant you
   // ARRIVED as, even after the switcher had swapped the floor underneath it — the name on
   // screen and the floor on screen disagreed. An empty tail on the launcher / on unmount.
+  // ── AND IT HAS TO STILL BE LISTENING WHEN WE SHOUT (T12 sweep, 2026-08-18) ───────────────────
+  // On a HARD load of /owner/manager the pill was blank anyway. React runs child effects BEFORE
+  // parent effects, so this component broadcast before OwnerShell had attached its `lfh:owner-crumb`
+  // listener, and the tail was shouted into an empty room. Measured: the crumb read "Owner › Manager
+  // mode" with the floor iframe already on screen. The dashboard and the reports hub only escape
+  // this by accident — their emitters re-run when their data lands, which is after the shell is up.
+  //   So emit once now (for the ordinary in-app navigation, where the shell is already mounted and
+  // listening) and once more on the next frame, which is after the parent's effects have run. The
+  // second emit is identical, so a listener that heard the first just sets the same value again.
   useEffect(() => {
     const name = restaurants.find((r) => r.id === rid)?.name;
     const emit = (tail: string[]) => {
       window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
     };
-    emit(name ? [name] : []);
-    return () => { emit([]); };
+    const tail = name ? [name] : [];
+    emit(tail);
+    const again = requestAnimationFrame(() => emit(tail));
+    return () => { cancelAnimationFrame(again); emit([]); };
   }, [rid, restaurants]);
 
   // The top bar's "Switch restaurant" dropdown re-scopes THIS page instead of bouncing out to

@@ -283,14 +283,21 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       setRestOpen(false);
       setNavOpen(false); // no navigation happens on the home page → close explicitly
       window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
-    } else if (path === "/owner/reports") {
+    } else if (path === "/owner/reports" || path === "/owner/activity") {
       // On Reports the switcher re-scopes the reports IN PLACE (owner 2026-07-27:
       // "toggle on top to all restaurants" must work here without bouncing back to the
       // dashboard). The reports page listens for lfh:owner-scope and sets its rid — same
       // event-driven, no-new-fetch idea the dashboard uses for its own switcher.
+      //
+      // AUDIT & LOGS JOINED THIS BRANCH (owner, 2026-08-18). Picking a restaurant there used to
+      // throw him out to the dashboard — the one page of the three that did. It now listens on the
+      // same channel. The NAME rides along so that page can put it in the crumb without a lookup of
+      // its own; Reports ignores it and finds its own.
       setRestOpen(false);
       setNavOpen(false);
-      window.dispatchEvent(new CustomEvent("lfh:owner-scope", { detail: { rid } }));
+      window.dispatchEvent(new CustomEvent("lfh:owner-scope", {
+        detail: { rid, name: rid ? (myRests.find((r) => r.id === rid)?.name ?? "") : "" },
+      }));
     } else if (path === "/owner/manager") {
       // Manager mode re-scopes IN PLACE too. It used to throw you back to the owner home, which
       // is why the page carried its own switch row — a second switcher, and a 47px band of chrome
@@ -373,7 +380,21 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 if (!on && (!adminViewing || simulated)) return null;
                 return (
                   <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}${on ? "" : " xray-off"}`}
-                    onClick={() => { if (isActive(it)) setNavOpen(false); }} /* different page → the path-effect closes AFTER the route commits (closing here races the back-stack rewind and can bounce the nav) */
+                    onClick={() => {
+                      if (!isActive(it)) return; // different page → the path-effect closes AFTER the route commits (closing here races the back-stack rewind and can bounce the nav)
+                      setNavOpen(false);
+                      // TAPPING THE SECTION YOU ARE ALREADY IN MUST DO SOMETHING (T12 sweep,
+                      // 2026-08-17). Next does not remount a route you are already on, so with a
+                      // restaurant or a dish drilled open on the dashboard this link was a dead
+                      // tap — measured on both sizes: open a dish, then ☰ → Dashboard, and the dish
+                      // was still on screen. On a phone that was the only control the owner could
+                      // even see, because the crumb is display:none there. The dashboard already
+                      // understands this event as "show me everything", which is exactly what
+                      // tapping "Dashboard" means.
+                      if (it.href === "/owner") {
+                        window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }));
+                      }
+                    }}
                     aria-current={isActive(it) ? "page" : undefined}
                     title={on ? undefined : `Not available — ${it.label} isn't enabled for this owner (turned off by the admin). You can still open it from this view.`}>
                     <i className={`fas ${it.icon}`} aria-hidden="true" />
@@ -494,7 +515,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                   aria-haspopup="menu" aria-expanded={restOpen} title="Switch restaurant">
                   <span className="dot" aria-hidden="true" />
                   <span className="lbl">{
-                    path === "/owner" || path.startsWith("/owner/reports") || path === "/owner/manager"
+                    // The pages that re-scope IN PLACE announce their scope as the head of the crumb
+                    // tail, so the pill mirrors it. Audit & logs joined them on 2026-08-18.
+                    path === "/owner" || path.startsWith("/owner/reports") || path === "/owner/manager" || path === "/owner/activity"
                       ? (crumbTail[0] || "All restaurants")
                       : adminViewing ? shownName : "Owner overview"
                   }</span>
@@ -539,7 +562,20 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               {crumbTail.length > 0 ? (
                 <>
                   <button type="button" className="cr root" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer" }}
-                    onClick={() => window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }))}>
+                    onClick={() => {
+                      // The dashboard hears this as "show me everything"; the reports hub hears it
+                      // as "back to the hub". Manager mode hears NEITHER — it listens on its own
+                      // channel (lfh:owner-manager-rid), so on /owner/manager this crumb was a
+                      // silent dead tap: the segment renders as soon as the floor names its
+                      // restaurant in the tail, and tapping it did nothing at all (T12 sweep,
+                      // 2026-08-17 — measured by listening for all three events). A tap must never
+                      // vanish in silence, so send its channel too; the pages that do not listen
+                      // for the other event simply ignore it.
+                      window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }));
+                      if (path.startsWith("/owner/manager")) {
+                        window.dispatchEvent(new CustomEvent("lfh:owner-manager-rid", { detail: { rid: null } }));
+                      }
+                    }}>
                     {ownerSectionLabel(path)}
                   </button>
                   {crumbTail.map((t, i) => (

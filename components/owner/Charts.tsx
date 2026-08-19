@@ -291,14 +291,31 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
   );
 }
 
+// The category axis width, shared by the axis and its tick so the two can never drift apart.
+const CAT_AXIS_W = 110;
 /** A category tick that carries its own tooltip — recharts clips a long label silently. */
+// ── AND IT NOW CLIPS VISIBLY, AT THE END (T12 sweep, 2026-08-18) ───────────────────────────────
+// The tooltip was the whole mitigation, and a phone has no hover. Worse, `textAnchor="end"` draws
+// the label LEFTWARD from the axis edge, so an over-long name ran off the SVG and lost its FIRST
+// characters — the identifying ones. Measured on the dish comparison chart at BOTH sizes: 5 of the
+// 6 visible names lost between 6px and 57px, and "Truffle & Wild Mushroom Pizza" rendered as
+// "uffle & Wild Mushroom Pizza" with nothing to say so.
+// So the label is trimmed to the axis width and given an ellipsis: the loss is at the END, where
+// every reader expects it, and it is visible. The <title> keeps the full name for a mouse, and the
+// bar itself stays clickable for a thumb.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CatTick({ x, y, payload }: any) {
   const label = String(payload?.value ?? "");
+  // 11.5px mixed-case text measures ~5.55px per character on this axis (measured: "Grilled Chicken
+  // Salad", 21 chars, 116px). 12px of air, not 6: at 6 the widest kept label still clipped by 2px on
+  // the A35 (measured), because a capital-heavy name runs above the average. 12 leaves every label
+  // fully inside — re-measured 0px of clipping on all six.
+  const budget = Math.max(6, Math.floor((CAT_AXIS_W - 12) / 5.55));
+  const shown = label.length > budget ? label.slice(0, budget - 1).trimEnd() + "…" : label;
   return (
     <g transform={`translate(${x},${y})`}>
       <title>{label}</title>
-      <text x={0} y={0} dy={4} textAnchor="end" fill={AXIS} fontSize={11.5}>{label}</text>
+      <text x={0} y={0} dy={4} textAnchor="end" fill={AXIS} fontSize={11.5}>{shown}</text>
     </g>
   );
 }
@@ -343,7 +360,7 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
           {/* A long name is clipped to the 110px axis with nothing to reveal it. A custom tick
               draws the same label plus an SVG <title>, so hovering gives the full name back
               (T5 sweep, 2026-08-06). */}
-          <YAxis type="category" dataKey="name" width={110} tick={<CatTick />} />
+          <YAxis type="category" dataKey="name" width={CAT_AXIS_W} tick={<CatTick />} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name={valueLabel} radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>

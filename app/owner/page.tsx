@@ -20,8 +20,8 @@
 //   · Report ▾ (top right): Print / CSV / Excel of what's currently on screen.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { inr, useActiveAutoRefresh, actLabel, panelLabel } from "@/components/admin/shared";
-import { asSuffix } from "@/lib/ownerPin";
+import { inr, useActiveAutoRefresh, actLabel, panelLabel, timeAgo } from "@/components/admin/shared";
+import { asSuffix, asValue } from "@/lib/ownerPin";
 import {
   AreaTrend, TimeBar, LeaderBar, WhoEarnsMore, CategoryDonut, PaymentDonut, canonPayMethod,
   DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevMonthCompare,
@@ -102,7 +102,10 @@ type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow
   // Named figures the server could NOT read this time (lib/partialRead). A chart built from only
   // SOME of the group is still drawn — but it must say so, or a total that is too small reads as
   // fact (T9 finding F18, 2026-08-07).
-  partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null };
+  partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null;
+  // Food cooked and then binned, priced at what the ingredients cost (mig 337). null = the read
+  // failed, which is reported rather than shown as a zero — a silent 0 would say he wasted nothing.
+  foodLoss?: { amount: number; entries: number } | null };
 type Dish = { title: string; qty: number; revenue: number };
 type Records = {
   bestDay?: { date: string; revenue: number } | null;
@@ -121,6 +124,8 @@ type RestA = {
   // Staff pay that LEFT in this window (mig 221). null = this restaurant doesn't have the
   // Staff-profiles-&-pay module, so no such tile is drawn at all.
   staffPay?: { paidOut: number; people: number; entries: number } | null;
+  /** Food cooked and then binned, at ingredient cost (mig 337). See the group type above. */
+  foodLoss?: { amount: number; entries: number } | null;
   timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
@@ -247,14 +252,29 @@ function errText(e: unknown): string {
   }
   return String(e);
 }
-function timeAgo(iso: string): string {
-  const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
-  if (s < 45) return "just now";
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} hr ago`;
-  return `${Math.round(h / 24)} d ago`;
+// HOW LONG AGO — ONE WORDING (owner, 2026-08-18, approving the sweep's 🟡 4).
+// This file used to carry its own copy that wrote "5 min ago" / "3 hr ago", while Audit & logs one
+// click away — and every one of the eleven admin-console screens — wrote "5m ago" from the shared
+// helper. Same fact, two wordings, on two screens he moves between constantly. The SHORT form wins
+// because it is already the wording on twelve screens: changing those instead would mean editing the
+// one file the whole admin console shares, for a bigger blast radius and no better answer. So the
+// local copy is gone and `timeAgo` below is the shared one, imported with `inr` and the log
+// translators from components/admin/shared.
+
+// WHICH ELEMENT ACTUALLY SCROLLS on the owner console (T12 sweep, 2026-08-17).
+// At >900px it is `.adm-main`; at <=900px globals.css gives `.adm-main` `overflow-y: visible` and
+// makes `.adm` the 100dvh scroller instead. The window NEVER scrolls at either width — measured:
+// at 1280x800 `.adm-main` is 2256/751 and the document is 800/800; at 360x780 `.adm` is 4109/780
+// while `.adm-main` is 4052/4052. So a save/restore written against `.adm-main` alone silently did
+// nothing on a phone, which is exactly how the owner's "back should keep me where I was" was lost
+// there. Same shape as `port()` in app/aevinite/restaurants/page.tsx, which solved this first.
+function scrollPort(): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  for (const sel of [".adm-main", ".adm"]) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el && el.scrollHeight > el.clientHeight + 2) return el;
+  }
+  return document.querySelector<HTMLElement>(".adm-main");
 }
 
 // ── Per-card range dropdown (the global tab bar's replacement) ────────────────
@@ -388,13 +408,19 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
   );
 }
 
-// ── D1-style KPI card: sparkline inside, delta chip; the whole card is a LINK
-// into the matching report (owner round-3: "the top five box … should take you
-// to the report section").
-function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }: {
-  k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
+// ── D1-style KPI card: sparkline inside, delta chip. The whole card is a BUTTON that opens the
+// tile's popup (owner, 2026-08-18: "if you click on orders, it will take you to that pop up, which
+// will show average order and all the details of the order"). It used to be a Link straight into
+// the report; that is now the LAST line of the popup instead, so the figure gets explained before
+// he leaves the page — and so the link can carry the scope and the range he is actually looking at.
+//
+// `compact` prints the short form on the FACE of the tile (₹55.1L) — his ask, and what makes five
+// tiles fit one line. The exact rupees are in the popup.
+function Kpi({ k, v, money, compact, delta, prevTitle, sub, loading, spark, pill, onOpen }: {
+  k: string; v: number | string; money?: boolean; compact?: boolean;
+  delta?: { now: number; prev: number | null };
   prevTitle?: string; sub?: string; loading?: boolean; spark?: number[];
-  pill?: string; href?: string;
+  pill?: string; onOpen?: () => void;
 }) {
   const hasSpark = !!spark && spark.length >= 2 && !loading;
   const body = (
@@ -404,7 +430,13 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
         {pill ? <span className="ow2-live">{pill}</span> : null}
       </div>
       <div className="row">
-        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
+        <div className="v">{typeof v === "number"
+          ? (compact && !loading
+              // the SHARED short form (lib/money), the same one the restaurant switcher and the
+              // chart axes use — so one amount never reads two ways on one screen
+              ? <span style={{ fontVariantNumeric: "tabular-nums" }}>{compactINR(v)}</span>
+              : <AnimatedNumber value={v} loading={loading} money={money} />)
+          : v}</div>
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
       {sub && !loading && <div className="ow2-sub">{sub}</div>}
@@ -431,13 +463,28 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
          360px phone each was carrying 34px of empty green-less space (T5 sweep, 2026-08-06).
          Same three-class weight so it still beats .owx .adm-stat. */
       .owx .adm-stat.ow2-kpi.ow2-nospark { padding-bottom: 14px; }
-      .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; transition: border-color .15s, transform .15s; }
+      /* ow2-click is a <button> now (owner, 2026-08-18: the tile opens a popup). A button brings
+         its own font, centring and padding, so reset all three or the tiles stop matching the cards
+         around them. width:100% keeps it filling its grid track, and text-align:left undoes the
+         centring a button does by default. NEVER use a backtick in these comments — this block is a
+         template literal and a backtick closes it (this file's own warning, learned twice today). */
+      .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; width: 100%; font: inherit; text-align: left; transition: border-color .15s, transform .15s; }
       .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
       .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
       /* nowrap + flex-none: on a 360px phone the dot and the word "live" stacked inside the
          pill and the label broke to "TODAY SO / FAR" (T5 sweep, 2026-08-11). */
-      .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; white-space: nowrap; flex: none; }
+      /* ── THE "live" PILL NEEDS ITS OWN READABLE INK (T12 sweep, 2026-08-17) ──────────────────
+         This used to be a flat ${GREEN}, and for a long time nothing showed it: every KPI tile was
+         a Link, and globals.css line 2392 forces every element inside an anchor to inherit its colour, so there
+         the pill quietly took the tile's own ink and measured 17.74:1 on the light skin. The moment
+         a tile is NOT a link — which is now the case when Reports are switched off for the
+         restaurant — the declared value applies and the same pill measures 1.92:1 on a white card.
+         Fixed the way this file already fixes it for the top-performer figure a few hundred lines
+         down: mix the skin's own accent toward the skin's own text, so it stays green in both
+         themes and readable in both. Measured after the change, in the div case: light 5.9:1,
+         dark 8.4:1. Do not put a flat hex back here. */
+      .ow2-live { font-size: 10px; font-weight: 800; color: color-mix(in srgb, var(--accent) 80%, var(--text)); background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; white-space: nowrap; flex: none; }
       .ow2-kt .k { min-width: 0; }
       .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
       .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
@@ -460,8 +507,10 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
       }
     `}</style>
   );
-  return href ? (
-    <Link href={href} className={`adm-stat owx-kpi ow2-kpi ow2-click${hasSpark ? "" : " ow2-nospark"}`} title="Open the full report">{body}{styles}</Link>
+  return onOpen ? (
+    <button type="button" onClick={onOpen}
+      className={`adm-stat owx-kpi ow2-kpi ow2-click${hasSpark ? "" : " ow2-nospark"}`}
+      title={`${k} — tap for the detail`}>{body}{styles}</button>
   ) : (
     <div className={`adm-stat owx-kpi ow2-kpi${hasSpark ? "" : " ow2-nospark"}`}>{body}{styles}</div>
   );
@@ -477,17 +526,34 @@ export default function OwnerDashboard() {
   const drillScroll = useRef<[number, number, number]>([0, 0, 0]);
   const prevView = useRef<View>(view);
   const viewTo = (v: View) => {
-    const el = typeof document === "undefined" ? null : document.querySelector<HTMLElement>(".adm-main");
+    const el = scrollPort();
     if (el) drillScroll.current[levelDepth(prevView.current)] = el.scrollTop;
     setView(v);
   };
   useLayoutEffect(() => {
-    const el = document.querySelector<HTMLElement>(".adm-main");
+    const el = scrollPort();
     const from = levelDepth(prevView.current), to = levelDepth(view);
     prevView.current = view;
     if (!el || from === to) return;
     el.scrollTop = to > from ? 0 : drillScroll.current[to];   // deeper → top; back → restore
   }, [view]);
+  // ── THE DRILL IS A BACK STEP (T12 sweep, 2026-08-17) ─────────────────────────────────────────
+  // Opening a dish changes the SCREEN without changing the address, so on its own the phone's BACK
+  // button skipped it and left the owner panel altogether. Measured on a 360x780 A35: after tapping
+  // one dish there was NO way back to the dashboard at all — the top-strip crumb is display:none at
+  // that width, the ☰ drawer's own "Dashboard" link is already the active route, and re-opening
+  // /owner deliberately restores the drill (the refresh-proof drill, owner round-5). Only clearing
+  // session storage escaped.
+  //
+  // So the drill registers with the back-stack manager, the same singleton the range dropdowns, the
+  // restaurant drawer and the heatmap zoom already use — never a hand-rolled pushState (project
+  // rule). ONE LAYER PER LEVEL, in hook order, so the layers stack restaurant-then-dish and BACK
+  // peels dish → restaurant → dashboard. A single-restaurant owner jumps home→dish, which registers
+  // both at once; the dish layer sends him straight home and the restaurant layer then unregisters
+  // itself, which reconcile() rewinds invisibly (same URL either way).
+  useBackClose("owner-drill-restaurant", view.level !== "home", () => setView({ level: "home" }));
+  useBackClose("owner-drill-dish", view.level === "dish", () => setView((v) =>
+    v.level === "dish" && !single ? { level: "restaurant", rid: v.rid } : { level: "home" }));
   // The MAIN range (top-right): the one dropdown the whole page follows — KPI boxes
   // and graphs alike (owner round-2: "only the main one"). Default 30 days.
   const [globalRange, setGlobalRange] = useState<Range>("30d");
@@ -517,6 +583,15 @@ export default function OwnerDashboard() {
   // line reports the OLDEST thing on screen — the honest worst case.
   const [ages, setAges] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  // A DELIBERATE "this section isn't enabled for you" answer, kept apart from `err` so it is never
+  // dressed as a breakage (see the branch in fetchPayload). While it is set, no analytics payload
+  // is ever going to arrive, so nothing on the page may keep saying "Loading…".
+  //
+  // It carries the SCOPE it belongs to. On an estate where the admin has taken Reports away from
+  // one restaurant, drilling into that restaurant must not blank the group view the owner then
+  // returns to — and a return to a scope already in `cache` fires no fetch, so nothing would clear
+  // a scope-less flag.
+  const [offScope, setOffScope] = useState<{ scope: string; msg: string } | null>(null);
   // Has ANY payload answered this visit? Until one has, what is on screen is the instant-paint
   // snapshot from the last time this tab was open — real numbers, but last-seen ones. The age
   // line said "updated 15 hr ago" without saying that was a saved copy (T5 sweep, 2026-08-11).
@@ -570,10 +645,20 @@ export default function OwnerDashboard() {
     writeSnap(snapKey, { ov, cache, money: moneyCache, updatedAt: updatedAt ?? undefined });
   }, [snapKey, ov, cache, moneyCache, updatedAt]);
 
+  /** The refusal, but only if it is about the scope currently on screen. */
+  const offNote = offScope && offScope.scope === scopeKey ? offScope.msg : null;
+  // ── AND NO STALE FIGURE MAY LEAK THROUGH IT (T12 sweep, 2026-08-17, second pass) ──────────────
+  // `pl` falls back to the instant-paint snapshot — real numbers from the last time this tab was
+  // open. Seen in a light-skin screenshot of the switched-off state: the note said figures were not
+  // shown while the tiles beside it still drew "-59%" delta chips and green sparklines, the revenue
+  // chart was fully painted, and "Staff pay out" and "After staff pay" printed real money derived
+  // from the very revenue that was supposedly hidden. Once the server has refused this scope, the
+  // honest answer is that we have nothing to show for it — snapshot included.
   const pl = useCallback((range: string): Payload | undefined =>
-    cache[`${scopeKey}|${range}`] ?? snap?.cache?.[`${scopeKey}|${range}`], [cache, snap, scopeKey]);
+    (offScope && offScope.scope === scopeKey) ? undefined
+      : cache[`${scopeKey}|${range}`] ?? snap?.cache?.[`${scopeKey}|${range}`], [cache, snap, scopeKey, offScope]);
   const moneyOf = (range: Range): MoneyTotals | "err" | undefined =>
-    moneyCache[`${scopeKey}|${range}`] ?? snap?.money?.[`${scopeKey}|${range}`];
+    offNote ? undefined : moneyCache[`${scopeKey}|${range}`] ?? snap?.money?.[`${scopeKey}|${range}`];
 
   // Refresh-proof drill (owner round-5: "if you refresh it, it comes backwards").
   // The panel runs under the back-stack history manager, which OWNS pushState/popstate
@@ -644,8 +729,17 @@ export default function OwnerDashboard() {
       // PERMISSION, not a network problem — it used to drop the top strip's Connected pill to a
       // warning state and show the entitlement text in the red "couldn't load" banner
       // (T5 sweep, 2026-08-06). Say it plainly and leave the connection light alone.
-      if (a.error && a.disabled) { setErr(errText(a.error)); return; }
+      // ── SWITCHED OFF IS NOT BROKEN (T12 sweep, 2026-08-17) ──────────────────────────────────
+      // This branch has always understood that a 403 + `disabled: true` is a PERMISSION rather
+      // than a network problem — the 2026-08-06 fix stopped it dropping the Connected pill. But
+      // it still put the sentence in `err`, and `err` renders inside a RED-BORDERED card headed
+      // "Couldn't load.", over a page of cards that then said "Loading…" for ever and three KPI
+      // values that stayed blank. Measured by replaying the server's own answer: an owner whose
+      // Reports the admin deliberately switched off was told, permanently, that his dashboard was
+      // broken. It gets its own state so the page can say it plainly and stop pretending to load.
+      if (a.error && a.disabled) { setOffScope({ scope: sk, msg: errText(a.error) }); setErr(null); setLanded(true); return; }
       if (a.error) throw new Error(errText(a.error));
+      setOffScope((cur) => (cur && cur.scope === sk ? null : cur));
       setCache((c) => ({ ...c, [key]: a }));
       setLanded(true);
       if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
@@ -712,9 +806,21 @@ export default function OwnerDashboard() {
   }, [ov, scopeKey, fetchPayload, fetchMoney]);
 
   // Recent activity mini feed (single/drilled view) — 6 rows, scoped, egress-tiny.
+  //
+  // ── "SWITCHED OFF" IS NOT "STILL LOADING" (T12 sweep, 2026-08-17) ────────────────────────────
+  // /api/owner/oplog answers 403 + `disabled: true` when the admin has taken Audit & logs away
+  // from this owner (hiding is never the only guard). This function used to fold that answer into
+  // the same `null` it uses for "nothing arrived", and `null` is what the card renders as
+  // "Loading…" — so the one card on the home screen an owner opens every day sat spinning
+  // FOREVER, with a live "See all" beside it. Measured by replaying the server's own 403.
+  // Module checklist point 6: render nothing when the flag is off. So the refusal gets its own
+  // state and the whole card is left out.
+  const [actsOff, setActsOff] = useState(false);
   const fetchActs = useCallback(async (rid: string) => {
     try {
       const j = await fetch(`/api/owner/oplog?limit=6&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((r) => r.json());
+      if (j.disabled) { setActsOff(true); setActs([]); return; }
+      setActsOff(false);
       setActs(Array.isArray(j.actions) ? j.actions : null);
     } catch { setActs(null); }
   }, [scopePin]);
@@ -759,7 +865,14 @@ export default function OwnerDashboard() {
     for (const r of neededRanges) fetchPayload(scopeKey, r);
     fetchPayload(scopeKey, "month", { qs: "range=month" });
     fetchMoney(scopeKey, globalRange);
-  }, [loadOverview, fetchPayload, fetchMoney, neededRanges, scopeKey, globalRange]);
+    // …AND THE ACTIVITY FEED (T12 sweep, 2026-08-17). It was left out, so the card headed
+    // "Recent activity · who did what" was frozen at whatever the page loaded with while every
+    // other card on the screen stayed 60 seconds fresh. Measured over ~88s of an active tab:
+    // analytics went 3 → 5 requests, oplog stayed at 1. Manual Refresh already re-fetched it,
+    // which is what says the omission was an oversight rather than a decision. Six rows with a
+    // column list and a hard limit is the cheapest read on this page.
+    if (activeRid) fetchActs(activeRid);
+  }, [loadOverview, fetchPayload, fetchMoney, fetchActs, activeRid, neededRanges, scopeKey, globalRange]);
   const tickRef = useRef(tick); tickRef.current = tick;
   useActiveAutoRefresh(() => tickRef.current(), 60000);
 
@@ -786,12 +899,12 @@ export default function OwnerDashboard() {
     const p = pl(range);
     if (!p) return null;
     if (p.scope === "restaurant") {
-      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null };
+      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null, foodLoss: p.foodLoss ?? null };
     }
     const revenue = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
     const orders = p.restaurantRevenue.reduce((a, r) => a + r.orders, 0);
     const paidOrders = p.paymentMethods.reduce((a, m) => a + (m.orders || 0), 0);
-    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null };
+    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null, foodLoss: p.foodLoss ?? null };
   }, [pl]);
 
   // Sparkline points (per bucket) for a range — group sums across restaurants.
@@ -1059,7 +1172,11 @@ export default function OwnerDashboard() {
       if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${hour12(busiest.hour)} — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
       const total = p.dishes.reduce((a, d) => a + d.revenue, 0);
       if (p.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${p.dishes[0].title} makes ${Math.round((p.dishes[0].revenue / total) * 100)}% of dish revenue` });
-      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${RANGE_LABEL[globalRange]}` });
+      // NO "₹X lost to cancellations" LINE (owner, 2026-08-18). It read as money the restaurant
+      // lost, and a cancellation is not that — nothing was charged. It also quoted the money
+      // rollup's count, which disagrees with the Audit's by 3x on the same window (measured:
+      // 1,124/₹8,28,096 here against 394/₹1,85,766 there, because the two count different sets).
+      // The Audit's own risk strip answers this properly, on the screen that owns the record.
       const payRows = (p.paymentMethods ?? []).map((x) => ({ ...x, method: canonPayMethod(x.method) }));
       const pay = payRows.filter((x) => x.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
       const payTotal = payRows.reduce((a, x) => a + x.revenue, 0);
@@ -1075,7 +1192,7 @@ export default function OwnerDashboard() {
       const top = p.restaurantRevenue[0];
       if (top && total > 0 && p.restaurantRevenue.length > 1)
         out.push({ icon: "fa-trophy", text: `${top.name} leads with ${Math.round((top.revenue / total) * 100)}% of revenue ${rl}` });
-      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to cancellations ${RANGE_LABEL[globalRange]}` });
+      // …and the same for the group view, for the same reason.
       if (money && money !== "err" && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
     }
     return out.slice(0, 4);
@@ -1090,6 +1207,18 @@ export default function OwnerDashboard() {
     const d = p.dishes[idx];
     return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: p.dishes.length, dishes: p.dishes } : ("missing" as const);
   }, [view, pl, globalRange]);
+
+  // ── the tile popup (owner, 2026-08-18) ───────────────────────────────────────────────────────
+  // Which tile is open, or null. Every figure it shows is already in hand, so opening it costs no
+  // request. Registered with the back-stack manager like every other overlay on this page.
+  const [tileOpen, setTileOpen] = useState<null | "revenue" | "orders" | "today" | "expenses" | "onhand">(null);
+  useBackClose("owner-kpi-tile", !!tileOpen, () => setTileOpen(null));
+  useEffect(() => {
+    if (!tileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTileOpen(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [tileOpen]);
 
   // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
   const [drawerRid, setDrawerRid] = useState<string | null>(null);
@@ -1148,7 +1277,27 @@ export default function OwnerDashboard() {
   };
   const exportName = `aevidine-report-${new Date().toISOString().slice(0, 10)}`;
   // KPI boxes deep-link into the matching report (round-3).
-  const reportHref = (t: string) => (scopePin ? `/owner/reports?rid=${scopePin}${asSuffix()}&open=${t}` : `/owner/reports?open=${t}`);
+  // ── THE DEEP LINK CARRIES WHAT HE IS LOOKING AT (owner, 2026-08-18) ──────────────────────────
+  // His bug, in his words: "whenever I click on order, it takes me to the order of a particular
+  // restaurant. But actually I am in a tab for all the restaurant." Exactly right, and this line was
+  // why: it only ever sent `rid`, which on an admin tab is the ADMIN'S PIN — the restaurant the
+  // console drilled into — and the reports page then forces its own scope to that pin. So from
+  // "All restaurants" on a pinned admin tab, every tile landed on Burger Barn.
+  //
+  // Two things now travel with the link, and the reports page prefers them over the pin:
+  //   • `view=all` or `view=<rid>` — the scope THIS PAGE is showing (`activeRid`), which is null on
+  //     the all-restaurants view. A separate name from `rid` on purpose: `rid` is the admin's
+  //     authorisation pin and must keep meaning that, or a tab could re-scope its own permissions.
+  //   • `range=<the dropdown's value>` — "if I'm at thirty days all restaurant and I open the detail
+  //     view of orders then it should be also open in thirty days and all restaurant."
+  const detailHref = (t: string) => {
+    const q = new URLSearchParams();
+    if (scopePin) { q.set("rid", scopePin); const a = asValue(); if (a) q.set("as", a); }
+    q.set("view", activeRid ?? "all");
+    q.set("range", globalRange);
+    q.set("open", t);
+    return `/owner/reports?${q.toString()}`;
+  };
 
   const goHome = () => viewTo({ level: "home" });
   const openFull = (rid: string) => { setDrawerRid(null); viewTo({ level: "restaurant", rid }); };
@@ -1172,6 +1321,14 @@ export default function OwnerDashboard() {
     return `Figures computed ${new Date(at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })} · ${timeAgo(at)}`;
   };
   const mainAge = () => ageTitle(`${scopeKey}|${globalRange}`);
+  /** What a card with no payload yet should say. "Loading…" is a promise, and once the server has
+   *  told us this section is switched off for this restaurant the promise is false — every card
+   *  said it for ever (T12 sweep, 2026-08-17). Short, because it is repeated per card. */
+  const loadNote = offNote ? "Not shown — Reports are switched off." : "Loading…";
+  /** Reports really are available for this scope: the admin still grants the section AND the
+   *  server has not refused this payload. Used to stop the KPI tiles linking into a Reports hub
+   *  that would only refuse him — the hero shortcut has always been gated, the tiles never were. */
+  const reportsOn = ov?.entitlements?.reports !== false && !offNote;
   const kMain = kpiOf(globalRange);
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
@@ -1245,41 +1402,156 @@ export default function OwnerDashboard() {
     </div>
   ) : null;
 
-  // How many tiles this row will actually draw — 5 normally, 7 once the payroll module is on.
-  // Seven into a fixed 5-across grid left the last two alone against three empty columns
-  // (T5 sweep, 2026-08-11); the count picks a balanced row instead (7 → 4 + 3).
-  const kpiCount = 5 + (kMain?.staffPay ? 2 : 0);
-  const kpiCols = kpiCount <= 5 ? kpiCount : Math.ceil(kpiCount / 2);
+  // ── THE TILE ROW (owner, 2026-08-18, after reviewing the sweep) ───────────────────────────────
+  // "you can just do, like, money has been generated, orders, if you click on orders it will take
+  // you to that pop up … we can keep revenue, orders, today so far, expenses, on hand money" and
+  // "everything should be in the one line. That's what I want. Right now it is two rows."
+  //
+  // So: FIVE tiles, one row. "Avg order" is gone from the row — it lives inside the Orders popup,
+  // which is where he asked for it. "Lost to cancellations", "Staff pay out" and "After staff pay"
+  // are gone as tiles; what they held is now Expenses + On hand, with the detail in the popups.
+  //
+  // ── THE MONEY MODEL, CHECKED RATHER THAN ASSUMED ─────────────────────────────────────────────
+  // He said cancellations should sit under Expenses. They must not be added to it, and this is why:
+  // migration 315 made `revenue` the NET figure — the discount is already taken off it — and every
+  // rollup counts only orders that are not cancelled. So a discount and a cancellation are ALREADY
+  // out of revenue. Adding them to Expenses and then subtracting Expenses from revenue would count
+  // the same loss twice, and "on hand" would read lakhs too low.
+  //   Expenses = what actually LEFT the business (the staff pay ledger).
+  //   On hand   = revenue − Expenses, so the three tiles reconcile on screen.
+  //   Discounts and cancellations live in the REVENUE popup under "what you didn't charge", which
+  //   is the honest home for them: they are the answer to "why isn't revenue higher?".
+  const staffOut = kMain?.staffPay?.paidOut ?? 0;
+  const hasPayroll = !!kMain?.staffPay;
+  // FOOD COOKED AND THEN BINNED (owner, 2026-08-18: "the cancelinging amout go up expensis goes up").
+  // Priced at what the ingredients really cost, not at what the bill would have been — the bill value
+  // is revenue he never earned and was never in the revenue figure to begin with (mig 315).
+  const foodLost = kMain?.foodLoss?.amount ?? 0;
+  const foodLostRows = kMain?.foodLoss?.entries ?? 0;
+  const expensesOut = staffOut + foodLost;
+  const onHand = (kMain?.revenue ?? 0) - expensesOut;
+  const mt = money === "err" ? undefined : (money as MoneyTotals | undefined);
+  // ── WHEN REPORTS ARE SWITCHED OFF ────────────────────────────────────────────────────────────
+  // `offNote` means no analytics payload is ever coming, so every tile prints an em dash and says
+  // why instead of animating a blank for ever, and none of them opens a popup or a report.
+  const offSub = "Reports are switched off";
   const kpiRow = (
-    <div className="adm-stats ow2-stats" style={{ ["--ow2-cols" as string]: String(kpiCols) }}>
-      <Kpi k="Revenue" href={reportHref("sales")} v={kMain?.revenue ?? 0} money loading={!kMain}
+    <div className="adm-stats ow2-stats ow2-stats5">
+      <Kpi k="Revenue" onOpen={offNote ? undefined : () => setTileOpen("revenue")} v={offNote ? "—" : (kMain?.revenue ?? 0)} money compact loading={!offNote && !kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
-        prevTitle={PREV_LABEL[globalRange]} sub={PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
-      <Kpi k="Orders" href={reportHref("volume")} v={kMain?.orders ?? 0} loading={!kMain}
-        sub={kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
+        prevTitle={PREV_LABEL[globalRange]} sub={offNote ? offSub : PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+      <Kpi k="Orders" onOpen={offNote ? undefined : () => setTileOpen("orders")} v={offNote ? "—" : (kMain?.orders ?? 0)} loading={!offNote && !kMain}
+        sub={offNote ? offSub : kMain ? `${inr(kMain.avg)} per paid order` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Avg order" href={reportHref("avgbill")} v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
-      <Kpi k="Today so far" href={reportHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
+      <Kpi k="Today so far" onOpen={() => setTileOpen("today")} v={todayRev} money compact loading={!ov} pill="● live"
         sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
-      <Kpi k="Lost to cancellations" href={reportHref("cancellations")} v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
-        loading={!money}
-        sub={money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
-      {/* STAFF PAY AS AN EXPENSE (owner 2026-07-30). Only drawn when the restaurant has the
-          module — otherwise the tiles don't exist, same as everywhere else. "After staff pay"
-          is the number he asked for: revenue minus what actually went out to the team. */}
-      {kMain?.staffPay && (
-        <>
-          <Kpi k="Staff pay out" href={reportHref("team")} v={kMain.staffPay.paidOut} money loading={!kMain}
-            sub={kMain.staffPay.entries
-              ? `${kMain.staffPay.entries} payment${kMain.staffPay.entries === 1 ? "" : "s"} · ${kMain.staffPay.people} on the pay list`
-              : "nothing paid out yet"} />
-          <Kpi k="After staff pay" href={reportHref("team")} v={(kMain.revenue ?? 0) - kMain.staffPay.paidOut} money loading={!kMain}
-            sub="revenue minus what went out to the team" />
-        </>
-      )}
+      <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
+        sub={offNote ? offSub
+          : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"
+          : foodLost > 0 ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where food was made`
+          : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
+      <Kpi k="On hand" onOpen={offNote ? undefined : () => setTileOpen("onhand")} v={offNote ? "—" : onHand} money compact loading={!offNote && !kMain}
+        sub={offNote ? offSub : "revenue minus expenses"} />
     </div>
   );
+
+  // ── THE TILE POPUP (owner, 2026-08-18) ───────────────────────────────────────────────────────
+  // "there should be a pop up which should open, and in that average order and information about
+  // the order should be written, and at the below there will be a click for a seen proper detail,
+  // and that will take me to that particular page." The tile shows a SHORT figure so five fit one
+  // line; the popup carries the exact rupees and the breakdown, which is also what solves the
+  // spacing he complained about.
+  //
+  // "it should also take me in the dashboard of whatever I am at … if I am at all restaurant, it
+  // should take me to the all restaurant orders thing … and thirty days" — so both the popup's
+  // heading AND its bottom link carry the scope he is looking at and the range he has chosen. See
+  // `detailHref` for how that travels.
+  // A row is [label, value, hint?, isTotal?]. `isTotal` is EXPLICIT rather than "the last row",
+  // because on the Revenue popup the last row is "Cancelled bills" — which is emphatically not a
+  // total, and styling it as one made a figure that is deliberately excluded look like the answer.
+  const tileDetail = (): { title: string; sub: string; rows: [string, string, (string | undefined)?, boolean?][]; note?: string; audit?: boolean; open: string } | null => {
+    const per = RANGE_LABEL[globalRange];
+    switch (tileOpen) {
+      case "revenue": return {
+        title: "Revenue", sub: `what guests actually paid · ${per}`,
+        rows: [
+          ["Revenue", inr(kMain?.revenue ?? 0), "after discounts, cancelled bills never counted"],
+          ["Paid orders", (kMain?.paidOrders ?? 0).toLocaleString("en-IN"), "bills that have been settled"],
+          ["Average per paid order", inr(kMain?.avg ?? 0)],
+          ...(kMain?.prev ? [["The period before", inr(kMain.prev.revenue), PREV_LABEL[globalRange]] as [string, string, string]] : []),
+          // A DISCOUNT IS MONEY; A CANCELLATION IS NOT (owner, 2026-08-18) ─────────────────────
+          // He said it plainly: a cancelled order "will [be] in [the] audit, so there would not even
+          // be [a] cancellation, only if you see" — i.e. it is a record you go and look at, not a
+          // figure to put on this screen. The database agrees and always has:
+          // `lfh_audit_risk()` calls `discount_given` MONEY and lets `order_cancelled` fall through
+          // to RECORD, and the Audit screen prints record rows as "of food, never charged".
+          //
+          // So the discount stays as a money line — it really is money the restaurant gave away, and
+          // it is already off the revenue above. The cancellation quotes NO figure at all, and here
+          // is the measured reason why that matters: on the same restaurant and the same 30 days, the
+          // money rollup behind this screen said 1,124 cancelled worth ₹8,28,096, while the Audit
+          // said 394 worth ₹1,85,766 — because the rollup counts every order row marked cancelled
+          // and the Audit holds only the ones recorded with a reason. Both are true about different
+          // sets, so any number printed here would contradict the record one click away. The screen
+          // says what a cancellation means for revenue, and sends him to the record for the rest.
+          ...(mt && mt.discount > 0 ? [["Discounts given", inr(mt.discount), "money you gave away — already taken off the revenue above"] as [string, string, string]] : []),
+        ],
+        note: "A cancelled bill is not money you lost — nothing was ever charged for it, so it was never in the revenue above. Cancellations are kept as a record, with the reason and the person, in Audit & logs.",
+        audit: true,
+        open: "sales",
+      };
+      case "orders": return {
+        title: "Orders", sub: `every order in the period · ${per}`,
+        rows: [
+          ["Orders", (kMain?.orders ?? 0).toLocaleString("en-IN")],
+          ["Paid", (kMain?.paidOrders ?? 0).toLocaleString("en-IN"), "settled bills"],
+          ["Still open", Math.max(0, (kMain?.orders ?? 0) - (kMain?.paidOrders ?? 0)).toLocaleString("en-IN"), "on a table right now, or unpaid"],
+          ["Average per paid order", inr(kMain?.avg ?? 0), "revenue ÷ paid orders"],
+          ...(kMain?.prev ? [["The period before", kMain.prev.orders.toLocaleString("en-IN"), PREV_LABEL[globalRange]] as [string, string, string]] : []),
+        ],
+        open: "volume",
+      };
+      case "today": return {
+        title: "Today so far", sub: "live, since the business day started at 5am",
+        rows: [
+          ["Taken today", inr(todayRev)],
+          ["Orders today", todayOrd.toLocaleString("en-IN")],
+          ["Average per order", inr(todayOrd ? todayRev / todayOrd : 0)],
+          ["Tables open now", String(activeRid ? (todayRow?.openTables ?? 0) : (ov?.totals.openTables ?? 0))],
+        ],
+        note: "This one does not follow the period above — it is always today.",
+        open: "daysummary",
+      };
+      case "expenses": return {
+        title: "Expenses", sub: `what the period cost you · ${per}`,
+        rows: [
+          ["Staff pay out", inr(staffOut), hasPayroll ? `${kMain!.staffPay!.entries} payment${kMain!.staffPay!.entries === 1 ? "" : "s"} to ${kMain!.staffPay!.people} ${kMain!.staffPay!.people === 1 ? "person" : "people"}` : "nothing recorded in this period"],
+          ["Food made then binned", inr(foodLost), kMain?.foodLoss == null
+            ? "couldn't read this — the figure above may be short"
+            : foodLostRows
+              ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where the kitchen had already cooked it — at what the ingredients cost`
+              : "none — every cancellation was caught before the kitchen started"],
+          ["Total expenses", inr(expensesOut), undefined, true],
+        ],
+        note: "This is what the period COST you, not what left your bank. Food is counted when it is used, not when it was bought. A discount is not here — your revenue already has it taken off. And a cancelled bill's value is not here either: nothing was charged for it, so it was never money you had. Cancellations live in Audit & logs, with the reason and the person.",
+        audit: true,
+        open: "team",
+      };
+      case "onhand": return {
+        title: "On hand", sub: `what is left of the period · ${per}`,
+        rows: [
+          ["Revenue", inr(kMain?.revenue ?? 0)],
+          ["Less staff pay", "− " + inr(staffOut)],
+          ["Less food made then binned", "− " + inr(foodLost)],
+          ["Money on hand", inr(onHand), undefined, true],
+        ],
+        note: "Takings minus what the period cost you. It is not a bank balance — rent, bills and any stock you have not recorded here are not in it, and food is counted when it is used rather than when it was bought.",
+        open: "team",
+      };
+      default: return null;
+    }
+  };
 
   return (
     <>
@@ -1317,6 +1589,15 @@ export default function OwnerDashboard() {
       </div>
 
       {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 16 }}><b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span></div>}
+      {/* The switched-off note: a plain, unalarming card in the muted colour, NOT the red one.
+          Nothing here is broken — Aevidine has simply not given this restaurant the Reports
+          section, and the owner's next move is to ask us, which the sentence says. */}
+      {offNote && !err && (
+        <div className="adm-card" style={{ marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <i className="fas fa-eye-slash" style={{ color: "var(--muted)", marginTop: 2 }} aria-hidden="true" />
+          <span><b>Figures aren&rsquo;t shown here.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{offNote}</span></span>
+        </div>
+      )}
 
 
       {/* ═══════ HOME · MULTI ═══════ */}
@@ -1334,7 +1615,7 @@ export default function OwnerDashboard() {
                 <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"} · each bar split by restaurant</span></span>
                 <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
               </div>
-              {!trendPayload ? <div className="adm-empty">Loading…</div>
+              {!trendPayload ? <div className="adm-empty">{loadNote}</div>
                 : <StackedDailyBars data={groupTrend.rows} lines={groupTrend.lines} />}
             </div>
           ) : (
@@ -1342,13 +1623,13 @@ export default function OwnerDashboard() {
               <div className="adm-card">
                 <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
                   <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
-                {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
+                {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">{loadNote}</div>
                   : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(r.id) }))}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
                 <div className="ow2-ct"><span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span></div>
-                {!trendPayload ? <div className="adm-empty">Loading…</div>
+                {!trendPayload ? <div className="adm-empty">{loadNote}</div>
                   : <AreaTrend data={groupTrend.rows} lines={groupTrend.lines} />}
               </div>
             </div>
@@ -1434,7 +1715,7 @@ export default function OwnerDashboard() {
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
-              {!pl("month") ? <div className="adm-empty">Loading…</div>
+              {!pl("month") ? <div className="adm-empty">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
@@ -1452,25 +1733,25 @@ export default function OwnerDashboard() {
               <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "categories")} />
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
           </div>
 
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               {(pl(globalRange) as GroupA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · {restScopeText}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "payments")} />
               {(pl(globalRange) as GroupA | undefined)?.paymentMethods
                 ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
           </div>
 
@@ -1491,7 +1772,11 @@ export default function OwnerDashboard() {
           </div>
           <div className="own-hero-links">
             {ov.entitlements?.reports !== false && <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>}
-            {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>}
+            {/* "Team", not "Staff & powers". The page this opens is headed "Team & pay" and its
+                only tab is "Team"; the SIDEBAR was corrected on 2026-08-05 for exactly that reason
+                and this shortcut was missed, so the two sat 90px apart in one frame naming the same
+                screen two different things (T12 sweep, 2026-08-17, seen on both sizes). */}
+            {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Team</Link>}
             {ov.entitlements?.issues !== false && <Link href={withPin("/owner/issues")} className="own-hero-link"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Feedback</Link>}
           </div>
         </div>
@@ -1506,7 +1791,7 @@ export default function OwnerDashboard() {
               <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span>
               <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
             </div>
-            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
+            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">{loadNote}</div>
               : restTrend.length >= 9
                 ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} />
                 : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0, __orders: Number(r.__orders) || 0 })) as { label: string; revenue: number }[]} color={GREEN} />}
@@ -1515,7 +1800,7 @@ export default function OwnerDashboard() {
           <div className="ow2-two">
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
-              {!pl("month") ? <div className="adm-empty">Loading…</div>
+              {!pl("month") ? <div className="adm-empty">{loadNote}</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
                       looked like a crash (owner-panel sweep 2026-08-04). */}
@@ -1527,23 +1812,23 @@ export default function OwnerDashboard() {
               <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
           </div>
 
           <div className="ow2-two" style={{ marginTop: 12 }}>
             <div className="adm-card">
-              <PartialStrip keys={(pl(globalRange) as RestA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <PartialStrip keys={(pl(globalRange) as RestA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               {(pl(globalRange) as RestA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
-                : <div className="adm-empty">Loading…</div>}
+                : <div className="adm-empty">{loadNote}</div>}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.paymentMethods && ((pl(globalRange) as RestA).paymentMethods.reduce((a, m) => a + m.revenue, 0) > 0)
                 ? <PaymentDonut data={(pl(globalRange) as RestA).paymentMethods} />
-                : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">Loading…</div>)}
+                : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">{loadNote}</div>)}
             </div>
           </div>
 
@@ -1594,17 +1879,30 @@ export default function OwnerDashboard() {
                   </span>
                 </span>
               </div>
-              <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort}
+              <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort} note={loadNote}
                 onDish={(t) => viewTo({ level: "dish", rid: activeRid, dish: t })} />
             </div>
-            {/* Recent activity — the owner's mini log (surprise add) */}
+            {/* Recent activity — the owner's mini log (surprise add).
+                ABSENT, not spinning, when the admin has taken Audit & logs away: `actsOff` is set
+                from the server's own 403 and `logs` is the entitlement the overview really sends.
+                Either one leaves the card out entirely (module checklist point 6) and the dish
+                list beside it simply takes the row. */}
+            {ov?.entitlements?.logs !== false && !actsOff && (
             <div className="adm-card">
               <div className="ow2-ct">
                 <span>Recent activity <span className="mut">· who did what</span></span>
-                {ov?.entitlements?.activity !== false && <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>}
+                {/* The card's own gate above already requires `logs`, so this link no longer
+                    carries a second copy of it. It used to gate on `entitlements.activity` — a key
+                    that has never existed: the section is called "logs" in lib/ownerEntitlements
+                    OWNER_SECTION_KEYS, that is what the sidebar gates on and what
+                    /api/owner/oplog refuses on. Measured live, the overview sends 33 keys and
+                    `activity` is not one of them, so the gate read `undefined !== false` and was
+                    ALWAYS true — an owner whose Audit & logs the admin had switched off was still
+                    offered a link into a page that refuses him (T12 sweep, 2026-08-17). */}
+                <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>
               </div>
               {!acts ? <div className="adm-empty">Loading…</div>
-                : acts.length === 0 ? <div className="adm-empty">Nothing yet.</div>
+                : acts.length === 0 ? <div className="adm-empty">Nothing yet — your team&rsquo;s work shows up here as it happens.</div>
                 : (
                   <div className="ow2-acts">
                     {acts.map((a) => (
@@ -1625,6 +1923,7 @@ export default function OwnerDashboard() {
                   </div>
                 )}
             </div>
+            )}
           </div>
 
           {highlights}
@@ -1634,7 +1933,7 @@ export default function OwnerDashboard() {
       {/* ═══════ DISH ═══════ */}
       {view.level === "dish" && (
         <div className="adm-card own-dish">
-          {dishView === "loading" || dishView === null ? <div className="adm-empty">Loading dish…</div>
+          {dishView === "loading" || dishView === null ? <div className="adm-empty">{offNote ? loadNote : "Loading dish…"}</div>
           : dishView === "missing" ? (
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
@@ -1643,9 +1942,22 @@ export default function OwnerDashboard() {
               </button>
             </div>
           ) : (<>
+            {/* ── A WAY BACK YOU CAN SEE (owner, 2026-08-18: "for the problem eight, have you add
+                the cross button or do stuff like that?") ────────────────────────────────────────
+                The phone's BACK and the sidebar's Dashboard link both work now, but neither is
+                visible, and at 360px the top-strip breadcrumb is display:none — so on his phone
+                nothing on the screen said "go back". A ✕ in the corner of the dish header, sized
+                past the 44px guideline so a thumb catches it, and it goes UP ONE LEVEL: back to the
+                restaurant on a multi-restaurant estate, back to the dashboard for one restaurant. */}
             <div className="own-dish-h" style={{ ["--rcol" as string]: GREEN }}>
-              <div className="own-dish-name">{dishView.d.title}</div>
-              <div className="adm-muted">{RANGE_LABEL[globalRange]}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="own-dish-name">{dishView.d.title}</div>
+                <div className="adm-muted">{RANGE_LABEL[globalRange]}</div>
+              </div>
+              <button type="button" className="own-dish-x"
+                onClick={() => setView(single ? { level: "home" } : { level: "restaurant", rid: (view as { rid: string }).rid })}
+                aria-label={single ? "Back to the dashboard" : "Back to the restaurant"}
+                title={single ? "Back to the dashboard" : "Back to the restaurant"}>✕</button>
             </div>
             <div className="adm-stats" style={{ marginTop: 14 }}>
               <div className="adm-stat"><div className="k">Revenue</div><div className="v"><AnimatedNumber value={dishView.d.revenue} money /></div></div>
@@ -1659,6 +1971,70 @@ export default function OwnerDashboard() {
           </>)}
         </div>
       )}
+
+      {/* ═══════ TILE POPUP — the detail behind a KPI tile (owner, 2026-08-18) ═══════ */}
+      {(() => {
+        const d = tileDetail();
+        if (!d) return null;
+        // WHOSE numbers these are, said on the popup itself: "it should also show for all restaurant
+        // or of a particular restaurant". The heading answers it before he reads a figure.
+        const who = activeRid
+          ? (ov?.restaurants.find((r) => r.id === activeRid)?.name ?? "this restaurant")
+          : `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`;
+        return (
+          <div className="ow2-tile-wrap" role="dialog" aria-label={`${d.title} detail`} aria-modal="true">
+            <div className="ow2-tile-back" onClick={() => setTileOpen(null)} aria-hidden="true" />
+            <div className="ow2-tile">
+              <header>
+                <span className="ti"><b>{d.title}</b><i>{d.sub}</i></span>
+                <button className="x" onClick={() => setTileOpen(null)} aria-label="Close">✕</button>
+              </header>
+              <div className="who"><i className="fas fa-store" aria-hidden="true" /> {who}</div>
+              <div className="rows">
+                {d.rows.map(([label, value, hint, isTotal]) => (
+                  <div className={`r${isTotal ? " last" : ""}`} key={label}>
+                    <span className="l">{label}{hint ? <i>{hint}</i> : null}</span>
+                    <span className="v">{value}</span>
+                  </div>
+                ))}
+              </div>
+              {d.note ? (
+                <p className="note">
+                  <i className="fas fa-circle-info" aria-hidden="true" />
+                  <span>
+                    {d.note}
+                    {/* Straight to the record, so "cancellations live in Audit & logs" is a door and
+                        not just a sentence. Gated on the SAME `logs` entitlement the sidebar and
+                        /api/owner/oplog use — if the admin has taken the log away there is nothing
+                        to send him to, and the sentence stands on its own. */}
+                    {d.audit && ov?.entitlements?.logs !== false ? (
+                      <>{" "}<Link className="nlink" href={withPin("/owner/activity")}>Open Audit &amp; logs <i className="fas fa-arrow-right" aria-hidden="true" /></Link></>
+                    ) : null}
+                  </span>
+                </p>
+              ) : null}
+              <footer>
+                {/* "at the below there will be a click for a seen proper detail, and that will take
+                    me to that particular page" — and it carries the scope and the range (detailHref). */}
+                {reportsOn ? (
+                  /* NO onClick THAT CLOSES THIS FIRST. Measured: closing the popup on the same tap
+                     sent us straight back to the dashboard instead of to the report. The popup owns
+                     a back-stack layer, and closing it makes backStack rewind that entry with
+                     history.go(-1) — which wins the race against the router and undoes the
+                     navigation. It is the identical trap components/owner/OwnerShell.tsx documents
+                     for its nav links ("pages that NAVIGATE leave it open and let the route change
+                     close it"), and the same cure: navigate, and let the unmount tidy up, where
+                     backStack's own "a real navigation pushed on top of our buffer" guard sees the
+                     new URL and leaves the buffer alone. */
+                  <Link className="full" href={detailHref(d.open)}>
+                    See the full detail <i className="fas fa-arrow-right" aria-hidden="true" />
+                  </Link>
+                ) : <span className="full off">Reports are switched off for this restaurant</span>}
+              </footer>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══════ DRAWER — phase 2 of the 3-phase drill (multi only) ═══════ */}
       {drawer && (
@@ -1703,6 +2079,13 @@ export default function OwnerDashboard() {
         .ow2-tools { display: flex; gap: 10px; align-items: flex-start; }
         .ow2-stats { margin-bottom: 12px; }
         :global(.ow2-stats) { display: grid; grid-template-columns: repeat(var(--ow2-cols, 5), 1fr); gap: 12px; }
+        /* ONE LINE, FIVE TILES (owner, 2026-08-18: "everything should be in the one line. That is
+           what I want. Right now it is top bottom two rows"). minmax(0,1fr) not 1fr, for the same
+           reason the chart pair below uses it: a bare 1fr floors at the item's min-content width, so
+           one long figure could push its own track wider than the row. The short money form on the
+           tile face (compactINR) is the other half of making five fit. */
+        :global(.ow2-stats5) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        :global(.ow2-stats5) > * { min-width: 0; }
         .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
         .ow2-ct .mut { color: var(--muted); font-weight: 500; }
         /* A quiet caption under a chart, for saying what it deliberately leaves out. */
@@ -1760,7 +2143,12 @@ export default function OwnerDashboard() {
         .hq-table .go i { color: var(--muted); font-size: 11px; }
         .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
         /* dish view bits reused */
-        .own-dish-h { border-left: 4px solid var(--rcol); padding-left: 12px; }
+        .own-dish-h { display: flex; align-items: flex-start; gap: 12px; border-left: 4px solid var(--rcol); padding-left: 12px; }
+        /* 44x44 — the tap-target guideline, and the reason this is not the 25x22 the panel sheets
+           use (he judged those fine because the phone BACK also closes them; here BACK is exactly
+           what was missing, so this one has to be catchable). */
+        .own-dish-x { flex: none; width: 44px; height: 44px; border-radius: 12px; border: var(--border); background: var(--bg); color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
+        .own-dish-x:hover { color: var(--accent); border-color: var(--accent); }
         .own-dish-name { font-size: 22px; font-weight: 800; }
         .rv-sort { display: inline-flex; gap: 2px; }
         .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
@@ -1814,12 +2202,50 @@ export default function OwnerDashboard() {
         .dspark small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
         .dall { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--muted); }
         .dall i { opacity: .7; margin-right: 4px; }
+        /* ── the KPI tile popup (owner, 2026-08-18) ────────────────────────────────────────────
+           A centred sheet rather than the side drawer: this is a figure being explained, not a
+           restaurant being previewed, and the numbers read better centred over the tile they came
+           from. Same close contract as every other overlay here — backdrop, the X, Escape and the
+           phone's BACK. */
+        .ow2-tile-wrap { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 18px; }
+        .ow2-tile-back { position: absolute; inset: 0; background: rgba(5,8,14,.6); backdrop-filter: blur(2px); animation: ow2fade .18s ease-out; }
+        .ow2-tile { position: relative; width: min(430px, 100%); max-height: min(88vh, 720px); overflow-y: auto; background: var(--card); border: var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.45); animation: ow2pop .18s cubic-bezier(.4,0,.2,1); }
+        @keyframes ow2pop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+        .ow2-tile header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 16px 18px 10px; }
+        .ow2-tile header .ti { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .ow2-tile header .ti b { font-size: 17px; font-weight: 800; }
+        .ow2-tile header .ti i { font-style: normal; font-size: 11.5px; color: var(--muted); }
+        .ow2-tile .x { flex: none; background: var(--bg); border: var(--border); color: var(--text); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; cursor: pointer; }
+        .ow2-tile .who { display: flex; align-items: center; gap: 7px; margin: 0 18px 12px; padding: 6px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 9%, transparent); font-size: 11.5px; font-weight: 700; color: var(--text); }
+        .ow2-tile .who i { font-size: 10px; opacity: .7; }
+        .ow2-tile .rows { padding: 0 18px; display: flex; flex-direction: column; }
+        .ow2-tile .r { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border-c, rgba(128,128,128,.16)); }
+        .ow2-tile .r:last-child { border-bottom: none; }
+        /* the total line reads as the answer, not as one more row */
+        .ow2-tile .r.last { margin-top: 4px; border-top: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); border-bottom: none; padding-top: 11px; }
+        .ow2-tile .r.last .l, .ow2-tile .r.last .v { font-weight: 800; }
+        .ow2-tile .r.last .v { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-size: 17px; }
+        .ow2-tile .r .l { display: flex; flex-direction: column; gap: 2px; font-size: 13px; font-weight: 600; min-width: 0; }
+        .ow2-tile .r .l i { font-style: normal; font-size: 10.5px; color: var(--muted); font-weight: 500; line-height: 1.35; }
+        .ow2-tile .r .v { flex: none; font-size: 14.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .ow2-tile .note { display: flex; gap: 8px; margin: 12px 18px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+        .ow2-tile .note > i { margin-top: 2px; opacity: .8; flex: none; }
+        :global(.ow2-tile .note .nlink) { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; font-weight: 800; color: color-mix(in srgb, var(--accent) 80%, var(--text)) !important; text-decoration: none; white-space: nowrap; }
+        :global(.ow2-tile .note .nlink:hover) { text-decoration: underline; }
+        :global(.ow2-tile .note .nlink i) { font-size: 9px; }
+        .ow2-tile footer { padding: 14px 18px 16px; }
+        :global(.ow2-tile .full) { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a !important; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; text-decoration: none; }
+        :global(.ow2-tile .full:hover) { filter: brightness(1.08); }
+        :global(.ow2-tile .full.off) { background: var(--bg); border: var(--border); color: var(--muted) !important; cursor: default; font-weight: 600; }
         .ow2-drawer footer { padding: 14px 18px; border-top: var(--border); }
         .ow2-drawer .full { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; }
         .ow2-drawer .full:hover { filter: brightness(1.08); }
-        @media (max-width: 1080px) { :global(.ow2-stats) { grid-template-columns: repeat(3, 1fr) !important; } }
+        /* Five in a line is a DESKTOP promise. Below ~1080px five tiles would be ~150px each and the
+           labels would break mid-word, which is the exact fault the 2026-08-11 fix cured — so the
+           laptop step is 3 and the phone step is 2. Told to him plainly rather than pretended. */
+        @media (max-width: 1080px) { :global(.ow2-stats), :global(.ow2-stats5) { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; } }
         @media (max-width: 760px) {
-          :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
+          :global(.ow2-stats), :global(.ow2-stats5) { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           .ow2-two, .ow2-callouts { grid-template-columns: minmax(0, 1fr); }
           /* by CLASS, never by nth-child — a row whose cells don't line up 1:1 with the header
              (the "figures hidden" row) used to lose the wrong ones. And :global, because the
@@ -1835,8 +2261,10 @@ export default function OwnerDashboard() {
 }
 
 // ── Every-dish list (kept from the old view, range now per-card) ──────────────
-function DishList({ payload, sort, onDish }: { payload?: RestA; sort: "revenue" | "qty"; onDish: (t: string) => void }) {
-  if (!payload) return <div className="adm-empty">Loading…</div>;
+function DishList({ payload, sort, onDish, note }: { payload?: RestA; sort: "revenue" | "qty"; onDish: (t: string) => void; note?: string }) {
+  // `note` is the page's own placeholder text: "Loading…" normally, but "Reports are switched off"
+  // once the server has said so, because then no payload is ever coming (T12 sweep, 2026-08-17).
+  if (!payload) return <div className="adm-empty">{note ?? "Loading…"}</div>;
   const dishes = [...payload.dishes].sort((a, b) => (sort === "revenue" ? b.revenue - a.revenue : b.qty - a.qty));
   const maxRev = Math.max(1, ...dishes.map((d) => d.revenue));
   return (

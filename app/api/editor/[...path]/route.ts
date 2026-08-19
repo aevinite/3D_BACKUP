@@ -2388,7 +2388,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
       const rows = must(await sb.from("deletion_audit")
-        .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount")
+        // `order_id` and the ONE scalar out of meta (owner, 2026-08-18) — never `meta` itself. The
+        // comment above explains why meta is lazy: it carries a whole order snapshot, and 100 of them
+        // for rows nobody opened is the board-wide read the egress rules exist to prevent. A JSON
+        // path selection costs a text field per row and is what lets the list show the loss tag and
+        // offer the answer without opening anything.
+        .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount,order_id,made:meta->>made")
+        // A REMOVALS list shows REMOVALS. 'removal_classified' is the answer to "was the food made?",
+        // not a thing taken out of the system — leaving it in put "Cancellation answered" rows in a
+        // list headed "everything taken out", and counted them in its record count and money total.
+        // The current answer already rides on the cancellation row itself as a tag; the trail of who
+        // answered and what they changed stays in the table for the admin's support view.
+        .neq("kind", "removal_classified")
         .eq("restaurant_id", rid).order("at", { ascending: false }).limit(lim));
       return ok(auditForReader((rows || []) as { actor?: string | null; actor_role?: string | null }[], !g.user));
     }
@@ -3129,6 +3140,47 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       });
       if (error) throw new Error(error.message);
       return ok({ ok: true, id: data });
+    }
+
+    // ── ANSWER (OR CORRECT) "WAS THE FOOD MADE?" FROM THE AUDIT (P3, owner 2026-08-18) ──────────
+    // "from audit section you can trasnfer the thing as cancelling." Three rows need this and none
+    // of them had a person to ask at the time:
+    //   · a cancellation from before this feature existed;
+    //   · the waiter tablet emptying an order dish by dish until it cancels itself;
+    //   · lib/sessionClose archiving unpaid food when a table closes — nobody is standing there.
+    // They sit tagged `unanswered`, and this is where a manager settles them. It is also how a
+    // WRONG answer is corrected: the RPC is idempotent and append-only, so it moves the stock and
+    // the expense to match the new answer and records what it changed from.
+    //
+    // Gated on `void_bills` — the same power that lets someone cancel in the first place. Answering
+    // moves real stock and writes a real cost, so it is not open floor work; but it needs no NEW
+    // permission either, because "may cancel" and "may say whether it was cooked" are one job.
+    if (a === "audit" && b === "classify" && req.method === "POST") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("change whether a cancelled order's food was made");
+      const orderId = body?.order_id ? String(body.order_id) : "";
+      const made = body?.made;
+      if (!orderId) return err("which order?", 400);
+      if (typeof made !== "boolean") return err("say whether the food was made", 400);
+      const { data, error } = await sb.rpc("lfh_cancel_classify", {
+        p_restaurant: rid, p_order: orderId, p_made: made,
+        p_actor: g.user?.name || g.user?.username || "manager",
+        p_actor_id: g.user?.id ?? null, p_actor_role: g.user?.role ?? null, p_audit_id: null,
+      });
+      if (error) throw new Error(error.message);
+      const res = data as { ok?: boolean; reason?: string; lossCost?: number } | null;
+      // A refusal is a real answer the screen must show, not a silent no-op — this is the mistake
+      // the cancel path made on 2026-08-18 (it called the RPC before the row was cancelled).
+      if (!res || res.ok !== true) return err(res?.reason === "not_cancelled"
+        ? "That order isn't cancelled, so there is nothing to answer."
+        : res?.reason === "order_not_found" ? "That order no longer exists."
+        : "Couldn't record that answer — try again.", 409);
+      await log("editor", "cancel_classified", {
+        restaurant_id: rid, order_id: orderId, device_id: dev,
+        detail: made
+          ? `the food WAS made — recorded as a loss of ${res.lossCost ?? 0}`
+          : "the food was never made — ingredients returned to stock",
+      });
+      return ok({ ok: true, ...res });
     }
 
     if (a === "orders" && b === "delete") {
@@ -5059,6 +5111,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       if (patch.payment_status === "pending") { patch.paid_at = null; patch.tip = 0; }
       if (patch.archived === true) patch.archived_at = new Date().toISOString();
       if (patch.archived === false) patch.archived_at = null;
+      // The person's answer to "was the food made?", acted on AFTER the update below (see the note in
+      // the cancel block). null = it was not asked, which stays UNANSWERED rather than being guessed.
+      let classifyMade: boolean | null = null;
       // Whether the ✕ below was forced by the archive rather than asked for directly — it goes
       // into the audit row so a later reader knows this was "table freed with food unpaid",
       // not somebody deliberately cancelling a ticket.
@@ -5113,6 +5168,24 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
           tableNumber: cur.table_number != null ? String(cur.table_number) : null,
           meta: { was_paid: cur.payment_status === "paid", ...(archiveForcedTheCancel ? { auto: "unpaid food archived off the floor" } : {}) },
         });
+        // ── WAS THE FOOD ACTUALLY MADE? (owner, 2026-08-18 — docs/CANCEL-AND-LOSS-SPEC.md) ────────
+        // A cancelled order is two different events wearing one name. The panel now asks, in red, and
+        // the answer travels WITH the cancel so one round trip does everything:
+        //   true  → the food was cooked. The kitchen-fire consumption stands (the stock really is
+        //           gone) and the ingredient cost becomes a `food_loss` expense.
+        //   false → never started. The consumption is reversed line for line, so the ingredients go
+        //           back on the shelf — which is what NOTHING did before this: cancelling reversed
+        //           nothing, so a mis-keyed order ate its ingredients for ever.
+        // An absent answer is left UNANSWERED on purpose rather than guessed — an old row, an offline
+        // replay from a panel that predates this, or lib/sessionClose's automatic archive all land
+        // there, and the Audit screen is where a person fixes it (P3).
+        // ORDER OF OPERATIONS, and it cost me a wrong test to find: at THIS point the row has not
+        // been updated yet — the UPDATE runs at the bottom of this handler. lfh_cancel_classify
+        // refuses an order that is not cancelled yet, which is the right guard, so calling it here
+        // returned {ok:false,'not_cancelled'} and did nothing. So only REMEMBER the answer here and
+        // act on it after the write lands.
+        const madeAns = (body as { made?: unknown } | null)?.made;
+        if (typeof madeAns === "boolean") classifyMade = madeAns;
         // …and, once a day at most, tell the owner when the day's voids look unusual (lib/cancelWatch.ts).
         // Cancel is the ONLY way a bill leaves the working list now, so the level of cancelling is
         // the thing worth watching — but this never blocks or questions the cancel itself, which is
@@ -5124,6 +5197,28 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
       const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
+      // ── NOW the row is cancelled, so the answer can do its work (mig 337) ──────────────────────
+      // made=true keeps the kitchen-fire consumption and prices it as a food_loss expense;
+      // made=false reverses the consumption so the ingredients go back on the shelf. Best-effort: the
+      // cancel itself has already succeeded and must never look failed because the costing hiccuped —
+      // but a refusal is LOGGED rather than swallowed, because a silent one is what hid the ordering
+      // mistake this comment exists to explain.
+      if (classifyMade !== null) {
+        const cls = await sb.rpc("lfh_cancel_classify", {
+          p_restaurant: rid, p_order: id, p_made: classifyMade,
+          p_actor: g.user?.name || g.user?.username || "Admin (Aevidine)",
+          p_actor_id: g.user?.id ?? null, p_actor_role: g.user?.role || "admin", p_audit_id: null,
+        });
+        const bad = cls.error ? cls.error.message : (cls.data as { ok?: boolean; reason?: string } | null)?.ok === false
+          ? `refused: ${(cls.data as { reason?: string }).reason}` : null;
+        if (bad) {
+          await log("editor", "cancel_classify_failed", {
+            restaurant_id: rid, order_id: id, level: "error",
+            detail: `could not record whether the food was made — ${bad}`,
+            device_id: deviceIdFrom(req),
+          });
+        }
+      }
       return ok({ ok: true });
     }
 
