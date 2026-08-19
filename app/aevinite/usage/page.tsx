@@ -28,11 +28,15 @@ export default function AdminUsage() {
   useActiveAutoRefresh(load, 60000);
 
   const max = d ? Math.max(1, ...d.rows.map((r) => r.orders30d)) : 1;
+  // "…" MEANS STILL LOADING. After a failed read it never resolves, so the four headline numbers
+  // sat on an ellipsis for ever and the page looked like it was still working (T17 sweep,
+  // 2026-08-19). A read that failed shows "—" — unknown — with the error line and Retry above it.
+  const blank = err ? "—" : "…";
   const STATS: { k: string; v: string | number; hint?: string }[] = [
-    { k: "Orders · 30 days", v: d ? nf(d.totals.orders30d) : "…", hint: "all restaurants" },
-    { k: "Orders · 7 days", v: d ? nf(d.totals.orders7d) : "…", hint: "all restaurants" },
-    { k: "Restaurants", v: d ? d.totals.restaurants : "…", hint: "live" },
-    { k: "Staff (active)", v: d ? nf(d.totals.staff) : "…", hint: "across all" },
+    { k: "Orders · 30 days", v: d ? nf(d.totals.orders30d) : blank, hint: "all restaurants" },
+    { k: "Orders · 7 days", v: d ? nf(d.totals.orders7d) : blank, hint: "all restaurants" },
+    { k: "Restaurants", v: d ? d.totals.restaurants : blank, hint: "live" },
+    { k: "Staff (active)", v: d ? nf(d.totals.staff) : blank, hint: "across all" },
   ];
 
   return (
