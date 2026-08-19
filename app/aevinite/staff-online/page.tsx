@@ -177,7 +177,12 @@ export default function AdminStaffOnline() {
       )}
 
       <style href="adm-staff-online" precedence="default">{`
-        .so-snap { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
+        /* A NOTE, NOT A WARNING (T17 sweep, 2026-08-19). This pill says "this page doesn't update
+           on its own" — which is deliberate and correct, not a fault. It was drawn in the console's
+           WARNING colour, so an amber badge sat on this screen on every single load, for ever. A
+           bar that is always up is how the admin learns to stop reading amber. It now looks like
+           what it is: a quiet piece of information next to the button it points at. */
+        .so-snap { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); white-space: nowrap; }
         .so-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
         .so-card { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: var(--card); border: var(--border); position: relative; overflow: hidden; transition: transform .14s ease, box-shadow .14s ease; }
         .so-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
