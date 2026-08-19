@@ -770,6 +770,16 @@ export default function OwnerStaffPage() {
           .ost-row { align-items: flex-start; }
           .ost-actions { flex-basis: 100%; margin-top: 8px; }
           .ost-actions .ost-mini, .ost-actions select { flex: 1 1 auto; text-align: center; }
+          /* 36px ON A PHONE (owner asked for this on 2026-08-19). Measured 26–28px before, in both
+             skins — tappable, and full-width, but SHORTER than every other target in this very file
+             (the table tiles are 36, the tab is 40) and one of them is Remove, which cannot be
+             undone. 36 matches the table tiles rather than inventing a number, and it is the
+             smallest change that clears them: the row grows by about 10px per action line, which is
+             one extra line of scrolling per three people, not a redesign. Padding stays put so the
+             labels do not move; min-height does the work. */
+          .ost-actions .ost-mini, .ost-actions select { min-height: 36px; }
+          /* The inline rename editor is on the same row and had the same problem. */
+          .ost-editrow .ost-in, .ost-editrow .ost-btn, .ost-editrow .ost-mini { min-height: 36px; }
         }
       `}</style>
     </>
