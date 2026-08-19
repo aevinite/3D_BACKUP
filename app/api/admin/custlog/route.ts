@@ -45,11 +45,21 @@ export async function GET(req: NextRequest) {
     // ids). The old code took the 400 most-recent rows platform-wide, so a member whose orders
     // fell outside that window showed fewer orders than reality ("2" when they had 5) on a busy
     // multi-restaurant day. No `total` — the admin counts orders, never sees per-order money.
+    //
+    // AND THE SAME BUG WAS STILL HERE, one layer down (sweep #6, T19). Scoping by member id fixed
+    // WHICH rows are asked for; it did nothing about HOW MANY come back. Neither read stated a
+    // ceiling, so both stopped at PostgREST's own cap — and 120 members on a busy day is well past
+    // it. The rows that fell off the end were simply not counted, which is the very symptom the
+    // note above says was fixed: a guest showing fewer orders than they really made, on the screen
+    // the admin uses to answer "who did what". A hidden ceiling gives a wrong number silently; an
+    // explicit one that is far above anything real gives the right one. 120 members × 60 orders is
+    // a heavier day than either table has ever seen.
+    const MEMBER_ROW_CAP = 8000;
     const memberIds = memberRows.map((m) => m.id).filter(Boolean);
     const [orders, calls] = memberIds.length
       ? await Promise.all([
-          sb.from("orders").select("member_id, created_at").in("member_id", memberIds),
-          sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds),
+          sb.from("orders").select("member_id, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
+          sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
         ])
       : [{ data: [], error: null }, { data: [], error: null }];
     if (orders.error || calls.error)
