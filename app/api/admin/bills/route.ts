@@ -43,6 +43,11 @@ const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 const SESSION_COLS = "id, status, bill_no, invoice_no, invoice_voided, table_number, restaurant_id, opened_at, closed_at, created_at, deleted_at, deleted_by, delete_reason";
 const ORDER_COLS = "id, session_id, total, discount, tax_rate, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
+// The ceiling on "the orders of ONE bill". The trail read above already states 500 with the reason
+// ("a bill of 400 KOTs is already refused elsewhere as implausible"); the delete and restore paths
+// read the same set with no ceiling at all, which on a bill past PostgREST's own cap would have
+// tombstoned some of its orders and left the rest live — a half-deleted bill, reported as done.
+const BILL_ORDER_CAP = 500;
 
 // What an order was actually worth, net of its discount. This was a SECOND COPY of
 // lib/billLedger.ts's netOf() (T7 improvement I1) — the ledger's amounts and the permanent audit's
@@ -230,7 +235,7 @@ async function postImpl(req: NextRequest) {
     // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
     if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
-    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
     // …and into the Audit, the one place a person looks for "what was removed and why". The
@@ -260,7 +265,7 @@ async function postImpl(req: NextRequest) {
   if (action === "restore") {
     // Read the money BEFORE the restore clears the tombstone, so the audit row can say what came
     // back — the same columns and the same netOf() the delete recorded on the way out.
-    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).not("deleted_at", "is", null)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     // restoreOrders() now THROWS when the database refuses either write (T7 finding F3 — it used to
     // report the row count it intended and leave the bill deleted). Caught here so the admin gets a

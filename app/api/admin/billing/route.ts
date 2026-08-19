@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
   const [restQ, billingQ, yearPaymentsQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
     // Named columns + a bound (sweep 2026-08-04). This whole-platform read had no .eq(), no column
     // list and no .limit() — the only read in the admin tree missing all three. One row per
     // restaurant makes it small today, but it grows with exactly the number this product is built

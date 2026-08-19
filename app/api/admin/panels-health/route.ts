@@ -17,8 +17,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const [restsQ, setQ, staffQ] = await Promise.all([
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
-    sb.from("settings").select("restaurant_id, enabled_panels"),
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
+    sb.from("settings").select("restaurant_id, enabled_panels").limit(2000),
     // Active operational staff only, explicit columns, bounded — we just need the latest
     // last_seen per (restaurant, role); aggregated below in JS.
     sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("last_seen_at", { ascending: false, nullsFirst: false }).limit(3000),

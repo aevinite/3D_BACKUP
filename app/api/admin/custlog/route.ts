@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
     ].filter(Boolean))) as string[];
     const nameById = new Map<string, string>();
     if (rids.length) {
-      const rest = await sb.from("restaurants").select("id, name").in("id", rids);
+      const rest = await sb.from("restaurants").select("id, name").in("id", rids).limit(2000);
       for (const x of rest.data ?? []) nameById.set(x.id, x.name);
     }
     const tag = <T extends { restaurant_id?: string | null }>(r: T) =>

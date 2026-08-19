@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
     // Restaurant names for the rows' restaurant_id chips (one scoped lookup).
     const rids = Array.from(new Set((actQ.data || []).map((a) => a.restaurant_id).filter(Boolean)));
     const restNames = rids.length
-      ? new Map(((await sb.from("restaurants").select("id, name").in("id", rids)).data || []).map((r) => [r.id, r.name]))
+      ? new Map(((await sb.from("restaurants").select("id, name").in("id", rids).limit(2000)).data || []).map((r) => [r.id, r.name]))
       : new Map();
     return ok({
       owner: { id: o.id, username: o.username, name: o.name || o.username, active: o.active === true, lastSeenAt: o.last_seen_at, createdAt: o.created_at },
@@ -103,8 +103,8 @@ export async function GET(req: NextRequest) {
   if (new URL(req.url).searchParams.get("deleted") === "1") {
     const [binQ, linksQ] = await Promise.all([
       sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
-        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
-      sb.from("restaurant_owners").select("user_id"),
+        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000),
+      sb.from("restaurant_owners").select("user_id").limit(20000),
     ]);
     if (binQ.error) return adminFail("the owners recycle bin", binQ.error, { action: "load" });
     const owned = new Map<string, number>();
@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
       // "silently dropped every restaurant past the 100th" in the owner reports. 2000 is far above
       // any real estate and still an explicit ceiling rather than a hidden one.
       .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000),
-    sb.from("restaurant_owners").select("restaurant_id, user_id"),
+    sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000),
     sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000),
   ]);
   // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). Every failure on this page answered with the
@@ -155,7 +155,7 @@ export async function GET(req: NextRequest) {
   const primaryIds = Array.from(new Set((restQ.data || []).map((r) => r.owner_user_id).filter(Boolean) as string[]));
   const primaryUser = new Map<string, { name: string; binned: boolean }>();
   if (primaryIds.length) {
-    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds);
+    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds).limit(2000);
     for (const u of pq.data || []) primaryUser.set(u.id as string, { name: (u.name as string) || (u.username as string), binned: !!u.deleted_at });
   }
 
@@ -493,7 +493,7 @@ export async function PATCH(req: NextRequest) {
 // the join rows, then deletes the staff_users row. Returns how many restaurants
 // were released. staff_actions rows are kept on purpose (audit outlives account).
 async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; released: number }> {
-  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || [];
+  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000)).data || [];
   for (const l of links) {
     const rid = l.restaurant_id as string;
     const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];

@@ -17,9 +17,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const [billingQ, usageQ, restsQ] = await Promise.all([
-    sb.from("restaurant_billing").select("restaurant_id, status, plan"),
+    sb.from("restaurant_billing").select("restaurant_id, status, plan").limit(2000),
     sb.rpc("lfh_admin_usage"),
-    sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null),
+    sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null).limit(2000),
   ]);
   // Check ALL three — a partial failure (e.g. the usage RPC times out) would otherwise leave
   // usage empty and flag EVERY paying restaurant as churn-risk with a confident 200 (audit).

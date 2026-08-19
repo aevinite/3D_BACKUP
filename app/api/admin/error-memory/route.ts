@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   const ids = [...new Set(rows.map((x) => x.restaurant_id).filter(Boolean))] as string[];
   let names = new Map<string, string>();
   if (ids.length) {
-    const n = await sb.from("restaurants").select("id, name").in("id", ids);
+    const n = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
     names = new Map(((n.data ?? []) as { id: string; name: string }[]).map((x) => [x.id, x.name]));
   }
   return NextResponse.json({

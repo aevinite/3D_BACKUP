@@ -28,14 +28,14 @@ export async function GET(req: NextRequest) {
 
   const [restQ, setQ, ownersQ, linksQ, ordersTodayQ, maintQ, onlineQ, issuesQ, actQ, errQ, fixQ] =
     await Promise.all([
-      sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
-      sb.from("settings").select("restaurant_id, enabled_panels"),
-      sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true),
+      sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000),
+      sb.from("settings").select("restaurant_id, enabled_panels").limit(2000),
+      sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).limit(2000),
       // The owner⇄restaurant join (mig 097) — so the "Owner" quick-open knows when a
       // restaurant has SEVERAL owners and shows a "which owner?" chooser (owner 2026-07-25).
-      sb.from("restaurant_owners").select("restaurant_id, user_id"),
+      sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000),
       sb.from("orders").select("id", head).neq("status", "cancelled").gte("created_at", sinceIso),
-      sb.from("settings").select("restaurant_id").eq("service_mode", true),
+      sb.from("settings").select("restaurant_id").eq("service_mode", true).limit(2000),
       // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
       // hauling the ENTIRE staff_users table every 60s just to filter it on the client.
       sb.from("staff_users").select("name, username, role, restaurant_id, last_seen_at", { count: "exact" }).eq("active", true).gte("last_seen_at", onlineSinceIso).limit(200),

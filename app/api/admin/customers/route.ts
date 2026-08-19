@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Restaurant names for the row chips + the filter dropdown (small, read once).
-    const rests = ((await sb.from("restaurants").select("id, name, slug, accent_color").order("slug")).data || []) as
+    const rests = ((await sb.from("restaurants").select("id, name, slug, accent_color").order("slug").limit(2000)).data || []) as
       Array<{ id: string; name: unknown; slug: string; accent_color: string | null }>;
     // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
     // string on others — read both, fall back to the slug so a chip is never blank.

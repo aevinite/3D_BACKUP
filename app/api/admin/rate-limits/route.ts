@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   if (!(await admin(req))) return err("unauthorized", 401);
   const rules = await sb.from("rate_limit_rules")
     .select("id, key, label, max_count, window_seconds, enabled, updated_at")
-    .is("restaurant_id", null).order("key");
+    .is("restaurant_id", null).order("key").limit(500);
   if (rules.error) return adminFail("the rate limits", rules.error, { action: "load" });
 
   const ev = await sb.from("rate_limit_events")
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const ids = [...new Set((ev.data ?? []).map((e) => e.restaurant_id).filter((x) => x && x !== "00000000-0000-0000-0000-000000000000"))];
   const names: Record<string, string> = {};
   if (ids.length) {
-    const rs = await sb.from("restaurants").select("id, name").in("id", ids);
+    const rs = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
     for (const r of rs.data ?? []) names[r.id] = r.name;
   }
   const events = (ev.data ?? []).map((e) => ({ ...e, restaurant_name: names[e.restaurant_id] || null }));

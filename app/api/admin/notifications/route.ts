@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       .select("id, restaurant_id, subject, body, raised_by, raised_role, created_at, image_url, audio_url")
       .eq("status", "open").order("created_at", { ascending: false }).limit(TICKET_LIMIT),
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000),
     sb.from("staff_actions").select("id, panel, action, detail, restaurant_id, created_at")
       .eq("level", "error").is("seen_at", null).is("resolved_at", null).gte("created_at", since24h).order("created_at", { ascending: false }).limit(10),
     sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("level", "error").is("seen_at", null).is("resolved_at", null).gte("created_at", since24h),
