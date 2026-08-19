@@ -476,5 +476,11 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 .kset-line > b { margin-left: auto; text-align: right; }
 .kset-note { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 8px 0 0; }
 .kset-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+/* 44px EVERYWHERE IN THE SHEET, not just in the button rows (measured at 390px, 2026-08-19: the ✕ and
+   the Sign out button came out 37px). This screen is tapped with a wet hand — the same reason .pstep,
+   .detail-x, .qdest-t and .prsheet-row all carry the target size. A control that only ALMOST reaches it
+   is the one that gets missed mid-service. */
+.kset .btn, .kset a.btn, .kset button { min-height: 44px; }
+.kset-head .btn { min-width: 44px; }
 .kset-btns .btn, .kset-btns a.btn { min-height: 44px; }
 .kset-danger { background: #7f1d1d; border-color: #b91c1c; color: #fff; }
