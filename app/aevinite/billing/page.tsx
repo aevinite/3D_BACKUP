@@ -232,7 +232,11 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   };
 
   const inputStyle: React.CSSProperties = { padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, width: "100%" };
-  const cardStyle: React.CSSProperties = { background: "var(--card)", border: "var(--border)", borderRadius: 14, width: "min(96vw, 560px)", maxHeight: "90vh", overflowY: "auto" };
+  // 96vw NEXT TO THE WRAPPER'S 16px PADDING ADDED UP TO MORE THAN THE SCREEN (T16 sweep,
+  // 2026-08-19): 345.6 + 32 > 360, so the grid could not centre the card and it sat against the
+  // left padding with its right edge ~2px off an A35. `100%` is the padded content box, so the
+  // card is properly inset on a phone and unchanged at the 560px cap on a computer.
+  const cardStyle: React.CSSProperties = { background: "var(--card)", border: "var(--border)", borderRadius: 14, width: "min(100%, 560px)", maxHeight: "90vh", overflowY: "auto" };
 
   return (
     <>
