@@ -156,8 +156,27 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
 
   const load = useCallback(async () => {
     setLoadErr(false);
+    // ── ONE RETRY BEFORE LOCKING THE FORM (T16 sweep, 2026-08-19) ──────────────────────────
+    // A BRAND-NEW restaurant has no table QR codes yet, and this load is what mints them. The
+    // admin route reads the existing codes, works out which are missing and INSERTS them — so two
+    // of these cards loading at the same moment (the Access screen mounts one per open row, and it
+    // remembers which rows were open) both try to insert tables 1..N, the loser hits the unique
+    // index and the route answers 500 "couldn't mint unique codes — try again". Reproduced on a
+    // freshly created restaurant: one load 200, the other 500, and the very next load 200.
+    //
+    // That 500 landed here as `loadErr`, which locks the whole card behind "Couldn't load this
+    // restaurant's settings" with a Retry button — on the screen an admin opens seconds after
+    // creating a restaurant. Retrying once, quietly, is what the situation actually needs: the
+    // codes exist by then. If the second attempt fails too the card still locks and still says so,
+    // so a real outage is not hidden. The route's insert should become an upsert as well — that is
+    // a one-line change in app/api/admin/restaurants/settings/route.ts and is HANDOFF H3.
+    const fetchOnce = async () => (await fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
     try {
-      const j = await (await fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
+      let j = await fetchOnce();
+      if (j?.error) {
+        await new Promise((r) => setTimeout(r, 700));
+        j = await fetchOnce();
+      }
       if (j.error || !j.settings) { setLoadErr(true); return; }
       const s: Draft = { ...j.settings };
       // Open PRE-FILLED with what the bill prints right now (the manager form's rule):
