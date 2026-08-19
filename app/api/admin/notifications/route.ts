@@ -12,6 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -47,7 +49,12 @@ export async function GET(req: NextRequest) {
   // empty bell (no tickets, and NO suspended-restaurant alerts) as if everything's clear (audit).
   // Errors are non-fatal to the feed: if that read fails we still return the rest.
   const nErr = ticketsQ.error || countQ.error || restQ.error;
-  if (nErr) return NextResponse.json({ error: nErr.message }, { status: 500 });
+  // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
+  // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
+  // right for a developer, useless on the screen the owner runs his platform from. adminFail
+  // keeps the raw text where it is actually useful (the response `detail` and the server log)
+  // and gives the screen a sentence that names the thing and says whether anything changed.
+  if (nErr) return adminFail("the notifications", nErr, { action: "load" });
 
   const restaurants = (restQ.data || []) as { id: string; name: string; slug: string; active: boolean }[];
   const nameOf: Record<string, string> = {};

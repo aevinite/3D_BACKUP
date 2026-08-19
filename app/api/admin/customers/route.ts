@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
 import { safeSearch } from "@/lib/searchText";
 
@@ -67,7 +69,11 @@ export async function GET(req: NextRequest) {
     // This is the admin-only view — "Meera has eaten at 3 of our restaurants".
     if (detail) {
       const { data, error } = await sb.from("customers").select(COLS).eq("phone", detail).limit(50);
-      if (error) throw new Error(error.message);
+      // PLAIN WORDS, not the database's (sweep #6, T19). `throw new Error(error.message)` walked the
+      // raw sentence out through the catch at the bottom and into the console's red toast — the same
+      // fault lib/adminFail was written for, just wearing a throw. Answered here instead so the raw
+      // text stays in the response `detail` and the server log, where it is actually read.
+      if (error) return adminFail("this guest's record", error, { action: "load" });
       const rows = ((data || []) as Row[]).map((c) => ({ ...c, restaurantName: nameOf(c.restaurant_id) }));
       return NextResponse.json({
         detail: {
@@ -90,7 +96,7 @@ export async function GET(req: NextRequest) {
     if (seg === "new") q = q.lt("visits", REPEAT_MIN);
     if (seg === "blocked") q = q.eq("blocked", true);
     const { data, error, count } = await q;
-    if (error) throw new Error(error.message);
+    if (error) return adminFail("the guest list", error, { action: "load" });
     const customers = ((data || []) as Row[]).map((c) => ({
       ...c,
       restaurantName: nameOf(c.restaurant_id),

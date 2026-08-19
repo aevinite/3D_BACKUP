@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +39,12 @@ export async function GET(req: NextRequest) {
     // Surface a failed read — otherwise a broken query shows an EMPTY customer log ("no
     // customers") with a 200 instead of an error the page can retry (audit).
     const cErr = members.error || blocklist.error;
-    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+    // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
+    // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
+    // right for a developer, useless on the screen the owner runs his platform from. adminFail
+    // keeps the raw text where it is actually useful (the response `detail` and the server log)
+    // and gives the screen a sentence that names the thing and says whether anything changed.
+    if (cErr) return adminFail("the customer log", cErr, { action: "load" });
     const memberRows = members.data ?? [];
     const blockRows = blocklist.data ?? [];
 
@@ -62,8 +69,9 @@ export async function GET(req: NextRequest) {
           sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
         ])
       : [{ data: [], error: null }, { data: [], error: null }];
+    // Same rule as the reads above: plain words on the screen, the raw text in the log.
     if (orders.error || calls.error)
-      return NextResponse.json({ error: (orders.error || calls.error)!.message }, { status: 500 });
+      return adminFail("the customer log", (orders.error || calls.error)!, { action: "load" });
 
     // Stamp each row with its restaurant name so the admin (who sees every restaurant at
     // once) can tell tenants apart instead of one indistinguishable jumble.

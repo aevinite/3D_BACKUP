@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { redactMoney } from "@/lib/oplog";
 // The SAME grouping the Repair board uses, so the button and the board can never disagree.
@@ -68,7 +70,12 @@ export async function GET(req: NextRequest) {
   // (the anti-pattern the floor route avoids). The two soft LISTS below (online staff, issues)
   // may still degrade to empty; the notifications bell is the primary issues surface (audit 2026-07-09).
   const critErr = restQ.error || ordersTodayQ.error || maintQ.error;
-  if (critErr) return NextResponse.json({ error: critErr.message }, { status: 500 });
+  // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
+  // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
+  // right for a developer, useless on the screen the owner runs his platform from. adminFail
+  // keeps the raw text where it is actually useful (the response `detail` and the server log)
+  // and gives the screen a sentence that names the thing and says whether anything changed.
+  if (critErr) return adminFail("the console home screen", critErr, { action: "load" });
 
   const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
   const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));

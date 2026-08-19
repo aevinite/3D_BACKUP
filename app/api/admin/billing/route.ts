@@ -15,6 +15,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
@@ -49,8 +51,14 @@ export async function GET(req: NextRequest) {
       sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle(),
       sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200),
     ]);
-    if (billingQ.error) return bad(billingQ.error.message, 500);
-    if (paymentsQ.error) return bad(paymentsQ.error.message, 500);
+    // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). These six sites answered with the database's
+    // own sentence, so a failure on the platform-billing page read as e.g. `duplicate key value
+    // violates unique constraint "restaurant_billing_pkey"` in a red toast. adminFail keeps that
+    // text where it is useful (the response `detail` and the server log) and gives the screen a
+    // sentence that names the thing AND says whether anything changed — which on a money page is
+    // the part the owner actually needs.
+    if (billingQ.error) return adminFail("this restaurant's billing", billingQ.error, { action: "load" });
+    if (paymentsQ.error) return adminFail("this restaurant's payment history", paymentsQ.error, { action: "load" });
     return ok({ billing: billingQ.data || null, payments: paymentsQ.data || [] });
   }
 
@@ -69,7 +77,7 @@ export async function GET(req: NextRequest) {
     sb.from("restaurant_billing").select(BILLING_COLS).limit(2000),
     sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
   ]);
-  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return bad(q.error.message, 500);
+  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return adminFail("the billing table", q.error, { action: "load" });
 
   const billingByRid = new Map<string, Billing>((billingQ.data || []).map((b: Billing) => [b.restaurant_id, b]));
   const paidThisYearByRid = new Map<string, number>();
@@ -143,7 +151,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       updated_at: new Date().toISOString(),
     };
     const { error } = await sb.from("restaurant_billing").upsert(patch, { onConflict: "restaurant_id" });
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("this restaurant's plan", error, { action: "save" });
     await logAction("admin", "billing_set_plan", { detail: `${patch.plan || "plan"} · ${status}`, restaurant_id: rid });
     return ok({ ok: true });
   }
@@ -166,7 +174,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       note: body.note ? String(body.note) : null,
     };
     const ins = await sb.from("restaurant_payments").insert(row).select("id").single();
-    if (ins.error) return bad(ins.error.message, 500);
+    if (ins.error) return adminFail("this payment", ins.error, { action: "save" });
 
     // "Also move the next-due date" is a SECOND write, and its failure used to be swallowed: the
     // payment saved, the reply said ok, and next-due quietly stayed where it was — so the restaurant
@@ -200,7 +208,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // below it, and the platform's money record carried a removal that never happened. Asking the
     // delete which row it took is one word (`.select`) and makes the answer honest.
     const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id").maybeSingle();
-    if (gone.error) return bad(gone.error.message, 500);
+    if (gone.error) return adminFail("this payment", gone.error, { action: "save" });
     if (!gone.data) return bad("That payment is already gone — refresh the page.", 404);
     await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: (gone.data as { restaurant_id: string }).restaurant_id || null });
     return ok({ ok: true });
