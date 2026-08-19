@@ -420,6 +420,18 @@ export default function AdminFloor() {
                   <div className="adm-minigrid">
                     {r.tables.map((t) => {
                       const tg = t.g ? TAG_MINI[t.g] : undefined;
+                      // A LABEL THAT IS NOT A TABLE NUMBER MUST NOT SMEAR ACROSS ITS NEIGHBOURS
+                      // (T16 sweep, 2026-08-19). A tile is a 22px square with an 8.5px font, built
+                      // for "1".."300". But the floor's table list is generate_series(1, table_count)
+                      // UNION the table_number of every session and order — so an order keyed by
+                      // something else (French House carries eight 7-digit ones) arrives as a
+                      // "table", and with nothing clipping the tile its digits ran straight over the
+                      // tiles beside it: two of that restaurant's four rows rendered as one
+                      // unreadable run of numbers. Seen in a 1280×800 screenshot of this page.
+                      // Clipped, shortened with a leading ellipsis so it never pretends to be the
+                      // whole value, and the full label stays in the tooltip below.
+                      const long = String(t.n).length > 3;
+                      const face = t.c ? "•" : tg ? tg.emoji : long ? "…" + String(t.n).slice(-2) : t.n;
                       return (
                       <span key={t.n}
                         className="adm-minitile"
@@ -429,9 +441,12 @@ export default function AdminFloor() {
                           // still wins (money state beats decoration).
                           boxShadow: t.p === "red" ? "inset 0 0 0 2px #f87171" : t.p === "green" ? "inset 0 0 0 2px #34d399" : tg ? `inset 0 0 0 2px ${tg.color}` : undefined,
                           color: t.s === "free" ? "var(--muted)" : "#fff",
+                          // Nothing may leave its own square, whatever the label turns out to be.
+                          overflow: "hidden",
+                          ...(long ? { fontSize: 7 } : null),
                         }}
                         title={`Table ${t.n} — ${t.s}${tg ? ` · ${tg.label}` : ""}${t.p === "red" ? " · UNPAID" : t.p === "green" ? " · paid" : ""}${t.c ? " · waiter called" : ""}`}>
-                        {t.c ? "•" : tg ? tg.emoji : t.n}
+                        {face}
                       </span>
                       );
                     })}
