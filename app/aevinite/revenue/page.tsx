@@ -4,7 +4,7 @@
 // never appears. All figures come from /api/admin/revenue (derived from restaurant_billing +
 // restaurant_payments — no schema change). Dark ops-console theme, hand-rolled SVG chart.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useActiveAutoRefresh } from "@/components/admin/shared";
+import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
 
 type Plan = { plan: string; mrr: number; count: number };
 type Month = { month: string; label: string; collected: number };
@@ -121,9 +121,20 @@ export default function AdminRevenue() {
           <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Platform revenue</h1>
           <p className="adm-page-sub" style={{ marginTop: 4 }}>Your subscription income — what restaurants pay you. Not their food sales.</p>
         </div>
-        <button className="adm-btn" disabled={loading} onClick={load}>
-          <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* HOW OLD THE FIGURES ARE (T18 sweep, 2026-08-20). Platform analytics and Customers both
+              say when they were last counted; this page refreshed itself every 60 seconds and said
+              nothing, so a tab left open overnight looked live. `generatedAt` was already in the
+              reply and simply unread. */}
+          {d?.generatedAt ? (
+            <span className="adm-muted" style={{ fontSize: 12 }} title={new Date(d.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>
+              updated {timeAgo(d.generatedAt)}
+            </span>
+          ) : null}
+          <button className="adm-btn" disabled={loading} onClick={load}>
+            <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+          </button>
+        </div>
       </div>
 
       {err && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{err} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></p>}
