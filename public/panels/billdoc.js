@@ -342,7 +342,7 @@
 + "     · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the\n"
 + "       left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */\n"
 + "  @page{margin:0}\n"
-+ "  @media print{body{margin:0 !important;padding:2mm 5mm !important}\n"
++ "  @media print{body{margin:0 !important;padding:2mm 5mm !important;width:auto !important;box-shadow:none !important;background:#fff !important}\n"
 + "    /* a bill spanning several printer pages: print the ITEM header ONCE (browsers\n"
 + "       otherwise repeat <thead> on every page — it showed up mid-bill), and never split\n"
 + "       a row across a page boundary (a fragmented flex row shifted every amount one\n"
@@ -357,11 +357,39 @@
 + "     solid rules. Bold is spent on exactly two things: the restaurant name and the TOTAL.\n"
 + "     Nothing below 10.5px and no italics — both smear at 203 dpi. */\n"
 + "  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}\n"
+// ── THE PREVIEW IS THE PAPER, INCLUDING ITS WIDTH (owner, 2026-08-19, with both photos) ───────────
+// "The bill printed, but the format, spacing and all that is not perfect as it shows in the view."
+// He was right, and the cause was width. The bill had NO width on screen, so the preview laid itself
+// out across the whole window (~780px) while the paper gives it 60mm of ink — about 227px. Same font,
+// a third of the room: the restaurant name that fitted one line on screen wrapped to two on paper, and
+// every wrapped line made the whole thing look tighter than the preview promised.
+//
+// So the screen now gets EXACTLY the printer's column: 70mm wide with the same 5mm side padding the
+// print rule uses, on a grey desk with a paper shadow, centred. What he sees is now what the roll
+// does — wrapping included — which is the only honest kind of preview and the thing the file's own
+// name ("the preview is what the printer prints") always claimed.
+//
+// It is CSS only. The markup is untouched, because the same document is also read inside the Audit
+// card's sandboxed iframe with no scripts at all — a preview that needed JavaScript to look right
+// would make the record and the paper two different things.
 + "  body{font-family:'Helvetica Neue',Helvetica,Arial,'Liberation Sans',sans-serif;\n"
-+ "       font-size:12.5px;line-height:1.44;margin:22px 30px;color:#000;font-weight:400;\n"
-+ "       font-variant-numeric:tabular-nums}\n"
++ "       font-size:12.5px;line-height:1.44;color:#000;font-weight:400;\n"
++ "       font-variant-numeric:tabular-nums;\n"
+// border-box, or the padding is ADDED to the 70mm and the screen column becomes 80mm — which is a
+// preview 10mm wider than the paper, i.e. the same lie in smaller print (measured: content 70mm on
+// screen vs 60mm on the roll before this was added).
++ "       width:70mm;margin:0 auto;padding:2mm 5mm;box-sizing:border-box}\n"
++ "  @media screen{html{background:#e9e9ec;min-height:100%}\n"
++ "    body{background:#fff;box-shadow:0 2px 16px rgba(0,0,0,.18);margin:14px auto 40px;padding-top:calc(2mm + 52px)}}\n"
 + "  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}\n"
-+ "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;margin:0 0 4px}\n"
+// line-height on the NAME (owner, 2026-08-19). 60mm of ink holds about 20 uppercase characters at
+// this size, so a real restaurant name — "AANGAN GARDEN RESTAURANT" is 24 — takes two lines. It was
+// inheriting the body's 1.44 leading, which made those two lines 14.5mm of loose air at the top of
+// every bill; 1.12 makes a wrapped name read as one deliberate block. The SIZE is deliberately left
+// alone: the name is the biggest thing on a customer's bill and shrinking it to dodge a wrap would
+// cost every restaurant legibility to save one line.
++ "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;\n"
++ "     line-height:1.12;margin:0 0 5px}\n"
 + "  .sub{text-align:center;font-size:11px;line-height:1.5}\n"
 + "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;\n"
 + "        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}\n"
@@ -403,8 +431,11 @@
 + "     Cancel are indistinguishable to the page — see closeBill() below), so this bar is how it\n"
 + "     goes away, and how a second copy is printed without rebuilding the bill. It is hidden\n"
 + "     from the paper by display:none AND excluded from the page-length measurement below. */\n"
-+ "  .bar{position:sticky;top:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
-+ "       margin:-22px -30px 14px;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}\n"
+// FIXED, not sticky: the bill is a 70mm column now, and a sticky bar inside it would be 70mm wide
+// with its buttons squeezed. Fixed to the window keeps Print again / Close full size and out of the
+// paper's way; the body reserves room for it with padding-top above.
++ "  .bar{position:fixed;top:0;left:0;right:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
++ "       margin:0;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}\n"
 + "  .bar button{font:inherit;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;\n"
 + "              border:1px solid #b9b9c0;background:#fff;color:#000}\n"
 + "  .bar button.x{background:#111;color:#fff;border-color:#111}\n"
