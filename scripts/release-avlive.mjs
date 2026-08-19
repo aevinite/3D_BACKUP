@@ -37,13 +37,16 @@ const HOST = "https://www.aevinite.shop";
 
 // Files AV live keeps as ITS OWN — never overwritten from backup. Each one has a reason, and the
 // reasons are why "just copy the whole tree" has failed before.
+// ONE ENTRY LEFT, and it is a token limitation rather than a decision (owner, 2026-08-19: "make av
+// exactly like backup fully identical"). The four AV-live operational scripts now live in BACKUP too,
+// and `.claude` is tracked repo content, so both are copied like everything else — a repo cannot be
+// called identical while one side carries files the other has never had.
 const KEEP_LIVE = [
-  ".github/workflows/checks.yml",              // the release token has no `workflow` scope: a push containing it is rejected outright
-  "scripts/apply-migration-avlive.mjs",        // AV live's own guarded appliers + operational scripts…
-  "scripts/apply-migration-prod.mjs",
-  "scripts/copy-demo-to-prod.mjs",
-  "scripts/reset-prod-owner-pw.mjs",           // …which the app never imports, so they cannot affect the build
-  ".claude",                                   // session + permission config belongs to whoever opens the folder
+  // The release token is a fine-grained PAT with no `workflow` scope: GitHub rejects the WHOLE push if
+  // it contains a change to anything under .github/workflows. So this one file cannot be made identical
+  // with the credentials available — it is reported at the end rather than silently skipped, and the
+  // fix (a token with `workflow`) is the owner's to give.
+  ".github/workflows/checks.yml",
 ];
 
 const args = process.argv.slice(2);
@@ -224,5 +227,11 @@ const home = await fetch(HOST, { redirect: "follow" }).then((r) => r.status).cat
 const proof = await fetch(`${HOST}/print-setup.html?rel=${pushed.slice(0, 8)}`, { redirect: "follow" }).then((r) => r.status).catch(() => 0);
 say(`  9 · ${pushed.slice(0, 8)} READY · ${HOST} answers ${home} · this release's own page answers ${proof}`);
 if (proof !== 200) say("      ⚠ the new page did not answer 200 — panel assets are cached for up to a day (stale-while-revalidate), so re-check with a ?v= before concluding anything");
+// The one thing that cannot be made identical, stated every run so it never becomes folklore.
+try {
+  const wf = git(LIVE, "diff", "--name-only", "devsrc/backupmain", "--", ".github/workflows/checks.yml");
+  if (wf) say("      ⚠ .github/workflows/checks.yml still differs — the release token has no `workflow` scope, so a push carrying it is rejected outright. Everything else is identical.");
+  else say("      · .github/workflows/checks.yml matches too — nothing is being held back");
+} catch { /* the note is a nicety */ }
 const behind = git(BACKUP, "rev-list", "--count", `${PIN}..origin/main`);
 say(`\n  ✓ AV live is level with backup ${PIN.slice(0, 8)}${Number(behind) ? ` (backup has since gained ${behind} commit(s) — a chase never converges, so this is where it landed)` : ""}\n`);
