@@ -13,6 +13,7 @@
 // the tab is hidden.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SkelList } from "@/components/admin/Skeleton";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 
 const IST = "Asia/Kolkata";
 
@@ -118,12 +119,15 @@ export default function AdminCustomers() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setDetailBusy(false); }
   }, []);
-  useEffect(() => {
-    if (!detail) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDetail(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [detail]);
+  // ONE LINE, NOT FOUR HAND-ROLLED ONES (T18 sweep, 2026-08-20). This drawer was the only overlay
+  // in the admin console that did not call useAdminModal — the hook whose own header says it exists
+  // so "no future modal can get any of them wrong". It hand-rolled an Escape listener and stopped
+  // there, so it got none of the other three. Measured at 360x780 before this: pressing the phone's
+  // hardware BACK left the Customers page entirely (about:blank) instead of closing the drawer;
+  // focus never entered the drawer, so a keyboard user was still tabbing the table behind it; and
+  // the page scrolled under a finger while the drawer was open. The sibling OwnerChooser on the
+  // Dashboard has had the hook since 2026-07-25. Rendered below in <CustomerDrawer/> because the
+  // hook needs a ref to a mounted dialog, which means the dialog has to be its own component.
 
   const rows = customers || [];
   const maxSpread = Math.max(1, ...spread.map((s) => s.count));
@@ -274,60 +278,70 @@ export default function AdminCustomers() {
         )}
       </div>
 
-      {/* ── the guest's own record: every restaurant this number has eaten at ───────── */}
-      {(detail || detailBusy) && (
-        <div onClick={() => setDetail(null)} role="dialog" aria-modal="true" aria-label="Customer record"
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", backdropFilter: "blur(3px)", zIndex: 80, display: "flex", justifyContent: "flex-end" }}>
-          <div onClick={(e) => e.stopPropagation()} className="adm-card"
-            style={{ width: "min(460px, 100%)", height: "100%", borderRadius: 0, overflow: "auto", padding: 22 }}>
-            {!detail ? <SkelList rows={4} label="Loading customer" /> : (
-              <>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                  <div>
-                    <h2 style={{ fontSize: 19 }}>{detail.name || "Guest"}</h2>
-                    <div className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>{showPhone(detail.phone)}</div>
-                  </div>
-                  <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={() => setDetail(null)} aria-label="Close">✕</button>
-                </div>
+      {(detail || detailBusy) && <CustomerDrawer detail={detail} onClose={() => setDetail(null)} />}
 
-                <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))" }}>
-                  <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Visits</div><div className="v" style={{ fontSize: 21 }}>{nfmt(detail.totalVisits)}</div></div>
-                  <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Restaurants</div><div className="v" style={{ fontSize: 21 }}>{detail.restaurants.length}</div></div>
-                  <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Status</div>
-                    <div className="v" style={{ fontSize: 15, marginTop: 7 }}>{detail.blockedAnywhere ? "Blocked somewhere" : "Fine"}</div></div>
-                </div>
-
-                {detail.restaurants.length > 1 && (
-                  <p className="hint" style={{ margin: "0 0 10px" }}>
-                    This number eats at <b>{detail.restaurants.length}</b> of our restaurants — a picture only you can see here;
-                    each owner only ever sees their own row.
-                  </p>
-                )}
-
-                <div style={{ display: "grid", gap: 9 }}>
-                  {detail.restaurants.map((r) => (
-                    <div key={r.restaurant_id} style={{ border: "var(--border)", borderRadius: 12, padding: "11px 13px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <b style={{ fontSize: 13.5 }}>{r.restaurantName}</b>
-                        {r.blocked && <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>}
-                        <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{r.visits} visit{r.visits === 1 ? "" : "s"}</span>
-                      </div>
-                      <div className="adm-muted" style={{ fontSize: 12, marginTop: 5 }}>
-                        Known as <b style={{ color: "var(--text)" }}>{r.name || "Guest"}</b> · first {dfmt(r.first_seen_at)} · last {dfmt(r.last_seen_at)} ({ago(r.last_seen_at)})
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <p className="hint" style={{ marginTop: 16 }}>
-                  Erasing a guest is the owner&apos;s call, from their own Customers page — it wipes the record,
-                  the visit history and any linked devices for that restaurant.
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </>
+  );
+}
+
+// The guest's own record: every restaurant this number has eaten at — the cross-restaurant view
+// only the admin gets. Its own component so `useAdminModal` has a mounted dialog to hold: that one
+// call gives it the phone Back button, Escape, focus moving in and back out, Tab trapped inside,
+// and the scroll port behind it frozen (T18 sweep, 2026-08-20 — it had only Escape before).
+function CustomerDrawer({ detail, onClose }: { detail: Detail | null; onClose: () => void }) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  useAdminModal(cardRef, "admin-customer-detail", onClose);
+  return (
+    <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Customer record"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", backdropFilter: "blur(3px)", zIndex: 80, display: "flex", justifyContent: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} ref={cardRef} tabIndex={-1} className="adm-card"
+        style={{ width: "min(460px, 100%)", height: "100%", borderRadius: 0, overflow: "auto", padding: 22 }}>
+        {!detail ? <SkelList rows={4} label="Loading customer" /> : (
+          <>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <div>
+                <h2 style={{ fontSize: 19 }}>{detail.name || "Guest"}</h2>
+                <div className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>{showPhone(detail.phone)}</div>
+              </div>
+              <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={onClose} aria-label="Close">✕</button>
+            </div>
+
+            <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))" }}>
+              <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Visits</div><div className="v" style={{ fontSize: 21 }}>{nfmt(detail.totalVisits)}</div></div>
+              <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Restaurants</div><div className="v" style={{ fontSize: 21 }}>{detail.restaurants.length}</div></div>
+              <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Status</div>
+                <div className="v" style={{ fontSize: 15, marginTop: 7 }}>{detail.blockedAnywhere ? "Blocked somewhere" : "Fine"}</div></div>
+            </div>
+
+            {detail.restaurants.length > 1 && (
+              <p className="hint" style={{ margin: "0 0 10px" }}>
+                This number eats at <b>{detail.restaurants.length}</b> of our restaurants — a picture only you can see here;
+                each owner only ever sees their own row.
+              </p>
+            )}
+
+            <div style={{ display: "grid", gap: 9 }}>
+              {detail.restaurants.map((r) => (
+                <div key={r.restaurant_id} style={{ border: "var(--border)", borderRadius: 12, padding: "11px 13px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <b style={{ fontSize: 13.5 }}>{r.restaurantName}</b>
+                    {r.blocked && <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>}
+                    <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{r.visits} visit{r.visits === 1 ? "" : "s"}</span>
+                  </div>
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 5 }}>
+                    Known as <b style={{ color: "var(--text)" }}>{r.name || "Guest"}</b> · first {dfmt(r.first_seen_at)} · last {dfmt(r.last_seen_at)} ({ago(r.last_seen_at)})
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="hint" style={{ marginTop: 16 }}>
+              Erasing a guest is the owner&apos;s call, from their own Customers page — it wipes the record,
+              the visit history and any linked devices for that restaurant.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
