@@ -317,7 +317,20 @@ export async function POST(req: NextRequest) {
     const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
     const base = cleanClonedSettings(template.data);
     saved = await sb.from("settings")
-      .upsert({ ...base, id: rest.data.slug, restaurant_id: rid, ...patch }, { onConflict: "restaurant_id" })
+  // THE SETTINGS ROW IS KEYED BY THE RESTAURANT'S OWN ID, NOT ITS SLUG (T20 sweep, 2026-08-19).
+  // `settings.id` is that table's PRIMARY KEY (mig 003). Migration 319 frees a restaurant's slug the
+  // moment it goes to the recycle bin — but a binned restaurant KEEPS its settings row, so a slug can
+  // be free in `restaurants` and still taken in `settings`. Keyed by slug, the upsert below (whose
+  // conflict target is restaurant_id, not id) would then hit `settings_pkey` and hand the admin a raw
+  // "duplicate key value violates unique constraint" for flipping a switch. The uuid cannot collide,
+  // and nothing anywhere looks a settings row up by slug — every read is `.eq("restaurant_id", …)`
+  // except the four legacy `id='site'` reads, which are restaurant #1's own row.
+  //
+  // The create route and the quick-features route were both given this on 2026-08-16 and these were
+  // left on the old key. Unreachable today (every restaurant on both stacks has a settings row, so
+  // this clone branch never runs) — closed now because the symptom is a database sentence on his
+  // screen, and it is invisible until the day it happens.
+      .upsert({ ...base, id: rid, restaurant_id: rid, ...patch }, { onConflict: "restaurant_id" })
       .select(SELECT).maybeSingle();
   }
   if (saved.error) return adminFail("this restaurant's settings", saved.error, { action: "save" });

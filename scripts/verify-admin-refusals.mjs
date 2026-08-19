@@ -21,7 +21,7 @@
 //
 //   node scripts/verify-admin-refusals.mjs        (or npm run verify:admin-refusals)
 //   node scripts/verify-admin-refusals.mjs --repo /path/to/other/checkout
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -124,6 +124,44 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
   check("no admin gate in my half decides from a count whose error it never checked",
     offenders.length === 0,
     offenders.length ? `${offenders.join(", ")} — a failed count reads as a real zero, so the gate opens` : "");
+}
+
+// ── 4 · A NEW settings ROW IS KEYED BY THE RESTAURANT ID, NEVER ITS SLUG ─────────────────────────
+// The same optimism, one layer down: keying by slug assumes the NAME is free, and since migration 319
+// it isn't a safe assumption — a binned restaurant gives its slug back in `restaurants` while KEEPING
+// its settings row, so the name can be free in one table and taken in the other. `settings.id` is a
+// PRIMARY KEY (mig 003) and these upserts conflict on `restaurant_id`, not on `id`, so the collision
+// is not absorbed: it surfaces as `duplicate key value violates unique constraint "settings_pkey"` on
+// the admin's screen for flipping a switch — the exact "database error on his screen, which is worse
+// than the lock it replaces" that migration 319's own header says it exists to avoid.
+//
+// The create route and quick-features were fixed on 2026-08-16; four siblings were left behind and are
+// fixed here. Discovered by scanning, not from a list, so the next route to clone a settings template
+// is covered the day it is written.
+{
+  const walk = (rel, out = []) => {
+    for (const e of readdirSync(join(ROOT, rel), { withFileTypes: true })) {
+      const p = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(p, out); else if (e.name === "route.ts") out.push(p);
+    }
+    return out;
+  };
+  const routes = existsSync(join(ROOT, "app/api/admin")) ? walk("app/api/admin").sort() : [];
+  check("app/api/admin could be walked, so this looks at every route", routes.length > 20, `${routes.length} route file(s)`);
+  const offenders = [];
+  const cloners = [];
+  for (const rel of routes) {
+    const src = code(rel);
+    if (!src || !/cleanClonedSettings/.test(src)) continue;   // only the routes that clone a template
+    cloners.push(rel);
+    // Any `id:` in the row being written to `settings` must be the restaurant's uuid, never a slug.
+    for (const m of src.matchAll(/\bid:\s*([A-Za-z0-9_.\[\]]+)/g)) {
+      if (/slug/i.test(m[1])) offenders.push(`${rel} :: id: ${m[1]}`);
+    }
+  }
+  check("every admin route that clones a settings template was found", cloners.length >= 5, `${cloners.length}: ${cloners.map((c) => c.split("/").slice(-2)[0]).join(", ")}`);
+  check("none of them keys the new settings row by a SLUG", offenders.length === 0,
+    offenders.length ? `${offenders.join(", ")} — a slug freed by the recycle bin can still be taken in settings, and the upsert conflicts on restaurant_id, so this becomes a raw settings_pkey error on his screen` : "");
 }
 
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
