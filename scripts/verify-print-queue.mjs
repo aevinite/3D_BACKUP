@@ -174,9 +174,26 @@ const guide = read("public/print-setup.html");
 check(guide.length > 30000,
   `the in-app setup guide is a real guide (${Math.round(guide.length / 1024)} KB)`,
   "public/print-setup.html has shrunk to a stub");
-check(/\/api\/print-station\/mac/.test(guide) && /\/api\/print-station\/windows/.test(guide) && /\/api\/print-station\/linux/.test(guide) && /window\.print\(\)/.test(guide),
-  "…offering all three generated starters plus a save-as-PDF button",
-  "the guide no longer offers a starter download or the PDF button the owner asked for");
+check(/window\.print\(\)/.test(guide),
+  "…with the save-as-PDF button he asked for",
+  "the guide lost the save-as-PDF button");
+// NOTHING IS OFFERED AS A DOWNLOAD any more, anywhere. On a Mac a downloaded script is the
+// "Apple could not verify… / Move to Bin" dialog with no way past it on Sequoia; on Windows it is
+// SmartScreen. A file the person pastes into Notepad/TextEdit/nano themselves has neither.
+check(!/api\/print-station\/(mac|windows|linux)/.test(guide) && !/download>/.test(guide),
+  "the guide offers NO file to download — every OS menu is taught by hand instead",
+  "a starter download is back on the guide: on a Mac that is the 'Apple could not verify' dialog with only Done / Move to Bin, which is exactly what the owner hit");
+check([["win", "windows"], ["mac", "mac"], ["linux", "linux"]].every(([id, anchor]) =>
+    new RegExp(`<section class="os" data-osid="${id}">\\s*<h2 id="${anchor}"`).test(guide)) &&
+  ["win", "mac", "linux"].every((id) => guide.includes(`data-pick="${id}"`)) &&
+  /body\[data-os="win"\] section\.os:not\(\[data-osid="win"\]\)/.test(guide),
+  "…and the three menus are pickable: one section per OS plus the chooser that hides the other two",
+  "the per-OS menu chooser is gone — he asked for '3 diff menu for all 3 diff os' so a restaurant reads only its own steps");
+// The chooser HIDES two thirds of the page, so both ways out of a hidden menu are guarded as well.
+check(/body\[data-os\] section\.os\{display:block !important\}/.test(guide) &&
+  /document\.body\.dataset\.os !== os\) show\(os, false\)/.test(guide),
+  "…a saved PDF still holds all three, and a link into a hidden menu opens it first",
+  "picking one OS can hide a menu that a contents-list link or the printed PDF still needs — a link that appears to do nothing");
 const ownerSettings = read("app/owner/settings/page.tsx");
 // The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
 // rather than the literal — asserting the spelling of code that legitimately changed shape is how
@@ -191,28 +208,36 @@ check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
 check(/prsheet-status/.test(kpanel) && /kotPrintTarget/.test(kpanel),
   "the kitchen screen's 🖨 sheet SHOWS where printing stands (on/off, and which screen prints)",
   "the kitchen sheet no longer says whether this screen is even meant to be printing — a cook at a silent printer has to ask someone");
-// The starters are GENERATED per request now, with the URL of the site they were downloaded from —
-// they were static files until 2026-08-19, when the Mac one turned out to be blocked by Gatekeeper AND
-// pointing at the wrong stack (two failures that look identical to the person at the printer).
-const station = read("lib/printStation.ts");
-const stationRoute = read("app/api/print-station/[file]/route.ts");
-check(/mac:/.test(station) && /windows:/.test(station) && /linux:/.test(station),
-  "one source generates all three starters (Windows · Mac · Linux/Pi)",
-  "a starter is missing from lib/printStation.ts — a screen offers it as a download and the link would 404");
-check(/x-forwarded-host/.test(stationRoute) && /Content-Disposition/.test(stationRoute),
-  "…each download arrives pointed at the site it came from, as an attachment (nothing to edit)",
-  "the starter route no longer fills in the requesting site — every restaurant would have to find and edit the URL line, and a wrong URL looks exactly like a blocked file");
-check(/disable-backgrounding-occluded-windows/.test(station) && /kiosk-printing/.test(station),
-  "the two flags that make this work at all are in the generated scripts",
-  "a starter lost --kiosk-printing or --disable-backgrounding-occluded-windows — the first means every ticket waits for a click, the second is the whole covered-window bug");
+// The guide is the ONLY source of the launcher now: lib/printStation.ts and its download route were
+// DELETED on 2026-08-19 along with the download itself (owner, with the screenshot: "print-station-mac
+// .command Not Opened — Apple could not verify… / Move to Bin", then "make 3 diff menu for all 3 diff
+// os setup and tell me in each every step… bcz dwl it and clicking it shows this error"). A file the
+// person types themselves carries no quarantine flag, so no security layer can object to it. So the two
+// flags that make automatic printing work at all are asserted in each of the three PASTEABLE blocks.
+const osMenu = (id) => {
+  const m = guide.match(new RegExp(`<section class="os" data-osid="${id}">[\\s\\S]*?</section>`));
+  return m ? m[0] : "";
+};
+check(["win", "mac", "linux"].every((id) => {
+    const sec = osMenu(id);
+    return /--kiosk-printing/.test(sec) && /--disable-backgrounding-occluded-windows/.test(sec);
+  }),
+  "the two flags that make this work at all are in all three pasteable blocks",
+  "an OS menu lost --kiosk-printing or --disable-backgrounding-occluded-windows — the first means every ticket waits for a click, the second is the whole covered-window bug");
+// The site address has to be INSIDE a Copy block, not merely somewhere on the page: what the person
+// pastes is the block, and Windows has exactly one block, so a count of two would have been wrong.
+check(["win", "mac", "linux"].every((id) =>
+  /<pre data-copy>(?:(?!<\/pre>)[\s\S])*data-site-url(?:(?!<\/pre>)[\s\S])*<\/pre>/.test(osMenu(id))),
+  "…every menu carries THIS site's address inside a Copy-button block",
+  "an OS menu has lost its site address or its Copy buttons — a hand-retyped Chrome command line is how a flag goes missing, and a guessed stack is why a launcher silently did nothing");
 check(/Gatekeeper|could not verify/i.test(guide) && /bash ~\/Downloads/.test(guide),
-  "the guide answers the macOS block a real Mac shows (and the old right-click trick is gone)",
+  "the guide still names the macOS block by its real dialog, and rescues a file already sitting in Downloads",
   "the guide no longer explains 'Apple could not verify' — the owner hit exactly that dialog, and the instructions told him to right-click → Open, which macOS Sequoia removed");
 check(["windows", "mac", "linux", "devices", "switches", "which", "test", "wrong"].every((id) => guide.includes(`<h2 id="${id}"`)),
   "the guide is the three-OS structure he asked for (Windows · Mac · Linux/Pi) with who-prints, the test and the fault table",
   "the guide has lost one of its main sections — he asked for THREE OS sections plus which-screen-prints, the test and the fault table");
 check(/Save as type/.test(guide) && /Make Plain Text/.test(guide) && /nano ~\/print-station\.sh/.test(guide),
-  "each OS section also teaches making the file BY HAND (Notepad · TextEdit plain text · nano)",
+  "each OS menu teaches making the file BY HAND (Notepad · TextEdit plain text · nano)",
   "the by-hand instructions are gone. The owner asked for them precisely because a download can be blocked (macOS) or saved wrong (.bat.txt) — 'tell me all step by step everything, how I have to make that file'");
 check(/data-site-url/.test(guide) && /location\.origin/.test(guide),
   "…and every command carries THIS site's address, written in by the page itself",
