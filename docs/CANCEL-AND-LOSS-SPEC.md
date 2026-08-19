@@ -98,10 +98,24 @@ and now asserts the tag map's two halves agree; `verify:owner-screen` to 55. Ful
 6. `removal_classified` rows appeared in a list headed "everything taken out of the system" and were
    counted in its total. Filtered out of both removals lists, and out of the chips to match.
 
-## 5b. The one question he has not answered
+## 5b. ANSWERED — who may change it (owner, 2026-08-19)
 
-Who may **change** an answer later. Built on the stated default: whoever cancels answers, and only
-`void_bills` (manager and above) may correct it from the Audit. Say the word and it moves.
+> "can be change by owner or manager"
+
+So **both**, each in their own screen:
+
+* **Manager** → their panel's Audit · removals, gated on `void_bills` (the same power that lets them
+  cancel in the first place, so no new permission).
+* **Owner** → their Audit & logs, gated on the `logs` section being switched on for that restaurant.
+
+**This is a narrow, deliberate exception to the owner-read-only rule of 2026-08-04, and the line still
+holds where it matters.** That rule protects the RECORD: an owner may never restore, delete or rewrite
+a removal, `canRestore: false` still stands, and there is no route that puts a bill back. Answering
+whether the kitchen had already cooked the food changes none of that — it appends a
+`removal_classified` row naming who answered and what they changed it from, and moves stock and one
+expense. `verify:audit` was NARROWED rather than dropped: the owner route may call exactly one write
+RPC, the classifier, and nothing that restores or rewrites. Proved by putting a restore call in and
+watching it fail.
 
 ## 5. Open questions for him (do not guess)
 

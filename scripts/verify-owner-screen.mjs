@@ -342,6 +342,35 @@ check("the food loss comes from the analytics payload, not the bill value",
     "supabase/migrations/337: a classification no longer writes its own row. The history of who answered\n       what, and what they changed it from, is the record — it may never be overwritten.");
 }
 
+// ── 20. the OWNER may answer it too (owner, 2026-08-19: "can be change by owner or manager") ────
+// A narrow, deliberate exception to this page being read-only. The 2026-08-04 rule is that an owner
+// can never RESTORE or UNDO a removal — that still stands and is checked below. Answering whether the
+// kitchen had cooked the food undoes nothing and edits no row; it records a fact only a person present
+// can know, append-only.
+{
+  const oa = read("app/api/owner/audit/route.ts");
+  check("the owner can answer \"was the food made?\"",
+    /export async function POST/.test(oa) && /lfh_cancel_classify/.test(oa),
+    "app/api/owner/audit/route.ts: the owner can no longer answer it. He asked for owner AND manager on\n       2026-08-19; the manager route alone is half the instruction.");
+  check("…and still cannot restore anything from here",
+    /canRestore: false/.test(oa) && !/lfh_restore|p_restore|restore_removal/.test(oa),
+    "app/api/owner/audit/route.ts: a restore path has appeared. Answering is the ONLY write an owner\n       gets on this record — putting a bill back is Aevidine's alone (owner rule, 2026-08-04).");
+  check("the owner's answer is scoped, gated and checked against the order",
+    /inScope\(scope, rid\)/.test(oa) && /logViewSubset\(await entitledSubset\(\[rid\], "logs"\), "removals"\)/.test(oa)
+      && /status !== "cancelled"/.test(oa),
+    "app/api/owner/audit/route.ts: the POST stopped checking that the order is one of theirs, that the\n       section is switched on, or that the order is actually cancelled. Hiding a page is never the\n       only guard.");
+  check("the restaurant comes from the ORDER, not from the caller",
+    /from\("orders"\)\s*\.select\("restaurant_id, status"\)/.test(oa.replace(/\n\s*/g, " ")),
+    "app/api/owner/audit/route.ts: the POST is trusting a restaurant id from the body. Read it from the\n       order and then check scope — narrow, never widen.");
+  const ap = read("app/owner/activity/page.tsx");
+  check("each row's answer buttons hold their own tap",
+    /function MadeAnswer/.test(ap) && /if \(busy !== null\) return;/.test(ap),
+    "app/owner/activity/page.tsx: the answer buttons no longer guard against a second tap, or the state\n       moved back up to the list — one shared flag greys out every row on the page.");
+  check("a refused answer is shown, never swallowed",
+    /answerErr/.test(ap) && /Couldn&rsquo;t record that answer/.test(ap),
+    "app/owner/activity/page.tsx: a refused answer is silent again. A switched-off section or an order\n       that is no longer cancelled are both real answers the screen owes him.");
+}
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -352,4 +381,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 55 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 61 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");

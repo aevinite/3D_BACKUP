@@ -17,7 +17,7 @@
 // Scoped server-side by ownerScope (only this owner's restaurants; money is NOT hidden —
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
@@ -158,6 +158,24 @@ export default function OwnerAuditLogs() {
     return params;
   }, [scopePin, pickRid]);
 
+  // ── ANSWERING IT (owner, 2026-08-19) ──────────────────────────────────────────────────────────
+  // One tiny POST, then reload the record so the tag on the row matches the answer just given. The
+  // tap is never dropped in silence: the row holds its buttons disabled while this runs and says what
+  // happened either way (see the row markup).
+  const [answerErr, setAnswerErr] = useState<string | null>(null);
+  const answerMade = useCallback(async (orderId: string, made: boolean) => {
+    setAnswerErr(null);
+    const p = scopeParams();
+    const res = await fetch(`/api/owner/audit${p.toString() ? "?" + p.toString() : ""}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order_id: orderId, made }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok) { setAnswerErr(j.error || "Couldn't record that answer — try again."); throw new Error(j.error || "failed"); }
+    setRemovals(null);
+    await loadAuditRef.current();
+  }, [scopeParams]);
+
   const loadAudit = useCallback(async () => {
     const p = scopeParams();
     if (audPage > 1) p.set("page", String(audPage));
@@ -193,6 +211,12 @@ export default function OwnerAuditLogs() {
       setTotal(Number(j.total) || 0);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopeParams, level, qDebounced, page]);
+
+  // answerMade reloads through a ref so it does not have to depend on loadAudit's identity (which
+  // changes with the page, the type filter and the scope) — otherwise every one of those would rebuild
+  // the row handlers for no reason.
+  const loadAuditRef = useRef(loadAudit);
+  loadAuditRef.current = loadAudit;
 
   // Both views load once up front — that is also how the page learns which views this
   // owner even HAS (a disabled answer hides its chip). Two small, capped reads.
@@ -230,13 +254,21 @@ export default function OwnerAuditLogs() {
       {bothOff ? (
         <div className="adm-card"><div className="adm-empty">Audit &amp; logs isn&rsquo;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : view === "audit" && !audDisabled ? (
-        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} counts={audCounts} kind={audKind} setKind={pickAudKind} onReload={loadAudit} onOpenRemoval={setRemovalId}
+        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} counts={audCounts} kind={audKind} setKind={pickAudKind} onReload={loadAudit} onAnswer={answerMade} onOpenRemoval={setRemovalId}
           page={audPage} pages={audPages} total={audTotal} onPage={setAudPage} scopeName={pickName} />
       ) : (
         <ActivityView rows={rows} err={err} level={level} setLevel={setLevel} q={q} setQ={setQ} onReload={loadActivity} onOpen={setDetailRow}
           page={page} pages={pages} total={total} onPage={setPage} scopeName={pickName} />
       )}
 
+      {/* A refused answer says so at the page level too, not only on the row that was tapped — a
+          switched-off section or an order that is no longer cancelled are both real answers. */}
+      {answerErr && (
+        <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 12 }}>
+          <b>Couldn&rsquo;t record that answer.</b>{" "}
+          <span className="adm-muted" style={{ fontSize: 12.5 }}>{answerErr}</span>
+        </div>
+      )}
       {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
       {/* Click a removal → the whole story: which KOT, every item on it, the totals, the time and
           day, who did it. The owner SEES everything and changes nothing — /api/owner/audit is
@@ -248,8 +280,49 @@ export default function OwnerAuditLogs() {
   );
 }
 
+/** The two answer buttons on a cancellation row (owner, 2026-08-19). Its own component so each row
+ *  keeps its own "saving…" state — one shared flag would grey out every row on the page. */
+function MadeAnswer({ orderId, made, onAnswer }: {
+  orderId: string; made: boolean | null; onAnswer: (orderId: string, made: boolean) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<null | boolean>(null);
+  const [failed, setFailed] = useState(false);
+  const hit = async (v: boolean) => {
+    if (busy !== null) return;               // never let a second tap start a second write
+    setBusy(v); setFailed(false);
+    try { await onAnswer(orderId, v); } catch { setFailed(true); } finally { setBusy(null); }
+  };
+  const btn = (v: boolean): React.CSSProperties => ({
+    padding: "5px 10px", minHeight: 32, borderRadius: 9, fontSize: 11.5, fontWeight: 700,
+    cursor: busy === null ? "pointer" : "default", whiteSpace: "nowrap",
+    border: `1px solid ${made === v ? (v ? "var(--adm-danger)" : "var(--adm-ok)") : "var(--border-c, rgba(128,128,128,.28))"}`,
+    background: made === v
+      ? `color-mix(in srgb, ${v ? "var(--adm-danger)" : "var(--adm-ok)"} 16%, transparent)`
+      : "var(--bg)",
+    color: made === v ? (v ? "var(--adm-danger)" : "var(--adm-ok)") : "var(--text)",
+    opacity: busy !== null && busy !== v ? 0.5 : 1,
+  });
+  return (
+    <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6 }}
+      onClick={(e) => e.stopPropagation()}>
+      <span style={{ fontSize: 11, fontWeight: 800, color: made === null ? "var(--adm-warn)" : "var(--muted)" }}>
+        {made === null ? "Was the food made?" : "Food made?"}
+      </span>
+      <button type="button" style={btn(true)} onClick={() => hit(true)}
+        title="The food was cooked — it counts as a loss and the ingredients stay used">
+        {busy === true ? "Saving…" : "Yes, cooked"}
+      </button>
+      <button type="button" style={btn(false)} onClick={() => hit(false)}
+        title="Never started — the ingredients go back into stock">
+        {busy === false ? "Saving…" : "No, never started"}
+      </button>
+      {failed && <span style={{ fontSize: 11, color: "var(--adm-danger)" }}>Didn&rsquo;t save — try again</span>}
+    </span>
+  );
+}
+
 // ── Audit (removals) ─────────────────────────────────────────────────────────
-function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, onOpenRemoval, page, pages, total, onPage, scopeName }: {
+function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, onAnswer, onOpenRemoval, page, pages, total, onPage, scopeName }: {
   removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void;
   /** Per-type counts over EVERY page, from the database. Null = count the page and say so. */
   counts: { kind: string; n: number; amount: number; risk?: string }[] | null;
@@ -257,6 +330,10 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
    *  page must filter every page) and it resets the paging. */
   kind: string; setKind: (k: string) => void;
   onReload: () => void;
+  /** Answer "was the food made?" on a cancellation. The owner may do this (owner, 2026-08-19: "can be
+   *  change by owner or manager") — a narrow exception to this page being otherwise read-only: it
+   *  undoes no removal and edits no row, it records a fact only a person present can know. */
+  onAnswer: (orderId: string, made: boolean) => Promise<void>;
   onOpenRemoval: (id: number) => void;
   // Paging (owner, 2026-08-12) — the same strip the Activity log uses, so the two halves of this
   // page behave identically.
@@ -448,6 +525,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                       : [];
                     if (!tags.length) return null;
                     return (
+                      <>
                       <span style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
                         {tags.map((t) => (
                           <span key={t} style={{
@@ -462,6 +540,10 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                           }}>{AUDITSORT.tagIcon(t)} {AUDITSORT.tagLabel(t)}</span>
                         ))}
                       </span>
+                      {r.kind === "order_cancelled" && r.order_id
+                        ? <MadeAnswer orderId={r.order_id} made={madeVal} onAnswer={onAnswer} />
+                        : null}
+                      </>
                     );
                   })()}
                   {r.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{r.restaurant_name}</span> : null}

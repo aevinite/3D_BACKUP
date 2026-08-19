@@ -424,9 +424,25 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
   /canRestore: false/.test(ownerAudit)
     ? ok("the owner's removal detail never offers a restore")
     : fail("the owner route may now offer canRestore — only the admin puts a bill back (owner rule)");
-  !/export async function (POST|PATCH|PUT|DELETE)/.test(ownerAudit)
-    ? ok("the owner audit route is GET-only — the owner can look and change nothing")
-    : fail("the owner audit route grew a write handler — the owner must not be able to change a record");
+  // ── NARROWED, NOT DROPPED (owner, 2026-08-19: "can be change by owner or manager") ─────────────
+  // This used to be "the owner audit route is GET-only". He has since asked for one write, and only
+  // one: answering whether a cancelled order's food was actually cooked. That undoes nothing, edits no
+  // row and puts no bill back — it appends a `removal_classified` row and moves stock and one expense
+  // (migration 337). The record itself stays immutable, which is what the rule was protecting.
+  //
+  // So the rule is now about WHAT the write does, not whether one exists: the only RPC the owner route
+  // may call is the classifier, and nothing that restores, deletes or rewrites a removal.
+  {
+    const banned = /lfh_restore|restore_removal|\.delete\(\)|\.update\(\s*\{[^}]*(amount|reason_code|reason_note|kind)\s*:/;
+    // Look INSIDE the write handler only. The GET legitimately calls read RPCs — the per-type chip
+    // counts among them — and judging the whole file flagged those as writes.
+    const postBody = (ownerAudit.match(/export async function POST[\s\S]*$/) || [""])[0];
+    const rpcs = [...postBody.matchAll(/\.rpc\("([a-z_]+)"/g)].map((m) => m[1]);
+    const strayRpc = rpcs.filter((n) => n !== "lfh_cancel_classify");
+    !banned.test(postBody) && strayRpc.length === 0
+      ? ok(`the owner audit route writes ONE thing only — the "was the food made?" answer (${rpcs.length} rpc call${rpcs.length === 1 ? "" : "s"}, all the classifier)`)
+      : fail(`the owner audit route can now change the record itself${strayRpc.length ? ` (it calls: ${strayRpc.join(", ")})` : ""} — answering is the only write an owner gets; restoring, deleting or rewriting a removal is Aevidine's alone`);
+  }
   !/export async function (POST|PATCH|PUT|DELETE)/.test(adminAudit)
     ? ok("restoring still goes through the audited bill-ledger path, not a second door on the audit view")
     : fail("the admin audit route grew its own write path — keep the one audited restore in /api/admin/bills");

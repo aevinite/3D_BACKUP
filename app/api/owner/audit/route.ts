@@ -177,3 +177,64 @@ export async function GET(req: NextRequest) {
     ...(names.partial ? { partial: ["restaurantNames"] } : {}),
   });
 }
+
+// ── POST /api/owner/audit — answer "was the food made?" on a cancellation ─────────────────────────
+// Owner, 2026-08-19, asked directly: "can be change by owner or manager". So the owner may answer it
+// here, and a manager may answer it in their own panel (/api/editor/audit/classify).
+//
+// THIS IS A NARROW, DELIBERATE EXCEPTION TO THE READ-ONLY RULE ABOVE, and the distinction matters:
+// the 2026-08-04 rule is that an owner can never RESTORE or UNDO a removal — `canRestore: false`
+// stands, there is no route here that puts a bill back, and nothing about the removal row is edited.
+// Answering whether the kitchen had already cooked the food is not undoing anything: it is recording
+// an operational fact that only a person present can know, and it is append-only — a new
+// `removal_classified` row naming who answered and what they changed it from (migration 337).
+// What it DOES move is stock and one expense row, which is the whole point.
+//
+// Gated three ways, all of which the GET above already establishes: a real owner only sees their own
+// restaurants (ownerScope), the Audit & logs section must still be switched on for that restaurant
+// (`logs` + the removals view), and the order must be inside the caller's scope.
+export async function POST(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => null) as { order_id?: unknown; made?: unknown } | null;
+  const orderId = typeof body?.order_id === "string" ? body.order_id : "";
+  const made = body?.made;
+  if (!/^[0-9a-f-]{36}$/i.test(orderId)) return NextResponse.json({ error: "which order?" }, { status: 400 });
+  if (typeof made !== "boolean") return NextResponse.json({ error: "say whether the food was made" }, { status: 400 });
+
+  // WHICH RESTAURANT is it? Read it from the order itself rather than trusting the caller, then check
+  // that restaurant is in scope — the same "narrow, never widen" rule ?rid= follows on the GET.
+  const ord = await sb.from("orders").select("restaurant_id, status").eq("id", orderId).maybeSingle();
+  if (ord.error) return dbFail("owner/audit.classify", ord.error, { message: "Couldn't read that order just now — please try again." });
+  const rid = ord.data?.restaurant_id as string | undefined;
+  if (!rid) return NextResponse.json({ error: "That order no longer exists." }, { status: 404 });
+  if (!scope.all && !inScope(scope, rid)) return NextResponse.json({ error: "That order isn't one of yours." }, { status: 403 });
+  if (ord.data?.status !== "cancelled") {
+    return NextResponse.json({ error: "That order isn't cancelled, so there is nothing to answer." }, { status: 409 });
+  }
+  // Hiding the page is never the only guard — the section has to be ON for a real owner, exactly as
+  // the GET requires. The admin's own session is never gated (it is X-ray).
+  if (!scope.all && !scope.admin) {
+    const allowed = await logViewSubset(await entitledSubset([rid], "logs"), "removals");
+    if (!allowed.length) {
+      return NextResponse.json({ error: "The removals record isn't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    }
+  }
+
+  const r = await sb.rpc("lfh_cancel_classify", {
+    p_restaurant: rid, p_order: orderId, p_made: made,
+    p_actor: scope.admin ? "Admin (Aevidine)" : "Owner",
+    p_actor_id: scope.all ? null : (scope as { ownerId?: string }).ownerId ?? null,
+    p_actor_role: scope.admin ? "admin" : "owner", p_audit_id: null,
+  });
+  if (r.error) return dbFail("owner/audit.classify", r.error, { message: "Couldn't record that answer just now — please try again." });
+  const out = r.data as { ok?: boolean; reason?: string; lossCost?: number; tags?: string[] } | null;
+  // A refusal is an answer the screen must show, never a silent no-op — the mistake the cancel path
+  // made on 2026-08-18, when it called this RPC before the row was cancelled and nothing said so.
+  if (!out || out.ok !== true) {
+    return NextResponse.json({ error: out?.reason === "order_not_found" ? "That order no longer exists."
+      : "Couldn't record that answer — try again." }, { status: 409 });
+  }
+  return NextResponse.json({ ok: true, made, lossCost: out.lossCost ?? 0, tags: out.tags ?? [] });
+}
