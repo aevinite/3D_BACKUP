@@ -126,8 +126,17 @@ export async function GET(req: NextRequest) {
   let delCountQ = sb.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
   if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
 
-  const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null), delCountQ]);
+  const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000), delCountQ]);
   if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
+  // ALL THREE READS ARE CHECKED, because on this screen a silent zero is the failure mode that
+  // matters most (this file's own header: "THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY
+  // TIME"). The count above was written precisely because "the chip said 0 while deleted bills
+  // existed" — and then `delQ.count ?? 0` put that exact 0 back for a FAILED count, so a database
+  // blip made the one screen whose job is proving no sale vanished say that none had. The names
+  // read is the same story one step down: with it empty every row reads "—" and the restaurant
+  // filter has nothing in it, so the admin cannot even narrow the list to look.
+  if (delQ.error) return adminFail("the bill ledger", delQ.error, { action: "load" });
+  if (restsQ.error) return adminFail("the bill ledger", restsQ.error, { action: "load" });
 
   const sessions = (sessQ.data || []) as unknown as BillSession[];
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
