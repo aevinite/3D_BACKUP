@@ -595,7 +595,9 @@ export function CategoryDonut({ data, minHeight = 230 }: { data: { category: str
       {pad > 0 && Array.from({ length: pad }, (_, i) => <span key={`pad${i}`} aria-hidden="true" style={{ height: rowH, flexShrink: 0 }} />)}
     </div>
   );
-  if (!n) return <Empty />;
+  // Nothing to draw still has to FILL the card — an "empty" line parked at the top of a
+  // stretched card looks like the chart failed to paint (owner's rule, same as above).
+  if (!n) return <div style={{ flex: "1 1 auto", minHeight: 120, display: "grid", placeItems: "center" }}><Empty /></div>;
   return (
     // flex:1 + minHeight is the whole trick on the card side: in a flex-column card this box
     // TAKES the leftover height (so there is nothing left to sit blank under it); anywhere
