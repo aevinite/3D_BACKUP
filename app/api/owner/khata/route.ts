@@ -59,6 +59,11 @@ export async function GET(req: NextRequest) {
   // Shared lookup (finding F17) — checks its own error rather than silently rendering every debt's
   // restaurant as "—", which on a multi-restaurant estate makes "who owes what" unreadable.
   const names = await restaurantNames(moduleIds);
+  // …AND SAY SO WHEN IT COULDN'T BE READ (T20 sweep, 2026-08-19). The helper reports a failed lookup
+  // as `partial` for exactly this reason, and five of its six callers pass that on. This one dropped
+  // it, so on a multi-restaurant estate every debt in the list rendered its restaurant as "—" with
+  // nothing on the page saying why — which is the whole of finding F17 back again, one route later.
+  // It rides the `partial` array this route already returns, so no screen has to learn anything new.
 
   const nowIso = new Date().toISOString();
   // HOW MANY PEOPLE THE LIST SHOWS. Bounded by PERSON (mig 309), biggest debt first, so everyone
@@ -113,6 +118,7 @@ export async function GET(req: NextRequest) {
     );
   }
   const partial: PartialKey[] = [];
+  if (names.partial) partial.push("restaurantNames");
   if (collMonthQ.error) { console.error("[owner/khata] month collected failed:", collMonthQ.error.message); partial.push("collectedMonth"); }
   if (collTodayQ.error) { console.error("[owner/khata] today collected failed:", collTodayQ.error.message); partial.push("collectedToday"); }
 

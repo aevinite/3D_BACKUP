@@ -187,6 +187,32 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   }
 }
 
+// ── 6 · IF THE HELPER REPORTS "I COULDN'T READ IT", THE ROUTE MUST PASS THAT ON (T20, 2026-08-19) ─
+// lib/restaurantNames returns `partial: true` when the lookup failed, and "restaurantNames" is a
+// declared PartialKey, precisely so a screen can say "couldn't read which restaurant each row belongs
+// to" instead of printing a dash. That is the whole of finding F17.
+//
+// A caller that ignores the flag has re-created F17 in its own file: on a multi-restaurant estate
+// every row's restaurant renders as "—" with nothing saying why. Five of the six callers passed it on;
+// khata did not. Checked for every caller, so a sixth cannot be added without it.
+{
+  const CALLERS = [
+    ["app/api/owner/khata/route.ts", "who owes what, across brands"],
+    ["app/api/owner/oplog/route.ts", "which restaurant an action happened at"],
+    ["app/api/owner/audit/route.ts", "which restaurant a removal happened at"],
+    ["app/api/owner/issues/route.ts", "which restaurant a complaint came from"],
+    ["app/api/owner/ratings/route.ts", "which restaurant a rating came from"],
+    ["app/api/owner/customers/route.ts", "which restaurant a guest belongs to"],
+  ];
+  for (const [p2, what] of CALLERS) {
+    const src = read(p2);
+    if (!src) { fail(`${p2} is missing`); continue; }
+    if (!/restaurantNames\s*\(/.test(src)) { fail(`${p2} no longer uses the shared name lookup — that is F17's local copy coming back`); continue; }
+    if (/names\.partial/.test(src)) ok(`${p2} says so when it could not read ${what}`);
+    else fail(`${p2} drops the name lookup's partial flag — every row would render its restaurant as "—" with nothing saying why (F17)`);
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
