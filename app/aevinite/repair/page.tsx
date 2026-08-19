@@ -366,13 +366,21 @@ export default function AdminRepair() {
     setTicketBusy(null);
     if (!r.ok) { toast(r.error || "Couldn’t update that complaint.", "err"); loadHub(); }
   };
-  const openTickets = issues.filter((i) => i.status === "open").length;
+  // THE PICKER HAS TO MEAN THE WHOLE PAGE, OR THE BANNER IS A LIE (T17 sweep, 2026-08-19).
+  // Choosing a restaurant put "Showing <name> only." at the top and then left the complaints and
+  // the at-risk lists showing every restaurant on the stack — so a 9pm call about one client still
+  // meant reading nine restaurants' complaints under a banner that said otherwise. Both feeds carry
+  // the restaurant id already, so this is a filter over rows in hand: no extra request, no new data.
+  const scopedIssues = rid ? issues.filter((i) => i.restaurant_id === rid) : issues;
+  const openTickets = scopedIssues.filter((i) => i.status === "open").length;
   const shownTickets = useMemo(() => {
-    const list = ticketFilter === "all" ? issues : issues.filter((i) => i.status === ticketFilter);
+    const list = ticketFilter === "all" ? scopedIssues : scopedIssues.filter((i) => i.status === ticketFilter);
     return [...list].sort((a, b) =>
       a.status === b.status ? +new Date(b.created_at) - +new Date(a.created_at) : a.status === "open" ? -1 : 1);
-  }, [issues, ticketFilter]);
-  const attCount = (att?.atRisk.length || 0) + (att?.onboarding.length || 0);
+  }, [scopedIssues, ticketFilter]);
+  const atRisk = (att?.atRisk || []).filter((r) => !rid || r.id === rid);
+  const onboarding = (att?.onboarding || []).filter((r) => !rid || r.id === rid);
+  const attCount = atRisk.length + onboarding.length;
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
   // ONE RESTAURANT PICKER FOR THE WHOLE PAGE (owner, 2026-08-16). It already existed, but only to
@@ -693,7 +701,7 @@ export default function AdminRepair() {
         <i className="fas fa-flag" aria-hidden="true" style={{ color: openTickets ? "var(--adm-accent, #e8a13c)" : "var(--muted)" }} />
         <h2>Complaints &amp; issues</h2>
         {openTickets ? <span className="rp-chip">{openTickets}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>raised by staff &amp; owners · all restaurants</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>raised by staff &amp; owners · {scopedName || "all restaurants"}</span>
         <div style={{ marginLeft: "auto" }}>
           <Dropdown value={ticketFilter} onChange={setTicketFilter} options={TICKET_FILTERS} ariaLabel="Filter complaints" minWidth={124} />
         </div>
@@ -719,7 +727,7 @@ export default function AdminRepair() {
         <i className="fas fa-heart-pulse" aria-hidden="true" style={{ color: attCount ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>At-risk &amp; onboarding</h2>
         {attCount ? <span className="rp-chip danger">{attCount}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>restaurants that need a nudge</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? `${scopedName} only` : "restaurants that need a nudge"}</span>
       </div>
       {attErr && (
         <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>Couldn&rsquo;t load account health. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadHub}>Retry</button></p>
@@ -729,11 +737,11 @@ export default function AdminRepair() {
           <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-danger)" }} aria-hidden="true" />
           Churn risk <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· paying but not ordering</span>
         </div>
-        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.atRisk.length === 0 ? (
-          <div className="adm-empty"><i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 7 }} aria-hidden="true" />Nothing at risk — every paying restaurant is ordering.</div>
+        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : atRisk.length === 0 ? (
+          <div className="adm-empty"><i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 7 }} aria-hidden="true" />Nothing at risk{scopedName ? ` at ${scopedName}` : " — every paying restaurant is ordering"}.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {att.atRisk.map((r) => (
+            {atRisk.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderBottom: "var(--border)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: "var(--adm-danger)", flex: "0 0 auto" }} aria-hidden="true" />
                 <b style={{ fontSize: 14 }}>{r.name}</b>
@@ -750,11 +758,11 @@ export default function AdminRepair() {
           <i className="fas fa-seedling" style={{ color: "#60a5fa" }} aria-hidden="true" />
           Needs onboarding <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· new, no orders yet</span>
         </div>
-        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.onboarding.length === 0 ? (
-          <div className="adm-empty">No stalled new restaurants — recent sign-ups are all ordering.</div>
+        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : onboarding.length === 0 ? (
+          <div className="adm-empty">{scopedName ? `${scopedName} is not waiting on setup.` : "No stalled new restaurants — recent sign-ups are all ordering."}</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {att.onboarding.map((r) => (
+            {onboarding.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderBottom: "var(--border)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: "#60a5fa", flex: "0 0 auto" }} aria-hidden="true" />
                 <b style={{ fontSize: 14 }}>{r.name}</b>
