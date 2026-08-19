@@ -154,7 +154,11 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     const paidOn = String(body.paid_on || "");
     if (!isUuid(rid)) return bad("valid restaurant_id required");
     if (amount == null || !(amount > 0)) return bad("Amount must be a number greater than 0 (e.g. 12000).");
-    if (!paidOn) return bad("paid_on required");
+    // A DATE, not just "something". Anything non-empty used to go straight at a `date` column, so a
+    // typo answered with the database's own "invalid input syntax for type date" in a red toast —
+    // a sentence that names no field and tells the admin nothing to change.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || Number.isNaN(Date.parse(paidOn)))
+      return bad("Enter the payment date as YYYY-MM-DD (e.g. 2026-08-19).");
     const row = {
       restaurant_id: rid, amount, paid_on: paidOn,
       method: body.method ? String(body.method) : null,
@@ -164,14 +168,26 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     const ins = await sb.from("restaurant_payments").insert(row).select("id").single();
     if (ins.error) return bad(ins.error.message, 500);
 
+    // "Also move the next-due date" is a SECOND write, and its failure used to be swallowed: the
+    // payment saved, the reply said ok, and next-due quietly stayed where it was — so the restaurant
+    // read as due (or overdue) on the Billing table the moment after being paid, and the only way to
+    // find out was to notice. The payment itself is already recorded and must not be undone, so this
+    // says what happened instead: the payment is in, the date is not.
+    let dueMoved: string | null = null;
     if (body.roll_next_due) {
       const billing = (await sb.from("restaurant_billing").select("cycle").eq("restaurant_id", rid).maybeSingle()).data as { cycle?: string } | null;
       const cycle = billing?.cycle === "monthly" ? "monthly" : "yearly";
       const nextDue = rollForward(paidOn, cycle);
-      await sb.from("restaurant_billing").upsert({ restaurant_id: rid, next_due_on: nextDue, updated_at: new Date().toISOString() }, { onConflict: "restaurant_id" });
+      const roll = await sb.from("restaurant_billing").upsert({ restaurant_id: rid, next_due_on: nextDue, updated_at: new Date().toISOString() }, { onConflict: "restaurant_id" });
+      if (roll.error) {
+        console.error("[admin/billing] payment saved but next-due could not be moved:", roll.error.message);
+        await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn} · next-due NOT moved`, restaurant_id: rid });
+        return ok({ ok: true, id: ins.data?.id, warning: "The payment was saved, but the next-due date could not be moved — set it by hand on the plan." });
+      }
+      dueMoved = nextDue;
     }
-    await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn}`, restaurant_id: rid });
-    return ok({ ok: true, id: ins.data?.id });
+    await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn}${dueMoved ? ` · next due ${dueMoved}` : ""}`, restaurant_id: rid });
+    return ok({ ok: true, id: ins.data?.id, nextDueOn: dueMoved });
   }
 
   if (action === "delete_payment") {
