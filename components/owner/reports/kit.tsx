@@ -140,19 +140,24 @@ export function scrollToId(id: string) {
 }
 
 // ── Panel — a titled card that content sits inside ────────────────────────────
-export function Panel({ title, hint, right, children, pad = true, id }: {
+export function Panel({ title, hint, right, children, pad = true, id, fill = false }: {
   title?: React.ReactNode; hint?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode; pad?: boolean;
   id?: string;   // anchor target so a KPI tile can smooth-scroll to this panel
+  // fill: hand the leftover height DOWN to the child instead of leaving a blank band under it.
+  // A .rs-grid row stretches both panels to the taller one, so a short chart beside a 400px
+  // table sat in dead space (same fault the owner reported on the dashboard, 2026-08-19).
+  // Opt-in, because most panels hold text that must NOT be stretched.
+  fill?: boolean;
 }) {
   return (
-    <section className="rs-panel" id={id}>
+    <section className="rs-panel" id={id} style={fill ? { display: "flex", flexDirection: "column" } : undefined}>
       {(title || right) && (
         <header className="rs-panel-h">
           <div><b>{title}</b>{hint && <span className="rs-panel-hint"> · {hint}</span>}</div>
           {right}
         </header>
       )}
-      <div className={pad ? "rs-panel-b" : ""}>{children}</div>
+      <div className={pad ? "rs-panel-b" : ""} style={fill ? { display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 } : undefined}>{children}</div>
     </section>
   );
 }
