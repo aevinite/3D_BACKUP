@@ -155,7 +155,7 @@ export default function AdminHealth() {
               {h.tableEstimatesError ? (
                 <div className="adm-empty">Couldn&apos;t read estimates: {h.tableEstimatesError}</div>
               ) : (
-                <div className="adm-logwrap">
+                <div className="adm-logwrap hx-kv">
                   <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 120px" }}><span>Table</span><span style={{ textAlign: "right" }}>~ rows</span></div>
                   {h.tableEstimates.map((t) => (
                     <div key={t.table} className="adm-logrow" style={{ gridTemplateColumns: "1fr 120px" }}>
@@ -170,7 +170,7 @@ export default function AdminHealth() {
             <div className="adm-card" style={{ marginBottom: 14 }}>
               <h2>Realtime &amp; connections</h2>
               <p className="hint">Confirms the app is pointed at the right backend — no keys shown.</p>
-              <div className="adm-logwrap">
+              <div className="adm-logwrap hx-kv">
                 <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Realtime host</span><span className="mono adm-muted">{h.realtime.configuredHost || "not configured"}</span></div>
                 <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Staff online (last 3 min)</span><span style={{ fontWeight: 700 }}>{h.staffOnlineNow} / {h.staffTotal}</span></div>
                 <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Restaurants</span><span style={{ fontWeight: 700 }}>{h.restaurants.active} live · {h.restaurants.suspended} suspended</span></div>
@@ -279,6 +279,22 @@ export default function AdminHealth() {
           </div>
         )}
       </div>
+
+      <style href="adm-health" precedence="default">{`
+        /* THE NUMBERS ARE THE WHOLE POINT OF THESE TWO CARDS (T17 sweep, 2026-08-19).
+           The console's phone rule gives every .adm-logrow a 540px min-width and lets the wrapper
+           scroll sideways. That is the right call for the admin's comparison tables — you read
+           down a column there. It is the wrong call for a two-column key -> value list: measured on
+           a 360px screen the card is 296px wide and the row is 540px, so "Row count estimates"
+           showed five table names and NOT ONE number, and "Realtime & connections" showed three
+           labels and none of their values. Nothing hinted the card could be dragged.
+           These lists fit instead, the value sitting under its label. Same rows, same order. */
+        @media (max-width: 560px) {
+          .hx-kv .adm-logrow { min-width: 0; grid-template-columns: 1fr !important; gap: 3px; padding: 10px 14px; }
+          .hx-kv .adm-logrow > :nth-child(2) { text-align: left !important; font-size: 12.5px; }
+          .hx-kv .adm-logrow.head { display: none !important; }
+        }
+      `}</style>
     </>
   );
 }
