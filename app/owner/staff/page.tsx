@@ -665,21 +665,18 @@ export default function OwnerStaffPage() {
         .ost-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
         .ost-name { font-size: 17px; font-weight: 800; }
         .ost-section-t { font-size: 12.5px; font-weight: 800; margin-bottom: 8px; }
-        .ost-perms { display: flex; flex-wrap: wrap; gap: 8px; }
-        .ost-perm { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border: var(--border); border-radius: 10px; background: var(--card); color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
-        .ost-perm:hover:not(:disabled) { border-color: var(--accent); }
-        .ost-perm.on { color: var(--rcol, var(--accent)); border-color: color-mix(in srgb, var(--rcol, var(--accent)) 55%, transparent); background: color-mix(in srgb, var(--rcol, var(--accent)) 9%, transparent); }
-        .ost-perm i { font-size: 16px; }
-        .ost-perm:disabled { opacity: .75; cursor: default; }
-        .ost-perm.xray-off { color: #b45309; border-color: color-mix(in srgb, #d97706 45%, transparent); opacity: .8; }
+        /* THE POWERS-TAB CSS WAS DELETED HERE (2026-08-19). Twelve rules — ost-perms, ost-perm and
+           its states, reach-chip and its states, reach-legend, plus their reduced-motion rule —
+           styled the nine tri-state permission controls and their reach badges. The controls went
+           with the access rebuild (owner, 2026-07-31: "only admin will have all this permission")
+           and the last of them on 2026-08-04; the CSS outlived them by four months, matching no
+           element on this page. Three sweeps re-found it and each correctly decided it harmed
+           nobody — which is exactly how dead code survives. If a permission control ever belongs on
+           an owner screen again that is a decision, not a restyle: the switches live on
+           /aevinite → Access and permissions. Guarded by verify:owner-panel section 11. */
         /* Reach badges — one letter shows how far a power reaches (M = managers).
            Accent-tinted when it reaches, muted outline when it doesn't. The letter
            itself carries the meaning (never colour-only) + a tooltip. */
-        .reach-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; margin-left: 2px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .02em; line-height: 1; border: 1px solid transparent; transition: background .18s ease, color .18s ease, border-color .18s ease, opacity .18s ease; }
-        .reach-chip.on { color: var(--rcol, var(--accent)); border-color: color-mix(in srgb, var(--rcol, var(--accent)) 45%, transparent); background: color-mix(in srgb, var(--rcol, var(--accent)) 14%, transparent); }
-        .reach-chip.off { color: var(--muted); border-color: color-mix(in srgb, var(--fg, #888) 20%, transparent); background: transparent; }
-        .reach-legend { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font-size: 11px; font-weight: 600; color: var(--muted); vertical-align: middle; }
-        @media (prefers-reduced-motion: reduce) { .reach-chip { transition: none; } }
         .ost-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: var(--border); }
         .ost-tab { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
         .ost-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
