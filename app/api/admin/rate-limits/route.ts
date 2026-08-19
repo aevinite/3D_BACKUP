@@ -50,6 +50,13 @@ export async function GET(req: NextRequest) {
   const reqRows = await sb.from("unblock_requests")
     .select("id, key, ip, device_id, message, created_at")
     .eq("status", "open").order("created_at", { ascending: false }).limit(50);
+  // THE LIST'S OWN FAILURE MATTERS MORE THAN THE COUNT'S (sweep #6, T19). The note below records
+  // that `|| 1` once hid a failed COUNT — but the LIST it decorates was still unchecked, so a
+  // failure there sent `requests: []` with a 200. An empty section reads as "nobody is asking",
+  // which is the one wrong answer this section can give: the person on the other end is locked out
+  // of the panel and asking to be let back in is the ONLY move they have. If we cannot read their
+  // requests we have to say so, not quietly speak for them.
+  if (reqRows.error) return adminFail("the unblock requests", reqRows.error, { action: "load" });
   // "asked N× today" per ip, across the last 24h (open + resolved), so the admin sees repeat askers.
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const counted = await sb.from("unblock_requests").select("ip").gte("created_at", since).limit(1000);
