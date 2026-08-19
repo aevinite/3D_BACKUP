@@ -800,7 +800,10 @@ function printTableBill(t) {
   }
   // One reusable named window, and nothing here ever closes it — Print and Cancel are the same
   // event to the page, so closing on afterprint threw the bill away when someone pressed Cancel.
-  const w = window.open("", "lfh_bill_print", "width=380,height=680");
+  // Opened tall on purpose: the bill sizes itself to fit the window (billdoc.js zFit), so a taller
+  // window means a bigger, easier-to-read bill rather than a scrollbar. A REUSED window keeps its
+  // own size, so this is the first-open default only.
+  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups to print the bill.", false); return; }
   try { w.document.open(); } catch (e) {}
   w.document.write(html);
