@@ -333,7 +333,7 @@ check("the food loss comes from the analytics payload, not the bill value",
     "app/api/owner/analytics/route.ts: a failed food-loss read now returns 0, which tells him he wasted\n       nothing. It must be absent so the popup can say it could not be read.");
 }
 {
-  const mig = read("supabase/migrations/337_was_the_food_actually_made.sql");
+  const mig = read("supabase/migrations/340_was_the_food_actually_made.sql");
   check("the loss expense is dated by the business day",
     /- interval '5 hours'\) AT TIME ZONE 'Asia\/Kolkata'\)::date/.test(mig),
     "supabase/migrations/337: the food-loss expense is dated by the calendar day again. Migration 294\n       set the rule — step back the 5-hour offset first — or food cooked after midnight is stamped\n       tomorrow and falls outside the window the dashboard filters by.");

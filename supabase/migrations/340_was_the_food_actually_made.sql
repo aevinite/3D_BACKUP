@@ -1,4 +1,8 @@
--- 337_was_the_food_actually_made.sql
+-- 340_was_the_food_actually_made.sql
+-- (Renumbered from 337 on 2026-08-19: two migrations landed as 337 the same night, 2 minutes
+--  apart, and `verify:db-parity` fails on a duplicated number because the order of two files
+--  with the same number is undefined. This is the newer of the two; nothing between 338 and
+--  339 uses what it creates, so moving it later changes nothing on a rebuild.)
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- P1 of docs/CANCEL-AND-LOSS-SPEC.md — the owner, 2026-08-18:
 --   "while kot delete button there will be one thing order was mode and order was not made like in
