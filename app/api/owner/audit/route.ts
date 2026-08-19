@@ -13,7 +13,7 @@
 // hard limit — never a whole-table read. deletion_audit is indexed (restaurant_id, at DESC).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 // The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
 import { auditForReader, forReader } from "@/lib/auditActor";
@@ -30,8 +30,15 @@ export const dynamic = "force-dynamic";
 const COLS = "id, at, kind, reason_code, reason_note, actor, actor_role, table_number, bill_no, invoice_no, kot_no, item_title, qty, amount, restaurant_id, order_id, made:meta->>made";
 
 export async function GET(req: NextRequest) {
-  let scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  let scope = sc.scope;
 
   // Section switch ("logs") first, then this view's own sub-option ("removals").
   if (!scope.all && !scope.admin) {
@@ -194,8 +201,9 @@ export async function GET(req: NextRequest) {
 // restaurants (ownerScope), the Audit & logs section must still be switched on for that restaurant
 // (`logs` + the removals view), and the order must be inside the caller's scope.
 export async function POST(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
 
   const body = await req.json().catch(() => null) as { order_id?: unknown; made?: unknown } | null;
   const orderId = typeof body?.order_id === "string" ? body.order_id : "";

@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { getOwnerEntitlementsUnion, mergeOwnerEntitlements, entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers
@@ -43,8 +43,15 @@ type OutRow = {
 };
 
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
 
   // Scope the aggregation IN THE DATABASE (mig 138): pass the owner's restaurant
   // ids so the RPC only scans + sums their orders, instead of summing the WHOLE

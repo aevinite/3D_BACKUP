@@ -14,7 +14,7 @@
 // a hard limit — never a whole-table read.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";
@@ -39,8 +39,15 @@ export const dynamic = "force-dynamic";
 const COLS = "id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, created_at";
 
 export async function GET(req: NextRequest) {
-  let scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  let scope = sc.scope;
 
   // The owner's Log page is a listed switch (Access → Owner's menu → Logs) since the access
   // rebuild, so hiding the nav item is not enough — this endpoint has to refuse too, or the

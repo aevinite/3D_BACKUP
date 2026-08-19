@@ -143,7 +143,8 @@
     "db:replace-demo-history": "node scripts/reset-demo-history.mjs",
     "db:vacuum-rebuild": "node scripts/db-maintain.mjs",
     "verify:print-paper": "node scripts/verify-billdoc-paper.mjs",
-    "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs"
+    "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs",
+    "verify:owner-scope": "node scripts/verify-owner-scope-503.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",

@@ -19,7 +19,7 @@
 // the wrong thing. Corrected in the T9 sweep, 2026-08-06.)
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
@@ -221,8 +221,15 @@ async function windowTotals(pIds: string[] | null, from: string, to: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
 
   const sp = req.nextUrl.searchParams;
   // ── AN UNKNOWN RANGE IS ANSWERED AS "today", SO IT MUST SAY "today" (T9 finding F21) ───────────

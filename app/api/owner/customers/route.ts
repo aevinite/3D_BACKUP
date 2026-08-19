@@ -5,7 +5,7 @@
 // columns, .in(restaurant_id), .limit, one cheap head-count for the true total.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
@@ -26,8 +26,15 @@ const REPEAT_MIN = 2; // visits >= 2 = a returning customer (real count, not a t
 const scopedIds = scopedRestaurantIds;
 
 export async function GET(req: NextRequest) {
-  let scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  let scope = sc.scope;
   // A real owner is limited to restaurants whose "customers" section the admin still
   // allows; the admin's own session is never gated (admin = top power).
   if (!scope.all && !scope.admin) {
@@ -170,8 +177,9 @@ export async function GET(req: NextRequest) {
 // restaurant the owner actually owns AND still has the "customers" section for.
 // Admin (top power) is never gated. Body: { restaurant_id, phone }.
 export async function DELETE(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
   let body: { restaurant_id?: string; phone?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "bad body" }, { status: 400 }); }
   const restaurantId = String(body?.restaurant_id || "");

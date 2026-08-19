@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, dbFail, type PartialKey } from "@/lib/ownerScope";
+import { ownerScope, ownerScopeOr503, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { inventoryLadder, inventoryEffectiveByRid } from "@/lib/tableTags";
 import { scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
@@ -22,7 +22,12 @@ const err = (m: string, status = 400) => NextResponse.json({ error: m }, { statu
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19) — see the note in
+  // lib/ownerScope's ownerScopeOr503(). This route keeps its OWN 401 wording; the only new answer is
+  // the retryable 503 for a scope read that failed, which used to reach Next as an unhandled 500.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp && sc.resp.status !== 401) return sc.resp;
+  const scope = sc.scope;
   if (!scope) return err("Not authorised.", 401);
 
   const sp = req.nextUrl.searchParams;
