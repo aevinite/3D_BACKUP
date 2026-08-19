@@ -47,6 +47,7 @@
     "verify:owner-clash": "node scripts/verify-owner-clash.mjs",
     "verify:owner-panel": "node scripts/verify-owner-panel.mjs",
     "verify:owner-territory": "node scripts/verify-owner-territory.mjs",
+    "verify:owner-territory-live": "node scripts/verify-owner-territory-live.mjs",
     "verify:pay-history-delete": "node scripts/verify-pay-history-delete.mjs",
     "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
     "verify:outbound": "node scripts/verify-outbound-honesty.mjs",
