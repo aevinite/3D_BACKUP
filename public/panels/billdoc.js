@@ -390,7 +390,7 @@
 // together — font size, padding, borders — so the layout is mathematically identical and only the
 // display size changes: same wraps, same rhythm, just big enough to read. It is SCREEN ONLY; print
 // resets it to 1, so nothing about the paper is affected.
-+ "       font-size:12.5px;line-height:1.44;color:#000;font-weight:400;\n"
++ "       font-size:12.5px;line-height:1.55;color:#000;font-weight:400;\n"
 + "       font-variant-numeric:tabular-nums;\n"
 + "       width:66mm;margin:0 auto;padding:2mm 0;box-sizing:border-box}\n"
 // The white sheet is shown 72mm wide with the 66mm of INK centred inside it, because that is what the
@@ -399,7 +399,7 @@
 // only the visible paper edge is added. Without it the ink ran to the very edge and the preview looked
 // like a bill with its margins cut off.
 + "  @media screen{html{background:#e9e9ec;min-height:100%}\n"
-+ "    body{zoom:1.7;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2);width:72mm;padding:2mm 3mm;\n"
++ "    body{zoom:2;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2);width:72mm;padding:2mm 3mm;\n"
 + "         margin:10px auto 30px;padding-top:calc(2mm + 34px)}}\n"
 + "  @media print{body{zoom:1 !important}}\n"
 + "  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}\n"
@@ -408,18 +408,18 @@
 // 1.44 leading, which left those two lines sitting in 14.5mm of loose air; 1.12 makes them read as one
 // block. The SIZE is deliberately unchanged: the name is the biggest thing on a customer's bill.
 + "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;\n"
-+ "     line-height:1.12;margin:0 0 5px}\n"
-+ "  .sub{text-align:center;font-size:11px;line-height:1.5}\n"
-+ "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;\n"
++ "     line-height:1.18;margin:0 0 6px}\n"
++ "  .sub{text-align:center;font-size:11.5px;line-height:1.55}\n"
++ "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:12px 0 10px;padding:5px 0;\n"
 + "        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}\n"
 // The cancelled band — same one ink, same double border the KOT's DUPLICATE banner uses, so
 // a voided bill is as unmistakable on paper as a reprinted ticket is.
 + "  .vband{text-align:center;font-weight:700;font-size:15px;letter-spacing:1.5px;\n"
 + "         border:3px double #000;padding:5px 2px;margin:8px 0 2px;text-transform:uppercase}\n"
-+ "  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:1.5px 0}\n"
++ "  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3.5px 0}\n"
 + "  .kv span:first-child{font-size:11px;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}\n"
 + "  .kv b{font-weight:400;text-align:right}\n"
-+ "  .dash{border-top:1px solid #000;margin:8px 0}\n"
++ "  .dash{border-top:1px solid #000;margin:11px 0}\n"
 + "  /* fixed columns, sized from THIS bill's own figures (see widest{}) so a ₹1,07,880 line\n"
 + "     and a long dish name can never crowd each other */\n"
 + "  table{width:100%;border-collapse:collapse;margin-top:2px;table-layout:fixed}\n"
@@ -427,11 +427,11 @@
 + "     border-bottom:1px solid #000;padding:0 0 4px}\n"
 + "  th.c,td.c{text-align:center;padding-left:4px}\n"
 + "  th.r,td.r{text-align:right;padding-left:7px}\n"
-+ "  td{font-size:12.5px;padding:5px 0;vertical-align:top;border:0}\n"
++ "  td{font-size:12.5px;padding:6.5px 0;vertical-align:top;border:0}\n"
 + "  td.n{padding-right:4px;word-break:break-word}\n"
 + "  tr.ex td{font-size:11px;padding:0 0 5px 9px}\n"
 + "  tbody tr:last-child td{padding-bottom:6px}\n"
-+ "  .t{display:flex;justify-content:space-between;font-size:12px;padding:2.5px 0}\n"
++ "  .t{display:flex;justify-content:space-between;font-size:12px;padding:3.5px 0}\n"
 + "  .t.tx{border-top:1px solid #000;margin-top:4px;padding-top:5px}\n"
 + "  /* The MRP stamp and the note under the total. Boxed outline rather than a shade —\n"
 + "     a thermal head has no grey (see the ONE INK note above), so a tint would print as\n"
