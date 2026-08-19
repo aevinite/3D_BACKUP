@@ -115,7 +115,16 @@ export default function AdminBills() {
     const p = new URLSearchParams();
     if (rid) p.set("restaurant_id", rid);
     if (state) p.set("state", state);
-    if (from) p.set("from", from);
+    // BOTH ENDS OF THE WINDOW ARE PINNED TO IST (T18 sweep, 2026-08-20). The end already was; the
+    // start was sent as a bare `YYYY-MM-DD`, which `new Date()` reads as UTC midnight — 05:30 IST.
+    // So the window opened five and a half hours late, right across the late-night trade, and the
+    // two ends disagreed: a bill taken at 03:56 IST on the 19th is AFTER "to: 18 Aug" (23:59:59 IST
+    // on the 18th) and BEFORE "from: 19 Aug" (05:30 IST), so a single-day search on either day could
+    // not find it at all. Measured on the backup database: "From 19 Aug, To 19 Aug" returned 30
+    // bills of the 181 taken that IST day — 151 unreachable, including #373/#374/#375 at 03:55 IST.
+    // That is the exact opposite of this screen's stated job ("the admin must be able to reach a
+    // deleted bill at any time"), so the start now says which midnight it means, like the end does.
+    if (from) p.set("from", from + "T00:00:00.000+05:30");
     // An end DATE means the whole of that day, not midnight at its start — otherwise picking
     // "to: today" hides everything taken today, the exact off-by-one the report window rule warns about.
     if (to) p.set("to", to + "T23:59:59.999+05:30");
