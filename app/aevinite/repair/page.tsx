@@ -635,10 +635,13 @@ export default function AdminRepair() {
 
       {/* ── Rate limits reached (mig 205) ──────────────────────────────── */}
       <div className="rp-sec-h" id="rate-limits">
-        <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: rlHits.length ? "var(--adm-danger)" : "var(--muted)" }} />
+        {/* The icon must glow for what is ON SCREEN. It read `rlHits.length`, so picking one
+            restaurant left a red gauge sitting beside the words "No rate limits have been
+            reached." — an alarm for rows the admin cannot see (T17 sweep, 2026-08-19). */}
+        <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: rlErr ? "var(--adm-warn)" : shownRlHits.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Rate limits reached</h2>
         {shownRlHits.length ? <span className="rp-chip danger">{shownRlHits.length}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · all restaurants</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · {scopedName || "all restaurants"}</span>
         <Link href="/aevinite/rate-limits" className="adm-btn" style={{ marginLeft: "auto", fontSize: 12 }}><i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Manage limits</Link>
       </div>
       {errLoading && shownRlHits.length === 0 ? (
@@ -650,7 +653,7 @@ export default function AdminRepair() {
           <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={loadHub}>Retry</button>
         </div>
       ) : shownRlHits.length === 0 ? (
-        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No rate limits have been reached.</div>
+        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No rate limits have been reached{scopedName ? ` at ${scopedName}` : ""}.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
           {shownRlHits.map((h) => (
