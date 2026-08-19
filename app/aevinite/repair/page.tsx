@@ -73,6 +73,11 @@ const PANEL_NAME: Record<string, string> = {
 // Roll repeats of the SAME error into one row with a ×N badge, so a printer firing 8 times
 // isn't 8 rows. Keyed by panel + restaurant + action + the NORMALISED message (mig 218), so the
 // same bug carrying a different order id still counts as one problem instead of alarming twice.
+// How many error REPORTS this board asks the server for. Named, because the page has to be able
+// to say "there may be more" when the answer comes back exactly this long — a capped list that
+// looks complete is how "19 problems open" quietly becomes a wrong number (T17 sweep, 2026-08-19).
+const ERROR_FEED_LIMIT = 50;
+
 type ErrGroup = { key: string; sample: Action; count: number; latest: string };
 function groupErrors(rows: Action[]): ErrGroup[] {
   const map = new Map<string, ErrGroup>();
@@ -180,7 +185,7 @@ export default function AdminRepair() {
       // ?unresolved=1 — only errors nobody has cleared yet (mig 181 resolved_at). Resolving one
       // (or a landed fix, via the mig 183 trigger) drops it off this list; the full Logs page
       // still shows resolved rows. Without this the board could never be emptied.
-      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50&unresolved=1"),
+      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
@@ -565,6 +570,13 @@ export default function AdminRepair() {
               </div>
             );
           })}
+          {errors.length >= ERROR_FEED_LIMIT && (
+            <p className="adm-muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>
+              <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+              Showing the {ERROR_FEED_LIMIT} most recent reports — there may be older unresolved ones below this.
+              Resolve some, or read the whole list in Audit &amp; logs.
+            </p>
+          )}
         </div>
       )}
 

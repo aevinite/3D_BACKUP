@@ -41,6 +41,11 @@ type Member = {
 type Block = { id: string; device_id?: string | null; phone?: string | null; table_number?: string | null; reason?: string | null; blocked_at: string; restaurant_name?: string | null };
 type CustData = { members: Member[]; blocklist: Block[]; orders: { member_id: string }[]; calls: { member_id: string }[] };
 
+// How many rows each feed asks the server for. Named, because a list that comes back exactly this
+// long is a TRUNCATED list, and the page has to say so — otherwise the admin reads the newest 200
+// rows and believes he has read everything there is (T17 sweep, 2026-08-19).
+const FEED_LIMIT = 200;
+
 // Cleanup windows offered in the "logs are getting full" banner (delete older than).
 const CLEANUP_OPTS = [
   { days: 365, label: "Keep 1 year" },
@@ -122,7 +127,7 @@ export default function AdminLogs() {
 
   const loadOps = useCallback(async () => {
     const qs = (rid ? `&restaurant_id=${rid}` : "") + (level ? `&level=${level}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
-    try { const j = await (await fetch(`/api/admin/oplog?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
+    try { const j = await (await fetch(`/api/admin/oplog?limit=${FEED_LIMIT}${qs}`, { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
   }, [rid, level, qDebounced]);
   const loadCust = useCallback(async () => {
     const qs = rid ? `?restaurant_id=${rid}` : "";
@@ -175,7 +180,7 @@ export default function AdminLogs() {
   // The Removals record (deletion_audit) — every restaurant's audit rows, searchable.
   const loadAud = useCallback(async () => {
     const qs = (rid ? `&restaurant_id=${rid}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
-    try { const j = await (await fetch(`/api/admin/audit?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setAudErr(true); else { setAud(j.removals || []); setAudErr(false); } } catch { setAudErr(true); }
+    try { const j = await (await fetch(`/api/admin/audit?limit=${FEED_LIMIT}${qs}`, { cache: "no-store" })).json(); if (j.error) setAudErr(true); else { setAud(j.removals || []); setAudErr(false); } } catch { setAudErr(true); }
   }, [rid, qDebounced]);
   // Cheap HEAD count for the banner — no rows pulled. Refreshes when the restaurant changes.
   const loadCount = useCallback(async () => {
@@ -388,9 +393,9 @@ export default function AdminLogs() {
       )}
 
       {tab === "ops"
-        ? <OpsTable rows={opsRows} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
+        ? <OpsTable rows={opsRows} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} capped={(ops?.length ?? 0) >= FEED_LIMIT} onSendToClaude={sendToClaude} onResolve={markResolved} />
         : tab === "aud"
-        ? <AudTable rows={audRows} err={audErr} onRetry={loadAud} scopedName={scopedName || null} onOpenRemoval={setRemovalId} />
+        ? <AudTable rows={audRows} err={audErr} onRetry={loadAud} scopedName={scopedName || null} capped={(aud?.length ?? 0) >= FEED_LIMIT} onOpenRemoval={setRemovalId} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
@@ -415,7 +420,7 @@ export default function AdminLogs() {
   );
 }
 
-function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onSendToClaude: (a: Action) => void; onResolve: (a: Action, resolved: boolean) => void }) {
+function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onResolve }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; capped: boolean; onSendToClaude: (a: Action) => void; onResolve: (a: Action, resolved: boolean) => void }) {
   const cols = "92px 1fr auto";
   // Which row's full detail popup is open (every row is clickable → the organized detail card).
   const [detailRow, setDetailRow] = useState<Action | null>(null);
@@ -510,6 +515,7 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
         );
       })}
     </div>
+    {capped && <FeedCap what="staff actions" />}
     {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
     </>
   );
@@ -517,13 +523,14 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
 
 // The Removals record — every restaurant's deletion_audit rows, with the restaurant named
 // on each row so "All restaurants" is never ambiguous.
-function AudTable({ rows, err, onRetry, scopedName, onOpenRemoval }: { rows: Removal[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onOpenRemoval: (id: number) => void }) {
+function AudTable({ rows, err, onRetry, scopedName, capped, onOpenRemoval }: { rows: Removal[] | null; err: boolean; onRetry: () => void; scopedName: string | null; capped: boolean; onOpenRemoval: (id: number) => void }) {
   const cols = "1.4fr 1fr auto";
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the removals record. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (rows === null) return <SkelList rows={6} label="Loading removals" />;
   if (rows.length === 0) return <div className="adm-empty">Nothing has been removed {scopedName ? `at ${scopedName}` : "yet"} — this list fills itself as it happens.</div>;
   return (
-    <div className="adm-logwrap aud-stack">
+    <>
+      <div className="adm-logwrap aud-stack">
       <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
       {rows.map((r) => {
         const [ico, label] = REMOVAL_KIND[r.kind] || ["•", r.kind];
@@ -558,7 +565,21 @@ function AudTable({ rows, err, onRetry, scopedName, onOpenRemoval }: { rows: Rem
           </div>
         );
       })}
-    </div>
+      </div>
+      {capped && <FeedCap what="removals" />}
+    </>
+  );
+}
+
+// "This list is the newest N, not all of them." A truncated feed that says nothing is the reason
+// the admin can believe he has read everything (T17 sweep, 2026-08-19).
+function FeedCap({ what }: { what: string }) {
+  return (
+    <p className="adm-muted" style={{ fontSize: 12, margin: "8px 2px 0" }}>
+      <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+      Showing the {FEED_LIMIT} most recent {what} — there are older ones. Narrow it with the
+      restaurant filter or the search to see further back.
+    </p>
   );
 }
 
