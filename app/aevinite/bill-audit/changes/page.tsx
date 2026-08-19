@@ -127,6 +127,18 @@ export default function AdminBillChanges() {
                 </div>
               );
             })}
+            {/* SAY WHEN THE LIST STOPS (T18 sweep, 2026-08-20). The endpoint caps this read at 500
+                rows; below that number the list is the whole story, and at exactly 500 it is not —
+                and nothing said which. The sibling Bills ledger has always ended with "Showing N —
+                there are older ones", so scrolling to the bottom of THAT screen tells you whether
+                you have seen everything. This one just stopped. Filter to a restaurant, or to the
+                at-risk rows, to reach further back. */}
+            {d.rows.length >= 500 && (
+              <div style={{ padding: "12px 14px", fontSize: 11.5, color: "var(--muted)", textAlign: "center" }}>
+                Showing the most recent {d.rows.length} changes — there are older ones. Narrow to one
+                restaurant, or to the at-risk rows, to reach further back.
+              </div>
+            )}
           </div>
         )}
       </div>
