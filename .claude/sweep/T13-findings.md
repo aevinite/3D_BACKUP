@@ -167,7 +167,7 @@ changes them the guard fails until the form agrees again.
 
 ## 🔗 HANDOFF — the real fix lives in another terminal's file
 
-### H3 · The first phone-Back press on a person's profile does nothing — `lib/backStack.ts` / `components/admin/useAdminModal.ts`
+### H3 · ✅ CLOSED 2026-08-19 — The first phone-Back press on a person's profile did nothing — `lib/backStack.ts` / `components/admin/useAdminModal.ts`
 
 **Where:** owner panel → Team → "Open profile" → press the phone's Back button, on a phone.
 **Phase:** P06366. **Found** 2026-08-18 in the post-merge pass, by driving it.
@@ -186,12 +186,14 @@ cockpit it is a page, so there are two back-steps for one visible layer.
 should not pick alone — making the layer's close use `router.back()` fixes the double press but
 strands anyone who reached the profile from a typed or bookmarked URL with no roster behind it.
 
-**Change needed:** let a back layer opt out of pushing its own buffer entry when the thing it closes
-is a ROUTE rather than an overlay — or have `StaffProfile` skip that layer when its host says it is
-page-hosted (`ProfileHost` already carries a `can` capability bag that could say so).
-**Severity:** low-medium. Nothing is lost or wrong; it is one dead press on every profile close.
+**FIXED 2026-08-19** by the second of those: `ProfileHost.pageHosted` → `StaffProfile` →
+`useAdminModal({ backLayer: false })`. The default stays ON, so all 13 real admin modals are untouched
+and Aevidine's own profile modal still closes on one Back without leaving the page (regression checked).
+Opening the profile is now ONE history entry; Back pops it natively; closing became a `replace` so that
+tapping ✕ and pressing Back cannot re-open what you just closed. Verified 11/11.
+Guarded: `verify:owner-panel` §10.
 
-### H4 · Opening one person's profile takes 4–10 seconds — `app/api/owner/staff/route.ts`
+### H4 · ✅ CLOSED 2026-08-19 (and my figure here was overstated) — Opening one person's profile was slow — `app/api/owner/staff/route.ts`
 
 **Where:** owner panel → Team → "Open profile". **Measured** five times: 3.9s, 6.4s, 7.0s, 8.7s,
 10.1s to the person's name appearing. One `?staff=` request, status 200, no console errors.
@@ -202,9 +204,16 @@ endpoint does a lot per open: the person, the pay summaries, a `lfh_staff_perfor
 activity feed, `accessStateFor`, `payrollByRid` and `loadLogVisibility`. Several already run in
 parallel; the RPCs look like the long pole.
 
-**Change needed:** measure which read dominates, and consider deferring the performance RPC and the
-activity feed until after first paint — the name, role and pay setup are what the owner opened it for.
-**Not mine:** that route is another terminal's file.
+**FIXED 2026-08-19**, and differently from what I guessed here: nothing needed deferring to after
+first paint. The reads were simply awaited in a ROW — seven sequential round trips to Mumbai — and the
+four around the already-bunched pay reads now start together, after the gates (so a kitchen login still
+costs nothing extra). Seven hops → four.
+
+⚠️ **AND THE FIGURE ABOVE WAS OVERSTATED.** "4–10 seconds" was measured while this machine was running
+repeated test suites and a dev server at the same time. On a quiet machine, production builds both
+sides, five runs each: API median **1901ms → 1123ms**, tap-to-name median **2533ms → 1860ms**. The
+saving is real and structural (~600–700ms, a quarter to a third), but nobody was waiting ten seconds.
+Guarded: `verify:owner-panel` §10.
 
 ### H1 · `app/owner/layout.tsx` — a stale comment, and a first-ever blip lands on the error page
 

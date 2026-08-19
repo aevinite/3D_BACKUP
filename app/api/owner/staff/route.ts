@@ -454,6 +454,38 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
   if (!acc.moduleOn) return ok({ disabled: true, error: "Staff profiles & pay aren't enabled for this restaurant — contact Aevidine." }, 403);
   if (!hasProfile(u.role)) return ok({ notEligible: true, error: "Kitchen logins don't have a profile.", role: u.role }, 200);
 
+  // ── EVERYTHING THAT DOES NOT DEPEND ON ANOTHER READ STARTS NOW (T13 handoff H4, 2026-08-19) ──
+  //
+  // Opening one person took 4–10 seconds, measured five times on the owner's own screen (3.9s, 6.4s,
+  // 7.0s, 8.7s, 10.1s to the name appearing). Nothing was slow on its own: this function simply
+  // awaited seven things in a ROW, and every one of them is a round trip to Mumbai —
+  //   person → payroll → pay-set → performance → access tree → activity → log visibility.
+  // The pay reads had already been bunched for exactly this reason ("run one after another they
+  // added up to ~1.9s and the page sat on Loading…"); the four reads AROUND them had not.
+  //
+  // The person and the payroll gate must stay first — the early returns above depend on them, and
+  // firing these for a kitchen login would be reads for an answer we then throw away. Everything
+  // after those gates is keyed only on `u.restaurant_id` / `id`, so it all starts together and the
+  // chain drops from seven sequential hops to four.
+  //
+  // `logsOn` still gates the ACTIVITY read (it must — a feed that ignored the switch would be a way
+  // around something Aevidine turned off), so activity remains the one hop that waits.
+  // `.catch(...)` on each: these are STARTED here and some are awaited later or not at all, and a
+  // floating promise that rejects takes the process down rather than this one request. None of these
+  // three throws today (each answers a shape on failure), so the catches are belt-and-braces that
+  // keep the answer honest — a failure still arrives as "couldn't read", never as a silent default.
+  const treeQ = accessStateFor(u.restaurant_id).catch(() => null);
+  const logsOnQ = (s.actor === "admin")
+    ? Promise.resolve(true)
+    : (async () => (await logViewSubset(await entitledSubset([u.restaurant_id], "logs"), "activity")).length > 0)()
+        .catch(() => false);
+  // ONE extra single-row read in the minority case, deliberately. `visQ` used to run only after
+  // `logsOn` came back true; starting it alongside costs one indexed `restaurants` read by id when
+  // the admin HAS switched the owner's Activity view off, and saves a whole Mumbai round trip on
+  // every profile open when it is on (which is the default for every restaurant).
+  const visQ = loadLogVisibility([u.restaurant_id], s.actor === "admin")
+    .catch(() => ({ ok: false as const, error: new Error("log visibility read failed") }));
+
   // Kicked off BEFORE the pay reads so it overlaps them instead of queueing behind.
   const perfQ = (shownActor(s) === "owner" || shownActor(s) === "admin") && sp.get("perf") !== "0"
     ? sb.rpc("lfh_staff_performance", {
@@ -533,7 +565,7 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
   // CREDS ARE STRIPPED. accessStateFor returns masked "••••1234" hints of a restaurant's Zomato /
   // Swiggy keys; nothing on a person's profile shows them, so they have no business travelling to
   // this browser at all.
-  const tree = await accessStateFor(u.restaurant_id);
+  const tree = await treeQ;                       // started right after the gates, above
   if (tree) out.tree = { ...tree, creds: {} };
   out.person = acc.canSeePay ? person : withoutPay(person);
   out.payrollOn = acc.moduleOn === true;
@@ -544,8 +576,7 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
   // switch Aevidine turned off, which is precisely what "hiding is never the only guard" forbids
   // in reverse. Switched off → an empty list plus a flag, so the card says so instead of claiming
   // this person has done nothing.
-  const logsOn = (s.actor === "admin")
-    || (await logViewSubset(await entitledSubset([u.restaurant_id], "logs"), "activity")).length > 0;
+  const logsOn = await logsOnQ;                   // started right after the gates, above
   if (!logsOn) { out.activity = []; out.activityOff = true; }
   else {
     // The row-level `action` column is needed so the per-KIND switches can be applied here exactly
@@ -566,7 +597,7 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
       out.partial = [...((out.partial as string[]) || []), "logVisibility"];
     } else {
       // Per-KIND visibility, through the one module that fails CLOSED (T9 finding F23).
-      const vis = await loadLogVisibility([u.restaurant_id], s.actor === "admin");
+      const vis = await visQ;                     // started right after the gates, above
       if (!vis.ok) {
         out.activity = [];
         out.activityUnread = true;
