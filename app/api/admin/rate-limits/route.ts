@@ -96,7 +96,14 @@ export async function PATCH(req: NextRequest) {
   patch.updated_by = "admin";
   const r = await sb.from("rate_limit_rules").update(patch).eq("id", id).select("key").maybeSingle();
   if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
-  await logAction("admin", "rate_limit_edit", { level: "info", detail: `rate limit "${r.data?.key ?? id}" updated: ${JSON.stringify(patch)}` });
+  // AN EDIT MUST NOT SUCCEED AT NOTHING — the same rule allow/dismiss learned below, applied to the
+  // one path on this page that actually changes a limit. `r.data` is null when the id matched no row
+  // (the rule was renamed or removed in another tab since the page loaded), and this still answered
+  // ok:true and wrote a log line reading `rate limit "<uuid>" updated`. So the admin watched a
+  // limit he had just raised sit at its old value with no hint why, and the record of the change
+  // named a rule nobody can find.
+  if (!r.data) return err("that limit no longer exists — refresh the page", 404);
+  await logAction("admin", "rate_limit_edit", { level: "info", detail: `rate limit "${r.data.key}" updated: ${JSON.stringify(patch)}` });
   return NextResponse.json({ ok: true });
 }
 
