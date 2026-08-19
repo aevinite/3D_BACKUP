@@ -48,8 +48,14 @@ export async function GET(req: NextRequest) {
     .limit(500);
   if (rid && isUuid(rid)) q = q.eq("restaurant_id", rid);
 
-  const [aQ, restsQ] = await Promise.all([q, sb.from("restaurants").select("id, name").is("deleted_at", null)]);
+  const [aQ, restsQ] = await Promise.all([q, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000)]);
   if (aQ.error) return adminFail("the bill trail", aQ.error, { action: "load" });
+  // BOTH reads, not just the rows. This is a cross-restaurant screen: the restaurant NAME is how
+  // the admin tells one tenant's bill changes from another's, and it feeds the filter dropdown as
+  // well. With this read unchecked a failure left every row labelled "—" and the dropdown empty,
+  // so the page looked like a working list of anonymous events and the admin had no way to narrow
+  // it. Same rule the sibling account-health route already states for its three reads.
+  if (restsQ.error) return adminFail("the bill trail", restsQ.error, { action: "load" });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   const rows = (aQ.data || []).map((a) => ({
