@@ -221,6 +221,15 @@ export default function AdminRevenue() {
         .rev-strip { display: flex; flex-wrap: wrap; padding: 0; margin-bottom: 12px; }
         .rev-strip .cell { display: flex; flex-direction: column; gap: 3px; padding: 12px 18px; border-right: var(--border); flex: 1 1 auto; min-width: 150px; }
         .rev-strip .cell:last-child { border-right: 0; }
+        /* A DIVIDER MUST SEPARATE THE THINGS IT SITS BETWEEN (T18 sweep, 2026-08-20). This is a
+           WRAPPING flexbox, and every cell carried a right border cleared only on :last-child — so
+           once the cells stacked one per row on a phone, four disconnected vertical hairlines ran
+           down the right-hand side of the card and stopped before the last figure. It read as a
+           half-drawn table. Stacked, the divider goes between the rows instead. */
+        @media (max-width: 720px) {
+          .rev-strip .cell { border-right: 0; border-bottom: var(--border); }
+          .rev-strip .cell:last-child { border-bottom: 0; }
+        }
         .rev-strip .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
         .rev-strip .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
         .rev-strip .h { font-size: 11px; color: var(--muted); }
