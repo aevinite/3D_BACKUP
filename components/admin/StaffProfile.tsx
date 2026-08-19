@@ -795,6 +795,18 @@ function Pay({ d, patch, reload, flash }: Kit) {
     catch (e: any) { flash(e.message); } finally { setBusy(false); }
   }
   async function setPayroll(on: boolean) {
+    // TAKING SOMEONE OFF THE PAY LIST ASKS FIRST (T13 sweep, 2026-08-19). This was a bare toggle:
+    // one tap, no question. Two things happen on that tap and neither is obvious from a switch —
+    // the person stops counting as an expense, so the month's staff cost in the owner's reports
+    // changes; and `payroll_added_at` / `payroll_added_by` are set to NULL, so the record of WHEN
+    // they were enrolled and by WHOM is destroyed. Toggling back on does not restore it: it stamps
+    // today and whoever is looking. Everything else is recoverable; that stamp is not.
+    //
+    // The wording is the sentence the owner's roster has always carried for this exact action — its
+    // own `setPayroll(s, false)` branch, which is unreachable there because the roster only ever
+    // offers ADD. So the careful question existed and the screen that actually does the removal was
+    // the one not asking it. Adding ONLY here keeps one confirm for one action.
+    if (!on && !confirm(`Take ${p.name || p.username} off the pay list?\n\nTheir past payments stay on the record, but they'll stop counting as an expense, you won't be able to record new payments for them, and the note of when they were added to the list is cleared.`)) return;
     try { await patch({ action: "set_job", in_payroll: on }); flash(on ? "Added to the pay list" : "Taken off the pay list"); reload(); }
     catch (e: any) { flash(e.message); }
   }

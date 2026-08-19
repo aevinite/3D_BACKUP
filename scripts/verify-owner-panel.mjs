@@ -464,6 +464,41 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
   }
 }
 
+// ── 12 · TAKING SOMEONE OFF THE PAY LIST ASKS FIRST ──────────────────────────────────────────
+// Found 2026-08-19 while turning ledger row P06359 from a skip into a real check. The profile sheet's
+// pay-list control was a bare toggle: one tap, no question — and that tap changes the month's staff
+// cost in the owner's reports AND nulls payroll_added_at / payroll_added_by, so the record of when
+// the person was enrolled and by whom is destroyed. Toggling back stamps today instead. Everything
+// else about it is recoverable; that stamp is not.
+//
+// The careful sentence already existed, in the OWNER ROSTER's own setPayroll — unreachable there,
+// because the roster only ever offers ADD. So the screen that does the removal was the one not asking.
+{
+  const prof = read("components/admin/StaffProfile.tsx");
+  const route = read("app/api/owner/staff/route.ts");
+  if (!prof) bad("components/admin/StaffProfile.tsx not found (if it moved, update this guard)");
+  else {
+    const bare = code(prof);
+    const fn = bare.slice(bare.indexOf("async function setPayroll"));
+    const body = fn.slice(0, fn.indexOf("async function", 1) > -1 ? fn.indexOf("async function", 1) : 1200);
+    if (/if \(!on && !confirm\(/.test(body)) ok("taking someone off the pay list asks first");
+    else bad("the pay-list toggle removes someone with NO question — one tap changes the reports and "
+      + "destroys the note of who enrolled them");
+    if (/past payments stay/.test(body)) ok("…and the question says the past payments stay on the record");
+    else bad("…the question does not reassure that nothing is erased, which is the first thing he would ask");
+    if (/when they were added/.test(body)) ok("…and warns that the enrolment note is cleared");
+    else bad("…the question does not mention the one thing that is NOT recoverable");
+    // it must ask on the way OFF only — a confirm to ADD someone would be noise
+    if (!/if \(on && !confirm/.test(body)) ok("…and it does not ask on the way ON, where nothing is lost");
+    else bad("adding someone to the pay list now asks a question too — that is noise, not a guard");
+  }
+  // and the server still clears the stamp, which is WHY the question has to mention it
+  if (route && /payroll_added_at: on \? new Date\(\)\.toISOString\(\) : null/.test(code(route)))
+    ok("the server still nulls the enrolment stamp on removal, so the warning stays true");
+  else bad("the server no longer nulls payroll_added_at — re-word the confirm, it is now telling him "
+    + "something that does not happen");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) console.log("\n❌ FAIL — the owner's cockpit is telling him something that did not happen.");
 else console.log("\n✅ PASS — Menu, Team and Settings each say what actually happened");
