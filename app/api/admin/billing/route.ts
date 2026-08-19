@@ -176,11 +176,17 @@ export const POST = withIdempotency(async (req: NextRequest) => {
 
   if (action === "delete_payment") {
     const id = String(body.payment_id || "");
-    if (!id) return bad("payment_id required");
-    const row = (await sb.from("restaurant_payments").select("restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
-    const { error } = await sb.from("restaurant_payments").delete().eq("id", id);
-    if (error) return bad(error.message, 500);
-    await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: row?.restaurant_id || null });
+    // Shape-checked like every other id on this route, so a stale row id can't reach a uuid column.
+    if (!isUuid(id)) return bad("valid payment_id required");
+    // A REMOVAL MUST NOT REPORT ITSELF WHEN NOTHING WENT (sweep #6, T19). This deleted by id and
+    // answered ok:true whatever came back, then wrote "removed a payment" to the record. So the
+    // page took the row off screen, the year's collected total silently disagreed with the history
+    // below it, and the platform's money record carried a removal that never happened. Asking the
+    // delete which row it took is one word (`.select`) and makes the answer honest.
+    const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id").maybeSingle();
+    if (gone.error) return bad(gone.error.message, 500);
+    if (!gone.data) return bad("That payment is already gone — refresh the page.", 404);
+    await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: (gone.data as { restaurant_id: string }).restaurant_id || null });
     return ok({ ok: true });
   }
 
