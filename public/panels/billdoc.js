@@ -374,10 +374,41 @@
 + "     Nothing below 10.5px and no italics — both smear at 203 dpi. */\n"
 + "  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}\n"
 + "  body{font-family:'Helvetica Neue',Helvetica,Arial,'Liberation Sans',sans-serif;\n"
-+ "       font-size:12.5px;line-height:1.44;margin:22px 30px;color:#000;font-weight:400;\n"
-+ "       font-variant-numeric:tabular-nums}\n"
+// ── THE PREVIEW *IS* THE PRINT (owner, 2026-08-19: "go back to preview that exactly match the print,
+//    I want preview and print same") ────────────────────────────────────────────────────────────────
+// The screen now uses the printer's own column, to the millimetre: the same 66mm width and the same
+// 2mm top/bottom padding the @media print rule above uses. Not "about the same" — the identical
+// numbers, so a line that wraps on paper wraps on screen at the same word.
+//
+// WHY 66mm AND NOT 70: measured from the printer's own bytes on 2026-08-19 (Chrome PDF → this Mac's
+// cgpdftoraster with the queue's PPD → the printer's rastertozj filter → decoded ESC/POS). The head
+// images 560 dots = 70.1mm, the chain CROPS TO THE INK AND LEFT-ALIGNS IT (which is why the old
+// padding:2mm 5mm silently vanished and the bill printed off-centre), and 66mm is the documented safe
+// maximum for an 80mm head. Declaring 70 or 72 changed nothing — the crop saturates.
+//
+// ZOOM IS WHY THIS IS READABLE. 66mm on a monitor is a ~250px strip. `zoom` scales every used length
+// together — font size, padding, borders — so the layout is mathematically identical and only the
+// display size changes: same wraps, same rhythm, just big enough to read. It is SCREEN ONLY; print
+// resets it to 1, so nothing about the paper is affected.
++ "       font-size:12.5px;line-height:1.44;color:#000;font-weight:400;\n"
++ "       font-variant-numeric:tabular-nums;\n"
++ "       width:66mm;margin:0 auto;padding:2mm 0;box-sizing:border-box}\n"
+// The white sheet is shown 72mm wide with the 66mm of INK centred inside it, because that is what the
+// roll actually is: 80mm of paper, ~70mm of printable head, 66mm of ink. With border-box the content
+// column stays exactly 66mm — the same number the print rule uses — so the line breaks are identical;
+// only the visible paper edge is added. Without it the ink ran to the very edge and the preview looked
+// like a bill with its margins cut off.
++ "  @media screen{html{background:#e9e9ec;min-height:100%}\n"
++ "    body{zoom:1.7;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2);width:72mm;padding:2mm 3mm;\n"
++ "         margin:10px auto 30px;padding-top:calc(2mm + 34px)}}\n"
++ "  @media print{body{zoom:1 !important}}\n"
 + "  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}\n"
-+ "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;margin:0 0 4px}\n"
+// 60-odd millimetres holds about 20 uppercase characters at this size, so a real name — "AANGAN GARDEN
+// RESTAURANT" is 24 — takes two lines on paper AND now in the preview. It was inheriting the body's
+// 1.44 leading, which left those two lines sitting in 14.5mm of loose air; 1.12 makes them read as one
+// block. The SIZE is deliberately unchanged: the name is the biggest thing on a customer's bill.
++ "  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;\n"
++ "     line-height:1.12;margin:0 0 5px}\n"
 + "  .sub{text-align:center;font-size:11px;line-height:1.5}\n"
 + "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;\n"
 + "        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}\n"
@@ -419,8 +450,10 @@
 + "     Cancel are indistinguishable to the page — see closeBill() below), so this bar is how it\n"
 + "     goes away, and how a second copy is printed without rebuilding the bill. It is hidden\n"
 + "     from the paper by display:none AND excluded from the page-length measurement below. */\n"
-+ "  .bar{position:sticky;top:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
-+ "       margin:-22px -30px 14px;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}\n"
+// FIXED to the window, not sticky inside a 66mm column where the buttons would be squeezed. It sits
+// inside the zoomed body, so its own zoom is wound back to keep the buttons a normal size.
++ "  .bar{position:fixed;top:0;left:0;right:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
++ "       margin:0;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc;zoom:.588}\n"
 + "  .bar button{font:inherit;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;\n"
 + "              border:1px solid #b9b9c0;background:#fff;color:#000}\n"
 + "  .bar button.x{background:#111;color:#fff;border-color:#111}\n"

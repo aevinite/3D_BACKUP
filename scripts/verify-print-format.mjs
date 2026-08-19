@@ -590,6 +590,24 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
   injects
     ? bad("the thermal bill/KOT declares an @page SIZE again — a page bigger or squarer than the roll makes the driver scale and ROTATE the job (measured: 80x134mm onto 70x65mm = 0.49x, sideways). Only @page{margin:0} belongs here; paper feed is the queue's job (FeedWhere/FeedDist).")
     : ok("neither thermal document declares an @page size — the queue's own receipt page paginates them");
+  // ── PREVIEW COLUMN == PRINT COLUMN (owner, 2026-08-19: "I want preview and print same") ─────────
+  // He asked for it twice, from opposite directions: first the print had to stop being sideways and
+  // small, then the preview had to stop promising a width the roll does not have. Both are the same
+  // rule — ONE ink column, quoted in both media. 66mm of ink is the documented maximum for an 80mm
+  // head, measured from the printer's own bytes (the chain crops to the ink and left-aligns it, so
+  // padding never survives — the width has to be stated).
+  //
+  // The screen says 72mm with 3mm of side padding, which IS 66mm of content with border-box, plus a
+  // visible paper edge; print says 66mm with no side padding. If either number moves without the
+  // other, the preview starts lying again and this check says so.
+  {
+    const css = thermal.replace(/\\n/g, "\n");
+    const screenInk = /width:72mm;padding:2mm 3mm/.test(css);
+    const printInk = /width:66mm !important/.test(css);
+    screenInk && printInk
+      ? ok("the preview and the print use ONE ink column (66mm), so a line wraps in the same place on both")
+      : bad(`the preview and the print no longer share one ink column (screen 72mm/3mm padding: ${screenInk}, print 66mm: ${printInk}). Keep them equal or the preview promises a width the roll has not got — the owner has reported that failure from both directions.`);
+  }
   /@page\{margin:0\}/.test(thermal.replace(/\\n/g, "\n"))
     ? ok("…and @page{margin:0} is still there, so no browser header/footer reaches the paper")
     : bad("@page{margin:0} has gone from the thermal document — the browser's own header, footer and page numbers will print on the roll");
