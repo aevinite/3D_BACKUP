@@ -109,10 +109,19 @@ export default function AdminHealth() {
         </button>
       </div>
 
-      {err && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{err}</p>}
+      {h === null && err ? (
+        // A FAILED CHECK IS NOT A CHECK IN PROGRESS (T17 sweep, 2026-08-19). The error line was
+        // printed and then the page fell through to "Checking…" underneath it — so the one screen
+        // that answers "is the platform up?" sat saying it was still looking, for ever.
+        <div className="adm-card" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", borderColor: "var(--adm-warn)" }}>
+          <span className="adx-pill warn"><span className="dot" />Couldn&apos;t check</span>
+          <span className="adm-muted" style={{ fontSize: 13 }}>{err} This is <b>unknown</b>, not healthy.</span>
+          <button className="adm-btn" style={{ marginLeft: "auto" }} disabled={loading} onClick={load}>Retry</button>
+        </div>
+      ) : null}
 
       {h === null ? (
-        <div className="adm-empty">Checking…</div>
+        err ? null : <div className="adm-empty">Checking…</div>
       ) : !h.dbOk ? (
         // Database ping failed → the API omits every summary field, so we must NOT
         // fall through to the normal render (it reads h.restaurants.* and would crash
