@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Dropdown from "@/components/admin/Dropdown";
 import { openRestaurantPanel } from "@/components/admin/shared";
+import { useToast } from "@/components/admin/toast";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type MiniTable = { n: string; s: string; p: string; c: boolean; g?: string };
@@ -123,6 +124,23 @@ function UpdatedAgo({ at }: { at: number }) {
 }
 
 export default function AdminFloor() {
+  const toast = useToast();
+  // OPENING A RESTAURANT MUST NEVER JUST DO NOTHING (T16 sweep, 2026-08-19).
+  //
+  // Every restaurant name and every open-table chip on this page is a door into that
+  // restaurant's manager panel. They all called openRestaurantPanel and THREW THE HANDLE
+  // AWAY — and that helper returns null precisely so a caller can tell the admin when the
+  // browser blocked the pop-up (its own comment says so, and the Restaurants page has always
+  // obeyed it). With a blocker on, tapping a restaurant here produced nothing at all: no tab,
+  // no message, nothing to retry — a dead button, which is the one thing a tap may never be.
+  const openPanel = useCallback(async (rid: string, name: string) => {
+    try {
+      const w = await openRestaurantPanel(rid, "/manager");
+      if (!w) toast(`Couldn't open ${name} — allow pop-ups for this site, then tap again.`, "err");
+    } catch (e) {
+      toast(`Couldn't open ${name} — ${e instanceof Error ? e.message : String(e)}`, "err");
+    }
+  }, [toast]);
   const [rests, setRests] = useState<RestFloor[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);
@@ -310,13 +328,13 @@ export default function AdminFloor() {
                   <div className="adm-muted" style={{ fontSize: 13, padding: "8px 0" }}>No tables occupied right now.</div>
                 ) : occ.map(({ r, ts }) => (
                   <div key={r.id} style={{ padding: "9px 0", borderBottom: "var(--border)" }}>
-                    <button onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Open ${r.name}'s manager panel`}
+                    <button onClick={() => openPanel(r.id, r.name)} title={`Open ${r.name}'s manager panel`}
                       style={{ background: "none", border: 0, color: "var(--accent)", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 7 }}>
                       {r.name} <span className="adm-muted" style={{ fontWeight: 400 }}>· {ts.length} open</span>
                     </button>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {ts.map((t) => (
-                        <button key={t.n} onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Table ${t.n} · ${t.s}${t.c ? " · waiter call" : ""}`}
+                        <button key={t.n} onClick={() => openPanel(r.id, r.name)} title={`Table ${t.n} · ${t.s}${t.c ? " · waiter call" : ""}`}
                           style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "var(--border)", borderRadius: 8, padding: "4px 9px", background: "var(--card)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>
                           <span style={{ width: 8, height: 8, borderRadius: 999, background: STATE_COLOR[t.s] || "var(--muted)" }} aria-hidden="true" />#{t.n}{t.c ? " •" : ""}
                         </button>
@@ -379,7 +397,7 @@ export default function AdminFloor() {
             return (
               <section key={r.id} className="adm-card adm-floormonth" aria-label={`${r.name} floor`}>
                 <header>
-                  <button className="adm-floormonth-name" onClick={() => openRestaurantPanel(r.id, "/manager")}
+                  <button className="adm-floormonth-name" onClick={() => openPanel(r.id, r.name)}
                     title={`Open ${r.name}'s manager panel (new tab, no password)`}>
                     {r.name}
                   </button>
@@ -466,7 +484,7 @@ export default function AdminFloor() {
                   {sorted.map((r) => (
                     <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "1fr 64px 60px 66px 76px" }}>
                       <span>
-                        <button className="adm-floormonth-name" style={{ fontSize: 13 }} onClick={() => openRestaurantPanel(r.id, "/manager")}
+                        <button className="adm-floormonth-name" style={{ fontSize: 13 }} onClick={() => openPanel(r.id, r.name)}
                           title={`Open ${r.name}'s manager panel (new tab, no password)`}>{r.name}</button>
                         {!r.active && <span style={{ color: "var(--adm-danger)", fontWeight: 700, fontSize: 11 }}> · suspended</span>}
                       </span>
