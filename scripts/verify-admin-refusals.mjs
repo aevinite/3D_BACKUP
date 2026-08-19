@@ -164,5 +164,64 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
     offenders.length ? `${offenders.join(", ")} — a slug freed by the recycle bin can still be taken in settings, and the upsert conflicts on restaurant_id, so this becomes a raw settings_pkey error on his screen` : "");
 }
 
+// ── 5 · THE CONSOLE GETS A SENTENCE, NOT POSTGRES PROSE ──────────────────────────────────────────
+// lib/adminFail was written on 2026-08-14 for exactly this: forty-odd handlers under /api/admin
+// answered `{ error: r.error.message }`, so the console's red toast read
+// `duplicate key value violates unique constraint "settings_pkey"`. That is the right sentence for a
+// developer and the wrong one for the screen he runs his platform from. adminFail keeps BOTH halves —
+// a plain sentence in `error` (what lib/adminFetch surfaces) and the raw text in `detail` and the
+// server log, where it is actually useful.
+//
+// The rollout was never finished and nothing was watching, so it had drifted back to being a habit
+// rather than a rule. This makes it a rule.
+//
+// NOT_YET is the honest state of the OTHER half of the admin API, which belongs to a different
+// territory in this sweep and is not mine to edit. Each line is a file and how many sites it has;
+// DELETE YOUR LINE when you convert it. The list can only shrink — a file that is not on it and sends
+// raw prose fails this check.
+const NOT_YET = new Map([
+  ["app/api/admin/attention/route.ts", 1],
+  ["app/api/admin/billing/route.ts", 6],
+  ["app/api/admin/custlog/route.ts", 1],
+  ["app/api/admin/dashboard/route.ts", 1],
+  ["app/api/admin/health/route.ts", 1],
+  ["app/api/admin/notifications/route.ts", 1],
+  ["app/api/admin/owners/route.ts", 16],
+  ["app/api/admin/panels-health/route.ts", 1],
+  // DELIBERATE, not a miss: these two write the database's words INTO THE BACKUP FILE, next to the
+  // table that failed, so whoever rebuilds a restaurant can see which table came back empty and why.
+  // They never reach a toast. `_meta.failed` names them at the top of the same file.
+  ["app/api/admin/restaurants/export/route.ts", 2],
+  // ensureCodes() is an internal helper that RETURNS the words to its caller; the caller wraps them
+  // in adminFail, so the screen never sees them. Counted here so the number stays honest.
+  ["app/api/admin/restaurants/settings/route.ts", 2],
+]);
+{
+  const walk = (rel, out = []) => {
+    for (const e of readdirSync(join(ROOT, rel), { withFileTypes: true })) {
+      const p = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(p, out); else if (e.name === "route.ts") out.push(p);
+    }
+    return out;
+  };
+  const routes = existsSync(join(ROOT, "app/api/admin")) ? walk("app/api/admin").sort() : [];
+  const RAW = /error:\s*[A-Za-z_.]*(?:error|Err)\.message|bad\(\s*[A-Za-z_.]*error\.message/g;
+  const offenders = [];
+  const stale = [];
+  for (const rel of routes) {
+    const src = code(rel);
+    if (!src) continue;
+    const n = (src.match(RAW) || []).length;
+    const allowed = NOT_YET.get(rel) ?? 0;
+    if (n > allowed) offenders.push(`${rel} (${n} site${n === 1 ? "" : "s"}${allowed ? `, ${allowed} allowed` : ""})`);
+    else if (allowed && n < allowed) stale.push(`${rel} now has ${n}, NOT_YET says ${allowed}`);
+  }
+  check("no admin route hands the database's own sentence to the console",
+    offenders.length === 0,
+    offenders.length ? `${offenders.join("; ")} — use adminFail(what, error, { action }) so the screen gets words and the log keeps the detail` : "");
+  check("the NOT_YET list is not stale (a converted file must delete its line)",
+    stale.length === 0, stale.join("; "));
+}
+
 console.log(`\n${fails ? `FAILED — ${fails} check(s)` : "PASS — no admin route answers a refusal, or a save, more optimistically than it knows"}\n`);
 process.exit(fails ? 1 : 0);

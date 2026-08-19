@@ -22,6 +22,8 @@ import {
   TABLET_COLS, TAB_ALLOWED, HAS_IDS, KNOWN_CONFIG_IDS,
 } from "@/lib/accessTree";
 import { expectClash, clashJson } from "@/lib/clash";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -338,19 +340,20 @@ export async function POST(req: NextRequest) {
   // Everything is validated by here, so the writes can go out together.
   if (Object.keys(restUpdate).length) {
     const up = await sb.from("restaurants").update(restUpdate).eq("id", rid);
-    if (up.error) return bad(up.error.message, 500);
+    // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
+    if (up.error) return adminFail("these permissions", up.error, { action: "save" });
   }
 
   if (Object.keys(setPatch).length) {
     const existing = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data;
     if (existing) {
       const up = await sb.from("settings").update(setPatch).eq("restaurant_id", rid);
-      if (up.error) return bad(up.error.message, 500);
+      if (up.error) return adminFail("these permissions", up.error, { action: "save" });
     } else {
       const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
       const row = { ...cleanClonedSettings(template.data), id: rid.slice(0, 40), restaurant_id: rid, ...setPatch };
       const up = await sb.from("settings").upsert(row, { onConflict: "restaurant_id" });
-      if (up.error) return bad(up.error.message, 500);
+      if (up.error) return adminFail("these permissions", up.error, { action: "save" });
     }
   }
 

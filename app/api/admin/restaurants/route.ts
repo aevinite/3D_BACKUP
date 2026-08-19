@@ -16,6 +16,8 @@ import { logAction } from "@/lib/oplog";
 import { loadStarterMenu, toCategoryRows, toFilterRows, toItemRows } from "@/lib/starterMenu";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { MP_DEFAULT } from "@/lib/accessConfig";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -56,7 +58,8 @@ export async function GET(req: NextRequest) {
     // is — gone from every list a person can see.
     const binQ = await sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason, purged_at")
       .not("deleted_at", "is", null).is("purged_at", null).order("deleted_at", { ascending: false });
-    if (binQ.error) return bad(binQ.error.message, 500);
+    // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
+    if (binQ.error) return adminFail("the recycle bin", binQ.error, { action: "load" });
     const now = Date.now();
     const trashed = (binQ.data || []).map((r) => {
       const deletedAt = r.deleted_at as string;
@@ -80,7 +83,7 @@ export async function GET(req: NextRequest) {
     sb.from("settings").select("restaurant_id, enabled_panels"),
     sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name"),
   ]);
-  if (restQ.error) return bad(restQ.error.message, 500);
+  if (restQ.error) return adminFail("the restaurant list", restQ.error, { action: "load" });
   const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
   const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
   const owners = (ownersQ.data || []).map((o) => ({ id: o.id, name: o.name || o.username }));
@@ -119,7 +122,7 @@ export async function PATCH(req: NextRequest) {
   const prev = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
   const oldOwner = (prev?.owner_user_id as string | null) || null;
   const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
-  if (error) return bad(error.message, 500);
+  if (error) return adminFail("this restaurant's owner", error, { action: "save" });
   // Remove the PREVIOUS primary's membership if it's being replaced/cleared
   // (leave it if it's the same user we're re-assigning, and never touch co-owners).
   if (oldOwner && oldOwner !== ownerId) {
@@ -127,7 +130,7 @@ export async function PATCH(req: NextRequest) {
     // scope. If it silently fails the old owner keeps seeing this restaurant — the
     // cross-owner leak we must never ship — so surface the error instead of swallowing it.
     const del = await sb.from("restaurant_owners").delete().eq("restaurant_id", rid).eq("user_id", oldOwner);
-    if (del.error) return bad(del.error.message, 500);
+    if (del.error) return adminFail("this restaurant's owner", del.error, { action: "save" });
   }
   // Add the NEW primary's membership (idempotent — composite PK + ignoreDuplicates).
   if (ownerId) {
@@ -152,7 +155,7 @@ export async function POST(req: NextRequest) {
     const r = (await sb.from("restaurants").select("id, name").eq("id", rid).limit(1)).data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     const { error } = await sb.from("restaurants").update({ active }).eq("id", rid);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail(active ? "reactivating this restaurant" : "suspending this restaurant", error, { action: "save" });
     await logAction("admin", active ? "restaurant_reactivate" : "restaurant_suspend", { restaurant_id: rid, actor: "admin", detail: `${r.name} ${active ? "reactivated" : "suspended"}` });
     return ok({ ok: true, active });
   }
@@ -174,7 +177,7 @@ export async function POST(req: NextRequest) {
     const { error } = await sb.from("restaurants")
       .update({ deleted_at: new Date().toISOString(), deleted_by: "admin", delete_reason: reason, active: false })
       .eq("id", rid);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("moving this restaurant to the recycle bin", error, { action: "save" });
     await logAction("admin", "restaurant_soft_delete", { restaurant_id: rid, actor: "admin", detail: `${r.name} moved to recycle bin${reason ? ` · reason: ${reason}` : ""}` });
     return ok({ ok: true, deleted: true });
   }
@@ -212,7 +215,7 @@ export async function POST(req: NextRequest) {
     const { error } = await sb.from("restaurants")
       .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate, slug })
       .eq("id", rid);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("restoring this restaurant", error, { action: "save" });
     await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — its web address was taken, so it came back as "${renamed}"` : ""}` });
     return ok({ ok: true, restored: true, active: activate, ...(renamed ? { renamed } : {}) });
   }
@@ -308,7 +311,7 @@ export async function POST(req: NextRequest) {
       // name at the same instant can both pass the while-loop and collide on the UNIQUE
       // constraint. Turn Postgres's raw 23505 into a friendly "try again" instead of a 500.
       if (rest.error.code === "23505") return bad("That name was just taken — please try a slightly different name.", 409);
-      return bad(rest.error.message, 500);
+      return adminFail("the new restaurant", rest.error, { action: "save" });
     }
     const rid = rest.data.id as string;
     // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
@@ -340,7 +343,7 @@ export async function POST(req: NextRequest) {
       // row the tenant is unusable, and leaving it made the admin — who just saw
       // "couldn't create" — retry and produce a duplicate with a "-2" slug.
       await sb.from("restaurants").delete().eq("id", rid);
-      return bad(setRes.error.message, 500);
+      return adminFail("the new restaurant's settings", setRes.error, { action: "save" });
     }
     // 2b) Seed the starter menu (categories → filters → items), scoped to this restaurant.
     //     Best-effort: a seed failure must NOT orphan the already-created restaurant — we

@@ -234,7 +234,10 @@ export async function GET(req: NextRequest) {
   const settings = (row.data as unknown as Patch) || {};
   const count = Math.min(Math.max(Math.round(Number(settings.table_count)) || 12, 1), 500);
   const codes = await ensureCodes(rid, count);
-  if ("error" in codes) return NextResponse.json({ error: codes.error }, { status: 500 });
+  // ensureCodes hands back the database's own words; they belong in `detail` and the log, not in the
+  // console's red toast (lib/adminFail). Its one non-database message ("couldn't mint unique codes")
+  // is already a sentence, and adminFail passes it through the same way.
+  if ("error" in codes) return adminFail("this restaurant's table QR codes", { message: codes.error }, { action: "load" });
   return NextResponse.json({ settings, slug: rest.data.slug, codes });
 }
 

@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,12 @@ export async function GET(req: NextRequest) {
     sb.from("restaurants").select("id, name, slug").is("deleted_at", null),
   ]);
   const anyErr = usageQ.error || restsQ.error;
-  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
+  // THE CONSOLE GETS A SENTENCE, NOT A POSTGRES ERROR (T20 sweep, 2026-08-19). This answered the
+  // database's own words verbatim, so the toast read something like `relation "lfh_admin_usage" does
+  // not exist`. adminFail keeps BOTH halves — a plain sentence in `error` (which lib/adminFetch is
+  // what every screen surfaces) and the raw text in `detail` plus the server log, which is where it
+  // is actually useful. Rolled out to forty-odd handlers on 2026-08-14; this one was missed.
+  if (anyErr) return adminFail("the usage figures", anyErr, { action: "load" });
 
   const meta = new Map<string, { name: string; slug: string }>((restsQ.data || []).map((r) => [r.id, { name: r.name, slug: r.slug }]));
   const rows = ((usageQ.data as { restaurant_id: string; orders_7d: number; orders_30d: number; staff_total: number; table_count: number }[]) || [])
