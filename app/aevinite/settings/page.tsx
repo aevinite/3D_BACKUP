@@ -32,7 +32,10 @@ export default function AdminSettings() {
     try {
       const r = await fetch("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [which]: val }) });
       if (!r.ok) throw new Error();
-      setMsg("Saved — applied to every restaurant.");
+      // WHAT IT REALLY DID (T16 sweep, 2026-08-19). This said "applied to every restaurant",
+      // which migration 157 does not do: this value is the DEFAULT, and a restaurant that has
+      // chosen its own window in its manager panel keeps that one.
+      setMsg("Saved — the new default for every restaurant that hasn't chosen its own.");
     } catch { setMsg("Couldn't save that just now."); loadRet(); }
   };
 
@@ -63,8 +66,22 @@ export default function AdminSettings() {
         </div>
 
         <div className="adm-card">
-          <h2>Log retention <span className="adm-muted">· all restaurants</span></h2>
-          <p className="hint">How long <b>every restaurant</b> keeps its activity &amp; customer logs — one platform-wide setting, from a single day up to a <b>1-month maximum</b>. Older entries auto-delete each night; bills are never touched.</p>
+          <h2>Log retention <span className="adm-muted">· platform default</span></h2>
+          {/* THIS CARD USED TO OVERSTATE ITSELF, TWICE (T16 sweep, 2026-08-19). It said "how long
+              EVERY restaurant keeps its logs — one platform-wide setting" with a "1-month MAXIMUM".
+              Migration 157 made this value the DEFAULT for restaurants that have not chosen their
+              own, and a restaurant's own choice wins; the manager panel's Activity log still offers
+              "3 months", which the editor route stores. So the maximum was not a maximum and the
+              setting was not platform-wide, and nothing on screen said so — the admin could set 7
+              days here and a restaurant would still be holding 90 days of customer log. */}
+          <p className="hint">
+            The <b>default</b> every restaurant follows for its activity &amp; customer logs — from a single
+            day up to 1 month. Older entries auto-delete each night; bills are never touched.
+          </p>
+          <p className="hint" style={{ marginTop: -4 }}>
+            A restaurant that has picked its <b>own</b> window on its manager panel keeps that one instead,
+            and that choice goes up to <b>3 months</b> — so this default does not cap it.
+          </p>
           {retErr && <p className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Couldn&rsquo;t load retention. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadRet}>Retry</button></p>}
           <div style={{ display: "grid", gap: 12 }}>
             <label className="adm-ret" style={{ justifyContent: "space-between" }}>
