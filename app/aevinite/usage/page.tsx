@@ -102,6 +102,18 @@ export default function AdminUsage() {
         .rev-strip .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
         .rev-strip .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
         .rev-strip .h { font-size: 11px; color: var(--muted); }
+        /* ON A PHONE the four numbers took a whole screen and left a stray rule (T17 sweep,
+           2026-08-19). Each cell asked for 150px plus 36px of padding, so two would not fit in
+           360px and they stacked one per row — 4 numbers, ~380px of scrolling before the table
+           they are meant to be read WITH. Worse, a right-hand border on a stacked cell draws a short
+           vertical line floating at the right edge of each row. Two per row, and the divider
+           follows the direction they actually sit in. */
+        @media (max-width: 560px) {
+          .rev-strip .cell { flex: 1 1 44%; min-width: 0; padding: 11px 13px; border-right: 0; border-bottom: var(--border); }
+          .rev-strip .cell:nth-child(odd) { border-right: var(--border); }
+          .rev-strip .cell:nth-last-child(-n+2) { border-bottom: 0; }
+          .rev-strip .v { font-size: 20px; }
+        }
       `}</style>
     </>
   );
