@@ -2005,6 +2005,22 @@ async function aanState() {
 const DEFAULT_NODES = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
 const showVal = (v) => (v === true ? "ON" : v === false ? "off" : JSON.stringify(v));
 
+// ── ONE SWITCH ON AANGAN IS DELIBERATELY NOT THE FACTORY DEFAULT ────────────────────────────────
+// Aangan is the control restaurant, so "it reads ON but the default is off" is normally drift and
+// this group is right to fail on it. This one is not drift. Aangan is waiter-order-only and has NO
+// KITCHEN SCREEN: orders go tablet → manager → a PRINTED ticket. Auto-print was switched on the day
+// the restaurant was built (2026-06-30, with `auto_print_kot_allowed`) and its settings row has not
+// been written since — turning it off would mean nobody in the kitchen ever sees the order.
+//
+// So the exception is RECORDED, not skipped: the phase still asserts a value, just the true one. A
+// skip would have quietly stopped watching the switch; this way, someone turning it OFF still fails.
+//
+// IT CANNOT ROT: the two phases under it fail if an entry names a switch that no longer exists, or
+// if an entry's value has become the factory default and the exception is therefore pointless.
+const AANGAN_DELIBERATE = {
+  auto_print_kot: { value: true, why: "Aangan has no kitchen screen — its tickets print or nobody sees the order" },
+};
+
 phase("Aangan exists and its Access screen loads", async () => {
   const a = await needAangan();
   const st = await aanState();
@@ -2012,12 +2028,30 @@ phase("Aangan exists and its Access screen loads", async () => {
   ok(a.active !== false, "Aangan is marked inactive");
 });
 for (const node of DEFAULT_NODES) {
-  phase(`Aangan default: ${node.name} is ${showVal(node.def)}`, async () => {
+  const ex = AANGAN_DELIBERATE[node.id];
+  const want = ex ? ex.value : node.def;
+  const label = ex
+    ? `Aangan (deliberate): ${node.name} is ${showVal(want)} — ${ex.why}`
+    : `Aangan default: ${node.name} is ${showVal(want)}`;
+  phase(label, async () => {
     const got = nodeValue(node, await aanState());
-    ok(JSON.stringify(got) === JSON.stringify(node.def),
-      `reads ${showVal(got)} but the factory default is ${showVal(node.def)} — run: node scripts/set-access-defaults.mjs --slug ${(await needAangan()).slug} --apply`);
+    ok(JSON.stringify(got) === JSON.stringify(want), ex
+      ? `reads ${showVal(got)} but Aangan is meant to keep this at ${showVal(want)} — ${ex.why}`
+      : `reads ${showVal(got)} but the factory default is ${showVal(want)} — run: node scripts/set-access-defaults.mjs --slug ${(await needAangan()).slug} --apply`);
   });
 }
+phase("every deliberate Aangan exception still names a real switch", async () => {
+  const missing = Object.keys(AANGAN_DELIBERATE).filter((id) => !DEFAULT_NODES.some((n) => n.id === id));
+  ok(!missing.length, `AANGAN_DELIBERATE names switch(es) that no longer carry a default: ${missing.join(", ")}`);
+});
+phase("no deliberate Aangan exception has quietly become the default", async () => {
+  // An exception that matches the factory default is dead weight pretending to be a decision —
+  // and the next person reads it as "this switch is special" when it no longer is.
+  const pointless = Object.entries(AANGAN_DELIBERATE)
+    .filter(([id, e]) => { const n = DEFAULT_NODES.find((x) => x.id === id); return n && JSON.stringify(n.def) === JSON.stringify(e.value); })
+    .map(([id]) => id);
+  ok(!pointless.length, `the factory default now matches the exception for: ${pointless.join(", ")} — delete the entry from AANGAN_DELIBERATE`);
+});
 phase("the defaults applier and this suite agree on which switches have a default", async () => {
   // Two files decide "which nodes count as a default": scripts/set-access-defaults.mjs writes
   // them and this group asserts them. If they ever disagree, one of them is silently skipping a

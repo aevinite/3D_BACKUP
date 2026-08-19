@@ -56,16 +56,31 @@ if (UNDO) {
 }
 
 // ── the shopping list, per restaurant, so the boxes don't all read the same ─────────────────────
-// name, purchase unit, unit cost, how much is on the shelf, the par level below which it is "low"
+// name, purchase unit, cost per PURCHASE unit, how much is on the shelf, the par level below which
+// it is "low" — the last two counted in purchase units — and, for anything bought by the pack, how
+// many pieces are IN one pack.
 const KITCHENS = {
   "french-house":  [["Butter", "kg", 480, 12, 8], ["Baguette flour", "kg", 62, 90, 40], ["Brie", "kg", 720, 4, 6], ["Coffee beans", "kg", 1150, 9, 5], ["Cream", "l", 210, 3, 10]],
   "pizza-palace":  [["Mozzarella", "kg", 540, 22, 15], ["Tomato passata", "l", 145, 40, 25], ["00 flour", "kg", 58, 120, 60], ["Pepperoni", "kg", 690, 5, 8], ["Olive oil", "l", 820, 11, 6]],
-  "sakura-sushi":  [["Sushi rice", "kg", 165, 60, 30], ["Nori sheets", "pack", 320, 18, 12], ["Salmon", "kg", 1450, 7, 10], ["Wasabi", "kg", 980, 2, 2], ["Soy sauce", "l", 260, 14, 8]],
+  "sakura-sushi":  [["Sushi rice", "kg", 165, 60, 30], ["Nori sheets", "pack", 320, 18, 12, 50], ["Salmon", "kg", 1450, 7, 10], ["Wasabi", "kg", 980, 2, 2], ["Soy sauce", "l", 260, 14, 8]],
   "spice-route":   [["Basmati rice", "kg", 128, 150, 80], ["Paneer", "kg", 420, 9, 12], ["Ghee", "kg", 640, 16, 10], ["Garam masala", "kg", 890, 3, 2], ["Onions", "kg", 34, 210, 100]],
-  "burger-barn":   [["Cheddar slices", "pack", 260, 24, 20], ["Potatoes", "kg", 32, 180, 90]],
+  "burger-barn":   [["Cheddar slices", "pack", 260, 24, 20, 20], ["Potatoes", "kg", 32, 180, 90]],
   "green-bowl":    [["Quinoa", "kg", 310, 26, 15], ["Avocado", "pc", 95, 40, 30]],
-  "taco-fiesta":   [["Tortillas", "pack", 140, 55, 30], ["Black beans", "kg", 180, 34, 20]],
+  "taco-fiesta":   [["Tortillas", "pack", 140, 55, 30, 10], ["Black beans", "kg", 180, 34, 20]],
 };
+// WHAT IT IS STORED IN vs WHAT IT IS BOUGHT IN — they are not the same unit (fixed 2026-08-19).
+// This list has always described what the kitchen BUYS ("Butter, kg, ₹480"), and the seed used to
+// write that straight into `base_uom` too, with a factor of 1. But base_uom is the LEDGER's unit —
+// every balance and every movement is stored in it — and migration 221 requires it to be a fine
+// one (g | ml | pc) for a plain reason: an item whose base unit is "pack" cannot express seven
+// slices left out of twelve, so its count silently rounds to whole packs forever.
+//
+// The app itself never allows that: /api/inventory accepts only g, ml or pc as a base and coerces
+// anything else, and the panel's own new-item form defaults to base g / buys in kg / factor 1000.
+// So ONLY this script could produce a bulk base unit — and it had, on three demo items (Cheddar
+// slices, Nori sheets, Tortillas), which is what phase 492 of the 528-phase suite was reporting.
+const BASE_OF = { kg: ["g", 1000], l: ["ml", 1000], g: ["g", 1], ml: ["ml", 1], pc: ["pc", 1], pack: ["pc", 0] };
+
 const VENDORS = ["Ram Traders", "Shree Fresh", "Metro Cash & Carry", "Daily Dairy Co", "Coastal Supplies"];
 const EXPENSES = [
   ["utilities", "Electricity bill", 4200], ["repair", "Chimney service", 1850], ["breakage", "Broken plates", 640],
@@ -101,12 +116,24 @@ for (const r of rests) {
   await sb.from("settings").update({ inventory_allowed: true }).eq("restaurant_id", r.id);
 
   // ── the ingredients ──
-  const rows = list.map(([name, uom, cost, have, par], i) => ({
-    restaurant_id: r.id, name, category: "kitchen", track_level: "FULL",
-    base_uom: uom, purchase_uom: uom, purchase_factor: 1,
-    par_qty: par, qty_base: have, avg_cost: cost, last_rate: cost,
-    active: true, created_by: TAG,
-  }));
+  const rows = list.map(([name, buyUom, costPerBuy, haveBuy, parBuy, perPack]) => {
+    const [base_uom, fixed] = BASE_OF[buyUom] || ["g", 1];
+    const purchase_factor = fixed || perPack || 1;
+    return {
+      restaurant_id: r.id, name, category: "kitchen", track_level: "FULL",
+      base_uom, purchase_uom: buyUom, purchase_factor,
+      // The ledger is kept in BASE units and the shelf figures are written in purchase units, so
+      // they convert here — 12 kg of butter is 12,000 g. `last_rate` is the price per PURCHASE
+      // unit (the panel's own label is "Rate (₹/kg)"), `avg_cost` the price per BASE unit, exactly
+      // as /api/inventory derives it: last_rate ÷ purchase_factor. The stock's VALUE is unchanged
+      // by all this — 12 × ₹480 and 12,000 × ₹0.48 are the same money.
+      par_qty: parBuy * purchase_factor,
+      qty_base: haveBuy * purchase_factor,
+      avg_cost: costPerBuy / purchase_factor,
+      last_rate: costPerBuy,
+      active: true, created_by: TAG,
+    };
+  });
   const ins = await sb.from("inv_items").insert(rows).select("id, name, qty_base, avg_cost");
   if (ins.error) { console.log(`  ${r.slug}: items failed — ${ins.error.message}`); continue; }
   const items = ins.data;
