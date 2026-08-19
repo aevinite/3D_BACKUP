@@ -251,12 +251,41 @@ export default function AdminHealth() {
         <span className="adm-muted" style={{ fontSize: 12 }}>which staff screens are connected, per restaurant</span>
       </div>
       {pErr && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{pErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></p>}
-      {pd && (
-        <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, borderColor: pd.attention > 0 ? "#d4a574" : undefined }}>
-          <i className={`fas ${pd.attention > 0 ? "fa-triangle-exclamation" : "fa-circle-check"}`} style={{ color: pd.attention > 0 ? "#d4a574" : "var(--adm-ok)" }} aria-hidden="true" />
-          <span style={{ fontSize: 13 }}>{pd.attention > 0 ? <><b>{pd.attention}</b> enabled panel{pd.attention === 1 ? "" : "s"} quiet or never seen — a device or login may be down.</> : "All enabled panels have been active recently."}</span>
-        </div>
-      )}
+      {pd && (() => {
+        // A WARNING THAT IS ALWAYS UP IS NOT A WARNING (T17 sweep, 2026-08-19).
+        //
+        // This bar counted every enabled panel not seen in the last HOUR and called all of them
+        // "a device or login may be down". A restaurant that is shut, between shifts, or simply
+        // closed on a Monday has every panel quiet — so on this platform the bar read
+        // "23 enabled panels quiet or never seen" on every single load, with a warning triangle,
+        // for ever. Twenty of the twenty-three were closed restaurants. An admin who sees the same
+        // amber bar every morning stops reading it, and the three that DO matter go with it.
+        //
+        // NEVER SEEN is the one that is genuinely wrong: an enabled panel nobody has ever signed
+        // into is a setup that was not finished, and it stays true whatever the hour. That keeps
+        // the warning. "Quiet for over an hour" is stated as the plain fact it is, in the same
+        // sentence, so nothing is hidden and nothing is dressed up.
+        const never = pd.rows.filter((r) => r.active).reduce((n, r) => n + r.panels.filter((x) => x.role !== "owner" && x.status === "never").length, 0);
+        const quiet = pd.rows.filter((r) => r.active).reduce((n, r) => n + r.panels.filter((x) => x.role !== "owner" && x.status === "offline").length, 0);
+        const alarm = never > 0;
+        return (
+          <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderColor: alarm ? "#d4a574" : undefined }}>
+            <i className={`fas ${alarm ? "fa-triangle-exclamation" : "fa-circle-check"}`} style={{ color: alarm ? "#d4a574" : "var(--adm-ok)" }} aria-hidden="true" />
+            <span style={{ fontSize: 13, flex: "1 1 240px", minWidth: 0 }}>
+              {alarm ? (
+                <>
+                  <b>{never}</b> enabled panel{never === 1 ? " has" : "s have"} never been signed into — that setup was never finished.
+                  {quiet > 0 ? <span className="adm-muted"> {quiet} more {quiet === 1 ? "is" : "are"} simply quiet (nothing in the last hour), which is normal for a closed restaurant.</span> : null}
+                </>
+              ) : quiet > 0 ? (
+                <span className="adm-muted">Every enabled panel has been signed into. {quiet} {quiet === 1 ? "is" : "are"} quiet right now — nothing in the last hour, which is normal for a closed restaurant.</span>
+              ) : (
+                "All enabled panels have been active recently."
+              )}
+            </span>
+          </div>
+        );
+      })()}
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
         {!pd ? (pErr ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={4} label="Loading" />) : pd.rows.length === 0 ? (
           <div className="adm-empty">No restaurants yet.</div>
