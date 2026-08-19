@@ -2239,7 +2239,16 @@ async function unmergeTable(child, opts = {}) {
   // device can end the merge between the paint and the finger.
   if (!parent) { toast(`${tableLabel(child)} isn't merged with another table any more.`, false); load().catch(() => {}); return; }
   if (!opts.silent) {
-    await ensurePartySlices(child, true);      // both halves, so the sums below are the real ones
+    const readOk = await ensurePartySlices(child, true);   // both halves, so the sums below are real
+    // COULDN'T ASK IS NOT THE SAME AS NOTHING THERE (the rule closeTableAndFree already follows). If
+    // a slice did not land, the lines below would read the empty cache and announce "nothing was
+    // ordered at it" about a table that may be holding food — a confirm that talks someone into a
+    // split by understating it. Say which of the two it is instead.
+    if (!readOk) {
+      toast(`Couldn't check what is on ${tableLabel(child)} just now — try again in a moment.`, false);
+      load().catch(() => {});
+      return;
+    }
     // ordersOf() already resolves a merged child through the PARTY's session and then keeps only the
     // rows rung AT that table number — which is exactly the split the server will perform.
     const live = (x) => ordersOf(x).filter((o) => o.status !== "cancelled" && !o.archived);
@@ -2289,8 +2298,10 @@ async function closeTableAndFree(t) {
   // Did the slice actually LAND? ensurePartySlices swallows a failed read, and without knowing
   // that, a missing session reads as "already free" — which is a lie when the truth is "we
   // couldn't ask". Two different problems deserve two different sentences (2026-08-04).
-  let readOk = true;
-  try { await ensurePartySlices(t, true); } catch { readOk = false; }
+  // ensurePartySlices now ANSWERS this instead of throwing (it catches each read itself), so read
+  // the answer — a try/catch around a function that never throws would have quietly made every
+  // failed read look like a successful one, and "already free" is exactly the lie this guards.
+  const readOk = await ensurePartySlices(t);
   const s = sessionOf(t);
   if (!s) {
     toast(readOk && sliceLoaded(t)
@@ -2986,7 +2997,7 @@ async function ensureTableSlice(t, force) {
   // selected table's slice, so a previously-viewed table's cached rows can be up to 60s
   // stale. selectTable passes force=true so re-opening a table never shows stale detail.
   if (!force && ((state.data.orders || []).some((o) => String(o.table_number) === String(t))
-      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t)))) return;
+      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t)))) return true;
   try {
     const slice = await api("GET", "/state?table=" + encodeURIComponent(t));
     const tset = String(t);
@@ -3008,13 +3019,45 @@ async function ensureTableSlice(t, force) {
       calls: dedupeById((d.calls || []).filter((c) => String(c.table_number) !== tset).concat(slice.calls || [])),
       requests: dedupeById((d.requests || []).filter((r) => String(r.table_number) !== tset).concat(slice.requests || [])),
     });
-  } catch { /* leave cache as-is; the action then no-ops rather than throwing */ }
+    return true;
+  } catch { return false; /* leave cache as-is; the action then no-ops rather than throwing */ }
 }
 // A merged party spans SEVERAL tables' slices — any whole-party read or action must have them
 // all cached, or partyOrders() silently sees half the bill. Forced on purpose, same reasoning
 // as the manager's ensurePartySlices: a whole-party action can fire the instant a detail opens.
-async function ensurePartySlices(t, force = true) {
-  await Promise.all(partyTablesOf(t).map((x) => ensureTableSlice(x, force).catch(() => {})));
+// Returns TRUE only when every member's slice really landed. A swallowed fetch blip is fine for an
+// action that then no-ops, but NOT for a screen that is about to tell someone what will happen: the
+// split confirm reads these rows to say what comes back, and with an unread slice it would announce
+// "nothing was ordered at it" about a table that is holding food. Callers that don't care ignore it.
+//
+// FETCH TOGETHER, THEN MERGE IN ORDER (T7, 2026-08-18) — and what is actually known about why.
+//
+// THE SYMPTOM, measured and reproducible: on a party of THREE tables, opening the table that HOLDS
+// the bill and pressing ⇹ Unmerge announced "T25 gets nothing back — nothing was ordered at it"
+// about a table holding a ₹483 ticket. It happened on every run of the long walk and never in a
+// two-table party opened from the child. With the shape below it has not happened once in repeated
+// runs. The confirm reads the same rows partyOrders() reads, so the same moment would also
+// under-count the BILL.
+//
+// WHAT I DID NOT PROVE: the mechanism. The obvious suspect — a lost update from running the members
+// concurrently — does NOT hold up: ensureTableSlice captures `state.data` and re-assigns it in one
+// synchronous block with no await between, so two concurrent calls cannot interleave there. I could
+// not pin down the real cause before this change made the symptom go away, so this comment says what
+// was observed rather than inventing a story. If you touch this, re-run a THREE-table party and open
+// it from the table holding the bill — that is the case that showed it.
+//
+// The shape itself is not a guess: loadImpl and loadTables already read the members in parallel and
+// merge them in a sequential loop, so this makes the panel do it one way in three places instead of
+// two ways in three places.
+async function ensurePartySlices(t) {
+  const tables = partyTablesOf(t);
+  const slices = await Promise.all(tables.map((x) => api("GET", "/state?table=" + encodeURIComponent(x)).catch(() => null)));
+  let allGot = true;
+  for (const [i, x] of tables.entries()) {
+    if (slices[i]) mergeSelectedSlice(x, slices[i]);   // one at a time — each sees the last one's result
+    else allGot = false;
+  }
+  return allGot;
 }
 
 // Open a table INSTANTLY (mirrors the manager): drop a pending "open" session into

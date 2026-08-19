@@ -257,6 +257,24 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 @container (max-width: 64px) { .tseats, .tile .tmerge .tm-t { display: none; } } /* seats, and the
    merged table LIST — the ⇄ itself never goes, or a joined table would read as a solo one */
 @container (max-width: 56px) { .t-linenum { display: none; } }               /* the count, keep the bar */
+/* FOUR ROWS DO NOT FIT A SMALL SQUARE — and the row that was being cut is the one you tap (T7,
+   2026-08-19, measured; pre-existing). A tile that has BOTH a badge row (a call, a request, someone
+   waiting to join) AND an action row carries four rows: number 16px + badges 16px + the served line
+   17px + the actions 34px, which needs 104px inside a 95px tile. `min-height: fit-content` is set and
+   does NOT save it — the box has a definite height from its 1/1 aspect-ratio — so the overflow was
+   simply hidden, and what hung off the bottom was ＋ Take order and ✓ Accept: 11px of a 34px row gone
+   at 12-per-row on a desktop, 5px at 6-per-row on an iPad held upright. A waiter aiming at the ✓ of a
+   table that has ALSO rung the bell — the busiest kind of table there is — was aiming at a button
+   with its bottom third cut off.
+   The fix is this file's own rule, "shed detail on the way down": drop the WORDS from the served
+   line and keep the bar, exactly as the 56px step above already does, but only when the badges and
+   the actions are both there and the tile is small. The bar still shows the mix, the badges still
+   show the call, and the buttons get their full height back. Never shrink .t-act to make room — its
+   height IS the tap target (T14 sweep, 2026-08-05). */
+@container (max-width: 104px) {
+  .tile:has(.tbadges):has(.t-act) .t-linenum { display: none; }
+  .tile:has(.tbadges):has(.t-act) .tbadges { margin-top: 2px; }
+}
 @container (max-width: 50px) { .t-act { display: none; } }                   /* tap the tile instead */
 .tacc, .tpay, .tclose { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: clamp(22px, 17cqw, 36px); border-radius: clamp(6px, 6cqw, 10px);
@@ -480,7 +498,14 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 /* the [hidden] attribute must win over display:grid — else it blocks taps at rest */
 .confirm-overlay[hidden] { display: none; }
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }
-.confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.5; }
+/* A CONFIRM MAY BE A LIST, AND ITS LINES MUST STAY LINES (T7, 2026-08-18). The box sets
+   textContent — deliberately, so nothing a person typed can ever become markup — but that also
+   means the newlines in a multi-line question were collapsed into one run-on paragraph. The split
+   confirm is the one that needs them: "what comes back · what stays · what does not move" read as a
+   single grey block, which is exactly the kind of wall nobody reads before tapping. `pre-line`
+   honours the newlines and still wraps normally; every single-sentence confirm has no newlines in
+   it, so nothing else changes. */
+.confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.5; white-space: pre-line; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 /* A second question asked while one is already up is refused — the box on screen shakes so
    the waiter sees which one is waiting, instead of the tap vanishing. (2026-07-30) */

@@ -264,6 +264,31 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
       `${TABLET}: unmergeTable()'s confirm must include "${phrase}". The manager's identical confirm\n    lists all three, and a waiter needs the truth before the tap at least as much.`,
     );
   }
+  {
+    const eps = fnBody("ensurePartySlices");
+    check(
+      "tablet: a party's slices are MERGED one at a time, never all at once",
+      /await Promise\.all\(tables\.map/.test(eps) && /for \(const \[i, x\] of tables\.entries\(\)\)/.test(eps) && !/Promise\.all\([^)]*ensureTableSlice/.test(eps),
+      `${TABLET}: ensurePartySlices must fetch the members' slices together and then merge them in a\n    ` +
+      `LOOP, the way loadImpl and loadTables already do. With the members run concurrently, a party of\n    ` +
+      `THREE opened from the table holding the bill announced "gets nothing back — nothing was ordered\n    ` +
+      `at it" about a table holding a ₹483 ticket, and partyOrders() — the BILL — reads the same rows.\n    ` +
+      `The mechanism was never pinned down; the symptom and its cure both were. Re-run a three-table\n    ` +
+      `party opened from the bill-holding table if you change this.`,
+    );
+    check(
+      "tablet: …and the close path reads that answer rather than catching a throw",
+      /const readOk = await ensurePartySlices\(t\);/.test(fnBody("closeTableAndFree")),
+      `${TABLET}: closeTableAndFree must READ ensurePartySlices' answer. It used to wrap it in a\n    ` +
+      `try/catch, and the function no longer throws — so every failed read would look like a good one\n    ` +
+      `and a table nobody could check would be reported as "already free".`,
+    );
+  }
+  check(
+    "tablet: the split confirm refuses to guess when the party's rows could not be read",
+    /const readOk = await ensurePartySlices\(child, true\)/.test(un) && /if \(!readOk\)[\s\S]{0,200}?toast\(/.test(un),
+    `${TABLET}: unmergeTable() must know whether the slices actually landed. ensureTableSlice swallows\n    a fetch blip on purpose, so without this the confirm reads an empty cache and announces "nothing\n    was ordered at it" about a table that is holding food — talking someone into a split by\n    understating it. Same rule closeTableAndFree already follows for "already free" vs "couldn't ask".`,
+  );
   check(
     "tablet: a ⇹ tap on a merge that already ended says so instead of vanishing",
     /if \(!parent\) \{[^}]*toast\(/.test(un),
@@ -364,6 +389,29 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
       `The newest migration defining ${fn} is ${owner || "(none found)"}, and its body never calls\n    lfh_merge_parent_table. A diner at a table that has been joined to another then falls through\n    the "no open session" branch, which is the stranding this was fixed for in migration 333.`,
     );
   }
+}
+
+// ── 8 · A SMALL TILE MUST NOT CUT OFF THE ROW YOU TAP (T7, 2026-08-19) ───────────────────────
+// A tile with BOTH a badge row and an action row has four rows, which needs 104px inside a 95px
+// square. `min-height: fit-content` does not save it (the box has a definite height from its 1/1
+// aspect-ratio), so the overflow was hidden — and what hung off the bottom was ＋ Take order and
+// ✓ Accept: 11px of a 34px row gone at 12-per-row on a desktop, 5px at 6-per-row on an iPad upright.
+// Measured, and identical on a clean checkout, so it long predates this guard.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  check(
+    "tablet: a small tile carrying badges AND actions sheds the served WORDS, not the buttons",
+    /@container \(max-width: 104px\)[\s\S]{0,240}?\.tile:has\(\.tbadges\):has\(\.t-act\) \.t-linenum \{ display: none/.test(css),
+    `${CSS}: the tile's "shed detail on the way down" ladder needs its four-row step. Without it the\n    ` +
+    `action row is clipped on exactly the tables that need attending — the ones that have rung the\n    ` +
+    `bell AND placed a new order.`,
+  );
+  check(
+    "tablet: …and the action row's own height is never shrunk to make that room",
+    /\.t-act \{[^}]*min-height: clamp\(26px, 44cqw, 40px\)/.test(css),
+    `${CSS}: .t-act's min-height IS the tap target (T14 sweep, 2026-08-05 — it was raised from 19px\n    ` +
+    `precisely because a waiter could not hit it). Take the space from the wording, never from this.`,
+  );
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────
