@@ -584,10 +584,25 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
   }, [owner.id]);
 
   // Attach one or many restaurants in a single action (the big picker is multi-select).
-  const assignRestaurants = (ids: string[]) => {
+  //
+  // NOT `run()`, on purpose (T16 sweep, 2026-08-19). `run` only calls onChanged() when nothing
+  // threw - right for a single action, wrong for a loop: pick five, have the third fail, and two
+  // WERE attached while the pane still showed none of them. The admin then re-picks all five,
+  // because the screen told them nothing landed. So this counts what actually landed, refreshes
+  // either way, and says how many of how many made it.
+  const assignRestaurants = async (ids: string[]) => {
     setShowAssign(false);
     if (!ids.length) return;
-    run(async () => { for (const rid of ids) await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); });
+    setMErr(""); setBusy(true);
+    let done = 0;
+    let failure = "";
+    for (const rid of ids) {
+      try { await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); done++; }
+      catch (e: any) { failure = e?.message || "Action failed."; break; }
+    }
+    setBusy(false);
+    onChanged();                        // ALWAYS - the pane must show what really happened
+    if (failure) setMErr(ids.length === 1 ? failure : `Attached ${done} of ${ids.length} - ${failure}`);
   };
   // Make-primary → hand this restaurant's PRIMARY badge to this owner. Deliberately
   // spells out that it changes no access (every permission is membership-based) so the
