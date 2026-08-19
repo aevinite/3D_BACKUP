@@ -12,7 +12,7 @@
 // inline magnitude bar) beside the source split. Refetches hold the previous
 // render at reduced opacity — no skeleton flash.
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { openRestaurantPanel, useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
 import type { TrendPoint } from "@/components/admin/OrdersTrend";
 
@@ -73,15 +73,38 @@ export default function AdminAnalytics() {
   // request (the same RPC, one day, bucketed by hour) and only when the person asks for it —
   // never on load, so a quiet platform costs exactly what it did before.
   const [drillDay, setDrillDay] = useState<string | null>(null);
+  // ONLY THE NEWEST ANSWER MAY LAND (T18 sweep, 2026-08-20).
+  //
+  // Two requests are in flight on an ordinary open: the mount effect runs once with the default
+  // 7d and again with the range read out of the address, and a range switch or the 60s backstop can
+  // add more. Nothing sequenced them, so whichever REPLY arrived last won — regardless of which
+  // range the page was showing. Both are served from the snapshot cache, so which one that is, is a
+  // race. Measured before this guard: `/aevinite/analytics?range=30d` opened four times in a row
+  // showed 290 / 290 / 290 / 290 under the label "ORDERS · LAST 30 DAYS", when the 30-day answer
+  // from the same endpoint was 5,990 — the platform's headline order count wrong by a factor of 20,
+  // with the right label and the right tab highlighted over it. (An earlier run gave
+  // 6,355 / 291 / 6,355 / 291: it lands on the wrong answer often, not always.) The Dashboard's
+  // "Orders today" card links here with ?range=today, so its drill-in had the same coin-flip.
+  //
+  // A monotonic token, not an AbortController: the request is cheap and may well be serving another
+  // tab's cache warm-up, so we let it finish and simply refuse to WRITE a reply that is no longer
+  // the one being waited for. `loading` is only cleared by the current attempt, so a slow loser
+  // cannot un-dim the page under a request that is still running.
+  const reqSeq = useRef(0);
   const load = useCallback(async (r: Range, live = false, day: string | null = null) => {
+    const mine = ++reqSeq.current;
     setLoading(true); setErr(null);
     try {
       const q = day ? `day=${encodeURIComponent(day)}` : `range=${r}`;
       const res = await fetch(`/api/admin/analytics?${q}${live ? "&refresh=1" : ""}`, { cache: "no-store" });
       const j = await res.json();
+      if (mine !== reqSeq.current) return;             // a newer window is being asked for — drop this
       if (!res.ok) throw new Error(j.error || "Couldn't load analytics.");
       setData(j);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
+    } catch (e) {
+      if (mine !== reqSeq.current) return;
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { if (mine === reqSeq.current) setLoading(false); }
   }, []);
   // Changing the range always drops any drill — the drilled day belongs to the window it came from.
   useEffect(() => { setDrillDay(null); load(range); }, [range, load]);
