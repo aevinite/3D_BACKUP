@@ -5323,7 +5323,10 @@ window.addEventListener("online", () => load().catch(() => {}));
            because a GET that ends a session fires from anything that merely POINTS at the URL — a
            waiter could be signed out mid-service. Same change AdminShell made for /api/staff-logout.
            The route answers 303 → /login, so this still works with no JavaScript. -->
-      <form method="post" action="/api/panel-logout" style="margin:0">
+      <!-- target="_top": this panel is in an IFRAME, so a plain submit signs out only the frame and
+           leaves the page around it (and its URL) untouched — the waiter looks signed out and is not.
+           Found while giving the KITCHEN screen its first sign-out, 2026-08-19; same one-line fix. -->
+      <form method="post" action="/api/panel-logout" target="_top" style="margin:0">
         <button type="submit" class="dw-btn danger" style="margin-top:0;width:100%">Sign out</button>
       </form>
       <div class="muted" style="font-size:12px;margin-top:10px">More settings will live here soon.</div>

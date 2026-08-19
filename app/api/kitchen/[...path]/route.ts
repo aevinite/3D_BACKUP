@@ -25,7 +25,7 @@ import { panelFailure } from "@/lib/panelFailure";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // The print queue itself (mig 269 + 335) — shared with the manager route so two panels can never
 // drift into two different ideas of what "claimed" means.
-import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued } from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, takeStation, releaseStation, mayClaim } from "@/lib/printQueue";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +45,13 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 //  also honours the admin's "view as" restaurant.)
 
 const nowIso = () => new Date().toISOString();
+
+// The station heartbeat rides the board read, and it must never be the reason a board read fails —
+// a screen that cannot say "still here" should still show its tickets.
+async function touchStationSafe(rid: string, dev: string | null) {
+  if (!dev) return;
+  try { const { touchStation } = await import("@/lib/printQueue"); await touchStation(rid, dev); } catch { /* the next read tries again */ }
+}
 
 // Which tables carry a special mark right now — { "6": "vip", "12": "family" }.
 //
@@ -273,8 +280,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ? await ordersAlreadyQueued(rid, (live.orders as { id: string; status?: string }[])
             .filter((o) => o.status === "received" || o.status === "preparing").map((o) => o.id))
         : [];
+      // WHO IS PRINTING (mig 338). Every screen needs it, not just the printer: a cook whose tickets
+      // are coming out at the counter should be able to read that on this screen instead of asking.
+      // One tiny indexed read, and it doubles as this station's heartbeat when the station is us.
+      const boardDev = deviceIdFrom(req);
+      const station = await stationView(rid, boardDev);
+      if (station.mine) await touchStationSafe(rid, boardDev);
       return ok({
-        printJobs, queuedFor,
+        printJobs, queuedFor, station,
         orders: live.orders, items: live.items, dishes: must(dishes),
         platform: platformRows,
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
@@ -578,7 +591,44 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "print-jobs" && b === "claim") {
       const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).map(String).slice(0, 20) : [];
       if (!ids.length) return ok({ won: [] });
-      return ok({ won: await claimKotJobs(rid, ids) });
+      // ── ONE SCREEN IS THE PRINTER (mig 338) ────────────────────────────────────────────────
+      // Asked HERE, not on the panel: two entitled kitchen tabs used to both claim and the winner
+      // was a coin flip. The gate also TAKES the station when nobody holds it (so a kitchen that has
+      // always just printed keeps doing exactly that) and refuses when a live screen elsewhere holds
+      // it, telling this one where the paper is coming out.
+      const st = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle()) as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+      const target = String(st?.kot_print_target || "kitchen");
+      const gate = await mayClaim(rid, {
+        deviceId: dev, panel: "kitchen", label: "Kitchen screen",
+        auto: st?.auto_print_kot === true && st?.auto_print_kot_allowed === true,
+        roomAllowed: target === "kitchen" || target === "both",
+        by: g.user?.name || g.user?.username || null,
+      });
+      if (!gate.ok) return ok({ won: [], refused: gate.reason, station: gate.station });
+      return ok({ won: await claimKotJobs(rid, ids), station: gate.station });
+    }
+
+    // ── print-station/take · /release — "print HERE instead", and "stop printing here" ──────────
+    // The one tap that moves a restaurant's printing to the screen the person is standing at. It is a
+    // write, so it rides the outbox like every other panel write; replaying it late is harmless (the
+    // worst case is the station moving to a screen that then goes quiet, and quiet stations are
+    // taken over automatically after a few minutes).
+    if (a === "print-station" && b === "take") {
+      if (!dev) return err("This browser has no device id yet — reload the panel and try again.", 409);
+      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle()) as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+      if (!(st2?.auto_print_kot === true && st2?.auto_print_kot_allowed === true)) return err("Automatic printing is switched off for this restaurant.", 409);
+      const tg = String(st2?.kot_print_target || "kitchen");
+      if (!(tg === "kitchen" || tg === "both")) return err("Your admin has set kitchen tickets to print on the counter screen.", 409);
+      const view = await takeStation(rid, { deviceId: dev, label: "Kitchen screen", panel: "kitchen", by: g.user?.name || g.user?.username || null });
+      await logAction("kitchen", "print_station_take", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen is now the printer" });
+      return ok({ ok: true, station: view });
+    }
+    if (a === "print-station" && b === "release") {
+      if (dev) await releaseStation(rid, dev);
+      await logAction("kitchen", "print_station_release", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen stopped printing" });
+      return ok({ ok: true, station: await stationView(rid, dev) });
     }
 
     // ── print-jobs/:id/done — the printed/failed report closes the loop ──────────────

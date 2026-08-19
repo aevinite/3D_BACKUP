@@ -112,7 +112,37 @@ export async function GET(req: NextRequest) {
       }
     }
   }
-  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules });
+  // ── KITCHEN PRINTING, per restaurant (owner, 2026-08-19) ──────────────────────────────────────
+  // He asked for printing to be visible in the owner panel too — "divide whole printing in both
+  // manager as well as owner and kitchen" — and for nothing to show when it is off. So one row per
+  // restaurant that HAS it on, saying which screen is printing right now (mig 338). No controls: the
+  // owner is not standing at the printer, and the two switches are the admin's (mig 107/336).
+  // Two small indexed reads over restaurants this owner already has, and only when there is one.
+  const printing: { restaurant_id: string; name: string; target: string; station: string | null; stale: boolean }[] = [];
+  try {
+    const ids = restaurants.map((r) => r.id);
+    if (ids.length) {
+      const [setRows, stRows] = await Promise.all([
+        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, kot_print_target").in("restaurant_id", ids),
+        sb.from("print_stations").select("restaurant_id, label, panel, claimed_by, last_seen_at").in("restaurant_id", ids).eq("active", true),
+      ]);
+      const byRid = new Map(((stRows.data || []) as Record<string, unknown>[]).map((r) => [String(r.restaurant_id), r]));
+      const nameOf2 = new Map(restaurants.map((r) => [r.id, r.name]));
+      for (const row of (setRows.data || []) as Record<string, unknown>[]) {
+        if (row.auto_print_kot !== true || row.auto_print_kot_allowed !== true) continue;   // off → not mentioned at all
+        const rid2 = String(row.restaurant_id);
+        const st = byRid.get(rid2) as { label?: string; panel?: string; claimed_by?: string; last_seen_at?: string } | undefined;
+        printing.push({
+          restaurant_id: rid2,
+          name: nameOf2.get(rid2) || "",
+          target: String(row.kot_print_target || "kitchen"),
+          station: st ? (st.label || (st.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (st.claimed_by ? ` · ${st.claimed_by}` : "") : null,
+          stale: !!(st?.last_seen_at && Date.now() - Date.parse(st.last_seen_at) > 3 * 60 * 1000),
+        });
+      }
+    }
+  } catch { /* a printing row is a nicety; never let it shorten the page */ }
+  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing });
   } catch (e) {
     // A half-read restaurant list must not silently shorten the admin's page (same rule as
     // `scopedRestaurantIds` everywhere else).

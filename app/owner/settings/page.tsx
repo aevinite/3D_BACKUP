@@ -12,6 +12,9 @@ type Module = { restaurant_id: string; name: string; key: string; label: string;
 type Data = {
   name: string; isAdmin: boolean; canChangePassword: boolean;
   sections: Record<string, boolean>; restaurants: { id: string; name: string }[];
+  // Kitchen printing, per restaurant that HAS it on (mig 336/338). Absent or empty = nothing to show,
+  // and the card does not render at all — his rule: if printing is off, no option appears.
+  printing?: { restaurant_id: string; name: string; target: string; station: string | null; stale: boolean }[];
   modules?: Module[];
 };
 // REJECTED (owner, 2026-08-18): DO NOT show the owner which sections are switched OFF.
@@ -125,8 +128,28 @@ export default function OwnerSettings() {
           which screen prints are the admin's, and the per-device answer belongs to the computer with
           the printer, not to this account. What belongs here is the DOOR to the guide, which is the
           thing an owner actually needs when a new restaurant is being set up. */}
+      {!!(data?.printing && data.printing.length) && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Kitchen printing</div>
+        {/* WHERE THE PAPER IS COMING OUT, per restaurant (mig 338). One screen prints at a time; this
+            says which, and whether it has gone quiet. No controls here on purpose — the owner is not
+            standing at the printer, the two switches belong to the admin, and the per-screen switch
+            belongs to the computer the printer is attached to. */}
+        <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+          {data.printing.map((p) => (
+            <div key={p.restaurant_id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", border: "var(--border)", borderRadius: 9, padding: "8px 11px" }}>
+              <b style={{ fontSize: 13 }}>{p.name || "This restaurant"}</b>
+              <span className="adm-muted" style={{ fontSize: 12 }}>
+                tickets print on {p.target === "counter" ? "the counter screen" : p.target === "both" ? "the kitchen screen (counter as backup)" : "the kitchen screen"}
+              </span>
+              <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
+                {p.station
+                  ? <>printing now: <b>{p.station}</b>{p.stale ? <span className="adm-muted"> · gone quiet</span> : null}</>
+                  : <span className="adm-muted">no screen has taken it yet</span>}
+              </span>
+            </div>
+          ))}
+        </div>
         <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
           A kitchen ticket is queued by the server the moment an order is placed, so it can never be
           lost — it waits until a screen prints it. The full written guide covers setting a printer up
@@ -144,10 +167,11 @@ export default function OwnerSettings() {
         </div>
         <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
           Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is
-          done for you by Aevidine — ask and it is one switch. Your manager screen shows where it stands
-          under <b>Settings → Printing</b>.
+          done for you by Aevidine — ask and it is one switch. The screen that prints is chosen ON that
+          computer: manager screen → <b>Settings → Printing</b>, kitchen screen → <b>☰ → Settings</b>.
         </p>
       </div>
+      )}
 
       {/* Change password */}
       {data?.canChangePassword && (

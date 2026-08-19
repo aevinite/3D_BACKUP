@@ -43,7 +43,7 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 // The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
 // claim from the same rows, and one implementation is what stops them drifting into two ideas of
 // "claimed" — which would be a ticket printed twice.
-import { pendingKotJobs, claimKotJobs, finishKotJob } from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation } from "@/lib/printQueue";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
@@ -1886,12 +1886,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // enforced again at the claim, server-side, so a stale tab cannot jump the queue.
     if (path[0] === "print-jobs" && path[1] === "pending") {
       const t = await counterPrintTarget(rid);
+      // WHO IS PRINTING (mig 338) — sent whether or not this screen may print, because the answer
+      // "printing is happening on the kitchen screen" is exactly what a manager needs to see.
+      const dv = deviceIdFrom(req);
+      const station = await stationView(rid, dv);
+      if (station.mine) { try { await touchStation(rid, dv as string); } catch { /* next read retries */ } }
       // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
       // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
-      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target });
+      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station });
       // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
       // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target });
+      // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
+      // station's name instead, so it can offer "print here instead" rather than quietly racing.
+      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station });
     }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
@@ -4308,8 +4316,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // before the admin changed the setting would otherwise keep claiming tickets the kitchen is
       // now supposed to print — the classic "the screen said yes, the server says no" fault.
       const t = await counterPrintTarget(rid);
-      if (!t.mayPrint) return ok({ won: [], off: true });
-      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }) });
+      const gate = await mayClaim(rid, {
+        deviceId: deviceIdFrom(req), panel: "editor", label: "Counter · manager screen",
+        auto: t.mayPrint, roomAllowed: t.mayPrint, by: actorName || null,
+      });
+      if (!gate.ok) return ok({ won: [], refused: gate.reason, station: gate.station });
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), station: gate.station });
     }
 
     if (a === "print-jobs" && c === "done") {
@@ -4333,6 +4345,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : `try ${r.attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
       });
       return ok({ ok: true, attempts: r.attempts });
+    }
+
+    // ── print-station/take · /release — "print HERE instead" from the counter screen (mig 338) ──
+    // One tap moves the restaurant's printing to the screen the person is standing at, and the other
+    // screen finds out on its next read. Refused when the admin has not opened the counter screen at
+    // all, so the button can never promise something the server will not honour.
+    if (a === "print-station" && b === "take") {
+      const dv2 = deviceIdFrom(req);
+      if (!dv2) return err("This browser has no device id yet — reload the panel and try again.", 409);
+      const t2 = await counterPrintTarget(rid);
+      if (!t2.mayPrint) return err("Kitchen tickets are not set to print on a counter screen. Your admin sets that.", 409);
+      const view = await takeStation(rid, { deviceId: dv2, label: "Counter · manager screen", panel: "editor", by: actorName || null });
+      await log("editor", "print_station_take", { device_id: dv2, restaurant_id: rid, detail: "this counter screen is now the printer" });
+      return ok({ ok: true, station: view });
+    }
+    if (a === "print-station" && b === "release") {
+      const dv3 = deviceIdFrom(req);
+      if (dv3) await releaseStation(rid, dv3);
+      await log("editor", "print_station_release", { device_id: dv3, restaurant_id: rid, detail: "this counter screen stopped printing" });
+      return ok({ ok: true, station: await stationView(rid, dv3) });
     }
 
     // print-jobs/:id/dismiss — the manager handled a stuck/failed reprint another way

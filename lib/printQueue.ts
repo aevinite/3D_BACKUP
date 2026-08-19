@@ -207,3 +207,107 @@ export async function ordersAlreadyQueued(rid: string, orderIds: string[]): Prom
     .eq("restaurant_id", rid).eq("kind", "kot").in("order_id", ids).limit(400)).data as { order_id: string | null }[] | null;
   return [...new Set((rows || []).map((r) => r.order_id).filter(Boolean))] as string[];
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+// WHICH ONE SCREEN IS THE PRINTER (mig 338)
+// ══════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// mig 335 made a ticket a row; mig 336 said which ROOM may claim it; this says which DEVICE. Without
+// it, two entitled screens both claimed and the winner was a coin flip — printing once, but on
+// whichever machine happened to be quicker, with nothing on screen saying where the paper went.
+//
+// One active station per restaurant, enforced by a partial unique index in the database. Taking over
+// is deliberate (one tap on the other screen) EXCEPT when the holder has gone quiet, because a shut
+// kitchen screen must not take printing with it.
+
+/** How long a station may go unheard-of before any entitled screen may take it without asking. */
+export const STATION_STALE_MS = 3 * 60 * 1000;
+
+export type PrintStation = {
+  device_id: string;
+  label: string | null;
+  panel: string;
+  claimed_by: string | null;
+  last_seen_at: string;
+};
+export type StationView = {
+  /** The screen currently printing, if any is still being heard from. */
+  active: PrintStation | null;
+  /** Is that me? */
+  mine: boolean;
+  /** The holder exists but has gone quiet — anyone entitled may take over without asking. */
+  stale: boolean;
+};
+
+/** Who is printing for this restaurant, and is it this device? */
+export async function stationView(rid: string, deviceId: string | null): Promise<StationView> {
+  const row = (await sb.from("print_stations")
+    .select("device_id, label, panel, claimed_by, last_seen_at")
+    .eq("restaurant_id", rid).eq("active", true).maybeSingle()).data as PrintStation | null;
+  if (!row) return { active: null, mine: false, stale: false };
+  const stale = Date.now() - Date.parse(row.last_seen_at) > STATION_STALE_MS;
+  return { active: row, mine: !!deviceId && row.device_id === deviceId, stale };
+}
+
+/**
+ * Make THIS device the one that prints. Hands the station over from whoever had it — that is the
+ * point: a person standing at the right printer taps once and the paper moves to them.
+ *
+ * Two statements, in this order, because the partial unique index allows exactly one active row:
+ * stand everyone else down, then stand up (or wake) mine. Doing it the other way round would
+ * momentarily need two, and the database would refuse the whole thing.
+ */
+export async function takeStation(
+  rid: string,
+  device: { deviceId: string; label: string; panel: "kitchen" | "editor"; by?: string | null },
+): Promise<StationView> {
+  await sb.from("print_stations").update({ active: false })
+    .eq("restaurant_id", rid).eq("active", true).neq("device_id", device.deviceId);
+  await sb.from("print_stations").upsert({
+    restaurant_id: rid, device_id: device.deviceId, label: device.label.slice(0, 60),
+    panel: device.panel, active: true, claimed_by: (device.by || null), last_seen_at: new Date().toISOString(),
+  }, { onConflict: "restaurant_id,device_id" });
+  return stationView(rid, device.deviceId);
+}
+
+/** This screen stops being the printer. Nobody takes over until a screen asks — a restaurant that
+ *  turned its printer off should not have tickets quietly coming out somewhere else. */
+export async function releaseStation(rid: string, deviceId: string): Promise<void> {
+  await sb.from("print_stations").update({ active: false })
+    .eq("restaurant_id", rid).eq("device_id", deviceId);
+}
+
+/** "I am still here." Written on the reads a printing screen already makes, so a screen that closes
+ *  goes quiet by itself and, after STATION_STALE_MS, stops holding printing hostage. */
+export async function touchStation(rid: string, deviceId: string): Promise<void> {
+  await sb.from("print_stations").update({ last_seen_at: new Date().toISOString() })
+    .eq("restaurant_id", rid).eq("device_id", deviceId).eq("active", true);
+}
+
+/**
+ * THE ONE GATE every print path goes through: may this device claim a ticket right now?
+ *
+ * `auto` — is automatic printing on for the restaurant (both mig-107 rungs).
+ * `roomAllowed` — does mig 336's kot_print_target name this panel's room.
+ * Then the station: mine → yes · nobody's → yes, and it becomes mine · someone else's and gone quiet
+ * → yes, and it becomes mine · someone else's and alive → NO, and the caller is told where it is.
+ *
+ * `autoTake` is false for a REPRINT the manager sent to a specific room: that ticket is aimed at a
+ * printer on purpose and must not quietly move the whole restaurant's printing to another screen.
+ */
+export async function mayClaim(
+  rid: string,
+  opts: { deviceId: string | null; panel: "kitchen" | "editor"; label: string; auto: boolean; roomAllowed: boolean; by?: string | null; autoTake?: boolean },
+): Promise<{ ok: boolean; reason?: "off" | "wrong_room" | "no_device" | "other_station"; station: StationView }> {
+  const view = await stationView(rid, opts.deviceId);
+  if (!opts.auto) return { ok: false, reason: "off", station: view };
+  if (!opts.roomAllowed) return { ok: false, reason: "wrong_room", station: view };
+  // No device cookie at all (a stripped browser, a script): it can never be "the" printer, because
+  // there would be nothing to hand over from later.
+  if (!opts.deviceId) return { ok: false, reason: "no_device", station: view };
+  if (view.mine) { await touchStation(rid, opts.deviceId); return { ok: true, station: view }; }
+  if (view.active && !view.stale) return { ok: false, reason: "other_station", station: view };
+  if (opts.autoTake === false) return { ok: false, reason: "other_station", station: view };
+  const taken = await takeStation(rid, { deviceId: opts.deviceId, label: opts.label, panel: opts.panel, by: opts.by });
+  return { ok: true, station: taken };
+}
