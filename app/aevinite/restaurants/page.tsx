@@ -180,7 +180,9 @@ export default function AdminRestaurants() {
         </a>
       </div>
 
-      <NewRestaurant onCreated={loadList} />
+      {/* The live slugs, so the guest-link preview can show the address the server will really
+          mint rather than the one the typed name suggests (see slugPreview below). */}
+      <NewRestaurant onCreated={loadList} takenSlugs={(list || []).map((r) => r.slug)} />
 
       <div className="adm-card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -339,7 +341,7 @@ function Tog({ on, k, label, onClick, busy }: { on: boolean; k: string; label: s
   );
 }
 
-function NewRestaurant({ onCreated }: { onCreated: () => void }) {
+function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; takenSlugs: string[] }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [panels, setPanels] = useState<Record<string, boolean>>({ ...SYS_PANELS });
@@ -376,7 +378,18 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
     if (p === "system") { setPanels({ ...SYS_PANELS }); setSeedMenu(true); }
     else if (saved) { setPanels({ ...SYS_PANELS, ...(saved.panels || {}) }); setSeedMenu(saved.seedMenu !== false); }
   };
-  const slugPreview = (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
+  // THE PREVIEW HAS TO BE THE ADDRESS THAT WILL ACTUALLY EXIST (T16 sweep, 2026-08-19).
+  //
+  // It used to be the bare slug of the typed name, but the create route makes the slug unique with
+  // a numeric suffix when a LIVE restaurant already holds it (a binned one no longer reserves the
+  // name, mig 319). So the form promised "/r/aangan/menu", the restaurant was minted as
+  // "aangan-2", and the admin had already read the wrong address off the screen - the address that
+  // goes on printed QR codes. Same loop as the server's, over the slugs already on this page.
+  const slugBase = (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
+  const slugTaken = new Set(takenSlugs);
+  let slugPreview = slugBase;
+  for (let i = 2; slugTaken.has(slugPreview); i++) slugPreview = `${slugBase}-${i}`;
+  const slugSuffixed = slugPreview !== slugBase;
   const setPanel = (k: string) => setPanels((s) => ({ ...s, [k]: !s[k] }));
 
   const create = async () => {
@@ -432,6 +445,13 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
         </div>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy} className="nr-input" />
         <div className="nr-slug">Guest link: <code>/r/{slugPreview}/menu</code></div>
+        {slugSuffixed && (
+          <div className="hint" style={{ margin: "4px 0 0", color: "var(--adm-warn, #d97706)" }}>
+            <i className="fas fa-circle-info" style={{ marginRight: 6 }} aria-hidden="true" />
+            <b>/r/{slugBase}/menu</b> is already in use, so this one gets <b>{slugPreview}</b>. That is the address
+            its QR codes will carry &mdash; rename it now if you&rsquo;d rather have a different one.
+          </div>
+        )}
         <div className="adm-togglegrid" style={{ marginTop: 8 }}>
           <Tog on={seedMenu} k="seed" label="Start with sample menu" onClick={() => setSeedMenu((v) => !v)} busy={busy} />
         </div>
