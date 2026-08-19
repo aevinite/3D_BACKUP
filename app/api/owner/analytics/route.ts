@@ -271,12 +271,24 @@ export async function GET(req: NextRequest) {
   // that view with no note") and its two neighbours were left behind. Enumerate the scope like tips
   // does, and read the payroll rung for the whole set in ONE settings query rather than one
   // round-trip per restaurant — that loop was fine for one restaurant and wrong for a platform.
-  const staffPayExpense = async (): Promise<{ paidOut: number; people: number; entries: number } | null> => {
-    let ids: string[];
+  // ── THE RESTAURANT LIST IS READ ONCE, NOT ONCE PER TILE (T20 sweep, 2026-08-19) ────────────────
+  // `staffPayExpense()` and `foodLossExpense()` each resolved the scope for themselves, and on the
+  // ADMIN's all-restaurants view that means `scopedRestaurantIds()` — which PAGES the whole
+  // `restaurants` table, a thousand rows at a time. Two tiles, so the same paged read ran twice on
+  // every recompute, and the two awaits sat one after another in the returned object literal, so the
+  // second waited on the first. Memoised per request and started together: one list, one wait.
+  //
+  // Deliberately a promise, not an array: the resolution is only paid for if a tile actually needs
+  // it, which for a single-restaurant owner is never (the `rid` / `scope.ids` branches are free).
+  let scopeIdsP: Promise<string[] | null> | null = null;
+  const tileIds = (): Promise<string[] | null> => (scopeIdsP ??= (async () => {
     try {
-      ids = (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scope.ids).filter(Boolean) as string[];
+      return (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scope.ids).filter(Boolean) as string[];
     } catch { return null; }   // an unreadable list must not print a figure that is too small
-    if (!ids.length) return null;
+  })());
+  const staffPayExpense = async (): Promise<{ paidOut: number; people: number; entries: number } | null> => {
+    const ids = await tileIds();
+    if (!ids || !ids.length) return null;
     const eff = await payrollEffectiveByRid(ids);
     const on = ids.filter((id) => eff[id] === true);
     if (!on.length) return null;
@@ -306,11 +318,8 @@ export async function GET(req: NextRequest) {
   // restaurant_id, with the columns named and voided rows excluded. Same window rule as staff pay —
   // a business day ends at 05:00 IST, so businessDateHi, never istDateOf.
   const foodLossExpense = async (): Promise<{ amount: number; entries: number } | null> => {
-    let ids: string[];
-    try {
-      ids = (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scope.ids).filter(Boolean) as string[];
-    } catch { return null; }   // an unreadable list must not print a figure that is too small
-    if (!ids.length) return null;
+    const ids = await tileIds();          // the same one list — see the note on staffPayExpense
+    if (!ids || !ids.length) return null;
     const q = await sb.from("expenses")
       .select("amount")
       .in("restaurant_id", ids)
@@ -501,9 +510,10 @@ export async function GET(req: NextRequest) {
       const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
         dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
       }));
+      // Together, not one after another: they are independent reads over the same id list.
+      const [staffPay, foodLoss] = await Promise.all([staffPayExpense(), foodLossExpense()]);
       return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev,
-        staffPay: await staffPayExpense(),
-        foodLoss: await foodLossExpense(),
+        staffPay, foodLoss,
         ...(partial.length ? { partial } : {}) };
         },
       });
@@ -584,12 +594,13 @@ export async function GET(req: NextRequest) {
     // `orders` counts ALL non-cancelled (incl. open/unpaid) while revenue+avgOrder are
     // PAID-only — so Revenue ÷ Orders ≠ Avg order and looks like a wrong number. Ship
     // `paidOrders` too so the dashboard can label the tile honestly (owner audit 2026-07-06).
+    // Together, not one after another — see the note on staffPayExpense.
+    const [staffPay, foodLoss] = await Promise.all([staffPayExpense(), foodLossExpense()]);
     return {
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, topDish: dishRows[0]?.title || "—" },
-      staffPay: await staffPayExpense(),
-      foodLoss: await foodLossExpense(),
+      staffPay, foodLoss,
       timeseries: tsRows,
       timeseriesPrev: tsPrevRows,
       dishes: dishRows,
