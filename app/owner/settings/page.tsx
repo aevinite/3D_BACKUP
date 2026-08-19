@@ -155,15 +155,19 @@ export default function OwnerSettings() {
           lost — it waits until a screen prints it. The full written guide covers setting a printer up
           on <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a <b>Raspberry Pi</b>: the printer itself, the
           paper settings, the one window to open so printing never stops when it is minimised, and what
-          to do when something goes wrong. It opens as its own page and can be saved as a PDF.
+          to do when something goes wrong. It opens as its own page and can be saved as a PDF. There is
+          nothing to download — the guide has one menu per operating system and every command has a Copy
+          button, because a downloaded script is blocked by macOS and warned about by Windows.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
             <i className="fas fa-book-open" aria-hidden="true" /> Open the printer setup guide
           </a>
-          <a className="adm-btn" href="/api/print-station/windows" download>⬇ Windows starter</a>
-          <a className="adm-btn" href="/api/print-station/mac" download>⬇ Mac starter</a>
-          <a className="adm-btn" href="/api/print-station/linux" download>⬇ Linux / Pi starter</a>
+          {/* Straight into one OS menu — the guide is three by-hand menus now, and the person setting a
+              printer up already knows which computer is under the counter. */}
+          <a className="adm-btn" href="/print-setup.html#windows" target="_blank" rel="noopener">🪟 Windows steps</a>
+          <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
+          <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
         </div>
         <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
           Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is

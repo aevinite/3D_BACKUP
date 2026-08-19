@@ -12395,14 +12395,16 @@ function formPrinting(s) {
     </p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <a class="btn primary" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Open the setup guide</a>
-      <a class="btn" href="/api/print-station/windows" download>⬇ Windows starter</a>
-      <a class="btn" href="/api/print-station/mac" download>⬇ Mac starter</a>
-      <a class="btn" href="/api/print-station/linux" download>⬇ Linux / Pi starter</a>
+      <a class="btn" href="${PRINT_SETUP_URL}#windows" target="_blank" rel="noopener">🪟 Windows steps</a>
+      <a class="btn" href="${PRINT_SETUP_URL}#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
+      <a class="btn" href="${PRINT_SETUP_URL}#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
     </div>
     <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
-      A “starter” opens one Chrome window that prints silently and doesn't fall asleep behind other
-      windows. Download the one for that computer, change the single <code>URL</code> line inside it, and
-      double-click it. The guide explains every line.
+      Each menu walks you through making one small file on that computer — open the text editor, press
+      <b>Copy</b> on the code, paste it, save it. That file opens one Chrome window which prints silently
+      and does not fall asleep behind other windows. <b>Nothing is downloaded:</b> a downloaded script is
+      blocked by macOS ("Apple could not verify...") and warned about by Windows, while a file you typed
+      yourself simply opens. Your site address is already filled into every command.
     </p>
   </div>`;
 }
