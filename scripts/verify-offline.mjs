@@ -708,6 +708,19 @@ async function run() {
     {
       const menu = await staff.request.get(`${BASE}/api/r/french-house/menu-data`).then((r) => r.json()).catch(() => null);
       const dish = menu && menu.items && menu.items[0];
+      // WHICH RESTAURANT — and this check stopped working the day that stopped being a guess
+      // (owner, 2026-08-18: "I agree to 7"). /api/guest/place-order used to fall back to restaurant
+      // #1 when the body carried no `restaurantId`; it now refuses with 400 unknown_restaurant, and
+      // rightly — that fallback was the last way a real order could land on somebody else's books.
+      // This replay never sent the field, so from that day it was refused AT THE DOOR and never
+      // reached the clash guard it exists to test. It still "failed safe", which is exactly why
+      // nobody noticed: the check was green-adjacent while testing nothing. Send the id, as a real
+      // phone does, so the 409 below is once again the clash guard's answer and not the door's.
+      // Resolve it the way a real phone does — off the guest page itself, which is handed the id
+      // server-side by the tenant resolver. Reading it here rather than hard-coding the demo UUID
+      // keeps the check honest if the seeded ids ever change.
+      const gHtml = await staff.request.get(`${BASE}/r/french-house/menu?table=1`).then((r) => r.text()).catch(() => "");
+      const gRid = (gHtml.match(/restaurantId\\?":\\?"([0-9a-f-]{36})/) || [])[1] || null;
       // Build the whole situation ourselves rather than hunting for a table that happens to
       // have been occupied for a while — depending on existing data made this check quietly
       // un-runnable once the suite's own tidy-up had closed the long-standing tables.
@@ -749,9 +762,10 @@ async function run() {
           "X-LFH-Replay": "1",
           "X-LFH-Queued-At": QUEUED_AT.toISOString(), // taken before staff closed the table
         },
-        data: { mode: "public", table: gt, items: [{ id: dish && dish.id, qty: 1 }], allergies: [] },
+        data: { mode: "public", table: gt, items: [{ id: dish && dish.id, qty: 1 }], allergies: [], restaurantId: gRid },
       });
       const rBody = await replay.json().catch(() => null);
+      if (!gRid) bad("test setup: the menu did not name its restaurant, so this replay could not be aimed", "without it the route refuses at the door and the clash guard is never reached");
       replay.status() === 409 && rBody && rBody.clash
         ? ok(`the guest's stale order was refused: "${String(rBody.clash.plain).slice(0, 70)}"`)
         : bad(`a stale guest order was NOT refused (HTTP ${replay.status()})`, JSON.stringify(rBody));
