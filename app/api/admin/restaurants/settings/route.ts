@@ -277,6 +277,20 @@ export async function POST(req: NextRequest) {
       sb.from("banquet_bills").select("id", { count: "exact", head: true }).eq("restaurant_id", rid),
       sb.from("settings").select("banquet_bill_next").eq("restaurant_id", rid).maybeSingle(),
     ]);
+    // ── A LOCK MUST NOT OPEN BECAUSE A COUNT FAILED (T20 sweep, 2026-08-19) ──────────────────────
+    // Neither read's `.error` was inspected. `issued.count` is null on a failed count, so
+    // `Number(null) || 0` came out 0 — "no banquet bills have been issued" — and the refusal below
+    // never fired. A passing database hiccup was therefore enough to let the starting number of a
+    // live bill series be moved after bills had already gone out on it, which is precisely the thing
+    // an audit checks and the reason this refusal exists at all.
+    //
+    // Same rule as every other gate in this codebase: refuse on doubt. A person can try again in a
+    // second; a renumbered series cannot be untangled. (`cur` matters for the same reason — a failed
+    // read made `current` 1, so a request setting it to 1 would have read as "no change" and slipped
+    // past the comparison.)
+    if (issued.error || cur.error) {
+      return adminFail("this restaurant's banquet bill numbering", issued.error || cur.error, { action: "save" });
+    }
     const already = Number(issued.count) || 0;
     const current = Number(cur.data?.banquet_bill_next) || 1;
     if (already > 0 && Number.isFinite(n) && n !== current) {
