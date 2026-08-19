@@ -47,7 +47,14 @@ export async function GET(req: NextRequest) {
 
   try {
     // Restaurant names for the row chips + the filter dropdown (small, read once).
-    const rests = ((await sb.from("restaurants").select("id, name, slug, accent_color").order("slug").limit(2000)).data || []) as
+    // CHECKED, because `|| []` is the whole bug (sweep #6, T19). This is the platform-wide guest
+    // list, so the restaurant chip is the only thing telling one tenant's guests from another's, and
+    // the same read fills the filter. With the failure swallowed, every chip fell back to "—" and the
+    // dropdown came back empty: a page of anonymous phone numbers the admin can neither read nor
+    // narrow, served with a confident 200.
+    const restsQ = await sb.from("restaurants").select("id, name, slug, accent_color").order("slug").limit(2000);
+    if (restsQ.error) return adminFail("the restaurant list", restsQ.error, { action: "load" });
+    const rests = (restsQ.data || []) as
       Array<{ id: string; name: unknown; slug: string; accent_color: string | null }>;
     // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
     // string on others — read both, fall back to the slug so a chip is never blank.
