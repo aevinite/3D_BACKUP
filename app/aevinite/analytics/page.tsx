@@ -139,7 +139,11 @@ export default function AdminAnalytics() {
     return Array.from({ length: 12 }, (_, i) => tr.slice(Math.floor(i * step), Math.floor((i + 1) * step)).reduce((s, p) => s + p.orders, 0));
   })();
 
-  const busiestActive = (data?.busiest || []).filter((r) => r.orders > 0).slice(0, 8);
+  // The endpoint returns the top ten; the card lists eight. Say so when there are more, rather than
+  // dropping a restaurant silently — this page is where he looks to see who is busy and who is not,
+  // and a list that quietly ends is a list he cannot add up (T18 sweep, 2026-08-20).
+  const busiestWithOrders = (data?.busiest || []).filter((r) => r.orders > 0);
+  const busiestActive = busiestWithOrders.slice(0, 8);
   const busiestMax = Math.max(1, ...busiestActive.map((r) => r.orders));
   const sources = (data?.bySource || []).filter((s) => s.orders > 0 || s.source === "dine_in");
   const sourceTotal = sources.reduce((s, x) => s + x.orders, 0);
@@ -244,7 +248,12 @@ export default function AdminAnalytics() {
         <div className="adx-grid2col">
           <div className="adm-card" style={{ marginBottom: 14 }}>
             <h2>Busiest restaurants</h2>
-            <p className="hint">Ranked by order count (not money) for {windowText}.</p>
+            <p className="hint">
+              Ranked by order count (not money) for {windowText}.
+              {busiestWithOrders.length > busiestActive.length
+                ? ` Showing the busiest ${busiestActive.length} of ${busiestWithOrders.length} restaurants that took an order.`
+                : ""}
+            </p>
             {data === null ? (
               <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
             ) : busiestActive.length === 0 ? (
