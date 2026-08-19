@@ -1440,7 +1440,9 @@ export default function OwnerDashboard() {
                       looked like a crash (owner-panel sweep 2026-08-04). */}
                   <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
-            <div className="adm-card">
+            {/* flex column, so the donut card can TAKE the height the taller card beside it
+                sets (owner, 2026-08-19). CategoryDonut then fills it — see Charts.tsx. */}
+            <div className="adm-card ow2-fill">
               {/* "added up across restaurants" — the group donut merges a category NAME across
                   every restaurant, which is the right thing for a portfolio view but is NOT what
                   the Items & menu report does (it keeps each brand's rows apart, because the same
@@ -1519,7 +1521,9 @@ export default function OwnerDashboard() {
                       looked like a crash (owner-panel sweep 2026-08-04). */}
                   <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
-            <div className="adm-card">
+            {/* flex column, so the donut card can TAKE the height the taller card beside it
+                sets (owner, 2026-08-19). CategoryDonut then fills it — see Charts.tsx. */}
+            <div className="adm-card ow2-fill">
               <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
@@ -1717,6 +1721,10 @@ export default function OwnerDashboard() {
            they close the string and the build fails with "Identifier cannot follow number". */
         .ow2-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
         .ow2-two > * { min-width: 0; }
+        /* A card that hands its leftover height to its chart instead of leaving a blank
+           band under it. The grid already stretches both cards to the taller one's height;
+           this is what lets the SHORTER card's content actually use it. */
+        .ow2-fill { display: flex; flex-direction: column; }
         /* table */
         .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
         .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
