@@ -223,11 +223,28 @@ export async function DELETE(req: NextRequest) {
   // a pay-later bill is outstanding and says how much and what to do, rather than either silently
   // keeping their data (what it used to do) or silently destroying a live receivable. Once the debt
   // is collected or written off, the erase goes through and takes the khata row with it.
-  const owing = await rd("khataOwed", () => sb.rpc("lfh_khata_outstanding_summary", { p_restaurant_ids: [restaurantId] }));
-  if (owing.error) {
-    // Cannot check whether they owe → refuse. Erasing on doubt is irreversible; waiting is not.
-    return dbFail("owner/customers.erase", owing.error, { message: "Couldn't check their pay-later balance just now — please try again." });
-  }
+  //
+  // ── ASK ABOUT THIS ONE PERSON, NOT ABOUT THE TOP 500 DEBTORS (T20 sweep, 2026-08-19) ───────────
+  // This check used to call `lfh_khata_outstanding(p_restaurant_ids, p_limit: 500)` and filter the
+  // rows in JS. That function is bounded BY PERSON — `WHERE r.rn <= p_limit` over a
+  // `row_number() OVER (ORDER BY sum(bill_amount) DESC)` (mig 309) — so it returns the 500 BIGGEST
+  // debtors and nobody else. A guest ranked 501st came back with no rows, read as owing ₹0, and the
+  // erase went through: their pay-later record was anonymised while the debt stood, leaving a
+  // receivable on the books that nobody is attached to. That is the same "never decide from the
+  // shown page" fault this area has been corrected for twice (T7 F13 on the khata headline, T9 F19
+  // on the complaints badge) — and here it does not merely misreport a number, it authorises an
+  // irreversible erase.
+  //
+  // A cap cannot be raised out of this: the question is not "who owes the most", it is "does THIS
+  // person owe anything", and that has an exact answer. It is read straight from `orders` with mig
+  // 309's own predicate and mig 301's own arithmetic (`total - disc_gross`, the discount as it
+  // really reduces the bill — never re-derived from tax/subtotal), on the index that exists for
+  // exactly this shape: `orders_khata_open_live_ix (restaurant_id, khata_customer_id)`. Bounded,
+  // one round trip, and it cannot be truncated.
+  //
+  // The old `lfh_khata_outstanding_summary` call above it is gone with it. Its `.data` was never
+  // read — it existed only as a "can we reach the khata data at all?" probe — and the exact read
+  // below does that job better, by failing on the very question being asked.
   const khataRow = await rd("khataPerson", () => sb.from("khata_customers")
     .select("id, name, phone").eq("restaurant_id", restaurantId).eq("phone", phone).maybeSingle());
   if (khataRow.error) {
@@ -235,18 +252,33 @@ export async function DELETE(req: NextRequest) {
   }
   const person = khataRow.data as { id: string; name: string | null } | null;
   if (person) {
-    const bal = await rd("khataBalance", () => sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: [restaurantId], p_limit: 500 }));
+    // Every LIVE, unpaid, uncancelled pay-later order of THIS person at THIS restaurant. The 2000
+    // cap is a runaway guard, not a business bound — it is orders-per-person, and a person with
+    // 2000 open pay-later bills is a different conversation.
+    const bal = await rd("khataBalance", () => sb.from("orders")
+      .select("id, session_id, total, disc_gross")
+      .eq("restaurant_id", restaurantId)
+      .eq("khata_customer_id", person.id)
+      .not("khata_at", "is", null)
+      .neq("payment_status", "paid")
+      .neq("status", "cancelled")
+      .is("deleted_at", null)
+      .limit(2000));
     if (bal.error) {
+      // Cannot check whether they owe → refuse. Erasing on doubt is irreversible; waiting is not.
       return dbFail("owner/customers.erase", bal.error, { message: "Couldn't check their pay-later balance just now — please try again." });
     }
-    const theirs = ((bal.data || []) as { khata_customer_id: string; bill_amount: number }[])
-      .filter((b) => b.khata_customer_id === person.id);
-    const owed = Math.round(theirs.reduce((a, b) => a + (Number(b.bill_amount) || 0), 0) * 100) / 100;
+    const theirs = (bal.data || []) as { id: string; session_id: string | null; total: number | null; disc_gross: number | null }[];
+    const owed = Math.round(theirs.reduce((a, o) =>
+      a + ((Number(o.total) || 0) - (Number(o.disc_gross) || 0)), 0) * 100) / 100;
+    // BILLS, not order rows — one sitting can be several orders, and the sentence says "bills".
+    // Same key the RPC uses for a bill: the session, or the order id when there is no session.
+    const bills = new Set(theirs.map((o) => o.session_id ?? o.id)).size;
     if (owed > 0) {
       return NextResponse.json({
-        error: `${person.name || "This guest"} still owes ₹${owed} on ${theirs.length} pay-later ${theirs.length === 1 ? "bill" : "bills"}. Collect or write that off first, then erase them.`,
+        error: `${person.name || "This guest"} still owes ₹${owed} on ${bills} pay-later ${bills === 1 ? "bill" : "bills"}. Collect or write that off first, then erase them.`,
         reason: "khata_outstanding",
-        owed, bills: theirs.length,
+        owed, bills,
       }, { status: 409 });
     }
   }
