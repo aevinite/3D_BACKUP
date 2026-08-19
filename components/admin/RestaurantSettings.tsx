@@ -1154,11 +1154,19 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       {show("tables") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Table setting</h2>
+        {/* WHAT A RENAME REALLY DOES (T16 sweep, 2026-08-19). This said "bills & QR codes keep the
+            number", which is the opposite of the owner's own rule of 2026-07-29 — Aangan renamed
+            its ten tables to A1–B2 and asked for the prints to follow, and since PRs #547/#548 the
+            NAME wins outright on paper ("A1", no "(T1)" tail). Checked on this page's own bill
+            preview: with table 5 named, the bill printed "Table zzt16 Banquet", not "Table 5". So
+            the card was telling the admin the reverse of what the printer does. The QR half WAS
+            right — a rename never touches a table's code — so only the bill half changes. */}
         <p className="hint">
           How many tables the restaurant has, each table&apos;s <b>name</b> (optional — e.g. the last table as
-          &ldquo;Banquet&rdquo;; tiles and table views show it, while bills &amp; QR codes keep the number) and how many
-          people can sit there (nothing set = 4). Admin-only: the manager can rename tables and set seats, but only you
-          can add or remove tables.
+          &ldquo;Banquet&rdquo;) and how many people can sit there (nothing set = 4). A name shows on the floor tiles
+          and table views, and it is <b>what the bill and the kitchen ticket print</b> — so a waiter carries paper that
+          matches the floor. Its <b>QR code keeps the number</b> and never changes. Admin-only: the manager can rename
+          tables and set seats, but only you can add or remove tables.
         </p>
         <div style={{ width: 200, marginBottom: 12 }}>
           {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
@@ -1168,7 +1176,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             <div key={t} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, background: "var(--bg)", border: "var(--border)" }}>
               <span style={{ fontWeight: 700, fontSize: 13, minWidth: 28 }}>T{t}</span>
               <input type="text" maxLength={24} value={names[String(t)] ?? ""} placeholder="Name" disabled={!loadOk || busy}
-                title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
+                title='A display name for this table (e.g. "Banquet") — it prints on the bill and the kitchen ticket; the QR code keeps the number'
                 onChange={(e) => setName(t, e.target.value)}
                 style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "5px 8px" }} />
               <input type="number" min={1} max={30} value={String(seats[String(t)] ?? 4)} title="Seats" disabled={!loadOk || busy}
