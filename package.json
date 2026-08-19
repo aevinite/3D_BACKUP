@@ -39,6 +39,7 @@
     "verify:no-ask": "node scripts/verify-no-ask-before-delete.mjs",
     "avlive:preflight": "node scripts/avlive-preflight.mjs",
     "verify:audit": "node scripts/verify-audit-coverage.mjs",
+    "verify:admin-health": "node scripts/verify-admin-health-logs.mjs",
     "verify:access": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && npx esbuild lib/staffCaps.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/staffCaps.mjs --log-level=warning && node scripts/verify-access-model.mjs",
     "verify:access-live": "node scripts/verify-access-live.mjs",
     "verify:access-search": "node scripts/verify-access-search.mjs",
