@@ -315,7 +315,8 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // object — so unsaved edits still show and there is no second copy left to drift.
   const previewBill = () => {
     const html = billPreviewHtml(draft, "bill", restForDoc());
-    const w = window.open("", "lfh_bill_preview", "width=420,height=700");
+    // Tall by default: the document fits itself to the window, so height buys readability.
+    const w = window.open("", "lfh_bill_preview", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
     if (!w) { setErr("Allow pop-ups to preview the bill."); return; }
     try { w.document.open(); } catch { /* reused window: start blank */ }
     w.document.write(html); w.document.close();

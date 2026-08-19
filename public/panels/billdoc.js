@@ -398,8 +398,20 @@
 // column stays exactly 66mm — the same number the print rule uses — so the line breaks are identical;
 // only the visible paper edge is added. Without it the ink ran to the very edge and the preview looked
 // like a bill with its margins cut off.
+// HOW BIG THE PREVIEW IS SHOWN — FITTED TO THE WINDOW, NOT A FIXED NUMBER (owner, 2026-08-19:
+// "make sure the preview looks in a small screen … I could able to see the whole bill in preview
+// … maybe some more zoom out. Don't change anything in the code because the bill printed right
+// now is exactly like the format"). So NOTHING below the @media print rule moved: the paper is
+// finished and this is display size only.
+//
+// A fixed 2x was right for a short bill and wrong for a real one — his 4-dish Aangan bill is
+// 178mm of paper (measured off the printer's own bytes), which at 2x is ~1340px and does not fit
+// any bill window, so he was handed a preview he had to scroll to judge. The number below is now
+// only the fallback for a frame where scripts cannot run (the Audit card's sandboxed iframe);
+// wherever the page CAN run, zFit() measures the document at 1x and picks the zoom that shows all
+// of it, then -/+ nudge it and the choice is remembered.
 + "  @media screen{html{background:#e9e9ec;min-height:100%}\n"
-+ "    body{zoom:2;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2);width:72mm;padding:2mm 3mm;\n"
++ "    body{zoom:1.35;background:#fff;box-shadow:0 2px 18px rgba(0,0,0,.2);width:72mm;padding:2mm 3mm;\n"
 + "         margin:10px auto 30px;padding-top:calc(2mm + 34px)}}\n"
 + "  @media print{body{zoom:1 !important}}\n"
 + "  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}\n"
@@ -453,7 +465,13 @@
 // FIXED to the window, not sticky inside a 66mm column where the buttons would be squeezed. It sits
 // inside the zoomed body, so its own zoom is wound back to keep the buttons a normal size.
 + "  .bar{position:fixed;top:0;left:0;right:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;\n"
-+ "       margin:0;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc;zoom:.588}\n"
++ "       margin:0;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc;zoom:.74}\n"
+// .74 is 1/1.35 — the inverse of the fallback body zoom above, so the buttons come out life-size
+// when no script runs. zApply() overwrites it with the inverse of whatever zoom is actually in use.
++ "  .bar .zg{margin-right:auto;display:flex;align-items:center;gap:4px}\n"
++ "  .bar .zg button{padding:6px 10px;font-size:13px;min-width:32px}\n"
++ "  .bar .zl{font:12px/1 system-ui,sans-serif;color:#3a3a42;min-width:44px;text-align:center;\n"
++ "           background:#fff;border:1px solid #d8d8dc;border-radius:7px;padding:6px 4px;cursor:pointer}\n"
 + "  .bar button{font:inherit;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;\n"
 + "              border:1px solid #b9b9c0;background:#fff;color:#000}\n"
 + "  .bar button.x{background:#111;color:#fff;border-color:#111}\n"
@@ -471,6 +489,13 @@
    (the panel's own tap rule), so the caller can leave the chrome off. Nothing else passes noBar, so
    every real bill and every preview keeps its bar exactly as before. */
 + (d.noBar ? "" : '<div class="bar">'
+/* Zoom out / in / fit. Deliberately on the LEFT and quiet: the two things that DO something to a
+   bill — print it, close it — keep the right-hand end where every panel puts its actions. The
+   middle chip shows the current size and is itself the "fit the whole bill" button, so three
+   controls cover all of it without a fourth. They touch nothing but the display size. */
++   '<span class="zg"><button title="Show it smaller" onclick="zStep(-1)">\u2212</button>'
++   '<span class="zl" title="Fit the whole bill in the window" onclick="zFit(1)">100%</span>'
++   '<button title="Show it bigger" onclick="zStep(1)">+</button></span>'
 +   (d.note ? '<span class="note">' + esc(d.note) + "</span>" : "")
 +   '<button onclick="printAgain()">🖨 Print' + (d.autoPrint ? " again" : " this") + "</button>"
 +   '<button class="x" onclick="closeBill()">✕ Close</button></div>') + "\n"
@@ -756,6 +781,46 @@
 // toolbar button and from the onload path, and a missing function would break both.
 // Guarded by verify:print-format so it cannot come back.
 + "function measure(){ /* intentionally nothing — see the note in billdoc.js */ }\n"
+/* ── SEE THE WHOLE BILL (owner, 2026-08-19) ────────────────────────────────────────────────────
+   The paper column is 66mm — about a 250px strip on a monitor — so the preview has always been
+   DISPLAYED zoomed. The zoom is now fitted to the window instead of fixed: measure the document at
+   1x, then show it at the largest size that still fits, floor 0.6 (below that a 10.5px label stops
+   being readable and a scrollbar is the better answer) and ceiling 2.
+   CSS 'zoom' scales every used length together — font size, padding, borders, the 66mm column — so
+   the LAYOUT IS UNTOUCHED at any of these numbers: the same words wrap where the paper wraps them.
+   Print resets it to 1 with the 'body{zoom:1 !important}' rule above, which an inline style cannot
+   beat, so none of this can reach the printer.
+   His nudge is remembered per browser, and remembering it is the point: a bill window is opened
+   dozens of times a shift and nobody wants to re-zoom every time. The word 'fit' is stored so a
+   longer bill still fits later, rather than freezing today's percentage. */
++ "var ZKEY = \"lfh_bill_zoom\", ZMIN = .6, ZMAX = 2, Zn = 0;\n"
++ "function zApply(z){ Zn = z; try{ document.body.style.zoom = z; }catch(e){}\n"
++ "  try{ var b = document.querySelector(\".bar\"); if (b) b.style.zoom = (1 / z).toFixed(3); }catch(e){}\n"
++ "  try{ var l = document.querySelector(\".zl\"); if (l) l.textContent = Math.round(z * 100) + \"%\"; }catch(e){} }\n"
+// WHAT "THE HEIGHT OF THE BILL" MEANS, measured twice before it was right:
+//   · body.scrollHeight  — too SHORT: it leaves out body's own margin:10px auto 30px (the white
+//     paper edge above and below the sheet), so the fit left 40 zoomed pixels hanging over the
+//     bottom of the window and the bill still scrolled by a hair.
+//   · documentElement.scrollHeight — too TALL: html carries min-height:100%, so it can never
+//     report less than the window. Every bill then fitted at ~99% and a SHORT one could never use
+//     the room it had. A min-height on the measured box turns a fit into a no-op.
+// So the content is measured as what it is: the sheet plus its own two margins.
++ "function zRoom(){ /* what the document needs at 1x, and what the window has to give */\n"
++ "  var b = document.body, was = b.style.zoom; b.style.zoom = 1;\n"
++ "  var cs = getComputedStyle(b), w = b.offsetWidth || 272;\n"
++ "  var h = b.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);\n"
++ "  b.style.zoom = was; if (!(h > 0)) h = 740;\n"
++ "  return { z: Math.min(((innerWidth || 380) - 14) / w, ((innerHeight || 680) - 10) / h) }; }\n"
++ "function zFit(remember){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round(zRoom().z * 100) / 100));\n"
++ "  zApply(z); if (remember) { try{ localStorage.setItem(ZKEY, \"fit\"); }catch(e){} } }\n"
++ "function zStep(d){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round((Zn + d * .15) * 100) / 100));\n"
++ "  zApply(z); try{ localStorage.setItem(ZKEY, String(z)); }catch(e){} }\n"
++ "function zStart(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "  var n = parseFloat(v); if (v && v !== \"fit\" && n >= ZMIN && n <= ZMAX) zApply(n); else zFit(0); }\n"
+// A bill window is REUSED for the next bill, so this runs per document, and the fit is redone when
+// the window is resized — but only while he has not set a size of his own, or a drag would undo it.
++ "addEventListener(\"resize\", function(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "  if (!v || v === \"fit\") zFit(0); });\n"
 + "function printAgain(){ print(); }\n"
 + "function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }\n"
 + "// NOTHING here closes this window. Print and Cancel look identical to the page (one afterprint\n"
@@ -767,6 +832,9 @@
 + "// the ✕ Close button, so the moment the dialog goes away Enter/Space/Esc dismisses the bill.\n"
 + "addEventListener(\"keydown\", function(e){ if (e.key === \"Escape\") closeBill(); });\n"
 + "onafterprint = function(){ try{ var b = document.querySelector(\".bar .x\"); if (b) b.focus(); }catch(e){} };\n"
+// Sized BEFORE the print dialog opens on the auto-print path: the dialog is modal, so a bill left
+// at the wrong size until it closed would be the first thing he saw behind it.
++ "zStart();\n"
 + (autoPrint ? "setTimeout(printAgain, 300);\n" : "setTimeout(measure, 300);\n")
 + "<\/script>";
   }

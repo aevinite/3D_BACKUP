@@ -5102,7 +5102,10 @@ function printBill(t, sess, os, opts = {}) {
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
   // saying which — so the old "close on afterprint" also threw the bill away on Cancel. The window
   // closes only from its own ✕ Close, and a NAMED target means the next bill reuses it.
-  const w = window.open("", "lfh_bill_print", "width=380,height=680");
+  // Opened tall on purpose: the bill sizes itself to fit the window (billdoc.js zFit), so a taller
+  // window means a bigger, easier-to-read bill rather than a scrollbar. A REUSED window keeps its
+  // own size, so this is the first-open default only.
+  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
   try { w.document.open(); } catch (e) {} // reused window: start from a blank document
   w.document.write(html);
@@ -5370,7 +5373,7 @@ async function printZReport() {
   try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
   const di = z.dineIn;
   const row = (l, v, b) => `<div class="zr${b ? " b" : ""}"><span>${esc(l)}</span><span>${v}</span></div>`;
-  const w = window.open("", "_blank", "width=380,height=720");
+  const w = window.open("", "_blank", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups to print the report", "err"); return; }
   w.document.write(`<!doctype html><title>Day-close Z report — ${esc(z.date)}</title>
 <style>
