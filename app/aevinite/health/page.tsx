@@ -96,6 +96,9 @@ export default function AdminHealth() {
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
+  // Restaurant id → name, from the panels-health rows this page already has. No extra request.
+  const restaurantName = (id: string) => pd?.rows.find((r) => r.id === id)?.name || "unknown restaurant";
+
   const tier = h ? latencyTier(h.latencyMs) : "warn";
 
   return (
@@ -210,10 +213,21 @@ export default function AdminHealth() {
                       {h.broken3d.count} dish{h.broken3d.count === 1 ? "" : "es"} to fix
                     </span>
                   </p>
-                  <div className="adm-logwrap">
+                  {/* WHICH RESTAURANT — otherwise this is a dish name and nothing to do with it
+                      (T17 sweep, 2026-08-19). There are nine restaurants on this platform; a row
+                      reading "Truffle Fries · missing: small" does not tell the admin whose menu to
+                      open. The name comes from the panels-health rows already fetched below, so it
+                      costs no extra request. */}
+                  <div className="adm-logwrap hx-kv">
                     {h.broken3d.dishes.map((d) => (
                       <div key={`${d.restaurantId}-${d.slug}`} className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}>
-                        <span>{d.title || d.slug}</span>
+                        <span style={{ minWidth: 0 }}>
+                          {d.title || d.slug}
+                          <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />
+                            {restaurantName(d.restaurantId)}
+                          </span>
+                        </span>
                         <span className="mono adm-muted">missing: {d.missing}</span>
                       </div>
                     ))}
