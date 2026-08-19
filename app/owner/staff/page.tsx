@@ -423,6 +423,19 @@ export default function OwnerStaffPage() {
                       {!s.active && <span className="ost-disabled">disabled</span>}
                       {/* How complete their record is, and where their money stands. Kitchen rows
                           show neither — they have no profile (owner's call 2026-07-29). */}
+                      {/* WHY A KITCHEN ROW IS SHORTER (owner asked for this on 2026-08-19). A kitchen
+                          login has no profile, no completeness bar and no pay — his own ruling, made
+                          three times (docs/REJECTED-IDEAS.md R7) and right. But on screen it just
+                          looked like a row with things MISSING rather than a row that is complete as
+                          designed, so every sweep re-asked the question and so would he.
+                          Worded so it can never read as a promise of one later: it states what a
+                          kitchen login IS for, not what it lacks. Never turn this into a link, a
+                          button, or a "coming soon" — that is the thing he has refused three times. */}
+                      {!s.profileEligible && s.role === "kitchen" && (
+                        <span className="ost-nokitchen" title="Kitchen logins sign in to the kitchen screen to see and print tickets. There is no profile or pay record for them.">
+                          kitchen screen only — no profile
+                        </span>
+                      )}
                       {s.profileEligible && s.completeness && (
                         <a className="ost-prog" href={withRid(`/owner/staff/${s.id}`)}
                            title={`${s.completeness.filled} of ${s.completeness.total} details filled — open their profile`}>
@@ -715,6 +728,9 @@ export default function OwnerStaffPage() {
            (2026-08-06). Darker, same hue; the wash stays. */
         :global([data-skin="light"]) .ost-rolebadge[data-role="manager"] { color: color-mix(in srgb, var(--accent) 62%, #000); }
         .ost-disabled { font-size: 10.5px; color: var(--adm-danger, #c0392b); font-weight: 700; }
+        /* Quiet, not a warning: nothing is wrong with a kitchen login. Muted text, no chip, no colour
+           that reads as a problem — it is a fact about the row, the same weight as a phone number. */
+        .ost-nokitchen { font-size: 11.5px; color: var(--muted); }
         .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 8px; }
         .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
         .ost-mini { font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: 7px; border: var(--border); background: var(--card); color: var(--fg, inherit); cursor: pointer; }
