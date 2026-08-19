@@ -77,6 +77,15 @@
     pre b{color:#0d6b3f}
     a[href^="http"]::after{content:" (" attr(href) ")";font-size:11px;color:#666}
   }
+  /* Every command on this page is meant to be PASTED, and re-typing a Chrome command line by hand is
+     how a flag goes missing. `data-copy` blocks get a button; the rest are left alone. */
+  pre { position: relative }
+  pre[data-copy] { padding-right: 76px }
+  .cpy { position: absolute; top: 8px; right: 8px; border: 0; border-radius: 7px; padding: 5px 10px;
+    font: 600 12px/1 inherit; background: #2b3648; color: #dbe4f2; cursor: pointer }
+  .cpy:hover { background: #38455c }
+  .cpy.done { background: #0d8a52; color: #fff }
+  @media print { .cpy { display: none } }
 </style>
 </head>
 <body>
@@ -87,11 +96,14 @@
   <p>Everything needed to make kitchen tickets (KOTs) print by themselves — on <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a <b>Raspberry Pi</b> (and which devices can never do it) —
      every step, every setting, and what to do when something goes wrong. Written for someone who has
      never set up a printer before.</p>
+  <p style="margin:14px 0 0;color:#d6c9f7;font-size:14px">Each starter arrives already pointed at
+     <b>this site</b> — there is nothing to edit. Add <code>?panel=manager</code> to a link for a
+     <b>counter</b> screen instead of a kitchen one.</p>
   <div class="btns">
     <button class="btn" onclick="window.print()">🖨 Save this as a PDF / print it</button>
-    <a class="btn ghost" href="/print-station/print-station-mac.command" download>⬇ Download the Mac starter</a>
-    <a class="btn ghost" href="/print-station/print-station-windows.bat" download>⬇ Download the Windows starter</a>
-    <a class="btn ghost" href="/print-station/print-station-linux.sh" download>⬇ Download the Linux / Pi starter</a>
+    <a class="btn ghost" href="/api/print-station/windows" download>⬇ Windows starter</a>
+    <a class="btn ghost" href="/api/print-station/mac" download>⬇ Mac starter</a>
+    <a class="btn ghost" href="/api/print-station/linux" download>⬇ Linux / Pi starter</a>
   </div>
 </header>
 
@@ -121,8 +133,8 @@
     <li><b>Plug the thermal printer into the computer</b> and make it that computer's <b>default printer</b>.</li>
     <li><b>Download the starter file</b> for that computer (the two buttons at the top of this page).
         Mac → <code>print-station-mac.command</code>. Windows → <code>print-station-windows.bat</code>.</li>
-    <li><b>Open the starter file once and edit one line</b> — the <code>URL</code> line. Put <code>/kitchen</code>
-        at the end for a kitchen screen, or <code>/manager</code> for the counter screen. Save it.</li>
+    <li><b>Nothing to edit</b> — the download already points at this site and at the kitchen screen.
+        (For a counter screen, use the <code>?panel=manager</code> link instead.)</li>
     <li><b>Double-click the starter file.</b> A single Chrome window opens, full screen. Log in once — it stays
         logged in from then on.</li>
     <li><b>Turn it on in the app</b> — in the admin console's <b>🖨 KOT printing</b> card: switch auto-print
@@ -183,7 +195,7 @@
   <p>Most cheap 80mm printers have <b>no macOS driver of their own</b>. For the POS-80 / ZJ-80 family, the
     open-source <code>zj-58</code> driver works and is already installed on the owner's Mac. If you are setting
     up a fresh Mac, this is the whole recipe (it needs an administrator password):</p>
-  <pre>git clone https://github.com/klirichek/zj-58
+  <pre data-copy>git clone https://github.com/klirichek/zj-58
 cd zj-58 &amp;&amp; make
 <b>sudo</b> cp rastertozj /usr/libexec/cups/filter/
 <b>sudo</b> cp zj80.ppd /Library/Printers/PPDs/Contents/Resources/</pre>
@@ -192,7 +204,7 @@ cd zj-58 &amp;&amp; make
   <h3>4.2 · The paper settings that matter</h3>
   <p>These four are not decoration — each one was worked out against a real roll, and getting one wrong is how
     you end up with 20 cm of blank paper before every ticket, or a cut through the middle of a line:</p>
-  <pre>lpadmin -p Printer_POS_80 \
+  <pre data-copy>lpadmin -p Printer_POS_80 \
   -o <b>PageSize=X70MMY65MM</b> \
   -o <b>CutMedia=EndOfJob</b> \
   -o <b>FeedWhere=AfterJob</b> \
@@ -219,21 +231,51 @@ cd zj-58 &amp;&amp; make
     closes). If you would rather set it permanently: <b>System Settings → Lock Screen</b> → set the display and
     the machine never to sleep on power.</p>
   <h3>4.5 · Open the print station</h3>
+  <div class="warn"><b>Read this first — macOS blocks downloaded scripts.</b> When you double-click the
+    starter, a recent Mac says <b>“print-station-mac.command” Not Opened — Apple could not verify it is
+    free of malware</b>, and offers only <b>Done</b> or <b>Move to Bin</b>. Nothing is wrong with the
+    file: Apple refuses any script downloaded from the web that hasn't been through their paid
+    notarisation. The old “right-click → Open” trick no longer works on macOS Sequoia. <b>Use option A
+    below and the question never comes up.</b></div>
+
+  <h4>Option A · Paste one line into Terminal <span class="tag mac">easiest — nothing to download</span></h4>
+  <p>Open <b>Terminal</b> (⌘Space, type “terminal”, Enter), paste this, press Enter. It is the whole
+    starter in one line, so there is no file for macOS to object to. Change <code>/kitchen</code> to
+    <code>/manager</code> for a counter screen.</p>
+  <pre data-copy>caffeinate -dimsu "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --kiosk --kiosk-printing \
+  --user-data-dir="$HOME/.aevidine-print-station" \
+  --disable-background-timer-throttling \
+  --disable-backgrounding-occluded-windows \
+  --disable-renderer-backgrounding \
+  --no-first-run --no-default-browser-check \
+  --autoplay-policy=no-user-gesture-required \
+  "https://www.aevinite.shop<b>/kitchen</b>"</pre>
+  <p>Leave that Terminal window open — it is what keeps the Mac awake. Closing the Chrome window (⌘Q)
+    ends it. To have it start by itself at login, see <b>4.6</b>.</p>
+
+  <h4>Option B · Use the downloaded starter file</h4>
   <ol class="steps">
     <li><b>Download</b> <code>print-station-mac.command</code> (button at the top of this page).</li>
-    <li><b>Edit one line.</b> Right-click → Open With → TextEdit. Change:
-      <pre>URL="https://3-d-backup.vercel.app<b>/kitchen</b>"</pre>
-      Use <code>/kitchen</code> for a screen in/near the kitchen, or <code>/manager</code> for the counter
-      screen. Save and close.</li>
-    <li><b>Allow it to run, once.</b> In Terminal:
-      <pre>chmod +x ~/Downloads/print-station-mac.command</pre>
-      (If macOS says "cannot be opened because it is from an unidentified developer":
-      right-click the file → <b>Open</b> → <b>Open</b> again. Only needed the first time.)</li>
-    <li><b>Double-click it.</b> A small black Terminal window appears — <b>leave it open</b>, it is what keeps
-      the Mac awake — and one full-screen Chrome opens on the panel.</li>
-    <li><b>Log in once</b> with the restaurant's kitchen (or manager) username and password. This window has
-      its own private Chrome profile, so it stays logged in and your everyday Chrome is untouched.</li>
+    <li><b>Start it THROUGH Terminal, which macOS allows:</b>
+      <pre data-copy>bash ~/Downloads/print-station-mac.command</pre>
+      That is the whole fix. Running a script through <code>bash</code> is reading a file, not launching
+      an app, so Gatekeeper has nothing to block.</li>
+    <li><b>Prefer to double-click it in future?</b> Then clear the download flag once:
+      <pre data-copy>xattr -d com.apple.quarantine ~/Downloads/print-station-mac.command
+chmod +x ~/Downloads/print-station-mac.command</pre>
+      After that it double-clicks normally, for ever. (The other route is <b>System Settings → Privacy
+      &amp; Security</b>, scroll to the message naming the file, and press <b>Open Anyway</b> — but the
+      two lines above are quicker and do not need the dialog to still be showing.)</li>
+    <li><b>Log in once</b> with the restaurant's kitchen (or manager) username and password. This window
+      keeps its own private Chrome profile, so it stays logged in and your everyday Chrome is untouched.</li>
   </ol>
+
+  <h3>4.6 · Have it open by itself at login (recommended)</h3>
+  <p>So nobody has to remember after a power cut: <b>System Settings → General → Login Items →</b> press
+    <b>+</b> and pick the <code>print-station-mac.command</code> file. (It must be un-quarantined first —
+    the two lines in step 4 above.)</p>
+
   <div class="ok"><b>To finish for the day:</b> press <b>⌘Q</b> in the Chrome window (or close the Terminal
     window). The Mac is then free to sleep again.</div>
 </div>
@@ -279,18 +321,18 @@ cd zj-58 &amp;&amp; make
   <h3>5b.1 · Install the printer (CUPS)</h3>
   <p>Linux prints through <b>CUPS</b>, which is already installed on Raspberry Pi OS and Ubuntu. Plug
     the printer in and:</p>
-  <pre>sudo apt update &amp;&amp; sudo apt install -y cups printer-driver-escpr
+  <pre data-copy>sudo apt update &amp;&amp; sudo apt install -y cups printer-driver-escpr
 sudo usermod -aG lpadmin $USER      # lets you add printers without being root
 lpinfo -v                           # shows the printer's address, e.g. usb://Zjiang/POS-80</pre>
   <p>Add it, name it plainly, and make it the default:</p>
-  <pre>sudo lpadmin -p POS80 -E -v "usb://Zjiang/POS-80" -m raw
+  <pre data-copy>sudo lpadmin -p POS80 -E -v "usb://Zjiang/POS-80" -m raw
 sudo lpoptions -d POS80             # default printer for this machine
 echo "hello" | lp -d POS80          # a one-line test print</pre>
   <p><b><code>-m raw</code> is deliberate.</b> An 80mm thermal printer speaks ESC/POS; “raw” means CUPS
     passes the job through untouched, which is what Chrome's own output needs. If your model has a
     proper PPD (Epson's <code>escpr</code> driver covers many), use that instead of <code>raw</code>.</p>
   <h3>5b.2 · A NETWORK printer instead of USB (recommended on a Pi)</h3>
-  <pre>lpadmin -p POS80 -E -v socket://192.168.1.50:9100 -m raw</pre>
+  <pre data-copy>lpadmin -p POS80 -E -v socket://192.168.1.50:9100 -m raw</pre>
   <p>Port <b>9100</b> is the standard raw-printing port. Give the printer a fixed address in your
     router first, or it will move and printing will stop for no visible reason.</p>
   <h3>5b.3 · Paper settings</h3>
@@ -302,8 +344,8 @@ echo "hello" | lp -d POS80          # a one-line test print</pre>
     <code>print-station.sh</code>, <code>chmod +x</code> it, and run it:</p>
   <p>Or just download <b>print-station-linux.sh</b> from the top of this page — it is the same script,
     already written, and it finds Chromium or Chrome by itself:</p>
-  <pre>#!/bin/sh
-URL="https://3-d-backup.vercel.app<b>/kitchen</b>"          # or /manager for the counter screen
+  <pre data-copy>#!/bin/sh
+URL="https://www.aevinite.shop<b>/kitchen</b>"          # or /manager for the counter screen
 PROFILE="$HOME/.aevidine-print-station"
 xset s off; xset -dpms; xset s noblank                # never blank the screen
 exec chromium-browser --kiosk --kiosk-printing \
@@ -315,7 +357,7 @@ exec chromium-browser --kiosk --kiosk-printing \
   --autoplay-policy=no-user-gesture-required "$URL"</pre>
   <p>On Ubuntu use <code>google-chrome</code> in place of <code>chromium-browser</code>.</p>
   <h3>5b.5 · Start it on boot (the part that makes it maintenance-free)</h3>
-  <pre>mkdir -p ~/.config/autostart
+  <pre data-copy>mkdir -p ~/.config/autostart
 cat &gt; ~/.config/autostart/print-station.desktop &lt;&lt;EOF
 [Desktop Entry]
 Type=Application
@@ -458,6 +500,18 @@ EOF</pre>
         <td>Either switch 2 still says "the kitchen screen", or nobody answered <b>Yes, print here</b> on
         that computer.</td><td>Check the admin console's <b>Which screen prints</b> choice, then look for
         the strip above that screen's Tables grid. If it is not there, the choice has not been made yet.</td></tr>
+    <tr><td><b>macOS: “Not Opened — Apple could not verify…”, only <i>Done</i> or <i>Move to Bin</i></b></td>
+        <td>Gatekeeper blocking a script downloaded from the web. The file is fine; Apple refuses anything
+        not notarised by them.</td>
+        <td>Run it through bash instead — <code>bash ~/Downloads/print-station-mac.command</code> — or clear
+        the flag once with <code>xattr -d com.apple.quarantine &lt;file&gt;</code>. Or skip the file entirely
+        and use the one-line Terminal command in <a href="#mac">4.5 option A</a>.</td></tr>
+    <tr><td><b>Windows: “Windows protected your PC”</b></td>
+        <td>SmartScreen, the same idea as above.</td>
+        <td><b>More info → Run anyway.</b> Once per file.</td></tr>
+    <tr><td><b>Linux: “Permission denied”</b></td>
+        <td>The file isn't marked executable yet.</td>
+        <td><code>chmod +x print-station-linux.sh</code>, or run <code>sh print-station-linux.sh</code>.</td></tr>
     <tr><td><b>A dialog box appears asking to print</b></td><td>Chrome was opened normally, not by the starter
         file.</td><td>Close it and open the starter file instead. Silent printing only happens with
         <code>--kiosk-printing</code>.</td></tr>
@@ -535,5 +589,25 @@ EOF</pre>
 </footer>
 
 </div>
+<script>
+  // Copy buttons. No library, no CDN — the page must open on a slow restaurant connection. The text
+  // copied is the block's own text with the <b> highlighting stripped, so what lands on the clipboard
+  // is exactly what should be pasted.
+  for (const pre of document.querySelectorAll("pre[data-copy]")) {
+    const b = document.createElement("button");
+    b.className = "cpy"; b.type = "button"; b.textContent = "Copy";
+    b.onclick = async () => {
+      const text = pre.innerText.replace(/\n\s*Copy\s*$/, "").trim();
+      try { await navigator.clipboard.writeText(text); }
+      catch (e) {                                        // older browsers / no permission
+        const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t);
+        t.select(); try { document.execCommand("copy"); } catch (e2) {} t.remove();
+      }
+      b.textContent = "Copied ✓"; b.classList.add("done");
+      setTimeout(() => { b.textContent = "Copy"; b.classList.remove("done"); }, 1800);
+    };
+    pre.appendChild(b);
+  }
+</script>
 </body>
 </html>

@@ -12277,9 +12277,9 @@ function formPrinting(s) {
     </p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <a class="btn primary" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Open the setup guide</a>
-      <a class="btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter</a>
-      <a class="btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter</a>
-      <a class="btn" href="/print-station/print-station-linux.sh" download>⬇ Linux / Pi starter</a>
+      <a class="btn" href="/api/print-station/windows" download>⬇ Windows starter</a>
+      <a class="btn" href="/api/print-station/mac" download>⬇ Mac starter</a>
+      <a class="btn" href="/api/print-station/linux" download>⬇ Linux / Pi starter</a>
     </div>
     <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
       A “starter” opens one Chrome window that prints silently and doesn't fall asleep behind other

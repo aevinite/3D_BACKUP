@@ -138,9 +138,9 @@ export default function OwnerSettings() {
           <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
             <i className="fas fa-book-open" aria-hidden="true" /> Open the printer setup guide
           </a>
-          <a className="adm-btn" href="/print-station/print-station-windows.bat" download>⬇ Windows starter</a>
-          <a className="adm-btn" href="/print-station/print-station-mac.command" download>⬇ Mac starter</a>
-          <a className="adm-btn" href="/print-station/print-station-linux.sh" download>⬇ Linux / Pi starter</a>
+          <a className="adm-btn" href="/api/print-station/windows" download>⬇ Windows starter</a>
+          <a className="adm-btn" href="/api/print-station/mac" download>⬇ Mac starter</a>
+          <a className="adm-btn" href="/api/print-station/linux" download>⬇ Linux / Pi starter</a>
         </div>
         <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
           Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is
