@@ -208,7 +208,13 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       await load(); // re-read so table-count changes mint the new tables' QR codes too
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
-  const discard = () => { setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null); };
+  const discard = () => {
+    // Cancel anything the auto-save still owes the server. Without this, Discard reverted the
+    // screen and a pending debounce then wrote the discarded value a moment later — so pressing
+    // Discard could put a rejected GST mode back on a real restaurant (T16 sweep, 2026-08-19).
+    cancelPending();
+    setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null);
+  };
 
   // Publish this panel's state to the ONE bar. Keyed by the sections it owns, so mounting the
   // same section twice can't register twice.
@@ -219,7 +225,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   });
 
   // ── AUTO-SAVE, for discrete controls only (owner, 2026-07-30: "I change value to 8 and it
-  // doesn't auto save"). Debounced so a drag or fast typing writes ONCE, not per keystroke.
+  // doesn't auto save").
   //
   // Deliberately NOT the whole form. A text field would save half-typed rubbish (a partial
   // GSTIN, an incomplete bill footer), and "Number of tables" is outright dangerous to
@@ -227,31 +233,73 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // fire the section backfill. Those keep the explicit Save bar. Only bounded values with no
   // data consequence are auto-saved — the same "saves instantly per change" habit the Access
   // per-person selects already use.
-  const autoTimer = useRef<number | null>(null);
+  //
+  // ── THREE WAYS "SAVES ON ITS OWN" USED TO BE A LIE (T16 sweep, 2026-08-19) ─────────────────
+  // Every one of these controls is a select, a radio or a switch, so it fires ONCE per decision —
+  // yet all of them went through a single 600 ms debounce built for a slider that no longer
+  // exists. That cost three real losses:
+  //
+  //   1. LEAVING THE ROW THREW THE VALUE AWAY. This component is mounted by the Access screen
+  //      inside a dropdown row, and collapsing that row (or opening another) UNMOUNTS it. The old
+  //      unmount cleanup cleared the pending timer, and unregisterSave removed the panel from the
+  //      save bar in the same breath — so picking "Tables per row: 6" and closing the row left no
+  //      write, no Save bar and no message. The pick vanished in silence.
+  //   2. TWO PICKS INSIDE 600 ms LOST THE FIRST. One shared timer meant the second decision
+  //      cancelled the first one's write.
+  //   3. DISCARD WAS OVERTAKEN. Pressing Discard reverted the screen and the pending timer then
+  //      wrote the discarded value anyway.
+  //
+  // So: a discrete pick POSTS IMMEDIATELY (autoSaveNow), the debounce survives per KEY for the
+  // typed-number path that genuinely needs it, and a pending write is FLUSHED on unmount rather
+  // than dropped. `keepalive` lets that last flush outlive the component.
   const [autoSaved, setAutoSaved] = useState<string | null>(null);
-  useEffect(() => () => { if (autoTimer.current) window.clearTimeout(autoTimer.current); }, []);
+  const alive = useRef(true);
+  const pending = useRef(new Map<string, { v: unknown; timer: number }>());
+  const cancelPending = () => {
+    for (const { timer } of pending.current.values()) window.clearTimeout(timer);
+    pending.current.clear();
+  };
+  const postSetting = useCallback((k: string, v: unknown, keepalive = false) => fetch("/api/admin/restaurants/settings", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ restaurant_id: restaurant.id, [k]: v }), keepalive,
+  }), [restaurant.id]);
+  useEffect(() => () => {
+    alive.current = false;
+    // FLUSH, don't drop: whatever the debounce still owes goes to the server now.
+    for (const [k, { v, timer }] of pending.current) { window.clearTimeout(timer); void postSetting(k, v, true).catch(() => {}); }
+    pending.current.clear();
+  }, [postSetting]);
+  const commitSetting = async (k: string, v: unknown) => {
+    pending.current.delete(k);
+    if (alive.current) setErr(null);
+    try {
+      const r = await postSetting(k, v);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      // Trust the SERVER's value, not ours — it clamps (99 → 12), so the field must show
+      // what was really stored rather than what was typed.
+      const stored = d.settings && k in d.settings ? d.settings[k] : v;
+      if (!alive.current) return;
+      setDraft((x) => ({ ...x, [k]: stored }));
+      setBase((b) => ({ ...b, [k]: stored })); // keeps the Save bar from lighting up for it
+      setAutoSaved(k);
+      window.setTimeout(() => setAutoSaved((cur) => (cur === k ? null : cur)), 1800);
+    } catch (e) {
+      if (alive.current) setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+  // A select / radio / switch: one decision, one write, no waiting.
+  const autoSaveNow = (k: string, v: unknown) => {
+    const p = pending.current.get(k);
+    if (p) { window.clearTimeout(p.timer); pending.current.delete(k); }
+    void commitSetting(k, v);
+  };
+  // A typed number: debounced PER KEY so a second field can't cancel the first one's write.
   const autoSave = (k: string, v: unknown) => {
-    if (autoTimer.current) window.clearTimeout(autoTimer.current);
-    autoTimer.current = window.setTimeout(async () => {
-      setErr(null);
-      try {
-        const r = await fetch("/api/admin/restaurants/settings", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ restaurant_id: restaurant.id, [k]: v }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || "Couldn't save.");
-        // Trust the SERVER's value, not ours — it clamps (99 → 12), so the field must show
-        // what was really stored rather than what was typed.
-        const stored = d.settings && k in d.settings ? d.settings[k] : v;
-        setDraft((x) => ({ ...x, [k]: stored }));
-        setBase((b) => ({ ...b, [k]: stored })); // keeps the Save bar from lighting up for it
-        setAutoSaved(k);
-        window.setTimeout(() => setAutoSaved((cur) => (cur === k ? null : cur)), 1800);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-      }
-    }, 600);
+    const p = pending.current.get(k);
+    if (p) window.clearTimeout(p.timer);
+    const timer = window.setTimeout(() => { void commitSetting(k, v); }, 600);
+    pending.current.set(k, { v, timer });
   };
 
   const toggleKot = async () => {
@@ -473,7 +521,8 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           const n = Number(raw);
           const fixed = raw === "" || !Number.isFinite(n) ? Number(base[k]) : Math.min(Math.max(n, lo), hi);
           if (Number.isFinite(fixed) && String(fixed) !== raw) set(k, fixed);
-          if (Number.isFinite(fixed) && fixed !== Number(base[k])) autoSave(k, fixed);
+          // Blur means the value is settled, so it goes now rather than on the keystroke debounce.
+          if (Number.isFinite(fixed) && fixed !== Number(base[k])) autoSaveNow(k, fixed);
         } : undefined}
         style={{ ...inputStyle, marginTop: 4 }}
       />
@@ -506,7 +555,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         {label}
         <select
           value={known ? String(cur) : ""} disabled={!loadOk || busy || !known}
-          onChange={(e) => { const n = Number(e.target.value); if (!Number.isFinite(n)) return; set(k, n); autoSave(k, n); }}
+          onChange={(e) => { const n = Number(e.target.value); if (!Number.isFinite(n)) return; set(k, n); autoSaveNow(k, n); }}
           style={{ ...inputStyle, marginTop: 4 }}
         >
           {!known && <option value="">—</option>}
@@ -525,7 +574,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // customer switches below keep that behaviour, so no existing call site changes.
   const boolToggle = (label: string, k: string, on: boolean, opts: { auto?: boolean } = {}) => (
     <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
-      onClick={() => { set(k, !on); if (opts.auto) autoSave(k, !on); }}
+      onClick={() => { set(k, !on); if (opts.auto) autoSaveNow(k, !on); }}
       title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
       <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
     </button>
@@ -545,7 +594,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         }}>
           <input type="radio" name={`${k}-${restaurant.id}`} checked={cur === o.value} disabled={!loadOk || busy}
             style={{ marginTop: 3 }}
-            onChange={() => { set(k, o.value); autoSave(k, o.value); }} />
+            onChange={() => { set(k, o.value); autoSaveNow(k, o.value); }} />
           <span>
             <b style={{ fontSize: 13 }}>{o.label}</b>
             <span className="adm-muted" style={{ display: "block", fontSize: 11.5, lineHeight: 1.45 }}>{o.ex}</span>
