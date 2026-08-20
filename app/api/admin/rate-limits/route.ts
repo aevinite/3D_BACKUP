@@ -144,6 +144,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // CLEAR THE WHOLE ALERT LIST (owner, 2026-08-20 — "all option should be for everything").
+  // Dismiss only: it clears ALERTS and changes nothing else. Deliberately NOT offered in bulk —
+  // "allow" (which resets a subject's counter, i.e. lifts a wall for whoever hit it) and "block"
+  // (which bars a device from the admin panel): both decide something about ONE person, and a
+  // one-tap "do that to everyone" is how a limit stops protecting anything.
+  // Scoped to one restaurant when the console is, so a button under "Showing French House only"
+  // cannot quietly touch nine restaurants' alerts.
+  if (action === "dismiss_all") {
+    const scope = typeof b.restaurant_id === "string" && UUID.test(b.restaurant_id) ? b.restaurant_id : null;
+    let upd = sb.from("rate_limit_events")
+      .update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" })
+      .eq("status", "open");
+    if (scope) upd = upd.eq("restaurant_id", scope);
+    const r = await upd.select("id");
+    if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
+    const n = r.data?.length ?? 0;
+    await logAction("admin", "rate_limit_dismiss_all", {
+      restaurant_id: scope ?? undefined, level: "info",
+      detail: `Cleared ${n} limit-reached alert(s)${scope ? " (one restaurant)" : " (all restaurants)"}. No limit changed and nobody was let through or blocked.`,
+    });
+    return NextResponse.json({ ok: true, dismissed: n });
+  }
+
   const eventId = String(b.event_id || "");
   if (!UUID.test(eventId)) return err("invalid event_id");
 

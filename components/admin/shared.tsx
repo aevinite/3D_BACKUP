@@ -24,7 +24,7 @@ export type Overview = {
   openTables: number; activeOrders: number; unpaidOrders: number;
   ordersToday: number;
 };
-export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; actor_id?: string | null; device_id?: string | null; order_id?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error"; seen_at?: string | null; resolved_at?: string | null };
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; actor_id?: string | null; device_id?: string | null; order_id?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error"; seen_at?: string | null; resolved_at?: string | null; snoozed_until?: string | null };
 
 export const STATE_LABEL: Record<Tile["state"], string> = {
   free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",
@@ -143,6 +143,10 @@ export const ACT_LABEL: Record<string, string> = {
   repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
   repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
   repair_edit_time: "Repair · edited time", fix_request: "Sent for overnight repair", error_resolved: "Marked resolved",
+  // Bulk + wait, added with the board's "all" actions (owner, 2026-08-20). A WAIT is not a resolve:
+  // the problem stays open and comes back by itself, which is why it has its own words here.
+  error_snoozed: "Set a problem to come back later", errors_resolved_all: "Cleared every problem from the board",
+  errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",

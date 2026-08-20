@@ -59,8 +59,15 @@ export async function GET(req: NextRequest) {
       // only the NUMBER crosses the wire. Bounded at 200: this button asks "is there something
       // to fix, and roughly how much", and a console with 200+ distinct unresolved faults has
       // bigger problems than an exact total.
+      // (3) A PROBLEM SET TO WAIT IS NOT ON THE BOARD, SO IT IS NOT ON THIS BUTTON EITHER (mig 344,
+      // 2026-08-20). "Remind me later" was added because the only two answers were "mark it
+      // resolved" (a false record) and "leave it red for ever". If a waiting problem still counted
+      // here, the console would be back to two numbers for one fact — the very thing notes (1) and
+      // (2) above were written to end. The wait expires by itself and the tile, and this count,
+      // come straight back; the Repair board states how many are waiting so nothing is silent.
       sb.from("staff_actions").select("panel, action, detail, restaurant_id")
         .eq("level", "error").is("resolved_at", null)
+        .or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`)
         .order("created_at", { ascending: false }).limit(200),
       sb.from("fix_requests").select("id", head).eq("status", "open"),
     ]);

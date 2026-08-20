@@ -6860,6 +6860,10 @@ const OP_ACTION_LABELS = {
   repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
   repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
   repair_edit_time: "Repair · edited time", fix_request: "Sent for overnight repair", error_resolved: "Marked resolved",
+  // Bulk + wait, added with the board's "all" actions (owner, 2026-08-20). A WAIT is not a resolve:
+  // the problem stays open and comes back by itself, which is why it has its own words here.
+  error_snoozed: "Set a problem to come back later", errors_resolved_all: "Cleared every problem from the board",
+  errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",

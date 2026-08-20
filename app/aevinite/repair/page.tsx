@@ -46,6 +46,15 @@ const TICKET_FILTERS = [
 
 const uuid = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) + Math.random();
 
+// How long "Remind me later" waits. Hours, because that is what the server takes (mig 344) — the
+// labels are what a person reads. Kept short and few: a list of ten durations is a decision, and
+// this control exists to be pressed without thinking about it.
+const LATER_CHOICES: { hours: number; label: string; long: string }[] = [
+  { hours: 4, label: "in 4 hours", long: "Back in 4 hours" },
+  { hours: 24, label: "tomorrow", long: "Back tomorrow" },
+  { hours: 24 * 7, label: "next week", long: "Back next week" },
+];
+
 const TOOLS: { op: Op; label: string; icon: string; desc: string; danger?: boolean }[] = [
   { op: "unstick_table", label: "Unstick a table", icon: "fa-wand-magic-sparkles", desc: "Force-close a jammed open/pending table so it's usable again." },
   { op: "refire_order", label: "Re-fire an order", icon: "fa-fire-burner", desc: "Send the same dishes to the kitchen again as a fresh order (new KOT)." },
@@ -125,6 +134,21 @@ export default function AdminRepair() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmResolve, setConfirmResolve] = useState<string>(""); // group key mid-confirm ("are you sure?")
   const [resolving, setResolving] = useState<Set<string>>(new Set());
+  // ── THE "ALL" ACTIONS (owner, 2026-08-20) ───────────────────────────────────────────────────
+  // "there should be a resolved all option. Also there should be fixed all option. Also, like all
+  // option should be for everything." Nineteen tiles, eight of them the same three manager faults,
+  // and every one needing its own two-step Resolve is how a board stops being read.
+  //
+  // `bulk` names the one bulk action in flight (so its own button says what it is doing and the
+  // others stay put); `confirmBulk` is the are-you-sure step, which every one of these gets —
+  // clearing a whole board on a mis-tap is worse than clearing one tile on a mis-tap.
+  const [bulk, setBulk] = useState<"" | "resolve" | "later" | "claude" | "limits" | "tickets">("");
+  const [confirmBulk, setConfirmBulk] = useState<"" | "resolve" | "later" | "claude" | "limits" | "tickets">("");
+  const [bulkNote, setBulkNote] = useState(""); // progress while N requests go out, e.g. "7 of 19"
+  // Which tile's "Later ▾" menu is open, and how many problems are currently waiting out of sight.
+  // The COUNT matters as much as the feature: a wait that isn't stated is just a quieter mute.
+  const [laterFor, setLaterFor] = useState("");
+  const [waiting, setWaiting] = useState<number | null>(null);
   // Problems recorded as fixed (migs 218/219) + whether the reference list is open.
   const [memories, setMemories] = useState<ErrMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
@@ -185,7 +209,7 @@ export default function AdminRepair() {
       // ?unresolved=1 — only errors nobody has cleared yet (mig 181 resolved_at). Resolving one
       // (or a landed fix, via the mig 183 trigger) drops it off this list; the full Logs page
       // still shows resolved rows. Without this the board could never be emptied.
-      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`),
+      adminFetch<{ actions: Action[]; waiting: number | null }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
@@ -207,7 +231,7 @@ export default function AdminRepair() {
     // that the page could not ask. Every feed now records its failure by name, the green card is
     // replaced by a "couldn't load" line with Retry, and the pill above shows "—" instead of 0.
     const failed: string[] = [];
-    if (e.ok) setErrors(e.data.actions || []); else failed.push("problems");
+    if (e.ok) { setErrors(e.data.actions || []); setWaiting(e.data.waiting ?? null); } else { failed.push("problems"); setWaiting(null); }
     if (q.ok) setRequests(q.data.requests || []); else failed.push("the Claude queue");
     if (h.ok) setRuns(h.data.runs || []); else failed.push("Claude's history");
     if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
@@ -276,6 +300,135 @@ export default function AdminRepair() {
       toast(g.count > 1 ? `Resolved · cleared ${g.count} reports` : "Resolved");
       loadHub(); // pull the new record so the "already fixed" list stays honest
     } else { toast(r.error || "Couldn't resolve that.", "err"); loadHub(); }
+  };
+
+  // ── "Remind me later" — the third answer this board never had (mig 344) ──────────────────────
+  // The only two used to be "mark it resolved" — which writes a record saying you handled something
+  // you have not, and tells Fix-now the problem is already fixed — or leave it red for ever, which
+  // is how four fortnight-old tiles teach you to stop looking. A wait leaves the problem OPEN: it
+  // comes back by itself, the full Audit & logs list never stopped showing it, and a fresh
+  // occurrence writes a fresh row that carries no wait at all.
+  const snoozeError = async (g: ErrGroup, hours: number, label: string) => {
+    setLaterFor("");
+    setResolving((prev) => new Set(prev).add(g.key));
+    setErrors((prev) => prev.filter((a) => errorGroupKey(a) !== g.key));
+    const r = await adminFetch<{ ok: boolean; snoozed?: number }>("/api/admin/resolve-error", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action_id: g.sample.id, snooze_hours: hours }),
+    });
+    setResolving((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+    if (r.ok) toast(`Back on the board ${label} — still open, just not now.`);
+    else toast(r.error || "Couldn't set that reminder.", "err");
+    loadHub();
+  };
+
+  // ── EVERY "ALL" ACTION ──────────────────────────────────────────────────────────────────────
+  // All of them are scoped exactly the way the page is: the restaurant picker at the top narrows
+  // what you can SEE, so it must narrow what "all" MEANS — a button that quietly acts on nine
+  // restaurants under a banner reading "Showing French House only" is the fault this page was
+  // already fixed for once.
+  const resolveAllProblems = async () => {
+    setConfirmBulk(""); setBulk("resolve");
+    const r = await adminFetch<{ ok: boolean; resolved: number }>("/api/admin/resolve-error", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true, ...(rid ? { restaurant_id: rid } : {}) }),
+    });
+    setBulk("");
+    if (r.ok) toast(`Cleared ${r.data.resolved} report${r.data.resolved === 1 ? "" : "s"} from the board. Anything that happens again comes straight back.`);
+    else toast(r.error || "Couldn't clear the board.", "err");
+    loadHub();
+  };
+
+  const snoozeAllProblems = async (hours: number, label: string) => {
+    setConfirmBulk(""); setBulk("later");
+    const r = await adminFetch<{ ok: boolean; snoozed: number }>("/api/admin/resolve-error", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true, snooze_hours: hours, ...(rid ? { restaurant_id: rid } : {}) }),
+    });
+    setBulk("");
+    if (r.ok) toast(`${r.data.snoozed} report${r.data.snoozed === 1 ? "" : "s"} will be back ${label}. None of them is marked fixed.`);
+    else toast(r.error || "Couldn't set those reminders.", "err");
+    loadHub();
+  };
+
+  // "Fix all" is OVERNIGHT, and says so on the button. `instant` opens a Claude window on the Mac
+  // per request — nineteen tiles would be nineteen windows, which is not a feature. The 2:30 robot
+  // takes a whole queue in one run and leaves one morning report, which is what a bulk send means.
+  // One request per problem GROUP, three at a time: each carries its own error context and its own
+  // err_key, so the queue can still match a ticket to its tile (mig 183) and a re-press cannot file
+  // a duplicate. Anything already queued is skipped rather than sent twice.
+  const sendAllToClaude = async () => {
+    setConfirmBulk(""); setBulk("claude");
+    const todo = groups.filter((g) => !alreadyQueued(g));
+    let done = 0, failedN = 0;
+    setBulkNote(`0 of ${todo.length}`);
+    // Mark them all as sent up front so the buttons settle immediately; a failure below un-marks.
+    setSent((prev) => { const n = new Set(prev); todo.forEach((g) => n.add(g.key)); return n; });
+    const queue = [...todo];
+    const worker = async () => {
+      for (;;) {
+        const g = queue.shift();
+        if (!g) return;
+        const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+          body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode: "overnight" }),
+        });
+        if (r.ok) done++;
+        else { failedN++; setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
+        setBulkNote(`${done + failedN} of ${todo.length}`);
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setBulk(""); setBulkNote("");
+    toast(failedN
+      ? `Queued ${done} for the 2:30 AM robot — ${failedN} wouldn't send. Try those again.`
+      : `Queued ${done} problem${done === 1 ? "" : "s"} for the 2:30 AM robot. It leaves one report in the morning.`,
+      failedN ? "err" : undefined);
+    loadHub();
+  };
+
+  // Clear every limit-reached ALERT on screen. Dismiss only — no limit is changed, nobody is let
+  // through and nobody is blocked; those three decide something about one person and are
+  // deliberately not offered in bulk (see the server note next to `dismiss_all`).
+  const dismissAllLimits = async () => {
+    setConfirmBulk(""); setBulk("limits");
+    const r = await adminFetch<{ ok: boolean; dismissed: number }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismiss_all", ...(rid ? { restaurant_id: rid } : {}) }),
+    });
+    setBulk("");
+    if (r.ok) toast(`Cleared ${r.data.dismissed} alert${r.data.dismissed === 1 ? "" : "s"}. No limit changed.`);
+    else toast(r.error || "Couldn't clear those alerts.", "err");
+    loadHub();
+  };
+
+  // Resolve every OPEN complaint on screen. One request each on purpose: the endpoint checks the
+  // restaurant for every row and writes its own audit line per complaint, which is exactly the
+  // record you want later — a single bulk line would say "resolved 9" and name none of them.
+  const resolveAllTickets = async () => {
+    setConfirmBulk(""); setBulk("tickets");
+    const todo = scopedIssues.filter((i) => i.status === "open");
+    let done = 0, failedN = 0;
+    setBulkNote(`0 of ${todo.length}`);
+    setIssues((prev) => prev.map((i) => (todo.some((t) => t.id === i.id) ? { ...i, status: "resolved" } : i)));
+    const queue = [...todo];
+    const worker = async () => {
+      for (;;) {
+        const it = queue.shift();
+        if (!it) return;
+        const r = await adminFetch<{ ok: boolean }>("/api/owner/issues?scope=all", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: it.id, status: "resolved" }),
+        });
+        if (r.ok) done++; else failedN++;
+        setBulkNote(`${done + failedN} of ${todo.length}`);
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setBulk(""); setBulkNote("");
+    toast(failedN ? `Resolved ${done} — ${failedN} wouldn't save.` : `Resolved ${done} complaint${done === 1 ? "" : "s"}.`, failedN ? "err" : undefined);
+    loadHub();
   };
 
   // Forget a record, so Fix-now treats that problem as brand new again. (It was never hiding
@@ -487,6 +640,74 @@ export default function AdminRepair() {
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? scopedName : "all restaurants"} · not yet resolved</span>
       </div>
 
+      {/* ── The board's "all" row (owner, 2026-08-20) ────────────────────────────────────────────
+          Three answers for the whole board, the same three each tile has. Every one asks first —
+          on a mis-tap, one tile is a nuisance and nineteen is a lost afternoon — and every one is
+          scoped by the picker above, so the button can never act on nine restaurants under a
+          banner that says one. */}
+      {!errLoading && !problemsErr && groups.length > 0 && (
+        <div className="rp-bulk">
+          <i className="fas fa-layer-group" aria-hidden="true" style={{ opacity: 0.65 }} />
+          <span className="rp-bulk-lead">
+            All {groups.length} problem{groups.length === 1 ? "" : "s"}{scopedName ? <> at <b>{scopedName}</b></> : " on this board"} at once:
+          </span>
+
+          {confirmBulk === "resolve" ? (
+            <span className="rp-bulk-ask">
+              <span>Mark all {groups.length} as handled?</span>
+              <button className="adm-btn primary" onClick={resolveAllProblems}>Yes, clear the board</button>
+              <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
+            </span>
+          ) : confirmBulk === "claude" ? (
+            <span className="rp-bulk-ask">
+              <span>Send all {groups.filter((g) => !alreadyQueued(g)).length} to the 2:30 AM robot?</span>
+              <button className="adm-btn primary" onClick={sendAllToClaude}>Yes, queue them</button>
+              <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
+            </span>
+          ) : confirmBulk === "later" ? (
+            <span className="rp-bulk-ask">
+              <span>Bring them all back…</span>
+              {LATER_CHOICES.map((c) => (
+                <button key={c.hours} className="adm-btn" onClick={() => snoozeAllProblems(c.hours, c.label)}>{c.label}</button>
+              ))}
+              <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
+            </span>
+          ) : (
+            <span className="rp-bulk-btns">
+              <button className="adm-btn" disabled={!!bulk} onClick={() => setConfirmBulk("resolve")}
+                title="I've handled all of these — clear the board. Anything that happens again comes straight back.">
+                <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />
+                {bulk === "resolve" ? "Clearing…" : "Resolve all"}
+              </button>
+              <button className="adm-btn" disabled={!!bulk || groups.every((g) => alreadyQueued(g))} onClick={() => setConfirmBulk("claude")}
+                title="Queue every one of these for the 2:30 AM robot — it takes the whole list in one run and leaves one morning report. Not 'now': instant opens a Claude window per problem.">
+                <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />
+                {bulk === "claude" ? `Sending ${bulkNote}…` : "Fix all overnight"}
+              </button>
+              <button className="adm-btn" disabled={!!bulk} onClick={() => setConfirmBulk("later")}
+                title="Not now — hide them until later, then show them again. Nothing is marked fixed.">
+                <i className="fas fa-clock" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />
+                {bulk === "later" ? "Setting…" : "Remind me later"}
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* A WAIT THAT ISN'T STATED IS JUST A QUIETER MUTE. Snoozed problems leave the board and the
+          console's red count, so the number of them has to be on screen — otherwise "3 problems
+          open" stops meaning "3 problems exist", which is the exact fault the capped-list line
+          further down was added for. `null` = we couldn't read the count, so we say nothing. */}
+      {!errLoading && !problemsErr && !!waiting && (
+        <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+          <i className="fas fa-clock" aria-hidden="true" style={{ opacity: 0.7 }} />
+          <span>
+            <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? " is" : "s are"} set to come back later — still open, not fixed, and
+            listed in <Link href="/aevinite/logs" style={{ color: "var(--accent)" }}>Audit &amp; logs</Link> the whole time.
+          </span>
+        </p>
+      )}
+
       {errLoading ? (
         <div className="adm-empty">Checking for problems…</div>
       ) : problemsErr ? (
@@ -569,9 +790,29 @@ export default function AdminRepair() {
                         <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmResolve("")}>Cancel</button>
                       </span>
                     ) : (
-                      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} disabled={resolving.has(g.key)} onClick={() => setConfirmResolve(g.key)} title="I've handled this — clear it from the board (stays gone after refresh)">
-                        <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />{resolving.has(g.key) ? "Resolving…" : "Resolve"}
-                      </button>
+                      <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {/* NOT NOW, WITHOUT LYING ABOUT IT (mig 344). Resolve says "I handled this"
+                            and writes a record that tells Fix-now the problem is fixed; leaving it
+                            red for a fortnight is how a board stops being read. This is the third
+                            answer: the tile goes away and comes back by itself, still open. */}
+                        {laterFor === g.key ? (
+                          <>
+                            <span className="adm-muted" style={{ fontSize: 12 }}>Back…</span>
+                            {LATER_CHOICES.map((c) => (
+                              <button key={c.hours} className="adm-btn" style={{ fontSize: 12 }} onClick={() => snoozeError(g, c.hours, c.label)}>{c.label}</button>
+                            ))}
+                            <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setLaterFor("")}>Cancel</button>
+                          </>
+                        ) : (
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={resolving.has(g.key)} onClick={() => setLaterFor(g.key)}
+                            title="Not now — hide this until later, then show it again. It stays OPEN and nothing is marked fixed.">
+                            <i className="fas fa-clock" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Later
+                          </button>
+                        )}
+                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={resolving.has(g.key)} onClick={() => setConfirmResolve(g.key)} title="I've handled this — clear it from the board (stays gone after refresh)">
+                          <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />{resolving.has(g.key) ? "Resolving…" : "Resolve"}
+                        </button>
+                      </span>
                     )}
                   </div>
                 </div>
@@ -642,7 +883,24 @@ export default function AdminRepair() {
         <h2>Rate limits reached</h2>
         {shownRlHits.length ? <span className="rp-chip danger">{shownRlHits.length}</span> : null}
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · {scopedName || "all restaurants"}</span>
-        <Link href="/aevinite/rate-limits" className="adm-btn" style={{ marginLeft: "auto", fontSize: 12 }}><i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Manage limits</Link>
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* DISMISS ALL, and only dismiss. It clears ALERTS — no limit is changed, nobody is let
+              through, nobody is blocked. Those three each decide something about one person, and a
+              one-tap "do it to everyone" is how a limit stops protecting anything. */}
+          {shownRlHits.length > 0 && (confirmBulk === "limits" ? (
+            <span className="rp-bulk-ask">
+              <span>Clear all {shownRlHits.length} alerts?</span>
+              <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={dismissAllLimits}>Yes, clear</button>
+              <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmBulk("")}>Cancel</button>
+            </span>
+          ) : (
+            <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!bulk} onClick={() => setConfirmBulk("limits")}
+              title="Clear every one of these alerts. No limit is changed and nobody is let through or blocked.">
+              <i className="fas fa-broom" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />{bulk === "limits" ? "Clearing…" : "Dismiss all"}
+            </button>
+          ))}
+          <Link href="/aevinite/rate-limits" className="adm-btn" style={{ fontSize: 12 }}><i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Manage limits</Link>
+        </span>
       </div>
       {errLoading && shownRlHits.length === 0 ? (
         <div className="adm-empty">Checking…</div>
@@ -705,7 +963,20 @@ export default function AdminRepair() {
         <h2>Complaints &amp; issues</h2>
         {openTickets ? <span className="rp-chip">{openTickets}</span> : null}
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>raised by staff &amp; owners · {scopedName || "all restaurants"}</span>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {openTickets > 0 && (confirmBulk === "tickets" ? (
+            <span className="rp-bulk-ask">
+              <span>Resolve all {openTickets}?</span>
+              <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={resolveAllTickets}>Yes, resolve</button>
+              <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmBulk("")}>Cancel</button>
+            </span>
+          ) : (
+            <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!bulk} onClick={() => setConfirmBulk("tickets")}
+              title="Mark every open complaint here as resolved. Each one is recorded separately, so the log still names them.">
+              <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />
+              {bulk === "tickets" ? `Resolving ${bulkNote}…` : "Resolve all"}
+            </button>
+          ))}
           <Dropdown value={ticketFilter} onChange={setTicketFilter} options={TICKET_FILTERS} ariaLabel="Filter complaints" minWidth={124} />
         </div>
       </div>
@@ -976,6 +1247,20 @@ export default function AdminRepair() {
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}
+        /* The "do this to all of them" row. Neutral, not amber and not red: nothing here is a
+           warning — it is a shortcut for work you were going to do one tile at a time. */
+        .rp-bulk{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 14px;border-radius:12px;border:var(--border);background:color-mix(in srgb,var(--text) 3%,var(--card));margin-bottom:10px;font-size:13px}
+        .rp-bulk-lead{flex:1 1 180px;min-width:0;color:var(--muted)}
+        .rp-bulk-lead b{color:var(--text)}
+        .rp-bulk-btns,.rp-bulk-ask{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .rp-bulk-ask > span{font-size:12.5px;color:var(--text);font-weight:600}
+        .rp-bulk .adm-btn{font-size:12px}
+        /* On a phone the lead sentence takes its own line so the buttons aren't crushed to one
+           word each — the same treatment .rp-sec-h already gets above. */
+        @media (max-width:560px){
+          .rp-bulk-lead{flex:1 1 100%}
+          .rp-bulk-btns,.rp-bulk-ask{flex:1 1 100%}
+        }
       `}</style>
     </>
   );
