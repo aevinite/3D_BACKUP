@@ -12,6 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const ok = (d: any, s = 200) => NextResponse.json(d, { status: s });
@@ -52,7 +54,8 @@ export async function POST(req: NextRequest) {
   await purge(id);
   const path = `${folder(id)}/photo-${Date.now()}.${ext}`;
   const up = await sb.storage.from(BUCKET).upload(path, new Uint8Array(await file.arrayBuffer()), { contentType: file.type, upsert: true });
-  if (up.error) return bad(up.error.message, 500);
+  // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
+  if (up.error) return adminFail("this photo", up.error, { action: "save" });
   const url = sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
   const wr = await setUrl(id, url, person.profile as Record<string, unknown>);
   if (wr.error) return bad("The photo uploaded but didn't save — please try again.", 500);

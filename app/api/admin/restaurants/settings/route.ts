@@ -234,7 +234,10 @@ export async function GET(req: NextRequest) {
   const settings = (row.data as unknown as Patch) || {};
   const count = Math.min(Math.max(Math.round(Number(settings.table_count)) || 12, 1), 500);
   const codes = await ensureCodes(rid, count);
-  if ("error" in codes) return NextResponse.json({ error: codes.error }, { status: 500 });
+  // ensureCodes hands back the database's own words; they belong in `detail` and the log, not in the
+  // console's red toast (lib/adminFail). Its one non-database message ("couldn't mint unique codes")
+  // is already a sentence, and adminFail passes it through the same way.
+  if ("error" in codes) return adminFail("this restaurant's table QR codes", { message: codes.error }, { action: "load" });
   return NextResponse.json({ settings, slug: rest.data.slug, codes });
 }
 
@@ -277,6 +280,20 @@ export async function POST(req: NextRequest) {
       sb.from("banquet_bills").select("id", { count: "exact", head: true }).eq("restaurant_id", rid),
       sb.from("settings").select("banquet_bill_next").eq("restaurant_id", rid).maybeSingle(),
     ]);
+    // ── A LOCK MUST NOT OPEN BECAUSE A COUNT FAILED (T20 sweep, 2026-08-19) ──────────────────────
+    // Neither read's `.error` was inspected. `issued.count` is null on a failed count, so
+    // `Number(null) || 0` came out 0 — "no banquet bills have been issued" — and the refusal below
+    // never fired. A passing database hiccup was therefore enough to let the starting number of a
+    // live bill series be moved after bills had already gone out on it, which is precisely the thing
+    // an audit checks and the reason this refusal exists at all.
+    //
+    // Same rule as every other gate in this codebase: refuse on doubt. A person can try again in a
+    // second; a renumbered series cannot be untangled. (`cur` matters for the same reason — a failed
+    // read made `current` 1, so a request setting it to 1 would have read as "no change" and slipped
+    // past the comparison.)
+    if (issued.error || cur.error) {
+      return adminFail("this restaurant's banquet bill numbering", issued.error || cur.error, { action: "save" });
+    }
     const already = Number(issued.count) || 0;
     const current = Number(cur.data?.banquet_bill_next) || 1;
     if (already > 0 && Number.isFinite(n) && n !== current) {
@@ -303,7 +320,20 @@ export async function POST(req: NextRequest) {
     const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
     const base = cleanClonedSettings(template.data);
     saved = await sb.from("settings")
-      .upsert({ ...base, id: rest.data.slug, restaurant_id: rid, ...patch }, { onConflict: "restaurant_id" })
+  // THE SETTINGS ROW IS KEYED BY THE RESTAURANT'S OWN ID, NOT ITS SLUG (T20 sweep, 2026-08-19).
+  // `settings.id` is that table's PRIMARY KEY (mig 003). Migration 319 frees a restaurant's slug the
+  // moment it goes to the recycle bin — but a binned restaurant KEEPS its settings row, so a slug can
+  // be free in `restaurants` and still taken in `settings`. Keyed by slug, the upsert below (whose
+  // conflict target is restaurant_id, not id) would then hit `settings_pkey` and hand the admin a raw
+  // "duplicate key value violates unique constraint" for flipping a switch. The uuid cannot collide,
+  // and nothing anywhere looks a settings row up by slug — every read is `.eq("restaurant_id", …)`
+  // except the four legacy `id='site'` reads, which are restaurant #1's own row.
+  //
+  // The create route and the quick-features route were both given this on 2026-08-16 and these were
+  // left on the old key. Unreachable today (every restaurant on both stacks has a settings row, so
+  // this clone branch never runs) — closed now because the symptom is a database sentence on his
+  // screen, and it is invisible until the day it happens.
+      .upsert({ ...base, id: rid, restaurant_id: rid, ...patch }, { onConflict: "restaurant_id" })
       .select(SELECT).maybeSingle();
   }
   if (saved.error) return adminFail("this restaurant's settings", saved.error, { action: "save" });

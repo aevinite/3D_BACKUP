@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, inScope, type OwnerScope, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
@@ -30,8 +30,15 @@ const disabledResp = () =>
   NextResponse.json({ error: "Feedback & issues aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
 
 export async function GET(req: NextRequest) {
-  let scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  let scope = sc.scope;
   const gated = await gateIssuesScope(scope);
   if (!gated) return disabledResp();
   scope = gated;
@@ -96,8 +103,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  let scope = sc.scope;
   const gatedP = await gateIssuesScope(scope);
   if (!gatedP) return disabledResp();
   scope = gatedP;
@@ -135,8 +143,9 @@ export async function PATCH(req: NextRequest) {
 // straight through) and removes the trap in advance. (Found by the skipped-phase audit 2026-08-04.)
 export const POST = withIdempotency(postImpl, "owner");
 async function postImpl(req: NextRequest) {
-  let scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  let scope = sc.scope;
   const gatedC = await gateIssuesScope(scope);
   if (!gatedC) return disabledResp();
   scope = gatedC;

@@ -147,7 +147,9 @@
     "db:vacuum-rebuild": "node scripts/db-maintain.mjs",
     "verify:print-paper": "node scripts/verify-billdoc-paper.mjs",
     "verify:admin-money": "node scripts/verify-admin-money.mjs",
-    "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs"
+    "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs",
+    "verify:owner-scope": "node scripts/verify-owner-scope-503.mjs",
+    "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",

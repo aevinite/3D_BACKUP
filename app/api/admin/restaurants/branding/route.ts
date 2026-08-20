@@ -7,6 +7,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { isHexColor, sanitizeBrandTheme } from "@/lib/brandTheme";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const ok = (d: any, s = 200) => NextResponse.json(d, { status: s });
@@ -20,7 +22,8 @@ export async function GET(req: NextRequest) {
   if (!isUuid(rid)) return bad("Missing or invalid restaurant_id.");
   const { data, error } = await sb.from("restaurants")
     .select("accent_color, theme, hero_title, tagline, logo_text, logo_url").eq("id", rid).maybeSingle();
-  if (error) return bad(error.message, 500);
+  // Plain sentence to the screen, raw text to `detail` + the log — see the note in /api/admin/usage.
+  if (error) return adminFail("this restaurant's branding", error, { action: "load" });
   return ok({
     accent_color: data?.accent_color ?? null,
     theme: (data?.theme && typeof data.theme === "object") ? data.theme : {},
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
   const exists = (await sb.from("restaurants").select("id").eq("id", rid).maybeSingle()).data;
   if (!exists) return bad("Restaurant not found.", 404);
   const { error } = await sb.from("restaurants").update(patch).eq("id", rid);
-  if (error) return bad(error.message, 500);
+  if (error) return adminFail("this restaurant's branding", error, { action: "save" });
   await logAction("admin", "restaurant_branding", { actor: "admin", restaurant_id: rid, detail: `updated branding (${Object.keys(patch).join(", ")})` });
   return ok({ ok: true });
 }

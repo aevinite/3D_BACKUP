@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     restaurant_id: restaurant_id as string, device_id: deviceIdFrom(req),
     detail: `Google review link ${norm.url ? "set" : "cleared"} · mode ${mode}`,
   });
-  const rest = await sb.from("restaurants").select("id, slug").eq("id", restaurant_id).maybeSingle();
+  const rest = await sb.from("restaurants").select("id").eq("id", restaurant_id).maybeSingle();
   if (rest.error) return adminFail("this restaurant's review link", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
 
@@ -83,7 +83,20 @@ export async function POST(req: NextRequest) {
   // (mirrors the features/panels/staff-features routes), then set id/restaurant_id + link + mode.
   const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
   const base = cleanClonedSettings(template.data); // strip #1's identity/geo/tax so they don't leak
-  const newRow = { ...base, id: rest.data.slug, restaurant_id, ...patch };
+  // THE SETTINGS ROW IS KEYED BY THE RESTAURANT'S OWN ID, NOT ITS SLUG (T20 sweep, 2026-08-19).
+  // `settings.id` is that table's PRIMARY KEY (mig 003). Migration 319 frees a restaurant's slug the
+  // moment it goes to the recycle bin — but a binned restaurant KEEPS its settings row, so a slug can
+  // be free in `restaurants` and still taken in `settings`. Keyed by slug, the upsert below (whose
+  // conflict target is restaurant_id, not id) would then hit `settings_pkey` and hand the admin a raw
+  // "duplicate key value violates unique constraint" for flipping a switch. The uuid cannot collide,
+  // and nothing anywhere looks a settings row up by slug — every read is `.eq("restaurant_id", …)`
+  // except the four legacy `id='site'` reads, which are restaurant #1's own row.
+  //
+  // The create route and the quick-features route were both given this on 2026-08-16 and these were
+  // left on the old key. Unreachable today (every restaurant on both stacks has a settings row, so
+  // this clone branch never runs) — closed now because the symptom is a database sentence on his
+  // screen, and it is invisible until the day it happens.
+  const newRow = { ...base, id: restaurant_id, restaurant_id, ...patch };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("google_review_url, google_review_mode").maybeSingle();
   if (ins.error) return adminFail("this restaurant's review link", ins.error, { action: "save" });
   await audit();

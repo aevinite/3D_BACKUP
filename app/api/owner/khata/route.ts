@@ -9,7 +9,7 @@
 // mig-184 RPCs as the manager panel, so the two views can never disagree on what's owed.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, type PartialKey } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, type PartialKey } from "@/lib/ownerScope";
 import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { restaurantNames } from "@/lib/restaurantNames";
@@ -29,8 +29,15 @@ const istMonthStartIso = () => {
 const scopedIds = scopedRestaurantIds;
 
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
   // A half-read restaurant list would make "total outstanding" quietly too small, so it is
   // answered as a retryable failure rather than a wrong figure (T9 sweep, 2026-08-05).
   let ids: string[];
@@ -52,6 +59,11 @@ export async function GET(req: NextRequest) {
   // Shared lookup (finding F17) — checks its own error rather than silently rendering every debt's
   // restaurant as "—", which on a multi-restaurant estate makes "who owes what" unreadable.
   const names = await restaurantNames(moduleIds);
+  // …AND SAY SO WHEN IT COULDN'T BE READ (T20 sweep, 2026-08-19). The helper reports a failed lookup
+  // as `partial` for exactly this reason, and five of its six callers pass that on. This one dropped
+  // it, so on a multi-restaurant estate every debt in the list rendered its restaurant as "—" with
+  // nothing on the page saying why — which is the whole of finding F17 back again, one route later.
+  // It rides the `partial` array this route already returns, so no screen has to learn anything new.
 
   const nowIso = new Date().toISOString();
   // HOW MANY PEOPLE THE LIST SHOWS. Bounded by PERSON (mig 309), biggest debt first, so everyone
@@ -106,6 +118,7 @@ export async function GET(req: NextRequest) {
     );
   }
   const partial: PartialKey[] = [];
+  if (names.partial) partial.push("restaurantNames");
   if (collMonthQ.error) { console.error("[owner/khata] month collected failed:", collMonthQ.error.message); partial.push("collectedMonth"); }
   if (collTodayQ.error) { console.error("[owner/khata] today collected failed:", collTodayQ.error.message); partial.push("collectedToday"); }
 

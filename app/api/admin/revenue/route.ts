@@ -10,6 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +35,8 @@ export async function GET(req: NextRequest) {
   // Check ALL three — else a failed payments/restaurants read would show confident zeros / "—"
   // names with a 200 instead of an error the page can retry (audit).
   const anyErr = billingQ.error || paymentsQ.error || restsQ.error;
-  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
+  // Plain sentence to the screen, raw text to `detail` + the log — see the note in /api/admin/usage.
+  if (anyErr) return adminFail("the platform revenue figures", anyErr, { action: "load" });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   // Only count LIVE restaurants (matches the Billing page's H4 rule + its Trial count): drop
