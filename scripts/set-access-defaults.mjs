@@ -43,6 +43,20 @@ const ARGS = process.argv.slice(2);
 const arg = (n, d) => { const i = ARGS.indexOf(n); return i === -1 ? d : ARGS[i + 1]; };
 const SLUG = arg("--slug", "aangan");
 const APPLY = ARGS.includes("--apply");
+// --only <id,id> — reset JUST these switches instead of the whole set.
+//
+// WHY THIS EXISTS (2026-08-20). A blanket reset is the wrong tool when only a switch or two has
+// drifted, and on Aangan it is actively dangerous: the QA suite records a DELIBERATE exception for
+// `auto_print_kot` ("Aangan has no kitchen screen — its tickets print or nobody sees the order"),
+// and the suite's own failure message used to say "run: set-access-defaults --apply". Following
+// that advice to fix two unrelated switches would ALSO have switched Aangan's printing off, so
+// nobody in that kitchen would ever see an order again. The advice and the tool disagreed with the
+// exception the same repo had written down.
+//
+// Named by node id (the model's own id, e.g. table_ops), and an id that matches nothing is a
+// REFUSAL rather than a silent no-op — "I reset it and nothing happened" is how a typo turns into
+// a switch everyone believes was fixed.
+const ONLY = (arg("--only", "") || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 const env = {};
 for (const l of readFileSync(join(ROOT, ".env.local"), "utf8").split("\n")) {
@@ -109,7 +123,16 @@ const featureNodes = ALL_NODES
     name: `${n.name} (Feature)`,
   }));
 
-const defaultNodes = [...realNodes, ...featureNodes];
+let defaultNodes = [...realNodes, ...featureNodes];
+if (ONLY.length) {
+  const unknown = ONLY.filter((id) => !defaultNodes.some((n) => n.id === id));
+  if (unknown.length) {
+    console.error(`--only names ${unknown.length} switch(es) that carry no default: ${unknown.join(", ")}`);
+    process.exit(1);
+  }
+  defaultNodes = defaultNodes.filter((n) => ONLY.includes(n.id));
+  console.log(`(--only: ${defaultNodes.length} of the model's switches — the rest are left exactly as they are)`);
+}
 
 let patch = {};
 const diffs = [];
