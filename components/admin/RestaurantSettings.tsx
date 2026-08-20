@@ -207,9 +207,32 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   }, [restaurant.id]);
 
   const set = (k: string, v: unknown) => setDraft((d) => ({ ...d, [k]: v }));
+  const [autoSaved, setAutoSaved] = useState<string | null>(null);
+  // KEYS THIS CARD SAVES BY ITSELF — "busy" while a write is out, "done" once it has landed (or
+  // been refused and put back). Two jobs, one record:
+  //   • the line under the control reads Saving… / ✓ Saved / Saves on its own from it, and
+  //   • dirtyKeys IGNORES every key in it, so the shared Save bar can never appear for a control
+  //     that saves itself. That is the whole point of "there shouldn't be a button" (owner,
+  //     2026-08-20): while the write was in flight the draft differed from the stored value, the
+  //     bar counted it as unsaved, and a Save button flashed up next to a control that needed no
+  //     pressing. A refusal reverts the draft, so nothing is lost by leaving them out for good.
+  const [selfSaving, setSelfSaving] = useState<Record<string, "busy" | "done">>({});
+  // The three-state line that sits under every self-saving control. ONE place, so a select, a
+  // switch and a radio row can never end up telling the admin three different stories.
+  const savedHint = (k: string) => {
+    const saving = selfSaving[k] === "busy";
+    const done = autoSaved === k;
+    return (
+      <span aria-live="polite" style={{ ...hintStyle, display: "block", fontWeight: done || saving ? 700 : 400,
+        color: done ? "var(--adm-ok, #16a34a)" : saving ? "var(--muted)" : "var(--muted)" }}>
+        {done ? "✓ Saved" : saving ? "Saving…" : "Saves on its own"}
+      </span>
+    );
+  };
   const dirtyKeys = useMemo(
-    () => KEYS.filter((k) => JSON.stringify(draft[k] ?? null) !== JSON.stringify(base[k] ?? null)),
-    [draft, base],
+    // …minus anything a self-saving control owns (see selfSaving): those never want a button.
+    () => KEYS.filter((k) => !selfSaving[k] && JSON.stringify(draft[k] ?? null) !== JSON.stringify(base[k] ?? null)),
+    [draft, base, selfSaving],
   );
   const dirty = loadOk && dirtyKeys.length > 0;
 
@@ -271,7 +294,6 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // So: a discrete pick POSTS IMMEDIATELY (autoSaveNow), the debounce survives per KEY for the
   // typed-number path that genuinely needs it, and a pending write is FLUSHED on unmount rather
   // than dropped. `keepalive` lets that last flush outlive the component.
-  const [autoSaved, setAutoSaved] = useState<string | null>(null);
   const alive = useRef(true);
   const pending = useRef(new Map<string, { v: unknown; timer: number }>());
   const cancelPending = () => {
@@ -282,15 +304,38 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ restaurant_id: restaurant.id, [k]: v }), keepalive,
   }), [restaurant.id]);
-  useEffect(() => () => {
-    alive.current = false;
-    // FLUSH, don't drop: whatever the debounce still owes goes to the server now.
-    for (const [k, { v, timer }] of pending.current) { window.clearTimeout(timer); void postSetting(k, v, true).catch(() => {}); }
-    pending.current.clear();
+  useEffect(() => {
+    // SET IT BACK TO TRUE ON EVERY MOUNT, not just false on unmount (T16 round 2, 2026-08-20).
+    //
+    // `alive` is a ref, so it SURVIVES a remount — and React mounts, unmounts and remounts every
+    // component in development. The first mount's cleanup therefore left it false for good, and
+    // from then on every guarded state update was skipped: the write still went to the server, but
+    // "Saving…", "✓ Saved" and the put-it-back-on-a-refusal all did nothing, and the Save bar had
+    // nothing to clear it. Measured: `selfSaving` stayed {} through every render. A ref used as a
+    // liveness flag has to be re-armed here or it is a one-shot.
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      // FLUSH, don't drop: whatever the debounce still owes goes to the server now.
+      for (const [k, { v, timer }] of pending.current) { window.clearTimeout(timer); void postSetting(k, v, true).catch(() => {}); }
+      pending.current.clear();
+    };
   }, [postSetting]);
+  // ── THE WORD UNDER THE CONTROL IS THE ONLY REPORT, SO IT MUST BE TRUE (owner, 2026-08-20:
+  // "there shouldn't be a button also… it should be written that this has been saved, and that
+  // return will only come when it is actually been saved").
+  //
+  // So there are exactly three states and no Save button anywhere near these controls:
+  //   • "Saves on its own"  — nothing in flight
+  //   • "Saving…"           — the request is out; nothing is claimed yet
+  //   • "✓ Saved"           — the SERVER answered ok, and the value shown is the value it stored
+  //
+  // And a REFUSAL puts the control back to what is really stored, rather than leaving the new
+  // value on screen for a Save bar to offer later. That is what makes "no button" honest: the
+  // screen can never sit there showing a number the restaurant is not on.
   const commitSetting = async (k: string, v: unknown) => {
     pending.current.delete(k);
-    if (alive.current) setErr(null);
+    if (alive.current) { setErr(null); setSelfSaving((s) => ({ ...s, [k]: "busy" })); }
     try {
       const r = await postSetting(k, v);
       const d = await r.json();
@@ -304,7 +349,13 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       setAutoSaved(k);
       window.setTimeout(() => setAutoSaved((cur) => (cur === k ? null : cur)), 1800);
     } catch (e) {
-      if (alive.current) setErr(e instanceof Error ? e.message : String(e));
+      if (!alive.current) return;
+      // Put the control back on the stored value — no half-saved screen, and nothing for a
+      // button to pick up later.
+      setDraft((x) => ({ ...x, [k]: base[k] }));
+      setErr((e instanceof Error ? e.message : String(e)) + " — the setting was put back.");
+    } finally {
+      if (alive.current) setSelfSaving((s) => ({ ...s, [k]: "done" }));
     }
   };
   // A select / radio / switch: one decision, one write, no waiting.
@@ -313,10 +364,13 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     if (p) { window.clearTimeout(p.timer); pending.current.delete(k); }
     void commitSetting(k, v);
   };
+  // A key claimed here is out of the Save bar's hands from now on, in BOTH paths — the debounced
+  // one has to claim it up front too, or the bar appears for the 600 ms it is waiting.
   // A typed number: debounced PER KEY so a second field can't cancel the first one's write.
   const autoSave = (k: string, v: unknown) => {
     const p = pending.current.get(k);
     if (p) window.clearTimeout(p.timer);
+    setSelfSaving((s) => ({ ...s, [k]: "busy" }));
     const timer = window.setTimeout(() => { void commitSetting(k, v); }, 600);
     pending.current.set(k, { v, timer });
   };
@@ -549,11 +603,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           together as one sentence — "Fewer = bigger tiles.Saves on its own" (spotted on the
           moved Tables card, 2026-08-01). display:block puts each on its own line. */}
       {opts.hint && <span className="adm-muted" style={{ ...hintStyle, display: "block" }}>{opts.hint}</span>}
-      {opts.auto && (
-        <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
-          {autoSaved === k ? "✓ Saved" : "Saves on its own"}
-        </span>
-      )}
+      {opts.auto && savedHint(k)}
     </label>
   );
   // pickNumber: choose a whole number from a list instead of typing one (owner, 2026-08-02:
@@ -582,9 +632,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
-        <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
-          {autoSaved === k ? "✓ Saved" : "Saves on its own"}
-        </span>
+        {savedHint(k)}
       </label>
     );
   };
@@ -620,9 +668,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           </span>
         </label>
       ))}
-      <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
-        {autoSaved === k ? "✓ Saved" : "Saves on its own"}
-      </span>
+      {savedHint(k)}
     </div>
   );
 
