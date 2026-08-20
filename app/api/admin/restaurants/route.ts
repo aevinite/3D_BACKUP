@@ -36,16 +36,32 @@ function genPassword(): string {
   return s;
 }
 
-// 90-day recycle-bin retention. Kept in ONE place (mirrored by the SQL guard in
-// admin_purge_restaurant, migration 128) so the lock can't drift between UI + DB.
-const RETENTION_DAYS = 90;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ── THE RECYCLE BIN NO LONGER LOCKS THE DOOR (owner, 2026-08-20) ──────────────────────────────
+// It used to be a 90-DAY WAIT: a binned restaurant could only be permanently removed once 90 days
+// had passed, enforced here AND in the SQL function admin_purge_restaurant (mig 128), with no
+// override anywhere. His instruction: *"i wanna chnage the rule that you camn't permamnetly delete
+// from recycle bin what i wanna do is you can able to dlete from recycyle bin"* — the bin is his
+// own console, on his own platform, and waiting three months to clear out a restaurant he deleted
+// this morning is a lock he never wanted. Migration 342 drops the SQL half of it.
+//
+// WHAT DID **NOT** GO WITH IT, because none of it was the thing he objected to:
+//   · type-the-exact-name to confirm, and the offer to download a full backup first;
+//   · the money is still KEPT (mig 309) — bills, invoices, payments and credit notes survive a
+//     purge and stay readable in the Bills ledger. A sale can never disappear
+//     (docs/COMPLIANCE-GUARDRAILS.md §3.0), and removing a restaurant was never a route around it;
+//   · restaurant #1 (the default) can still never be purged;
+//   · the purge is still written to the admin's own audit trail.
+// `daysHeld` below replaces `daysLeft`: the bin now REPORTS how long something has sat there
+// instead of counting down to a permission.
+const RETENTION_DAYS = 0;
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
 
-  // ?deleted=1 → the RECYCLE BIN: only trashed restaurants, with the retention
-  // countdown + whether they're yet eligible to purge. Kept separate from the
-  // main list so a deleted restaurant never leaks back into the live table.
+  // ?deleted=1 → the RECYCLE BIN: only trashed restaurants, with how long each has sat there.
+  // Kept separate from the main list so a deleted restaurant never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {
     // A PURGED RESTAURANT IS NOT IN THE BIN ANY MORE (T20 sweep, 2026-08-16).
     //
@@ -63,12 +79,15 @@ export async function GET(req: NextRequest) {
     const now = Date.now();
     const trashed = (binQ.data || []).map((r) => {
       const deletedAt = r.deleted_at as string;
-      const purgeEligibleAt = new Date(new Date(deletedAt).getTime() + RETENTION_DAYS * 86400000).toISOString();
-      const daysLeft = Math.max(0, Math.ceil((new Date(purgeEligibleAt).getTime() - now) / 86400000));
+      // How long it has SAT here — a fact, not a permission. `canPurge` is now always true (the
+      // default restaurant is the one thing the purge itself still refuses, and it can't be binned
+      // in the first place), and `daysLeft` is gone rather than left lying at 0 for a screen to
+      // render as "0 days left". Both fields kept their names where they still mean something.
+      const daysHeld = Math.max(0, Math.floor((now - new Date(deletedAt).getTime()) / 86400000));
       return {
         id: r.id, slug: r.slug, name: r.name,
         deletedAt, deletedBy: r.deleted_by || null, reason: r.delete_reason || null,
-        purgeEligibleAt, daysLeft, canPurge: now >= new Date(purgeEligibleAt).getTime(),
+        daysHeld, canPurge: true,
       };
     });
     return ok({ trashed, retentionDays: RETENTION_DAYS });
@@ -105,10 +124,14 @@ export async function PATCH(req: NextRequest) {
   let body: any = {}; try { body = await req.json(); } catch {}
   const rid = String(body?.restaurant_id || "");
   if (!rid) return bad("Missing restaurant_id.");
+  // Shape-checked before it reaches a uuid column, like every sibling admin route — otherwise a
+  // stale link produces a raw Postgres 500 body instead of the tidy "Restaurant not found." below.
+  if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
   // owner_user_id may be a uuid (assign) or null/"" (clear the owner).
   const raw = body?.owner_user_id;
   const ownerId = raw == null || raw === "" ? null : String(raw);
   if (ownerId) {
+    if (!UUID.test(ownerId)) return bad("That user isn't an owner.", 400);
     const owner = (await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
     if (!owner) return bad("That user isn't an owner.", 400);
   }
@@ -119,7 +142,16 @@ export async function PATCH(req: NextRequest) {
   // co-owners (a different user_id) untouched. Skipping this would let the OLD
   // primary keep seeing this restaurant after a reassign/clear — the exact
   // cross-owner leak we must prevent now that scope reads the join table.
-  const prev = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
+  // ── "SAVED" MUST MEAN SAVED (T20 sweep item 15, owner-approved 2026-08-20) ──────────────────
+  // This read was already here, but only its `.data` was used: an unknown-but-valid uuid made
+  // `prev` undefined, the UPDATE below matched 0 rows, and the handler still answered {ok:true}.
+  // The console said "Saved" and the owner still could not see the restaurant — the same silent-
+  // success shape the branding route was fixed for on 2026-07-06. A FAILED read is now told apart
+  // from a MISSING row, because answering "not found" on a blip would be its own lie.
+  const prevQ = await sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1);
+  if (prevQ.error) return adminFail("this restaurant's owner", prevQ.error, { action: "load" });
+  const prev = prevQ.data?.[0];
+  if (!prev) return bad("Restaurant not found — it may have been removed. Reload the list and try again.", 404);
   const oldOwner = (prev?.owner_user_id as string | null) || null;
   const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
   if (error) return adminFail("this restaurant's owner", error, { action: "save" });
@@ -196,28 +228,69 @@ export async function POST(req: NextRequest) {
     // links were deleted at purge time and only the bills were kept (mig 309). Refuse it in words,
     // rather than quietly returning an empty restaurant to the live list (T20 sweep, 2026-08-16).
     if (r.purged_at) return bad("This restaurant was permanently removed — its menu, staff and settings are gone, so it can't be brought back. Its bills are still on record in the Bills ledger.", 409);
-    // THE NAME MAY HAVE BEEN TAKEN WHILE IT SAT IN THE BIN (owner, 2026-08-13: "inside bin no name
-    // lock… and that name will be rewritten if same name exist"). Since mig 319 only LIVE
-    // restaurants reserve a slug, so restoring can collide — and a collision on the unique index
-    // would surface as a raw database error. So the RETURNING one is renamed, never the restaurant
-    // currently using the name: whoever is live and serving guests keeps their web address.
+    // ── THE NAME MAY HAVE BEEN TAKEN WHILE IT SAT IN THE BIN ──────────────────────────────────
+    // Since mig 319 only a LIVE restaurant reserves a web address, so a name freed by binning can
+    // be handed to somebody else — and restoring then collides on the unique index.
+    //
+    // THIS USED TO RENAME THE RETURNING RESTAURANT SILENTLY (aangan → aangan-2) and mention it in
+    // the response. The owner's instruction on 2026-08-20 replaces that with a QUESTION: *"if the
+    // name is available in the resutrant and recycle and recycle want to restore so it say like
+    // name already tke 2 option can show 1 opion close 2nd chnage name and restore which will
+    // change anme and restore that stuff"*. So: 409 + `conflict`, the screen asks, and NOTHING is
+    // written until he presses a button. The same shape the OWNER bin has used since 2026-08-01
+    // (mig 245) — one recycle bin, one way of answering a clash.
+    //
+    // Only TWO ways out, deliberately, and they are the two he named: close (nothing happens), or
+    // change the returning restaurant's name and restore under it. The LIVE restaurant currently
+    // serving guests at that address is never touched — its QR codes are on real tables.
+    const slugOf = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    const takenBy = async (s: string) => {
+      const q = await sb.from("restaurants").select("id, name, active").eq("slug", s).is("deleted_at", null).neq("id", rid).limit(1);
+      // A clash check that cannot read is NOT "the name is free" — writing on that assumption is
+      // how you hit the raw unique-index error this whole branch exists to avoid.
+      if (q.error) throw q.error;
+      return (q.data || [])[0] || null;
+    };
+    // The admin's answer to a previous 409: { resolve: { name: "Aangan (old)", slug?: "aangan-old" } }.
+    const resolve = (body?.resolve && typeof body.resolve === "object") ? body.resolve as { name?: unknown; slug?: unknown } : null;
+    let name = r.name as string;
     let slug = r.slug as string;
-    let renamed: string | null = null;
-    const taken = async (s: string) =>
-      ((await sb.from("restaurants").select("id").eq("slug", s).is("deleted_at", null).neq("id", rid).limit(1)).data || []).length > 0;
-    if (await taken(slug)) {
+    if (resolve) {
+      const wantName = String(resolve.name ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
+      if (wantName.length < 2) return bad("The new name must be at least 2 characters.");
+      const wantSlug = slugOf(String(resolve.slug ?? "") || wantName);
+      if (wantSlug.length < 2) return bad("That name doesn't make a usable web address — add some letters or numbers.");
+      name = wantName;
+      slug = wantSlug;
+    }
+    let holder: { id: string; name: string; active: boolean } | null;
+    try { holder = await takenBy(slug) as { id: string; name: string; active: boolean } | null; }
+    catch (e) { return adminFail("this restaurant's web address", e as { message?: string }, { action: "load" }); }
+    if (holder) {
+      // A suggestion the admin can accept with one press, and it is checked to be free itself —
+      // otherwise the dialog offers a name that fails the moment it is submitted.
       const base = slug.replace(/-\d+$/, "");
-      let n = 2;
-      while (await taken(`${base}-${n}`) && n < 50) n++;
-      slug = `${base}-${n}`;
-      renamed = slug;
+      let suggested = `${base}-2`;
+      try { for (let n = 2; n < 50 && (await takenBy(suggested)); n++) suggested = `${base}-${n + 1}`; } catch { /* keep the plain suggestion */ }
+      return NextResponse.json({
+        error: `The web address /r/${slug}/menu is taken by "${holder.name}".`,
+        conflict: {
+          slug, restored: { id: rid, name: r.name, slug: r.slug },
+          holder: { id: holder.id, name: holder.name, active: holder.active === true },
+          suggestedName: `${r.name} (old)`, suggestedSlug: suggested,
+          // Told the admin so a second clash reads as "you picked one that is also taken", not as
+          // the dialog silently reopening on itself.
+          retry: !!resolve,
+        },
+      }, { status: 409 });
     }
     const { error } = await sb.from("restaurants")
-      .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate, slug })
+      .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate, name, slug })
       .eq("id", rid);
     if (error) return adminFail("restoring this restaurant", error, { action: "save" });
-    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — its web address was taken, so it came back as "${renamed}"` : ""}` });
-    return ok({ ok: true, restored: true, active: activate, ...(renamed ? { renamed } : {}) });
+    const renamed = slug !== r.slug ? slug : null;
+    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — renamed to "${name}" at /r/${renamed}/menu because its old web address was taken` : ""}` });
+    return ok({ ok: true, restored: true, active: activate, name, slug, ...(renamed ? { renamed } : {}) });
   }
 
   // ── purge_restaurant — PERMANENT, irreversible removal of a binned restaurant's
@@ -226,21 +299,23 @@ export async function POST(req: NextRequest) {
   // "keep bills forever, purge only the rest") — orders, sessions, payments, credit
   // notes, invoice history and the Removals audit all survive, which is why the
   // restaurants row itself survives too, marked `purged_at`, for them to hang off.
-  // The atomic SQL function admin_purge_restaurant enforces the three hard rules
-  // (never the default, never before 90 days, never twice) independently of this
-  // handler. There is NO early-purge override. ──────────────────────────────────
+  // The atomic SQL function admin_purge_restaurant enforces the two hard rules that
+  // remain (never the default, never twice) independently of this handler. THE 90-DAY
+  // WAIT IS GONE (owner, 2026-08-20 — see the note on RETENTION_DAYS at the top of this
+  // file); migration 342 removed its SQL half so the two sides can't disagree. ────────
   if (action === "purge_restaurant") {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
+    if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
     if (rid === DEFAULT_RID) return bad("The default restaurant can't be purged.", 400);
-    const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    // A FAILED READ IS NOT "NOT FOUND". Deciding a refusal from an unchecked read is the fault
+    // fixed in this same file's banquet-numbering gate (T20 item 4) — here it would mean answering
+    // "Restaurant not found" for a blip, which sends the admin looking for a row that is right there.
+    const rQ = await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1);
+    if (rQ.error) return adminFail("this restaurant", rQ.error, { action: "load" });
+    const r = rQ.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
-    if (!r.deleted_at) return bad("Only a restaurant in the recycle bin can be purged.", 409);
-    const eligibleAt = new Date(r.deleted_at).getTime() + RETENTION_DAYS * 86400000;
-    if (Date.now() < eligibleAt) {
-      const daysLeft = Math.ceil((eligibleAt - Date.now()) / 86400000);
-      return bad(`Locked for ${daysLeft} more ${daysLeft === 1 ? "day" : "days"} — a restaurant can only be purged 90 days after deletion.`, 423);
-    }
+    if (!r.deleted_at) return bad("Only a restaurant in the recycle bin can be removed. Move it to the recycle bin first.", 409);
     // Atomic hard delete (children → parents → the row) in one transaction.
     const { error } = await sb.rpc("admin_purge_restaurant", { p_rid: rid });
     // The SQL function raises in words a person can act on ("already been purged", "Retention
@@ -250,7 +325,10 @@ export async function POST(req: NextRequest) {
     if (error) {
       const m = String(error.message || "");
       if (/already been purged/i.test(m)) return bad("This restaurant has already been permanently removed. Its bills are still on record in the Bills ledger.", 409);
-      if (/Retention lock/i.test(m)) return bad("It's too soon — a restaurant can only be removed 90 days after it was deleted.", 423);
+      // Kept as a SAFETY NET, not as a rule: migration 342 drops the retention lock, but a database
+      // that has not had 342 applied yet (a stack mid-release) would still raise it, and the admin
+      // deserves that sentence rather than a raw exception. It should now be unreachable here.
+      if (/Retention lock/i.test(m)) return bad("This database still has the old 90-day wait on it — its migrations are behind. Nothing was removed.", 423);
       if (/never be purged/i.test(m)) return bad("The default restaurant can never be removed.", 400);
       if (/not in the recycle bin/i.test(m)) return bad("Only a restaurant in the recycle bin can be removed.", 409);
       return bad(m, 500);

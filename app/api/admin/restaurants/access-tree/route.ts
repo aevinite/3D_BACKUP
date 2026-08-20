@@ -14,6 +14,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { accessStateFor } from "@/lib/accessState";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+// ONE rule for a channel credential — see the header of lib/channelKey.ts.
+import { applyChannelKey, channelKeyAction } from "@/lib/channelKey";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
@@ -142,7 +144,7 @@ function describeAccessPatch(patch: Record<string, any>): string {
     }
   }
   // A credential's VALUE never reaches the log — only that one was set or cleared.
-  for (const [k, v] of Object.entries(obj(patch.creds))) bits.push(`${k} key: ${v === null ? "removed" : "saved"}`);
+  for (const [k, v] of Object.entries(obj(patch.creds))) { const a = channelKeyAction(v); if (a !== "none") bits.push(`${k} key: ${a === "clear" ? "removed" : "saved"}`); }
   return bits.slice(0, 12).join(" · ") + (bits.length > 12 ? ` · +${bits.length - 12} more` : "");
 }
 
@@ -311,20 +313,14 @@ export async function POST(req: NextRequest) {
     for (const [k, v] of Object.entries(obj(patch.creds))) {
       if (!CREDS_KEYS.includes(k)) continue;
       took++;
-      const cur = obj(next[k]);
-      // "" = the form was saved without retyping the key, so leave the stored one alone. null =
-      // remove it deliberately. Anything else replaces it. Trimmed because a pasted key almost
-      // always arrives with a newline, and a key with a stray newline fails with no clue why.
-      // `key`, NOT `api_key` (T17 sweep, 2026-08-13, finding F4). This wrote `api_key` while the
-      // restaurant detail's Platform-channels screen wrote `key` — one column, two field names, so
-      // neither screen could see what the other had saved and clearing on one left the other's copy
-      // standing. `key` is the shape migration 209 documents, so it wins; the legacy field is
-      // dropped on every write here, which is what makes an already-split restaurant converge.
-      if (v === null) { const { api_key: _dropLegacy, key: _drop, ...rest } = cur; next[k] = rest; continue; }
-      const key = String(v ?? "").trim();
-      if (!key) continue;
-      const { api_key: _legacy, ...keep } = cur;
-      next[k] = { ...keep, key: key.slice(0, 400) };
+      // THE ONE CONVENTION, now in one file (owner, 2026-08-20 — T20 item 12). This branch's rule
+      // was always the right one — "" = the form was saved without retyping a write-only field, so
+      // leave the stored key alone; null = remove it deliberately — but the sibling
+      // platform-channels route read "" as CLEAR, the exact opposite, on the same column. Both call
+      // lib/channelKey.ts now, which carries the rule and the reason it is this way round.
+      // `key`, NOT `api_key` (T17 sweep, 2026-08-13, finding F4): the legacy field is dropped on
+      // every write, which is what makes an already-split restaurant converge on one copy.
+      next[k] = applyChannelKey(obj(next[k]), v);
     }
     if (took) setPatch.platform_channels = next;
   }
