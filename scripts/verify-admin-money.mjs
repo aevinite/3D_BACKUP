@@ -259,19 +259,46 @@ try {
   // ── B(live) · the label and the number describe the same window ────────────────────────────
   head("B(live) · ?range= shows that range's own number");
   {
-    const truth = {};
-    for (const r of ["today", "30d"]) truth[r] = (await api(`/api/admin/analytics?range=${r}`)).totals.totalOrders.toLocaleString("en-IN");
+    // THE TRUTH IS READ FROM THE PAGE'S OWN REPLY, NOT FETCHED ONCE UP FRONT (fixed 2026-08-20).
+    // It used to GET each range once, keep the figure, and then compare four page-opens against it
+    // over the next forty seconds. On a quiet database that works. On this one it cried wolf: other
+    // sessions place orders while a sweep runs, so "today" climbed 68 → 87 → 94 → 102 during a
+    // single run and three of four opens were marked as showing "another window's figure" when
+    // every one of them was correct. A guard that fails because the data moved teaches you to
+    // ignore it.
+    //
+    // What this fault was ever about is whether the NUMBER ON SCREEN belongs to the window the page
+    // says it is showing — so the comparison is now against the reply that page actually received
+    // for that range. Immune to the data changing, and a strictly tighter test: a stale reply
+    // landing under the wrong label is exactly what it now catches.
     const c = await ctx();
     let mismatches = 0;
+    const notes = [];
     for (const r of ["30d", "today", "30d", "today"]) {
       const p = await c.newPage();
+      const replies = [];
+      p.on("response", (res) => {
+        const u = res.url();
+        if (!u.includes("/api/admin/analytics")) return;
+        const q = new URL(u).searchParams.get("range") || "7d";
+        replies.push({ q, body: res.json().catch(() => null) });
+      });
       await p.goto(`${BASE}/aevinite/analytics?range=${r}`, { waitUntil: "domcontentloaded" });
       await p.waitForTimeout(8500);
       const v = await p.evaluate(() => document.querySelector(".adm-stat .v")?.textContent);
-      if (v !== truth[r]) mismatches++;
+      const label = await p.evaluate(() => document.querySelector(".adm-stat")?.textContent || "");
+      // The LAST reply for the range that was asked for — the one whose figure must be on screen.
+      const mine = [...replies].reverse().find((x) => x.q === r);
+      const want = mine ? (await mine.body)?.totals?.totalOrders : null;
+      const wantText = want == null ? null : want.toLocaleString("en-IN");
+      const rangeWord = r === "30d" ? "last 30 days" : "today";
+      if (wantText == null || v !== wantText || !label.toLowerCase().includes(rangeWord)) {
+        mismatches++;
+        notes.push(`?range=${r}: tile ${JSON.stringify(v)}, its own reply said ${JSON.stringify(wantText)}, label ${JSON.stringify(label.slice(0, 40))}`);
+      }
       await p.close();
     }
-    ok(mismatches === 0, `four opens alternating ?range=30d / ?range=today — ${mismatches} showed another window's figure`);
+    ok(mismatches === 0, `four opens alternating ?range=30d / ?range=today — ${mismatches} showed a figure that was not its own reply's${notes.length ? ` (${notes.join(" | ")})` : ""}`);
     await c.close();
   }
 
