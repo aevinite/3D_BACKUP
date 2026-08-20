@@ -400,6 +400,13 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
    ~4px) — wrap instead of shaving — and give the small controls a 44px target. */
 @media (max-width: 760px) {
   .top-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  /* REJECTED (owner, 2026-08-20): do NOT add a min-width here so that 🚫 Sold out (36×44) and the
+     ⋯ menu button (33×44) become full 44px-WIDE targets on a phone. The 44px height below is
+     deliberate and stays; only the width is short, and only under 760px — above it these two measure
+     108px and hidden. This bar has wrapped to FOUR rows at 360px before (the note further down in
+     this block is what fixed that), and widening buttons is exactly what brings it back; a bar that
+     wraps costs a cook more than a narrow icon does. Extends R4 and R22.
+     See docs/REJECTED-IDEAS.md (R41). */
   .top-actions .btn { padding: 9px 11px; min-height: 44px; display: inline-flex; align-items: center; }
   .theme-toggle { width: 44px; height: 44px; }
   /* Leave room at the bottom so the last ticket / "Nothing here" isn't hidden behind the
