@@ -96,6 +96,9 @@ export default function AdminHealth() {
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
+  // Restaurant id → name, from the panels-health rows this page already has. No extra request.
+  const restaurantName = (id: string) => pd?.rows.find((r) => r.id === id)?.name || "unknown restaurant";
+
   const tier = h ? latencyTier(h.latencyMs) : "warn";
 
   return (
@@ -109,10 +112,19 @@ export default function AdminHealth() {
         </button>
       </div>
 
-      {err && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{err}</p>}
+      {h === null && err ? (
+        // A FAILED CHECK IS NOT A CHECK IN PROGRESS (T17 sweep, 2026-08-19). The error line was
+        // printed and then the page fell through to "Checking…" underneath it — so the one screen
+        // that answers "is the platform up?" sat saying it was still looking, for ever.
+        <div className="adm-card" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", borderColor: "var(--adm-warn)" }}>
+          <span className="adx-pill warn"><span className="dot" />Couldn&apos;t check</span>
+          <span className="adm-muted" style={{ fontSize: 13 }}>{err} This is <b>unknown</b>, not healthy.</span>
+          <button className="adm-btn" style={{ marginLeft: "auto" }} disabled={loading} onClick={load}>Retry</button>
+        </div>
+      ) : null}
 
       {h === null ? (
-        <div className="adm-empty">Checking…</div>
+        err ? null : <div className="adm-empty">Checking…</div>
       ) : !h.dbOk ? (
         // Database ping failed → the API omits every summary field, so we must NOT
         // fall through to the normal render (it reads h.restaurants.* and would crash
@@ -143,7 +155,7 @@ export default function AdminHealth() {
               {h.tableEstimatesError ? (
                 <div className="adm-empty">Couldn&apos;t read estimates: {h.tableEstimatesError}</div>
               ) : (
-                <div className="adm-logwrap">
+                <div className="adm-logwrap hx-kv">
                   <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 120px" }}><span>Table</span><span style={{ textAlign: "right" }}>~ rows</span></div>
                   {h.tableEstimates.map((t) => (
                     <div key={t.table} className="adm-logrow" style={{ gridTemplateColumns: "1fr 120px" }}>
@@ -158,7 +170,7 @@ export default function AdminHealth() {
             <div className="adm-card" style={{ marginBottom: 14 }}>
               <h2>Realtime &amp; connections</h2>
               <p className="hint">Confirms the app is pointed at the right backend — no keys shown.</p>
-              <div className="adm-logwrap">
+              <div className="adm-logwrap hx-kv">
                 <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Realtime host</span><span className="mono adm-muted">{h.realtime.configuredHost || "not configured"}</span></div>
                 <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Staff online (last 3 min)</span><span style={{ fontWeight: 700 }}>{h.staffOnlineNow} / {h.staffTotal}</span></div>
                 <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Restaurants</span><span style={{ fontWeight: 700 }}>{h.restaurants.active} live · {h.restaurants.suspended} suspended</span></div>
@@ -201,10 +213,21 @@ export default function AdminHealth() {
                       {h.broken3d.count} dish{h.broken3d.count === 1 ? "" : "es"} to fix
                     </span>
                   </p>
-                  <div className="adm-logwrap">
+                  {/* WHICH RESTAURANT — otherwise this is a dish name and nothing to do with it
+                      (T17 sweep, 2026-08-19). There are nine restaurants on this platform; a row
+                      reading "Truffle Fries · missing: small" does not tell the admin whose menu to
+                      open. The name comes from the panels-health rows already fetched below, so it
+                      costs no extra request. */}
+                  <div className="adm-logwrap hx-kv">
                     {h.broken3d.dishes.map((d) => (
                       <div key={`${d.restaurantId}-${d.slug}`} className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}>
-                        <span>{d.title || d.slug}</span>
+                        <span style={{ minWidth: 0 }}>
+                          {d.title || d.slug}
+                          <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />
+                            {restaurantName(d.restaurantId)}
+                          </span>
+                        </span>
                         <span className="mono adm-muted">missing: {d.missing}</span>
                       </div>
                     ))}
@@ -228,12 +251,41 @@ export default function AdminHealth() {
         <span className="adm-muted" style={{ fontSize: 12 }}>which staff screens are connected, per restaurant</span>
       </div>
       {pErr && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{pErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></p>}
-      {pd && (
-        <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, borderColor: pd.attention > 0 ? "#d4a574" : undefined }}>
-          <i className={`fas ${pd.attention > 0 ? "fa-triangle-exclamation" : "fa-circle-check"}`} style={{ color: pd.attention > 0 ? "#d4a574" : "var(--adm-ok)" }} aria-hidden="true" />
-          <span style={{ fontSize: 13 }}>{pd.attention > 0 ? <><b>{pd.attention}</b> enabled panel{pd.attention === 1 ? "" : "s"} quiet or never seen — a device or login may be down.</> : "All enabled panels have been active recently."}</span>
-        </div>
-      )}
+      {pd && (() => {
+        // A WARNING THAT IS ALWAYS UP IS NOT A WARNING (T17 sweep, 2026-08-19).
+        //
+        // This bar counted every enabled panel not seen in the last HOUR and called all of them
+        // "a device or login may be down". A restaurant that is shut, between shifts, or simply
+        // closed on a Monday has every panel quiet — so on this platform the bar read
+        // "23 enabled panels quiet or never seen" on every single load, with a warning triangle,
+        // for ever. Twenty of the twenty-three were closed restaurants. An admin who sees the same
+        // amber bar every morning stops reading it, and the three that DO matter go with it.
+        //
+        // NEVER SEEN is the one that is genuinely wrong: an enabled panel nobody has ever signed
+        // into is a setup that was not finished, and it stays true whatever the hour. That keeps
+        // the warning. "Quiet for over an hour" is stated as the plain fact it is, in the same
+        // sentence, so nothing is hidden and nothing is dressed up.
+        const never = pd.rows.filter((r) => r.active).reduce((n, r) => n + r.panels.filter((x) => x.role !== "owner" && x.status === "never").length, 0);
+        const quiet = pd.rows.filter((r) => r.active).reduce((n, r) => n + r.panels.filter((x) => x.role !== "owner" && x.status === "offline").length, 0);
+        const alarm = never > 0;
+        return (
+          <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderColor: alarm ? "#d4a574" : undefined }}>
+            <i className={`fas ${alarm ? "fa-triangle-exclamation" : "fa-circle-check"}`} style={{ color: alarm ? "#d4a574" : "var(--adm-ok)" }} aria-hidden="true" />
+            <span style={{ fontSize: 13, flex: "1 1 240px", minWidth: 0 }}>
+              {alarm ? (
+                <>
+                  <b>{never}</b> enabled panel{never === 1 ? " has" : "s have"} never been signed into — that setup was never finished.
+                  {quiet > 0 ? <span className="adm-muted"> {quiet} more {quiet === 1 ? "is" : "are"} simply quiet (nothing in the last hour), which is normal for a closed restaurant.</span> : null}
+                </>
+              ) : quiet > 0 ? (
+                <span className="adm-muted">Every enabled panel has been signed into. {quiet} {quiet === 1 ? "is" : "are"} quiet right now — nothing in the last hour, which is normal for a closed restaurant.</span>
+              ) : (
+                "All enabled panels have been active recently."
+              )}
+            </span>
+          </div>
+        );
+      })()}
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
         {!pd ? (pErr ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={4} label="Loading" />) : pd.rows.length === 0 ? (
           <div className="adm-empty">No restaurants yet.</div>
@@ -256,6 +308,22 @@ export default function AdminHealth() {
           </div>
         )}
       </div>
+
+      <style href="adm-health" precedence="default">{`
+        /* THE NUMBERS ARE THE WHOLE POINT OF THESE TWO CARDS (T17 sweep, 2026-08-19).
+           The console's phone rule gives every .adm-logrow a 540px min-width and lets the wrapper
+           scroll sideways. That is the right call for the admin's comparison tables — you read
+           down a column there. It is the wrong call for a two-column key -> value list: measured on
+           a 360px screen the card is 296px wide and the row is 540px, so "Row count estimates"
+           showed five table names and NOT ONE number, and "Realtime & connections" showed three
+           labels and none of their values. Nothing hinted the card could be dragged.
+           These lists fit instead, the value sitting under its label. Same rows, same order. */
+        @media (max-width: 560px) {
+          .hx-kv .adm-logrow { min-width: 0; grid-template-columns: 1fr !important; gap: 3px; padding: 10px 14px; }
+          .hx-kv .adm-logrow > :nth-child(2) { text-align: left !important; font-size: 12.5px; }
+          .hx-kv .adm-logrow.head { display: none !important; }
+        }
+      `}</style>
     </>
   );
 }

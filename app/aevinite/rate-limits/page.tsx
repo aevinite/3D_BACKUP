@@ -31,6 +31,11 @@ export default function AdminRateLimits() {
   const [blocked, setBlocked] = useState<Blocked[]>([]);
   const [requests, setRequests] = useState<UnblockReq[]>([]);
   const [loading, setLoading] = useState(true);
+  // A FAILED LOAD IS NOT AN ALL-CLEAR (T17 sweep, 2026-08-19). `load()` only raised a toast, which
+  // is gone in three seconds, and then every section rendered its EMPTY state: a green "No limits
+  // reached right now.", an empty rules card, "No requests right now." and "No devices are
+  // blocked." Four confident answers to a question the page never managed to ask.
+  const [loadErr, setLoadErr] = useState("");
   const [draft, setDraft] = useState<Record<string, { max_count: number; window_seconds: number }>>({});
   const [busy, setBusy] = useState<string>("");
   // Each section can be folded shut; the choice is remembered on this device (pure UI, no query).
@@ -74,7 +79,8 @@ export default function AdminRateLimits() {
       const d: Record<string, { max_count: number; window_seconds: number }> = {};
       for (const x of r.data.rules || []) d[x.id] = { max_count: x.max_count, window_seconds: x.window_seconds };
       setDraft(d);
-    } else toast(r.error || "Couldn't load rate limits.", "err");
+      setLoadErr("");
+    } else { setLoadErr(r.error || "Couldn't load the rate limits."); toast(r.error || "Couldn't load rate limits.", "err"); }
     setLoading(false);
   }, [toast]);
   useEffect(() => { load(); }, [load]);
@@ -114,6 +120,21 @@ export default function AdminRateLimits() {
     if (res.ok) { setHits((prev) => prev.filter((x) => x.id !== h.id)); toast("Blocked from the admin panel."); load(); }
     else toast(res.error || "Couldn't block.", "err");
   };
+  // "Let them try again" — the answer for a GENUINE person who mistyped (the owner forgetting his
+  // own admin password is the everyday case). It lifts the short login lockout on that device and
+  // marks the alert handled. The note at the bottom of "The limits" has promised this button since
+  // it was written; only "Block this device" was ever rendered, so the one screen dedicated to
+  // limits offered the harsh answer and not the kind one — while the Repair hub offered both
+  // (T17 sweep, 2026-08-19).
+  const clearHit = async (h: Hit) => {
+    setHits((prev) => prev.filter((x) => x.id !== h.id));
+    const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "clear", event_id: h.id }),
+    });
+    if (res.ok) toast("Cleared — that device can try the admin password again now.");
+    else { toast(res.error || "Couldn't clear that.", "err"); load(); }
+  };
   const unblock = async (b: Blocked) => {
     setBlocked((prev) => prev.filter((x) => x.key !== b.key));
     setRequests((prev) => prev.filter((x) => x.key !== b.key)); // any request for that device is now moot
@@ -151,6 +172,15 @@ export default function AdminRateLimits() {
   };
   const labelFor = (key: string) => rules.find((r) => r.key === key)?.label || key;
 
+  // The one block every section shows instead of its empty state when the read failed.
+  const unread = (
+    <div className="rl-unread">
+      <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+      <span>{loadErr} — so this is <b>unknown</b>, not clear.</span>
+      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={load}>Retry</button>
+    </div>
+  );
+
   // A section heading that folds its body open/shut. `anchorId` keeps the "#hits" jump target.
   const secHead = (id: string, inner: React.ReactNode, anchorId?: string) => (
     <div className="rl-sec rl-sec-btn" id={anchorId} role="button" tabIndex={0} aria-expanded={!collapsed[id]}
@@ -174,13 +204,13 @@ export default function AdminRateLimits() {
       {/* Hits — a limit was reached */}
       {secHead("hits", (
         <>
-          <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: hits.length ? "var(--adm-danger)" : "var(--muted)" }} />
+          <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: loadErr ? "var(--adm-warn)" : hits.length ? "var(--adm-danger)" : "var(--muted)" }} />
           <h2>Limits reached</h2>
           {hits.length ? <span className="rl-chip danger">{hits.length}</span> : null}
           <span className="adm-muted" style={{ fontSize: 12 }}>who hit a wall right now · all restaurants</span>
         </>
       ), "hits")}
-      {collapsed.hits ? null : loading ? <SkelList rows={3} label="Loading limits" /> : hits.length === 0 ? (
+      {collapsed.hits ? null : loading ? <SkelList rows={3} label="Loading limits" /> : loadErr ? unread : hits.length === 0 ? (
         <div className="rl-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No limits reached right now.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
@@ -197,9 +227,14 @@ export default function AdminRateLimits() {
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
                   {h.key === "admin_login" ? (
-                    <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => blockHit(h)} title="Bar this device/IP from reaching the admin panel">
-                      <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
-                    </button>
+                    <>
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => clearHit(h)} title="Genuine person — clear the short lockout so they can try the password again now">
+                        <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Let them try again
+                      </button>
+                      <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => blockHit(h)} title="Bar this device/IP from reaching the admin panel">
+                        <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => allowHit(h)} title="This was a real customer — reset their counter so they get through now">
@@ -229,7 +264,7 @@ export default function AdminRateLimits() {
           <span className="adm-muted" style={{ fontSize: 12 }}>change how many actions are allowed per time window</span>
         </>
       ))}
-      {collapsed.rules ? null : loading ? <SkelList rows={3} label="Loading limits" /> : (
+      {collapsed.rules ? null : loading ? <SkelList rows={3} label="Loading limits" /> : loadErr ? unread : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
           {rules.map((r) => {
             const d = draft[r.id] || { max_count: r.max_count, window_seconds: r.window_seconds };
@@ -280,7 +315,7 @@ export default function AdminRateLimits() {
           <span className="adm-muted" style={{ fontSize: 12 }}>blocked devices asking to be let back in</span>
         </>
       ))}
-      {collapsed.requests ? null : loading ? <SkelList rows={3} label="Loading limits" /> : requests.length === 0 ? (
+      {collapsed.requests ? null : loading ? <SkelList rows={3} label="Loading limits" /> : loadErr ? unread : requests.length === 0 ? (
         <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No requests right now.</div>
       ) : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
@@ -313,7 +348,7 @@ export default function AdminRateLimits() {
           {blocked.length ? <span className="rl-chip danger">{blocked.length}</span> : null}
         </>
       ))}
-      {collapsed.blocked ? null : loading ? <SkelList rows={3} label="Loading limits" /> : blocked.length === 0 ? (
+      {collapsed.blocked ? null : loading ? <SkelList rows={3} label="Loading limits" /> : loadErr ? unread : blocked.length === 0 ? (
         <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No devices are blocked.</div>
       ) : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
@@ -341,6 +376,10 @@ export default function AdminRateLimits() {
         .rl-caret.closed{transform:rotate(-90deg)}
         .rl-chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--adm-accent,#e8a13c) 16%,transparent);color:var(--adm-accent,#e8a13c)}
         .rl-chip.danger{background:color-mix(in srgb,var(--adm-danger) 16%,transparent);color:var(--adm-danger)}
+        /* "I couldn't read this" — deliberately not the green all-clear and not the red alarm. */
+        .rl-unread{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:14px 16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-warn) 40%,transparent);background:color-mix(in srgb,var(--adm-warn) 8%,var(--card));color:var(--text);font-size:13.5px;margin-bottom:10px}
+        .rl-unread i{color:var(--adm-warn)}
+        .rl-unread > span{flex:1 1 200px;min-width:0}
         .rl-clear{display:flex;align-items:center;gap:9px;padding:16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent);background:color-mix(in srgb,var(--adm-ok,#4caf82) 8%,var(--card));color:var(--text);font-size:13.5px}
         .rl-clear i{color:var(--adm-ok,#4caf82)}
         .rl-hit{position:relative;display:flex;gap:12px;padding:13px 14px 13px 16px;border-radius:12px;border:var(--border);background:var(--card);margin-bottom:10px;overflow:hidden}

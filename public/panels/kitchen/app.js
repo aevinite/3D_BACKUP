@@ -420,7 +420,13 @@ function ticketHtml(o, rows) {
   const reprintBtn = `<button class="reprint" data-reprint="${esc(o.id)}" title="Print this kitchen ticket" aria-label="Print kitchen ticket">🖨</button>`;
   // Special table type (mig 166): a small coloured badge next to the table number so
   // cooks know to prioritise (👑 VIP · 🏠 Family · 🤝 Owner's guest). Read-only here.
-  const TAG_BADGE = { vip: ["👑 VIP", "#8b5cf6"], family: ["🏠 FAMILY", "#e11d48"], guest: ["🤝 GUEST", "#aab4c4"] };
+  // The violet was #8b5cf6, which measured 4.23:1 against the white label at 10px/800 — under the
+  // 4.5:1 that size needs, and the only one of the three marks that missed (Family 4.70, Guest
+  // 7.60). Of all three to be the faint one it was the worst choice: VIP is the mark that means
+  // pull this ticket forward. Same violet taken one step darker measures 5.31:1. The badge looks
+  // the same at arm's length; it is simply readable now. (T6 re-check, 2026-08-19, pixel-sampled
+  // on the running board in both skins — these colours are inline, so one value fixes both.)
+  const TAG_BADGE = { vip: ["👑 VIP", "#7c46e0"], family: ["🏠 FAMILY", "#e11d48"], guest: ["🤝 GUEST", "#aab4c4"] };
   // THE MARK BELONGS TO THE TABLE, NOT THE ORDER (fixed 2026-08-06, T4 sweep). This read `o.tag`
   // for the whole life of the feature — and `orders` has no `tag` column, so the badge was never
   // once drawn and a cook had no way to see that table 6 was the owner's guest. The board now
@@ -566,6 +572,22 @@ function reconcileList(container, desired) {
   for (const node of existing.values()) node.remove();
 }
 
+// Tell the reconciler it no longer knows what a card says, so the next paint MUST rebuild it.
+//
+// `__kdsHtml` is reconcileList()'s cheap change-check: the html a card was last drawn from. Every
+// path that REBUILDS a card re-stamps it. The ✓ does not rebuild a card — it edits one line of it
+// in place — and it must not stamp either, because that would claim the card matches html it was
+// never built from. What it owes instead is to say the stamp is now meaningless, on the one path
+// where the edit is then undone with no server round trip to repaint behind it: a refused write.
+// Without that the reconciler compares desired html to a stamp older than the edit, matches, and
+// reuses a node the edit already changed — which is exactly how a refused ✓ left a cook unable to
+// re-send a dish. (T6 re-check, 2026-08-19. The undo bar does NOT need this — measured; see the
+// note in undoReady.)
+function forgetCardHtml(orderId) {
+  if (orderId == null) return;
+  const card = document.querySelector(`.ticket[data-ticket="${window.CSS && CSS.escape ? CSS.escape(String(orderId)) : orderId}"]`);
+  if (card) card.__kdsHtml = null;
+}
 // COLUMNS view — the classic New → Cooking → Ready board. Dine-in tickets first,
 // then platform tickets, in each column.
 // REJECTED (owner, 2026-08-07): do NOT collapse or hide an EMPTY column on a phone to win back the
@@ -759,6 +781,22 @@ function markItemReady(id, btn) {
     // write did land and only the reply was lost, the refetch simply paints it ready again.
     pendingReady.delete(id);
     if (it.status !== "served") it.status = prev;
+    // …AND THE CARD HAS TO BE ALLOWED TO REDRAW (T6 re-check, 2026-08-19 — the first version of
+    // this fix put the DATA back and left the SCREEN wrong). The tap above patches this one line
+    // surgically: `btn.outerHTML = …` removes the ✓ from the DOM without touching the card's
+    // `__kdsHtml`, which is the copy reconcileList() compares against to decide whether to repaint.
+    // So once the status is restored the desired html matches that stale copy exactly, the
+    // reconciler concludes "unchanged, reuse the node", and the node it reuses is the one with no
+    // ✓ on it. Measured on a ticket with two cooking dishes: the dish reads `preparing` on the
+    // server and everywhere else, and the cook still cannot re-send it — no ✓, and none arriving
+    // on the next read, or the one after. It only comes back when something ELSE changes that
+    // ticket's html, which for a ticket showing "DAY 12d 1h" is the age text, once an hour.
+    // A single-dish ticket hid this: finishing it moves the card to the Ready lane, and
+    // moveCardToReady() rebuilds the card and re-stamps __kdsHtml on the way. Nothing rebuilds a
+    // card that never changed lane.
+    // Clearing the stamp is the whole fix: the next reconcile sees "I have no idea what this card
+    // says" and repaints it from the truth. Cheap, and it cannot make anything else stale.
+    forgetCardHtml(o ? o.id : it.order_id);
     toast("Failed: " + e.message);
     freshLoad();
   });
@@ -775,6 +813,11 @@ async function undoReady(snap, orderId) {
     const it = (state.items || []).find((x) => x.id === s.id);
     if (it && it.status !== "served") it.status = s.prev;
   });
+  // (The take-back does NOT need forgetCardHtml. It looks like it should — the tap patched the card
+  // in place, so the stamp is stale here too — but it was measured both ways, tapping UNDO the
+  // instant the bar appears, and the board behaves identically: the freshLoad() at the end of this
+  // function is what puts the ✓ back, in about the same moment either way. Adding the call changed
+  // nothing a cook could see, so it is not here. T6 re-check, 2026-08-19.)
   render();
   try {
     // ONE REQUEST FOR THE WHOLE TICKET (owner-picked improvement, 2026-08-07). This used to be
