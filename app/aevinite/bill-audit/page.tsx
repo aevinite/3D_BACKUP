@@ -16,6 +16,8 @@ type Bill = {
   amount: number; paid: number; orderCount: number; invoiceGens: number;
   openedAt: string | null; closedAt: string | null; at: string | null;
   deletedAt: string | null; deletedBy: string | null; deleteReason: string | null;
+  // Closed-unpaid bills only: was the food made? (owner 2026-08-20 — see the tile's own note.)
+  loss?: "yes" | "no" | "unknown" | null;
 };
 type Rest = { id: string; name: string };
 type Data = {
@@ -256,6 +258,21 @@ export default function AdminBills() {
   // Everything on screen = the first page plus whatever "Load more" has fetched.
   const rows: Bill[] = [...(d?.bills || []), ...more];
   const settledPaid = rows.filter((b) => b.state === "settled").reduce((s, b) => s + b.paid, 0);
+  // TWO KINDS OF CLOSED-UNPAID BILL, AND THEY ARE NOT THE SAME MORNING (owner, 2026-08-20):
+  // "we have 2 option in close out also — one with the food was made, to count as loss; one is food
+  // was not made and cancelled, so no loss detected." The tile beside this one has always said
+  // "₹441 collected"; this one said "31 · walk-outs / cancels" and no money at all, so 31 walk-outs
+  // at ₹80 looked exactly like 31 at ₹900.
+  //
+  // The server answers each bill from the order's own status (cooked = a walk-out) or from the
+  // "was the food made?" answer mig 340 records on a cancellation — see lossOfClosedUnpaid. A bill
+  // nobody has answered stays UNANSWERED and is shown as its own figure: on this database all 538
+  // cancellations predate the question, and turning that into a confident "₹0 lost" would be the
+  // screen inventing a fact on behalf of the person checking it.
+  const unpaidRows = rows.filter((b) => b.state === "cancelled");
+  const unpaidBy = (k: "yes" | "no" | "unknown") =>
+    unpaidRows.filter((b) => (b.loss || "unknown") === k).reduce((s, b) => s + b.amount, 0);
+  const lostMade = unpaidBy("yes"), lostNone = unpaidBy("no"), lostUnknown = unpaidBy("unknown");
 
   return (
     <div className="blz">
@@ -279,7 +296,12 @@ export default function AdminBills() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, margin: "18px 0" }}>
         <Stat icon="running" tone="#22c55e" k="Open now" v={counts.running || 0} sub="tables still running · on this page" calculating={!d} />
         <Stat icon="settled" tone="#3b82f6" k="Settled" v={counts.settled || 0} sub={`${inr(settledPaid)} collected · on this page`} calculating={!d} />
-        <Stat icon="cancelled" tone="#f59e0b" k="Closed unpaid" v={counts.cancelled || 0} sub="walk-outs / cancels · on this page" calculating={!d} />
+        <Stat icon="cancelled" tone="#f59e0b" k="Closed unpaid" v={counts.cancelled || 0} calculating={!d}
+          sub={<>
+            {inr(lostMade)} food was made · {inr(lostNone)} never made
+            {lostUnknown > 0 && <> · {inr(lostUnknown)} not answered</>}
+            <br />walk-outs / cancels · on this page
+          </>} />
         <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable · every one, all time" calculating={!d} />
       </div>
 
@@ -387,6 +409,17 @@ export default function AdminBills() {
                       <Field k="Orders" v={String(b.orderCount)} />
                       <Field k="Opened" v={b.openedAt ? new Date(b.openedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"} />
                       <Field k="Closed" v={b.closedAt ? new Date(b.closedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"} />
+                      {/* Only on a bill that closed with nothing collected — the question does not
+                          apply to one that was paid, parked or comped. This is the same answer the
+                          tile totals up, per bill, so a person can find WHICH bill the money is in
+                          rather than trusting the tile. "Not answered yet" is a real state and says
+                          where it is answered (mig 340's P3: the Audit screen). */}
+                      {b.state === "cancelled" && (
+                        <Field k="Was the food made?" v={
+                          b.loss === "yes" ? "Yes — counts as a loss"
+                            : b.loss === "no" ? "No — never made, no loss"
+                            : "Not answered yet — answer it in Audit"} />
+                      )}
                     </div>
 
                     <SecHead icon="invoice" label="Invoice history" />
@@ -442,7 +475,10 @@ export default function AdminBills() {
 // asserted "0 tables still running / ₹0 collected / 0 Deleted" — indistinguishable from a day with
 // no sales at all, on the one screen whose stated job is spotting a sale that has gone missing. The
 // sibling Live-floor page already had this: app/aevinite/floor/page.tsx passes `calculating`.
-function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number; sub: string; calculating?: boolean }) {
+// `sub` is a ReactNode, not a string: the Closed-unpaid tile says two things (what the food-made
+// half is worth and what the never-made half is worth) and needs its own line break to stay legible
+// at 150px, the narrowest this grid ever draws a tile.
+function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number; sub: React.ReactNode; calculating?: boolean }) {
   return (
     <div className="adm-card blz-stat" style={{ padding: "14px 16px" }}>
       <div style={{ fontSize: 11.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>

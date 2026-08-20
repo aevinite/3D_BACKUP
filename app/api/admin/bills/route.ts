@@ -34,7 +34,7 @@ import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
-import { rollUpBill, netOf, type BillSession, type BillOrder, type BillState } from "@/lib/billLedger";
+import { rollUpBill, netOf, lossOfClosedUnpaid, type BillSession, type BillOrder, type BillState } from "@/lib/billLedger";
 import { withIdempotency } from "@/lib/idempotency";
 import { invalidateFloor } from "@/lib/floorSummary";
 
@@ -181,6 +181,43 @@ export async function GET(req: NextRequest) {
     const genBy = new Map<string, number>();
     for (const e of ev || []) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
     for (const b of bills) b.invoiceGens = genBy.get(b.sessionId) || 0;
+  }
+
+  // ── WAS THE FOOD MADE, ON THE BILLS THAT CLOSED WITH NOTHING COLLECTED? ────────────────────
+  // (owner, 2026-08-20 — "we have 2 option in close out also".) The tile beside "Settled … ₹441
+  // collected" was a bare count: "31 · walk-outs / cancels". 31 walk-outs at ₹80 and 31 at ₹900 are
+  // very different mornings and the screen could not tell them apart.
+  //
+  // SCOPED, AND ONLY FOR THE BILLS THAT NEED IT. A walk-out answers itself from the order status
+  // (lib/billLedger.ts → lossOfClosedUnpaid), so the only bills that need a lookup are the
+  // closed-unpaid ones whose every live order is CANCELLED. That is a handful of the page's rows,
+  // not all of them, and the read is one query for the whole page keyed by session_id — never one
+  // per bill. `deletion_audit` carries the current answer on the `order_cancelled` row itself
+  // (mig 340 merges it there precisely so a list does not need a sub-query per line), and mig 349
+  // adds the (session_id, kind) index this filter needs.
+  const needAnswer = bills.filter((b) => b.state === "cancelled").map((b) => b.sessionId);
+  if (needAnswer.length) {
+    const ans = await sb.from("deletion_audit")
+      .select("order_id, meta")
+      .eq("kind", "order_cancelled")
+      .in("session_id", needAnswer)
+      .limit(5000);
+    // NOT fatal, and deliberately so: a failure here must not take down the ledger, which is the
+    // screen for proving no sale went missing. Every affected bill falls back to "unknown", which
+    // is what the tile says when nobody has answered — honest either way, never a made-up ₹0.
+    if (ans.error) console.error("[admin/bills] cancellation answers unavailable:", ans.error.message);
+    const madeByOrder = new Map<string, boolean>();
+    for (const r of (ans.data || []) as { order_id: string | null; meta: { made?: unknown } | null }[]) {
+      const made = r.meta?.made;
+      if (r.order_id && typeof made === "boolean") madeByOrder.set(r.order_id, made);
+      // The RPC writes it through jsonb_build_object, so it is a real JSON boolean; a string is
+      // read too in case an older row was written by hand.
+      else if (r.order_id && (made === "true" || made === "false")) madeByOrder.set(r.order_id, made === "true");
+    }
+    for (const b of bills) {
+      if (b.state !== "cancelled") continue;
+      b.loss = lossOfClosedUnpaid(ordersBySession.get(b.sessionId) || [], madeByOrder);
+    }
   }
 
   // Bucket counts for the chips. The derived states (running / settled / pay-later / on-house /

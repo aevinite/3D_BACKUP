@@ -131,6 +131,50 @@ export function deriveBillState(session: BillSession, orders: BillOrder[]): Bill
   return "cancelled"; // closed with nothing collected (walk-out / all cancelled)
 }
 
+// ── WAS THIS CLOSED-UNPAID BILL A REAL LOSS? (owner, 2026-08-20) ─────────────────────────────
+// His words: "we have 2 option in close out also — one with the food was made, to count as loss;
+// one is food was not made and cancelled, so no loss detected."
+//
+// "Closed unpaid" is TWO events wearing one name, exactly as a cancellation was before mig 340:
+//   · a WALK-OUT — the kitchen cooked it, the guest ate and left, nothing was collected. Real loss,
+//     and nothing to ask: the order's own status says the kitchen fired it.
+//   · a bill CANCELLED before anything was cooked — no food, no cost. The sale is gone; nothing was
+//     lost but the sale.
+// The answer for the cancelled case is the one migration 340 already collects ("was the food
+// made?"). It is merged onto the `order_cancelled` audit row's meta by lfh_cancel_classify, which is
+// the row a list reads — that migration's own comment says why ("a list cannot afford a sub-query
+// per line"). So this needs no new question, no new column and no guess.
+//
+// UNANSWERED IS ITS OWN ANSWER. Every one of the 538 cancellations on the dev database predates the
+// question, so `made` is NULL on all of them. Calling those "no loss" would be inventing a fact, and
+// calling them "loss" would be inflating one. They come back as "unknown" and the tile says so —
+// the same rule mig 340 set for the Audit screens ("Nothing is guessed").
+//
+// WHAT THIS IS NOT. It does not write an expense, touch revenue, or put a cancelled bill's value on
+// the owner's dashboard — the line settled on 2026-08-18 (mig 340's header): the ingredient cost of
+// food made and binned is a cost; a cancelled bill's VALUE is not. This is the admin's oversight
+// ledger splitting the value of bills that closed with nothing collected, by whether food was made.
+export type BillLoss = "yes" | "no" | "unknown";
+// The kitchen-fire boundary, and it is the same one the stock movements use: mig 224 posts the
+// ingredient consumption when an order is ACCEPTED into the kitchen. An order still sitting at
+// 'received' was never started, so it cost nothing — which is why it is not on this list.
+const FIRED = new Set(["preparing", "ready", "served"]);
+export function lossOfClosedUnpaid(orders: BillOrder[], madeByOrder: Map<string, boolean>): BillLoss {
+  const live = orders.filter((o) => !o.deleted_at);
+  // Cooked and never paid for. No question needed — the status is the answer.
+  if (live.some((o) => FIRED.has(String(o.status || "")))) return "yes";
+  const cancelled = live.filter((o) => o.status === "cancelled");
+  // NOTHING WAS CANCELLED AND NOTHING WAS COOKED, so there is nothing to ask. This is the common
+  // case and it is stated rather than left to fall out of `[].every() === true`: a bill that took a
+  // number and never ordered (58 of them on the dev database, every one worth ₹0), or one whose
+  // orders never left 'received'. No food, no cost.
+  if (!cancelled.length) return "no";
+  if (cancelled.some((o) => madeByOrder.get(o.id) === true)) return "yes";
+  // Every cancellation on the bill was answered, and the answer was "never made".
+  if (cancelled.every((o) => madeByOrder.get(o.id) === false)) return "no";
+  return "unknown";
+}
+
 // One rolled-up ledger record for the UI.
 export type BillRecord = {
   sessionId: string;
@@ -151,6 +195,9 @@ export type BillRecord = {
   deletedAt: string | null;
   deletedBy: string | null;
   deleteReason: string | null;
+  // Only ever set on a CLOSED-UNPAID bill (see lossOfClosedUnpaid) — null on every other state,
+  // because the question does not apply to a bill that was paid, parked or comped.
+  loss?: BillLoss | null;
 };
 
 export function rollUpBill(session: BillSession, orders: BillOrder[], restaurantName: string): BillRecord {
@@ -177,5 +224,8 @@ export function rollUpBill(session: BillSession, orders: BillOrder[], restaurant
     deletedAt: session.deleted_at || (orders.find((o) => o.deleted_at)?.deleted_at ?? null),
     deletedBy: session.deleted_by || (orders.find((o) => o.deleted_by)?.deleted_by ?? null),
     deleteReason: session.delete_reason || (orders.find((o) => o.delete_reason)?.delete_reason ?? null),
+    // Filled in by the ledger endpoint once it has the cancellation answers, like invoiceGens
+    // above — one scoped read for the whole page rather than one per bill.
+    loss: null,
   };
 }
