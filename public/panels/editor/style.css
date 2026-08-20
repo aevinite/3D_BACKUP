@@ -2334,6 +2334,17 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   border-radius: 9px; padding: 6px 10px;
 }
 .ret-ctl i { opacity: .7; }
+/* THE READ-ONLY FORM of the same chip, for a person who may see the window but not change it
+   (a manager always; an owner once Aevidine has locked it — owner, 2026-08-21). It keeps the
+   chip's shape so the header doesn't reflow, and it always CARRIES ITS REASON: a control that
+   greys out with nothing to explain it is the thing he has objected to before. */
+.ret-ctl-ro { cursor: default; }
+.ret-ctl-ro b { color: var(--text); font-weight: 700; }
+.ret-ctl-ro .ret-by {
+  font-style: normal; font-size: 11px; font-weight: 600; opacity: .8;
+  padding: 2px 6px; border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+}
 .ret-select {
   background: var(--bg); color: var(--text, inherit);
   border: 1px solid var(--line); border-radius: 7px;

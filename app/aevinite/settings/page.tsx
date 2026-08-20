@@ -15,13 +15,15 @@ export default function AdminSettings() {
   const [ret, setRet] = useState<{ oplog_retention_days: number; custlog_retention_days: number } | null>(null);
   // Which stack this console is pointed at, from the server (see the row below).
   const [env, setEnv] = useState<{ name: string; live: boolean } | null>(null);
+  const [lock, setLock] = useState<{ locked: boolean; at: string | null } | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
   const [retErr, setRetErr] = useState(false);
   const [msg, setMsg] = useState("");
 
   const loadRet = useCallback(async () => {
     try {
       const j = await (await fetch("/api/admin/settings", { cache: "no-store" })).json();
-      if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); if (j.environment) setEnv(j.environment); }
+      if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); if (j.environment) setEnv(j.environment); setLock(j.retentionLock || { locked: false, at: null }); }
     } catch { setRetErr(true); }
   }, []);
   useEffect(() => { loadRet(); }, [loadRet]);
@@ -35,8 +37,29 @@ export default function AdminSettings() {
       // WHAT IT REALLY DID (T16 sweep, 2026-08-19). This said "applied to every restaurant",
       // which migration 157 does not do: this value is the DEFAULT, and a restaurant that has
       // chosen its own window in its manager panel keeps that one.
-      setMsg("Saved — the new default for every restaurant that hasn't chosen its own.");
+      setMsg(lock?.locked
+        ? "Saved — applied to every restaurant, and locked, so none of them can change it."
+        : "Saved — applied to every restaurant now. Any of their owners can still change their own.");
     } catch { setMsg("Couldn't save that just now."); loadRet(); }
+  };
+
+  // TURNING THE LOCK ON DOES NOT TOUCH THE WINDOWS (owner, 2026-08-21). It is sent on its own, so
+  // "freeze what every restaurant has" can never be confused with "rewrite what every restaurant
+  // has" — the server audits the two as separate events for the same reason.
+  const saveLock = async (locked: boolean) => {
+    setLockBusy(true);
+    setMsg("");
+    try {
+      const r = await fetch("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ retention_lock: locked }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "");
+      // Only claim it after the server says so — the screen never shows a lock that isn't real.
+      setLock(j.retentionLock || { locked, at: new Date().toISOString() });
+      setMsg(locked ? "Saved — locked." : "Saved — unlocked.");
+    } catch (e) {
+      setMsg(e instanceof Error && e.message ? `Couldn't change the lock — ${e.message}` : "Couldn't change the lock just now.");
+      loadRet();
+    } finally { setLockBusy(false); }
   };
 
   return (
@@ -66,21 +89,20 @@ export default function AdminSettings() {
         </div>
 
         <div className="adm-card">
-          <h2>Log retention <span className="adm-muted">· platform default</span></h2>
-          {/* THIS CARD USED TO OVERSTATE ITSELF, TWICE (T16 sweep, 2026-08-19). It said "how long
-              EVERY restaurant keeps its logs — one platform-wide setting" with a "1-month MAXIMUM".
-              Migration 157 made this value the DEFAULT for restaurants that have not chosen their
-              own, and a restaurant's own choice wins; the manager panel's Activity log still offers
-              "3 months", which the editor route stores. So the maximum was not a maximum and the
-              setting was not platform-wide, and nothing on screen said so — the admin could set 7
-              days here and a restaurant would still be holding 90 days of customer log. */}
+          <h2>Log retention <span className="adm-muted">· every restaurant</span></h2>
+          {/* THIS CARD HAS NOW BEEN WRONG IN BOTH DIRECTIONS, so here is what the code actually does.
+              It first claimed a "1-month MAXIMUM" applied "to every restaurant" — it enforced no
+              maximum. The T16 sweep then over-corrected it to "the default for every restaurant that
+              hasn't chosen its own", which is also untrue: POST /api/admin/settings runs
+              `update(patch).not("restaurant_id","is",null)`, so saving here REWRITES EVERY
+              restaurant's window immediately, including the ones that had chosen. What it could not
+              do was make the change STICK — an owner could set 3 months again the next minute.
+              That gap is what the lock closes (owner, 2026-08-21: "make sure admin can do only lock
+              for mangaer and ever admin do will be visible to manager"). */}
           <p className="hint">
-            The <b>default</b> every restaurant follows for its activity &amp; customer logs — from a single
-            day up to 1 month. Older entries auto-delete each night; bills are never touched.
-          </p>
-          <p className="hint" style={{ marginTop: -4 }}>
-            A restaurant that has picked its <b>own</b> window on its manager panel keeps that one instead,
-            and that choice goes up to <b>3 months</b> — so this default does not cap it.
+            How long every restaurant keeps its activity &amp; customer logs — from a single day up to
+            1 month. Saving <b>applies the window to every restaurant straight away</b>. Older entries
+            auto-delete each night; bills are never touched.
           </p>
           {retErr && <p className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Couldn&rsquo;t load retention. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadRet}>Retry</button></p>}
           <div style={{ display: "grid", gap: 12 }}>
@@ -98,6 +120,31 @@ export default function AdminSettings() {
                 {ret && !RET_OPTS.some((o) => o.d === ret.custlog_retention_days) && <option value={ret.custlog_retention_days}>{ret.custlog_retention_days} days</option>}
               </select>
             </label>
+
+            {/* THE LOCK. Deliberately NOT a hidden platform cap: he asked for a lock the restaurant
+                can SEE, so the line under it states exactly what the manager panel will show. */}
+            <button type="button" className={`adm-toggle ${lock?.locked ? "on" : "off"}`}
+              disabled={!lock || lockBusy}
+              onClick={() => saveLock(!lock?.locked)}
+              title={lock?.locked ? "Locked — tap to let restaurants choose again" : "Unlocked — tap to freeze this for every restaurant"}>
+              <span>Lock this for every restaurant</span>
+              <span className="pill">{lock?.locked ? "ON" : "OFF"}</span>
+            </button>
+            <p className="hint" style={{ marginTop: -4 }}>
+              {lock?.locked ? (
+                <>
+                  <b>Locked.</b> No restaurant can change these windows. Their manager panel shows the
+                  window you chose, marked <i>set by Aevidine</i>, so nobody is left wondering why the
+                  dropdown stopped working.
+                </>
+              ) : (
+                <>
+                  <b>Unlocked.</b> A restaurant&rsquo;s <b>owner</b> can set their own window afterwards,
+                  up to <b>3 months</b> — so a window you choose here may not last. A <b>manager</b> can
+                  never change it either way; that is a compliance rule, not this switch.
+                </>
+              )}
+            </p>
           </div>
           {msg && <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>{msg}</p>}
         </div>

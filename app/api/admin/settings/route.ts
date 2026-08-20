@@ -45,6 +45,25 @@ function describeStack(): { name: string; live: boolean; ref: string } {
   return { name: "Unknown", live: false, ref };
 }
 
+// ── THE LOCK (owner, 2026-08-21) ─────────────────────────────────────────────────────────────
+// His answer to "should the 1-month cap be enforced?" was neither yes nor no: *"make sure admin
+// can do only lock for mangaer and ever admin do will be visible to manager"*. So the admin does
+// not silently cap anybody — the admin LOCKS, and the lock is something the restaurant can SEE.
+//
+// Stored in app_config (mig 186), not in `settings`: it is one platform-wide fact, and `settings`
+// already carries 110 columns with one row per restaurant — writing the same boolean into every
+// row would make a single truth into N truths that can drift.
+const LOCK_KEY = "log_retention_lock";
+type RetentionLock = { locked: boolean; at: string | null };
+async function readLock(): Promise<RetentionLock> {
+  const r = await sb.from("app_config").select("value").eq("key", LOCK_KEY).maybeSingle();
+  // A missing row means "never locked" — the honest default, and NOT an error the screen should
+  // show: a platform that has never used the lock is the normal state.
+  if (r.error || !r.data) return { locked: false, at: null };
+  const v = (r.data.value || {}) as Record<string, unknown>;
+  return { locked: v.locked === true, at: typeof v.at === "string" ? v.at : null };
+}
+
 export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -67,6 +86,9 @@ export async function GET(req: NextRequest) {
     // database this deployment is actually pointed at, which is the thing that decides whose data
     // you are about to change. No key or URL is returned — only the short project ref and a name.
     environment: describeStack(),
+    // The manager panel reads the same fact through its own whoami, so the two screens can never
+    // disagree about whether a restaurant may change this.
+    retentionLock: await readLock(),
   });
 }
 
@@ -83,7 +105,30 @@ export async function POST(req: NextRequest) {
     if (k in body) patch[k] = clampDays(body[k]);
   }
   if ("audit_retention_years" in body) patch.audit_retention_years = clampYears(body.audit_retention_years);
-  if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
+
+  // THE LOCK IS ITS OWN WRITE, and it goes to app_config rather than into `patch` — so turning the
+  // lock on never rewrites 100 restaurants' retention numbers as a side effect. It is also audited
+  // separately below, because "the admin froze this for everyone" is a different event from "the
+  // admin changed the window", and a reader of the trail must be able to tell them apart.
+  let lockWrote: RetentionLock | null = null;
+  if ("retention_lock" in body) {
+    const locked = body.retention_lock === true || body.retention_lock === "true";
+    const at = new Date().toISOString();
+    const w = await sb.from("app_config").upsert({ key: LOCK_KEY, value: { locked, at } }, { onConflict: "key" });
+    if (w.error) return adminFail("the log-retention lock", w.error, { action: "save" });
+    lockWrote = { locked, at };
+  }
+
+  if (!Object.keys(patch).length && !lockWrote) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
+  if (!Object.keys(patch).length && lockWrote) {
+    await logAction("admin", "retention_change", {
+      device_id: deviceIdFrom(req),
+      detail: lockWrote.locked
+        ? "log retention LOCKED for every restaurant — a manager or owner can see the window but not change it"
+        : "log retention UNLOCKED — each restaurant may choose its own window again",
+    });
+    return NextResponse.json({ ok: true, retentionLock: lockWrote });
+  }
   // Every settings row carries a restaurant_id (id='site' is #1's row) → this writes them all.
   const r = await sb.from("settings").update(patch).not("restaurant_id", "is", null);
   if (r.error) return adminFail("the log-retention settings", r.error, { action: "save" });
@@ -98,7 +143,10 @@ export async function POST(req: NextRequest) {
     detail: `retention set for ALL restaurants — ${Object.entries(patch).map(([k, v]) => {
       const unit = k === "audit_retention_years" ? (Number(v) === 1 ? "year" : "years") : (Number(v) === 1 ? "day" : "days");
       return `${k.replace(/_years$/, "").replace(/_days$/, "").replace(/_/g, " ")} ${v} ${unit}`;
-    }).join(", ")}`,
+    }).join(", ")}`
+      + (lockWrote ? (lockWrote.locked
+        ? " — and LOCKED, so no restaurant may change it"
+        : " — and UNLOCKED, so each restaurant may choose again") : ""),
   });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, ...(lockWrote ? { retentionLock: lockWrote } : {}) });
 }
