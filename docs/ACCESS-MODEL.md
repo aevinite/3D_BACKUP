@@ -63,8 +63,9 @@ routes. The restaurant runs on staff panels only.
 | **Put menu on maintenance** | **OFF** | Hands someone the red "close the menu to diners" control in their own Settings — `access_config.maintenance.on`, enforced on the WRITE at `/api/maintenance`. Its one sub-option, **Who may do it**, is `Owner only` (default) or `Owner and manager`. OFF for every restaurant until it is deliberately handed over. |
 | **Favourites** | ON | The heart + Favourites tab. (Loyalty will build on this later.) |
 | **Veg / non-veg** | ON | The veg/non-veg filter chips **and** the veg icon on dishes. Off for pure-veg restaurants. |
-| **Bubble effect** | ON | The rising bubble particles on the guest menu background (`bubbles_enabled`, read by `lib/menu.ts`). Off gives a flat, calm background. |
-| **Design and styling** *(last)* | — | Default menu layout (grid/list), default light/dark, menu theme, **languages** (one or many — default English only), **currency** (default ₹). With a single language + single currency the guest-side switchers are **removed**, not disabled. |
+| **Prep time on a dish** | **OFF** | Shows the Prep time typed on a dish ("20 min") on its menu card, beside the rating (`features.prep_time`). Off by default — most restaurants would rather not promise a time — and a dish with no prep time typed shows nothing either way. *(This row has existed on the screen and was missing from this table until 2026-08-18; the rows below it are in the tree's real order, which is not what this table used to claim.)* |
+| **Design and styling** | — | Default menu layout (grid/list), default light/dark, menu theme, **languages** (one or many — default English only), **currency** (default ₹). With a single language + single currency the guest-side switchers are **removed**, not disabled. |
+| **Bubble effect** *(last)* | ON | The rising bubble particles on the guest menu background (`bubbles_enabled`, read by `lib/menu.ts`). Off gives a flat, calm background. |
 
 ### A2 · Pay later (khata)
 OFF ⇒ the khata tab/entries disappear from the **manager** and **owner** panels entirely.
@@ -160,7 +161,12 @@ menu, permission for manager, manager settings."*
    instead; no such viewer exists, and the model's own row text always agreed with the code
    ("The Feature switch removes it from every manager of this restaurant"). Corrected
    2026-08-04 — if the viewer is wanted, it is a build, not a description.
-2. **Permission for manager** — `Delete a bill` · `Reopen a bill` (**default OFF for every
+2. **Permission for manager** — TWO rows, not three. `Delete a bill` **is gone and must not come
+   back** (owner, 2026-08-16 — `docs/REJECTED-IDEAS.md` **R27**): cancel is the only route out of a
+   bill for anyone at the restaurant, the owner included, and `canDeleteBill()` answers true only
+   for the Aevidine admin console. This line listed it as a live row until 2026-08-18, which sends
+   a session to rebuild exactly what he refused. The two that exist:
+   `Reopen a bill` (**default OFF for every
    restaurant** — owner, 2026-08-02, superseding his earlier same-day word that it ships on;
    with **Only within**, default **5 min**, enforced at the void-invoice endpoint for a real
    manager) ·

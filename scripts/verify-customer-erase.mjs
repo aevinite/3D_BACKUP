@@ -103,6 +103,40 @@ else {
   else bad("the log may store the full phone number the owner asked us to erase");
   if (!/detail:[^\n]*\$\{phone\}/.test(del) && !/phone_full/.test(del)) ok("no line writes the whole number");
   else bad("something in the erase writes the full number into a record");
+
+  // ── 5 · THE DEBT CHECK MUST ASK ABOUT THIS PERSON, NOT ABOUT THE TOP DEBTORS ─────────────────
+  // (T20 sweep, 2026-08-19.) The erase REFUSES while a pay-later bill is outstanding — that is the
+  // owner's own call ("why is there an erase button? there should be a paid button"), and it is the
+  // only thing standing between an irreversible erase and a receivable nobody is attached to.
+  //
+  // It used to answer that question with `lfh_khata_outstanding(p_restaurant_ids, p_limit: 500)`,
+  // which is bounded BY PERSON over `row_number() OVER (ORDER BY sum(bill_amount) DESC)` (mig 309) —
+  // i.e. the 500 BIGGEST debtors and nobody else. A guest ranked 501st came back with no rows, read
+  // as owing ₹0, and was erased with the debt standing. Raising the cap does not fix it; asking a
+  // different question does.
+  //
+  // So the property, not the line: the refusal must not be computed from any top-N/ranked read, and
+  // it must be scoped to the ONE person whose record is about to go.
+  // CODE ONLY — the handler EXPLAINS the old ranked read in a comment, and a guard that cannot tell
+  // an explanation from a call is a guard that punishes writing the reason down.
+  const delCode = del.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  const TOP_N_READS = ["lfh_khata_outstanding", "p_limit"];
+  const ranked = TOP_N_READS.filter((t) => delCode.includes(t));
+  if (!ranked.length) ok("the pay-later refusal is not computed from a top-N/ranked read");
+  else bad(`the pay-later refusal reads ${ranked.join(" + ")} — that is ranked and capped, so a small debt below the cap reads as ₹0 and the guest is erased anyway`);
+
+  // It must read THIS person's own open bills, with mig 309's predicate and mig 301's arithmetic.
+  const balBlock = (delCode.match(/rd\("khataBalance"[\s\S]{0,900}?\)\);/) || [])[0] || "";
+  if (/from\("orders"\)/.test(balBlock) && /khata_customer_id/.test(balBlock)) ok("it reads this ONE person's own pay-later orders");
+  else bad("the pay-later balance is not read per person from `orders` by khata_customer_id");
+  const predicate = ['khata_at', 'payment_status', 'status', 'deleted_at', 'restaurant_id'];
+  const missing = predicate.filter((k) => !balBlock.includes(k));
+  if (!missing.length) ok("…with the whole mig-309 predicate (live, unpaid, uncancelled, this restaurant)");
+  else bad(`the balance read is missing ${missing.join(", ")} — it would count a bill that is not owed, or miss one that is`);
+  if (/disc_gross/.test(balBlock)) ok("…and the discount is taken from disc_gross, never re-derived from tax/subtotal (mig 301)");
+  else bad("the amount owed does not subtract disc_gross — the figure will be wrong on any discounted bill");
+  if (/\.limit\(/.test(balBlock)) ok("…and the read is still bounded");
+  else bad("the balance read is unbounded");
 }
 
 // ── LIVE · seed a guest + a real sale, erase the guest, prove the sale survives ─────────────────

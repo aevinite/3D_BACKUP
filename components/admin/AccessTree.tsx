@@ -14,9 +14,9 @@
  * nodePatch() from the same model — the screen cannot disagree with the database about
  * where a switch lives. Styling reuses the panel's existing .acc2-* language plus a small
  * .at-* set for the tree indentation. */
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch, nodeExpect,
+  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch, nodeExpect, expectHeader,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 import { useToast } from "@/components/admin/toast";
@@ -160,9 +160,31 @@ const HELP_SHOTS: Record<string, string[]> = {
   // ── modules ──
   khata: ["khata"], banquet: ["banquet"], auto_print_kot: ["auto-print-kot"], payroll: ["owner-staff"],
   // ── panel menus ──
-  mgr_tab_editor: ["edit_menu"], own_menu: ["edit_menu"], d_own_edit_menu: ["edit_menu"], d_mgr_edit_menu: ["edit_menu"],
-  mgr_tab_log: ["view_logs"], own_logs: ["view_logs"], d_own_logs: ["view_logs"], d_mgr_logs: ["view_logs"],
-  mgr_tab_ratings: ["view_ratings"], own_ratings: ["view_ratings"], d_own_ratings: ["view_ratings"], d_mgr_ratings: ["view_ratings"],
+  // ONE ENTRY PER ROW THAT REALLY EXISTS. Seven keys here named rows that had been renamed away —
+  // `own_logs` / `d_own_logs` / `d_mgr_logs` (the row is `own_audit` since 2026-08-02),
+  // `d_own_edit_menu` / `d_mgr_edit_menu` and `d_own_ratings` / `d_mgr_ratings` (the Edit-menu and
+  // log parts are keyed by their own sub-option, `d_mgr_add_dish` and so on). A key that matches no
+  // row is invisible: the row falls through to the derived names, finds no file, and the sheet says
+  // "There wasn't a good picture for this one" — exactly what a key that was never written would do.
+  // scripts/verify-access-model.mjs check 22 now fails on one. (sweep T15, 2026-08-18)
+  mgr_tab_editor: ["edit_menu"],
+  mgr_tab_log: ["view_logs"],
+  mgr_tab_ratings: ["view_ratings"],
+  // ── THE OWNER'S ROWS SHOW THE OWNER'S OWN PANEL (owner, 2026-08-18: "you can do the 16th one
+  //    too") ──────────────────────────────────────────────────────────────────────────────────
+  // Five of these said "There wasn't a good picture for this one" although the app HAD a capture of
+  // that screen — of the MANAGER panel. Borrowing it would have broken his standing rule that a
+  // picture must be of the thing you are reading about, so scripts/shot-access-help.mjs grew an
+  // owner job per row instead and these are the owner's own pages, ringed on his own nav.
+  //
+  // `own_ratings` is deliberately NOT here, and it is the one row with no owner screen to
+  // photograph: the owner panel's nav has no Rating review page at all — its entitlement gates
+  // /api/owner/ratings only. Left unmapped, it derives `ratings.png`, which is the GUEST menu with
+  // the star row ringed. That is what a rating IS, so it represents the row honestly; it is simply
+  // not a picture of a page of his, because there is not one.
+  own_reports: ["own_reports"], own_customers: ["own_customers"], own_issues: ["own_issues"],
+  own_settings: ["own_settings"], own_audit: ["own_audit"], own_access: ["own_access"],
+  own_menu: ["own_menu"], own_manager_mode: ["own_manager_mode"],
 };
 
 /** The action rows (Give a discount, Mark a bill paid…) are named after their power flag on both
@@ -174,7 +196,9 @@ function helpImages(node: Node): string[] {
   const b = node.bind as { key?: string; flag?: string };
   const stem = node.id.replace(/^(mgr|wtr|d_mgr|d_own)_/, "");
   const names = [...new Set([stem, b?.flag, b?.key].filter(Boolean) as string[])];
-  return names.flatMap((n) => [`/admin-help/${n}.png`, `/admin-help/${n.replace(/_/g, "-")}.png`]);
+  // DEDUPED at the end too: a name with no underscore spells the same file twice, so every such
+  // row handed React two children with the identical `key` and probed the same URL twice.
+  return [...new Set(names.flatMap((n) => [`/admin-help/${n}.png`, `/admin-help/${n.replace(/_/g, "-")}.png`]))];
 }
 
 /** "On by default" / "Off by default" / the default value, in words. */
@@ -295,20 +319,38 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   };
   const [openSec, setOpenSec] = useState<Record<string, boolean>>(() => readOpen().sec);
   const [openNode, setOpenNode] = useState<Record<string, boolean>>(() => readOpen().node);
+  // WHICH RESTAURANT THE OPEN SET IN STATE BELONGS TO (sweep T15, 2026-08-18). Without it, picking
+  // a different restaurant carried the previous one's open sections across AND overwrote that
+  // restaurant's own memory: on the render where `rid` changes, this write effect runs BEFORE the
+  // read effect below has reset the state, so it saved restaurant A's open set under restaurant B's
+  // key — and the read effect then read exactly that back. The comment under it has always said the
+  // opposite ("otherwise picking one in the dropdown would open whatever the previous one had
+  // open"), and that is the "every dropdown is open" the owner asked to be rid of on 2026-07-31.
+  // Measured: open two sections, switch restaurant, both were still open.
+  const openFor = useRef(openKey);
   useEffect(() => {
+    if (openFor.current !== openKey) return;   // mid-switch: this state is the OTHER restaurant's
     try { sessionStorage.setItem(openKey, JSON.stringify({ sec: openSec, node: openNode })); } catch {}
   }, [openKey, openSec, openNode]);
   // A different restaurant has its own memory — otherwise picking one in the dropdown would open
   // whatever the previous one had open.
-  useEffect(() => { const o = readOpen(); setOpenSec(o.sec); setOpenNode(o.node); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rid]);
+  useEffect(() => { const o = readOpen(); setOpenSec(o.sec); setOpenNode(o.node); openFor.current = openKey; /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rid]);
   const [info, setInfo] = useState<Node | null>(null);
   const flash = useRef<number>(0);
 
-  const load = useCallback((id: string) => {
+  // `keepError` = this reload was CAUSED by a refusal, so do not wipe the sentence explaining it.
+  //
+  // THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). A refused save set the message and then
+  // called load() on the same line to show what the row really says now — and load() cleared it on
+  // success. Sampled every 100ms: the banner read "Someone else changed Quick order — send to a
+  // table while you had it open — it now says off" at +0ms and was GONE before anyone could read
+  // it. The switch snapped back with no reason given, which is the silent-refusal shape this whole
+  // panel is built to avoid.
+  const load = useCallback((id: string, keepError = false) => {
     if (!id) return;
     fetch(`/api/admin/restaurants/access-tree?restaurant_id=${id}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => { if (d.error) setErr(d.error); else { setErr(""); setSt(d.state as TreeState); } })
+      .then((d) => { if (d.error) setErr(d.error); else { if (!keepError) setErr(""); setSt(d.state as TreeState); } })
       .catch(() => setErr("Couldn't load this restaurant's settings."));
   }, []);
   useEffect(() => { setSt(null); setRecent([]); load(rid); loadRecent(rid); }, [rid, load, loadRecent]);
@@ -325,7 +367,10 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
       // X-LFH-Expect = "this is what the row said when I tapped it" — the ONE clash gate
       // (lib/clash.ts) refuses the save if somebody else has moved it since. Sent only where the
       // row can honestly say what it saw; see nodeExpect. (sweep T6, 2026-08-10)
-      headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": JSON.stringify(expect) } : {}) },
+      // expectHeader(), not JSON.stringify(): a header must be ISO-8859-1, and fetch() throws away
+      // the WHOLE request if it is not. Two rows here are named with an em dash and could not be
+      // saved at all because of it. See lib/accessTree.ts. (sweep T15, 2026-08-18)
+      headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": expectHeader(expect) } : {}) },
       body: JSON.stringify({ restaurant_id: rid, patch }),
     })
       .then(async (r) => {
@@ -334,13 +379,13 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
           // 409 = another admin got there first. Say so in their words and RELOAD, so the row
           // shows what it actually says now rather than the value that lost.
           setErr(j.clash ? `${j.clash.plain} ${j.clash.todo}` : (j.error || "That change didn't save."));
-          setSaving("err"); load(rid); return;
+          setSaving("err"); load(rid, true); return;   // keep the sentence; the reload is the refusal's own
         }
         setErr("");
         if (stamp === flash.current) { setSaving("saved"); setTimeout(() => { if (stamp === flash.current) setSaving(""); }, 1400); }
         loadRecent(rid);   // the line the server just wrote — one scoped read, only after a save that landed
       })
-      .catch(() => { setSaving("err"); setErr("That change didn't save — the connection dropped."); load(rid); });
+      .catch(() => { setSaving("err"); setErr("That change didn't save — the connection dropped."); load(rid, true); });
   }, [rid, load, loadRecent]);
 
   /**
@@ -1164,10 +1209,37 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
   useAdminModal(sheetRef, `access-info-${node.id}`, onClose);
   // The pictures. Every one that LOADS is shown; a name with no file drops out via onError. When
   // nothing is left the sheet says so, rather than reaching for a photo of somewhere else.
-  const [broken, setBroken] = useState<Record<string, boolean>>({});
+  //
+  // A NAME WITH NO FILE HAS TO COST NOTHING TO LOOK AT (sweep T15, 2026-08-18). The note here used
+  // to claim it already did — "a missing picture costs nothing and never shows a broken image" —
+  // and it was not true: the <img> was rendered straight away, so opening ⓘ on any of the ~86 rows
+  // that have no capture showed TWO bordered boxes with their alt text and the "Example from a
+  // demo restaurant" caption over them, until the 404s came back and React took them away.
+  // Measured: 2 shots + the caption on open, 0 shots + "There wasn't a good picture for this one"
+  // once settled — a broken-looking flash on the majority of rows.
+  //
+  // ASK FIRST, RENDER AFTER. Each candidate name is probed with an off-DOM Image(); only the ones
+  // that really load are put on the page, and the browser serves them from its own cache the
+  // instant they are, so nothing is fetched twice. Hiding a rendered <img> with display:none does
+  // NOT work here and was the first attempt: a hidden image with loading="lazy" is never fetched,
+  // so neither onLoad nor onError ever fires and the sheet sits in "still deciding" for ever.
+  const candidates = useMemo(() => helpImages(node), [node]);
+  const [shot, setShot] = useState<Record<string, "ok" | "no">>({});
+  useEffect(() => {
+    setShot({});
+    let alive = true;
+    for (const src of candidates) {
+      const probe = new Image();
+      probe.onload = () => { if (alive) setShot((s) => ({ ...s, [src]: "ok" })); };
+      probe.onerror = () => { if (alive) setShot((s) => ({ ...s, [src]: "no" })); };
+      probe.src = src;
+    }
+    return () => { alive = false; };
+  }, [candidates]);
   const [more, setMore] = useState(false);
   const path = readablePath(node.id);
-  const shots = helpImages(node).filter((s) => !broken[s]);
+  const shots = candidates.filter((s) => shot[s] === "ok");
+  const settling = candidates.some((s) => !shot[s]);   // still waiting on an answer for one
   const kids = node.children || [];
   const def = defaultLine(node);
   return (
@@ -1181,8 +1253,7 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
             this shows ALL of them. lazy + static /public files, so an unopened sheet costs
             nothing. See scripts/shot-access-help.mjs to re-capture. */}
         {shots.map((src) => (
-          <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} loading="lazy"
-            onError={() => setBroken((b) => ({ ...b, [src]: true }))} />
+          <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} />
         ))}
         {/* SAY IT IS AN EXAMPLE (sweep T6, 2026-08-10). These are real captures of the app, but of
             ONE restaurant — opening ⓘ on Menu while Aangan Garden is selected shows Pizza Palace's
@@ -1214,7 +1285,9 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
         {node.leftToBuild ? <p className="at-sheet-note">This one isn&apos;t built yet. The switch appears here the moment it is.</p> : null}
         {/* Said out loud, centred at the bottom, instead of quietly borrowing a photo of something
             else (owner, 2026-08-01). Silence here would read as "the picture failed to load". */}
-        {!shots.length ? <p className="at-sheet-noshot">There wasn&apos;t a good picture for this one.</p> : null}
+        {/* Only once every candidate has answered — otherwise this line flashes on a row that DOES
+            have a picture, which is the same lie the other way round. */}
+        {!shots.length && !settling ? <p className="at-sheet-noshot">There wasn&apos;t a good picture for this one.</p> : null}
         <button className="adm-btn" onClick={onClose}>Close</button>
       </div>
     </div>
@@ -1554,6 +1627,26 @@ export function TreeStyle() {
   .at-def.off { border-color:#ef4444; color:#ef4444; background:color-mix(in srgb,#ef4444 12%,transparent); }
   .at-def.on  { border-color:#22c55e; color:#22c55e; background:color-mix(in srgb,#22c55e 12%,transparent); }
   .at-def.pin { border-color:#f59e0b; color:#f59e0b; background:color-mix(in srgb,#f59e0b 12%,transparent); }
+  /* ── THE DEFAULT CHIP HAS TO BE READABLE ON THE LIGHT CONSOLE TOO (sweep T15, 2026-08-18) ──
+     Measured on the running screen, in all three of the chip's real states, on both skins. A 12%
+     wash of the chip's own colour over a WHITE card leaves the text sitting on itself:
+
+                       dark console        light console, before → after
+       "On"              6.55:1              1.91:1 → 4.54:1
+       "Off"             4.25:1              2.99:1 → 5.16:1
+       "On + PIN"        6.86:1              1.83:1 → 5.27:1
+       the word DEFAULT  6.79:1              2.45:1 → 5.63:1
+
+     Three hard-coded hexes, and a hard-coded hex cannot follow the skin — the same lesson as the
+     role chips on a staff profile (T11) and the section count chip above. This chip is the only
+     thing on the screen that says whether EVERY manager or waiter at a restaurant starts with a
+     power on or off, so misreading it costs a restaurant a feature. Same hues, taken darker; the
+     wash and the border are untouched, so the colour coding still reads at a glance, and the dark
+     console is not touched at all. */
+  [data-skin="light"] .at-def.off { color: color-mix(in srgb, #ef4444 72%, #000); }
+  [data-skin="light"] .at-def.on  { color: color-mix(in srgb, #22c55e 62%, #000); }
+  [data-skin="light"] .at-def.pin { color: color-mix(in srgb, #f59e0b 55%, #000); }
+  [data-skin="light"] .at-cap.d   { color: color-mix(in srgb, #f472b6 62%, #000); }
   .at-def:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .at-tag { font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; border-radius:5px; }
   .at-tag.build { background:color-mix(in srgb,var(--adm-warn) 18%,transparent); color:var(--adm-warn); border:1px solid color-mix(in srgb,var(--adm-warn) 34%,transparent); }

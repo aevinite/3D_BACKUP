@@ -502,6 +502,40 @@ export const SECTIONS: Section[] = [
             bind: { t: "setting", key: "qop_parcel_allowed" },
             what: "The big Parcel bar on the “where does it go?” step. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar, and QO/P sends to tables only. This switch is only about which destinations the QO/P screen offers — the Parcel feature itself is permanent and has no switch to turn off. With this AND “Quick order — send to a table” both off there is nothing left for QO/P to do, so the button simply isn't on the floor — the header keeps only the KOT menu, nothing is greyed out and nothing errors." },
         ] },
+      // ╔══════════════════════════════════════════════════════════════════════════════════════╗
+      // ║ THE THREE FLOOR FEATURES GET THEIR SWITCH BACK (owner, 2026-08-18)                    ║
+      // ╚══════════════════════════════════════════════════════════════════════════════════════╝
+      // His decision, in his words: "I want that toggle thing where you can able to check… I want to
+      // turn on and turn off the feature if the restaurant required or not required."
+      //
+      // WHY THEY HAD TO COME BACK. All three are REAL, LIVE GATES that never stopped working:
+      //   take_orders → refuses order placement at app/api/tablet and app/api/editor
+      //   table_ops   → the KOT ▾ menu (move a party, merge, move a ticket/dish, split, reprint)
+      //   table_tags  → the VIP / Family / Owner's-guest ribbon
+      // The 2026-07-31 rebuild deleted their rows on the theory that they were "permanently on for
+      // whoever's panel owns them". They were not: each is a stored `settings.<x>_allowed` column,
+      // and lib/settingsClone writes table_ops_allowed = false and table_tags_allowed = false into
+      // EVERY new restaurant. Measured on the backup database 2026-08-18: table_ops_allowed was
+      // false on burger-barn, sakura-sushi, demo-bistro, green-bowl, taco-fiesta, pizza-palace and
+      // spice-route — seven live restaurants whose managers had no KOT ▾ menu and whose waiters had
+      // no table operations, while Access → Waiter → "Move, merge or split a table" read ON and no
+      // screen anywhere could put it right. That is the exact screen-says-ON-server-says-NO the
+      // rebuild exists to abolish, caused by removing the switch and leaving the gate.
+      //
+      // So: three switches, on the one screen that owns them. Their `def` is what
+      // lib/settingsClone really writes for a new restaurant, so the ⓘ and the factory state agree.
+      // The `module:` bindings in lib/accessModel.ts STAY — they are correct again now that an admin
+      // can see and set the column they read.
+      { id: "take_orders", name: "Take a new order", def: true,
+        bind: { t: "module", key: "take_orders" },
+        confirm: "Switch order-taking OFF for this restaurant?\n\nNobody will be able to punch in a new dine-in order — not the manager panel's ＋ Take order, not the waiter tablet, not the ⚡ QO/P screen. The restaurant can still bill and close the tables it already has open.",
+        what: "Punching in a dine-in order at all: the ＋ Take order button on a table, the waiter tablet's order screen, and the tables half of ⚡ QO/P. Every restaurant needs this, so it starts ON — the switch is here so you can SEE that it is on, and take it away for a restaurant that only sells parcels. WHO may take an order is a separate thing: the manager's default and the waiter's are under Manager and Waiter." },
+      { id: "table_ops", name: "Move, merge & split tables", def: false,
+        bind: { t: "module", key: "table_ops" },
+        what: "The KOT ▾ menu on the floor: moving a party to another table, merging two tables into one bill, moving a whole kitchen ticket or a single dish, splitting a bill, and reprinting a ticket. OFF removes the whole menu from the manager panel AND the waiter tablet, and the server refuses those actions — so a restaurant with it off cannot move a party once the order has gone to the kitchen. A NEW restaurant starts with it OFF, which is why most of them have it off today; switch it on for any restaurant that runs a real floor." },
+      { id: "table_tags", name: "Table types (VIP / Family / Guest)", def: false,
+        bind: { t: "module", key: "table_tags" },
+        what: "Marking a table so the floor shows who is sitting there — VIP, Family, Owner's guest. OFF removes the ribbon and the marking menu from the manager panel and the waiter tablet. A NEW restaurant starts with it OFF. Pay later (khata) is NOT affected: it has had its own switch under Extra features since migration 235." },
       // ╔════════════════════════════════════════════════════════════════════════════════╗
       // ║ 🛵 ORDERS WITHOUT A TABLE — ONE FEATURE, PERMANENT, NO SWITCH (owner, 2026-08-03)║
       // ╚════════════════════════════════════════════════════════════════════════════════╝
@@ -684,8 +718,10 @@ export const SECTIONS: Section[] = [
     //      ("four will be the fixed one"): every manager always has them, so they have NO row
     //      here at all (the model's rule: no row = permanently on). Their old switches are
     //      retired — see MANAGER_TAB_KEYS below.
-    //   2. PERMISSION FOR MANAGER — Delete a bill, Reopen a bill (with its minutes window,
-    //      default 5 min), Discount a bill (with its percentage cap, default 50%).
+    //      (His 2026-08-02 list opened with "delete bill"; that row was deleted on 2026-08-16 —
+    //      docs/REJECTED-IDEAS.md → R27 — so the two below are the whole list.)
+    //   2. PERMISSION FOR MANAGER — Reopen a bill (with its minutes window, default 5 min) and
+    //      Discount a bill (with its percentage cap, default 50%).
     //   3. MANAGER SETTINGS ("what manager can do") — only the sections a real manager can
     //      genuinely use: table name & seats, Users (create / reset / disable — never delete),
     //      and who serves which table. The billing / kitchen / sessions rows were removed:
@@ -771,8 +807,14 @@ export const SECTIONS: Section[] = [
         // there will be the percentage"). His defaults for every restaurant: reopen within
         // 5 minutes, discount up to 50% — set as the model defaults (defOf), so a restaurant
         // that never stored a value reads exactly that.
+        // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. This sentence used to open
+        // "…: delete a bill, reopen a bill…", left over from his 2026-08-02 wording, and it stayed
+        // on screen for two days after the row itself was deleted on 2026-08-16. The ⓘ of the one
+        // group that decides a manager's money powers was telling the admin that bill DELETION is
+        // a permission they can hand over, when cancel is the only route out of a bill for anyone
+        // at the restaurant and no such row will ever exist again. Do not put it back.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
-        what: "The money actions, for every manager in this restaurant: delete a bill, reopen a bill (and for how long), discount a bill (and up to how much). One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
+        what: "The money actions, for every manager in this restaurant: reopen a bill (and for how long), and discount a bill (and up to how much). There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
         children: [
           ...ACTIONS.map(mgrAction),
           {
@@ -786,7 +828,9 @@ export const SECTIONS: Section[] = [
             // it. The free pick-any-date search left the panel with this: a date field wider
             // than the reach would be a control promising days the server refuses.
             id: "mgr_bills", name: "Bills", bind: { t: "none" },
-            what: "The Bills tab is fixed — every manager always has it. This decides how far back its record of settled bills reaches. Reopen, delete and discount keep their own rows above.",
+            // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. "Reopen, delete and
+            // discount keep their own rows above" named a row that no longer exists; there are two.
+            what: "The Bills tab is fixed — every manager always has it. This decides how far back its record of settled bills reaches. Reopening and discounting keep their own rows above.",
             children: [
               { id: "mgr_bills_range", name: "Which bills they can see", def: "today", bind: { t: "opt", id: "view_bills", side: "manager", key: "range" },
                 what: "Every restaurant starts on TODAY — the bills of the shift they are standing in. Today + yesterday is handed over deliberately, because yesterday's bills say what a shift took.",
@@ -1191,6 +1235,26 @@ export function nodeExpect(n: Node, s: TreeState, rid: string):
     case "section":  return at("restaurants", `owner_entitlements.${b.key}`, s.sections?.[b.key]);
     default:         return null;   // creds · tab · has · capTablet · opt · limit · ratingsMaster · none
   }
+}
+
+/** The `X-LFH-Expect` header value for an expectation - JSON, with every character above U+00FF
+ *  escaped, so the string is pure ASCII.
+ *
+ *  THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). A header value must be ISO-8859-1, and
+ *  `fetch()` REFUSES THE WHOLE REQUEST if it is not - it throws before anything leaves the browser:
+ *  "Failed to read the 'headers' property from 'RequestInit': String contains non ISO-8859-1 code
+ *  point." The expectation carries the row's NAME as its label, and two rows on the Access screen
+ *  are named with an em dash. Both were therefore IMPOSSIBLE to save: the toggle did not move, no
+ *  request was made, and the screen said "Not saved" with no explanation. The same trap was waiting
+ *  on a staff profile, where the fields are a person's own typing - a designation with a curly
+ *  apostrophe would have done it.
+ *
+ *  JSON.stringify does NOT escape non-ASCII by default; escaping it here costs nothing and the
+ *  server's own JSON.parse gives back the identical string, em dash and all, so the refusal message
+ *  still reads exactly as it should. */
+export function expectHeader(expect: unknown): string {
+  return JSON.stringify(expect).replace(/[\u0080-\uffff]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /** The patch that sets this node to `v`. Shaped exactly like TreeState, so the client

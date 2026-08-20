@@ -171,7 +171,14 @@ const REACT_VALUE_EDITS = [
   {
     file: "components/admin/AccessTree.tsx",
     route: "app/api/admin/restaurants/access-tree/route.ts",
-    patterns: [{ re: /"X-LFH-Expect":\s*JSON\.stringify/, name: "sends what the row said when it was tapped" }],
+    // Matched on "the header is built FROM `expect`", not on the name of the function that builds
+    // it. It read /"X-LFH-Expect":\s*JSON\.stringify/ and went red the moment sweep T15 replaced
+    // JSON.stringify with expectHeader() — a real fix, because a header value must be ISO-8859-1
+    // and fetch() throws away the whole request if it is not, so the two Access rows named with an
+    // em dash were impossible to save. The write was protected the entire time; only the spelling
+    // moved. A guard that pins spelling reports a fix as a regression, which is the one thing this
+    // file must never do.
+    patterns: [{ re: /"X-LFH-Expect":\s*[A-Za-z_$][\w.$]*\(\s*expect\b/, name: "sends what the row said when it was tapped" }],
   },
   {
     file: "app/owner/issues/page.tsx",

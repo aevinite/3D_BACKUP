@@ -22,6 +22,8 @@ import {
   TABLET_COLS, TAB_ALLOWED, HAS_IDS, KNOWN_CONFIG_IDS,
 } from "@/lib/accessTree";
 import { expectClash, clashJson } from "@/lib/clash";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +93,15 @@ function describeAccessPatch(patch: Record<string, any>): string {
   for (const [k, v] of Object.entries(obj(patch.settings))) {
     const label = nameOfBind((b) => (b.t === "setting" || b.t === "tablet" || b.t === "choice" || b.t === "list" || b.t === "text") && b.key === k)
       || nameOfBind((b) => b.t === "module" && `${b.key}_allowed` === k);
-    say(label, k, Array.isArray(v) ? v.join("/") : v);
+    // A WAITER'S TRI-STATE IS SAID IN WORDS, like the capTablet branch forty lines below already
+    // does (owner, 2026-08-18). Six of the eight waiter rows are column-bound and came through
+    // here, so the "Recent changes here" strip read "Mark a bill paid: pin" — a word that appears
+    // nowhere on the screen the admin is looking at, on a strip whose whole job is telling them in
+    // English what they just changed. The other two rows have said "on, with a manager PIN" all
+    // along, so the same save could describe the same idea two different ways. (sweep T15)
+    const isWaiterCap = !!nameOfBind((b) => b.t === "tablet" && b.key === k);
+    const said = isWaiterCap && v === "pin" ? "on, with a manager PIN" : Array.isArray(v) ? v.join("/") : v;
+    say(label, k, said);
   }
   for (const [panel, keys] of Object.entries(obj(patch.tabs)))
     for (const [k, v] of Object.entries(obj(keys))) say(nameOfBind((b) => b.t === "tab" && b.panel === panel && b.key === k), `${panel}.${k}`, v);
@@ -261,11 +271,29 @@ export async function POST(req: NextRequest) {
   // refused, and the screen reloaded showing half the change applied. Validate first, write after.
   const setPatch: Record<string, any> = {};
 
+  // ── COUNT WHAT SURVIVED, HERE TOO (T20 sweep, 2026-08-19) ──────────────────────────────────────
+  // The `grants` and `sections` branches above each count what got past their allow-list, so a patch
+  // naming nothing but unknown keys leaves the column alone and the handler can honestly answer
+  // "nothing could be saved". These two branches did not: `setPatch.features` /
+  // `setPatch.platform_channels` were assigned regardless, so the column was rewritten with its own
+  // current value, the "did anything land?" test at the bottom concluded that something had, and the
+  // screen showed a green "Saved" for a change this route dropped in full. It also purged the guest
+  // menu cache for a write that changed nothing.
+  //
+  // That is the same dead-switch-wearing-a-green-tick shape the note at the top of this handler
+  // describes fixing for the other two branches, and the same one the `cfgTook` counter exists for.
+  // Reachable whenever a screen is a version behind the model — a retired feature row on a tab
+  // somebody left open since before a deploy.
+  //
+  // The count is ALLOW-LIST MEMBERSHIP, not "did the value change", exactly like grants/sections: a
+  // cred sent as "" is a deliberate no-op the channel form sends on every save ("saved without
+  // retyping the key"), and it must still count as a real save.
   if (patch.features) {
     const curFeat = obj((await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle()).data?.features);
     const next = { ...curFeat };
-    for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) next[k] = v === true;
-    setPatch.features = next;
+    let took = 0;
+    for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) { next[k] = v === true; took++; }
+    if (took) setPatch.features = next;
   }
   // Channels and their API keys live in the SAME column, so they are merged into ONE object here.
   // Doing them in two independent branches would have let a patch carrying both write the column
@@ -274,12 +302,15 @@ export async function POST(req: NextRequest) {
   if (patch.channels || patch.creds) {
     const curPc = obj((await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle()).data?.platform_channels);
     const next = { ...curPc };
+    let took = 0;   // see the note on the features branch above
     for (const [k, v] of Object.entries(obj(patch.channels))) {
       if (!CHANNEL_KEYS.includes(k)) continue;
       next[k] = { ...obj(next[k]), on: v === true }; // keep any stored API credentials
+      took++;
     }
     for (const [k, v] of Object.entries(obj(patch.creds))) {
       if (!CREDS_KEYS.includes(k)) continue;
+      took++;
       const cur = obj(next[k]);
       // "" = the form was saved without retyping the key, so leave the stored one alone. null =
       // remove it deliberately. Anything else replaces it. Trimmed because a pasted key almost
@@ -295,7 +326,7 @@ export async function POST(req: NextRequest) {
       const { api_key: _legacy, ...keep } = cur;
       next[k] = { ...keep, key: key.slice(0, 400) };
     }
-    setPatch.platform_channels = next;
+    if (took) setPatch.platform_channels = next;
   }
   if (patch.settings) {
     for (const [k, v] of Object.entries(obj(patch.settings))) {
@@ -317,19 +348,20 @@ export async function POST(req: NextRequest) {
   // Everything is validated by here, so the writes can go out together.
   if (Object.keys(restUpdate).length) {
     const up = await sb.from("restaurants").update(restUpdate).eq("id", rid);
-    if (up.error) return bad(up.error.message, 500);
+    // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
+    if (up.error) return adminFail("these permissions", up.error, { action: "save" });
   }
 
   if (Object.keys(setPatch).length) {
     const existing = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data;
     if (existing) {
       const up = await sb.from("settings").update(setPatch).eq("restaurant_id", rid);
-      if (up.error) return bad(up.error.message, 500);
+      if (up.error) return adminFail("these permissions", up.error, { action: "save" });
     } else {
       const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
       const row = { ...cleanClonedSettings(template.data), id: rid.slice(0, 40), restaurant_id: rid, ...setPatch };
       const up = await sb.from("settings").upsert(row, { onConflict: "restaurant_id" });
-      if (up.error) return bad(up.error.message, 500);
+      if (up.error) return adminFail("these permissions", up.error, { action: "save" });
     }
   }
 

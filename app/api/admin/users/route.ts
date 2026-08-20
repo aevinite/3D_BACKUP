@@ -27,6 +27,8 @@ import { newWaiterTables } from "@/lib/tableAssign";
 import { PROFILE_FIELDS, hasProfile, mergeProfilePatch, jobPatchFrom, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE } from "@/lib/staffProfile";
 import { capsForRole, isCapValue } from "@/lib/staffCaps";
 import { expectClash, clashJson } from "@/lib/clash";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +112,8 @@ export async function GET(req: NextRequest) {
       .limit(2000), // safety cap so this never becomes an unbounded whole-table read; true per-restaurant server scoping/pagination is a follow-up (audit 2026-07-08)
     sb.from("restaurants").select("id, name"),
   ]);
-  if (usersQ.error) return bad(usersQ.error.message, 500);
+  // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
+  if (usersQ.error) return adminFail("the staff list", usersQ.error, { action: "load" });
   const nameById: Record<string, string> = Object.fromEntries((restsQ.data || []).map((r) => [r.id, r.name]));
   // Strip the PIN hash to a boolean; attach the restaurant name (mapped, not a
   // PostgREST embed) so the admin sees WHICH restaurant each user belongs to.
@@ -159,7 +162,7 @@ export async function POST(req: NextRequest) {
     catch (e) { return bad(e instanceof Error ? e.message : "Pick at least one table."); }
   }
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name").single();
-  if (error) return bad(error.message, 500);
+  if (error) return adminFail("this new login", error, { action: "save" });
   await logAction("admin", "user_create", { actor: "admin", restaurant_id: restaurantId, detail: `created ${role} "${display}" · id ${data!.id}` });
   // Return the password ONCE so the admin can hand it over; it's only stored hashed.
   return ok({ ok: true, id: data!.id, username: key, name: display, role, password });
@@ -276,7 +279,8 @@ export async function PATCH(req: NextRequest) {
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // Bump token_version → kills all their existing logins immediately.
     const wr = await sb.from("staff_users").update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
-    if (wr.error) return bad(wr.error.message, 500); // never hand out a password that didn't actually save
+    // never hand out a password that didn't actually save
+    if (wr.error) return adminFail("this person's password", wr.error, { action: "save" });
     await logAction("admin", "user_reset_password", { actor: "admin", restaurant_id: u.restaurant_id, detail: `reset password for "${u.username}" · id ${id}` });
     return ok({ ok: true, password });
   }
@@ -284,7 +288,8 @@ export async function PATCH(req: NextRequest) {
     const active = !!body?.active;
     // Disabling someone also invalidates their cookies (token_version bump).
     const wr = await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
-    if (wr.error) return bad(wr.error.message, 500); // don't report a lockout/enable that didn't save
+    // don't report a lockout/enable that didn't save
+    if (wr.error) return adminFail(active ? "enabling this login" : "disabling this login", wr.error, { action: "save" });
     await logAction("admin", active ? "user_enable" : "user_disable", { actor: "admin", restaurant_id: u.restaurant_id, detail: `${active ? "enabled" : "disabled"} "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
@@ -294,7 +299,7 @@ export async function PATCH(req: NextRequest) {
     // Role is part of the cookie signature, so this invalidates old cookies; bump
     // token_version too to be doubly sure.
     const wr = await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
-    if (wr.error) return bad(wr.error.message, 500);
+    if (wr.error) return adminFail("this person's role", wr.error, { action: "save" });
     await logAction("admin", "user_set_role", { actor: "admin", restaurant_id: u.restaurant_id, detail: `set "${u.username}" → ${role} · id ${id}` });
     return ok({ ok: true });
   }
@@ -308,7 +313,7 @@ export async function PATCH(req: NextRequest) {
     if (body?.can_self_set_pin !== undefined) { patch.can_self_set_pin = !!body.can_self_set_pin; notes.push(`${body.can_self_set_pin ? "granted" : "revoked"} self PIN-change`); }
     if (!Object.keys(patch).length) return bad("Nothing to change.");
     const wr = await sb.from("staff_users").update(patch).eq("id", id);
-    if (wr.error) return bad(wr.error.message, 500);
+    if (wr.error) return adminFail("what this person may change themselves", wr.error, { action: "save" });
     await logAction("admin", "user_set_access", { actor: "admin", restaurant_id: u.restaurant_id, detail: `${notes.join(" & ")} for "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
@@ -317,14 +322,14 @@ export async function PATCH(req: NextRequest) {
     // it). Stored hashed, never returned. clear=true removes the PIN.
     if (body?.clear === true) {
       const wr = await sb.from("staff_users").update({ pin_hash: null }).eq("id", id);
-      if (wr.error) return bad(wr.error.message, 500);
+      if (wr.error) return adminFail("this person's PIN", wr.error, { action: "save" });
       await logAction("admin", "user_set_pin", { actor: "admin", restaurant_id: u.restaurant_id, detail: `cleared PIN for "${u.username}" · id ${id}` });
       return ok({ ok: true });
     }
     const pin = String(body?.pin || "").trim();
     if (!/^\d{4,8}$/.test(pin)) return bad("PIN must be 4–8 digits.");
     const wr = await sb.from("staff_users").update({ pin_hash: await hashSecret(pin) }).eq("id", id);
-    if (wr.error) return bad(wr.error.message, 500);
+    if (wr.error) return adminFail("this person's PIN", wr.error, { action: "save" });
     await logAction("admin", "user_set_pin", { actor: "admin", restaurant_id: u.restaurant_id, detail: `${u.pin_hash ? "changed" : "set"} PIN for "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
@@ -350,7 +355,7 @@ export async function PATCH(req: NextRequest) {
     if (body?.phone !== undefined) patch.phone = String(body.phone || "").trim().slice(0, 20) || null;
     if (!Object.keys(patch).length) return bad("Nothing to change.");
     const wr = await sb.from("staff_users").update(patch).eq("id", id);
-    if (wr.error) return bad(wr.error.message, 500);
+    if (wr.error) return adminFail("these details", wr.error, { action: "save" });
     return ok({ ok: true }); // intentionally NOT logged — admin edits stay out of the operation log
   }
   return bad("Unknown action.");
@@ -371,7 +376,7 @@ export async function DELETE(req: NextRequest) {
   const pay = await payHistoryBlocksDelete(sb, id);
   if (pay.blocked) return bad(PAY_HISTORY_DELETE_MESSAGE(pay.count), 409);
   const del = await sb.from("staff_users").delete().eq("id", id);
-  if (del.error) return bad(del.error.message, 500);
+  if (del.error) return adminFail("removing this login", del.error, { action: "save" });
   await logAction("admin", "user_delete", { actor: "admin", restaurant_id: u.restaurant_id, detail: `deleted "${u?.username || "?"}" · id ${id}` });
   return ok({ ok: true });
 }

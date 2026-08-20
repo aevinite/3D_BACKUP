@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const ok = (d: any, s = 200) => NextResponse.json(d, { status: s });
@@ -47,10 +49,11 @@ export async function POST(req: NextRequest) {
   const path = `${rid}/logo-${Date.now()}.${ext}`;
   const buf = new Uint8Array(await file.arrayBuffer());
   const up = await sb.storage.from("branding").upload(path, buf, { contentType: file.type, upsert: true });
-  if (up.error) return bad(up.error.message, 500);
+  // Plain sentence to the screen, raw text to `detail` + the log — see the note in /api/admin/usage.
+  if (up.error) return adminFail("this restaurant's logo", up.error, { action: "save" });
   const url = sb.storage.from("branding").getPublicUrl(path).data.publicUrl;
   const { error } = await sb.from("restaurants").update({ logo_url: url }).eq("id", rid);
-  if (error) return bad(error.message, 500);
+  if (error) return adminFail("this restaurant's logo", error, { action: "save" });
   await logAction("admin", "restaurant_logo", { actor: "admin", restaurant_id: rid, detail: "uploaded logo" });
   return ok({ ok: true, logo_url: url });
 }
@@ -60,7 +63,7 @@ export async function DELETE(req: NextRequest) {
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!isUuid(rid)) return bad("Invalid restaurant_id.");
   const { error } = await sb.from("restaurants").update({ logo_url: null }).eq("id", rid);
-  if (error) return bad(error.message, 500);
+  if (error) return adminFail("this restaurant's logo", error, { action: "save" });
   await purgeLogos(rid); // also delete the stored file(s), not just the DB link
   await logAction("admin", "restaurant_logo", { actor: "admin", restaurant_id: rid, detail: "removed logo" });
   return ok({ ok: true });

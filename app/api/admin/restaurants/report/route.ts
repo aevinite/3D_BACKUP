@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { businessDayStartIso } from "@/lib/businessDay";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -40,7 +42,8 @@ export async function GET(req: NextRequest) {
   const toIso = to.toISOString();
 
   const restQ = await sb.from("restaurants").select("id, name, slug, active, created_at, owner_user_id").eq("id", rid).maybeSingle();
-  if (restQ.error) return bad(restQ.error.message, 500);
+  // Plain sentence to the screen, raw text to `detail` + the log — see the note in /api/admin/usage.
+  if (restQ.error) return adminFail("this restaurant's full report", restQ.error, { action: "load" });
   if (!restQ.data) return bad("restaurant not found", 404);
 
   const [
@@ -63,7 +66,7 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: rid, p_from: fromIso, p_to: toIso }),
   ]);
   for (const q of [ordersCountQ, orderItemsCountQ, activityCountQ, callsCountQ, sessionsCountQ, openTablesQ, staffQ, menuItemsCountQ, trendQ]) {
-    if (q.error) return bad(q.error.message, 500);
+    if (q.error) return adminFail("this restaurant's full report", q.error, { action: "load" });
   }
 
   const staffByRole: Record<string, number> = {};

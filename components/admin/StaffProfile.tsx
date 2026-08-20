@@ -30,9 +30,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { openRestaurantPanel, actLabel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
-import type { TreeState } from "@/lib/accessTree";
+import { expectHeader, type TreeState } from "@/lib/accessTree";
 import {
-  capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, countOverrides,
+  capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, roleValueLabel, countOverrides,
   type Cap, type CapValue,
 } from "@/lib/staffCaps";
 import {
@@ -104,12 +104,25 @@ const adminHost = (userId: string): ProfileHost => ({
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        ...(expect ? { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
+        // expectHeader(), not JSON.stringify(): these fields are a PERSON'S OWN TYPING, and a header
+        // must be ISO-8859-1 — a designation with a curly apostrophe or an em dash would make fetch()
+        // throw away the whole request, so Save would do nothing at all. (sweep T15, 2026-08-18)
+        ...(expect ? { "X-LFH-Expect": expectHeader({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
       },
       body: JSON.stringify({ id: userId, ...payload }),
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || "That didn't save.");
+    // A REFUSAL HAS TO READ AS ENGLISH (sweep T15, 2026-08-18). When another admin has moved the
+    // same field first, lib/clash.ts answers 409 with { error: "clash_changed_elsewhere", clash:
+    // { plain, todo } } — and this read `j.error`, so the person on screen was shown the machine
+    // code. Measured: changing a manager's designation underneath and pressing Save printed
+    // "clash_changed_elsewhere" in the header. The OWNER's copy of this same panel has said the
+    // plain sentence since it was built (components/owner/ownerProfileHost.ts), and so does the
+    // Access screen — the admin host was the one that did not.
+    if (!r.ok) {
+      const c = j?.clash as { plain?: string; todo?: string } | undefined;
+      throw new Error(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : (j.error || "That didn't save."));
+    }
     return j;
   },
   photo: {
@@ -288,7 +301,11 @@ export default function StaffProfile({ userId, onClose, onChanged, host }: {
 // ── LEFT RAIL: photo, who, completeness, the daily buttons ───────────────────
 function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => void }) {
   const p = d.person;
-  const c = completeness(p);
+  // Count "pay setup" only where a Pay card actually exists to fill it in — the same condition the
+  // main column uses to draw that card. Without this the meter asks a cook, an owner, and everyone
+  // at a restaurant whose payroll module is off (which is every restaurant by default) for a thing
+  // the screen will not let them enter. (sweep T15, 2026-08-18)
+  const c = completeness(p, { pay: p.role !== "owner" && hasProfile(p.role) && d.payrollOn });
   const pct = Math.round((c.filled / c.total) * 100);
   const photo = p.profile?.photo_url as string | undefined;
   const [busy, setBusy] = useState(false);
@@ -596,7 +613,15 @@ function PermRow({ cap, tree, perms, onSet }: {
         <div className="ds">{cap.node.what}</div>
       </div>
       <div className="stp-perm-c">
-        {cap.perPerson ? (
+        {cap.kind === "value" ? (
+          // A VALUE, not a switch — a % ceiling or a date reach. There is nothing here to be able
+          // to do, so it gets no on/off chip and no "Can do this" underneath, just the answer the
+          // Access screen holds. (sweep T15, 2026-08-18)
+          <div className="stp-fixed">
+            <span className="stp-chip mut">{roleValueLabel(cap, tree) ?? "…"}</span>
+            <span className="hint">set for the restaurant</span>
+          </div>
+        ) : cap.perPerson ? (
           <select className="stp-sel" value={value} onChange={(e) => onSet(cap, e.target.value as CapValue)} aria-label={cap.node.name}>
             {capStates(cap.pin).map((s) => (
               <option key={s} value={s}>
@@ -605,16 +630,18 @@ function PermRow({ cap, tree, perms, onSet }: {
             ))}
           </select>
         ) : (
-          // Restaurant-wide row (an owner's pages): show the truth, don't offer a switch that
-          // would save nothing. The link goes to the screen that actually owns it.
+          // Restaurant-wide row (an owner's pages, a manager's sub-options): show the truth, don't
+          // offer a switch that would save nothing. The note above says where it is set.
           <div className="stp-fixed">
             <span className={`stp-chip ${eff === "on" ? "ok" : "bad"}`}>{eff ? STATE_LABEL[eff] : "—"}</span>
             <span className="hint">set for the restaurant</span>
           </div>
         )}
-        <span className={`stp-eff ${eff === "off" ? "no" : "yes"}`}>
-          {eff === "off" ? "Cannot do this" : eff ? "Can do this" : ""}
-        </span>
+        {cap.kind === "value" ? null : (
+          <span className={`stp-eff ${eff === "off" ? "no" : "yes"}`}>
+            {eff === "off" ? "Cannot do this" : eff ? "Can do this" : ""}
+          </span>
+        )}
       </div>
     </div>
   );

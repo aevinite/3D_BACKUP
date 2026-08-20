@@ -6,7 +6,7 @@
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, verifySecret } from "@/lib/userAuth";
@@ -24,8 +24,15 @@ export const dynamic = "force-dynamic";
 // only while the transfer is on.
 
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // A SCOPE WE COULD NOT READ IS NOT "YOU ARE NOBODY" (T20 sweep, 2026-08-19). `ownerScope()` throws
+  // OwnerScopeUnavailable when the act-as widen read fails — deliberately, so a blip can never
+  // silently shrink the view — and `ownerScopeOr503()` was written in the same change to turn that
+  // into a retryable 503 with a sentence a person can act on. It had NO callers: all twelve owner
+  // routes still called `ownerScope()` bare, so the throw reached Next unhandled and the owner got a
+  // blank 500 with no retry. Same 401 as before for a real "not you"; the only new answer is the 503.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
   try {
   const owner = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   const name = owner?.name || owner?.username || (scope.admin ? "Admin" : "Owner");
@@ -59,7 +66,22 @@ export async function GET(req: NextRequest) {
     // restaurant's appearance/config that the admin withheld. Union above still decides
     // whether the nav item exists at all; this decides WHICH restaurants appear inside.
     const settingsIds = scope.admin ? scope.ids : await entitledSubset(scope.ids, "settings");
-    const r = await sb.from("restaurants").select("id, name").in("id", settingsIds.length ? settingsIds : [" "]).order("name");
+    // ── A BLIP MUST NOT EMPTY THE PAGE (T20 sweep, 2026-08-19) ──────────────────────────────────
+    // `r.error` was never inspected, so a failed read left `restaurants` as `[]` — and everything
+    // below is keyed off that list: `modIds`, so the module-toggle block is skipped; `nameOf`, so
+    // any surviving row is nameless; and the printing block, which reads `restaurants` directly. The
+    // owner opened Settings and saw a page with no restaurants, no feature switches and no printing
+    // rows, with nothing saying why.
+    //
+    // This is EXACTLY finding F16 (2026-08-12) in the branch F16 did not cover: that fix filled the
+    // list for the ADMIN's `scope.all` view and left the real owner's `else` branch — the majority
+    // case — reading the same way it always had. The list is the page here, so a failed read is a
+    // retryable answer, not a shorter page (the same rule `part.error` follows a few lines down).
+    const r = await sb.from("restaurants").select("id, name")
+      .in("id", settingsIds.length ? settingsIds : [" "]).order("name").limit(Math.max(settingsIds.length, 1));
+    if (r.error) return dbFail("owner/settings.restaurants", r.error, {
+      message: "Couldn't load your restaurants just now — please try again.",
+    });
     restaurants = (r.data || []) as { id: string; name: string }[];
   }
   // Only a REAL logged-in owner (not the admin act-as, which has no password row here) may
@@ -154,8 +176,9 @@ export async function GET(req: NextRequest) {
 // PATCH — the owner flips a module the admin transferred to them (mig 166).
 //   { restaurant_id, key: "table_tags", enabled: boolean }
 export async function PATCH(req: NextRequest) {
-  const scope = await ownerScope(req);
-  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp) return sc.resp;
+  const scope = sc.scope;
   const body = await req.json().catch(() => ({}));
   const rid = String(body?.restaurant_id || "");
   const def = MODULE_DEFS.find((d) => d.key === String(body?.key || ""));
@@ -190,7 +213,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Only a signed-in owner can change their password here." }, { status: 403 });
   // Same rung as GET: if the admin switched this owner's Settings section off, the self
   // password-change is refused server-side too (not just hidden from the nav).
-  const scope = await ownerScope(req);
+  // Same T20 note as the GET above, with one difference that matters: here a NULL scope is
+  // deliberately tolerated — an owner who currently has no enabled restaurant may still change their
+  // own password, and the guard at the top of POST is what proves they are an owner. So only the
+  // "we couldn't work out your restaurants" answer (503) is returned early; a 401 falls through
+  // exactly as `!scope` did before.
+  const sc = await ownerScopeOr503(req);
+  if (sc.resp && sc.resp.status !== 401) return sc.resp;
+  const scope = sc.scope ?? null;
   if (scope && !scope.all) {
     const ent = await getOwnerEntitlementsUnion(scope.ids);
     if (ent.settings === false)

@@ -25,6 +25,7 @@ const {
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
+  nodeExpect, expectHeader,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -680,6 +681,245 @@ else ok("the read/write route derives every allow-list from the model");
   if (!/typeof v === "boolean"/.test(clash) || !/"pin"/.test(clash))
     fail("lib/clash.ts describe() no longer says on/off for a switch — a refused permission change would quote \"true\"/\"false\"/\"pin\" at an admin");
   else ok("a refused permission change is described in the words the screen uses (on / off / manager PIN)");
+  // …AND EVERY SCREEN THAT SENDS AN EXPECTATION HAS TO READ THE ANSWER THE SAME WAY. The staff
+  // profile sends X-LFH-Expect on the job, the pay and every profile card, but its ADMIN host read
+  // `j.error` — which is the machine code — so a refused save printed "clash_changed_elsewhere" at
+  // the person. The owner's copy of the same panel has always read `clash.plain`. (T15, 2026-08-18)
+  // CODE ONLY — both files EXPLAIN this rule in a comment, so a naive text search reads its own
+  // documentation and passes over the very line that was wrong (it did, on the first draft).
+  const codeOf = (s) => s.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const [file, raw] of [["components/admin/StaffProfile.tsx", read("components/admin/StaffProfile.tsx")],
+                             ["components/owner/ownerProfileHost.ts", read("components/owner/ownerProfileHost.ts")]]) {
+    const src = codeOf(raw);
+    if (!/X-LFH-Expect/.test(src) && !/clash/.test(src)) continue;   // this host doesn't opt in
+    if (!/\.clash\b[\s\S]{0,200}\bplain\b/.test(src))
+      fail(`${file} shows a refused save as the raw code instead of the plain sentence lib/clash.ts sends`);
+    else ok(`${file} shows a refused save in plain words`);
+  }
+}
+
+// ── 21 · THE SCREEN MUST NOT OFFER A PERMISSION THE OWNER DELETED (R27) ─────
+// THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). "Delete a bill" left the manager's money
+// list on 2026-08-16 (docs/REJECTED-IDEAS.md R27 — cancel is the only route out of a bill for
+// anyone at the restaurant). The ROW went; the WORDS around it did not. "Permission for manager"
+// still told the admin, in its own description, that the group holds "delete a bill", and the Bills
+// row still said "Reopen, delete and discount keep their own rows above". So the one screen that
+// decides what a manager may do advertised a power the product refuses on compliance grounds —
+// and every check in this file passed, because they all ask about SWITCHES and none reads the
+// prose beside them.
+//
+// A sentence is allowed to say the thing does NOT exist; that is the correction. It may not list
+// it as something a role can be given.
+{
+  const bad = [];
+  for (const n of ALL_NODES) {
+    if (n.bind?.t === "grant" && n.bind.flag === "delete_bill") bad.push(`a row (${n.id}) offers the delete_bill grant`);
+    if (/^\s*delete (a|the) bill\s*$/i.test(n.name || "")) bad.push(`a row (${n.id}) is named "${n.name}"`);
+    // PER OCCURRENCE, not per string: a sentence that both denies the power AND lists it would
+    // otherwise pass on the strength of the denial. Only the 60 characters immediately BEFORE each
+    // mention decide whether that mention is a prohibition or an offer.
+    const text = `${n.name || ""} ${n.what || ""}`;
+    for (const m of text.matchAll(/delete (a|the) bill/gi)) {
+      const before = text.slice(Math.max(0, m.index - 60), m.index);
+      if (!/\b(no|not|never|cannot|can't|without|refuses|gone|nobody)\b/i.test(before))
+        bad.push(`"${n.name}" lists deleting a bill as something a role may be given — R27 says nobody at the restaurant may`);
+    }
+  }
+  const doc = read("docs/ACCESS-MODEL.md");
+  const bLine = (doc.match(/\n2\. \*\*Permission for manager\*\*[\s\S]{0,300}/) || [""])[0];
+  if (/`Delete a bill`\s*·/.test(bLine))
+    bad.push("docs/ACCESS-MODEL.md still lists `Delete a bill` as a live Permission-for-manager row");
+  if (bad.length) fail(`the access model still offers "delete a bill" (docs/REJECTED-IDEAS.md R27): ${bad.join("; ")}`);
+  else ok("nothing on the Access screen offers a manager the power to delete a bill (R27)");
+}
+
+// ── 22 · A ROW'S HELP PICTURES MUST NAME A ROW THAT EXISTS ──────────────────
+// Same shape as check 14 (the search synonyms), and for the same reason. HELP_SHOTS in
+// components/admin/AccessTree.tsx maps a ROW ID to the screenshots its ⓘ shows. Rows get renamed —
+// "Audit" became "Audit & logs" and `own_logs` became `own_audit` on 2026-08-02 — and a map keyed
+// by the old id keeps its entry, matches nothing, and silently stops showing the picture it was
+// written for. Nothing said so, because a name with no file is dropped by the <img> onError, which
+// is the same outcome as a key that never matched. (sweep T15, 2026-08-18)
+{
+  const src = read("components/admin/AccessTree.tsx");
+  const body = (src.match(/const HELP_SHOTS: Record<string, string\[\]> = \{([\s\S]*?)\n\};/) || [])[1] || "";
+  // EVERY key, not the first one on each line: entries are written several to a line
+  // ("mgr_tab_editor: […], own_menu: […]"), and a `\n\s*`-anchored scan saw 16 of the 20 —
+  // including none of the four the first version of this guard was written to catch.
+  const keys = [...body.replace(/\/\/[^\n]*/g, "").matchAll(/(?:^|[\s{,])([a-z0-9_]+):\s*\[/g)].map((m) => m[1]);
+  const ids = new Set(ALL_NODES.map((n) => n.id));
+  const stale = keys.filter((k) => !ids.has(k));
+  if (!keys.length) fail("could not read the HELP_SHOTS map — if it moved, update this guard");
+  else if (stale.length) fail(`${stale.length} help-picture key(s) name a row that does not exist, so those rows silently show no picture: ${stale.join(", ")}`);
+  else ok(`all ${keys.length} help-picture keys name a real row`);
+}
+
+// ── 23 · A MODULE GATE WITH NO SWITCH ON THE SCREEN ─────────────────────────
+// THE FAULT THIS EXISTS TO CATCH (sweep T15, 2026-08-18 — it is live on 7 of 9 restaurants).
+//
+// lib/accessModel.ts still carries a `module:` binding on some permissions. The editor's whoami
+// loops over those and forces the power OFF when the module's `<x>_allowed` column is false; the
+// tablet route does the same to the matching tablet_* tri-state. That is correct ONLY while the
+// Access screen has a switch for that module — otherwise a stored `false` is unreachable for ever
+// and the screen shows the capability as ON while both panels are refused. lib/accessModel.ts says
+// so in as many words, at the parcel/platform rows: "Do not re-add a module binding without a
+// switch on the Access screen to go with it: a gate no admin can see is the dead switch the access
+// rebuild deleted."
+//
+// Three bindings were left behind when the rebuild removed their rows. Measured on the backup
+// database, 2026-08-18: table_ops_allowed was false on burger-barn, sakura-sushi, demo-bistro,
+// green-bowl, taco-fiesta, pizza-palace and spice-route (true only on french-house and aangan), and
+// table_tags_allowed on the same seven minus pizza-palace — while Access → Waiter → "Move, merge or
+// split a table" read ON and no screen could put it right.
+//
+// RESOLVED (owner, 2026-08-18): "I want that toggle thing where you can able to check… I want to
+// turn on and turn off the feature if the restaurant required or not required." All three now have
+// a switch in Main features, so their `module:` bindings are correct again and the list below is
+// empty. It stays as a list so a FOURTH module losing its row fails here immediately.
+{
+  const HANDOFF_PENDING = [];
+  // ONE SLICE PER PERMISSION, anchored on its `{ id: "x", group: "y"` opening and ending at the
+  // next one. A looser "id … within 900 characters … module:" scan reads across the boundary and
+  // reports the module of the row BELOW (it blamed print_invoice for khata's binding while this
+  // check was being written), so the guard would name the wrong row on the day it matters.
+  const anchors = [...accessModel.matchAll(/\{\s*id:\s*"([a-z0-9_]+)",\s*group:\s*"/g)];
+  const withModule = anchors.map((a, i) => {
+    const own = accessModel.slice(a.index, i + 1 < anchors.length ? anchors[i + 1].index : accessModel.length);
+    const m = own.match(/\bmodule:\s*\{\s*allowed:\s*"([a-z0-9_]+)_allowed"/);
+    return m ? { id: a[1], mod: m[1] } : null;
+  }).filter(Boolean);
+  if (!anchors.length) fail("could not read the permission list in lib/accessModel.ts — if its shape changed, update this guard");
+  const stranded = withModule.filter((p) => !MODULE_KEYS.includes(p.mod));
+  const unexpected = stranded.filter((p) => !HANDOFF_PENDING.includes(p.mod));
+  const healed = HANDOFF_PENDING.filter((m) => !stranded.some((p) => p.mod === m));
+  if (unexpected.length)
+    fail(`a module gate with NO switch on the Access screen — a stored false is unreachable for ever and the screen would show it ON: ${unexpected.map((p) => `${p.id} → settings.${p.mod}_allowed`).join(", ")}`);
+  else if (healed.length)
+    fail(`${healed.join(", ")} no longer needs its place on the T15 handoff list in this check — take the name(s) out of HANDOFF_PENDING in the same commit as the fix`);
+  else ok(HANDOFF_PENDING.length
+    ? `no NEW module gate is unreachable from the screen (${HANDOFF_PENDING.length} known and handed off: ${HANDOFF_PENDING.join(", ")})`
+    : `every one of the ${withModule.length} module gates has a switch on the Access screen`);
+}
+
+// ── 24 · THE SPEC'S MENU TABLE MUST LIST EVERY MENU ROW ─────────────────────
+// docs/ACCESS-MODEL.md section A1 is a row-by-row table of what sits under Menu, and the next
+// session builds from it. It had drifted: "Prep time on a dish" had been on the screen for days
+// with no line in the table, and the table put Bubble effect above Design and styling and called
+// the latter "(last)" when it is not. A count check is enough to catch a row added or removed on
+// one side and not the other, and it needs no name matching between two vocabularies. (T15)
+{
+  const doc = read("docs/ACCESS-MODEL.md");
+  const a1 = (doc.match(/### A1 · Menu[\s\S]*?\n\| Sub-option \| Default \| What it does \|\n\|[-|\s]+\|\n([\s\S]*?)\n\n/) || [])[1];
+  const menuNode = ALL_NODES.find((n) => n.id === "menu");
+  if (!a1 || !menuNode) fail("could not read section A1's table, or the Menu row — if either moved, update this guard");
+  else {
+    const docRows = a1.split("\n").filter((l) => l.trim().startsWith("|")).length;
+    const treeRows = (menuNode.children || []).length;
+    if (docRows !== treeRows)
+      fail(`docs/ACCESS-MODEL.md A1 lists ${docRows} sub-options and Menu has ${treeRows} — the spec and the screen disagree about what is under Menu`);
+    else ok(`the spec's Menu table lists all ${treeRows} of the rows the screen shows`);
+  }
+}
+
+// ── 25 · THE ADMIN MUST BE ABLE TO CREATE A WAITER ──────────────────────────
+// THE FAULT THIS EXISTS TO KILL (sweep T15, 2026-08-18). newWaiterTables() in lib/tableAssign.ts
+// REFUSES a waiter created with an empty table pick — for every restaurant, with no module check
+// (owner, 2026-07-30: "block it — must pick at least one"). POST /api/admin/users calls it for
+// every `tablet` role. The admin's own Add-a-user form never sent `tables` and had no control for
+// one, so creating a waiter from /aevinite → Users was IMPOSSIBLE: the form submitted and the
+// server answered "Pick at least one table for this waiter … Use 'Select all' for the whole
+// floor", naming a control that was not on the screen. Watched happen, then watched work.
+//
+// Two halves, and both have to hold: the server still demands it, and the form still asks for it.
+{
+  const assign = read("lib/tableAssign.ts");
+  const form = read("app/aevinite/users/page.tsx");
+  const route = read("app/api/admin/users/route.ts");
+  const demanded = /Pick at least one table for this waiter/.test(assign) && /newWaiterTables/.test(route);
+  const bad = [];
+  if (demanded) {
+    if (!/tables:\s*newTables/.test(form)) bad.push("the admin's Add-a-user form does not send `tables`, so every waiter create is refused");
+    if (!/Tables this waiter will serve/.test(form)) bad.push("the admin's Add-a-user form has no table picker, so there is no way to answer the question the server asks");
+    if (!/Select all/.test(form)) bad.push('the form has no "Select all" — the owner\'s one-tap whole floor (2026-07-30)');
+  }
+  if (!demanded) ok("waiter creation: the server no longer demands a table pick, so the form need not ask");
+  else if (bad.length) fail(`the admin cannot create a waiter: ${bad.join("; ")}`);
+  else ok("the admin's Add-a-user form asks which tables a new waiter serves, which is what the server demands");
+}
+
+// ── 26 · AN EXPECTATION HEADER MUST BE PURE ASCII, OR NOTHING IS SENT AT ALL ──
+// THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). A header value must be ISO-8859-1, and
+// fetch() throws away the WHOLE request if it is not: "String contains non ISO-8859-1 code point".
+// The X-LFH-Expect header carries the row's NAME as its label, and two rows on the Access screen are
+// named with an em dash — "Quick order — send to a table" and "Parcel — send it out". Both were
+// therefore impossible to save from the screen at all: the toggle did not move, no request was made,
+// and the save line read "Not saved" with nothing to explain it. Every other check in this file
+// passed straight over it, because the ROW, the KEY, the ROUTE and the ALLOW-LIST were all perfect.
+//
+// The staff profile had the same trap waiting, where the fields are a person's own typing.
+{
+  const bad = [];
+  for (const [file, src] of [["components/admin/AccessTree.tsx", read("components/admin/AccessTree.tsx")],
+                             ["components/admin/StaffProfile.tsx", read("components/admin/StaffProfile.tsx")]]) {
+    if (!/X-LFH-Expect/.test(src)) continue;
+    if (/"X-LFH-Expect":\s*JSON\.stringify/.test(src))
+      bad.push(`${file} builds the header with a bare JSON.stringify — one em dash in a row name or in a person's typing and the whole save is thrown away by the browser`);
+    else if (!/"X-LFH-Expect":\s*expectHeader\(/.test(src))
+      bad.push(`${file} no longer builds the header with expectHeader()`);
+  }
+  if (!/export function expectHeader/.test(tree)) bad.push("expectHeader() is gone from lib/accessTree.ts");
+  // …and prove it on the real rows: every expectation this model can produce must escape to ASCII.
+  const st = { features: {}, settings: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {} };
+  for (const n of ALL_NODES) {
+    const b = n.bind;
+    if (b.t === "feature") st.features[b.key] = true;
+    else if (["setting", "choice", "text", "list", "tablet"].includes(b.t)) st.settings[b.key] = "x";
+    else if (b.t === "module") st.settings[`${b.key}_allowed`] = true;
+    else if (b.t === "grant") st.grants[b.flag] = true;
+    else if (b.t === "section") st.sections[b.key] = true;
+  }
+  const notAscii = ALL_NODES.map((n) => [n, nodeExpect(n, st, "rid")]).filter(([, e]) => e)
+    .filter(([, e]) => [...expectHeader(e)].some((c) => c.charCodeAt(0) > 127))
+    .map(([n]) => n.id);
+  if (notAscii.length) bad.push(`expectHeader() still leaves a non-ASCII character in the header for: ${notAscii.join(", ")}`);
+  if (bad.length) fail(`a save the browser will refuse to send: ${bad.join("; ")}`);
+  else ok(`every expectation header is pure ASCII, for all ${ALL_NODES.length} rows and for a person's own typing`);
+}
+
+// ── 27 · A REFUSED SAVE MUST STILL BE ON SCREEN A SECOND LATER ──────────────
+// The Access screen answers a refusal by setting the sentence AND reloading the row, so you can see
+// what it really says now. load() cleared the error on success — on the same tick — so the sentence
+// was gone before anyone could read it and the switch just snapped back. Sampled every 100ms: there
+// at +0ms, gone by +100ms. (sweep T15, 2026-08-18)
+{
+  const src = read("components/admin/AccessTree.tsx");
+  const bad = [];
+  if (!/const load = useCallback\(\(id: string, keepError = false\)/.test(src))
+    bad.push("load() no longer takes the keep-the-message flag");
+  if (!/setSaving\("err"\); load\(rid, true\)/.test(src))
+    bad.push("the refusal path reloads WITHOUT keeping its own message, so the sentence is wiped by the reload it asked for");
+  if (/connection dropped[\s\S]{0,40}load\(rid\)/.test(src))
+    bad.push("the dropped-connection path reloads without keeping its message");
+  if (bad.length) fail(`a refused save on the Access screen says nothing: ${bad.join("; ")}`);
+  else ok("a refused save keeps its explanation on screen after the reload it triggers");
+}
+
+// ── 28 · THE ACTIVITY LINE SAYS A WAITER'S PIN STATE IN WORDS ───────────────
+// The "Recent changes here" strip is the only place an admin sees what they just did, and the
+// owner's standing rule is that the log reads as English. A waiter's tri-state came through the
+// plain settings loop, so it wrote "Mark a bill paid: pin" — a word that is on no screen — while
+// the capTablet branch of the SAME function said "on, with a manager PIN" for the same idea. Six of
+// the eight waiter rows are column-bound, so the wrong form was the common one. (T15, 2026-08-18)
+{
+  // CODE ONLY — the loop EXPLAINS this rule in a comment, and a naive search reads its own
+  // documentation and passes over the very line that was wrong (it did, on the first draft).
+  const route = read("app/api/admin/restaurants/access-tree/route.ts")
+    .replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const settingsLoop = (route.match(/for \(const \[k, v\] of Object\.entries\(obj\(patch\.settings\)\)\) \{[\s\S]*?\n  \}/) || [""])[0];
+  if (!settingsLoop) fail("could not find describeAccessPatch's settings loop — if it moved, update this guard");
+  else if (!/manager PIN/.test(settingsLoop))
+    fail('the activity line writes a waiter tri-state raw, so the Recent-changes strip says "pin" instead of "on, with a manager PIN"');
+  else ok("the activity line says a waiter's PIN state in words, the same way both of its branches do");
 }
 
 // ── report ─────────────────────────────────────────────────────────────────

@@ -129,6 +129,21 @@ const ownerJobs = [
   { id: "manage_staff", pick: navlink("Staff & powers"), label: "Owner panel  ›  Staff & powers  ›  Manage staff" },
   { id: "handle_issues", pick: navlink("Feedback & issues"), label: "Owner panel  ›  Feedback & issues (tickets)" },
   { id: "view_customers", pick: navlink("Customers"), label: "Owner panel  ›  Customers list" },
+  // ── ONE PICTURE PER ROW OF ACCESS → OWNER (owner, 2026-08-18: "you can do the 16th one too") ──
+  // Five of the nine owner rows showed "There wasn't a good picture for this one" although the app
+  // HAD a capture of that screen — but of the MANAGER panel, not the owner's. His standing rule is
+  // that a picture must be of the thing you are reading about ("if there's no good photo which
+  // represents it, don't add any"), so borrowing the manager's would have been the wrong fix.
+  // These are the owner's own pages, named for the ROW they belong to, so components/admin/
+  // AccessTree.tsx can map them by node id and nothing has to be guessed.
+  { id: "own_reports", pick: navlink("Reports"), label: "Owner panel  ›  Reports  (sales, tax, payments, dishes, staff, day book)" },
+  { id: "own_customers", pick: navlink("Customers"), label: "Owner panel  ›  Customers  (guests who gave a name or a number)" },
+  { id: "own_issues", pick: navlink("Feedback & complaints"), label: "Owner panel  ›  Feedback & complaints" },
+  { id: "own_settings", pick: navlink("Settings"), label: "Owner panel  ›  Settings  (their panel, their password, what the restaurant has)" },
+  { id: "own_audit", pick: navlink("Audit & logs"), label: "Owner panel  ›  Audit & logs  (what was removed, and the activity log)" },
+  { id: "own_access", pick: navlink("Team"), label: "Owner panel  ›  Team  (create staff logins, set what each person may do)" },
+  { id: "own_menu", pick: navlink("Menu"), label: "Owner panel  ›  Menu  (the dishes and categories editor)" },
+  { id: "own_manager_mode", pick: navlink("Manager mode"), label: "Owner panel  ›  Manager mode  (work the floor as a manager would)" },
 ];
 const panelJobs = {
   manager: [{ id: "panel_manager", pick: `return [null,null];`, label: "Staff apps  ›  Manager panel (the control room)" }],

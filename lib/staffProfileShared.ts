@@ -81,7 +81,17 @@ type StaffLike = {
 };
 const has = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== "";
 
-export function completeness(s: StaffLike): { filled: number; total: number; selfFilled: number; selfTotal: number; missing: string[] } {
+/** `pay: false` = this person has no pay record to fill in, so do not count one.
+ *
+ *  WHY IT EXISTS (sweep T15, 2026-08-18). "Pay setup" was always one of the fourteen, but the Pay
+ *  card only appears for a non-owner, in a role that HAS a profile, at a restaurant whose payroll
+ *  module is on — and the module ships OFF, so on most restaurants there is no Pay card anywhere.
+ *  The rail then read "Still missing: … pay setup" for ever, on a screen that offers no way to fill
+ *  it: the dead-switch shape in miniature, asking for something the product refuses to take. The
+ *  same held permanently for a cook (no pay record, ever) and for an owner (their pay does not run
+ *  through the restaurant's payroll). Optional and defaulting to the old behaviour, so the two API
+ *  routes that call this are unchanged. */
+export function completeness(s: StaffLike, opts?: { pay?: boolean }): { filled: number; total: number; selfFilled: number; selfTotal: number; missing: string[] } {
   const p = (s.profile || {}) as Record<string, unknown>;
   // [label, filled?, countsForSelf]
   const checks: [string, boolean, boolean][] = [
@@ -100,12 +110,13 @@ export function completeness(s: StaffLike): { filled: number; total: number; sel
     ["shift", has(s.shift_label), false],
     ["pay setup", has(s.pay_type) && has(s.pay_amount), false],
   ];
+  const counted = opts?.pay === false ? checks.filter((c) => c[0] !== "pay setup") : checks;
   return {
-    filled: checks.filter((c) => c[1]).length,
-    total: checks.length,
-    selfFilled: checks.filter((c) => c[2] && c[1]).length,
-    selfTotal: checks.filter((c) => c[2]).length,
-    missing: checks.filter((c) => !c[1]).map((c) => c[0]),
+    filled: counted.filter((c) => c[1]).length,
+    total: counted.length,
+    selfFilled: counted.filter((c) => c[2] && c[1]).length,
+    selfTotal: counted.filter((c) => c[2]).length,
+    missing: counted.filter((c) => !c[1]).map((c) => c[0]),
   };
 }
 
