@@ -103,9 +103,14 @@ check(/lpstat -W completed/.test(script) && /cancel "\$CUPSID"/.test(script),
   "the helper reports success on `lp` accepting the file again — that says 'printed' with the printer switched off, and a stuck copy plus a retry is the only way this design could hand out two identical tickets");
 
 // ── 7 · the admin screen ──────────────────────────────────────────────────────────────────────
-check(/tokenIsValid/.test(adminR) && (adminR.match(/if \(!admin\(req\)\) return err/g) || []).length >= 2,
-  "the admin printing API is gated on every verb, like its 48 siblings",
-  "an /api/admin/printing verb lost its gate");
+// AWAITED, not merely present. tokenIsValid is async: `if (!admin(req))` tests a Promise, which is
+// always truthy, so the gate silently never fires — that shipped to backup on 2026-08-20 and handed a
+// restaurant's printing state to an uncookied request. The await is the whole check.
+check(/tokenIsValid/.test(adminR)
+  && (adminR.match(/if \(!\(await admin\(req\)\)\) return err/g) || []).length >= 2
+  && !/if \(!admin\(req\)\)/.test(adminR.replace(/^\s*\/\/[^\n]*$/gm, "")),
+  "the admin printing API is gated on every verb — and the gate is AWAITED (a Promise is always truthy)",
+  "an /api/admin/printing verb lost its gate, or tests tokenIsValid without awaiting it — which is the same as having no gate at all");
 check(/aevinite\/printing/.test(read("components/admin/AdminShell.tsx")),
   "…and the menu is reachable from the sidebar, not only by URL",
   "the Printing menu is gone from the admin nav");
