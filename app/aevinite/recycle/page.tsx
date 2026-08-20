@@ -651,6 +651,16 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
               {insideErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadInside}>Retry</button>
             </div>
           )}
+          {/* Who they were, before deciding whether to bring them back. Already in the same answer
+              as the restaurants below, so it costs nothing extra. */}
+          {inside && (
+            <p className="adm-muted" style={{ margin: 0, fontSize: 12 }}>
+              Login <b style={{ fontFamily: "ui-monospace, monospace" }}>@{inside.owner.username}</b>
+              {inside.owner.createdAt ? ` · joined ${fmtDate(inside.owner.createdAt)}` : ""}
+              {inside.owner.lastSeenAt ? ` · last signed in ${fmtDate(inside.owner.lastSeenAt)}` : " · never signed in"}
+              {inside.owner.active ? "" : " · was suspended"}
+            </p>
+          )}
           {inside && inside.restaurants.length === 0 && (
             <p className="adm-muted" style={{ margin: 0, fontSize: 12.5 }}>They hold no restaurants. Removing them for good affects nothing else.</p>
           )}
