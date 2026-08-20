@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   // ── ?from / ?to — ANY WINDOW, not just the last 30 days (owner, 2026-08-20 — decision 19) ────
   // Absent → the original two-column view (7-day + 30-day), unchanged, still one call to mig 153.
-  // Present → mig 346's lfh_admin_usage_range, which is the same function with the window as
+  // Present → mig 347's lfh_admin_usage_range, which is the same function with the window as
   // arguments: same live-tenant filter, same counts, same single round-trip.
   //
   // Both dates are validated and CLAMPED before they reach SQL: a window is at most 400 days, so a

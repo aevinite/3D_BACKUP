@@ -370,6 +370,14 @@ export async function POST(req: NextRequest) {
         error: `The web address /r/${slug}/menu is taken by "${holder.name}".`,
         conflict: {
           slug, restored: { id: rid, name: r.name, slug: r.slug },
+          // THE PRINTED CODES ARE THE PART NOBODY THINKS OF (owner, 2026-08-21). Renaming the
+          // returning restaurant is the right call and is not changing — mig 319's own comment says
+          // the RETURNING one gets renamed, never the one currently trading. But a QR code encodes
+          // the ADDRESS, not the restaurant, so the consequence is that this restaurant's old codes
+          // now open "<holder>"'s menu: a diner scanning the laminated card on the table orders from
+          // a different restaurant's list. The dialog has to say that, because the admin is about to
+          // agree to it and there is no way back except reprinting.
+          qrWarning: `Its old address /r/${r.slug}/menu now belongs to "${holder.name}", so any QR codes or printed menus still carrying it will open THAT restaurant's menu. They have to be reprinted with the new address.`,
           holder: { id: holder.id, name: holder.name, active: holder.active === true },
           suggestedName: `${r.name} (old)`, suggestedSlug: suggested,
           // Told the admin so a second clash reads as "you picked one that is also taken", not as
@@ -383,8 +391,13 @@ export async function POST(req: NextRequest) {
       .eq("id", rid);
     if (error) return adminFail("restoring this restaurant", error, { action: "save" });
     const renamed = slug !== r.slug ? slug : null;
-    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — renamed to "${name}" at /r/${renamed}/menu because its old web address was taken` : ""}` });
-    return ok({ ok: true, restored: true, active: activate, name, slug, ...(renamed ? { renamed } : {}) });
+    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — renamed to "${name}" at /r/${renamed}/menu because its old web address was taken. Its old QR codes (/r/${r.slug}/menu) now open a different restaurant and must be reprinted` : ""}` });
+    return ok({
+      ok: true, restored: true, active: activate, name, slug, ...(renamed ? { renamed } : {}),
+      // Said again on the way out, not only in the dialog: the admin who agreed to the rename is
+      // the one who has to get the codes reprinted, and by now the dialog has closed.
+      ...(renamed ? { oldAddress: `/r/${r.slug}/menu`, reprintQr: true } : {}),
+    });
   }
 
   // ── purge_restaurant — PERMANENT, irreversible removal of a binned restaurant's
@@ -446,6 +459,24 @@ export async function POST(req: NextRequest) {
     // the name, so "Aangan" deleted this morning can be created again this afternoon without
     // silently becoming "aangan-2".
     while (((await sb.from("restaurants").select("id").eq("slug", slug).is("deleted_at", null).limit(1)).data || []).length) slug = `${base}-${++n}`;
+    // ── A REUSED WEB ADDRESS INHERITS SOMEBODY ELSE'S PRINTED QR CODES (owner, 2026-08-21) ──────
+    // Freeing a binned restaurant's name is deliberate (mig 319, and he asked for it) and that is
+    // NOT changed here — this only makes the consequence visible, because it is silent and it is
+    // sharp: a QR code encodes the ADDRESS, not the restaurant (`/r/<slug>/menu?table=N`). So the
+    // moment a new restaurant takes an address a binned one used to hold, every laminated code and
+    // printed menu still carrying that address opens the NEW restaurant's menu — a diner at the old
+    // place orders from the new place's list. That is worse than a dead link, and nothing on screen
+    // said a word about it.
+    //
+    // Binning renames nothing (mig 319's own header: "Nothing is renamed by this"), so the previous
+    // occupant is simply the binned row still holding this slug. `restaurants` is a tiny table — the
+    // health route calls it exactly that — so this is one small read on a create, not a hot path,
+    // and it is skipped entirely when the address is brand new.
+    const previousHolder = ((await sb.from("restaurants")
+      .select("name, deleted_at")
+      .eq("slug", slug).not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false })
+      .limit(1)).data || [])[0] as { name: string; deleted_at: string } | null;
     // Chosen panels (default M+K+T on, Owner off). Coerce to honest booleans.
     const wp = (body?.panels && typeof body.panels === "object") ? body.panels as Record<string, unknown> : {};
     const panels = {
@@ -564,7 +595,9 @@ export async function POST(req: NextRequest) {
       }
     }
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
-    await logAction("admin", "restaurant_create", { actor: "admin", restaurant_id: rid, detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}` });
+    // The reused address goes in the RECORD as well as on the screen: months later, "why is this
+    // restaurant getting the other one's diners" is answered by this line and nothing else.
+    await logAction("admin", "restaurant_create", { actor: "admin", restaurant_id: rid, detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}${previousHolder ? ` · REUSED the web address /r/${slug}/menu, last held by "${previousHolder.name}" (binned ${new Date(previousHolder.deleted_at).toISOString().slice(0, 10)}) — that restaurant's printed QR codes now open THIS menu` : ""}` });
     // Remember this setup (panels + sample-menu) so the next "New restaurant" form auto-fills
     // from it. Best-effort — a save failure must never fail the create. NO `access` any more
     // (sweep T6, 2026-08-06): remembering a permission set is what let one stale shape pre-fill
@@ -577,7 +610,13 @@ export async function POST(req: NextRequest) {
         );
       } catch { /* remembering defaults is a convenience, not critical */ }
     }
-    return ok({ ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError });
+    return ok({
+      ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError,
+      // Present ONLY when this address had a previous occupant, so the console can say so once and
+      // then never mention it again. Not an error and not a refusal — freeing a binned name is his
+      // rule; this is the consequence stated out loud so reprinting the codes is a decision.
+      ...(previousHolder ? { reusedAddress: { name: previousHolder.name, binnedOn: previousHolder.deleted_at } } : {}),
+    });
   }
 
   if (action !== "create_owner") return bad("Unknown action.");

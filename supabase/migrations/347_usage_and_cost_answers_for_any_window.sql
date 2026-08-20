@@ -1,6 +1,6 @@
--- 346 · Usage & cost can be asked about any window
+-- 347 · Usage & cost can be asked about any window
 --
--- ⚠ MIGRATION NUMBER: next free after 345. CREATE OR REPLACE only — correct at any number, and it
+-- ⚠ MIGRATION NUMBER: next free after 346. CREATE OR REPLACE only — correct at any number, and it
 --   rewrites no data, so it needs no lfh_already_applied guard.
 --
 -- Admin → Usage & cost could only ever answer ONE question: 30-day order volume, biggest first.

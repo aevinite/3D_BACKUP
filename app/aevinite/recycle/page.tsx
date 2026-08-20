@@ -276,7 +276,10 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
         if (dialogOpen) { setClashErr(d.error || "Couldn't restore."); setBusy(false); return; }
         throw new Error(d.error || "Couldn't restore.");
       }
-      if (d.renamed) onRenamed(`${r.name} is back as “${d.name}” at /r/${d.renamed}/menu — its old web address was taken. Its QR codes need remaking.`);
+      // Says WHERE the old codes now go, not just that they need remaking — "its old address is
+      // taken" is a fact about us; "scanning the old card opens a different restaurant" is the
+      // thing that actually costs somebody a wrong order.
+      if (d.renamed) onRenamed(`${r.name} is back as “${d.name}” at /r/${d.renamed}/menu. Its old address ${d.oldAddress || `/r/${r.slug}/menu`} now belongs to a different restaurant, so any QR codes still carrying it open THAT menu — reprint them.`);
       setClash(null); setClashErr(null);
       onChanged();
     } catch (e) {
@@ -447,6 +450,8 @@ type SlugClash = {
   suggestedName: string;
   suggestedSlug: string;
   retry?: boolean;
+  /** What renaming COSTS: the old address now belongs to the holder, so printed codes are wrong. */
+  qrWarning?: string;
 };
 
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
@@ -486,6 +491,22 @@ function SlugClashDialog({ clash, busy, error, onClose, onResolve }: {
             {clash.holder.active ? "" : " (suspended)"} took its web address <b style={{ fontFamily: "ui-monospace, monospace" }}>/r/{clash.slug}/menu</b>.
             Two restaurants can&apos;t share one. Give the one coming back a different name, or close this and leave it in the bin.
           </p>
+
+          {/* THE PRINTED CODES (owner, 2026-08-21). A QR code carries the ADDRESS, not the
+              restaurant, so agreeing to this rename hands this restaurant's laminated table cards
+              to the restaurant that took its address — a diner scanning the old card orders from
+              somebody else's menu. It is not a reason to refuse the rename (the alternative is
+              leaving a paying restaurant in the bin), but the admin has to be told BEFORE he agrees,
+              because the only way back is reprinting. Amber, not red: nothing is broken yet. */}
+          {clash.qrWarning && (
+            <div style={{ margin: "0 0 12px", padding: "10px 12px", borderRadius: 9, fontSize: 12.5, lineHeight: 1.55,
+              border: "1px solid color-mix(in srgb, #d4a574 45%, transparent)",
+              background: "color-mix(in srgb, #d4a574 10%, transparent)" }}>
+              <i className="fas fa-qrcode" style={{ marginRight: 7, color: "#d4a574" }} aria-hidden="true" />
+              <b>Its old QR codes will point at the wrong restaurant.</b>{" "}
+              <span className="adm-muted">{clash.qrWarning}</span>
+            </div>
+          )}
 
           {error && (
             <div role="alert" style={{ margin: "0 0 12px", padding: "9px 12px", borderRadius: 9, fontSize: 12.5,

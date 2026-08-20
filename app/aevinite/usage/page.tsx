@@ -9,7 +9,7 @@
 // asked at all. Two additions, and they cost very differently:
 //   · SORTING is free. Ten rows are already in the browser; sorting them is arithmetic, not a
 //     query. No extra request, no extra egress, whichever column you pick.
-//   · A WINDOW is a query, so it is bounded on the server (mig 346 + the clamp in the route): one
+//   · A WINDOW is a query, so it is bounded on the server (mig 347 + the clamp in the route): one
 //     aggregate round-trip, at most 400 days, counts computed in the database.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
