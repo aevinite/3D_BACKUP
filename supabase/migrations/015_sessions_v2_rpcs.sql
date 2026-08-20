@@ -229,3 +229,17 @@ GRANT EXECUTE ON FUNCTION lfh_place_order(text, jsonb, numeric, numeric, numeric
 GRANT EXECUTE ON FUNCTION lfh_call_waiter(text, text)                  TO anon;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `lfh_open_session` above is RETIRED, and the GRANT to anon above is the reason it matters.
+-- Migration 021 wrote the rule: "guests do NOT open tables. Staff open a table's session from the
+-- editor floor." Migration 304 removed the function for doing exactly what that rule forbids —
+-- INSERT INTO sessions … status 'open' — while still being callable with the public menu key that
+-- ships in every guest's browser. Nothing calls it; staff open a table through
+-- `lfh_staff_open_table` (mig 114), which is service_role only.
+--
+-- A FULL re-seed ends correctly: 083 drops this two-argument signature and 304 drops the
+-- three-argument one. The hole is running THIS FILE ALONE, which re-creates the function AND
+-- re-grants it to anon in one step. This file now ends in the state migrations 021/304 decided.
+-- The signature dropped here is the one THIS file creates — (text, text); 083 owns the other one.
+DROP FUNCTION IF EXISTS lfh_open_session(text, text);

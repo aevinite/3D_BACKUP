@@ -354,3 +354,13 @@ GRANT EXECUTE ON FUNCTION lfh_call_waiter_table(text, text, uuid)               
 GRANT EXECUTE ON FUNCTION lfh_submit_review(text, text, int, text, text, uuid)             TO anon, authenticated;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `lfh_open_session` above is RETIRED — see migration 304 for the full reasoning, and migration
+-- 021 for the rule it breaks ("guests do NOT open tables"). This file re-creates the tenant-scoped
+-- three-argument version and re-grants it to anon, so running it alone re-opens a door that is
+-- meant to be closed, next to the real one (`lfh_staff_open_table`, service_role only).
+--
+-- A FULL re-seed ends correctly (304 sorts after this file). This closes the partial-run hole, the
+-- same way migration 099 was made to for its own cron job. Idempotent.
+DROP FUNCTION IF EXISTS lfh_open_session(text, text, uuid);
