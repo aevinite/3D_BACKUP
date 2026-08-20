@@ -92,9 +92,42 @@
     var $ = function (id) { return document.getElementById(id); };
 
     $("retry").addEventListener("click", function () { location.reload(); });
-    // The way OUT of the dead end. Home is the lightest page in the app and is usually
-    // already saved on the device, so it opens even when this screen couldn't.
-    $("home").addEventListener("click", function () { location.href = "/"; });
+
+    // THE WAY OUT HAS TO SUIT WHO IS LOOKING (guest sweep T1, 2026-08-16).
+    //
+    // This button used to always go to "/", and "/" is the PLATFORM door: app/page.tsx redirects
+    // it to /login, the staff username+password screen. For a waiter that is exactly right. For a
+    // DINER it is the same dead end components/GuestNotFound.tsx was written to remove — "its only
+    // button … pointed at '/', which 307s to /login, the STAFF sign-in … a customer … dumped on a
+    // staff password screen". Offline it is worse than useless: "/" is very unlikely to be saved
+    // either, so it bounced straight back to this page.
+    //
+    // The service worker answers the ORIGINAL navigation with this page (event.respondWith does not
+    // change the address), so location.pathname here is still the screen the person asked for —
+    // which is all we need to tell a diner apart from a member of staff.
+    //   /r/<slug>/menu|item…  -> that restaurant's own menu
+    //   /menu, /item/…        -> the legacy restaurant-#1 menu (those paths ARE #1, same rule as
+    //                            lib/tenantStorage)
+    //   /q/<code>             -> the tab's pinned restaurant when we have one (the /q/ page stores
+    //                            it before hydration); otherwise leave it as a reload, because the
+    //                            printed code is the only thing that knows their table
+    //   anything else         -> "/" exactly as before, for staff
+    var homeHref = "/";
+    var homeLabel = "Go to the home screen";
+    (function () {
+      var p = location.pathname || "";
+      var m = p.match(/^\/r\/([^/]+)\//);
+      if (m) { homeHref = "/r/" + m[1].toLowerCase() + "/menu"; homeLabel = "Go to the menu"; return; }
+      if (/^\/(menu|item)(\/|$)/.test(p)) { homeHref = "/menu"; homeLabel = "Go to the menu"; return; }
+      if (/^\/q\/[^/]+/.test(p)) {
+        var pinned = "";
+        try { pinned = sessionStorage.getItem("lfh_tab_tenant") || ""; } catch (e) {}
+        if (pinned) { homeHref = "/r/" + pinned.toLowerCase() + "/menu"; homeLabel = "Go to the menu"; }
+        else { homeHref = p; homeLabel = "Go to the menu"; }
+      }
+    })();
+    $("home").textContent = homeLabel;
+    $("home").addEventListener("click", function () { location.href = homeHref; });
 
     // A check that ONLY proves "we reached our own server". It must be a path the service
     // worker leaves alone and that touches NO database: an unmatched /api/ path answers 404
