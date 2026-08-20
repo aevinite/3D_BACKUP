@@ -159,7 +159,7 @@ export default function AdminPrinting() {
           <p className="adm-page-sub" style={{ margin: 0, maxWidth: "72ch" }}>
             Which computer prints which piece of paper. A small helper program on a computer asks us every
             two seconds whether there is anything for it — so paper comes out with no window open, nothing
-            logged in, and nothing to keep in front. <Link href="/print-setup.html" style={{ color: "var(--accent)" }}>The restaurant's own guide →</Link>
+            logged in, and nothing to keep in front. <Link href="/print-setup.html" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</Link>
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -218,7 +218,7 @@ export default function AdminPrinting() {
 
             {agents.length === 0 ? (
               <div className="adm-muted" style={{ fontSize: 13, padding: "6px 0 12px" }}>
-                No computer has the helper yet. Add one below and this restaurant's paper starts coming out
+                No computer has the helper yet. Add one below and this restaurant&apos;s paper starts coming out
                 without anybody watching a screen.
               </div>
             ) : agents.map((a) => (
