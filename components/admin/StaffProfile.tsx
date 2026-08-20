@@ -168,7 +168,25 @@ type Person = {
 };
 type Payment = { id: string; kind: string; amount: number; for_period: string | null; mode: string; paid_on: string; note: string | null; recorded_by: string | null; voided_at: string | null; void_reason: string | null };
 type Act = { action: string; detail: string | null; created_at: string; panel: string | null };
-type Detail = { person: Person; restaurant: { id: string; name: string; slug: string } | null; payrollOn: boolean; payments: Payment[]; activity: Act[] };
+// `payments` and `activity` are OPTIONAL on purpose — and reading them as if they were not is what
+// crashed this screen (Repair board, 2026-08-20: "Cannot read properties of undefined (reading
+// 'filter') @ /owner/staff/<id>", twice).
+//
+// Both endpoints deliberately LEAVE THE KEY OUT rather than send an empty list, because an empty
+// list renders as "nothing has ever been paid to them" and that is the sentence that starts a "you
+// never paid me" argument (app/api/owner/staff/route.ts says so at length next to `payUnread`).
+// There are two such cases on the owner route alone: the pay reads failed (`payUnread`), or the
+// viewer is a manager without permission to see pay at all. The component then did
+// `d.payments.filter(...)` and took the whole profile down — so the honest server answer became a
+// blank screen, which tells the person even less than the wrong number would have.
+type Detail = {
+  person: Person; restaurant: { id: string; name: string; slug: string } | null; payrollOn: boolean;
+  payments?: Payment[]; activity?: Act[];
+  /** The pay history could not be read — say so; never draw an empty ledger over it. */
+  payUnread?: boolean;
+  /** Same for the activity list: unread is not "they have done nothing". */
+  activityUnread?: boolean;
+};
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", kitchen: "Kitchen", tablet: "Waiter (tablet)" };
 const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa" };
@@ -870,7 +888,7 @@ function Pay({ d, patch, reload, flash }: Kit) {
     finally { setPaying(false); }
   }
 
-  const paid = d.payments.filter((x) => !x.voided_at);
+  const paid = (d.payments || []).filter((x) => !x.voided_at);
   return (
     <section className="stp-card">
       <h3>💰 Pay <span className="stp-chip mut">Payroll module is on</span></h3>
@@ -946,6 +964,13 @@ function Pay({ d, patch, reload, flash }: Kit) {
                 ))}
               </tbody>
             </table>
+          ) : d.payUnread ? (
+            // A FAILED READ IS NOT AN EMPTY LEDGER. The server left `payments` out precisely so
+            // this screen would not invent "nothing has been paid" for someone who has been paid
+            // all year — so it has to SAY that, not fall through to the same reassuring sentence.
+            <p className="stp-sub" style={{ marginTop: 12 }}>
+              Couldn&rsquo;t read their pay history just now — this is <b>unknown</b>, not empty. Close and reopen this person to try again.
+            </p>
           ) : <p className="stp-sub" style={{ marginTop: 12 }}>Nothing has been paid to them through the app yet.</p>}
         </>
       ) : null}
@@ -1038,12 +1063,21 @@ function SigningIn({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: (
 
 // ── ⑨ what they did lately ───────────────────────────────────────────────────
 function Activity({ d }: { d: Detail }) {
+  // Guarded for the same reason the pay ledger above is: the server may leave this key out (log
+  // visibility off, or the read failed — `activityUnread`), and `d.activity.length` on an absent
+  // key takes the whole profile down. `activityUnread` gets its own sentence, because "nothing
+  // recorded against this person yet" is a claim about them, not about our reading.
+  const acts = d.activity || [];
   return (
     <section className="stp-card">
       <h3>🕘 What they did lately</h3>
-      {d.activity.length ? (
+      {d.activityUnread ? (
+        <p className="stp-sub">
+          Couldn&rsquo;t read their recent actions just now — this is <b>unknown</b>, not an empty history.
+        </p>
+      ) : acts.length ? (
         <div className="stp-tl">
-          {d.activity.map((a, i) => (
+          {acts.map((a, i) => (
             <div key={i}>
               <time>{when(a.created_at)}</time>
               {/* actLabel(), like every other screen — this was the last place that hand-rolled

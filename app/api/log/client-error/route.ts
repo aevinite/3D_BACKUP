@@ -13,6 +13,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sendOwnerAlert, alertText } from "@/lib/alerts";
 import { capKeyFor, recentActionCount } from "@/lib/publicCap";
+import { getRestaurantBySlug } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,73 @@ const MAX_TAPS_PER_DEVICE_10MIN = 40;
 // now live in lib/publicCap (T9 improvement 18, 2026-08-06) — the same two helpers /api/guest/limit-hit
 // uses, so the two public write paths cannot drift apart on what a caller is or how it is counted.
 const WINDOW_MS = 10 * 60 * 1000;
+
+// ── A TILE THAT NAMES NO RESTAURANT CANNOT BE ACTED ON (T17 follow-up, 2026-08-20) ────────────
+// Five problems were sitting on the Repair board with no restaurant against them, three of them
+// from the French House guest menu — whose own address SAYS which restaurant it is
+// (`/r/french-house/menu`). They arrived that way because the React error boundaries report through
+// lib/errorReport.ts, which never sent `rid` at all; only the static panels tag the tenant
+// (public/panels/errlog.js → LFH_RT.getRid()). So the admin's restaurant picker could not narrow to
+// them and "Showing French House only" hid the very rows that were French House's.
+//
+// The address is already in hand — it is what we store as `where` — so the restaurant is derivable
+// here, for old shapes and new alike, without asking the client to change. getRestaurantBySlug is
+// the project's ONE resolver (lib/tenant.ts) and it is memoised for 15s, so a burst of reports from
+// one crashing menu costs a single lookup, not one per row.
+//
+// Deliberately only the GUEST doors: `/r/<slug>/…` names its restaurant, `/owner/khata` does not,
+// and an owner looking at "all restaurants" genuinely has no single one — guessing there would put
+// a wrong name on a problem, which is worse than none.
+const SLUG_IN_PATH = /(?:^|[^a-z0-9])\/?r\/([a-z0-9][a-z0-9-]{0,60})(?:\/|$|\s|#|\?)/i;
+
+// ── WHICH BROWSER, IN FOUR WORDS (2026-08-20) ────────────────────────────────────────────────
+// Two problems on the Repair board could not be chased at all: five reports of "The operation is
+// insecure." and three of a minified React error, both on the French House guest menu. Driven
+// again — normally, and with a browser rigged to refuse storage exactly the way Safari's private
+// mode does — the menu opens clean both times. The reports are real, but nothing in them says WHOSE
+// browser, so there is no way to tell a Safari-only fault from a Chrome one, or a phone from a
+// laptop. "The operation is insecure." is not even a message Chrome produces: it is Safari's and
+// Firefox's wording, which is the single most useful fact about it, and we had to infer it.
+//
+// So the row now carries a short browser tag. Deliberately SHORT and derived server-side:
+//   · the whole User-Agent is 150+ characters of noise on a screen a person reads, and this
+//     endpoint's detail is capped at 500 for good reason;
+//   · deriving it here means both reporters (the panels' errlog.js and the React boundaries) get
+//     it without either of them changing, and old clients get it too;
+//   · a browser NAME and platform is what makes a bug reproducible. Nothing here identifies a
+//     person — no full UA, no version minutiae, no device id beyond the cap key already stored.
+function browserTag(ua: string | null): string {
+  const s = String(ua || "");
+  if (!s) return "";
+  // Order matters: every one of these also claims to be "Safari", and Chrome-on-iOS says "CriOS".
+  const name =
+    /\bEdg\//.test(s) ? "Edge" :
+    /\b(CriOS|Chrome)\//.test(s) ? "Chrome" :
+    /\bFirefox|FxiOS\//.test(s) ? "Firefox" :
+    /\bSamsungBrowser\//.test(s) ? "Samsung" :
+    /\bSafari\//.test(s) ? "Safari" : "";
+  const platform =
+    /\biPhone\b/.test(s) ? "iPhone" :
+    /\biPad\b/.test(s) ? "iPad" :
+    /\bAndroid\b/.test(s) ? "Android" :
+    /\bMac OS X\b/.test(s) ? "Mac" :
+    /\bWindows\b/.test(s) ? "Windows" :
+    /\bLinux\b/.test(s) ? "Linux" : "";
+  const both = [name, platform].filter(Boolean).join(" · ");
+  return both ? ` [${both}]` : "";
+}
+
+async function ridFromAddress(where: string, referer: string | null): Promise<string | null> {
+  for (const candidate of [where, referer || ""]) {
+    const slug = candidate.match(SLUG_IN_PATH)?.[1];
+    if (!slug) continue;
+    try {
+      const r = await getRestaurantBySlug(slug);
+      if (r?.id) return r.id;
+    } catch { /* the log line matters more than its label — fall through to null */ }
+  }
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -84,12 +152,17 @@ export async function POST(req: NextRequest) {
 
     const message = String(body.message || "client error").slice(0, 300);
     const where = String(body.where || "").slice(0, 120);
-    const detail = (where ? `${message} @ ${where}` : message).slice(0, 500);
+    // The browser tag goes on the END, after the address, so the readable part of the line is
+    // untouched and the Repair board's one-line view still leads with the message.
+    const detail = `${where ? `${message} @ ${where}` : message}${browserTag(req.headers.get("user-agent"))}`.slice(0, 500);
+    // No rid from the client → read it off the address the crash happened at (see ridFromAddress).
+    // Only for a real error row: the tap batches above are already tagged by the panels.
+    const scoped = rid ?? await ridFromAddress(where, req.headers.get("referer"));
     // Written under capKey, not `device` — the cap counts rows by device_id, so a cookie-less
     // caller's rows must carry the same key or the cap would count zero of them forever.
     await sb.from("staff_actions").insert({
       panel, action: "client_error", detail, device_id: capKey, level: "error",
-      ...(rid !== null ? { restaurant_id: rid } : { restaurant_id: null }),
+      restaurant_id: scoped,
     });
 
     // Best-effort grouped alert (15-min dedupe lives in sendOwnerAlert). Wrapped in after() so

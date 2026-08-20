@@ -113,7 +113,17 @@ for (const rel of ALL) {
   // THE STRIPPER MUST NOT EAT CODE. Every function name the raw file declares has to survive, or
   // every later rule is reading a hole. This is the check that would have caught the /api/admin/*
   // trap above on its first run instead of on its third.
-  const declared = [...raw.matchAll(/(?:async\s+function|function)\s+([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]);
+  // …but only functions the file really DECLARES. These files describe themselves in prose, and
+  // that prose says things like "enforced here AND in the SQL function admin_purge_restaurant
+  // (mig 128)" — a comment, not a declaration. Scanning the raw text found it, stripping removed it,
+  // and the canary then reported the stripper as having "swallowed" code it never had (live, on
+  // app/api/admin/restaurants/route.ts). So the declaration list is taken from lines that are not
+  // comments; the canary still catches a runaway block comment eating real code, which is its job.
+  const codeOnly = raw
+    .split(/\n/)
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join("\n");
+  const declared = [...codeOnly.matchAll(/(?:async\s+function|function)\s+([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]);
   const lost = declared.filter((nm) => !new RegExp(`(?:async\\s+function|function)\\s+${nm}\\s*\\(`).test(src));
   if (lost.length) fail(`${rel}: the comment stripper swallowed ${lost.join(", ")} — this guard would be reading a hole`);
 
@@ -160,7 +170,26 @@ for (const rel of ALL) {
 
 /** From the "function" keyword at `at`, return the text of its body (brace-matched). */
 function sliceBody(src, at) {
-  const open = src.indexOf("{", at);
+  // ── SKIP THE PARAMETER LIST FIRST (fixed 2026-08-20) ────────────────────────────────────────
+  // This took the first `{` after the declaration, which is the function body for
+  // `(req: NextRequest)` — and the TYPE ANNOTATION for the catch-all routes, whose signature is
+  //     export async function GET(req: NextRequest, ctx: { params: Promise<{ path: string[] }> })
+  // There the first `{` is `{ params: … }`, so the "body" came back as that type and of course
+  // contained no gate. Live, this guard reported BOTH verbs of
+  // app/api/admin/printing/[...path]/route.ts as having no admin cookie check at all, when both
+  // check it on their very first line. A guard that invents a failure is worse than no guard — it
+  // had been failing on every run, so a REAL gate regression would have arrived as more of the same
+  // noise. So: walk the parameter list to its matching `)` and only then look for the body.
+  const paren = src.indexOf("(", at);
+  let from = at;
+  if (paren >= 0) {
+    let d = 0;
+    for (let i = paren; i < src.length; i++) {
+      if (src[i] === "(") d++;
+      else if (src[i] === ")") { d--; if (d === 0) { from = i + 1; break; } }
+    }
+  }
+  const open = src.indexOf("{", from);
   if (open < 0) return src.slice(at);
   let depth = 0;
   for (let i = open; i < src.length; i++) {

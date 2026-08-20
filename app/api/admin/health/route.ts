@@ -27,7 +27,14 @@ export async function GET(req: NextRequest) {
     sb.from("restaurants").select("id, active").is("deleted_at", null).limit(2000),
     // Bounded read — this page auto-refreshes every 60s, so cap it so it can't grow
     // into a full-table pull as staff count climbs across all tenants (egress guard).
-    sb.from("staff_users").select("id, last_seen_at").eq("active", true).limit(5000),
+    //
+    // `restaurant_id` rides along so this count can be narrowed to LIVE restaurants below. Two
+    // admin screens were answering the same question differently: System health said "2 / 58",
+    // Usage & cost said 49 (T17 follow-up, 2026-08-20). Measured: 58 active staff rows exist, 49 of
+    // them belong to live restaurants and NINE to binned ones. Usage filters to live tenants (it
+    // reads lfh_admin_usage, which is `WHERE r.deleted_at IS NULL`); this read did not, so people
+    // attached to a deleted restaurant were counted here and nowhere else. One number, one meaning.
+    sb.from("staff_users").select("id, last_seen_at, restaurant_id").eq("active", true).limit(5000),
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
     // A DISH THAT PROMISES 3D AND CANNOT DELIVER IT (owner, 2026-08-12: *"whenever the 3-D is not
     // available, it should show me as a problem also notification"*).
@@ -59,7 +66,13 @@ export async function GET(req: NextRequest) {
   const suspendedRestaurants = restaurants.length - activeRestaurants;
 
   const now = Date.now();
-  const staffOnlineNow = (staffQ.data || []).filter((u) => u.last_seen_at && now - new Date(u.last_seen_at).getTime() < 180_000).length;
+  // Live-restaurant staff only, so this agrees with Usage & cost (see the read above). Filtering
+  // here rather than in the query keeps both reads parallel — no extra round-trip. If the
+  // restaurants read itself failed we cannot tell live from binned, so we count them all rather
+  // than under-report; `staffError`/`restaurantsError` is what tells the page the figure is shaky.
+  const liveIds = new Set(restaurants.map((r) => r.id));
+  const staffRows = restQ.error ? (staffQ.data || []) : (staffQ.data || []).filter((u) => u.restaurant_id && liveIds.has(u.restaurant_id));
+  const staffOnlineNow = staffRows.filter((u) => u.last_seen_at && now - new Date(u.last_seen_at).getTime() < 180_000).length;
 
   let supaHost = "";
   try { supaHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "").host; } catch {}
@@ -83,7 +96,7 @@ export async function GET(req: NextRequest) {
     restaurants: { active: activeRestaurants, suspended: suspendedRestaurants, total: restaurants.length },
     restaurantsError: restQ.error?.message || null, // so the page shows "unreadable", not a green "0 live"
     staffOnlineNow,
-    staffTotal: (staffQ.data || []).length,
+    staffTotal: staffRows.length,
     staffError: staffQ.error?.message || null,
     realtime: { configuredHost: supaHost || null },
     openIssues: issuesQ.error ? null : (issuesQ.count || 0),

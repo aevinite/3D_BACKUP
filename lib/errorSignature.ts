@@ -40,6 +40,40 @@ export function readableError(msg: string | null | undefined): string {
   return what ? `${lead}: "${what}"` : lead;
 }
 
+/**
+ * The browser's own decoration on an error message, which says nothing about WHICH bug it is.
+ *
+ * ONE FAULT WAS SITTING ON THE REPAIR BOARD AS TWO TILES (T17 follow-up, 2026-08-20). The same
+ * line of code, reported by two paths, arrives written two different ways:
+ *
+ *   window.onerror        → "Uncaught ReferenceError: PRINT_SETUP_URL is not defined"
+ *   a caught error's .message → "PRINT_SETUP_URL is not defined"
+ *
+ * Character-for-character those differ, so the board counted them as two separate problems (one of
+ * them ×8), the admin had to resolve both, and Fix-now could open two Claude sessions for one line.
+ * `Uncaught`, `(in promise)` and the error CLASS are all added by the reporter, not by the bug: the
+ * message text is what identifies it. Two different classes carrying the identical message text
+ * cannot both be true of one line, so folding the class in loses nothing.
+ *
+ * Deliberately narrow: only a leading `<Something>Error:` is dropped, so a message that merely
+ * MENTIONS an error type mid-sentence is untouched.
+ */
+const BROWSER_PREFIX = /^\s*(?:uncaught\s+)?(?:\(in\s+promise\)\s*:?\s*)?(?:[a-z]*error|domexception)\s*:\s*/i;
+
+/** Strip the reporter's decoration, repeatedly (Safari sends "Uncaught (in promise) TypeError: …"). */
+function stripBrowserPrefix(s: string): string {
+  let out = s;
+  // Bounded: two passes is enough for every shape seen, and a loop can't run away on a hostile string.
+  for (let i = 0; i < 2; i++) {
+    const next = out.replace(BROWSER_PREFIX, "");
+    if (next === out) break;
+    out = next;
+  }
+  // "Uncaught" on its own (no class) still has to go, e.g. "Uncaught SyntaxError" handled above,
+  // but Firefox also sends a bare "uncaught exception: …".
+  return out.replace(/^\s*uncaught(\s+exception)?\s*:?\s*/i, "").trim() || s.trim();
+}
+
 /** Normalise an error message into a comparable signature. Empty message → "" (never matches). */
 export function errorSig(detail: string | null | undefined): string {
   let s = String(detail ?? "");
@@ -53,6 +87,18 @@ export function errorSig(detail: string | null | undefined): string {
     // Fall back to stripping tags when there's no title, so we never key on raw markup.
     s = (title || s.replace(/<[^>]*>/g, " ")).trim();
   }
+
+  // Drop the reporter's decoration BEFORE anything else, so "Uncaught ReferenceError: x is not
+  // defined" and "x is not defined" become one problem instead of two tiles (see BROWSER_PREFIX).
+  s = stripBrowserPrefix(s);
+
+  // ONE FAULT IS ONE TILE WHICHEVER BROWSER REPORTED IT. /api/log/client-error stamps a short
+  // browser tag on the end of the detail — " [Safari · iPhone]" — because without it a
+  // Safari-only crash cannot be told from a Chrome one (two problems on the board were
+  // unchaseable for exactly that reason). It must not reach the SIGNATURE: the browser is a fact
+  // about the report, not about which bug it is, and leaving it in would split one fault into one
+  // tile per browser — undoing the merge above with a different cause.
+  s = s.replace(/\s*\[[^[\]]{0,40}\]\s*$/, "");
 
   return s
     .replace(/\s+/g, " ")                                                   // collapse newlines/indent

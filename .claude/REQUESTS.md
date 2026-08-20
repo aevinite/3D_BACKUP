@@ -606,6 +606,61 @@ printing again will not"*, *"reopening can also chnage name and number … the o
   as **R37 / R38 / R39** in `docs/REJECTED-IDEAS.md`, with the matching `REJECTED` comments in the
   code, and re-commented in the database by migration 339.
 
+## 2026-08-20 — the T17 leftovers: System health rebuilt, and every "all" button (owner)
+
+Picked up from a terminal that died when the PC shut down. PR #1058 (items 1–15) was already
+MERGED before this session started; everything below is what that report had left open.
+
+- ✅ **Decision 16 → he removed the whole thing.** *"we don't want the top thing. Shows four things
+  here is the image"* (screenshot of the four-pill strip), plus *"you can optimize the whole system
+  health care also. Right now, I'm not able to see, like, properly, like, how the thing is in system
+  health. I have seen that setting for the first time."* **System health rebuilt**: strip gone → one
+  plain-words verdict line → six labelled checks, each saying what it MEANS and where to go → the
+  actionable lists → the developer detail (row estimates, backend host) folded away, one tap from
+  view. Nothing dropped. Recorded as **R42 / R43** in `docs/REJECTED-IDEAS.md` with the matching
+  `REJECTED` comments. `verify:admin-health` phase P08156 rewritten to the new location — same three
+  rules, still red if any is undone.
+- ✅ **Decision 17 + his "all" ask** (*"there should be a resolved all option. Also there should be
+  fixed all option. Also, like all option should be for everything"*). Repair board now has
+  **Resolve all · Fix all overnight · Remind me later** for the whole board, each with an
+  are-you-sure and each **scoped by the restaurant picker**; plus **Dismiss all** on the limit alerts
+  and **Resolve all** on the complaints. "Fix all" is deliberately OVERNIGHT — instant opens a Claude
+  window *per problem*, so nineteen tiles would be nineteen windows.
+- ✅ **Decision 18 — "not now" without lying** (migration 344 `snoozed_until`). A wait leaves
+  `resolved_at` NULL, states its own count on the board, keeps the row in Audit & logs, and a fresh
+  occurrence writes a fresh row with no wait on it. The dashboard's red count follows the same
+  definition, so the two screens can't disagree again.
+- ✅ **Decision 19 — Usage & cost.** Sortable on every column (free: the rows are already in the
+  browser) and any date window (migration 346 `lfh_admin_usage_range`, clamped to 400 days server
+  side, proved byte-identical to the old function over 7 and 30 days).
+- ✅ **The three that "weren't in my files"**: **20** the two screens disagreed about staff (58 vs
+  49) — 9 of them belonged to *binned* restaurants; health now scopes to live tenants like Usage
+  does. **21** one fault sat as two tiles because `window.onerror` says "Uncaught ReferenceError: X"
+  and a caught error says "X" — `errorSig` drops the reporter's decoration, and migration 344
+  normalises the stored records so "already fixed" keeps matching. **22** five tiles named no
+  restaurant: the React error boundaries never sent one at all. The reporter now sends what the page
+  knows and the server reads the slug off the address; migration 344 backfilled the 8 rows already
+  on the board.
+- ✅ **The live board: 18 tiles → 0.** One was a REAL crash and is fixed (owner → a person's
+  profile, `d.payments.filter` on a key the server deliberately omits when the pay read fails —
+  it took the whole profile down; `activity` had the same latent fault). Six were **already fixed in
+  code** and just never cleared. Two came from **app.js builds whose hashes were never committed** —
+  another session's mid-edit local build, not the product. Eight were **timeouts / a transient
+  fetch** from load testing. The two nobody has root-caused (a minified React error and Safari's
+  *"The operation is insecure."*, both on the guest menu) are **set to wait a week** rather than
+  falsely marked fixed — and the reason they were unchaseable is now fixed too: every client error
+  records a short **browser tag** (`[Safari · iPhone]`), stripped from the signature so it can't
+  split one fault into one tile per browser.
+- ✅ **Two guard bugs found and fixed on the way past.** `verify:admin-api-a` had been RED on a clean
+  `main`: its body-slicer took the first `{` after a handler's name, which for the catch-all routes
+  is the *type annotation*, so it reported both verbs of `/api/admin/printing` as having no admin
+  cookie check when both check it on line one; and its canary read `function …(` out of PROSE, so a
+  comment mentioning the SQL function `admin_purge_restaurant` looked like swallowed code. 181 checks
+  green now, and proven to go red when a real gate is removed.
+- 🟡 **The one "all" I did NOT add, deliberately:** *Forget all* on the already-fixed list. Its only
+  effect is to make Fix-now redo finished work, and it would destroy the PR links that record how
+  each was fixed. Say the word and it goes in.
+
 ## ✅ Done and shipped — collapsed (2026-08-15)
 
 These asks were delivered and verified live. Their full item-by-item text is in this file's git

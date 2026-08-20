@@ -143,10 +143,22 @@ ok(/\.hx-kv \.adm-logrow \{ min-width: 0;/.test(HEALTH), "P08378",
   "health: the rule that lets a key->value list fit a phone is gone");
 
 // ── 14 · a warning bar that is always up is not a warning ─────────────────────────────────────
-ok(/never been signed into/.test(HEALTH), "P08156",
-  "health: the panels bar warns about every quiet panel again — it would be up on every load");
+// THE RULE IS UNCHANGED; THE PLACE IT LIVES MOVED (2026-08-20). System health was rebuilt after the
+// owner said he could not read it, and the standalone amber bar this phase was written against is
+// gone — it said the same thing as the "Staff screens" row in the new check list, so it was one
+// fact wearing two coats, and the coat was a warning triangle. The three things this phase actually
+// protects are all still true and still worth failing over, so they are checked where they now live:
+//   · the warning is driven by NEVER-SEEN panels, not by every quiet one;
+//   · "quiet" is described as the ordinary fact it is;
+//   · the old always-up wording has not come back.
+ok(/never signed into/.test(HEALTH), "P08156",
+  "health: the never-signed-into warning is gone — the only panel state that is wrong at any hour");
+ok(/needsYou: neverSeen > 0/.test(HEALTH), "P08156",
+  "health: the staff-screens warning no longer keys on never-seen panels — it would be up on every load");
 ok(/x\.status === "never"/.test(HEALTH) && /x\.status === "offline"/.test(HEALTH), "P08156",
-  "health: the panels bar no longer separates 'never signed into' from 'quiet for an hour'");
+  "health: the panel counts no longer separate 'never signed into' from 'quiet for an hour'");
+ok(/which is normal/.test(HEALTH), "P08156",
+  "health: a quiet panel is no longer described as normal — that is what made the old bar cry wolf");
 ok(!/quiet or never seen — a device or login may be down/.test(HEALTH), "P08156",
   "health: the old always-up wording is back");
 

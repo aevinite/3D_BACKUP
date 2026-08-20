@@ -51,11 +51,20 @@ export async function GET(req: NextRequest) {
   // device_id / actor_id / order_id ride along so the click-to-open detail popup can show
   // exactly WHICH tablet did it, the stable acting-user id, and link the order — the list
   // itself still renders only a few of these (small extra columns, low-volume feed).
-  let q = sb.from("staff_actions").select("id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, created_at").order("created_at", { ascending: false }).limit(limit);
+  // `snoozed_until` (mig 344) rides along so the Logs page can MARK a waiting problem instead of
+  // it just being absent — the log shows every row, always; only the Repair board hides a wait.
+  let q = sb.from("staff_actions").select("id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, snoozed_until, created_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
   if (actionOk) q = q.eq("action", actionEq);
-  if (unresolvedOnly) q = q.is("resolved_at", null);
+  if (unresolvedOnly) {
+    q = q.is("resolved_at", null);
+    // A WAIT IS NOT A RESOLVE (mig 344). "Remind me later" hides the tile from the board until its
+    // moment and then hands it straight back — so the board's own read is the only place that
+    // honours it. `resolved_at` is untouched, the full Logs page still lists the row (marked as
+    // waiting), and a fresh occurrence writes a fresh row that carries no wait at all.
+    q = q.or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
+  }
   if (since) q = q.gte("created_at", since);
   if (qText) {
     // Escape the PostgREST or-filter meta-characters (%,) so a search term can't break the filter.
@@ -65,6 +74,20 @@ export async function GET(req: NextRequest) {
     const safe = safeSearch(qText);
     q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
   }
+  // HOW MANY ARE WAITING, so hiding one is never silent (mig 344). A wait is legitimate but it must
+  // be visible as a number, or "3 problems open" quietly stops meaning "3 problems exist" — the
+  // exact fault the capped-list line above this page was added for. HEAD count: no rows move, and
+  // it rides the same partial index the list uses.
+  const waitingQ = unresolvedOnly
+    ? await (async () => {
+        let w = sb.from("staff_actions").select("id", { count: "exact", head: true })
+          .eq("level", "error").is("resolved_at", null)
+          .gt("snoozed_until", new Date().toISOString());
+        if (restaurantId) w = w.eq("restaurant_id", restaurantId);
+        return w;
+      })()
+    : null;
+
   const r = await q;
   if (r.error) return adminFail("the activity log", r.error, { action: "load" });
   const rows = r.data ?? [];
@@ -83,5 +106,7 @@ export async function GET(req: NextRequest) {
     const meta = a.restaurant_id ? nameById.get(a.restaurant_id) : undefined;
     return { ...a, detail: redactMoney(a.detail), restaurant_name: meta?.name ?? null, restaurant_slug: meta?.slug ?? null };
   });
-  return NextResponse.json({ actions });
+  // `waiting` is null when we didn't ask (or couldn't read it) — so the page can stay quiet rather
+  // than print a confident 0 it has not verified.
+  return NextResponse.json({ actions, waiting: waitingQ && !waitingQ.error ? (waitingQ.count || 0) : null });
 }
