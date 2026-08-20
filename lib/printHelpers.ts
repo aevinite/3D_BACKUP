@@ -415,3 +415,21 @@ export async function helperFor(rid: string, kind: PrintKind): Promise<HelperOwn
     backup: b ? { agent: b.name, printer: r.backupPrinter as string } : null,
   };
 }
+
+/** Every kind's owner in ONE pair of reads, for the panels: asking helperFor() three times on a poll
+ *  is three times the same two queries. Same answers, a third of the cost. */
+export async function helpersFor(rid: string, kinds: PrintKind[]): Promise<Record<string, HelperOwner>> {
+  const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
+  const out: Record<string, HelperOwner> = {};
+  for (const kind of kinds) {
+    const r = routes[kind];
+    const a = r?.agent ? agents.find((x) => x.id === r.agent) : undefined;
+    if (!r?.agent || !r.printer || !a) { out[kind] = { owned: false }; continue; }
+    const b = r.backupAgent && r.backupPrinter ? agents.find((x) => x.id === r.backupAgent) : null;
+    out[kind] = {
+      owned: true, agent: a.name, printer: r.printer, connected: a.connected, secondsAgo: a.secondsAgo,
+      backup: b ? { agent: b.name, printer: r.backupPrinter as string } : null,
+    };
+  }
+  return out;
+}

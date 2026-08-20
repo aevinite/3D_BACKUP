@@ -5046,6 +5046,16 @@ function markBillPrintedLocally(sid) {
     b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
   });
 }
+// The window path, kept exactly as it was, in one place — so the helper path above can fall back to
+// it without a second copy of these six lines drifting from this one.
+function openBillWindow(html) {
+  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
+  if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
+  try { w.document.open(); } catch (e) {} // reused window: start from a blank document
+  w.document.write(html);
+  w.document.close();
+  try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
+}
 function printBill(t, sess, os, opts = {}) {
   // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
   // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
@@ -5102,6 +5112,25 @@ function printBill(t, sess, os, opts = {}) {
     } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
   }
 
+  // ── A COMPUTER MAY OWN THIS BILL (mig 341) ────────────────────────────────────────────────────
+  // When the address book names a printer for bills, the bill goes into the basket and the helper on
+  // that computer prints it — no window opens here at all, which is the whole point: the person at
+  // the counter keeps the screen they were on. Sent fire-and-forget on purpose: the paper is the
+  // server's job now, and if the send fails we fall straight back to the window below rather than
+  // leaving a guest waiting while we retry.
+  const billOwner = printOwner("bill");
+  if (billOwner && printedSid) {
+    api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
+      .then((r) => {
+        if (r && r.queued) { toast(r.note || ("Sent to " + billOwner.printer), "ok"); return; }
+        // noRoute (the route was cleared a second ago) or anything unexpected: the window is the
+        // honest fallback, never a dead end.
+        openBillWindow(html);
+      })
+      .catch(() => openBillWindow(html));
+    return;
+  }
+
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands the
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
   // saying which — so the old "close on afterprint" also threw the bill away on Cancel. The window
@@ -5109,12 +5138,7 @@ function printBill(t, sess, os, opts = {}) {
   // Opened tall on purpose: the bill sizes itself to fit the window (billdoc.js zFit), so a taller
   // window means a bigger, easier-to-read bill rather than a scrollbar. A REUSED window keeps its
   // own size, so this is the first-open default only.
-  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
-  if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
-  try { w.document.open(); } catch (e) {} // reused window: start from a blank document
-  w.document.write(html);
-  w.document.close();
-  try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
+  openBillWindow(html);
 }
 
 // Manager PERFORMANCE REPORT — a designed, downloadable (print / Save-as-PDF)
@@ -12342,6 +12366,11 @@ const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v ==
 // What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
 // read, so the strip only ever asks a question the admin has actually opened.
 let printTargetSays = null;
+// { kot:{owned,agent,printer,connected}, bill:{…}, banquet:{…} } — refreshed on the same read that
+// already asks whether this screen may print (mig 341). Empty until that first answer arrives, and
+// an empty answer means "no computer owns it", which is the old behaviour: open the window.
+let printOwners = {};
+const printOwner = (kind) => { const o = printOwners && printOwners[kind]; return o && o.owned ? o : null; };
 let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
 
 // The one-question strip, above the floor grid, in the same visual grammar as the printer-problem
@@ -12564,6 +12593,10 @@ async function managerPrintPass() {
     // this object at first, so every new line about it stayed invisible however right the server
     // was — the panel simply never carried the answer. Caught by driving the panel, not by reading.
     const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen", station: (r && r.station) || null, helper: (r && r.helper) || null };
+    // WHO OWNS EACH KIND OF PAPER — kitchen slips, bills, banquet sheets. printBill() and
+    // printBanquetBill() read this to decide whether to send the job to a computer or to open the
+    // window as they always have.
+    printOwners = (r && r.helpers) || printOwners;
     const stationKey = (v) => v && v.station && v.station.active ? `${v.station.active.device_id}:${v.station.mine}:${v.station.stale}` : String(!!(v && v.station));
     // A helper appearing or going quiet must repaint too, or the floor strip keeps yesterday's answer.
     const helperKey = (v) => v && v.helper && v.helper.owned ? `${v.helper.agent}:${v.helper.printer}:${v.helper.connected}` : "none";
@@ -15866,6 +15899,18 @@ function bindBanquet() {
 // gets the shorter form with the tax in the summary. Every figure comes from the
 // bill row (frozen at issue), so a re-print years later is identical.
 function printBanquetBill(b, lines) {
+  // A computer may own the banquet sheets too — usually the big paper printer, which is exactly the
+  // one nobody wants to pick out of a print dialog every time (mig 341).
+  const bqOwner = printOwner("banquet");
+  if (bqOwner && b && b.id) {
+    api("POST", "/print/send", { kind: "banquet", billId: b.id })
+      .then((r) => { if (r && r.queued) toast(r.note || ("Sent to " + bqOwner.printer), "ok"); else openBanquetWindow(b, lines); })
+      .catch(() => openBanquetWindow(b, lines));
+    return;
+  }
+  return openBanquetWindow(b, lines);
+}
+function openBanquetWindow(b, lines) {
   // The banquet document itself now lives in /panels/billdoc.js — it was the LAST piece of paper
   // that still existed twice (the admin's "See the banquet bill" drew its own, and the two had
   // already parted company over the frozen tax lines and the A4/A5 setup). This function's job is

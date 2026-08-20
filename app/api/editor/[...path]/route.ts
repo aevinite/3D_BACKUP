@@ -47,7 +47,7 @@ import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, r
 // A COMPUTER (a helper) can own the paper now — mig 341. When one does, no screen prints that kind:
 // a helper prints on the printer the address book names, a screen prints on whatever its own machine
 // defaults to, and both printing means the same ticket in two rooms.
-import { helperFor } from "@/lib/printHelpers";
+import { helperFor, helpersFor, queueJob } from "@/lib/printHelpers";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
@@ -1904,14 +1904,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (station.mine) { try { await touchStation(rid, dv as string); } catch { /* next read retries */ } }
       // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
       // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
-      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper });
+      // Every kind's owner, not just the kitchen slips: the panel needs to know before it prints a
+      // BILL whether a computer will do it, and this is the read it already makes. One pair of
+      // queries for all three (helpersFor), not three pairs.
+      const owners = await helpersFor(rid, ["kot", "bill", "banquet"]);
+      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners });
       // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
       // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
       // station's name instead, so it can offer "print here instead" rather than quietly racing.
-      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station });
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station });
+      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners });
     }
+
+
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
     // One-off read on the manager's click, never polled. The order may have left the live
@@ -2504,6 +2510,53 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // A LIVE write carries no replay marker, so this returns without a single query.
     const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
     if (clash) return clashJson(clash);
+
+    // ── print/send — "put this piece of paper in the basket for the computer that owns it" ────────
+    // The panel calls this INSTEAD of opening its print window, when a helper owns that kind of
+    // paper (mig 341). It is deliberately not a general "print anything" verb: the kind must be one
+    // a route names, the row must belong to this restaurant, and the document is built server-side
+    // from ids at the moment of printing — so this cannot be used to print an arbitrary document, or
+    // an out-of-date one.
+    //
+    // `noRoute` is a normal answer, not a failure: it means no computer owns this paper, and the
+    // panel then does exactly what it has always done — open the window. That is the fallback which
+    // keeps every restaurant working, including the ones that install nothing.
+    if (a === "print" && b === "send") {
+      const kind = String((body as Record<string, unknown>)?.kind || "");
+      if (kind !== "bill" && kind !== "banquet") return err("Only a bill or a banquet sheet can be sent this way.", 400);
+      const own = await helperFor(rid, kind);
+      if (!own.owned) return ok({ noRoute: true });
+      const payload: Record<string, unknown> = {};
+      if (kind === "bill") {
+        const sid = String((body as Record<string, unknown>)?.sessionId || "");
+        if (!sid) return err("Which bill?", 400);
+        // The session must be this restaurant's — the route handler never trusts the panel's word
+        // for whose row it is (every other write here does the same).
+        const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        if (!sess) return err("That table's bill is not this restaurant's.", 404);
+        payload.sessionId = sid;
+        if ((body as Record<string, unknown>)?.parcel) payload.parcel = true;
+      } else {
+        const bid = String((body as Record<string, unknown>)?.billId || "");
+        if (!bid) return err("Which banquet bill?", 400);
+        const bill = (await sb.from("banquet_bills").select("id").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        if (!bill) return err("That banquet bill is not this restaurant's.", 404);
+        payload.billId = bid;
+      }
+      const q = await queueJob(rid, kind, payload, { requestedBy: g.user?.name || g.user?.username || "manager" });
+      if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      await logAction("editor", "print_sent", {
+        restaurant_id: rid, device_id: dev,
+        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`,
+      });
+      // What the person is told, in the words they need: where it went, and — honestly — that it is
+      // waiting if that computer is asleep.
+      return ok({
+        queued: true, id: q.id, printer: own.printer, agent: own.agent, connected: !!own.connected,
+        note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back`,
+      });
+    }
+
 
     // Same floor-plan sanity check as the waiter panel (see lib/planTable.ts).
     if ((a === "order" || (a === "sessions" && b === "open")) && body && (body as Record<string, unknown>).table != null) {

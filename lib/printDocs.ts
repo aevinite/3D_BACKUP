@@ -97,13 +97,21 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
   const names = settings.table_names as Record<string, string> | undefined;
   const tableDisp = (names && tnum && names[tnum]) || (tnum ? (/^\d+$/.test(tnum) ? "T" + tnum : tnum) : "—");
 
-  return BILLDOC.billDocHtml(BILLDOC.billData({
+  // noBar goes to billDocHtml (the DOCUMENT), not to billData (the FIGURES) — they are two different
+  // shapes and the compiler said so, which is the third time today a type has caught a real mistake.
+  return BILLDOC.billDocHtml({ ...BILLDOC.billData({
     settings, restaurant: (restQ.data || {}) as Record<string, unknown>,
     orders, session, tableDisp, parcel: !!opts?.parcel,
     // The helper prints it with the machine's own print command — there is no window to fire a
     // dialog in, so the document must not try to print itself.
     autoPrint: false,
-  }));
+  }),
+    // NO TOOLBAR AND NO SCRIPT for a document nobody is looking at. The bar and the zoom controls are
+    // screen-only and would never reach the paper, but they are dead weight in a headless render, and
+    // `noBar` is the flag the Audit card already uses for the same reason (a bill being READ, not
+    // issued). Fewer moving parts in the one path that must not stall.
+    noBar: true,
+  });
 }
 
 /**
@@ -160,4 +168,33 @@ export function withPaper(html: string, paper: { wMm: number; hMm: number } | nu
   if (/@page\s*\{[^}]*\bsize\s*:/.test(html)) return html;
   const rule = `<style>@page{size:${paper.wMm}mm ${paper.hMm}mm;margin:0}</style>`;
   return html.includes("</head>") ? html.replace("</head>", rule + "</head>") : rule + html;
+}
+
+/**
+ * A banquet sheet — the A4/A5 event bill (mig 237). Every figure is read from the bill row, which was
+ * frozen when the bill was issued, so a reprint years later is identical to the original; nothing
+ * here recalculates a rupee.
+ */
+export async function banquetHtmlForBill(rid: string, billId: string): Promise<string | null> {
+  const [billQ, setQ, restQ] = await Promise.all([
+    sb.from("banquet_bills").select("*").eq("id", billId).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
+  ]);
+  const bill = billQ.data as Record<string, unknown> | null;
+  if (!bill) return null;
+  // THE LINES COME FROM THE LINKED ORDER, which is where the panel reads them too (its Banquet
+  // ledger does `r.order.items` → {title, qty, price}). My first version looked for a `lines` column
+  // on the bill; there is none, and it would have printed an event sheet with no items on it.
+  const ord = bill.order_id
+    ? (await sb.from("orders").select("items").eq("id", String(bill.order_id)).eq("restaurant_id", rid).maybeSingle()).data as { items?: unknown } | null
+    : null;
+  const lines = (Array.isArray(ord?.items) ? ord!.items as Record<string, unknown>[] : []).map((i) => ({
+    title: String(i.title ?? ""), qty: Number(i.qty) || 1, price: parseFloat(String(i.price)) || 0,
+  }));
+  return BILLDOC.banquetDocHtml({
+    bill, lines,
+    settings: (setQ.data || {}) as Record<string, unknown>,
+    restaurant: (restQ.data || {}) as Record<string, unknown>,
+  });
 }
