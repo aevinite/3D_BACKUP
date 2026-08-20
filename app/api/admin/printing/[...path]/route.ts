@@ -19,6 +19,11 @@ import { queueJob } from "@/lib/printHelpers";
 
 export const dynamic = "force-dynamic";
 
+// AWAIT IT. tokenIsValid is async, and `if (!admin(req))` tests a PROMISE — which is always truthy,
+// so the gate never fired and an uncookied request got a restaurant's printing state, its helper
+// names and its routes (found on the deployed site 2026-08-20, minutes after shipping). Every
+// sibling admin route writes `if (!(await admin(req)))`; this one now does too, and
+// verify:print-helper fails if the await is ever dropped again.
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
@@ -44,7 +49,7 @@ const originOf = (req: NextRequest) => {
 };
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
-  if (!admin(req)) return err("Not authorised", 401);
+  if (!(await admin(req))) return err("Not authorised", 401);
   const { path } = await ctx.params;
   const seg = (path || []).map(String);
   const rid = new URL(req.url).searchParams.get("rid") || "";
@@ -70,7 +75,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
-  if (!admin(req)) return err("Not authorised", 401);
+  if (!(await admin(req))) return err("Not authorised", 401);
   const { path } = await ctx.params;
   const seg = (path || []).map(String);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
