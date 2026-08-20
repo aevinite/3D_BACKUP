@@ -324,6 +324,26 @@ want(/clampPerRow|FLOOR_PER_ROW_MIN, FLOOR_PER_ROW_MAX/.test(CARD),
 want(/Admin only:/.test(CARD) && /table QR links at all/.test(CARD),
   "the QR card still says out loud that it is the only place table codes live");
 
+{
+  // ── the three round-3 fixes (2026-08-20) ────────────────────────────────────────────────────
+  // A locked field must not need a tooltip to be readable. The name was clipped with an ellipsis
+  // and the only way to read it was a native title — which always draws down-and-right, onto the
+  // Role picker (owner, with a screenshot). Both halves are guarded: no clipping, name-first title.
+  const USERS = read("app/aevinite/users/page.tsx");
+  const lockedBox = (USERS.match(/\{scopedName \? \([\s\S]{0,1400}?\n {10}\) : \(/) || [""])[0];
+  want(!/whiteSpace: "nowrap"/.test(lockedBox) && !/textOverflow: "ellipsis"/.test(lockedBox),
+    "the locked Restaurant field shows the whole name instead of clipping it with an ellipsis");
+  want(/title=\{`\$\{scopedName\}/.test(lockedBox),
+    "…and its tooltip LEADS with the restaurant name, not with the reason it is locked");
+
+  // The QR minting race that handed onboarding a locked settings card. A pkey clash means the
+  // other request already minted that table — it must be ignored, never re-minted and retried.
+  const SET = read("app/api/admin/restaurants/settings/route.ts");
+  want(/onConflict: "restaurant_id,table_number", ignoreDuplicates: true/.test(SET),
+    "a table QR code that another request already minted is accepted, not treated as a failure");
+  want(/\.in\("table_number", stillMissing\)/.test(SET),
+    "…and the loser of that race re-reads only the rows it lacks, never the whole table");
+}
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");

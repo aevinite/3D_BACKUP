@@ -67,6 +67,15 @@
   function injectStyles() {
     if (document.getElementById("lfh-conn-style")) return;
     var css = [
+      // REJECTED (owner, 2026-08-20): do NOT enlarge this pill into a 44px tap target. It measures
+      // 89 × 24.5 on the kitchen top bar at every width — the last control up there still under the
+      // finger target after that bar was fixed — and it IS a button: it opens the connection-details
+      // popover. He was shown both ways to fix it and the cost of each, and chose to leave it. Making it
+      // genuinely 44px tall grows the chip in THREE panels at once (kitchen, tablet and manager all
+      // load this file); keeping it visually identical means extending its hit area over the 🔔 beside
+      // it, which trades a harmless miss for a harmful one. A mis-tap here opens or closes an
+      // information popover and costs nothing — the cheapest mis-tap on the screen. Extends R4 and R22:
+      // the same judgement, twice before. See docs/REJECTED-IDEAS.md (R40).
       ".lfh-conn{position:relative;display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:999px;",
       "  font:700 12.5px/1 system-ui,sans-serif;white-space:nowrap;user-select:none;cursor:pointer;",
       "  border:1px solid var(--line,rgba(127,127,127,.22));color:var(--text,#334155);",
