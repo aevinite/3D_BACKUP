@@ -1,7 +1,7 @@
 // verify-purge-classified.mjs — a purge can no longer forget a table.
 //
-// WHERE THIS BITES: Admin console → Restaurants → Recycle bin → purge (only allowed 90 days after
-// deletion). It permanently clears a restaurant's data, and it does it by naming child tables ONE
+// WHERE THIS BITES: Admin console → Restaurants → Recycle bin → "Remove permanently" (no waiting
+// period since mig 342 — the admin can clear a restaurant he binned this morning). It permanently clears a restaurant's data, and it does it by naming child tables ONE
 // BY ONE, because the tenant foreign keys deliberately have no cascade (mig 078).
 //
 // THE PROBLEM THIS GUARD FIXES (T8 sweep, P10): that list is hand-maintained. Every feature since
@@ -72,6 +72,10 @@ const KEEP = new Map([
     "DERIVED from the kept bills (best day, biggest bill, busiest hour — mig 327) and rebuilt nightly, "
     + "so purging it would be undone by the next refresh anyway. It holds no row a purge could orphan: "
     + "the restaurants row itself is kept (mig 309), which is what it is keyed on."],
+  ["bill_chain",
+    "the tamper-evidence for the bills a purge KEEPS (mig 332). Not a preference: mig 332's "
+    + "trg_bill_chain_append_only trigger REFUSES a delete, so purging it would raise and abort the "
+    + "whole purge — and it is what proves the kept sales were never altered. Classified mig 346."],
   ["settings", "deleted LAST by the purge, after every child (checked separately below)"],
   ["staff_users", "deleted LAST by the purge, after every child (checked separately below)"],
 ]);
@@ -146,8 +150,19 @@ if (![...KEEP.keys(), ...UNDECIDED.keys()].some((t) => !tenant.includes(t))) pas
 // The two guards the owner's own rules put on this function must still be there.
 if (/never be purged/i.test(def)) pass("restaurant #1 still can never be purged");
 else fail("the 'default restaurant can never be purged' guard is gone from admin_purge_restaurant()");
-if (/90 days/.test(def)) pass("the 90-day retention lock is still there");
-else fail("the 90-day retention lock is gone from admin_purge_restaurant()");
+// THE WAIT IS GONE ON PURPOSE (owner, 2026-08-20, migration 342: "you can able to dlete from
+// recycyle bin"). This check used to assert the opposite and had been RED ever since, which is the
+// worst state for a guard to be in — a failing check everybody learns to scroll past. It now guards
+// his decision in the direction he actually made it: the lock coming BACK is the regression.
+// Read ENFORCEMENT, not prose: mig 345's body carries the comment "THE RETENTION LOCK IS GONE",
+// and a guard that greps a comment reports on the wording instead of on the product (this check's
+// first version did exactly that and went red on the migration that removed the lock). So strip
+// every -- comment first, then look for the raise that would actually block the admin.
+const defCode = def.replace(/--[^\n]*/g, "");
+if (/Retention lock/i.test(defCode) || /90 days/.test(defCode)) {
+  fail("the 90-day retention lock is BACK in admin_purge_restaurant() — the owner removed that wait "
+    + "on 2026-08-20 (mig 342); a recreate from an older migration has undone it");
+} else pass("the retention lock stays removed, as the owner asked (mig 342)");
 
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — a purge would silently leave a table behind`
