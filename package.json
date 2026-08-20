@@ -151,7 +151,8 @@
     "verify:admin-money": "node scripts/verify-admin-money.mjs",
     "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs",
     "verify:owner-scope": "node scripts/verify-owner-scope-503.mjs",
-    "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs"
+    "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs",
+    "verify:retention": "node scripts/verify-retention-lock.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",

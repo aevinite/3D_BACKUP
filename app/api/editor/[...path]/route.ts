@@ -384,6 +384,42 @@ async function canDeleteBill(g: { user: StaffUser | null }, _rid: string): Promi
   return !g.user; // the Aevidine admin console only; owner and manager alike get cancel, not delete
 }
 
+// ── IS LOG RETENTION FROZEN BY THE PLATFORM? (owner, 2026-08-21) ─────────────────────────────
+// His answer to "should the 1-month cap be enforced?": *"make sure admin can do only lock for
+// mangaer and ever admin do will be visible to manager"*. So the admin does not cap the product
+// behind the restaurant's back — the admin LOCKS, the panel SHOWS the lock, and this is the
+// server half that makes it real (hiding is never the only guard).
+//
+// Read from app_config (mig 186) — the same row the admin console writes.
+//
+// DELIBERATELY NOT CACHED. The first version held it for 30s, and the cost of that showed up
+// immediately in testing: after the admin turned the lock ON, a manager's screen still said
+// "owner only" and the server still ACCEPTED an owner's write, for up to half a minute. A policy
+// switch whose whole purpose is "this is now frozen, and everyone can see it" cannot be eventually
+// consistent — and what it buys is nothing: this is one primary-key lookup of one tiny row,
+// alongside the several queries whoami already runs. Egress discipline is about not re-reading
+// whole tables (docs/SAAS-EFFICIENCY-PLAYBOOK.md), not about shaving a single indexed row read.
+async function retentionLock(): Promise<{ locked: boolean; at: string | null }> {
+  const r = await sb.from("app_config").select("value").eq("key", "log_retention_lock").maybeSingle();
+  // A FAILED read must not quietly unlock the platform: treat it as locked-unknown → locked,
+  // so a database hiccup can never widen what a restaurant may do.
+  if (r.error) return { locked: true, at: null };
+  const val = (r.data?.value || {}) as Record<string, unknown>;
+  return { locked: val.locked === true, at: typeof val.at === "string" ? val.at : null };
+}
+// May THIS caller change the two log-retention windows from the panel? Takes the lock it was
+// already given, so one request never reads the same row twice.
+//   · a real manager — never. Not this switch: a retention dial in the hands of the person it
+//     audits is an off switch with extra steps (docs/COMPLIANCE-GUARDRAILS.md §3).
+//   · the owner — yes, unless the admin has locked it.
+//   · the Aevidine admin console (no staff cookie) — always; the lock is the admin's own, and the
+//     admin console is not the party it binds.
+function canSetRetention(g: { user: StaffUser | null }, lock: { locked: boolean }): { ok: boolean; code: string } {
+  if (!g.user) return { ok: true, code: "" };
+  if (g.user.role !== "owner") return { ok: false, code: "retention_manager_blocked" };
+  return lock.locked ? { ok: false, code: "retention_locked" } : { ok: true, code: "" };
+}
+
 // Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
 // ADMIN X-RAY rule (owner, 2026-07-22): the admin super-user (no staff cookie) passes
 // every rung — from the admin console the greyed-out button must genuinely work, the
@@ -824,6 +860,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         : null;
       const logParts: Record<string, boolean> = {};
       for (const k of ["removals", "activity", "customers"]) logParts[k] = lo && typeof lo === "object" ? lo[k] !== false : true;
+      // Resolved ONCE: whoami runs on every panel open, and canSetRetention() itself reads the
+      // lock, so asking four times would turn one cached fact into four calls.
+      const retLock = await retentionLock();
+      const retMay = canSetRetention(g, retLock);
       return ok({
         actor,
         role: actor,
@@ -915,6 +955,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // manager is now always `false`. Kept as its own line rather than folded away, because the
         // rule it states — the ADMIN CONSOLE is the only door — is the thing a reader needs.
         canDeleteBill: simulate ? false : await canDeleteBill(g, rid),
+        // LOG RETENTION, ANSWERED BY THE SERVER (owner, 2026-08-21). The panel drew this dropdown
+        // for everybody with no gate at all — so a manager got a live control whose every use ended
+        // in a refusal, and an owner got one that stopped working the moment the admin locked it,
+        // with nothing on screen to say why. The panel now repeats these fields instead of
+        // guessing, exactly as it does for canDeleteBill, so the two can never drift.
+        retention: {
+          // "View as a manager" must answer the way a real manager is answered, or the admin's
+          // simulate mode would show a working dropdown that a manager does not get.
+          canEdit: retMay.ok && !simulate,
+          why: simulate ? "retention_manager_blocked" : retMay.code,
+          locked: retLock.locked,
+          lockedAt: retLock.at,
+        },
         // One entry per module-backed capability (same keys as before: table_tags, khata,
         // banquet, table_ops, take_orders, parcel) — derived, so new modules appear here.
         features: Object.fromEntries(PERMISSIONS.filter((mp) => mp.module).map((mp) => [mp.id, !!ladders[moduleKey(mp)]?.effective])),
@@ -4621,6 +4674,39 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // under Access → Manager → What a manager can manage → The floor, and they are checked per
       // FIELD, so a manager allowed to rename a table cannot quietly change the layout too.
       // A settings section that is switched off must REFUSE, not merely vanish from the sidebar.
+        // RETENTION IS ANSWERED FIRST, AND WITH THE TRUE REASON (owner, 2026-08-21).
+        //
+        // WHAT THIS IS NOT: it is not a silent-save fix. I first assumed the strip list below made
+        // a manager's retention write vanish quietly, and CHECKED by removing this block — a
+        // manager sending only `oplog_retention_days` already got a 403, because the "refuse any
+        // key a manager sends" loop further down runs BEFORE that strip. So nothing was ever saved
+        // silently, and the strip list never even reached retention for a manager.
+        //
+        // WHAT WAS ACTUALLY WRONG: the refusal was `permDenied("change that setting")`, whose
+        // wording is "your owner hasn't given managers permission…". For retention that sentence is
+        // untrue — there is NO permission an owner can grant here, by design, so the manager was
+        // sent to ask for something nobody can give. And the panel drew an editable dropdown for
+        // them anyway, so the only thing it could ever produce was that refusal.
+        //
+        // A refusal now carries a CODE, so the panel can say which of the two real reasons it is.
+        //
+        // IT HAS TO SIT ABOVE EVERY MANAGER GATE BELOW, not next to the strip list. Placed lower it
+        // was unreachable: a manager hits `permDenied("change that setting")` first, which says
+        // "your owner hasn't given managers permission" — and for retention that sentence is simply
+        // untrue. There IS no permission an owner can grant for this, so the reason has to be the
+        // real one before any grant is consulted.
+        if (a === "settings" && body && typeof body === "object"
+          && ("oplog_retention_days" in body || "custlog_retention_days" in body)) {
+          const may = canSetRetention(g, await retentionLock());
+          if (!may.ok) {
+            return NextResponse.json({
+              error: may.code === "retention_locked"
+                ? "Aevidine has locked how long logs are kept. You can see the window, but only Aevidine can change it."
+                : "Only the restaurant's owner can change how long logs are kept.",
+              code: may.code,
+            }, { status: 403 });
+          }
+        }
       if (a === "settings" && g.user && g.user.role === "manager") {
         const offList = managerSettingsOff((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
         const touches = (ks: string[]) => body && typeof body === "object" && ks.some((k) => k in (body as object));

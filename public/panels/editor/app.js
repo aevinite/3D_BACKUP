@@ -6934,8 +6934,34 @@ function actLabel(code) {
   return w.charAt(0).toUpperCase() + w.slice(1);
 }
 // which: "oplog_retention_days" (operation log) or "custlog_retention_days" (customer log).
+//
+// WHO MAY ACTUALLY CHANGE THIS — ANSWERED BY THE SERVER, NOT GUESSED HERE (owner, 2026-08-21).
+// This drew a live dropdown for EVERYONE with no gate. A real manager is refused server-side (a
+// retention dial in the hands of the person it audits is an off switch with extra steps), so every
+// single use of that dropdown by a manager ended in a red refusal — and the refusal said "your
+// owner hasn't given managers permission", pointing them at a permission that does not exist.
+// Now `whoami.retention` says canEdit / why / locked and this simply repeats it — the same rule
+// canDeleteBill follows, so the screen and the server cannot drift.
+//
+// And when the ADMIN has locked it, the restaurant is TOLD SO ("ever admin do will be visible to
+// manager") — the window is still shown, with who set it. A locked control that just greys out
+// with no reason is the thing he has objected to before.
 function retentionControl(which) {
   const cur = Number((state.data.settings || {})[which]) || 90;
+  const R = (typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.retention) || null;
+  const label = (RETENTION_OPTS.find((o) => o.d === cur) || {}).label || cur + " days";
+  // No answer yet (an old cached app.js against a new server, or whoami still in flight) →
+  // show the READ-ONLY form. Never offer a control we cannot prove is allowed.
+  if (!R || R.canEdit !== true) {
+    const locked = !!(R && R.locked);
+    const why = locked
+      ? "Aevidine set this for every restaurant. You can see it, but only Aevidine can change it."
+      : "Only the restaurant's owner can change how long logs are kept.";
+    return `<span class="ret-ctl ret-ctl-ro" title="${esc(why)} Logs older than this are deleted automatically by a once-a-day cleanup. Your bills are never touched.">
+        <i class="fas fa-clock-rotate-left"></i> Logs kept for <b>${esc(label)}</b>
+        <em class="ret-by">${locked ? "🔒 set by Aevidine" : "owner only"}</em>
+      </span>`;
+  }
   const opts = RETENTION_OPTS
     .map((o) => `<option value="${o.d}"${o.d === cur ? " selected" : ""}>${o.label}</option>`)
     .join("");
@@ -6957,6 +6983,20 @@ async function saveRetention(which, val) {
     const lbl = (RETENTION_OPTS.find((o) => o.d === days) || {}).label || days + " days";
     toast("Saved — old logs auto-delete after " + lbl, "ok");
   } catch (e) {
+    // BRANCH ON THE SERVER'S CODE, NOT ITS PROSE. A refusal here is a real answer ("Aevidine
+    // locked it" / "owner only"), not a failure to reach the server, so it must not read like one.
+    // api() carries the parsed reply on `e.data` (with `e.status`) — that is this panel's
+    // contract for every call, so read the code from there and nowhere else.
+    const code = (e && e.data && e.data.code) || "";
+    if (code === "retention_locked" || code === "retention_manager_blocked") {
+      toast(e.message || "That's not yours to change.", "err");
+      // Put the dropdown back on the value that is really stored, so the screen never keeps
+      // showing a window the restaurant is not on. Done to the element rather than through a
+      // full redraw: this runs inside a tab whose own redraw would also refetch the log.
+      const sel = document.querySelector('.ret-select[data-ret="' + which + '"]');
+      if (sel) sel.value = String(Number((state.data.settings || {})[which]) || 90);
+      return;
+    }
     toast("Couldn't save retention: " + e.message, "err");
   }
 }
