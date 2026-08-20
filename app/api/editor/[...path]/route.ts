@@ -2526,6 +2526,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (kind !== "bill" && kind !== "banquet") return err("Only a bill or a banquet sheet can be sent this way.", 400);
       const own = await helperFor(rid, kind);
       if (!own.owned) return ok({ noRoute: true });
+      // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
+      // `g.user` is null when this is the admin console viewing a restaurant's panel. Their printers
+      // are theirs: nothing comes out of a paying client's roll because we opened their screen. The
+      // panel is told, and shows the document on OUR screen instead — the same window every
+      // restaurant without a helper uses. `force` is the deliberate way to help them ("their printer
+      // was stuck, send it again"), and it is audited so a mystery ticket at their counter can always
+      // be traced back to us.
+      if (!g.user && (body as Record<string, unknown>)?.force !== true) {
+        return ok({ adminView: true, printer: own.printer, agent: own.agent });
+      }
       const payload: Record<string, unknown> = {};
       if (kind === "bill") {
         const sid = String((body as Record<string, unknown>)?.sessionId || "");
@@ -2545,9 +2555,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       const q = await queueJob(rid, kind, payload, { requestedBy: g.user?.name || g.user?.username || "manager" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
-      await logAction("editor", "print_sent", {
+      await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
-        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`,
+        ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`
+          + (g.user ? "" : " — sent deliberately from the admin console"),
       });
       // What the person is told, in the words they need: where it went, and — honestly — that it is
       // waiting if that computer is asleep.

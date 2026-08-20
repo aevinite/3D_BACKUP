@@ -79,6 +79,7 @@ const GUARDS = [
   ["verify-hidden-dishes.mjs", "a dish taken off the menu is really off the menu"],
   ["verify-fix-survives.mjs", "a rewritten database function has not dropped a fix it already had"],
   ["verify-print-queue.mjs", "auto-print is a ROW, and prints on a window another window covers"],
+  ["verify-print-helper.mjs", "a COMPUTER can own the paper: one basket, many printers, no screen fighting it"],
 ];
 
 // NOT HERE, AND WHY — the admission test is stricter than it first looks.

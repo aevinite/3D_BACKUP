@@ -5123,6 +5123,9 @@ function printBill(t, sess, os, opts = {}) {
     api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
       .then((r) => {
         if (r && r.queued) { toast(r.note || ("Sent to " + billOwner.printer), "ok"); return; }
+        // Viewing as the admin: their printer stays quiet and the bill opens here instead, so nothing
+        // comes out of a paying client's roll because we looked at their screen.
+        if (r && r.adminView) toast("Admin view — showing the bill here, not printing at the restaurant.", "ok");
         // noRoute (the route was cleared a second ago) or anything unexpected: the window is the
         // honest fallback, never a dead end.
         openBillWindow(html);
@@ -6819,6 +6822,12 @@ const OP_ACTION_LABELS = {
   // WHICH SCREEN IS THE PRINTER (mig 338). Worth a row: "why did tickets start coming out at the
   // counter?" is answered by a name and a time, not by asking the shift who touched what.
   print_station_take: "Started printing on a screen", print_station_release: "Stopped printing on a screen",
+  // The print HELPER — a computer, not a screen, doing the printing (mig 341). Plain English, like
+  // every other line in this log: a manager reading it should never meet a code.
+  print_helper_added: "Added a computer that can print", print_helper_recoded: "Gave a printing computer a new code",
+  print_helper_removed: "Removed a computer from printing", print_routes_changed: "Changed which printer gets which paper",
+  print_switch: "Changed a printing switch", print_test: "Sent a test page to a printer",
+  print_sent: "Sent something to a printer", print_sent_by_admin: "Aevidine sent something to this restaurant's printer",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
@@ -15904,7 +15913,11 @@ function printBanquetBill(b, lines) {
   const bqOwner = printOwner("banquet");
   if (bqOwner && b && b.id) {
     api("POST", "/print/send", { kind: "banquet", billId: b.id })
-      .then((r) => { if (r && r.queued) toast(r.note || ("Sent to " + bqOwner.printer), "ok"); else openBanquetWindow(b, lines); })
+      .then((r) => {
+        if (r && r.queued) { toast(r.note || ("Sent to " + bqOwner.printer), "ok"); return; }
+        if (r && r.adminView) toast("Admin view — showing the sheet here, not printing at the restaurant.", "ok");
+        openBanquetWindow(b, lines);
+      })
       .catch(() => openBanquetWindow(b, lines));
     return;
   }

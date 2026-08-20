@@ -105,6 +105,12 @@ export const ACT_LABEL: Record<string, string> = {
   // WHICH SCREEN IS THE PRINTER (mig 338). Worth a row: "why did tickets start coming out at the
   // counter?" is answered by a name and a time, not by asking the shift who touched what.
   print_station_take: "Started printing on a screen", print_station_release: "Stopped printing on a screen",
+  // The print HELPER — a computer, not a screen, doing the printing (mig 341). Plain English, like
+  // every other line in this log: a manager reading it should never meet a code.
+  print_helper_added: "Added a computer that can print", print_helper_recoded: "Gave a printing computer a new code",
+  print_helper_removed: "Removed a computer from printing", print_routes_changed: "Changed which printer gets which paper",
+  print_switch: "Changed a printing switch", print_test: "Sent a test page to a printer",
+  print_sent: "Sent something to a printer", print_sent_by_admin: "Aevidine sent something to this restaurant's printer",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit

@@ -1,6 +1,7 @@
 # The print helper — one basket, many printers
 
-> **Status:** in build, started 2026-08-20. Owner asked for it after the Aangan problem:
+> **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
+> Guarded by `npm run verify:print-helper` (31 checks, in `verify:static`). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -156,3 +157,23 @@ if that computer is off the notes simply wait.
   printer is back", never a fake "printed".
 - **The admin looking at a client's panel prints NOTHING at the client's shop** unless he
   deliberately says so, and that override is audited.
+
+## What each stage actually cost, and what it caught
+
+| Stage | Built | Faults it caught by being DRIVEN |
+|---|---|---|
+| 1 | mig 341 · lib/printHelpers · lib/printDocs · the agent API | `orders.platform` does not exist (an empty document, so nothing printed) · "Table 99" where the owner ruled "T7" |
+| 2 | the three helper scripts | headless Chrome never exits after `--print-to-pdf` (hung for ever after ONE ticket) · `lp` returns 0 with the printer switched OFF, so the helper said "printed" when nothing did · the model name split on spaces and the PPD paper line matched with the wrong shape |
+| 3 | admin → Printing | — (16/16 first run) |
+| 4 | every screen stands down | the panel never carried the `helper` field, so every line about it was invisible · a device that had said "never print here" never asked the server, so the counter machine could not learn a computer had taken over |
+| 5 | bills + banquet through the basket | the banquet sheet's lines read from a column that does not exist (an event sheet with no items) · `noBar` belongs on the document, not the figures |
+| 6 | the guard + the hard cases | the guard tripped on its own explanation of ESC/POS · the parity harness fed the panel the wrong shape and cried drift where there was none |
+
+## The hard cases, all measured
+
+two computers whose printers share a NAME → one slip, to the addressed one · one code copied onto a
+second machine → flagged, and the ticket still only picked up once · a refusal → back in the basket
+with the reason on it · a backup printer → refused before its window, given the ticket after it · an
+order deleted before printing → prints nothing and is closed, not retried for ever · auto-print
+switched off mid-service → the helper idles and the ticket waits, then prints when switched back on ·
+a removed computer → cannot even ask.
