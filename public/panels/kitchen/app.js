@@ -1570,20 +1570,28 @@ function openPrinterSheet() {
   // should not have to ask anyone whether this screen is even meant to be printing — the two answers
   // that decide it are the admin's, so they are shown as plain sentences, never as dead switches.
   const tgt = state.kotPrintTarget || "kitchen";
-  const where = tgt === "counter" ? "the counter screen — not this one"
+  // A COMPUTER, NOT A SCREEN (mig 341). When a helper program owns the kitchen slips, this screen
+  // prints nothing at all — and the cook must be able to read WHY and WHERE from here, or a quiet
+  // screen beside a working printer is a mystery. The helper's name and printer are the answer.
+  const hlp = state.helper && state.helper.owned ? state.helper : null;
+  const where = hlp ? (esc(hlp.printer) + " — from " + esc(hlp.agent))
+    : tgt === "counter" ? "the counter screen — not this one"
     : tgt === "both" ? "this screen, with the counter as a 30-second backup"
     : "this screen";
   // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
   const stn = state.station || null;
-  const nowPrinting = stn && stn.mine ? "THIS screen"
+  const nowPrinting = hlp
+    ? (hlp.connected ? esc(hlp.agent) + " (ready)" : esc(hlp.agent) + " — asleep, tickets are waiting")
+    : stn && stn.mine ? "THIS screen"
     : stn && stn.active ? (esc(stn.active.label || (stn.active.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (stn.stale ? " (gone quiet)" : ""))
     : "no screen yet";
   const status = `<div class="prsheet-status">
       <div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
       <div><span>Tickets print on</span><b>${esc(where)}</b></div>
       <div><span>Printing right now</span><b>${nowPrinting}</b></div>
-      ${!state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
-      ${tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}
+      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}${hlp.backup ? ` If it prints nothing for a minute, ${esc(hlp.backup.printer)} takes over.` : ""}</p>` : ""}
+      ${!hlp && !state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
+      ${!hlp && tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}
     </div>`;
   ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer</h3><button class="btn" data-prclose>✕</button></div>
     ${status}

@@ -44,19 +44,28 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 // claim from the same rows, and one implementation is what stops them drifting into two ideas of
 // "claimed" — which would be a ticket printed twice.
 import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation } from "@/lib/printQueue";
+// A COMPUTER (a helper) can own the paper now — mig 341. When one does, no screen prints that kind:
+// a helper prints on the printer the address book names, a screen prints on whatever its own machine
+// defaults to, and both printing means the same ticket in two rooms.
+import { helperFor } from "@/lib/printHelpers";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
 // May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
 // Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
 // mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
-async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string }> {
-  const st = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target")
-    .eq("restaurant_id", rid).maybeSingle()).data as
-    { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
+  const [stQ, helper] = await Promise.all([
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
+    helperFor(rid, "kot"),
+  ]);
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
   const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
   const target = String(st?.kot_print_target || "kitchen");
-  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target };
+  // A named helper takes the kitchen slips off every screen — including this one, and including the
+  // backup path. The panel is told WHO has them so it can say so rather than going quiet.
+  if (helper.owned) return { mayPrint: false, backup: false, target, helper };
+  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
 }
 import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
@@ -1895,7 +1904,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (station.mine) { try { await touchStation(rid, dv as string); } catch { /* next read retries */ } }
       // `off` is a real answer, not an error: the panel stops asking and shows nothing. Either
       // auto-print is not on for this restaurant, or the admin has said only the KITCHEN prints.
-      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station });
+      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper });
       // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
       // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the

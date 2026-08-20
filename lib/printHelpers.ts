@@ -379,3 +379,39 @@ export async function waitingCount(rid: string): Promise<number> {
     .eq("restaurant_id", rid).in("status", ["queued", "printing"]);
   return r.count || 0;
 }
+
+// ── DOES A HELPER OWN THIS PAPER? ────────────────────────────────────────────────────────────
+export type HelperOwner = {
+  owned: boolean;                 // a helper is named for this kind of paper
+  agent?: string;                 // and this is what that computer is called
+  printer?: string;
+  connected?: boolean;
+  secondsAgo?: number | null;
+  backup?: { agent: string; printer: string } | null;
+};
+
+/**
+ * Whether a computer, rather than a screen, is responsible for this kind of paper.
+ *
+ * IT DOES NOT DEPEND ON THE HELPER BEING AWAKE, and that is deliberate. A kitchen slip routed to the
+ * kitchen printer belongs there: if the machine is asleep the ticket WAITS, because coming out of
+ * whatever printer the manager's laptop happens to default to is not "better than nothing" — it is a
+ * ticket the kitchen never sees, printed somewhere nobody is looking. A restaurant that wants
+ * "anywhere rather than nowhere" says so by naming a BACKUP printer, which is exactly what that line
+ * is for.
+ *
+ * So a screen stops printing the moment a route names a helper, and starts again the moment the
+ * route is cleared. One rule, readable on the screen either way.
+ */
+export async function helperFor(rid: string, kind: PrintKind): Promise<HelperOwner> {
+  const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
+  const r = routes[kind];
+  if (!r?.agent || !r.printer) return { owned: false };
+  const a = agents.find((x) => x.id === r.agent);
+  if (!a) return { owned: false };                       // removed machine — the screen may print again
+  const b = r.backupAgent && r.backupPrinter ? agents.find((x) => x.id === r.backupAgent) : null;
+  return {
+    owned: true, agent: a.name, printer: r.printer, connected: a.connected, secondsAgo: a.secondsAgo,
+    backup: b ? { agent: b.name, printer: r.backupPrinter as string } : null,
+  };
+}
