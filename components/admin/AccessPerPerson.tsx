@@ -19,7 +19,7 @@ import { type TreeState } from "@/lib/accessTree";
 // The rows each role has now live in lib/staffCaps, shared with the person's PROFILE panel
 // (components/admin/StaffProfile) and with the admin write route. One list, three screens —
 // this used to be a private copy here, and a second copy would be free to drift.
-import { capGroupsForRole, capVisible, capStates, roleDefault as capRoleDefault, countOverrides as countRoleOverrides } from "@/lib/staffCaps";
+import { capGroupsForRole, capVisible, capStates, roleValueLabel, roleDefault as capRoleDefault, countOverrides as countRoleOverrides } from "@/lib/staffCaps";
 
 type Staff = { id: string; name: string | null; username: string; role: string; active?: boolean; permissions?: Record<string, string> };
 
@@ -225,7 +225,14 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
                   <div className="nm">{node.name}</div>
                   <div className="ds">{node.what}</div>
                 </div>
-                {perPerson ? (
+                {cap.kind === "value" ? (
+                  /* A VALUE, not a switch — a % ceiling or a date reach. It is shown, never
+                     offered: there is no per-person path for it. (sweep T15, 2026-08-18) */
+                  <div className="app-fixed">
+                    <span className="chip wait">{roleValueLabel(cap, st) ?? "…"}</span>
+                    <span className="hint">set for the restaurant</span>
+                  </div>
+                ) : perPerson ? (
                   <div className="app-segs" role="radiogroup" aria-label={node.name}>
                     {capStates(pin).map((s) => (
                       <button key={s} role="radio" aria-checked={value === s}

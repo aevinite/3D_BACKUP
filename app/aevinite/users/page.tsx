@@ -67,6 +67,35 @@ export default function AdminUsers() {
   // button so the SEARCH is the hero. Opens on demand.
   const [addOpen, setAddOpen] = useState(false);
 
+  // ── WHICH TABLES A NEW WAITER WILL SERVE (sweep T15, 2026-08-18) ────────────────────────────
+  // Waiter sections (migs 222-225, owner 2026-07-30: "new tablet user will have to choose …
+  // there should be just a select all option"). A waiter's tablet shows ONLY the tables they were
+  // given, so newWaiterTables() REFUSES a create with an empty pick — for every restaurant, with
+  // no module check.
+  //
+  // This form never sent `tables`, so creating a waiter from the admin console was IMPOSSIBLE: the
+  // form submitted, the server answered "Pick at least one table for this waiter … Use 'Select
+  // all' for the whole floor", and there was no such control anywhere on the screen. The owner's
+  // own roster (/owner/staff) has had this picker since 2026-07-30; this is the same control, in
+  // the one place it was missing, so the two screens ask the same question the same way.
+  const [newTables, setNewTables] = useState<number[]>([]);
+  const [tableCount, setTableCount] = useState<number | null>(null);
+  const needsTables = nu.role === "tablet";
+  useEffect(() => {
+    // Only when it is about to be asked for — the floor of a restaurant nobody is adding a waiter
+    // to is nothing this screen needs to know.
+    if (!addOpen || !needsTables || !nu.restaurant_id) return;
+    let alive = true;
+    setTableCount(null);
+    setNewTables([]);
+    fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(nu.restaurant_id)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { if (alive) setTableCount(Math.max(0, Number(d?.settings?.table_count) || 0)); })
+      .catch(() => { if (alive) setTableCount(0); });
+    return () => { alive = false; };
+  }, [addOpen, needsTables, nu.restaurant_id]);
+  const allTables = Array.from({ length: tableCount || 0 }, (_, i) => i + 1);
+
   const scopedName = filterRid ? restaurants.find((r) => r.id === filterRid)?.name : "";
 
   // When the admin scopes to ONE restaurant, lock the "Add a user" form to it so a
@@ -117,11 +146,17 @@ export default function AdminUsers() {
     creatingRef.current = true;
     setErr(""); setCreating(true);
     try {
-      const r = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nu) });
+      // `tables` only for a waiter — the server ignores it for anyone else, and sending it would
+      // read as though a manager had a section too.
+      const r = await fetch("/api/admin/users", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(needsTables ? { ...nu, tables: newTables } : nu),
+      });
       const j = await r.json();
       if (!r.ok) { setErr(j.error || "Could not create user."); return; }
       setReveal({ name: j.name || j.username, password: j.password });
       setNu((n) => ({ role: "manager", restaurant_id: n.restaurant_id, name: "", phone: "", password: "" }));
+      setNewTables([]);
       setShowNewPw(false);
       load();
     } catch { setErr("Network error."); }
@@ -229,7 +264,44 @@ export default function AdminUsers() {
               </button>
             </span>
           </label>
-          <button type="submit" disabled={creating} style={{ ...btn("#22c55e"), padding: "11px 14px", opacity: creating ? 0.7 : 1 }}>
+          {/* A WAITER'S TABLES. Shown only for the waiter role, because only a waiter has a
+              section — and shown BEFORE the button, because the button is disabled until it is
+              answered. "Select all" is the whole floor in one tap, exactly as on /owner/staff. */}
+          {needsTables ? (
+            <div className="usp-tables">
+              <div className="usp-tables-head">
+                <b>Tables this waiter will serve</b>
+                <button type="button" className="usp-btn ghost sm" disabled={!allTables.length}
+                  onClick={() => setNewTables(allTables)}>Select all</button>
+                <button type="button" className="usp-btn ghost sm" disabled={!newTables.length}
+                  onClick={() => setNewTables([])}>Clear</button>
+                <span className="cnt">
+                  {tableCount === null ? "counting the floor…" : `${newTables.length} of ${tableCount} picked`}
+                </span>
+              </div>
+              {tableCount === null ? null : allTables.length ? (
+                <div className="usp-tgrid">
+                  {allTables.map((i) => {
+                    const on = newTables.includes(i);
+                    return (
+                      <button key={i} type="button" className={on ? "on" : ""} aria-pressed={on}
+                        onClick={() => setNewTables((cur) => (on ? cur.filter((x) => x !== i) : [...cur, i].sort((a, b) => a - b)))}>
+                        {on ? "✓ " : ""}T{i}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="usp-tables-warn">This restaurant has no tables set up yet — add them under Access &amp; permissions → Table before adding a waiter.</div>
+              )}
+              {allTables.length && !newTables.length ? (
+                <div className="usp-tables-warn">Pick at least one — their tablet shows only the tables you give them.</div>
+              ) : null}
+            </div>
+          ) : null}
+          <button type="submit" disabled={creating || (needsTables && !newTables.length)}
+            title={needsTables && !newTables.length ? "Pick at least one table for this waiter first" : ""}
+            style={{ ...btn("#22c55e"), padding: "11px 14px", opacity: creating || (needsTables && !newTables.length) ? 0.6 : 1 }}>
             {creating ? "Creating…" : "Create user"}
           </button>
         </form>
@@ -257,7 +329,11 @@ export default function AdminUsers() {
                   <span className="av" style={{ background: ROLE_COLOR[u.role] || "#64748b" }} aria-hidden>{initialOf(u)}</span>
                   <span className="pi">
                     <span className="nm">{u.name || u.username}{u.hasPin ? <span className="pin" title="PIN set">🔑</span> : null}{!u.active ? <em>disabled</em> : null}</span>
-                    <span className="mt">{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) : "never"}</span>
+                    {/* The ROLE, in words, for the phone. Below 640px the role pill on the right is
+                        hidden for width, which left the colour of the avatar circle as the only
+                        thing saying whether "diagm11" is a manager or a waiter — and a real person
+                        is called Raj, not "…tablet". Hidden above 640px, where the pill says it. */}
+                    <span className="mt"><span className="rolew"><b>{ROLE_LABEL[u.role] || u.role}</b>{" · "}</span>{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) : "never"}</span>
                   </span>
                   <span className="rp" style={{ ["--hue" as string]: ROLE_COLOR[u.role], background: `color-mix(in srgb, ${ROLE_COLOR[u.role]} 16%, transparent)` }}>{ROLE_LABEL[u.role] || u.role}</span>
                   <svg className="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
@@ -297,6 +373,16 @@ function UsersStyle() {
   .usp-banner { border-radius:14px; padding:14px 16px; margin-bottom:14px; border:var(--border); background:var(--card); }
   .usp-banner.err { border-color:#7f1d1d; color:#fca5a5; }
   .usp-banner.ok { border-color:#166534; color:#86efac; }
+  /* ── BOTH BANNERS ON THE LIGHT CONSOLE (sweep T15, 2026-08-18) ────────────────────────────
+     #fca5a5 and #86efac are DARK-skin inks and a hard-coded hex cannot follow the skin, so on the
+     light console they sat on a white card at 1.90:1 and 1.40:1 (measured; on the dark console
+     they read 9.72 and 13.14). The green one is the worst sentence in the product to be unable to
+     read — it is the "copy it now, it won't be shown again" line that carries a brand-new
+     password — and the red one is every failure this page can report. Same hues taken darker;
+     the border and the card are untouched, and the dark console is not touched at all.
+     After: 5.61:1 and 6.77:1. (.usp-row .nm em below was fixed the same way in T11.) */
+  [data-skin="light"] .usp-banner.err { color: color-mix(in srgb, #fca5a5 55%, #000); }
+  [data-skin="light"] .usp-banner.ok  { color: color-mix(in srgb, #86efac 42%, #000); }
   .usp-code { font-size:18px; background:var(--bg); padding:8px 12px; border-radius:8px; letter-spacing:1px; }
   .usp-btn { padding:9px 14px; border-radius:9px; border:0; font-weight:700; font-size:13px; cursor:pointer; color:#fff; }
   .usp-btn.blue { background:var(--ub); } .usp-btn.ghost { background:#374151; }
@@ -318,6 +404,17 @@ function UsersStyle() {
   .usp-add.open { background:#374151; box-shadow:none; }
   .usp-addpanel { border-radius:16px; padding:18px; margin-bottom:16px; border:1px solid color-mix(in srgb, var(--ub) 40%, var(--border)); background:var(--card); }
   .usp-formhint { font-size:12px; color:var(--muted); margin:10px 0 0; }
+  /* A new waiter's section — the same control /owner/staff has had since 2026-07-30. */
+  .usp-tables { grid-column:1/-1; border:var(--border); border-radius:12px; padding:11px 12px; background:var(--bg); }
+  .usp-tables-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:9px; font-size:13px; }
+  .usp-tables-head .cnt { margin-left:auto; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .usp-btn.sm { padding:5px 10px; font-size:12px; min-height:0; }
+  .usp-btn.ghost:disabled { opacity:.45; cursor:not-allowed; }
+  .usp-tgrid { display:flex; flex-wrap:wrap; gap:6px; max-height:190px; overflow-y:auto; }
+  .usp-tgrid button { min-height:32px; padding:0 11px; border-radius:9px; border:var(--border); background:var(--card);
+    color:var(--muted); font-size:12.5px; font-weight:700; cursor:pointer; }
+  .usp-tgrid button.on { border-color:var(--ub); background:color-mix(in srgb,var(--ub) 15%,transparent); color:var(--text); }
+  .usp-tables-warn { margin-top:9px; font-size:12.5px; font-weight:700; color:var(--adm-danger,#f87171); }
   .usp-count { font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:6px 2px 10px; }
   .usp-empty { padding:30px; text-align:center; color:var(--muted); border:var(--border); border-radius:14px; background:var(--card); }
   .usp-results { display:flex; flex-direction:column; gap:18px; }
@@ -335,8 +432,20 @@ function UsersStyle() {
   [data-skin="light"] .usp-row .nm em { color: color-mix(in srgb, #ef4444 62%, #000); }
   .usp-row .nm .pin { font-size:12px; }
   .usp-row .mt { display:block; font-size:12px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Desktop shows the role in the pill on the right, so the word in the meta line is redundant. */
+  .usp-row .mt .rolew { display:none; }
   .usp-row .rp { font-size:11px; font-weight:800; padding:4px 10px; border-radius:20px; flex:none; }
   .usp-row .chev { color:var(--muted); flex:none; transition:color .13s, transform .13s; }
-  @media (max-width:640px){ .usp-add { margin-left:0; } .usp-row .rp { display:none; } }
+  @media (max-width:640px){
+    .usp-add { margin-left:0; }
+    /* The pill goes for width — so the role has to be said in words instead, or the colour of the
+       avatar circle is the only thing telling a manager from a waiter (sweep T15, 2026-08-18). */
+    .usp-row .rp { display:none; }
+    /* The separator is REAL TEXT in the markup, not a ::after — generated content is invisible to
+       innerText, to a copy-paste and to a screen reader, which is how this looked right in a
+       screenshot and read as "Kitchenno phone" to everything else. */
+    .usp-row .mt .rolew { display:inline; }
+    .usp-row .mt .rolew b { font-weight:800; color:var(--text); }
+  }
   `}</style>;
 }
