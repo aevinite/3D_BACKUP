@@ -37,7 +37,7 @@
 // re-saves the page under the new key. It rides along with whatever the current VERSION is: v9 below
 // wipes the caches anyway for its own reasons, which for this change is strictly the nicer outcome
 // (every device re-saves under the new key immediately instead of missing once).
-const VERSION = "v9"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered. v9: a STAFF PANEL's first visit saves its reads too (it saved none), and the last-resort page no longer promises work it can't know was saved.
+const VERSION = "v10"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered. v9: a STAFF PANEL's first visit saves its reads too (it saved none), and the last-resort page no longer promises work it can't know was saved. v10: the offline page's way OUT suits who is looking — a diner is sent back to their restaurant's menu instead of the staff sign-in (the bump is required: /offline.html is precached, so devices keep the old copy until the cache names change).
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -438,7 +438,17 @@ async function offlinePage() {
     // no ids, so the check read it as "the last-resort page has no way out" (2026-07-31). Same
     // contract on both pages, or the guard can only ever see one of them.
     '<p style="margin:16px 0 0"><a id="retry" href="" onclick="location.reload();return false" style="color:#38bdf8">Try again</a>' +
-    ' &nbsp;·&nbsp; <a id="home" href="/" style="color:#38bdf8">Go to the home screen</a></p></div></body>',
+    ' &nbsp;·&nbsp; <a id="home" href="/" style="color:#38bdf8">Go to the home screen</a></p></div>' +
+    // AND THE WAY OUT SUITS WHO IS LOOKING, exactly as /offline.html now does it (guest sweep T1,
+    // 2026-08-16). "/" is the STAFF sign-in (app/page.tsx redirects it to /login), which is the
+    // right door for a waiter and a dead end for a diner. This page is served as the answer to the
+    // ORIGINAL navigation, so location.pathname is still the screen they asked for. Same three
+    // rules, same ids — verify:offline looks for #home to prove this page is not a dead end.
+    '<script>(function(){try{var p=location.pathname||"",h=document.getElementById("home"),m=p.match(/^\\/r\\/([^/]+)\\//);' +
+    'if(m){h.href="/r/"+m[1].toLowerCase()+"/menu";h.textContent="Go to the menu";return}' +
+    'if(/^\\/(menu|item)(\\/|$)/.test(p)){h.href="/menu";h.textContent="Go to the menu";return}' +
+    'if(/^\\/q\\/[^/]+/.test(p)){var t="";try{t=sessionStorage.getItem("lfh_tab_tenant")||""}catch(e){}' +
+    'h.href=t?"/r/"+t.toLowerCase()+"/menu":p;h.textContent="Go to the menu"}}catch(e){}})();</scr' + 'ipt></body>',
     { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }

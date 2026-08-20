@@ -73,9 +73,15 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
   // the first client render — so a widget can always build a correct /r/<slug>/... link, and
   // hydration can never mismatch. A door with no slug in its path (`/q/<code>`, `/view/<folder>`)
   // is settled a moment later by the effect below, which is where the tab's pin can be read.
+  //
+  // LOWER-CASED, for the same reason lib/tenantStorage's fold() exists: this slug BUILDS LINKS
+  // (`/r/<slug>/menu` from the global widgets) while the page components build theirs from the
+  // RESOLVED `r.slug`, which is always lower case. Handing back "French-House" here sent a diner
+  // between two spellings of one restaurant — and the phone files the basket per spelling.
+  // (Guest sweep T1, 2026-08-16; owner's capital/lower-case rule, 2026-08-12.)
   const pathSlug = useMemo(() => {
     const m = (pathname || "").match(/^\/r\/([^/]+)/);
-    return m ? decodeURIComponent(m[1]) : DEFAULT_RESTAURANT_SLUG;
+    return m ? decodeURIComponent(m[1]).trim().toLowerCase() : DEFAULT_RESTAURANT_SLUG;
   }, [pathname]);
 
   const [slug, setSlug] = useState<string>(pathSlug);
