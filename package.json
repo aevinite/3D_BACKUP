@@ -136,6 +136,7 @@
     "verify:parcel-home": "node scripts/verify-parcel-home.mjs",
     "verify:floor-per-row": "node scripts/verify-floor-per-row.mjs",
     "verify:read-guards": "node scripts/verify-read-guards.mjs",
+    "verify:admin-api-a": "node scripts/verify-admin-api-a.mjs",
     "verify:panel-api": "node scripts/verify-panel-api-guards.mjs",
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
     "read-timings": "node scripts/read-timings.mjs",

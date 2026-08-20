@@ -15,6 +15,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
@@ -49,8 +51,14 @@ export async function GET(req: NextRequest) {
       sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle(),
       sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200),
     ]);
-    if (billingQ.error) return bad(billingQ.error.message, 500);
-    if (paymentsQ.error) return bad(paymentsQ.error.message, 500);
+    // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). These six sites answered with the database's
+    // own sentence, so a failure on the platform-billing page read as e.g. `duplicate key value
+    // violates unique constraint "restaurant_billing_pkey"` in a red toast. adminFail keeps that
+    // text where it is useful (the response `detail` and the server log) and gives the screen a
+    // sentence that names the thing AND says whether anything changed — which on a money page is
+    // the part the owner actually needs.
+    if (billingQ.error) return adminFail("this restaurant's billing", billingQ.error, { action: "load" });
+    if (paymentsQ.error) return adminFail("this restaurant's payment history", paymentsQ.error, { action: "load" });
     return ok({ billing: billingQ.data || null, payments: paymentsQ.data || [] });
   }
 
@@ -61,7 +69,7 @@ export async function GET(req: NextRequest) {
   const [restQ, billingQ, yearPaymentsQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
     // Named columns + a bound (sweep 2026-08-04). This whole-platform read had no .eq(), no column
     // list and no .limit() — the only read in the admin tree missing all three. One row per
     // restaurant makes it small today, but it grows with exactly the number this product is built
@@ -69,7 +77,7 @@ export async function GET(req: NextRequest) {
     sb.from("restaurant_billing").select(BILLING_COLS).limit(2000),
     sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
   ]);
-  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return bad(q.error.message, 500);
+  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return adminFail("the billing table", q.error, { action: "load" });
 
   const billingByRid = new Map<string, Billing>((billingQ.data || []).map((b: Billing) => [b.restaurant_id, b]));
   const paidThisYearByRid = new Map<string, number>();
@@ -143,7 +151,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       updated_at: new Date().toISOString(),
     };
     const { error } = await sb.from("restaurant_billing").upsert(patch, { onConflict: "restaurant_id" });
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("this restaurant's plan", error, { action: "save" });
     await logAction("admin", "billing_set_plan", { detail: `${patch.plan || "plan"} · ${status}`, restaurant_id: rid });
     return ok({ ok: true });
   }
@@ -154,7 +162,11 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     const paidOn = String(body.paid_on || "");
     if (!isUuid(rid)) return bad("valid restaurant_id required");
     if (amount == null || !(amount > 0)) return bad("Amount must be a number greater than 0 (e.g. 12000).");
-    if (!paidOn) return bad("paid_on required");
+    // A DATE, not just "something". Anything non-empty used to go straight at a `date` column, so a
+    // typo answered with the database's own "invalid input syntax for type date" in a red toast —
+    // a sentence that names no field and tells the admin nothing to change.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || Number.isNaN(Date.parse(paidOn)))
+      return bad("Enter the payment date as YYYY-MM-DD (e.g. 2026-08-19).");
     const row = {
       restaurant_id: rid, amount, paid_on: paidOn,
       method: body.method ? String(body.method) : null,
@@ -162,25 +174,43 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       note: body.note ? String(body.note) : null,
     };
     const ins = await sb.from("restaurant_payments").insert(row).select("id").single();
-    if (ins.error) return bad(ins.error.message, 500);
+    if (ins.error) return adminFail("this payment", ins.error, { action: "save" });
 
+    // "Also move the next-due date" is a SECOND write, and its failure used to be swallowed: the
+    // payment saved, the reply said ok, and next-due quietly stayed where it was — so the restaurant
+    // read as due (or overdue) on the Billing table the moment after being paid, and the only way to
+    // find out was to notice. The payment itself is already recorded and must not be undone, so this
+    // says what happened instead: the payment is in, the date is not.
+    let dueMoved: string | null = null;
     if (body.roll_next_due) {
       const billing = (await sb.from("restaurant_billing").select("cycle").eq("restaurant_id", rid).maybeSingle()).data as { cycle?: string } | null;
       const cycle = billing?.cycle === "monthly" ? "monthly" : "yearly";
       const nextDue = rollForward(paidOn, cycle);
-      await sb.from("restaurant_billing").upsert({ restaurant_id: rid, next_due_on: nextDue, updated_at: new Date().toISOString() }, { onConflict: "restaurant_id" });
+      const roll = await sb.from("restaurant_billing").upsert({ restaurant_id: rid, next_due_on: nextDue, updated_at: new Date().toISOString() }, { onConflict: "restaurant_id" });
+      if (roll.error) {
+        console.error("[admin/billing] payment saved but next-due could not be moved:", roll.error.message);
+        await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn} · next-due NOT moved`, restaurant_id: rid });
+        return ok({ ok: true, id: ins.data?.id, warning: "The payment was saved, but the next-due date could not be moved — set it by hand on the plan." });
+      }
+      dueMoved = nextDue;
     }
-    await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn}`, restaurant_id: rid });
-    return ok({ ok: true, id: ins.data?.id });
+    await logAction("admin", "billing_add_payment", { detail: `₹${amount} · ${paidOn}${dueMoved ? ` · next due ${dueMoved}` : ""}`, restaurant_id: rid });
+    return ok({ ok: true, id: ins.data?.id, nextDueOn: dueMoved });
   }
 
   if (action === "delete_payment") {
     const id = String(body.payment_id || "");
-    if (!id) return bad("payment_id required");
-    const row = (await sb.from("restaurant_payments").select("restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
-    const { error } = await sb.from("restaurant_payments").delete().eq("id", id);
-    if (error) return bad(error.message, 500);
-    await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: row?.restaurant_id || null });
+    // Shape-checked like every other id on this route, so a stale row id can't reach a uuid column.
+    if (!isUuid(id)) return bad("valid payment_id required");
+    // A REMOVAL MUST NOT REPORT ITSELF WHEN NOTHING WENT (sweep #6, T19). This deleted by id and
+    // answered ok:true whatever came back, then wrote "removed a payment" to the record. So the
+    // page took the row off screen, the year's collected total silently disagreed with the history
+    // below it, and the platform's money record carried a removal that never happened. Asking the
+    // delete which row it took is one word (`.select`) and makes the answer honest.
+    const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id").maybeSingle();
+    if (gone.error) return adminFail("this payment", gone.error, { action: "save" });
+    if (!gone.data) return bad("That payment is already gone — refresh the page.", 404);
+    await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: (gone.data as { restaurant_id: string }).restaurant_id || null });
     return ok({ ok: true });
   }
 

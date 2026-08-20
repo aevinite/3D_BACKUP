@@ -27,6 +27,8 @@ import { normalizeLoginName } from "@/lib/userAuth";
 import { passwordFields } from "@/lib/passwordVault";
 import { logAction, redactMoney } from "@/lib/oplog";
 import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName, nameTakenMessage } from "@/lib/ownerHome";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const RETENTION_DAYS = 90; // a binned owner is restorable for this long, then purgeable (matches restaurants)
@@ -38,6 +40,12 @@ const realCharCount = (s: string) => (String(s).match(/[\p{L}\p{N}]/gu) || []).l
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
+// The database's words go to the LOG (searchable, ours) and a short note comes back for the caller.
+// Used by the two internal helpers below, whose return value used to be the raw Postgres sentence.
+function dbNote(step: string, e: { message?: string; code?: string } | null): string {
+  console.error(`[admin/owners] couldn't ${step}:`, e?.code || "", e?.message || "no reason given");
+  return `couldn't ${step}`;
+}
 
 function genPassword(): string {
   const a = "abcdefghijkmnpqrstuvwxyz23456789";
@@ -74,11 +82,11 @@ export async function GET(req: NextRequest) {
       .or(`actor_id.eq.${ownerId},detail.ilike.%${ownerId}%`)
       .order("created_at", { ascending: false })
       .limit(100);
-    if (actQ.error) return bad(actQ.error.message, 500);
+    if (actQ.error) return adminFail("this owner's activity", actQ.error, { action: "load" });
     // Restaurant names for the rows' restaurant_id chips (one scoped lookup).
     const rids = Array.from(new Set((actQ.data || []).map((a) => a.restaurant_id).filter(Boolean)));
     const restNames = rids.length
-      ? new Map(((await sb.from("restaurants").select("id, name").in("id", rids)).data || []).map((r) => [r.id, r.name]))
+      ? new Map(((await sb.from("restaurants").select("id, name").in("id", rids).limit(2000)).data || []).map((r) => [r.id, r.name]))
       : new Map();
     return ok({
       owner: { id: o.id, username: o.username, name: o.name || o.username, active: o.active === true, lastSeenAt: o.last_seen_at, createdAt: o.created_at },
@@ -95,10 +103,10 @@ export async function GET(req: NextRequest) {
   if (new URL(req.url).searchParams.get("deleted") === "1") {
     const [binQ, linksQ] = await Promise.all([
       sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
-        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
-      sb.from("restaurant_owners").select("user_id"),
+        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000),
+      sb.from("restaurant_owners").select("user_id").limit(20000),
     ]);
-    if (binQ.error) return bad(binQ.error.message, 500);
+    if (binQ.error) return adminFail("the owners recycle bin", binQ.error, { action: "load" });
     const owned = new Map<string, number>();
     for (const l of linksQ.data || []) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
     const now = Date.now();
@@ -126,12 +134,17 @@ export async function GET(req: NextRequest) {
       // "silently dropped every restaurant past the 100th" in the owner reports. 2000 is far above
       // any real estate and still an explicit ceiling rather than a hidden one.
       .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000),
-    sb.from("restaurant_owners").select("restaurant_id, user_id"),
+    sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000),
     sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000),
   ]);
-  if (ownersQ.error) return bad(ownersQ.error.message, 500);
-  if (linksQ.error) return bad(linksQ.error.message, 500);
-  if (restQ.error) return bad(restQ.error.message, 500);
+  // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). Every failure on this page answered with the
+  // database's own sentence — `insert or update on table "restaurant_owners" violates foreign key
+  // constraint …` in a red toast. adminFail keeps that text in the response `detail` and the server
+  // log and gives the screen a sentence naming the thing and saying whether anything changed; on the
+  // page that hands out ownership of a restaurant, "nothing was changed" is the important half.
+  if (ownersQ.error) return adminFail("the owners list", ownersQ.error, { action: "load" });
+  if (linksQ.error) return adminFail("who owns what", linksQ.error, { action: "load" });
+  if (restQ.error) return adminFail("the restaurant list", restQ.error, { action: "load" });
 
   const restById = new Map((restQ.data || []).map((r) => [r.id, r]));
 
@@ -142,7 +155,7 @@ export async function GET(req: NextRequest) {
   const primaryIds = Array.from(new Set((restQ.data || []).map((r) => r.owner_user_id).filter(Boolean) as string[]));
   const primaryUser = new Map<string, { name: string; binned: boolean }>();
   if (primaryIds.length) {
-    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds);
+    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds).limit(2000);
     for (const u of pq.data || []) primaryUser.set(u.id as string, { name: (u.name as string) || (u.username as string), binned: !!u.deleted_at });
   }
 
@@ -188,14 +201,26 @@ async function isLivePrimaryHolder(userId: string | null | undefined): Promise<b
 // Attach ONE restaurant to an owner: join-table membership + become the primary if
 // the slot is free OR only held by a binned/deleted account (so act-as, the admin's
 // Restaurants tab and every "who owns this?" display always resolve to a real owner).
+// Returns null on success, or a sentence FOR THE SCREEN. The database's own words used to be the
+// return value, and they travelled two ways: `bad(e, 500)` on the attach button, and the
+// `attachErrors` array in the create-owner reply, which the page lists next to the new login. So
+// creating an owner could show `insert or update on table "restaurant_owners" violates foreign key
+// constraint "restaurant_owners_restaurant_id_fkey"` under a freshly-minted password. The raw text
+// goes to the server log, where it is searchable, and the caller gets words (sweep #6, T19).
 async function attach(ownerId: string, rid: string): Promise<string | null> {
   const up = await sb.from("restaurant_owners")
     .upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
-  if (up.error) return up.error.message;
+  if (up.error) {
+    console.error("[admin/owners] attach failed:", up.error.code || "", up.error.message);
+    return "Couldn't attach that restaurant — nothing was changed. Please try again.";
+  }
   const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
   if (r && !(await isLivePrimaryHolder(r.owner_user_id as string | null))) {
     const set = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
-    if (set.error) return set.error.message;
+    if (set.error) {
+      console.error("[admin/owners] primary-owner set failed:", set.error.code || "", set.error.message);
+      return "The restaurant was attached, but its main owner could not be set — set it with ★ Make primary.";
+    }
   }
   return null;
 }
@@ -271,7 +296,7 @@ export async function POST(req: NextRequest) {
       if (newKey === restoredKey) return bad("Pick a DIFFERENT name for the current owner — that's the one being freed up.");
       if (await loginNameTaken(newKey)) return bad("That new name is taken too — pick another.", 409);
       const ren = await sb.from("staff_users").update({ name: newDisplay, username: newKey }).eq("id", blocker.id);
-      if (ren.error) return bad(ren.error.message, 500);
+      if (ren.error) return adminFail("the other owner's name", ren.error, { action: "save" });
       await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${blocker.name || blocker.username}" → "${newDisplay}" to free the name for a restore · owner ${blocker.id}` });
     }
 
@@ -280,7 +305,9 @@ export async function POST(req: NextRequest) {
     const patch: Record<string, unknown> = { deleted_at: null, deleted_by: null, delete_reason: null };
     if (mode === "rename_restored") { patch.name = restoredDisplay; patch.username = restoredKey; }
     const { error } = await sb.from("staff_users").update(patch).eq("id", ownerId);
-    if (error) return bad(error.code === "23505" ? "Someone just took that name — pick another." : error.message, error.code === "23505" ? 409 : 500);
+    if (error) return error.code === "23505"
+      ? bad("Someone just took that name — pick another.", 409)
+      : adminFail("this owner's restore", error, { action: "save" });
     const renamedNote = mode === "rename_restored" ? ` as "${restoredDisplay}"` : mode === "rename_existing" ? " (the other owner was renamed to free the name)" : "";
     await logAction("admin", "owner_restore_from_bin", { actor: "admin", restaurant_id: null, detail: `restored owner "${o.name || o.username}"${renamedNote} from recycle bin (still suspended) · owner ${ownerId}` });
     return ok({ ok: true, restored: true, name: restoredDisplay });
@@ -304,7 +331,9 @@ export async function POST(req: NextRequest) {
     }
     const who = o.name || o.username;
     const res = await hardDeleteOwner(ownerId);
-    if (res.error) return bad(res.error, 500);
+    // hardDeleteOwner hands back the database's sentence for the SERVER's benefit; the console gets
+    // plain words and the raw text goes to the log, same as every other failure on this page.
+    if (res.error) { console.error("[admin/owners] purge failed:", res.error); return bad("Couldn't remove that owner permanently — nothing was changed. Please try again.", 500); }
     await logAction("admin", "owner_purge", { actor: "admin", restaurant_id: null, detail: `PERMANENTLY purged owner "${who}" (${ownerId}) · ${res.released} restaurant(s) released` });
     return ok({ ok: true, purged: true });
   }
@@ -330,7 +359,9 @@ export async function POST(req: NextRequest) {
     .select("id, name").single();
   // 23505 = the global unique index on lower(username) — the friendly version of
   // "that username is taken" for the rare race between the check above and this insert.
-  if (ins.error) return bad(ins.error.code === "23505" ? "That username is taken — pick another." : ins.error.message, ins.error.code === "23505" ? 409 : 500);
+  if (ins.error) return ins.error.code === "23505"
+    ? bad("That username is taken — pick another.", 409)
+    : adminFail("this new owner", ins.error, { action: "save" });
   const ownerId = ins.data.id as string;
 
   // Attach every picked restaurant; report per-restaurant failures instead of
@@ -383,7 +414,7 @@ export async function PATCH(req: NextRequest) {
     const member = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", ownerId).limit(1)).data?.[0];
     if (!member) return bad("Assign this restaurant to the owner first — only a linked owner can be made primary.", 409);
     const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("this restaurant's primary owner", error, { action: "save" });
     const prevId = (r.owner_user_id as string | null) || null;
     const prev = prevId ? (await sb.from("staff_users").select("name, username, deleted_at").eq("id", prevId).limit(1)).data?.[0] : null;
     const prevWho = prev ? `${prev.name || prev.username}${prev.deleted_at ? " (in recycle bin)" : ""}` : "nobody";
@@ -397,14 +428,14 @@ export async function PATCH(req: NextRequest) {
     // SECURITY-CRITICAL revoke (same rule as /api/admin/restaurants PATCH): if this
     // delete fails the owner keeps seeing the restaurant — surface it, never swallow.
     const del = await sb.from("restaurant_owners").delete().eq("restaurant_id", rid).eq("user_id", ownerId);
-    if (del.error) return bad(del.error.message, 500);
+    if (del.error) return adminFail("the owner's link to this restaurant", del.error, { action: "save" });
     // If they were the PRIMARY, hand primary to a remaining co-owner (or clear it)
     // so restaurants.owner_user_id never points at someone with no membership.
     const r = (await sb.from("restaurants").select("owner_user_id, name").eq("id", rid).limit(1)).data?.[0];
     if (r?.owner_user_id === ownerId) {
       const next = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).limit(1)).data?.[0];
       const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
-      if (set.error) return bad(set.error.message, 500);
+      if (set.error) return adminFail("the restaurant's primary owner", set.error, { action: "save" });
     }
     await logAction("admin", "owner_detach_restaurant", { restaurant_id: rid, actor: "admin", detail: `${r?.name || rid} detached from owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true });
@@ -418,7 +449,7 @@ export async function PATCH(req: NextRequest) {
     const { error } = await sb.from("staff_users")
       .update({ ...(await passwordFields(password)), token_version: ((cur?.token_version as number) || 0) + 1, failed_count: 0, locked_until: null })
       .eq("id", ownerId);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("this owner's password", error, { action: "save" });
     await logAction("admin", "owner_reset_password", { actor: "admin", restaurant_id: null, detail: `reset password for owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true, password });
   }
@@ -430,7 +461,7 @@ export async function PATCH(req: NextRequest) {
     const patch: Record<string, unknown> = { active };
     if (!active) patch.token_version = ((cur?.token_version as number) || 0) + 1;
     const { error } = await sb.from("staff_users").update(patch).eq("id", ownerId);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("this owner's status", error, { action: "save" });
     await logAction("admin", active ? "owner_restore" : "owner_suspend", { actor: "admin", restaurant_id: null, detail: `${active ? "restored" : "suspended"} owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true, active });
   }
@@ -448,7 +479,7 @@ export async function PATCH(req: NextRequest) {
     if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
     if (key !== owner.username) { const m = await nameTakenMessage(key); if (m) return bad(m, 409); }
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
-    if (error) return bad(error.message, 500);
+    if (error) return adminFail("this owner's name", error, { action: "save" });
     await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${who}" → "${display}" · owner ${ownerId}` });
     return ok({ ok: true });
   }
@@ -462,20 +493,20 @@ export async function PATCH(req: NextRequest) {
 // the join rows, then deletes the staff_users row. Returns how many restaurants
 // were released. staff_actions rows are kept on purpose (audit outlives account).
 async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; released: number }> {
-  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || [];
+  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000)).data || [];
   for (const l of links) {
     const rid = l.restaurant_id as string;
     const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
     if (r?.owner_user_id === ownerId) {
       const next = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).neq("user_id", ownerId).limit(1)).data?.[0];
       const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
-      if (set.error) return { error: set.error.message, released: 0 };
+      if (set.error) return { error: dbNote("release a restaurant", set.error), released: 0 };
     }
   }
   const delLinks = await sb.from("restaurant_owners").delete().eq("user_id", ownerId);
-  if (delLinks.error) return { error: delLinks.error.message, released: 0 };
+  if (delLinks.error) return { error: dbNote("drop the ownership links", delLinks.error), released: 0 };
   const delUser = await sb.from("staff_users").delete().eq("id", ownerId);
-  if (delUser.error) return { error: delUser.error.message, released: 0 };
+  if (delUser.error) return { error: dbNote("delete the owner row", delUser.error), released: 0 };
   return { released: links.length };
 }
 
@@ -499,7 +530,7 @@ export async function DELETE(req: NextRequest) {
   const who = o.name || o.username;
   const { error } = await sb.from("staff_users")
     .update({ deleted_at: new Date().toISOString(), deleted_by: "admin", delete_reason: reason }).eq("id", ownerId);
-  if (error) return bad(error.message, 500);
+  if (error) return adminFail("this owner's move to the recycle bin", error, { action: "save" });
   await logAction("admin", "owner_soft_delete", {
     actor: "admin", restaurant_id: null, // platform-level (mig 156)
     detail: `moved owner "${who}" to recycle bin${reason ? ` · reason: ${reason}` : ""} · owner ${ownerId}`,

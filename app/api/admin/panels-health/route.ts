@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const ROLES = ["manager", "kitchen", "tablet", "owner"] as const;
@@ -15,8 +17,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const [restsQ, setQ, staffQ] = await Promise.all([
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
-    sb.from("settings").select("restaurant_id, enabled_panels"),
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
+    sb.from("settings").select("restaurant_id, enabled_panels").limit(2000),
     // Active operational staff only, explicit columns, bounded — we just need the latest
     // last_seen per (restaurant, role); aggregated below in JS.
     sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("last_seen_at", { ascending: false, nullsFirst: false }).limit(3000),
@@ -25,7 +27,12 @@ export async function GET(req: NextRequest) {
   // seen" (false "device down" for everyone) with a confident 200 (audit). Order the staff read
   // by last_seen so at scale the 3000-row cap keeps the MOST-RECENTLY-ACTIVE staff, not random ones.
   const anyErr = restsQ.error || setQ.error || staffQ.error;
-  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
+  // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
+  // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
+  // right for a developer, useless on the screen the owner runs his platform from. adminFail
+  // keeps the raw text where it is actually useful (the response `detail` and the server log)
+  // and gives the screen a sentence that names the thing and says whether anything changed.
+  if (anyErr) return adminFail("the panel-connectivity list", anyErr, { action: "load" });
 
   const panelsByRid = new Map<string, Record<string, boolean> | null>((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
   // Latest last_seen per "restaurant|role".

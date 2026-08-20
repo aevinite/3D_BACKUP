@@ -27,9 +27,17 @@ export async function GET(req: NextRequest) {
       .gte("created_at", sinceIso)
       .order("created_at", { ascending: false })
       .limit(500),
-    sb.from("restaurants").select("id, name").is("deleted_at", null),
+    sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000),
   ]);
   if (ordersQ.error) return adminFail("today's cancelled orders", ordersQ.error, { action: "load" });
+  // THE NAME READ IS NOT OPTIONAL HERE, and that is the whole point of this line.
+  //
+  // The filter below keeps an order only if its restaurant is in `nameById`. When the restaurants
+  // read failed, `restsQ.data` was null, `|| []` made the map EMPTY, and every single order was
+  // dropped — so the admin was shown "nothing was cancelled today" with a confident 200, on a day
+  // when orders had been cancelled. An empty screen that means "we couldn't look" is worse than an
+  // error, because there is nothing to retry and nothing to doubt.
+  if (restsQ.error) return adminFail("today's cancelled orders", restsQ.error, { action: "load" });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   const rows = (ordersQ.data || [])

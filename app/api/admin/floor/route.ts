@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
     // restaurants. Counts still come pre-summed from lfh_admin_floor_stats (one tiny row per
     // restaurant, counts only, NO revenue).
     const [restsQ, statsQ, tilesQ] = await Promise.all([
-      supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
+      supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
       supabaseAdmin.rpc("lfh_admin_floor_stats"),
       supabaseAdmin.rpc("lfh_admin_floor_all"),
     ]);

@@ -7,6 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -15,14 +17,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const [billingQ, usageQ, restsQ] = await Promise.all([
-    sb.from("restaurant_billing").select("restaurant_id, status, plan"),
+    sb.from("restaurant_billing").select("restaurant_id, status, plan").limit(2000),
     sb.rpc("lfh_admin_usage"),
-    sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null),
+    sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null).limit(2000),
   ]);
   // Check ALL three — a partial failure (e.g. the usage RPC times out) would otherwise leave
   // usage empty and flag EVERY paying restaurant as churn-risk with a confident 200 (audit).
   const anyErr = restsQ.error || usageQ.error || billingQ.error;
-  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
+  // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
+  // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
+  // right for a developer, useless on the screen the owner runs his platform from. adminFail
+  // keeps the raw text where it is actually useful (the response `detail` and the server log)
+  // and gives the screen a sentence that names the thing and says whether anything changed.
+  if (anyErr) return adminFail("the account-health list", anyErr, { action: "load" });
 
   const billing = new Map<string, { status: string; plan: string | null }>((billingQ.data || []).map((b) => [b.restaurant_id, { status: b.status, plan: b.plan }]));
   const usage = new Map<string, { o7: number; o30: number }>(((usageQ.data as { restaurant_id: string; orders_7d: number; orders_30d: number }[]) || []).map((u) => [u.restaurant_id, { o7: Number(u.orders_7d) || 0, o30: Number(u.orders_30d) || 0 }]));

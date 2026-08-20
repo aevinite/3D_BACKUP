@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean)));
   const nameById = new Map<string, { name: string; slug: string }>();
   if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name, slug").in("id", ids);
+    const rest = await sb.from("restaurants").select("id, name, slug").in("id", ids).limit(2000);
     for (const x of rest.data ?? []) nameById.set(x.id, { name: x.name, slug: x.slug });
   }
   const actions = rows.map((a) => {
