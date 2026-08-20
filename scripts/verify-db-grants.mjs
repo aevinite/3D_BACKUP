@@ -384,7 +384,10 @@ function checkMigrations() {
   // anywhere, so the check works wherever it is run from, and SAYS SO if it truly cannot look.
   let wtRoot = join(root, ".claude", "worktrees");
   try {
-    const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
+    // stdio: git's own `fatal: not a git repository` is noise here — the catch below is the
+    // handling, and a "fatal" line above a passing check reads like the check broke.
+    const common = execFileSync("git", ["rev-parse", "--git-common-dir"],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     const mainRoot = dirname(common.startsWith("/") ? common : join(root, common));
     wtRoot = join(mainRoot, ".claude", "worktrees");
   } catch { /* not a git checkout — fall back to the relative guess */ }
