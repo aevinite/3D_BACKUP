@@ -99,7 +99,13 @@ database, unread. See `docs/REJECTED-IDEAS.md` R27 before ever re-adding it.
 - **e-invoice / IRN is B2B only, turnover > ₹5 cr** — never stamp it on an ordinary diner bill.
 - **Reconcile to the rupee** — Z-report / dashboards must include voids and deleted bills (our past
   revenue-mismatch bugs prove this is fragile; keep it exact).
-- **Records retention 6–8 years** — even a tenant purged from the 90-day recycle bin must retain bills.
+- **Records retention 6–8 years** — even a tenant purged from the recycle bin must retain bills. The
+  recycle bin no longer imposes a waiting period before a permanent removal (owner, 2026-08-20,
+  migration 342), so this rule now stands entirely on its own: a purge deletes the menu, staff,
+  settings, saved customers and activity log, and **keeps** orders, order_items, sessions, payments,
+  session_payments, credit_notes, invoice_events, deletion_audit and the numbering counters — the
+  restaurants row survives, marked `purged_at`, so those bills have a parent. Guarded by
+  `npm run verify:admin-restaurants`, which fails if migration 342 ever deletes a money table.
 
 ## 4. Customer data — DPDP Act 2023 (we collect phone / khata book / feedback)
 

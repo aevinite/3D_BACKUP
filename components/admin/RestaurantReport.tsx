@@ -20,16 +20,28 @@ const RANGE_LABEL: Record<Range, string> = { today: "Today", "7d": "Last 7 days"
 
 type Report = {
   restaurant: { id: string; name: string; slug: string; active: boolean; createdAt: string; owner: string | null; plan: string | null; planStatus: string | null };
+  // Which figures the server could NOT read (owner, 2026-08-20 — T20 item 14). Present only when
+  // something genuinely went unread; the route retries a plumbing blip once before ever saying so.
+  // "—" used to mean BOTH "there isn't one" and "we couldn't read it", and those need different
+  // reactions from the admin: one is a restaurant with no owner set, the other is a page to reload.
+  partial?: string[];
   range: Range;
   usage: {
     orders: number; orderItems: number; activityLogEvents: number; waiterCalls: number; sessions: number;
-    tablesConfigured: number; tablesOpenNow: number; menuItemCount: number;
+    tablesConfigured: number | null; tablesOpenNow: number; menuItemCount: number;
     staffByRole: Record<string, number>; staffTotal: number; activityVolume: number;
   };
   trend: TrendPoint[];
 };
 
 const ROLE_LABEL: Record<string, string> = { manager: "Manager", tablet: "Tablet", kitchen: "Kitchen", owner: "Owner" };
+// The words for the three figures the server can report as unread (its `partial` list).
+const PARTIAL_LABEL: Record<string, string> = { owner: "who owns it", plan: "its plan", tablesConfigured: "how many tables it has" };
+const unread = (r: Report, k: string) => !!r.partial?.includes(k);
+/** "We couldn't read this" — deliberately NOT an em dash, which already means "there isn't one". */
+const Unread = () => (
+  <span className="adm-muted" style={{ fontStyle: "italic" }} title="This one figure couldn't be read — press Refresh">couldn&apos;t read</span>
+);
 
 export default function RestaurantReport({ restaurantId, restaurantName, onBack }: { restaurantId: string; restaurantName: string; onBack: () => void }) {
   const [range, setRange] = useState<Range>("7d");
@@ -85,20 +97,32 @@ export default function RestaurantReport({ restaurantId, restaurantName, onBack 
         <div className="adm-empty">Loading…</div>
       ) : (
         <>
+          {/* NAME WHAT IS MISSING, ONCE, AT THE TOP. Without this the greyed cells below are just
+              three more dashes and nobody knows the page is incomplete. Refresh re-reads. */}
+          {!!report.partial?.length && (
+            <div className="adm-card adx-noprint" role="status" style={{ marginBottom: 14, display: "flex", gap: 11, alignItems: "flex-start", borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 10%, var(--card))" }}>
+              <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn)", marginTop: 2 }} aria-hidden="true" />
+              <span style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+                Some of this report couldn&apos;t be read just now: <b>{report.partial.map((k) => PARTIAL_LABEL[k] || k).join(", ")}</b>.
+                Everything else on the page is correct. Press Refresh to try those again.
+              </span>
+              <button className="adm-btn" style={{ fontSize: 12 }} disabled={loading} onClick={() => load(range)}>Refresh</button>
+            </div>
+          )}
           <div className="adm-card" style={{ marginBottom: 14 }}>
             <h2>Overview</h2>
             <div className="adm-logwrap">
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Slug</span><span className="mono">{report.restaurant.slug}</span></div>
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Status</span><span>{report.restaurant.active ? "Live" : "Suspended"}</span></div>
-              <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Owner</span><span>{report.restaurant.owner || "—"}</span></div>
+              <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Owner</span><span>{unread(report, "owner") ? <Unread /> : (report.restaurant.owner || "—")}</span></div>
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Created</span><span>{new Date(report.restaurant.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</span></div>
-              <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Plan</span><span>{report.restaurant.plan ? `${report.restaurant.plan} (${report.restaurant.planStatus})` : "No plan set"}</span></div>
+              <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Plan</span><span>{unread(report, "plan") ? <Unread /> : report.restaurant.plan ? `${report.restaurant.plan} (${report.restaurant.planStatus})` : "No plan set"}</span></div>
             </div>
           </div>
 
           <div className="adm-stats">
             <div className="adm-stat"><div className="k">Orders</div><div className="v">{report.usage.orders}</div></div>
-            <div className="adm-stat"><div className="k">Tables open now</div><div className="v">{report.usage.tablesOpenNow} / {report.usage.tablesConfigured}</div></div>
+            <div className="adm-stat"><div className="k">Tables open now</div><div className="v">{report.usage.tablesOpenNow} / {report.usage.tablesConfigured ?? "?"}</div></div>
             <div className="adm-stat"><div className="k">Staff</div><div className="v">{report.usage.staffTotal}</div></div>
             <div className="adm-stat"><div className="k">Menu items</div><div className="v">{report.usage.menuItemCount}</div></div>
             <div className="adm-stat"><div className="k">Waiter calls</div><div className="v">{report.usage.waiterCalls}</div></div>

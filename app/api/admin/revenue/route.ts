@@ -12,6 +12,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -26,24 +28,42 @@ export async function GET(req: NextRequest) {
   // page label is IST, so a UTC year flips ~5.5h late and mismatches the heading. UTC+5:30.
   const yearStart = `${new Date(now.getTime() + 330 * 60000).getUTCFullYear()}-01-01`;
 
-  const [billingQ, paymentsQ, restsQ] = await Promise.all([
-    sb.from("restaurant_billing").select("restaurant_id, plan, status, amount, currency, cycle, next_due_on"),
-    // Explicit columns, bounded. Amount is treated as INR (matches the rest of billing).
-    sb.from("restaurant_payments").select("restaurant_id, amount, paid_on").order("paid_on", { ascending: false }).limit(10000),
-    sb.from("restaurants").select("id, name, slug").is("deleted_at", null),
+  // The 12-month chart's window, as a date the database can filter on.
+  const monthsFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+
+  // ── EVERY FIGURE ON THIS PAGE NOW COUNTS EVERY ROW (owner-approved 2026-08-20, item 13) ───────
+  // All three reads used to stop at PostgREST's row cap and say nothing about it, so MRR, the
+  // status bars and "collected all time" went quietly small as the platform grew — the bad way to
+  // become wrong, on the numbers that say whether the business works. The two fixes are different
+  // on purpose:
+  //
+  //   · restaurant_billing and restaurants are ONE ROW PER RESTAURANT, so they are PAGED
+  //     (lib/pageAll). At a thousand restaurants that is one extra round trip.
+  //   · restaurant_payments is a LEDGER — it grows forever and has no ceiling. Paging it into the
+  //     app to add it up would drag every row across the wire to produce fourteen numbers, so it
+  //     gets a SQL AGGREGATE instead (migration 343): one row, computed in Postgres, nothing left
+  //     for a cap to truncate. The same answer the Z-report and the Pay Later headline reached.
+  const [billingQ, collectedQ, restsQ] = await Promise.all([
+    pageAll<Billing>("restaurant_billing", (from, to) =>
+      sb.from("restaurant_billing").select("restaurant_id, plan, status, amount, currency, cycle, next_due_on")
+        .order("restaurant_id").range(from, to)),
+    sb.rpc("lfh_admin_platform_collected", { p_year_start: yearStart, p_months_from: monthsFrom }),
+    pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
+      sb.from("restaurants").select("id, name, slug").is("deleted_at", null).order("id").range(from, to)),
   ]);
   // Check ALL three — else a failed payments/restaurants read would show confident zeros / "—"
   // names with a 200 instead of an error the page can retry (audit).
-  const anyErr = billingQ.error || paymentsQ.error || restsQ.error;
+  const anyErr = billingQ.error || collectedQ.error || restsQ.error;
   // Plain sentence to the screen, raw text to `detail` + the log — see the note in /api/admin/usage.
-  if (anyErr) return adminFail("the platform revenue figures", anyErr, { action: "load" });
+  if (anyErr) return adminFail("the platform revenue figures", anyErr as { message?: string }, { action: "load" });
 
-  const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
+  const restRows = restsQ.rows || [];
+  const nameById = new Map<string, string>(restRows.map((r) => [r.id, r.name]));
   // Only count LIVE restaurants (matches the Billing page's H4 rule + its Trial count): drop
   // any billing row whose restaurant was soft-deleted, so a binned restaurant never inflates
   // MRR / the status bars here.
-  const liveIds = new Set<string>((restsQ.data || []).map((r) => r.id));
-  const billing = ((billingQ.data || []) as Billing[]).filter((b) => liveIds.has(b.restaurant_id));
+  const liveIds = new Set<string>(restRows.map((r) => r.id));
+  const billing = (billingQ.rows || []).filter((b) => liveIds.has(b.restaurant_id));
   // Monthly-equivalent recurring value of one subscription (yearly spread over 12).
   const monthlyEq = (b: Billing) => { const a = Number(b.amount) || 0; return b.cycle === "monthly" ? a : a / 12; };
 
@@ -60,7 +80,7 @@ export async function GET(req: NextRequest) {
   // for the same platform (QA 2026-07-24). Now both agree.
   const billingByRid = new Map<string, Billing>(billing.map((b) => [b.restaurant_id, b]));
   const byStatus: Record<string, number> = { active: 0, trial: 0, paused: 0, cancelled: 0 };
-  for (const r of restsQ.data || []) {
+  for (const r of restRows) {
     const st = billingByRid.get(r.id)?.status ?? "trial";
     byStatus[st] = (byStatus[st] || 0) + 1;
   }
@@ -74,15 +94,13 @@ export async function GET(req: NextRequest) {
   }
   const mrrByPlan = [...planMap.values()].map((p) => ({ ...p, mrr: Math.round(p.mrr) })).sort((a, b) => b.mrr - a.mrr);
 
-  // Real "collected" trend from the payments ledger.
-  const byMonth = new Map<string, number>();
-  let collectedThisYear = 0, collectedAllTime = 0;
-  for (const p of paymentsQ.data || []) {
-    const amt = Number(p.amount) || 0;
-    collectedAllTime += amt;
-    if (p.paid_on && p.paid_on >= yearStart) collectedThisYear += amt;
-    if (p.paid_on) { const m = String(p.paid_on).slice(0, 7); byMonth.set(m, (byMonth.get(m) || 0) + amt); }
-  }
+  // Real "collected" trend from the payments ledger — computed in SQL over EVERY payment
+  // (migration 343), so nothing here can be a truncated sample.
+  const coll = (Array.isArray(collectedQ.data) ? collectedQ.data[0] : collectedQ.data) as
+    { all_time?: number; this_year?: number; months?: Record<string, number> | null; row_count?: number } | null;
+  const collectedAllTime = Number(coll?.all_time) || 0;
+  const collectedThisYear = Number(coll?.this_year) || 0;
+  const byMonth = new Map<string, number>(Object.entries(coll?.months || {}).map(([k, v]) => [k, Number(v) || 0]));
   // Last 12 calendar months, zero-filled so the chart never has gaps.
   const monthly: { month: string; label: string; collected: number }[] = [];
   for (let i = 11; i >= 0; i--) {
@@ -107,6 +125,9 @@ export async function GET(req: NextRequest) {
     collectedAllTime: Math.round(collectedAllTime),
     monthly,
     paying,
+    // How many payment rows the figures above were computed over. Not shown on the page — it is
+    // there so a "that looks low" can be answered without opening the database.
+    paymentsCounted: Number(coll?.row_count) || 0,
     generatedAt: new Date().toISOString(),
   });
 }

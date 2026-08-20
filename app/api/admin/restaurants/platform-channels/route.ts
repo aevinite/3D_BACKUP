@@ -13,6 +13,8 @@ import { adminFail } from "@/lib/adminFail";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { logAction } from "@/lib/oplog";
+// ONE rule for a channel credential — see the header of lib/channelKey.ts.
+import { applyChannelKey, channelKeyAction } from "@/lib/channelKey";
 
 export const dynamic = "force-dynamic";
 
@@ -71,20 +73,21 @@ export async function POST(req: NextRequest) {
 
   // Merge onto whatever's stored — only touch the one channel in this request.
   const existing = ((cur.data as { platform_channels?: unknown } | null)?.platform_channels || {}) as ChanMap;
-  const next: ChanCfg = { ...(existing[channel] || {}) };
+  let next: ChanCfg = { ...(existing[channel] || {}) };
   if (typeof body?.on === "boolean") next.on = body.on;
-  // key: a non-empty string sets it; an empty string clears it; absent leaves it unchanged.
-  // Writing it also drops the legacy `api_key` the Access screen used to use, so a restaurant that
-  // ended up with two copies converges on one the next time either screen saves. (T17, finding F4)
-  if (typeof body?.key === "string") {
-    const k = body.key.trim();
-    next.key = k ? k.slice(0, 500) : null;
-    delete (next as { api_key?: unknown }).api_key;
-  }
+  // ── ONE CONVENTION FOR THE KEY, SHARED WITH THE ACCESS SCREEN (owner, 2026-08-20) ────────────
+  // This route used to read `""` as "clear the key" while app/api/admin/restaurants/access-tree
+  // read `""` as "leave it alone" — opposite meanings for the same value on the same column. Both
+  // now go through lib/channelKey.ts, which carries the rule and the reason:
+  //   absent or "" → leave it · null → clear it · a real string → set it.
+  // `""` leaves it alone because these keys are write-only, so the field a person sees is ALWAYS
+  // blank — under the old reading, saving a form without retyping wiped a working credential.
+  next = applyChannelKey(next, "key" in (body || {}) ? body.key : undefined) as ChanCfg;
   const merged: ChanMap = { ...existing, [channel]: next };
   const patch = { platform_channels: merged };
   // Never log the key value — only what changed.
-  const logDetail = `${channel}: ${typeof body?.on === "boolean" ? (body.on ? "on" : "off") : "—"}${typeof body?.key === "string" ? (body.key.trim() ? " · key set" : " · key cleared") : ""}`;
+  const keyAction = channelKeyAction("key" in (body || {}) ? body.key : undefined);
+  const logDetail = `${channel}: ${typeof body?.on === "boolean" ? (body.on ? "on" : "off") : "—"}${keyAction === "set" ? " · key set" : keyAction === "clear" ? " · key cleared" : ""}`;
 
   if (cur.data) {
     const r = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("platform_channels").maybeSingle();

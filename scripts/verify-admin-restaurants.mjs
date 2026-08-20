@@ -266,8 +266,51 @@ want(!/window\.confirm|window\.prompt/.test(OWN),
   "the owners page still uses on-theme dialogs, never a browser confirm/prompt (owner, 2026-07-26)");
 want(/data-owner=\{o\.username\}/.test(BIN),
   "a recycle-bin owner row still carries the data-owner hook a checker acts on");
-want(/purgeEligibleAt/.test(BIN) && /Purge locked until/.test(BIN),
-  "the bin still locks a permanent removal behind its retention date, with the date shown");
+// ── THE RECYCLE BIN'S RULES, AFTER THE 90-DAY WAIT WAS REMOVED (owner, 2026-08-20) ─────────────
+// The old check here asserted the OPPOSITE — that the bin locks a permanent removal behind a
+// retention date. He removed that lock deliberately, so this now guards the rails that DID survive,
+// which is where the safety actually lived all along.
+want(!/Purge locked until|purgeEligibleAt|days? left/i.test(BIN),
+  "the recycle bin no longer counts down to a permission — the 90-day wait is gone (owner, 2026-08-20)");
+want(/RETENTION_DAYS = 0/.test(read("app/api/admin/restaurants/route.ts"))
+  && /RETENTION_DAYS = 0/.test(read("app/api/admin/owners/route.ts")),
+  "both purge routes agree there is no waiting period");
+{
+  // Comments-stripped, so the migration's own explanation of what it REMOVED (which quotes the old
+  // code) can never be mistaken for the code still being there.
+  const mig342 = read("supabase/migrations/342_the_recycle_bin_stops_holding_the_door.sql")
+    .split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  want(/CREATE OR REPLACE FUNCTION admin_purge_restaurant/i.test(mig342) && !/Retention lock/i.test(mig342),
+    "migration 342 rewrites admin_purge_restaurant with no retention lock left in it");
+  want(/never be purged/i.test(mig342) && /not in the recycle bin/i.test(mig342) && /already been purged/i.test(mig342),
+    "migration 342 keeps the three rules that were never in question: not the default, not before binning, not twice");
+  want(!/delete from (orders|order_items|sessions|payments|session_payments|credit_notes|invoice_events|deletion_audit)\b/i.test(mig342),
+    "migration 342 still deletes no money — a sale can never disappear (COMPLIANCE-GUARDRAILS §3.0)");
+}
+want(/nameMatches/.test(BIN) && /Type <b/.test(BIN),
+  "a permanent removal still demands the exact name typed — that is what stops an accident now");
+want(/wantBackup/.test(BIN) && /restaurants\/export/.test(BIN),
+  "a permanent removal still offers to download the full backup first");
+want(/bills, invoices, payments and the removals record are kept/.test(BIN),
+  "the bin still states out loud that removing a restaurant does not erase its sales");
+// ── SEEING INSIDE A BINNED THING, AND WALKING INTO IT (owner, 2026-08-20) ──────────────────────
+want(/bin_detail=/.test(BIN),
+  "a bin row can be opened to see what is actually inside it");
+want(/openRestaurantPanel\(/.test(BIN),
+  "a bin row can open the restaurant's own panels — the 'visit there panel too' ask");
+want(/openRestaurantPanel\([^)]*true\)/.test(BIN),
+  "the bin passes the fromBin opt-in, without which act-as still refuses a binned restaurant");
+{
+  // The clash question, not a silent rename. Both halves: the server must ANSWER 409 + conflict,
+  // and the screen must OPEN a chooser rather than swallowing it.
+  const RR = read("app/api/admin/restaurants/route.ts");
+  want(/conflict: \{/.test(RR) && /status: 409/.test(RR),
+    "restoring a restaurant whose web address was taken asks instead of renaming it silently");
+  want(!/renamed = slug;\s*$/m.test(RR),
+    "the old silent auto-rename on restore is gone");
+  want(/SlugClashDialog/.test(BIN) && /Change name & restore/.test(BIN),
+    "the bin shows the two ways out he named: close, or change the name and restore");
+}
 {
   // Precise version of "it cannot make a sale disappear": every endpoint this screen calls.
   const calls = [...strip(BIN).matchAll(/fetch\(\s*[`"']([^`"'?]+)/g)].map((m) => m[1]);

@@ -10,6 +10,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { businessDayStartIso } from "@/lib/businessDay";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// ONE retry for a read that failed for a plumbing reason — see the long note in lib/readRetry.ts.
+import { retryRead } from "@/lib/readRetry";
 
 export const dynamic = "force-dynamic";
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -41,10 +43,37 @@ export async function GET(req: NextRequest) {
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
 
-  const restQ = await sb.from("restaurants").select("id, name, slug, active, created_at, owner_user_id").eq("id", rid).maybeSingle();
+  // ── WHY EVERY READ ON THIS PAGE IS NOW RETRIED (owner, 2026-08-20) ──────────────────────────
+  // T20 listed this route's three swallowed errors as a decision (item 14) and his answer was to
+  // go one better: *"i want you fix that hiccup doesn't happen only if you can do the improvement
+  // decision also"* — i.e. stop the blip first, and THEN make it say so if it still gets through.
+  //
+  // Both halves are here. `retryRead` gives every read on this page one more attempt when it fails
+  // for a plumbing reason (a dropped pooler connection, a socket hang-up, a 502) — the class that
+  // succeeds a moment later, which is what nearly every "hiccup" on this screen actually was. It
+  // deliberately does NOT retry a statement timeout or a broken query, because a second identical
+  // answer helps nobody and doubles the load that caused it.
+  //
+  // The improvement is `partial` below: the three reads that used to fail SILENTLY — the owner's
+  // name, the plan and the table count — now name themselves when a retry didn't save them, so the
+  // screen can say "couldn't read this" instead of drawing "—" and 0, which read as "there isn't
+  // one". The admin console had no convention for this; the owner panel has had one since
+  // 2026-08-06 (lib/partialRead.ts), and this adopts the same word for the same meaning.
+  type RestRow = { id: string; name: string; slug: string; active: boolean; created_at: string | null; owner_user_id: string | null };
+  const restQ = (await retryRead<RestRow>(() =>
+    sb.from("restaurants").select("id, name, slug, active, created_at, owner_user_id").eq("id", rid).maybeSingle() as PromiseLike<{ data: RestRow | null; error: unknown }>,
+  )).result;
   // Plain sentence to the screen, raw text to `detail` + the log — see the note in /api/admin/usage.
   if (restQ.error) return adminFail("this restaurant's full report", restQ.error, { action: "load" });
   if (!restQ.data) return bad("restaurant not found", 404);
+
+  /** One read, retried once on a plumbing failure, unwrapped back to the plain `{data, error}`
+   *  shape the rest of this handler already speaks. `count` rides through for the head-counts. */
+  type Read = { data: any; error: unknown; count?: number | null };
+  const one = async (run: () => PromiseLike<Read>): Promise<Read> => {
+    const { result } = await retryRead(run as () => PromiseLike<{ data: unknown; error: unknown }>);
+    return result as Read;
+  };
 
   const [
     ownerQ, billingQ, settingsQ,
@@ -52,18 +81,18 @@ export async function GET(req: NextRequest) {
     openTablesQ, staffQ, menuItemsCountQ,
     trendQ,
   ] = await Promise.all([
-    restQ.data.owner_user_id ? sb.from("staff_users").select("name, username").eq("id", restQ.data.owner_user_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-    sb.from("restaurant_billing").select("plan, status, cycle, next_due_on").eq("restaurant_id", rid).maybeSingle(),
-    sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle(),
-    sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
-    sb.from("order_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
-    sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
-    sb.from("waiter_calls").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
-    sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
-    sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open"),
-    sb.from("staff_users").select("role").eq("restaurant_id", rid).eq("active", true),
-    sb.from("menu_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid),
-    sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: rid, p_from: fromIso, p_to: toIso }),
+    restQ.data.owner_user_id ? one(() => sb.from("staff_users").select("name, username").eq("id", restQ.data!.owner_user_id).maybeSingle()) : Promise.resolve({ data: null, error: null }),
+    one(() => sb.from("restaurant_billing").select("plan, status, cycle, next_due_on").eq("restaurant_id", rid).maybeSingle()),
+    one(() => sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle()),
+    one(() => sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso)),
+    one(() => sb.from("order_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso)),
+    one(() => sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso)),
+    one(() => sb.from("waiter_calls").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso)),
+    one(() => sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso)),
+    one(() => sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open")),
+    one(() => sb.from("staff_users").select("role").eq("restaurant_id", rid).eq("active", true)),
+    one(() => sb.from("menu_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid)),
+    one(() => sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: rid, p_from: fromIso, p_to: toIso })),
   ]);
   for (const q of [ordersCountQ, orderItemsCountQ, activityCountQ, callsCountQ, sessionsCountQ, openTablesQ, staffQ, menuItemsCountQ, trendQ]) {
     if (q.error) return adminFail("this restaurant's full report", q.error, { action: "load" });
@@ -81,6 +110,17 @@ export async function GET(req: NextRequest) {
   // produced in the range. NOT bytes, NOT a billing figure.
   const activityVolume = ordersInRange + orderItemsInRange + activityInRange + sessionsInRange;
 
+  // ── THE THREE THAT USED TO GO QUIET ─────────────────────────────────────────────────────────
+  // owner / plan / table count each swallowed their error, so "couldn't read it" drew exactly like
+  // "there isn't one": an em dash where an owner's name goes, and 0 tables. They are NOT promoted
+  // to a whole-page failure — the rest of the report is perfectly readable and throwing it away for
+  // one absent figure is the fault lib/partialRead.ts was written to stop. They name themselves
+  // instead, and the screen greys just those.
+  const partial: string[] = [];
+  if (ownerQ.error) { console.error("[admin/report] owner name read failed:", (ownerQ.error as { message?: string })?.message); partial.push("owner"); }
+  if (billingQ.error) { console.error("[admin/report] plan read failed:", (billingQ.error as { message?: string })?.message); partial.push("plan"); }
+  if (settingsQ.error) { console.error("[admin/report] table count read failed:", (settingsQ.error as { message?: string })?.message); partial.push("tablesConfigured"); }
+
   const b = billingQ.error ? null : billingQ.data;
 
   return NextResponse.json({
@@ -90,13 +130,18 @@ export async function GET(req: NextRequest) {
       plan: b?.plan || null, planStatus: b?.status || null,
     },
     range,
+    // Rides along ONLY when something genuinely went unread, so a healthy report is byte-for-byte
+    // what it was before this change.
+    ...(partial.length ? { partial } : {}),
     usage: {
       orders: ordersInRange,
       orderItems: orderItemsInRange,
       activityLogEvents: activityInRange,
       waiterCalls: callsCountQ.count || 0,
       sessions: sessionsInRange,
-      tablesConfigured: Number(settingsQ.data?.table_count) || 0,
+      // null, not 0, when it could not be read — `partial` names it and the screen greys that tile.
+      // A confident "0 tables" is the fabricated figure this whole block exists to stop.
+      tablesConfigured: settingsQ.error ? null : Number(settingsQ.data?.table_count) || 0,
       tablesOpenNow: openTablesQ.count || 0,
       menuItemCount: menuItemsCountQ.count || 0,
       staffByRole,
