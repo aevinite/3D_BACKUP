@@ -24,8 +24,30 @@ sat ~2px off a 360px screen. Both fixed.
 | id | file | the change needed | why |
 |---|---|---|---|
 | H1 | `scripts/verify-purge-classified.mjs` (or a migration extending `admin_purge_restaurant()`) | classify `bill_chain` and `print_stations` — `bill_chain` belongs on KEEP ("the signature chain that proves the KEPT bills were not altered", mig 332); `print_stations` (mig 338) is operational and should be purged | `npm run verify:purge` is RED on `origin/main` and stays red. Its FK to `restaurants` is `ON DELETE CASCADE`, but the purge deliberately keeps the restaurants row, so the rows genuinely linger |
+
+> **CLOSED 2026-08-20 (mig 346 + the guard's inverted retention check) — verify:purge is GREEN**
+
 | H2 | `public/panels/editor/app.js` → `RETENTION_OPTS` · `app/api/editor/[...path]/route.ts` → the 1..90 clamp | drop the "3 months" option and clamp to 30, so the owner's "1 month MAX" (2026-07-09) is enforced and not just stated | the admin's platform default cannot cap a restaurant that chose its own window. I fixed the honesty half on the admin screen; only these two files can fix the enforcement half |
 | H3 | `app/api/admin/restaurants/settings/route.ts` → `ensureCodes()` | `insert(missing)` → `upsert(missing, { onConflict: "restaurant_id,table_number", ignoreDuplicates: true })`, then re-read the map | two first loads on a new restaurant race to mint the same table codes; the retry loop re-mints the CODE while the conflict is on the (restaurant, table) pair, so all three attempts fail and the route 500s. Reproduced: 200 + 500 |
+
+> **CLOSED 2026-08-20 (upsert + ignoreDuplicates + scoped re-read) — two loads raced, both 200**
+
 | H5 | `app/aevinite/users/page.tsx` lines 199-201 (**T15's territory — its PR #1021 is still open**) | the locked Restaurant field truncates the name and its `title` talks about the lock, so tapping it never shows the full name — and the native tooltip lands over the **Role** dropdown beside it. Put the NAME first in the title (`${scopedName} — scoped by the filter above…`) and let the field wrap onto two lines instead of truncating, so the tooltip is rarely needed | he asked for this directly (2026-08-20, with a screenshot). I did not edit it: T15's worktree is live and its PR touching that file is unmerged, and "another live session's uncommitted work" is one of his four ask-first carve-outs |
+
+> **CLOSED 2026-08-20 once T15's PR #1021 merged — the name wraps, the title leads with it**
+
 | H6 | `app/globals.css` → `.nr-preset` | one dead CSS class, now that the create form has no preset dropdown | harmless; whoever owns globals.css can drop the line |
+
+> **CLOSED 2026-08-20 — eight dead nr-* classes removed, not the one H6 named**
+
 | H4 | `lfh_floor_state` (mig 126) / `app/api/admin/floor/route.ts` | decide whether an order keyed by something that is not a table number should arrive as a "table" — the list is `generate_series(1, table_count)` UNION every session/order `table_number`, and French House carries eight 7-digit ones | I stopped them smearing across the tile grid; whether they belong on a floor at all is not a display question |
+
+
+## Still open after round 3 (2026-08-20)
+
+Only **H2** and **H4** remain, and both are a DECISION, not a fix:
+
+* **H2** — enforcing the 1-month log cap would take the manager panel's 3-month option away from every restaurant that chose it. That is the owner's call about his own product, not a correctness fix; the admin screen already stopped claiming it enforces one.
+* **H4** — hiding the eight 7-digit non-table keys from the Live floor could hide a genuinely open order. Their smearing across the tile grid is fixed; whether they belong on a floor is a product question.
+
+Two gates are RED on `origin/main` and neither is T16's: `verify:grants` (migration 344 is missing from the sequence — it exists only as an uncommitted file in the shared main folder) and `verify:ui` (three panel `?v=` hashes are stale; `npm run verify:panel-cache -- --fix` clears it, but it touches panel files another session is editing right now).
