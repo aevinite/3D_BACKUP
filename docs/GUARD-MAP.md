@@ -181,6 +181,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | `public/offline.html` — the last-resort screen | `verify:offline-retry` ← it must keep ONE backing-off retry loop however many times the device says it is back, and must never blame the wrong side | starts its own local stub | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
 | anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
+| a DEADLINE on anything a BROWSER runs — a fetch timeout, an abort signal | `verify:abort-guard` ← READING `AbortSignal.timeout` **throws** on a browser that lacks it, so `?? AbortSignal.timeout(ms)` does not skip the deadline, it throws out of the request. Five files in this repo already feature-test it; `lib/supabase.ts` — the client every browser database read goes through — did not, and with the API absent a guest's dish page rendered 17 characters instead of 627 and made zero of its 23 Supabase reads (T25 sweep, 2026-08-21) | nothing | no |
 
 ## 9 · Database — `supabase/migrations/*.sql`
 

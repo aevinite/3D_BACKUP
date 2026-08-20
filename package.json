@@ -34,6 +34,7 @@
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
     "verify:server-only": "node scripts/verify-server-only-imports.mjs",
+    "verify:abort-guard": "node scripts/verify-abort-guard.mjs",
     "verify:twins": "node scripts/verify-panel-twins.mjs",
     "verify:rejected": "node scripts/verify-rejected-ideas.mjs",
     "verify:no-ask": "node scripts/verify-no-ask-before-delete.mjs",

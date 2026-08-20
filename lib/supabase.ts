@@ -34,6 +34,44 @@ const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 // that never resolves. The service worker keeps its own, shorter timeout for deciding when to serve
 // the saved copy — that decision stays where it already lives.
 const REST_TIMEOUT_MS = 15000;
+
+// THE DEADLINE IS ASKED FOR, NEVER ASSUMED — because READING `AbortSignal.timeout` THROWS on an
+// older phone, and this client is the one every browser database read goes through (T25 sweep,
+// 2026-08-21).
+//
+// This repo had already learned this lesson FIVE times and written it down each time —
+// lib/menu.ts (`orderDeadline`), lib/guestOutbox.ts (`sendDeadline`), lib/session.ts (the `rpc`
+// helper), public/panels/outbox.js and public/panels/issue-raise.js all feature-test the API
+// before touching it, and outbox.js's comment says exactly why: *"READING AbortSignal.timeout
+// throws on some older phones — and when it did, the throw was …"*. The one place that skipped
+// the test was the shared browser client itself.
+//
+// MEASURED, on this branch, with the getter made to throw (which is what a browser lacking the
+// API does): the guest's DISH PAGE rendered 17 characters of text instead of 627, ZERO of the
+// normal 23 Supabase REST requests were made, and the getter was hit 42 times in one page view.
+// So on such a device: the settings/features read (`lfh_guest_settings`) is dead, the ban check is
+// dead, ratings and reviews are dead, and every session RPC — join a table, the shared cart, call
+// a waiter, place the order — is dead too. `lib/menu.ts` guards its OWN signal correctly, but when
+// the API is missing it hands us `undefined`, we fall to the `??` branch, and the throw lands here
+// instead. The dish GRID survived only because it comes from `/api/r/<slug>/menu-data`, a plain
+// fetch — which is what made this invisible.
+//
+// `AbortSignal.timeout` shipped in Chrome 103, Safari 15.4 and Firefox 100 (all 2022). The five
+// guards above exist precisely because that population is real on a restaurant floor in India.
+//
+// A device without the API simply gets NO deadline, which is exactly the behaviour it had before
+// the deadline was added — a slow read, not a dead one. That is the right trade: the timeout is a
+// protection against a hanging connection, and a protection must never be the thing that breaks.
+function restDeadline(): AbortSignal | undefined {
+  try {
+    return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(REST_TIMEOUT_MS)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // NO SESSION STORAGE, BECAUSE THIS APP HAS NO SUPABASE-AUTH USER — and because keeping it took the
 // guest menu down on a real class of phone (T4 sweep, 2026-08-17).
 //
@@ -58,7 +96,8 @@ export const supabase = createClient(url, anon, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   realtime: { worker: true, params: { eventsPerSecond: 10 } },
   global: {
-    fetch: (input, init) =>
-      fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(REST_TIMEOUT_MS) }),
+    // A caller that passes its own signal always wins (the same rule lib/supabaseAdmin.ts
+    // follows); otherwise we ASK for a deadline and accept "this browser can't make one".
+    fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? restDeadline() }),
   },
 });
