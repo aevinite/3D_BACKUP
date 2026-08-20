@@ -160,9 +160,18 @@ check(/BACKUP_PRINTER_MS = 30000/.test(eroute),
 check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
   "the manager panel ASKS the device once, on the floor screen (a phone must never claim a ticket)",
   "the per-device question is gone — the manager panel is opened on phones, and a phone that claims a ticket loses it");
-check(/if \(ans === "off"\) return;/.test(epanel) && /ans !== "on"\) return;/.test(epanel),
+// ASSERT THE RULE, NOT THE WORDING (this file's own header). This used to require the literal
+// `if (ans === "off") return;` as the FIRST thing managerPrintPass did. That line legitimately
+// changed shape in mig 341: a device that has said "never print here" must still be able to SAY
+// where the paper comes out when a helper program owns it, so it now asks the server ONCE for the
+// display and still prints nothing. The rule that matters is unchanged and is what is checked:
+// nothing is printed unless this device answered YES.
+check(/ans !== "on"\) return;/.test(epanel) && !/claimJobs|printKot\(/.test(epanel.split(/ans !== "on"\) return;/)[0].split("async function managerPrintPass")[1] || ""),
   "a device that has not answered YES never prints (the honest default is no)",
   "the manager panel prints without the device having agreed to be the printer");
+check(/helper: \(r && r\.helper\) \|\| null/.test(epanel) && /helperKey/.test(epanel),
+  "…and it carries the helper's answer, so a screen can say which computer prints instead",
+  "the panel dropped the helper field again — every line about it goes invisible while the server is right (mig 341)");
 check(/\$\{printerStripHtml\(\)\}\$\{printStationStripHtml\(\)\}/.test(epanel),
   "the strip is rendered on the floor, right beside the printer-problem strip",
   "the print-station strip is not rendered on the floor — the question would never be asked, so a counter screen could never be switched on");
