@@ -364,7 +364,9 @@ function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; taken
   const [seedMenu, setSeedMenu] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [done, setDone] = useState<{ id?: string; name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
+  // `reusedAddress` is only present when this restaurant took a web address a BINNED one still
+  // holds — see the note where it is rendered.
+  const [done, setDone] = useState<{ id?: string; name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null; reusedAddress?: { name: string; binnedOn: string } } | null>(null);
   const creatingRef = useRef(false); // sync double-submit guard (bug #12)
 
   // On open, pick up the one thing worth remembering: whether the last restaurant started with a
@@ -414,7 +416,7 @@ function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; taken
         body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels: STARTER_LOGINS, seedMenu, saveDefaults: true }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
-      setDone({ id: d.id, name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
+      setDone({ id: d.id, name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError, reusedAddress: d.reusedAddress });
       // Remember locally too so the very next open pre-fills instantly, and mark preset "saved".
       setName("");
       onCreated();
@@ -512,6 +514,27 @@ function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; taken
               </a>
             </p>
           ) : null}
+          {/* THIS ADDRESS HAD A PREVIOUS OCCUPANT (owner, 2026-08-21) ───────────────────────────
+              A binned restaurant does not reserve its name — his own rule (mig 319), and it is not
+              changing. But a QR code carries the ADDRESS, not the restaurant, so the new occupant
+              silently inherits every laminated table card the old one ever printed: a diner at the
+              old place scans and orders from THIS menu. Said once, here, where the decision was just
+              made — and it is a statement, not a refusal or an error. */}
+          {done.reusedAddress && (
+            <div style={{ margin: "8px 0", padding: "10px 12px", borderRadius: 9, fontSize: 12.5, lineHeight: 1.55,
+              border: "1px solid color-mix(in srgb, #d4a574 45%, transparent)",
+              background: "color-mix(in srgb, #d4a574 10%, transparent)" }}>
+              <i className="fas fa-qrcode" style={{ marginRight: 7, color: "#d4a574" }} aria-hidden="true" />
+              <b>This web address has been used before.</b>{" "}
+              <span className="adm-muted">
+                <b style={{ color: "var(--text)" }}>{done.reusedAddress.name}</b> held{" "}
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span> until it went to the
+                recycle bin on {new Date(done.reusedAddress.binnedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.
+                Any QR codes or printed menus still carrying that address now open <b style={{ color: "var(--text)" }}>this</b> restaurant&rsquo;s menu.
+                If that isn&rsquo;t what you want, rename this one now — before its codes are printed.
+              </span>
+            </div>
+          )}
           {done.seedError ? (
             <p className="hint" style={{ margin: "6px 0", color: "var(--adm-bad, #c0392b)" }}>Menu seed failed: {done.seedError}. The restaurant was created — add dishes from its manager panel.</p>
           ) : done.menuSeeded ? (
