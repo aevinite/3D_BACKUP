@@ -2017,6 +2017,11 @@ const showVal = (v) => (v === true ? "ON" : v === false ? "off" : JSON.stringify
 //
 // IT CANNOT ROT: the two phases under it fail if an entry names a switch that no longer exists, or
 // if an entry's value has become the factory default and the exception is therefore pointless.
+// THE FIX THIS SUGGESTS IS SCOPED (--only <id>), NEVER A BLANKET --apply (2026-08-20). A blanket
+// reset walks every switch that has a default, so being told to run it in order to correct one
+// drifted switch would ALSO reset auto_print_kot below — the exception recorded three lines up,
+// whose whole point is that turning it off means nobody in Aangan's kitchen sees an order. The
+// advice and the exception have to agree, or the exception is only a comment.
 const AANGAN_DELIBERATE = {
   auto_print_kot: { value: true, why: "Aangan has no kitchen screen — its tickets print or nobody sees the order" },
 };
@@ -2037,7 +2042,7 @@ for (const node of DEFAULT_NODES) {
     const got = nodeValue(node, await aanState());
     ok(JSON.stringify(got) === JSON.stringify(want), ex
       ? `reads ${showVal(got)} but Aangan is meant to keep this at ${showVal(want)} — ${ex.why}`
-      : `reads ${showVal(got)} but the factory default is ${showVal(want)} — run: node scripts/set-access-defaults.mjs --slug ${(await needAangan()).slug} --apply`);
+      : `reads ${showVal(got)} but the factory default is ${showVal(want)} — run: node scripts/set-access-defaults.mjs --slug ${(await needAangan()).slug} --only ${node.id} --apply`);
   });
 }
 phase("every deliberate Aangan exception still names a real switch", async () => {
