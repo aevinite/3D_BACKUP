@@ -1,5 +1,11 @@
 # Kitchen printing — how it works now, and how to set a restaurant up
 
+
+> **A COMPUTER CAN OWN THE PAPER NOW (mig 341, 2026-08-20).** A screen printing is still supported
+> and still the fallback, but the better path is a small helper program on the machine the printers are
+> plugged into: it polls the queue and prints each kind of paper on its own printer. Design, the four
+> ticks, and every fault found building it: **`docs/PRINT-HELPER.md`**. The admin screen is
+> `/aevinite/printing`; the guard is `npm run verify:print-helper`.
 **Written 2026-08-18, after the owner reported the real fault:** the kitchen PC could not keep the
 Chrome tab in front, and *"if you minimize, or open another app on the same PC, the KOT prints
 totally stop."* Two things were built the same day — the queue (below) and the print-station

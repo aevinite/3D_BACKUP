@@ -1,0 +1,177 @@
+// /api/admin/printing/* — the admin console's Printing menu.
+//
+// Everything about a restaurant's printing lives behind this one door: the computers that can print
+// (print_agents, mig 341), the address book that says which kind of paper goes to which printer, the
+// install text for a new computer, and a test page. It is the admin's screen because printing is
+// hardware: the owner is offered what the admin allows and nothing else.
+//
+// ADMIN-GATED like all its siblings — tokenIsValid BEFORE any database call, on every verb.
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { logAction } from "@/lib/oplog";
+import {
+  agentsView, createAgent, readRoutes, writeRoutes, waitingCount, mintAgentToken,
+  PRINT_KINDS, isPrintKind, HELPER_STALE_MS,
+} from "@/lib/printHelpers";
+import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
+import { queueJob } from "@/lib/printHelpers";
+
+export const dynamic = "force-dynamic";
+
+const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
+const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
+const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
+
+/** The install text for every operating system, with this machine's own code already in it. Shown
+ *  ONCE, when the code is minted or replaced: the code is stored only as a hash, so it cannot be
+ *  read back later — a lost code is REPLACED, never recovered. That is deliberate, and the screen
+ *  says so beside the button. */
+const scriptsFor = (origin: string, code: string, label: string) =>
+  Object.fromEntries(OS_LIST.map((os) => [os, {
+    filename: HELPER_FILENAME[os], autostart: HELPER_AUTOSTART[os],
+    text: helperScript(os, { origin, code, label }),
+  }]));
+
+// The site the helper must talk to: THIS deployment, taken from the request rather than a constant,
+// so a code minted on backup points at backup and one minted on the live site points at the live
+// site. A helper aimed at the wrong site is a machine that never prints and says nothing.
+const originOf = (req: NextRequest) => {
+  const h = req.headers;
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  return host ? `${proto}://${host}` : new URL(req.url).origin;
+};
+
+export async function GET(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  if (!admin(req)) return err("Not authorised", 401);
+  const { path } = await ctx.params;
+  const seg = (path || []).map(String);
+  const rid = new URL(req.url).searchParams.get("rid") || "";
+  if (!rid) return err("Which restaurant?");
+
+  if (!seg.length || seg[0] === "state") {
+    const [agents, routes, waiting, setRow] = await Promise.all([
+      agentsView(rid), readRoutes(rid), waitingCount(rid),
+      sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
+    ]);
+    const s = (setRow.data || {}) as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string };
+    // The last few jobs, so a screen can show "it printed / it didn't and why" without anybody
+    // opening a database. Small and indexed; nothing else needs the rows.
+    const recent = ((await sb.from("print_jobs")
+      .select("id, kind, status, printer, printed_by, attempts, error, created_at, done_at")
+      .eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(12)).data || []);
+    return NextResponse.json({
+      agents, routes, waiting, recent, kinds: PRINT_KINDS, staleMs: HELPER_STALE_MS,
+      printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true, target: s.kot_print_target || "kitchen" },
+    });
+  }
+  return err("Unknown request", 404);
+}
+
+export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  if (!admin(req)) return err("Not authorised", 401);
+  const { path } = await ctx.params;
+  const seg = (path || []).map(String);
+  const body = await req.json().catch(() => ({})) as Record<string, unknown>;
+  const rid = String(body.rid || "");
+  if (!rid) return err("Which restaurant?");
+
+  // ── add a computer ────────────────────────────────────────────────────────────────────────
+  if (seg[0] === "agents" && seg.length === 1) {
+    const name = String(body.name || "").trim();
+    if (!name) return err("Give the computer a name — “Shop's computer”, “My Mac”.");
+    const made = await createAgent(rid, name);
+    if ("error" in made) return err(made.error);
+    await logAction("admin", "print_helper_added", { restaurant_id: rid, detail: `computer “${name}” may now print` });
+    return NextResponse.json({ id: made.id, name, code: made.token, scripts: scriptsFor(originOf(req), made.token, name) });
+  }
+
+  if (seg[0] === "agents" && seg[1] && seg[2] === "rename") {
+    const name = String(body.name || "").trim();
+    if (!name) return err("Give the computer a name.");
+    const up = await sb.from("print_agents").update({ name }).eq("id", seg[1]).eq("restaurant_id", rid).select("id").maybeSingle();
+    if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.");
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── replace a lost code ───────────────────────────────────────────────────────────────────
+  // The old one stops working the instant this returns, which is also how a stolen or sold machine
+  // is dealt with: give the code to nobody and it is simply dead.
+  if (seg[0] === "agents" && seg[1] && seg[2] === "newcode") {
+    const row = (await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle()).data as { id: string; name: string } | null;
+    if (!row) return err("No such computer.", 404);
+    const { token, hash } = mintAgentToken();
+    // The fingerprint is cleared with the code: the next machine to use it is the machine it now
+    // belongs to, so a replaced code does not inherit an old "used on two computers" warning.
+    await sb.from("print_agents").update({ token_hash: hash, fingerprint: null, seen_fingerprints: [] }).eq("id", row.id).eq("restaurant_id", rid);
+    await logAction("admin", "print_helper_recoded", { restaurant_id: rid, detail: `new printing code for “${row.name}”` });
+    return NextResponse.json({ code: token, scripts: scriptsFor(originOf(req), token, row.name) });
+  }
+
+  // ── remove a computer ─────────────────────────────────────────────────────────────────────
+  // Marked revoked, never deleted: the record of which machine printed which ticket has to stay
+  // readable, and a row nobody can look up is not a record.
+  if (seg[0] === "agents" && seg[1] && seg[2] === "revoke") {
+    const row = (await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle()).data as { id: string; name: string } | null;
+    if (!row) return err("No such computer.", 404);
+    await sb.from("print_agents").update({ revoked_at: new Date().toISOString() }).eq("id", row.id).eq("restaurant_id", rid);
+    // Any route pointing at it is emptied in the same breath — a route naming a machine that can no
+    // longer print would leave paper silently unprinted, and an EMPTY line at least says so on the
+    // screen ("Kitchen slips: no printer chosen").
+    const routes = await readRoutes(rid);
+    const patch: Record<string, unknown> = {};
+    for (const k of PRINT_KINDS) {
+      if (routes[k].agent === row.id) patch[k] = null;
+      else if (routes[k].backupAgent === row.id) patch[k] = { agent: routes[k].agent, printer: routes[k].printer };
+    }
+    if (Object.keys(patch).length) await writeRoutes(rid, patch);
+    await logAction("admin", "print_helper_removed", { restaurant_id: rid, detail: `“${row.name}” can no longer print` });
+    return NextResponse.json({ ok: true, routesCleared: Object.keys(patch) });
+  }
+
+  // ── the address book ──────────────────────────────────────────────────────────────────────
+  if (seg[0] === "routes") {
+    const patch = (body.routes && typeof body.routes === "object" ? body.routes : {}) as Record<string, unknown>;
+    if (!Object.keys(patch).length) return err("Nothing to save.");
+    const saved = await writeRoutes(rid, patch);
+    if ("error" in saved) return err(saved.error);
+    await logAction("admin", "print_routes_changed", { restaurant_id: rid, detail: `printing routes updated: ${Object.keys(patch).join(", ")}` });
+    return NextResponse.json({ routes: saved.routes });
+  }
+
+  // ── the two switches, in the same place as everything else about printing ──────────────────
+  if (seg[0] === "switch") {
+    const patch: Record<string, boolean> = {};
+    if (typeof body.allowed === "boolean") patch.auto_print_kot_allowed = body.allowed;
+    if (typeof body.on === "boolean") patch.auto_print_kot = body.on;
+    if (!Object.keys(patch).length) return err("Nothing to change.");
+    const up = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    if (up.error) return err("Could not save that.");
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(" ") });
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── send one page to a printer ────────────────────────────────────────────────────────────
+  // A REAL job on the real road (kind='test'), because a test that takes a different path can pass
+  // while the path that matters is broken.
+  if (seg[0] === "test") {
+    const agentId = String(body.agentId || ""), printer = String(body.printer || "");
+    if (!agentId || !printer) return err("Pick a computer and one of its printers.");
+    const agents = await agentsView(rid);
+    const a = agents.find((x) => x.id === agentId);
+    if (!a) return err("That computer is not one of this restaurant's.");
+    if (!a.printers.some((p) => p.name === printer)) return err(`${a.name} has no printer called “${printer}”.`);
+    const q = await queueJob(rid, "test", { by: "admin" }, { requestedBy: "admin test page", agentId, printer });
+    if ("error" in q) return err("Could not queue the test page.");
+    await logAction("admin", "print_test", { restaurant_id: rid, detail: `test page sent to “${printer}” on ${a.name}` });
+    return NextResponse.json({
+      ok: true, id: q.id,
+      // Said plainly, because the honest answer is "it is on its way": the helper polls, so paper
+      // appears a second or two later, and if the machine is asleep it appears when it wakes.
+      note: a.connected ? "Sent — paper should appear in a moment." : `Sent, but ${a.name} was last seen ${a.secondsAgo ?? "?"}s ago. It will print when that computer is back.`,
+    });
+  }
+
+  return err("Unknown request", 404);
+}

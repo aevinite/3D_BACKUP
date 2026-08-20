@@ -26,6 +26,11 @@ import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // The print queue itself (mig 269 + 335) — shared with the manager route so two panels can never
 // drift into two different ideas of what "claimed" means.
 import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, takeStation, releaseStation, mayClaim } from "@/lib/printQueue";
+// WHEN A COMPUTER OWNS THE PAPER, A SCREEN MUST NOT ALSO PRINT IT (mig 341). A helper prints on the
+// printer the address book names; a screen prints on whatever that machine's default printer is. Both
+// printing means the same ticket in two places — and the screen's copy is the one that comes out in
+// the wrong room.
+import { helperFor } from "@/lib/printHelpers";
 
 export const dynamic = "force-dynamic";
 
@@ -268,7 +273,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // in kitchen" is naming this printer on purpose, whatever the automatic routing says.
       const kotTarget = String((must(settings) || {} as { kot_print_target?: string }).kot_print_target || "kitchen");
       const kitchenMayAuto = kotTarget === "kitchen" || kotTarget === "both";
-      const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs && kitchenMayAuto });
+      // …AND WHETHER A COMPUTER HAS THE JOB AT ALL. With a helper named for kitchen slips, this
+      // screen goes back to being an ordinary display: it stops being offered tickets, stops
+      // healing, and says on its own printer sheet where the paper is coming out instead.
+      const helper = await helperFor(rid, "kot");
+      const screenPrints = kitchenMayAuto && !helper.owned;
+      const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
       // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
       // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
       // it: on a database that has not had mig 335 yet, nothing is queued, the panel sees these
@@ -276,7 +286,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const autoOn = !!((must(settings) || {}).auto_print_kot && (must(settings) || {}).auto_print_kot_allowed);
       // The net must also stand down when this room isn't the printer, or it would "heal" a ticket
       // the counter is about to print.
-      const queuedFor = autoJobs && autoOn && kitchenMayAuto
+      const queuedFor = autoJobs && autoOn && screenPrints
         ? await ordersAlreadyQueued(rid, (live.orders as { id: string; status?: string }[])
             .filter((o) => o.status === "received" || o.status === "preparing").map((o) => o.id))
         : [];
@@ -296,8 +306,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Auto-print is ON for this SCREEN only when the restaurant has it on AND this room is the
         // one the admin chose to print (mig 336). The panel uses it for the printer heartbeat too —
         // a kitchen screen that isn't printing goes back to being an ordinary display.
-        autoPrintKot: autoOn && kitchenMayAuto,
+        autoPrintKot: autoOn && screenPrints,
         kotPrintTarget: kotTarget,
+        // Who really prints, so the sheet can say "Kitchen slips print at: Shop's computer →
+        // Printer_POS_80" instead of leaving a cook to guess why this screen is quiet.
+        helper,
         // { "1": "A1", … } — display names only; every id/bill still uses the number.
         tableNames: ((must(settings) || {}) as { table_names?: Record<string, string> }).table_names || {},
         // { "6": "vip", … } — which tables are marked, so a cook can see a priority ticket.
@@ -599,6 +612,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const st = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle()) as
         { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
       const target = String(st?.kot_print_target || "kitchen");
+      // A COMPUTER OWNS IT — a screen may not take it (mig 341). Checked here as well as on the
+      // board read, because a panel that was open BEFORE the route was set still holds tickets it
+      // believes are its to print: a gate that lives only in the board read is a gate a stale tab
+      // walks straight through. The reason travels back so the sheet can say where it prints now.
+      const own = await helperFor(rid, "kot");
+      if (own.owned) {
+        return ok({ won: [], refused: "helper", helper: own, station: await stationView(rid, dev) });
+      }
       const gate = await mayClaim(rid, {
         deviceId: dev, panel: "kitchen", label: "Kitchen screen",
         auto: st?.auto_print_kot === true && st?.auto_print_kot_allowed === true,

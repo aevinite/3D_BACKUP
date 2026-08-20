@@ -45,6 +45,10 @@ const GROUPS: NavGroup[] = [
       // the owner all call it "Access". Two names for one screen is a small thing that makes
       // every instruction about it ambiguous.
       { href: "/aevinite/access", label: "Access & permissions", icon: "fa-key" },
+      // Printing is hardware, and hardware is granted, not chosen: which computers may print and
+      // what each of them prints lives here (owner, 2026-08-20: "maybe we can create whole new
+      // printing menu in the admin panel for setup and all").
+      { href: "/aevinite/printing", label: "Printing", icon: "fa-print" },
       { href: "/aevinite/users", label: "Users", icon: "fa-users" },
     ],
   },

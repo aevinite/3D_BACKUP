@@ -5046,6 +5046,16 @@ function markBillPrintedLocally(sid) {
     b.textContent = b.textContent.replace(/\bPrint\b/, "Reprint");
   });
 }
+// The window path, kept exactly as it was, in one place — so the helper path above can fall back to
+// it without a second copy of these six lines drifting from this one.
+function openBillWindow(html) {
+  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
+  if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
+  try { w.document.open(); } catch (e) {} // reused window: start from a blank document
+  w.document.write(html);
+  w.document.close();
+  try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
+}
 function printBill(t, sess, os, opts = {}) {
   // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
   // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
@@ -5102,6 +5112,28 @@ function printBill(t, sess, os, opts = {}) {
     } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
   }
 
+  // ── A COMPUTER MAY OWN THIS BILL (mig 341) ────────────────────────────────────────────────────
+  // When the address book names a printer for bills, the bill goes into the basket and the helper on
+  // that computer prints it — no window opens here at all, which is the whole point: the person at
+  // the counter keeps the screen they were on. Sent fire-and-forget on purpose: the paper is the
+  // server's job now, and if the send fails we fall straight back to the window below rather than
+  // leaving a guest waiting while we retry.
+  const billOwner = printOwner("bill");
+  if (billOwner && printedSid) {
+    api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
+      .then((r) => {
+        if (r && r.queued) { toast(r.note || ("Sent to " + billOwner.printer), "ok"); return; }
+        // Viewing as the admin: their printer stays quiet and the bill opens here instead, so nothing
+        // comes out of a paying client's roll because we looked at their screen.
+        if (r && r.adminView) toast("Admin view — showing the bill here, not printing at the restaurant.", "ok");
+        // noRoute (the route was cleared a second ago) or anything unexpected: the window is the
+        // honest fallback, never a dead end.
+        openBillWindow(html);
+      })
+      .catch(() => openBillWindow(html));
+    return;
+  }
+
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands the
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
   // saying which — so the old "close on afterprint" also threw the bill away on Cancel. The window
@@ -5109,12 +5141,7 @@ function printBill(t, sess, os, opts = {}) {
   // Opened tall on purpose: the bill sizes itself to fit the window (billdoc.js zFit), so a taller
   // window means a bigger, easier-to-read bill rather than a scrollbar. A REUSED window keeps its
   // own size, so this is the first-open default only.
-  const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
-  if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
-  try { w.document.open(); } catch (e) {} // reused window: start from a blank document
-  w.document.write(html);
-  w.document.close();
-  try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
+  openBillWindow(html);
 }
 
 // Manager PERFORMANCE REPORT — a designed, downloadable (print / Save-as-PDF)
@@ -6795,6 +6822,12 @@ const OP_ACTION_LABELS = {
   // WHICH SCREEN IS THE PRINTER (mig 338). Worth a row: "why did tickets start coming out at the
   // counter?" is answered by a name and a time, not by asking the shift who touched what.
   print_station_take: "Started printing on a screen", print_station_release: "Stopped printing on a screen",
+  // The print HELPER — a computer, not a screen, doing the printing (mig 341). Plain English, like
+  // every other line in this log: a manager reading it should never meet a code.
+  print_helper_added: "Added a computer that can print", print_helper_recoded: "Gave a printing computer a new code",
+  print_helper_removed: "Removed a computer from printing", print_routes_changed: "Changed which printer gets which paper",
+  print_switch: "Changed a printing switch", print_test: "Sent a test page to a printer",
+  print_sent: "Sent something to a printer", print_sent_by_admin: "Aevidine sent something to this restaurant's printer",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
@@ -12342,11 +12375,26 @@ const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v ==
 // What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
 // read, so the strip only ever asks a question the admin has actually opened.
 let printTargetSays = null;
+// { kot:{owned,agent,printer,connected}, bill:{…}, banquet:{…} } — refreshed on the same read that
+// already asks whether this screen may print (mig 341). Empty until that first answer arrives, and
+// an empty answer means "no computer owns it", which is the old behaviour: open the window.
+let printOwners = {};
+const printOwner = (kind) => { const o = printOwners && printOwners[kind]; return o && o.owned ? o : null; };
 let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
 
 // The one-question strip, above the floor grid, in the same visual grammar as the printer-problem
 // strip that already lives there (mig 269) — a restaurant should not have to learn a second one.
 function printStationStripHtml() {
+  // A COMPUTER OWNS THE PAPER (mig 341). There is nothing to ask this screen — but there IS something
+  // to say, because a manager who used to see "printing here" and now sees nothing would reasonably
+  // think printing had broken. One quiet line, no buttons: a fact, not a question.
+  const hlpS = printTargetSays && printTargetSays.helper && printTargetSays.helper.owned ? printTargetSays.helper : null;
+  if (hlpS) {
+    return `<div class="prstrip"><div class="prstrip-row">
+      <span class="prstrip-ico">🖨</span>
+      <span class="prstrip-txt">Kitchen tickets print on <b>${esc(hlpS.printer)}</b> from <b>${esc(hlpS.agent)}</b>${hlpS.connected ? "" : " — that computer is asleep, tickets are waiting"}<small>No screen needs to be open for this, and this screen cannot take it over.</small></span>
+    </div></div>`;
+  }
   if (!printTargetSays || !printTargetSays.mayPrint) return "";
   const ans = printHereAnswer();
   if (ans === "off") return "";                       // answered no: never ask again on this device
@@ -12454,7 +12502,12 @@ function formPrinting(s) {
   const holderName = stn && stn.active
     ? `${esc(stn.active.label || (stn.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"))}${stn.active.claimed_by ? " · " + esc(stn.active.claimed_by) : ""}`
     : "";
-  const stationWord = printingHere ? "<b>THIS screen</b>" : stn && stn.active ? (holderName + (stn.stale ? " (gone quiet)" : "")) : "no screen yet";
+  // A helper program on a computer, if one owns these tickets — the honest answer to "which screen
+  // prints", which is now "none of them, and that is correct".
+  const hlpF = printTargetSays && printTargetSays.helper && printTargetSays.helper.owned ? printTargetSays.helper : null;
+  const stationWord = hlpF
+    ? `<b>${esc(hlpF.printer)}</b> — from ${esc(hlpF.agent)}${hlpF.connected ? "" : " (asleep, tickets waiting)"}`
+    : printingHere ? "<b>THIS screen</b>" : stn && stn.active ? (holderName + (stn.stale ? " (gone quiet)" : "")) : "no screen yet";
   const row = (label, value, who) => `<div style="display:flex;gap:10px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)">
       <span style="min-width:190px;color:var(--muted);font-size:13px">${esc(label)}</span>
       <b style="font-size:14px">${value}</b>
@@ -12476,6 +12529,15 @@ function formPrinting(s) {
     <p style="color:var(--muted);font-size:12.5px;margin:12px 0 0">${lastLine}</p>
     ${!on ? `<div class="hint" style="margin-top:12px">Automatic printing is switched off for this restaurant. Ask your admin to turn on <b>Auto-print the KOT</b> — nothing on this page will print anything until then.</div>` : ""}
   </div>
+  ${hlpF ? `<div class="card"><h3>A printer program is doing this for you</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 10px;line-height:1.5">
+      Kitchen tickets are printed by a small program on <b>${esc(hlpF.agent)}</b>, straight onto
+      <b>${esc(hlpF.printer)}</b>. That is why no screen has to be left open and no window can stop the
+      paper${hlpF.backup ? `, and if that printer prints nothing for a minute <b>${esc(hlpF.backup.printer)}</b> takes over` : ""}.
+      ${hlpF.connected ? "It is talking to us right now." : `It has not been heard from for ${hlpF.secondsAgo == null ? "a while" : Math.round(hlpF.secondsAgo / 60) + " minutes"} — tickets are waiting and will print the moment it is back.`}
+    </p>
+    <p style="color:var(--muted);font-size:12.5px;margin:0">Your admin sets which printer gets which paper.</p>
+  </div>` : `
   <div class="card"><h3>Should this screen print the kitchen tickets?</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
       A choice for <b>this device only</b>, kept in this browser. Say yes on the computer the printer is
@@ -12492,6 +12554,7 @@ function formPrinting(s) {
         ${heldByOther ? `<p class="hint" style="margin-top:10px">Tickets are coming out at <b>${holderName}</b>. Taking over stops that screen printing immediately — nothing is lost either way, a ticket waits in the queue until a screen prints it.</p>` : ""}`
       : `<div class="hint">Your admin has set tickets to print on <b>${esc(targetWord)}</b>, so this screen is not offered as a printer. A kitchen screen needs no switch — with automatic printing on, it simply prints.</div>`}
   </div>
+  `}
   <div class="card"><h3>📖 Setting a printer up — the full written guide</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
       Opens as its own page, with every step for <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a
@@ -12527,17 +12590,31 @@ async function managerPrintPass() {
   // A device that has said NO never asks the server anything. A device that has not answered yet asks
   // ONCE (so the strip can appear at all) and prints nothing until it is answered.
   const ans = printHereAnswer();
-  if (ans === "off") return;
+  // A device that has said NO never PRINTS — but it still has to be able to SAY where the paper
+  // comes out, or the Printing screen on the counter machine would show the old "which screen
+  // prints?" question while a computer was quietly doing the job (mig 341). So it asks ONCE, keeps
+  // the answer for the display, and then stops asking. One request, not a poll.
+  if (ans === "off" && printTargetSays) return;
   printPassBusy = true;
   try {
     const r = await api("GET", "/print-jobs/pending");
-    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen", station: (r && r.station) || null };
+    // `helper` is WHO REALLY PRINTS when a computer owns this paper (mig 341). It was missing from
+    // this object at first, so every new line about it stayed invisible however right the server
+    // was — the panel simply never carried the answer. Caught by driving the panel, not by reading.
+    const says = { mayPrint: !(r && r.off), target: (r && r.target) || "kitchen", station: (r && r.station) || null, helper: (r && r.helper) || null };
+    // WHO OWNS EACH KIND OF PAPER — kitchen slips, bills, banquet sheets. printBill() and
+    // printBanquetBill() read this to decide whether to send the job to a computer or to open the
+    // window as they always have.
+    printOwners = (r && r.helpers) || printOwners;
     const stationKey = (v) => v && v.station && v.station.active ? `${v.station.active.device_id}:${v.station.mine}:${v.station.stale}` : String(!!(v && v.station));
+    // A helper appearing or going quiet must repaint too, or the floor strip keeps yesterday's answer.
+    const helperKey = (v) => v && v.helper && v.helper.owned ? `${v.helper.agent}:${v.helper.printer}:${v.helper.connected}` : "none";
     const changed = !printTargetSays || printTargetSays.mayPrint !== says.mayPrint || printTargetSays.target !== says.target
-      || stationKey(printTargetSays) !== stationKey(says);
+      || stationKey(printTargetSays) !== stationKey(says) || helperKey(printTargetSays) !== helperKey(says);
     printTargetSays = says;
     if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
-    if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet
+    if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet (a
+                                                            // helper-owned restaurant lands here)
     // ONE SCREEN PRINTS (mig 338). A live station elsewhere means this screen shows "printing happens
     // there · print here instead" and takes NOTHING — the server would refuse the claim anyway; not
     // asking is what stops two screens fighting over every ticket.
@@ -15831,6 +15908,22 @@ function bindBanquet() {
 // gets the shorter form with the tax in the summary. Every figure comes from the
 // bill row (frozen at issue), so a re-print years later is identical.
 function printBanquetBill(b, lines) {
+  // A computer may own the banquet sheets too — usually the big paper printer, which is exactly the
+  // one nobody wants to pick out of a print dialog every time (mig 341).
+  const bqOwner = printOwner("banquet");
+  if (bqOwner && b && b.id) {
+    api("POST", "/print/send", { kind: "banquet", billId: b.id })
+      .then((r) => {
+        if (r && r.queued) { toast(r.note || ("Sent to " + bqOwner.printer), "ok"); return; }
+        if (r && r.adminView) toast("Admin view — showing the sheet here, not printing at the restaurant.", "ok");
+        openBanquetWindow(b, lines);
+      })
+      .catch(() => openBanquetWindow(b, lines));
+    return;
+  }
+  return openBanquetWindow(b, lines);
+}
+function openBanquetWindow(b, lines) {
   // The banquet document itself now lives in /panels/billdoc.js — it was the LAST piece of paper
   // that still existed twice (the admin's "See the banquet bill" drew its own, and the two had
   // already parted company over the frozen tax lines and the A4/A5 setup). This function's job is

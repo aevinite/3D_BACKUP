@@ -173,6 +173,8 @@ update the detail doc's section in the same commit.
 - **KOT/bills (migs 036–038):** daily `kot_no`/`bill_no`; discount apart from totals. Which of the
   THREE numbers is which, and why series have honest gaps: `docs/NUMBERING.md`. **Auto-print = a QUEUE
   (mig 335)**, never a tab noticing; no `document.hidden` refusal: `docs/KITCHEN-PRINT-SETUP.md`.
+  **A COMPUTER may own the paper (mig 341)** — a helper polls the queue and prints each kind on its own
+  printer; every screen then stands down. `docs/PRINT-HELPER.md`, `/aevinite/printing`, `verify:print-helper`.
   **New Postgres functions are PUBLIC-executable by default** — every staff-only fn needs
   REVOKE/GRANT (mig 038/267 lesson); `verify:grants` guards it.
 - **3D loading:** `lib/modelLoader.ts` singleton on `globalThis` — it is what makes "no re-fetch
