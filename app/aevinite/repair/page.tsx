@@ -73,6 +73,11 @@ const PANEL_NAME: Record<string, string> = {
 // Roll repeats of the SAME error into one row with a ×N badge, so a printer firing 8 times
 // isn't 8 rows. Keyed by panel + restaurant + action + the NORMALISED message (mig 218), so the
 // same bug carrying a different order id still counts as one problem instead of alarming twice.
+// How many error REPORTS this board asks the server for. Named, because the page has to be able
+// to say "there may be more" when the answer comes back exactly this long — a capped list that
+// looks complete is how "19 problems open" quietly becomes a wrong number (T17 sweep, 2026-08-19).
+const ERROR_FEED_LIMIT = 50;
+
 type ErrGroup = { key: string; sample: Action; count: number; latest: string };
 function groupErrors(rows: Action[]): ErrGroup[] {
   const map = new Map<string, ErrGroup>();
@@ -111,6 +116,11 @@ export default function AdminRepair() {
   // Live problems (error-level log rows) + local view state.
   const [errors, setErrors] = useState<Action[]>([]);
   const [errLoading, setErrLoading] = useState(true);
+  // Which of this page's feeds did NOT arrive on the last load. Empty string = it did.
+  // Nothing on this page may draw a green all-clear for a list it could not read.
+  const [problemsErr, setProblemsErr] = useState("");
+  const [rlErr, setRlErr] = useState("");
+  const [feedsFailed, setFeedsFailed] = useState<string[]>([]);
   const [sent, setSent] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmResolve, setConfirmResolve] = useState<string>(""); // group key mid-confirm ("are you sure?")
@@ -175,7 +185,7 @@ export default function AdminRepair() {
       // ?unresolved=1 — only errors nobody has cleared yet (mig 181 resolved_at). Resolving one
       // (or a landed fix, via the mig 183 trigger) drops it off this list; the full Logs page
       // still shows resolved rows. Without this the board could never be emptied.
-      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50&unresolved=1"),
+      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&limit=${ERROR_FEED_LIMIT}&unresolved=1`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
@@ -189,13 +199,24 @@ export default function AdminRepair() {
       // the read-only "Already fixed" reference list. Nothing here hides an error.
       adminFetch<{ memories: ErrMemory[] }>("/api/admin/error-memory"),
     ]);
-    if (e.ok) setErrors(e.data.actions || []);
-    if (q.ok) setRequests(q.data.requests || []);
-    if (h.ok) setRuns(h.data.runs || []);
+    // A FAILED READ IS NOT AN ALL-CLEAR (T17 sweep, 2026-08-19). Five of these seven results were
+    // used with a bare `if (x.ok)`, so a request that never arrived left its list empty — and an
+    // empty list is drawn on this page as a GREEN "All clear — no unresolved problems" and a green
+    // "No rate limits have been reached." At 9pm on a Saturday that is the worst sentence this
+    // screen can say: the admin closes the tab believing the platform is quiet when the truth is
+    // that the page could not ask. Every feed now records its failure by name, the green card is
+    // replaced by a "couldn't load" line with Retry, and the pill above shows "—" instead of 0.
+    const failed: string[] = [];
+    if (e.ok) setErrors(e.data.actions || []); else failed.push("problems");
+    if (q.ok) setRequests(q.data.requests || []); else failed.push("the Claude queue");
+    if (h.ok) setRuns(h.data.runs || []); else failed.push("Claude's history");
     if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
     if (at.ok) { setAtt(at.data); setAttErr(false); } else setAttErr(true);
-    if (rl.ok) { setRlHits(rl.data.events || []); setRlRules(rl.data.rules || []); }
-    if (mem.ok) setMemories(mem.data.memories || []);
+    if (rl.ok) { setRlHits(rl.data.events || []); setRlRules(rl.data.rules || []); } else failed.push("rate limits");
+    if (mem.ok) setMemories(mem.data.memories || []); else failed.push("the already-fixed record");
+    setProblemsErr(e.ok ? "" : (e.error || "Couldn't load the problem list."));
+    setRlErr(rl.ok ? "" : (rl.error || "Couldn't load the rate-limit alerts."));
+    setFeedsFailed(failed);
     setErrLoading(false);
   }, []);
   useEffect(() => { loadHub(); }, [loadHub]);
@@ -345,13 +366,21 @@ export default function AdminRepair() {
     setTicketBusy(null);
     if (!r.ok) { toast(r.error || "Couldn’t update that complaint.", "err"); loadHub(); }
   };
-  const openTickets = issues.filter((i) => i.status === "open").length;
+  // THE PICKER HAS TO MEAN THE WHOLE PAGE, OR THE BANNER IS A LIE (T17 sweep, 2026-08-19).
+  // Choosing a restaurant put "Showing <name> only." at the top and then left the complaints and
+  // the at-risk lists showing every restaurant on the stack — so a 9pm call about one client still
+  // meant reading nine restaurants' complaints under a banner that said otherwise. Both feeds carry
+  // the restaurant id already, so this is a filter over rows in hand: no extra request, no new data.
+  const scopedIssues = rid ? issues.filter((i) => i.restaurant_id === rid) : issues;
+  const openTickets = scopedIssues.filter((i) => i.status === "open").length;
   const shownTickets = useMemo(() => {
-    const list = ticketFilter === "all" ? issues : issues.filter((i) => i.status === ticketFilter);
+    const list = ticketFilter === "all" ? scopedIssues : scopedIssues.filter((i) => i.status === ticketFilter);
     return [...list].sort((a, b) =>
       a.status === b.status ? +new Date(b.created_at) - +new Date(a.created_at) : a.status === "open" ? -1 : 1);
-  }, [issues, ticketFilter]);
-  const attCount = (att?.atRisk.length || 0) + (att?.onboarding.length || 0);
+  }, [scopedIssues, ticketFilter]);
+  const atRisk = (att?.atRisk || []).filter((r) => !rid || r.id === rid);
+  const onboarding = (att?.onboarding || []).filter((r) => !rid || r.id === rid);
+  const attCount = atRisk.length + onboarding.length;
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
   // ONE RESTAURANT PICKER FOR THE WHOLE PAGE (owner, 2026-08-16). It already existed, but only to
@@ -411,15 +440,17 @@ export default function AdminRepair() {
             live, that read "7 problems (24h)" over rows dated 3d, 7d, 8d and 9d ago, while the
             Dashboard's own 24h-bounded button sat quiet and grey. Both screens now mean the same
             thing by "a problem": one nobody has resolved. Nothing is hidden by age. */}
-        <a className={`rp-pill${groups.length ? " alert" : " ok"}`} href="#problems"
-          title={errors.length > groups.length
+        <a className={`rp-pill${problemsErr ? "" : groups.length ? " alert" : " ok"}`} href="#problems"
+          title={problemsErr
+            ? "The problem list didn't load — this is not an all-clear"
+            : errors.length > groups.length
             ? `Jump to problems — ${groups.length} problem${groups.length === 1 ? "" : "s"}, ${errors.length} reports in all (repeats are grouped)`
             : "Jump to problems"}>
-          <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
-          <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} open</span>
+          <i className={`fas ${problemsErr ? "fa-circle-question" : groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
+          <span className="n">{errLoading ? "…" : problemsErr ? "—" : groups.length}</span><span>problem{groups.length === 1 && !problemsErr ? "" : "s"} open</span>
         </a>
         <a className={`rp-pill${shownRlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
-          <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : shownRlHits.length}</span><span>limit{shownRlHits.length === 1 ? "" : "s"} reached</span>
+          <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : rlErr ? "—" : shownRlHits.length}</span><span>limit{shownRlHits.length === 1 && !rlErr ? "" : "s"} reached</span>
         </a>
         <a className={`rp-pill${openTickets ? " warn" : ""}`} href="#complaints" title="Jump to complaints">
           <i className="fas fa-flag" aria-hidden="true" /><span className="n">{openTickets}</span><span>open complaint{openTickets === 1 ? "" : "s"}</span>
@@ -435,9 +466,22 @@ export default function AdminRepair() {
         </div>
       </div>
 
+      {/* One line naming EVERY feed that didn't arrive, so a quiet page is never mistaken for a
+          quiet platform. It sits directly under the counts it makes untrustworthy. */}
+      {!errLoading && feedsFailed.length > 0 && (
+        <div className="rp-unread">
+          <i className="fas fa-plug-circle-exclamation" aria-hidden="true" />
+          <span>
+            Couldn&rsquo;t read {feedsFailed.join(", ")} just now — <b>that is not an all-clear</b>, it means this page
+            couldn&rsquo;t ask.
+          </span>
+          <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={loadHub}>Retry</button>
+        </div>
+      )}
+
       {/* ── Problems right now ─────────────────────────────────────────── */}
       <div className="rp-sec-h" id="problems">
-        <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
+        <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: problemsErr ? "var(--adm-warn)" : groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Problems right now</h2>
         {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? scopedName : "all restaurants"} · not yet resolved</span>
@@ -445,6 +489,12 @@ export default function AdminRepair() {
 
       {errLoading ? (
         <div className="adm-empty">Checking for problems…</div>
+      ) : problemsErr ? (
+        <div className="rp-unread">
+          <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+          <span>{problemsErr} — so this is <b>unknown</b>, not clear.</span>
+          <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={loadHub}>Retry</button>
+        </div>
       ) : groups.length === 0 ? (
         <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> All clear — no unresolved problems{scopedName ? ` at ${scopedName}` : ""}.</div>
       ) : (
@@ -528,6 +578,13 @@ export default function AdminRepair() {
               </div>
             );
           })}
+          {errors.length >= ERROR_FEED_LIMIT && (
+            <p className="adm-muted" style={{ fontSize: 12, margin: "2px 0 8px" }}>
+              <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+              Showing the {ERROR_FEED_LIMIT} most recent reports — there may be older unresolved ones below this.
+              Resolve some, or read the whole list in Audit &amp; logs.
+            </p>
+          )}
         </div>
       )}
 
@@ -578,16 +635,25 @@ export default function AdminRepair() {
 
       {/* ── Rate limits reached (mig 205) ──────────────────────────────── */}
       <div className="rp-sec-h" id="rate-limits">
-        <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: rlHits.length ? "var(--adm-danger)" : "var(--muted)" }} />
+        {/* The icon must glow for what is ON SCREEN. It read `rlHits.length`, so picking one
+            restaurant left a red gauge sitting beside the words "No rate limits have been
+            reached." — an alarm for rows the admin cannot see (T17 sweep, 2026-08-19). */}
+        <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: rlErr ? "var(--adm-warn)" : shownRlHits.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Rate limits reached</h2>
         {shownRlHits.length ? <span className="rp-chip danger">{shownRlHits.length}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · all restaurants</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · {scopedName || "all restaurants"}</span>
         <Link href="/aevinite/rate-limits" className="adm-btn" style={{ marginLeft: "auto", fontSize: 12 }}><i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Manage limits</Link>
       </div>
       {errLoading && shownRlHits.length === 0 ? (
         <div className="adm-empty">Checking…</div>
+      ) : rlErr ? (
+        <div className="rp-unread">
+          <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+          <span>{rlErr} — so this is <b>unknown</b>, not clear.</span>
+          <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={loadHub}>Retry</button>
+        </div>
       ) : shownRlHits.length === 0 ? (
-        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No rate limits have been reached.</div>
+        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No rate limits have been reached{scopedName ? ` at ${scopedName}` : ""}.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
           {shownRlHits.map((h) => (
@@ -638,7 +704,7 @@ export default function AdminRepair() {
         <i className="fas fa-flag" aria-hidden="true" style={{ color: openTickets ? "var(--adm-accent, #e8a13c)" : "var(--muted)" }} />
         <h2>Complaints &amp; issues</h2>
         {openTickets ? <span className="rp-chip">{openTickets}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>raised by staff &amp; owners · all restaurants</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>raised by staff &amp; owners · {scopedName || "all restaurants"}</span>
         <div style={{ marginLeft: "auto" }}>
           <Dropdown value={ticketFilter} onChange={setTicketFilter} options={TICKET_FILTERS} ariaLabel="Filter complaints" minWidth={124} />
         </div>
@@ -664,7 +730,7 @@ export default function AdminRepair() {
         <i className="fas fa-heart-pulse" aria-hidden="true" style={{ color: attCount ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>At-risk &amp; onboarding</h2>
         {attCount ? <span className="rp-chip danger">{attCount}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>restaurants that need a nudge</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? `${scopedName} only` : "restaurants that need a nudge"}</span>
       </div>
       {attErr && (
         <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>Couldn&rsquo;t load account health. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadHub}>Retry</button></p>
@@ -674,11 +740,11 @@ export default function AdminRepair() {
           <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-danger)" }} aria-hidden="true" />
           Churn risk <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· paying but not ordering</span>
         </div>
-        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.atRisk.length === 0 ? (
-          <div className="adm-empty"><i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 7 }} aria-hidden="true" />Nothing at risk — every paying restaurant is ordering.</div>
+        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : atRisk.length === 0 ? (
+          <div className="adm-empty"><i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 7 }} aria-hidden="true" />Nothing at risk{scopedName ? ` at ${scopedName}` : " — every paying restaurant is ordering"}.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {att.atRisk.map((r) => (
+            {atRisk.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderBottom: "var(--border)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: "var(--adm-danger)", flex: "0 0 auto" }} aria-hidden="true" />
                 <b style={{ fontSize: 14 }}>{r.name}</b>
@@ -695,11 +761,11 @@ export default function AdminRepair() {
           <i className="fas fa-seedling" style={{ color: "#60a5fa" }} aria-hidden="true" />
           Needs onboarding <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· new, no orders yet</span>
         </div>
-        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.onboarding.length === 0 ? (
-          <div className="adm-empty">No stalled new restaurants — recent sign-ups are all ordering.</div>
+        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : onboarding.length === 0 ? (
+          <div className="adm-empty">{scopedName ? `${scopedName} is not waiting on setup.` : "No stalled new restaurants — recent sign-ups are all ordering."}</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {att.onboarding.map((r) => (
+            {onboarding.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderBottom: "var(--border)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: "#60a5fa", flex: "0 0 auto" }} aria-hidden="true" />
                 <b style={{ fontSize: 14 }}>{r.name}</b>
@@ -719,7 +785,7 @@ export default function AdminRepair() {
       </div>
       <div className="adm-card" style={{ marginBottom: 6 }}>
         <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 10px" }}>
-          Describe what&rsquo;s going wrong in your own words — a printer, a button, a wrong total. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant in the tools below to tag it, or leave it general.</>}
+          Describe what&rsquo;s going wrong in your own words — a printer, a button, a wrong total. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant at the top of this page to tag it, or leave it general.</>}
         </p>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
           placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
@@ -897,6 +963,11 @@ export default function AdminRepair() {
         .rp-chip.danger{background:color-mix(in srgb,var(--adm-danger) 16%,transparent);color:var(--adm-danger)}
         .rp-clear{display:flex;align-items:center;gap:9px;padding:16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent);background:color-mix(in srgb,var(--adm-ok,#4caf82) 8%,var(--card));color:var(--text);font-size:13.5px}
         .rp-clear i{color:var(--adm-ok,#4caf82)}
+        /* "I couldn't read this" — deliberately NOT the green all-clear and NOT the red alarm.
+           Nothing is known to be wrong; the page simply could not ask. */
+        .rp-unread{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:14px 16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-warn) 40%,transparent);background:color-mix(in srgb,var(--adm-warn) 8%,var(--card));color:var(--text);font-size:13.5px;margin-bottom:10px}
+        .rp-unread i{color:var(--adm-warn)}
+        .rp-unread > span{flex:1 1 200px;min-width:0}
         .rp-err{position:relative;display:flex;gap:12px;padding:13px 14px 13px 16px;border-radius:12px;border:var(--border);background:var(--card);margin-bottom:10px;overflow:hidden}
         .rp-err-bar{position:absolute;left:0;top:0;bottom:0;width:3px}
         .rp-panel{font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:1px 7px;border-radius:6px;border:1px solid;background:transparent;text-transform:uppercase}
