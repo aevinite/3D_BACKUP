@@ -179,15 +179,15 @@ console.log(`\nADMIN ROUTES · NO OPTIMISTIC ANSWERS — ${ROOT}\n`);
 // territory in this sweep and is not mine to edit. Each line is a file and how many sites it has;
 // DELETE YOUR LINE when you convert it. The list can only shrink — a file that is not on it and sends
 // raw prose fails this check.
+//
+// SEVEN LINES DELETED when this branch was merged with T19's (attention, billing, custlog,
+// dashboard, notifications, owners, panels-health): that territory converted them in the same
+// sweep, so the list was describing a state that no longer existed and the staleness check —
+// which is here precisely so the list can never flatter the code — went red on the merged tree.
+// Only health/route.ts is still genuinely unconverted; the last two entries are deliberate and
+// their reasons are on them.
 const NOT_YET = new Map([
-  ["app/api/admin/attention/route.ts", 1],
-  ["app/api/admin/billing/route.ts", 6],
-  ["app/api/admin/custlog/route.ts", 1],
-  ["app/api/admin/dashboard/route.ts", 1],
   ["app/api/admin/health/route.ts", 1],
-  ["app/api/admin/notifications/route.ts", 1],
-  ["app/api/admin/owners/route.ts", 16],
-  ["app/api/admin/panels-health/route.ts", 1],
   // DELIBERATE, not a miss: these two write the database's words INTO THE BACKUP FILE, next to the
   // table that failed, so whoever rebuilds a restaurant can see which table came back empty and why.
   // They never reach a toast. `_meta.failed` names them at the top of the same file.
