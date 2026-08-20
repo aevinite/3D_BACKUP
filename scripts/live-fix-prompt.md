@@ -78,6 +78,20 @@ what to touch. Everything else you decide and ship.
    dashboard red button and the red rows in Logs all clear by themselves. `--dry` first if you
    want to see what it will touch; `--status dismissed` if it turned out not to be a real problem.
    (Old branch missing the script? `git show origin/main:scripts/resolve-fix-request.mjs > /tmp/rfr.mjs && node /tmp/rfr.mjs --id …`.)
+
+   **"No fix request with that id"? The board still has to be cleared.** A sweep that files a test
+   ticket deletes its own row afterwards, and the window still opened — that happened on
+   2026-08-20 and left ten red rows nobody could clear. Clear them by the MESSAGE instead:
+
+   ```
+   node scripts/resolve-fix-request.mjs --sig "<part of the exact error message>"     # no ticket needed
+   node scripts/resolve-fix-request.mjs --id <id> --sig "<message>"                   # close the ticket if it's still there
+   ```
+
+   `--sig` is a plain substring of the error text (not a wildcard pattern), needs ≥12 characters,
+   and refuses if it matches more than 6 different problems — narrow it with more of the message
+   or `--restaurant <uuid>` rather than raising `--max-groups`. Run `--dry` first and READ the
+   groups it lists: you are clearing every one of them.
    **Never resolve a ticket whose fix isn't live and checked** — a cleared board the owner can't
    trust is worse than a red one. If you had to leave AV live unshipped, resolve only the stack
    you actually fixed and say so.
