@@ -1238,10 +1238,25 @@ function printKot(order, itemRows, restaurant, opts) {
       // is not branded "DUPLICATE" for a ticket that never came out), write it to the Everything
       // Log, and tell the cook and the manager through the same throttled path a synchronous
       // failure already uses — once a minute, never once per ticket.
-      try { w.focus(); w.print(); } catch (e) {
-        try { if (order && order.id != null) { printedIds.delete(order.id); savePrintedIds(); } } catch (_e) {}
-        try { logKotPrintFailure(e); } catch (_e) {}
-        try { notePrintTrouble(); } catch (_e) {}
+      // A TICKET NEVER PULLS THE SCREEN AWAY FROM THE PERSON USING IT (owner, 2026-08-20: at Aangan
+      // one man is the owner AND the manager — he sits at the counter in the owner panel, in Manager
+      // mode, and "the chrome you open is switching the owner panel to the kitchen when the print is
+      // being done. I want it works always in background"). This used to call w.focus() FIRST, on every
+      // automatic ticket. Focusing a frame is a user-visible focus change, and in a browser where the
+      // printing panel is a TAB beside the panel he is working in, that is enough to bring the printing
+      // tab forward — so every order yanked him out of the floor plan he was reading.
+      // focus() was here for old browsers that printed the PARENT document when an iframe was printed
+      // unfocused. Chrome — the only browser a print station runs, and the one this guide sets up —
+      // prints the frame either way. So: print WITHOUT touching focus, and keep the old behaviour as a
+      // FALLBACK for the one case that justified it, a print() that actually threw.
+      try { w.print(); }
+      catch (e1) {
+        try { w.focus(); w.print(); }
+        catch (e) {
+          try { if (order && order.id != null) { printedIds.delete(order.id); savePrintedIds(); } } catch (_e) {}
+          try { logKotPrintFailure(e); } catch (_e) {}
+          try { notePrintTrouble(); } catch (_e) {}
+        }
       }
       setTimeout(cleanup, 60000);
     }, 250);
