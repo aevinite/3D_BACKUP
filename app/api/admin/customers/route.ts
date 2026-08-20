@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
 import { safeSearch } from "@/lib/searchText";
 
@@ -45,7 +47,14 @@ export async function GET(req: NextRequest) {
 
   try {
     // Restaurant names for the row chips + the filter dropdown (small, read once).
-    const rests = ((await sb.from("restaurants").select("id, name, slug, accent_color").order("slug")).data || []) as
+    // CHECKED, because `|| []` is the whole bug (sweep #6, T19). This is the platform-wide guest
+    // list, so the restaurant chip is the only thing telling one tenant's guests from another's, and
+    // the same read fills the filter. With the failure swallowed, every chip fell back to "—" and the
+    // dropdown came back empty: a page of anonymous phone numbers the admin can neither read nor
+    // narrow, served with a confident 200.
+    const restsQ = await sb.from("restaurants").select("id, name, slug, accent_color").order("slug").limit(2000);
+    if (restsQ.error) return adminFail("the restaurant list", restsQ.error, { action: "load" });
+    const rests = (restsQ.data || []) as
       Array<{ id: string; name: unknown; slug: string; accent_color: string | null }>;
     // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
     // string on others — read both, fall back to the slug so a chip is never blank.
@@ -67,7 +76,11 @@ export async function GET(req: NextRequest) {
     // This is the admin-only view — "Meera has eaten at 3 of our restaurants".
     if (detail) {
       const { data, error } = await sb.from("customers").select(COLS).eq("phone", detail).limit(50);
-      if (error) throw new Error(error.message);
+      // PLAIN WORDS, not the database's (sweep #6, T19). `throw new Error(error.message)` walked the
+      // raw sentence out through the catch at the bottom and into the console's red toast — the same
+      // fault lib/adminFail was written for, just wearing a throw. Answered here instead so the raw
+      // text stays in the response `detail` and the server log, where it is actually read.
+      if (error) return adminFail("this guest's record", error, { action: "load" });
       const rows = ((data || []) as Row[]).map((c) => ({ ...c, restaurantName: nameOf(c.restaurant_id) }));
       return NextResponse.json({
         detail: {
@@ -90,7 +103,7 @@ export async function GET(req: NextRequest) {
     if (seg === "new") q = q.lt("visits", REPEAT_MIN);
     if (seg === "blocked") q = q.eq("blocked", true);
     const { data, error, count } = await q;
-    if (error) throw new Error(error.message);
+    if (error) return adminFail("the guest list", error, { action: "load" });
     const customers = ((data || []) as Row[]).map((c) => ({
       ...c,
       restaurantName: nameOf(c.restaurant_id),

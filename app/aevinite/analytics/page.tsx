@@ -12,9 +12,10 @@
 // inline magnitude bar) beside the source split. Refetches hold the previous
 // render at reduced opacity — no skeleton flash.
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { openRestaurantPanel, useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
 import type { TrendPoint } from "@/components/admin/OrdersTrend";
+import { labelFor } from "@/lib/timeView";
 
 const OrdersTrend = dynamic(() => import("@/components/admin/OrdersTrend"), {
   ssr: false,
@@ -73,21 +74,62 @@ export default function AdminAnalytics() {
   // request (the same RPC, one day, bucketed by hour) and only when the person asks for it —
   // never on load, so a quiet platform costs exactly what it did before.
   const [drillDay, setDrillDay] = useState<string | null>(null);
+  // ONLY THE NEWEST ANSWER MAY LAND (T18 sweep, 2026-08-20).
+  //
+  // Two requests are in flight on an ordinary open: the mount effect runs once with the default
+  // 7d and again with the range read out of the address, and a range switch or the 60s backstop can
+  // add more. Nothing sequenced them, so whichever REPLY arrived last won — regardless of which
+  // range the page was showing. Both are served from the snapshot cache, so which one that is, is a
+  // race. Measured before this guard: `/aevinite/analytics?range=30d` opened four times in a row
+  // showed 290 / 290 / 290 / 290 under the label "ORDERS · LAST 30 DAYS", when the 30-day answer
+  // from the same endpoint was 5,990 — the platform's headline order count wrong by a factor of 20,
+  // with the right label and the right tab highlighted over it. (An earlier run gave
+  // 6,355 / 291 / 6,355 / 291: it lands on the wrong answer often, not always.) The Dashboard's
+  // "Orders today" card links here with ?range=today, so its drill-in had the same coin-flip.
+  //
+  // A monotonic token, not an AbortController: the request is cheap and may well be serving another
+  // tab's cache warm-up, so we let it finish and simply refuse to WRITE a reply that is no longer
+  // the one being waited for. `loading` is only cleared by the current attempt, so a slow loser
+  // cannot un-dim the page under a request that is still running.
+  const reqSeq = useRef(0);
   const load = useCallback(async (r: Range, live = false, day: string | null = null) => {
+    const mine = ++reqSeq.current;
     setLoading(true); setErr(null);
     try {
       const q = day ? `day=${encodeURIComponent(day)}` : `range=${r}`;
       const res = await fetch(`/api/admin/analytics?${q}${live ? "&refresh=1" : ""}`, { cache: "no-store" });
       const j = await res.json();
+      if (mine !== reqSeq.current) return;             // a newer window is being asked for — drop this
       if (!res.ok) throw new Error(j.error || "Couldn't load analytics.");
       setData(j);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
+    } catch (e) {
+      if (mine !== reqSeq.current) return;
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { if (mine === reqSeq.current) setLoading(false); }
   }, []);
   // Changing the range always drops any drill — the drilled day belongs to the window it came from.
   useEffect(() => { setDrillDay(null); load(range); }, [range, load]);
   useActiveAutoRefresh(() => load(range, false, drillDay), 60000);
 
   const t = data?.totals;
+  // WHEN THE NUMBERS NARROW, THE WORDS NARROW WITH THEM (T18 sweep, 2026-08-20).
+  //
+  // Drilling into a day re-fetches the WHOLE payload for that one day, so `totals`, `busiest` and
+  // `bySource` all become one day's — but every label on this page was derived from
+  // `RANGE_LABEL[range]`, and `range` never changes when you drill. Measured before this: after
+  // "See 18 Aug hour by hour" the tile read "ORDERS · LAST 7 DAYS 73" (73 was that ONE day), the
+  // page subtitle still ended "Last 7 days.", both card hints still said "for last 7 days", and the
+  // chart heading still said "Orders per day" over an axis reading 12am…9pm. Only one small line
+  // inside the chart card admitted what was on screen. Every label now comes from `windowText`,
+  // which is the drilled day's own name while a drill is open.
+  //
+  // `windowLabel` on the chart stays the WHOLE window on purpose — its sentence is
+  // "the rest of <the week> had almost nothing", which is about the window, not the day.
+  const drillLabel = drillDay ? labelFor(drillDay, "day") : "";
+  const windowText = drillDay ? drillLabel : RANGE_LABEL[range].toLowerCase();
+  // The grain the SERVER actually bucketed by, not one re-derived from the range — a drill out of a
+  // 7-day window comes back hourly, and the heading used to keep saying "per day".
+  const grainWord = (data?.bucket || (range === "today" ? "hour" : "day")) === "hour" ? "hour" : "day";
   const occupancy = t && t.totalTables > 0 ? Math.min(1, t.activeTablesNow / t.totalTables) : 0;
   // Sparkline compresses the trend to ≤12 points so a 30-day range doesn't draw 30 segments 6px apart.
   const sparkPts = (() => {
@@ -97,7 +139,11 @@ export default function AdminAnalytics() {
     return Array.from({ length: 12 }, (_, i) => tr.slice(Math.floor(i * step), Math.floor((i + 1) * step)).reduce((s, p) => s + p.orders, 0));
   })();
 
-  const busiestActive = (data?.busiest || []).filter((r) => r.orders > 0).slice(0, 8);
+  // The endpoint returns the top ten; the card lists eight. Say so when there are more, rather than
+  // dropping a restaurant silently — this page is where he looks to see who is busy and who is not,
+  // and a list that quietly ends is a list he cannot add up (T18 sweep, 2026-08-20).
+  const busiestWithOrders = (data?.busiest || []).filter((r) => r.orders > 0);
+  const busiestActive = busiestWithOrders.slice(0, 8);
   const busiestMax = Math.max(1, ...busiestActive.map((r) => r.orders));
   const sources = (data?.bySource || []).filter((s) => s.orders > 0 || s.source === "dine_in");
   const sourceTotal = sources.reduce((s, x) => s + x.orders, 0);
@@ -128,7 +174,8 @@ export default function AdminAnalytics() {
   return (
     <>
       <h1 className="adm-page-h">Platform analytics</h1>
-      <p className="adm-page-sub">Cross-restaurant operational trends — order counts only, never earnings. {RANGE_LABEL[range]}.</p>
+      <p className="adm-page-sub">Cross-restaurant operational trends — order counts only, never earnings.{" "}
+        {drillDay ? `${drillLabel}, hour by hour.` : `${RANGE_LABEL[range]}.`}</p>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
         <div className="adm-tabs">
@@ -155,7 +202,7 @@ export default function AdminAnalytics() {
       <div style={{ opacity: loading && data ? 0.55 : 1, transition: "opacity .2s" }}>
         <div className="adm-stats" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
           {tile({
-            icon: "fa-receipt", label: `Orders · ${RANGE_LABEL[range].toLowerCase()}`,
+            icon: "fa-receipt", label: `Orders · ${windowText}`,
             value: t ? nf.format(t.totalOrders) : "…",
             sub: t && t.totalOrders === 0 ? "no orders in this range" : "dine-in, all restaurants",
             extra: <Spark pts={sparkPts} />,
@@ -188,8 +235,8 @@ export default function AdminAnalytics() {
         </div>
 
         <div className="adm-card" style={{ marginBottom: 14 }}>
-          <h2>Orders per {range === "today" ? "hour" : "day"}</h2>
-          <p className="hint">Platform-wide order count for {RANGE_LABEL[range].toLowerCase()} — the chart follows the data: a normal spread is plotted, a window whose orders all land on one day offers that day hour by hour, and too little to chart is said in words.</p>
+          <h2>Orders per {grainWord}</h2>
+          <p className="hint">Platform-wide order count for {windowText} — the chart follows the data: a normal spread is plotted, a window whose orders all land on one day offers that day hour by hour, and too little to chart is said in words.</p>
           {data ? <OrdersTrend data={data.trend} bucket={data.bucket || "day"}
             windowLabel={RANGE_LABEL[range].toLowerCase()}
             drilledInto={drillDay}
@@ -201,7 +248,12 @@ export default function AdminAnalytics() {
         <div className="adx-grid2col">
           <div className="adm-card" style={{ marginBottom: 14 }}>
             <h2>Busiest restaurants</h2>
-            <p className="hint">Ranked by order count (not money) for {RANGE_LABEL[range].toLowerCase()}.</p>
+            <p className="hint">
+              Ranked by order count (not money) for {windowText}.
+              {busiestWithOrders.length > busiestActive.length
+                ? ` Showing the busiest ${busiestActive.length} of ${busiestWithOrders.length} restaurants that took an order.`
+                : ""}
+            </p>
             {data === null ? (
               <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
             ) : busiestActive.length === 0 ? (
@@ -235,7 +287,7 @@ export default function AdminAnalytics() {
 
           <div className="adm-card" style={{ marginBottom: 14 }}>
             <h2>Orders by source</h2>
-            <p className="hint">Dine-in vs platform (Zomato / Swiggy / takeaway) order counts.</p>
+            <p className="hint">Dine-in vs platform (Zomato / Swiggy / takeaway) order counts for {windowText}.</p>
             {data === null ? (
               <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
             ) : sourceTotal === 0 ? (

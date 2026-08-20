@@ -43,6 +43,11 @@ const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 const SESSION_COLS = "id, status, bill_no, invoice_no, invoice_voided, table_number, restaurant_id, opened_at, closed_at, created_at, deleted_at, deleted_by, delete_reason";
 const ORDER_COLS = "id, session_id, total, discount, tax_rate, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
+// The ceiling on "the orders of ONE bill". The trail read above already states 500 with the reason
+// ("a bill of 400 KOTs is already refused elsewhere as implausible"); the delete and restore paths
+// read the same set with no ceiling at all, which on a bill past PostgREST's own cap would have
+// tombstoned some of its orders and left the rest live — a half-deleted bill, reported as done.
+const BILL_ORDER_CAP = 500;
 
 // What an order was actually worth, net of its discount. This was a SECOND COPY of
 // lib/billLedger.ts's netOf() (T7 improvement I1) — the ledger's amounts and the permanent audit's
@@ -126,8 +131,17 @@ export async function GET(req: NextRequest) {
   let delCountQ = sb.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
   if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
 
-  const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null), delCountQ]);
+  const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000), delCountQ]);
   if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
+  // ALL THREE READS ARE CHECKED, because on this screen a silent zero is the failure mode that
+  // matters most (this file's own header: "THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY
+  // TIME"). The count above was written precisely because "the chip said 0 while deleted bills
+  // existed" — and then `delQ.count ?? 0` put that exact 0 back for a FAILED count, so a database
+  // blip made the one screen whose job is proving no sale vanished say that none had. The names
+  // read is the same story one step down: with it empty every row reads "—" and the restaurant
+  // filter has nothing in it, so the admin cannot even narrow the list to look.
+  if (delQ.error) return adminFail("the bill ledger", delQ.error, { action: "load" });
+  if (restsQ.error) return adminFail("the bill ledger", restsQ.error, { action: "load" });
 
   const sessions = (sessQ.data || []) as unknown as BillSession[];
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
@@ -221,7 +235,7 @@ async function postImpl(req: NextRequest) {
     // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
     if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
-    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
     // …and into the Audit, the one place a person looks for "what was removed and why". The
@@ -251,7 +265,7 @@ async function postImpl(req: NextRequest) {
   if (action === "restore") {
     // Read the money BEFORE the restore clears the tombstone, so the audit row can say what came
     // back — the same columns and the same netOf() the delete recorded on the way out.
-    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).not("deleted_at", "is", null)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     // restoreOrders() now THROWS when the database refuses either write (T7 finding F3 — it used to
     // report the row count it intended and leave the bill deleted). Caught here so the admin gets a

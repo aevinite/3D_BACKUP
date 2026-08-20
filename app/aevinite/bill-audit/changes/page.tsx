@@ -4,13 +4,23 @@
 // from the activity log. Emphasises removals & reverts (tamper-risk). This is the secondary
 // view; the primary "Bills" ledger (one row per bill, by state) lives at /aevinite/bill-audit.
 import { useCallback, useEffect, useState } from "react";
-import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
+import { useActiveAutoRefresh, timeAgo, actLabel } from "@/components/admin/shared";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type Row = { id: string; action: string; restaurantName: string; table: string | null; actor: string; detail: string | null; at: string; risk: boolean };
 type Rest = { id: string; name: string };
 type Data = { rows: Row[]; riskCount: number; restaurants: Rest[]; generatedAt: string };
 
+// EVERY ACTION THE ENDPOINT CAN SEND HAS A LABEL HERE, AND THE FALLBACK IS ENGLISH (T18 sweep,
+// 2026-08-20). `order_cancel` and `order_uncancel` are both in the endpoint's BILL_ACTIONS — and
+// order_cancel is in its RISK set — but neither was in this map, and the fallback was
+// `{ t: r.action }`, i.e. the raw database word. Measured live: 500 rows on screen, 29 of them
+// reading "order_cancel" in the Change column, flagged red and counted in "226 bill removals /
+// reverts worth a glance". Cancelling a bill is the one route out of a sale that the restaurant is
+// allowed (compliance §3.0), so it is exactly the row a person reads most carefully here. The
+// sibling Bills page already fell through to the shared actLabel() and says why in its own comment:
+// it "never prints a raw code". This one does the same now, so a future action added to the
+// endpoint can never surface as an identifier again.
 const ACT: Record<string, { t: string; risk: boolean }> = {
   order_delete: { t: "Bill deleted", risk: true },
   orders_delete: { t: "Bills cleared", risk: true },
@@ -21,6 +31,8 @@ const ACT: Record<string, { t: string; risk: boolean }> = {
   order_move: { t: "Order moved", risk: false },
   table_shift: { t: "Table moved", risk: false },
   invoice_void: { t: "Invoice voided (reopened)", risk: true },
+  order_cancel: { t: "Bill cancelled", risk: true },
+  order_uncancel: { t: "Cancel undone", risk: false },
   table_restart: { t: "Table restarted", risk: false },
   table_close: { t: "Table closed", risk: false },
   repair_void_bill: { t: "Bill voided (repair)", risk: true },
@@ -99,7 +111,8 @@ export default function AdminBillChanges() {
               <span>Change</span><span>Restaurant</span><span>Table</span><span>By</span><span>Reason</span><span style={{ textAlign: "right" }}>When</span>
             </div>
             {d.rows.map((r) => {
-              const a = ACT[r.action] || { t: r.action, risk: r.risk };
+              // No entry → the shared plain-words map, then Sentence Case. Never the raw code.
+              const a = ACT[r.action] || { t: actLabel(r.action), risk: r.risk };
               return (
                 <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720, alignItems: "center" }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
@@ -114,6 +127,18 @@ export default function AdminBillChanges() {
                 </div>
               );
             })}
+            {/* SAY WHEN THE LIST STOPS (T18 sweep, 2026-08-20). The endpoint caps this read at 500
+                rows; below that number the list is the whole story, and at exactly 500 it is not —
+                and nothing said which. The sibling Bills ledger has always ended with "Showing N —
+                there are older ones", so scrolling to the bottom of THAT screen tells you whether
+                you have seen everything. This one just stopped. Filter to a restaurant, or to the
+                at-risk rows, to reach further back. */}
+            {d.rows.length >= 500 && (
+              <div style={{ padding: "12px 14px", fontSize: 11.5, color: "var(--muted)", textAlign: "center" }}>
+                Showing the most recent {d.rows.length} changes — there are older ones. Narrow to one
+                restaurant, or to the at-risk rows, to reach further back.
+              </div>
+            )}
           </div>
         )}
       </div>

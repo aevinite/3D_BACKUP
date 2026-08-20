@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean))) as string[];
   const nameById = new Map<string, string>();
   if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name").in("id", ids);
+    const rest = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
     for (const x of rest.data ?? []) nameById.set(x.id, x.name);
   }
   const removals = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));

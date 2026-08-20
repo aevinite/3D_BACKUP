@@ -3,8 +3,8 @@
 // restaurants pay US). PLATFORM income is allowed here; restaurant FOOD revenue is not and
 // never appears. All figures come from /api/admin/revenue (derived from restaurant_billing +
 // restaurant_payments — no schema change). Dark ops-console theme, hand-rolled SVG chart.
-import { useCallback, useEffect, useState } from "react";
-import { useActiveAutoRefresh } from "@/components/admin/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
 
 type Plan = { plan: string; mrr: number; count: number };
 type Month = { month: string; label: string; collected: number };
@@ -21,8 +21,35 @@ const STATUS_LABEL: Record<string, string> = { active: "Active (paying)", trial:
 
 // Hand-rolled SVG area+line of "collected per month". Trend data → line; subtle gridlines,
 // tabular hover values, an explicit empty state when there's nothing yet.
+//
+// IT DRAWS AT ITS OWN SIZE, SO 10px IS 10px (T18 sweep, 2026-08-20). The viewBox used to be a fixed
+// 760 units wide at `width: 100%`, and an SVG scales its text with its viewBox — so the same markup
+// measured 12.9px on the desktop (982px / 760 = 1.29x) and **3.9px on a phone** (298px / 760 =
+// 0.39x, a 5px-tall box). Every month label and the "peak ₹…" note were unreadable smudges on the
+// operator's own income chart. Measuring the container and drawing the viewBox at that width makes
+// one user unit one pixel at any size. And when twelve labels will not fit, they thin to every 2nd
+// or 3rd month — the house adaptive-time-axis rule — rather than overprinting each other. Nothing
+// about the chart's shape changed: same area, same line, same points, same peak note.
+const LABEL_PX = 10;          // the declared size, now also the RENDERED size
+const LABEL_MIN_GAP = 26;     // a three-letter month plus breathing room
+
 function CollectedChart({ data }: { data: Month[] }) {
-  const W = 760, H = 190, padL = 10, padR = 10, padT = 16, padB = 26;
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Start at the desktop width so the first paint is never a squeezed chart; the observer corrects
+  // it on the same frame it mounts.
+  const [w, setW] = useState(760);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const read = () => setW(Math.max(240, Math.round(el.getBoundingClientRect().width || 760)));
+    read();
+    if (typeof ResizeObserver === "undefined") { window.addEventListener("resize", read); return () => window.removeEventListener("resize", read); }
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const W = w, H = 190, padL = 10, padR = 10, padT = 16, padB = 26;
   const max = Math.max(1, ...data.map((d) => d.collected));
   const iw = W - padL - padR, ih = H - padT - padB;
   const x = (i: number) => padL + (data.length > 1 ? (i / (data.length - 1)) * iw : iw / 2);
@@ -30,22 +57,32 @@ function CollectedChart({ data }: { data: Month[] }) {
   const line = data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d.collected).toFixed(1)}`).join(" ");
   const area = `${line} L${x(data.length - 1).toFixed(1)},${(padT + ih).toFixed(1)} L${x(0).toFixed(1)},${(padT + ih).toFixed(1)} Z`;
   const anyData = data.some((d) => d.collected > 0);
-  if (!anyData) return <div className="adm-empty">No subscription payments recorded yet — record one on Billing &amp; plans.</div>;
+  // Label every Nth month, whichever N keeps them LABEL_MIN_GAP apart — and always keep the last
+  // one, so the chart's right-hand end is never nameless.
+  const step = data.length > 1 ? iw / (data.length - 1) : iw;
+  const every = Math.max(1, Math.ceil(LABEL_MIN_GAP / Math.max(step, 1)));
+  const showLabel = (i: number) => i === data.length - 1 || (data.length - 1 - i) % every === 0;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Collected per month, last 12 months" style={{ display: "block" }}>
-      {[0, 0.25, 0.5, 0.75, 1].map((f) => (
-        <line key={f} x1={padL} x2={W - padR} y1={padT + ih - f * ih} y2={padT + ih - f * ih} stroke="var(--muted)" strokeWidth="1" opacity="0.16" />
-      ))}
-      <path d={area} fill="var(--accent)" opacity="0.14" />
-      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      {data.map((d, i) => (
-        <circle key={d.month} cx={x(i)} cy={y(d.collected)} r="2.6" fill="var(--accent)"><title>{d.label}: {money(d.collected)}</title></circle>
-      ))}
-      {data.map((d, i) => (
-        <text key={d.month} x={x(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="var(--muted)">{d.label}</text>
-      ))}
-      <text x={padL} y={11} fontSize="10" fill="var(--muted)">peak {money(max)}</text>
-    </svg>
+    <div ref={boxRef} style={{ width: "100%" }}>
+      {!anyData ? (
+        <div className="adm-empty">No subscription payments recorded yet — record one on Billing &amp; plans.</div>
+      ) : (
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Collected per month, last 12 months" style={{ display: "block" }}>
+          {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+            <line key={f} x1={padL} x2={W - padR} y1={padT + ih - f * ih} y2={padT + ih - f * ih} stroke="var(--muted)" strokeWidth="1" opacity="0.16" />
+          ))}
+          <path d={area} fill="var(--accent)" opacity="0.14" />
+          <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          {data.map((d, i) => (
+            <circle key={d.month} cx={x(i)} cy={y(d.collected)} r="2.6" fill="var(--accent)"><title>{d.label}: {money(d.collected)}</title></circle>
+          ))}
+          {data.map((d, i) => (showLabel(i) ? (
+            <text key={d.month} x={x(i)} y={H - 8} textAnchor="middle" fontSize={LABEL_PX} fill="var(--muted)">{d.label}</text>
+          ) : null))}
+          <text x={padL} y={11} fontSize={LABEL_PX} fill="var(--muted)">peak {money(max)}</text>
+        </svg>
+      )}
+    </div>
   );
 }
 
@@ -84,9 +121,20 @@ export default function AdminRevenue() {
           <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Platform revenue</h1>
           <p className="adm-page-sub" style={{ marginTop: 4 }}>Your subscription income — what restaurants pay you. Not their food sales.</p>
         </div>
-        <button className="adm-btn" disabled={loading} onClick={load}>
-          <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* HOW OLD THE FIGURES ARE (T18 sweep, 2026-08-20). Platform analytics and Customers both
+              say when they were last counted; this page refreshed itself every 60 seconds and said
+              nothing, so a tab left open overnight looked live. `generatedAt` was already in the
+              reply and simply unread. */}
+          {d?.generatedAt ? (
+            <span className="adm-muted" style={{ fontSize: 12 }} title={new Date(d.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>
+              updated {timeAgo(d.generatedAt)}
+            </span>
+          ) : null}
+          <button className="adm-btn" disabled={loading} onClick={load}>
+            <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+          </button>
+        </div>
       </div>
 
       {err && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{err} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></p>}
@@ -184,6 +232,15 @@ export default function AdminRevenue() {
         .rev-strip { display: flex; flex-wrap: wrap; padding: 0; margin-bottom: 12px; }
         .rev-strip .cell { display: flex; flex-direction: column; gap: 3px; padding: 12px 18px; border-right: var(--border); flex: 1 1 auto; min-width: 150px; }
         .rev-strip .cell:last-child { border-right: 0; }
+        /* A DIVIDER MUST SEPARATE THE THINGS IT SITS BETWEEN (T18 sweep, 2026-08-20). This is a
+           WRAPPING flexbox, and every cell carried a right border cleared only on :last-child — so
+           once the cells stacked one per row on a phone, four disconnected vertical hairlines ran
+           down the right-hand side of the card and stopped before the last figure. It read as a
+           half-drawn table. Stacked, the divider goes between the rows instead. */
+        @media (max-width: 720px) {
+          .rev-strip .cell { border-right: 0; border-bottom: var(--border); }
+          .rev-strip .cell:last-child { border-bottom: 0; }
+        }
         .rev-strip .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
         .rev-strip .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
         .rev-strip .h { font-size: 11px; color: var(--muted); }

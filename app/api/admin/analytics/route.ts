@@ -119,12 +119,12 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
   const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000),
     // Fetch active staff's restaurant_id (bounded) so we can DROP staff that belong to a
     // binned restaurant — a head count included them and over-stated "Active staff".
     sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000),
-    sb.from("sessions").select("restaurant_id").eq("status", "open"),
-    sb.from("settings").select("restaurant_id, table_count"),
+    sb.from("sessions").select("restaurant_id").eq("status", "open").limit(20000),
+    sb.from("settings").select("restaurant_id, table_count").limit(2000),
     sb.from("orders").select("id", { count: "exact", head: true }).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
     // hours, never one flat day bucket); 7d/30d bucket by day. 4-arg overload = mig 129.

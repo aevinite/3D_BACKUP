@@ -332,7 +332,10 @@ function ModalShell({ id, onClose, width = 460, label, children }: {
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(3px)", zIndex: 1000 }} />
       <div style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
-        <div ref={ref} role="dialog" aria-modal="true" aria-label={label} style={{ ...modalCard, width: `min(96vw, ${width}px)` }}>
+        {/* 100%, not 96vw: the wrapper already pads 16px each side, and 96vw + 32 is wider than a
+            360px screen — which stopped the grid centring the card and pushed its edge off-screen
+            (T16 sweep, 2026-08-19). 100% is the padded content box. */}
+        <div ref={ref} role="dialog" aria-modal="true" aria-label={label} style={{ ...modalCard, width: `min(100%, ${width}px)` }}>
           {children}
         </div>
       </div>
@@ -584,10 +587,25 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
   }, [owner.id]);
 
   // Attach one or many restaurants in a single action (the big picker is multi-select).
-  const assignRestaurants = (ids: string[]) => {
+  //
+  // NOT `run()`, on purpose (T16 sweep, 2026-08-19). `run` only calls onChanged() when nothing
+  // threw - right for a single action, wrong for a loop: pick five, have the third fail, and two
+  // WERE attached while the pane still showed none of them. The admin then re-picks all five,
+  // because the screen told them nothing landed. So this counts what actually landed, refreshes
+  // either way, and says how many of how many made it.
+  const assignRestaurants = async (ids: string[]) => {
     setShowAssign(false);
     if (!ids.length) return;
-    run(async () => { for (const rid of ids) await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); });
+    setMErr(""); setBusy(true);
+    let done = 0;
+    let failure = "";
+    for (const rid of ids) {
+      try { await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); done++; }
+      catch (e: any) { failure = e?.message || "Action failed."; break; }
+    }
+    setBusy(false);
+    onChanged();                        // ALWAYS - the pane must show what really happened
+    if (failure) setMErr(ids.length === 1 ? failure : `Attached ${done} of ${ids.length} - ${failure}`);
   };
   // Make-primary → hand this restaurant's PRIMARY badge to this owner. Deliberately
   // spells out that it changes no access (every permission is membership-based) so the
@@ -871,7 +889,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="New owner" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         {reveal ? (
-          <div style={{ ...card, pointerEvents: "auto", width: "min(96vw, 440px)", display: "grid", gap: 12 }}>
+          <div style={{ ...card, pointerEvents: "auto", width: "min(100%, 440px)", display: "grid", gap: 12 }}>
             <div style={{ fontSize: 16, fontWeight: 800 }}>Owner “{reveal.name}” created</div>
             <div style={{ fontSize: 12.5, color: "#86efac" }}>Password — copy it now, it won&apos;t be shown again:</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -882,7 +900,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
             <button style={btn("#22c55e")} onClick={() => onCreated(reveal.id)}>Done</button>
           </div>
         ) : (
-          <form onSubmit={create} style={{ ...card, pointerEvents: "auto", width: "min(96vw, 440px)", maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 13 }}>
+          <form onSubmit={create} style={{ ...card, pointerEvents: "auto", width: "min(100%, 440px)", maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 13 }}>
             <div style={{ fontSize: 16, fontWeight: 800 }}>New owner</div>
             {err ? <div className="hue-ink" style={{ fontSize: 12.5, ["--hue" as string]: "#fca5a5" }}>{err}</div> : null}
             <label style={label}>Name / username <span style={{ color: "var(--muted)" }}>· this is their login</span>

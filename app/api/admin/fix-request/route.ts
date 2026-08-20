@@ -124,7 +124,12 @@ async function postHandler(req: NextRequest) {
   if (rid && !UUID.test(rid)) rid = null;
 
   const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, mode, summary: summary.slice(0, 300), note: note || null, context, action_id: actionId, err_key: errKey }).select("id").maybeSingle();
-  if (ins.error) return adminFail("the repair request", ins.error, { action: "load" });
+  // A FAILED WRITE MUST NOT SAY "couldn't load" (sweep #6, T19). adminFail's `action` decides which
+  // promise the sentence makes, and "load" makes none about the data: the admin was told the request
+  // could not be READ when in fact it had not been FILED, so there was nothing to tell him whether
+  // to press the button again. "save" answers "nothing was changed — please try again", which is
+  // both true here and the thing he needs to know.
+  if (ins.error) return adminFail("the repair request", ins.error, { action: "save" });
   await logAction("admin", "fix_request", { restaurant_id: rid ?? undefined, level: "info", detail: summary.slice(0, 120) });
 
   // Tell the panel where this request lands so the click message is honest: how many problems

@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +39,12 @@ export async function GET(req: NextRequest) {
     // Surface a failed read — otherwise a broken query shows an EMPTY customer log ("no
     // customers") with a 200 instead of an error the page can retry (audit).
     const cErr = members.error || blocklist.error;
-    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+    // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
+    // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
+    // right for a developer, useless on the screen the owner runs his platform from. adminFail
+    // keeps the raw text where it is actually useful (the response `detail` and the server log)
+    // and gives the screen a sentence that names the thing and says whether anything changed.
+    if (cErr) return adminFail("the customer log", cErr, { action: "load" });
     const memberRows = members.data ?? [];
     const blockRows = blocklist.data ?? [];
 
@@ -45,15 +52,26 @@ export async function GET(req: NextRequest) {
     // ids). The old code took the 400 most-recent rows platform-wide, so a member whose orders
     // fell outside that window showed fewer orders than reality ("2" when they had 5) on a busy
     // multi-restaurant day. No `total` — the admin counts orders, never sees per-order money.
+    //
+    // AND THE SAME BUG WAS STILL HERE, one layer down (sweep #6, T19). Scoping by member id fixed
+    // WHICH rows are asked for; it did nothing about HOW MANY come back. Neither read stated a
+    // ceiling, so both stopped at PostgREST's own cap — and 120 members on a busy day is well past
+    // it. The rows that fell off the end were simply not counted, which is the very symptom the
+    // note above says was fixed: a guest showing fewer orders than they really made, on the screen
+    // the admin uses to answer "who did what". A hidden ceiling gives a wrong number silently; an
+    // explicit one that is far above anything real gives the right one. 120 members × 60 orders is
+    // a heavier day than either table has ever seen.
+    const MEMBER_ROW_CAP = 8000;
     const memberIds = memberRows.map((m) => m.id).filter(Boolean);
     const [orders, calls] = memberIds.length
       ? await Promise.all([
-          sb.from("orders").select("member_id, created_at").in("member_id", memberIds),
-          sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds),
+          sb.from("orders").select("member_id, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
+          sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
         ])
       : [{ data: [], error: null }, { data: [], error: null }];
+    // Same rule as the reads above: plain words on the screen, the raw text in the log.
     if (orders.error || calls.error)
-      return NextResponse.json({ error: (orders.error || calls.error)!.message }, { status: 500 });
+      return adminFail("the customer log", (orders.error || calls.error)!, { action: "load" });
 
     // Stamp each row with its restaurant name so the admin (who sees every restaurant at
     // once) can tell tenants apart instead of one indistinguishable jumble.
@@ -63,7 +81,7 @@ export async function GET(req: NextRequest) {
     ].filter(Boolean))) as string[];
     const nameById = new Map<string, string>();
     if (rids.length) {
-      const rest = await sb.from("restaurants").select("id, name").in("id", rids);
+      const rest = await sb.from("restaurants").select("id, name").in("id", rids).limit(2000);
       for (const x of rest.data ?? []) nameById.set(x.id, x.name);
     }
     const tag = <T extends { restaurant_id?: string | null }>(r: T) =>

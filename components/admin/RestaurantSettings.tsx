@@ -156,8 +156,27 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
 
   const load = useCallback(async () => {
     setLoadErr(false);
+    // ── ONE RETRY BEFORE LOCKING THE FORM (T16 sweep, 2026-08-19) ──────────────────────────
+    // A BRAND-NEW restaurant has no table QR codes yet, and this load is what mints them. The
+    // admin route reads the existing codes, works out which are missing and INSERTS them — so two
+    // of these cards loading at the same moment (the Access screen mounts one per open row, and it
+    // remembers which rows were open) both try to insert tables 1..N, the loser hits the unique
+    // index and the route answers 500 "couldn't mint unique codes — try again". Reproduced on a
+    // freshly created restaurant: one load 200, the other 500, and the very next load 200.
+    //
+    // That 500 landed here as `loadErr`, which locks the whole card behind "Couldn't load this
+    // restaurant's settings" with a Retry button — on the screen an admin opens seconds after
+    // creating a restaurant. Retrying once, quietly, is what the situation actually needs: the
+    // codes exist by then. If the second attempt fails too the card still locks and still says so,
+    // so a real outage is not hidden. The route's insert should become an upsert as well — that is
+    // a one-line change in app/api/admin/restaurants/settings/route.ts and is HANDOFF H3.
+    const fetchOnce = async () => (await fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
     try {
-      const j = await (await fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
+      let j = await fetchOnce();
+      if (j?.error) {
+        await new Promise((r) => setTimeout(r, 700));
+        j = await fetchOnce();
+      }
       if (j.error || !j.settings) { setLoadErr(true); return; }
       const s: Draft = { ...j.settings };
       // Open PRE-FILLED with what the bill prints right now (the manager form's rule):
@@ -188,9 +207,32 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   }, [restaurant.id]);
 
   const set = (k: string, v: unknown) => setDraft((d) => ({ ...d, [k]: v }));
+  const [autoSaved, setAutoSaved] = useState<string | null>(null);
+  // KEYS THIS CARD SAVES BY ITSELF — "busy" while a write is out, "done" once it has landed (or
+  // been refused and put back). Two jobs, one record:
+  //   • the line under the control reads Saving… / ✓ Saved / Saves on its own from it, and
+  //   • dirtyKeys IGNORES every key in it, so the shared Save bar can never appear for a control
+  //     that saves itself. That is the whole point of "there shouldn't be a button" (owner,
+  //     2026-08-20): while the write was in flight the draft differed from the stored value, the
+  //     bar counted it as unsaved, and a Save button flashed up next to a control that needed no
+  //     pressing. A refusal reverts the draft, so nothing is lost by leaving them out for good.
+  const [selfSaving, setSelfSaving] = useState<Record<string, "busy" | "done">>({});
+  // The three-state line that sits under every self-saving control. ONE place, so a select, a
+  // switch and a radio row can never end up telling the admin three different stories.
+  const savedHint = (k: string) => {
+    const saving = selfSaving[k] === "busy";
+    const done = autoSaved === k;
+    return (
+      <span aria-live="polite" style={{ ...hintStyle, display: "block", fontWeight: done || saving ? 700 : 400,
+        color: done ? "var(--adm-ok, #16a34a)" : saving ? "var(--muted)" : "var(--muted)" }}>
+        {done ? "✓ Saved" : saving ? "Saving…" : "Saves on its own"}
+      </span>
+    );
+  };
   const dirtyKeys = useMemo(
-    () => KEYS.filter((k) => JSON.stringify(draft[k] ?? null) !== JSON.stringify(base[k] ?? null)),
-    [draft, base],
+    // …minus anything a self-saving control owns (see selfSaving): those never want a button.
+    () => KEYS.filter((k) => !selfSaving[k] && JSON.stringify(draft[k] ?? null) !== JSON.stringify(base[k] ?? null)),
+    [draft, base, selfSaving],
   );
   const dirty = loadOk && dirtyKeys.length > 0;
 
@@ -208,7 +250,13 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       await load(); // re-read so table-count changes mint the new tables' QR codes too
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
-  const discard = () => { setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null); };
+  const discard = () => {
+    // Cancel anything the auto-save still owes the server. Without this, Discard reverted the
+    // screen and a pending debounce then wrote the discarded value a moment later — so pressing
+    // Discard could put a rejected GST mode back on a real restaurant (T16 sweep, 2026-08-19).
+    cancelPending();
+    setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null);
+  };
 
   // Publish this panel's state to the ONE bar. Keyed by the sections it owns, so mounting the
   // same section twice can't register twice.
@@ -219,7 +267,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   });
 
   // ── AUTO-SAVE, for discrete controls only (owner, 2026-07-30: "I change value to 8 and it
-  // doesn't auto save"). Debounced so a drag or fast typing writes ONCE, not per keystroke.
+  // doesn't auto save").
   //
   // Deliberately NOT the whole form. A text field would save half-typed rubbish (a partial
   // GSTIN, an incomplete bill footer), and "Number of tables" is outright dangerous to
@@ -227,31 +275,104 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // fire the section backfill. Those keep the explicit Save bar. Only bounded values with no
   // data consequence are auto-saved — the same "saves instantly per change" habit the Access
   // per-person selects already use.
-  const autoTimer = useRef<number | null>(null);
-  const [autoSaved, setAutoSaved] = useState<string | null>(null);
-  useEffect(() => () => { if (autoTimer.current) window.clearTimeout(autoTimer.current); }, []);
+  //
+  // ── THREE WAYS "SAVES ON ITS OWN" USED TO BE A LIE (T16 sweep, 2026-08-19) ─────────────────
+  // Every one of these controls is a select, a radio or a switch, so it fires ONCE per decision —
+  // yet all of them went through a single 600 ms debounce built for a slider that no longer
+  // exists. That cost three real losses:
+  //
+  //   1. LEAVING THE ROW THREW THE VALUE AWAY. This component is mounted by the Access screen
+  //      inside a dropdown row, and collapsing that row (or opening another) UNMOUNTS it. The old
+  //      unmount cleanup cleared the pending timer, and unregisterSave removed the panel from the
+  //      save bar in the same breath — so picking "Tables per row: 6" and closing the row left no
+  //      write, no Save bar and no message. The pick vanished in silence.
+  //   2. TWO PICKS INSIDE 600 ms LOST THE FIRST. One shared timer meant the second decision
+  //      cancelled the first one's write.
+  //   3. DISCARD WAS OVERTAKEN. Pressing Discard reverted the screen and the pending timer then
+  //      wrote the discarded value anyway.
+  //
+  // So: a discrete pick POSTS IMMEDIATELY (autoSaveNow), the debounce survives per KEY for the
+  // typed-number path that genuinely needs it, and a pending write is FLUSHED on unmount rather
+  // than dropped. `keepalive` lets that last flush outlive the component.
+  const alive = useRef(true);
+  const pending = useRef(new Map<string, { v: unknown; timer: number }>());
+  const cancelPending = () => {
+    for (const { timer } of pending.current.values()) window.clearTimeout(timer);
+    pending.current.clear();
+  };
+  const postSetting = useCallback((k: string, v: unknown, keepalive = false) => fetch("/api/admin/restaurants/settings", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ restaurant_id: restaurant.id, [k]: v }), keepalive,
+  }), [restaurant.id]);
+  useEffect(() => {
+    // SET IT BACK TO TRUE ON EVERY MOUNT, not just false on unmount (T16 round 2, 2026-08-20).
+    //
+    // `alive` is a ref, so it SURVIVES a remount — and React mounts, unmounts and remounts every
+    // component in development. The first mount's cleanup therefore left it false for good, and
+    // from then on every guarded state update was skipped: the write still went to the server, but
+    // "Saving…", "✓ Saved" and the put-it-back-on-a-refusal all did nothing, and the Save bar had
+    // nothing to clear it. Measured: `selfSaving` stayed {} through every render. A ref used as a
+    // liveness flag has to be re-armed here or it is a one-shot.
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      // FLUSH, don't drop: whatever the debounce still owes goes to the server now.
+      for (const [k, { v, timer }] of pending.current) { window.clearTimeout(timer); void postSetting(k, v, true).catch(() => {}); }
+      pending.current.clear();
+    };
+  }, [postSetting]);
+  // ── THE WORD UNDER THE CONTROL IS THE ONLY REPORT, SO IT MUST BE TRUE (owner, 2026-08-20:
+  // "there shouldn't be a button also… it should be written that this has been saved, and that
+  // return will only come when it is actually been saved").
+  //
+  // So there are exactly three states and no Save button anywhere near these controls:
+  //   • "Saves on its own"  — nothing in flight
+  //   • "Saving…"           — the request is out; nothing is claimed yet
+  //   • "✓ Saved"           — the SERVER answered ok, and the value shown is the value it stored
+  //
+  // And a REFUSAL puts the control back to what is really stored, rather than leaving the new
+  // value on screen for a Save bar to offer later. That is what makes "no button" honest: the
+  // screen can never sit there showing a number the restaurant is not on.
+  const commitSetting = async (k: string, v: unknown) => {
+    pending.current.delete(k);
+    if (alive.current) { setErr(null); setSelfSaving((s) => ({ ...s, [k]: "busy" })); }
+    try {
+      const r = await postSetting(k, v);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      // Trust the SERVER's value, not ours — it clamps (99 → 12), so the field must show
+      // what was really stored rather than what was typed.
+      const stored = d.settings && k in d.settings ? d.settings[k] : v;
+      if (!alive.current) return;
+      setDraft((x) => ({ ...x, [k]: stored }));
+      setBase((b) => ({ ...b, [k]: stored })); // keeps the Save bar from lighting up for it
+      setAutoSaved(k);
+      window.setTimeout(() => setAutoSaved((cur) => (cur === k ? null : cur)), 1800);
+    } catch (e) {
+      if (!alive.current) return;
+      // Put the control back on the stored value — no half-saved screen, and nothing for a
+      // button to pick up later.
+      setDraft((x) => ({ ...x, [k]: base[k] }));
+      setErr((e instanceof Error ? e.message : String(e)) + " — the setting was put back.");
+    } finally {
+      if (alive.current) setSelfSaving((s) => ({ ...s, [k]: "done" }));
+    }
+  };
+  // A select / radio / switch: one decision, one write, no waiting.
+  const autoSaveNow = (k: string, v: unknown) => {
+    const p = pending.current.get(k);
+    if (p) { window.clearTimeout(p.timer); pending.current.delete(k); }
+    void commitSetting(k, v);
+  };
+  // A key claimed here is out of the Save bar's hands from now on, in BOTH paths — the debounced
+  // one has to claim it up front too, or the bar appears for the 600 ms it is waiting.
+  // A typed number: debounced PER KEY so a second field can't cancel the first one's write.
   const autoSave = (k: string, v: unknown) => {
-    if (autoTimer.current) window.clearTimeout(autoTimer.current);
-    autoTimer.current = window.setTimeout(async () => {
-      setErr(null);
-      try {
-        const r = await fetch("/api/admin/restaurants/settings", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ restaurant_id: restaurant.id, [k]: v }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error || "Couldn't save.");
-        // Trust the SERVER's value, not ours — it clamps (99 → 12), so the field must show
-        // what was really stored rather than what was typed.
-        const stored = d.settings && k in d.settings ? d.settings[k] : v;
-        setDraft((x) => ({ ...x, [k]: stored }));
-        setBase((b) => ({ ...b, [k]: stored })); // keeps the Save bar from lighting up for it
-        setAutoSaved(k);
-        window.setTimeout(() => setAutoSaved((cur) => (cur === k ? null : cur)), 1800);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-      }
-    }, 600);
+    const p = pending.current.get(k);
+    if (p) window.clearTimeout(p.timer);
+    setSelfSaving((s) => ({ ...s, [k]: "busy" }));
+    const timer = window.setTimeout(() => { void commitSetting(k, v); }, 600);
+    pending.current.set(k, { v, timer });
   };
 
   const toggleKot = async () => {
@@ -473,7 +594,8 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           const n = Number(raw);
           const fixed = raw === "" || !Number.isFinite(n) ? Number(base[k]) : Math.min(Math.max(n, lo), hi);
           if (Number.isFinite(fixed) && String(fixed) !== raw) set(k, fixed);
-          if (Number.isFinite(fixed) && fixed !== Number(base[k])) autoSave(k, fixed);
+          // Blur means the value is settled, so it goes now rather than on the keystroke debounce.
+          if (Number.isFinite(fixed) && fixed !== Number(base[k])) autoSaveNow(k, fixed);
         } : undefined}
         style={{ ...inputStyle, marginTop: 4 }}
       />
@@ -481,11 +603,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           together as one sentence — "Fewer = bigger tiles.Saves on its own" (spotted on the
           moved Tables card, 2026-08-01). display:block puts each on its own line. */}
       {opts.hint && <span className="adm-muted" style={{ ...hintStyle, display: "block" }}>{opts.hint}</span>}
-      {opts.auto && (
-        <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
-          {autoSaved === k ? "✓ Saved" : "Saves on its own"}
-        </span>
-      )}
+      {opts.auto && savedHint(k)}
     </label>
   );
   // pickNumber: choose a whole number from a list instead of typing one (owner, 2026-08-02:
@@ -506,7 +624,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         {label}
         <select
           value={known ? String(cur) : ""} disabled={!loadOk || busy || !known}
-          onChange={(e) => { const n = Number(e.target.value); if (!Number.isFinite(n)) return; set(k, n); autoSave(k, n); }}
+          onChange={(e) => { const n = Number(e.target.value); if (!Number.isFinite(n)) return; set(k, n); autoSaveNow(k, n); }}
           style={{ ...inputStyle, marginTop: 4 }}
         >
           {!known && <option value="">—</option>}
@@ -514,9 +632,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
-        <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
-          {autoSaved === k ? "✓ Saved" : "Saves on its own"}
-        </span>
+        {savedHint(k)}
       </label>
     );
   };
@@ -525,7 +641,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // customer switches below keep that behaviour, so no existing call site changes.
   const boolToggle = (label: string, k: string, on: boolean, opts: { auto?: boolean } = {}) => (
     <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
-      onClick={() => { set(k, !on); if (opts.auto) autoSave(k, !on); }}
+      onClick={() => { set(k, !on); if (opts.auto) autoSaveNow(k, !on); }}
       title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
       <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
     </button>
@@ -545,16 +661,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         }}>
           <input type="radio" name={`${k}-${restaurant.id}`} checked={cur === o.value} disabled={!loadOk || busy}
             style={{ marginTop: 3 }}
-            onChange={() => { set(k, o.value); autoSave(k, o.value); }} />
+            onChange={() => { set(k, o.value); autoSaveNow(k, o.value); }} />
           <span>
             <b style={{ fontSize: 13 }}>{o.label}</b>
             <span className="adm-muted" style={{ display: "block", fontSize: 11.5, lineHeight: 1.45 }}>{o.ex}</span>
           </span>
         </label>
       ))}
-      <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
-        {autoSaved === k ? "✓ Saved" : "Saves on its own"}
-      </span>
+      {savedHint(k)}
     </div>
   );
 
@@ -1086,11 +1200,19 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       {show("tables") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Table setting</h2>
+        {/* WHAT A RENAME REALLY DOES (T16 sweep, 2026-08-19). This said "bills & QR codes keep the
+            number", which is the opposite of the owner's own rule of 2026-07-29 — Aangan renamed
+            its ten tables to A1–B2 and asked for the prints to follow, and since PRs #547/#548 the
+            NAME wins outright on paper ("A1", no "(T1)" tail). Checked on this page's own bill
+            preview: with table 5 named, the bill printed "Table zzt16 Banquet", not "Table 5". So
+            the card was telling the admin the reverse of what the printer does. The QR half WAS
+            right — a rename never touches a table's code — so only the bill half changes. */}
         <p className="hint">
           How many tables the restaurant has, each table&apos;s <b>name</b> (optional — e.g. the last table as
-          &ldquo;Banquet&rdquo;; tiles and table views show it, while bills &amp; QR codes keep the number) and how many
-          people can sit there (nothing set = 4). Admin-only: the manager can rename tables and set seats, but only you
-          can add or remove tables.
+          &ldquo;Banquet&rdquo;) and how many people can sit there (nothing set = 4). A name shows on the floor tiles
+          and table views, and it is <b>what the bill and the kitchen ticket print</b> — so a waiter carries paper that
+          matches the floor. Its <b>QR code keeps the number</b> and never changes. Admin-only: the manager can rename
+          tables and set seats, but only you can add or remove tables.
         </p>
         <div style={{ width: 200, marginBottom: 12 }}>
           {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
@@ -1100,7 +1222,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             <div key={t} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, background: "var(--bg)", border: "var(--border)" }}>
               <span style={{ fontWeight: 700, fontSize: 13, minWidth: 28 }}>T{t}</span>
               <input type="text" maxLength={24} value={names[String(t)] ?? ""} placeholder="Name" disabled={!loadOk || busy}
-                title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
+                title='A display name for this table (e.g. "Banquet") — it prints on the bill and the kitchen ticket; the QR code keeps the number'
                 onChange={(e) => setName(t, e.target.value)}
                 style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "5px 8px" }} />
               <input type="number" min={1} max={30} value={String(seats[String(t)] ?? 4)} title="Seats" disabled={!loadOk || busy}

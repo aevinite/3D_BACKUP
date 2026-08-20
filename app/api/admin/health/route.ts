@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_admin_table_estimates"),
     // Live restaurants only (bug H4/#6, 2026-07-06): binned restaurants must not be
     // counted as "suspended". With deleted_at excluded, suspended = live-but-inactive.
-    sb.from("restaurants").select("id, active").is("deleted_at", null),
+    sb.from("restaurants").select("id, active").is("deleted_at", null).limit(2000),
     // Bounded read — this page auto-refreshes every 60s, so cap it so it can't grow
     // into a full-table pull as staff count climbs across all tenants (egress guard).
     sb.from("staff_users").select("id, last_seen_at").eq("active", true).limit(5000),

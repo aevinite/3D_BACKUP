@@ -62,6 +62,7 @@
     "verify:fix-survives": "node scripts/verify-fix-survives.mjs",
     "verify:guest-recovery": "node scripts/verify-guest-recovery.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
+    "verify:admin-restaurants": "node scripts/verify-admin-restaurants.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "verify:owner-money": "node scripts/verify-owner-money-screens.mjs",
     "check:current": "node scripts/check-folder-current.mjs",
@@ -136,6 +137,7 @@
     "verify:parcel-home": "node scripts/verify-parcel-home.mjs",
     "verify:floor-per-row": "node scripts/verify-floor-per-row.mjs",
     "verify:read-guards": "node scripts/verify-read-guards.mjs",
+    "verify:admin-api-a": "node scripts/verify-admin-api-a.mjs",
     "verify:panel-api": "node scripts/verify-panel-api-guards.mjs",
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
     "read-timings": "node scripts/read-timings.mjs",
@@ -144,6 +146,7 @@
     "db:replace-demo-history": "node scripts/reset-demo-history.mjs",
     "db:vacuum-rebuild": "node scripts/db-maintain.mjs",
     "verify:print-paper": "node scripts/verify-billdoc-paper.mjs",
+    "verify:admin-money": "node scripts/verify-admin-money.mjs",
     "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs"
   },
   "dependencies": {
