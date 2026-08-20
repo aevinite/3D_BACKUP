@@ -31,6 +31,11 @@ export type BillOrder = {
   total: number | null;
   discount: number | null;
   tax_rate: number | null;       // the rate THIS order was charged at (mig 284) — see netOf()
+  // THE net of this order, computed by the DATABASE (mig 310, GENERATED ALWAYS AS
+  // total − disc_gross STORED). Optional on the type only because a caller may not have selected
+  // it; when it is here, netOf() returns it and does no arithmetic of its own. See netOf().
+  net_amount?: number | null;
+  disc_gross?: number | null;    // discount × (1 + the rate this order was charged at), mig 301
   status: string | null;         // received/preparing/served/cancelled
   payment_status: string | null; // pending/paid
   payment_method: string | null;
@@ -65,9 +70,28 @@ export type BillSession = {
 // missing, so its figures being higher than every bill, Z-report line and dashboard number
 // undermined the oversight it exists for. `BillOrder.discount` was already declared and unread.
 //
-// The rate comes from the order's own `tax_rate` (mig 284) so a bill is never re-priced by a rate
-// changed later; with no stamped rate we fall back to the plain `total − discount`, which is what
-// those pre-284 bills charged.
+// THE LEDGER NO LONGER DOES THE ARITHMETIC AT ALL (2026-08-20). The paragraph above describes the
+// rule correctly and then got the FALLBACK wrong, and the fallback is not rare: `orders.tax_rate`
+// is NULL on every row written before mig 284. This code read "no stamped rate" as "no tax", i.e.
+// rate 0, and returned the plain `total − discount`. The database reads it as "the rate this
+// restaurant is configured at", which is what those bills were actually charged — that is what
+// `lfh_fill_disc_gross` (mig 301) puts in `orders.disc_gross`, and what
+// `orders.net_amount` (mig 310, GENERATED ALWAYS AS total − disc_gross STORED) therefore holds.
+//
+// One real bill, order ae738fc4 on Little French House: subtotal 500, tax 25, total 525, discount
+// 50, tax_rate NULL, configured rate 5%. The guest's paper prints tax on `subtotal − discount`
+// (public/panels/billdoc.js → billRows(): `taxable = subtotal − discount`), so the bill reads
+// 450 + 22.50 = ₹472.50, and `net_amount` says 472.50. This function said ₹475.00. Eleven orders
+// on the dev database, ₹80 of overstatement — on the ONE screen whose comment two paragraphs up
+// says that figures higher than the bill "undermined the oversight it exists for".
+//
+// So the rule mig 310 wrote down for the database — "EVERY money reader sums THIS column, so no
+// two screens can compute revenue differently" — now holds for the last reader outside it. The
+// arithmetic below survives ONLY as the answer for a caller that did not select `net_amount`
+// (there is none in this repo, and `verify:one-number` fails if one appears); it can never be
+// reached for a row the database wrote, because `net_amount` is generated and NOT NULL for all
+// 32,274 of them. Measured before the switch: zero rows where the stored net is HIGHER than the
+// old arithmetic, so this can only ever bring an overstated figure down.
 //
 // EXPORTED because it existed TWICE (2026-08-11, T7 improvement I1): `app/api/admin/bills/route.ts`
 // carried its own copy called `netAmount`, used for the "amount removed" recorded in the permanent
@@ -76,7 +100,13 @@ export type BillSession = {
 // charged at" were every one of them consolidated after a copy went its own way. The ledger's
 // figures and the audit's record of what was taken out are the last pair you want disagreeing.
 export const netOf = (o: BillOrder) => {
+  // ONE DEFINITION, AND IT IS THE DATABASE'S. `net_amount` is generated, so it is present and
+  // correct for every stored row; `disc_gross` is the same rule one step back and is used when a
+  // caller selected it but not the generated column.
+  if (o.net_amount != null && Number.isFinite(Number(o.net_amount))) return Number(o.net_amount);
   const total = Number(o.total) || 0;
+  if (o.disc_gross != null && Number.isFinite(Number(o.disc_gross)))
+    return Math.round((total - Number(o.disc_gross)) * 100) / 100;
   const disc = Number(o.discount) || 0;
   if (disc <= 0) return total;
   const rate = Number(o.tax_rate) > 0 ? Number(o.tax_rate) : 0;

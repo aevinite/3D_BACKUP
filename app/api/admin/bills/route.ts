@@ -42,7 +42,12 @@ export const dynamic = "force-dynamic";
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 const SESSION_COLS = "id, status, bill_no, invoice_no, invoice_voided, table_number, restaurant_id, opened_at, closed_at, created_at, deleted_at, deleted_by, delete_reason";
-const ORDER_COLS = "id, session_id, total, discount, tax_rate, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
+// `net_amount` (mig 310) and `disc_gross` (mig 301) are what make netOf() return the database's
+// own net instead of working one out here — see the long note over netOf(). Selecting them is not
+// optional: without net_amount every discounted bill whose `tax_rate` is NULL (i.e. every bill
+// written before mig 284) reads HIGH on the ledger and in the permanent "amount removed" record.
+// `verify:one-number` fails if this list loses either column.
+const ORDER_COLS = "id, session_id, total, discount, tax_rate, disc_gross, net_amount, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
 // The ceiling on "the orders of ONE bill". The trail read above already states 500 with the reason
 // ("a bill of 400 KOTs is already refused elsewhere as implausible"); the delete and restore paths
 // read the same set with no ceiling at all, which on a bill past PostgREST's own cap would have
@@ -52,8 +57,13 @@ const BILL_ORDER_CAP = 500;
 // What an order was actually worth, net of its discount. This was a SECOND COPY of
 // lib/billLedger.ts's netOf() (T7 improvement I1) — the ledger's amounts and the permanent audit's
 // "amount removed" are computed from the same rule now, so they cannot drift apart.
-const netAmount = (o: { total?: number | null; discount?: number | null; tax_rate?: number | null }) =>
-  netOf(o as BillOrder);
+const netAmount = (o: MoneyCols) => netOf(o as BillOrder);
+// The money columns every path on this route reads, in ONE place. `net_amount` is the whole point
+// (see ORDER_COLS above and netOf()'s note): the delete and restore paths below write this figure
+// into `deletion_audit.amount` — the permanent record of what was taken out of the books, which
+// nothing prunes — so a net computed a second way here would outlive the screen that showed it.
+const MONEY_COLS = "id, total, discount, tax_rate, disc_gross, net_amount";
+type MoneyCols = { id?: string; total?: number | null; discount?: number | null; tax_rate?: number | null; disc_gross?: number | null; net_amount?: number | null };
 
 async function requireAdmin(req: NextRequest) {
   return tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -235,7 +245,7 @@ async function postImpl(req: NextRequest) {
     // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
     if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
-    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP)).data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
     // …and into the Audit, the one place a person looks for "what was removed and why". The
@@ -265,7 +275,7 @@ async function postImpl(req: NextRequest) {
   if (action === "restore") {
     // Read the money BEFORE the restore clears the tombstone, so the audit row can say what came
     // back — the same columns and the same netOf() the delete recorded on the way out.
-    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)).data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     // restoreOrders() now THROWS when the database refuses either write (T7 finding F3 — it used to
     // report the row count it intended and leave the bill deleted). Caught here so the admin gets a
