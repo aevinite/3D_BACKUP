@@ -91,9 +91,15 @@ const parseEnv = (t) =>
 const envFile = stack === "av" ? ".env.AV.live" : ".env.local";
 // Keys live only in the MAIN checkout — a git worktree (how live-fix sessions work) has none,
 // so fall back to the main worktree's copy before giving up.
+// stdio silences git's OWN stderr. This probe is EXPECTED to fail whenever the script runs from
+// outside a checkout — which is the documented `/tmp/rfr.mjs` fallback in live-fix-prompt.md — and
+// the catch below already handles that. Letting git print `fatal: not a git repository` first put
+// a red-looking line at the top of a Fix-NOW terminal the owner is watching, above a run that then
+// worked perfectly. A message that says "fatal" about something deliberately optional is a lie.
 const mainCheckout = () => {
   try {
-    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root })
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: root, stdio: ["ignore", "pipe", "ignore"] })
       .toString().trim();
     return dirname(common); // .../repo/.git → .../repo
   } catch { return null; }
