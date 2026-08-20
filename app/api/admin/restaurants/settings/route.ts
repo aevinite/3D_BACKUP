@@ -204,15 +204,44 @@ async function ensureCodes(rid: string, count: number): Promise<Record<string, s
   const missing: { restaurant_id: string; table_number: number; code: string }[] = [];
   for (let t = 1; t <= count; t++) if (!map[String(t)]) missing.push({ restaurant_id: rid, table_number: t, code: newCode() });
   if (missing.length) {
-    // Global-unique code column: on the (astronomically rare) collision, re-mint and retry.
+    // TWO different unique indexes can refuse this write, and they need OPPOSITE answers (sweep
+    // T16, handoff H3 — this is the root cause of the "Couldn't load this restaurant's settings —
+    // editing is locked" card that appeared seconds after creating a restaurant):
+    //
+    //   · idx_table_qr_codes_code — the GLOBAL code column. A collision here is astronomically
+    //     rare and genuinely ours to fix: re-mint and try again.
+    //   · table_qr_codes_pkey (restaurant_id, table_number) — SOMEBODY ELSE ALREADY MINTED THIS
+    //     TABLE. This is a race, not a fault: the first load of a new restaurant is what creates
+    //     its codes, and two cards opening together both compute the same missing list.
+    //
+    // The old code treated both the same way, so a pkey clash re-minted the CODE and retried the
+    // very same table numbers — a conflict re-minting can never resolve. Three attempts later it
+    // gave up with "couldn't mint unique codes", and the card locked itself over a row that
+    // already existed. Now the pkey case is IGNORED at the database (ignoreDuplicates), so the
+    // loser of the race writes nothing and takes the winner's codes.
+    let landed: { table_number: number; code: string }[] = [];
     for (let attempt = 0; attempt < 3; attempt++) {
-      const ins = await sb.from("table_qr_codes").insert(missing);
-      if (!ins.error) break;
+      const ins = await sb.from("table_qr_codes")
+        .upsert(missing, { onConflict: "restaurant_id,table_number", ignoreDuplicates: true })
+        .select("table_number, code");
+      if (!ins.error) { landed = (ins.data as typeof landed) || []; break; }
+      // onConflict names the pkey only, so a code collision still surfaces here — re-mint it.
       if (!/duplicate|unique/i.test(ins.error.message)) return { error: ins.error.message };
       for (const m of missing) m.code = newCode();
       if (attempt === 2) return { error: "couldn't mint unique codes — try again" };
     }
-    for (const m of missing) map[String(m.table_number)] = m.code;
+    // Only the rows WE actually inserted come back, so never assume our own codes won.
+    for (const r of landed) map[String(r.table_number)] = r.code;
+    const stillMissing = [];
+    for (let t = 1; t <= count; t++) if (!map[String(t)]) stillMissing.push(t);
+    if (stillMissing.length) {
+      // The other request created these. One scoped read of exactly the rows we lack — never a
+      // re-read of the whole table (docs/SAAS-EFFICIENCY-PLAYBOOK.md).
+      const theirs = await sb.from("table_qr_codes").select("table_number, code")
+        .eq("restaurant_id", rid).in("table_number", stillMissing).limit(500);
+      if (theirs.error) return { error: theirs.error.message };
+      for (const r of theirs.data || []) map[String(r.table_number)] = r.code;
+    }
   }
   const scoped: Record<string, string> = {};
   for (let t = 1; t <= count; t++) if (map[String(t)]) scoped[String(t)] = map[String(t)];
