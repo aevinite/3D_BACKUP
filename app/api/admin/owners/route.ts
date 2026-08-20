@@ -107,9 +107,49 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── ?deleted=1 → the RECYCLE BIN: only binned owners, with the retention
-  // countdown + whether they're yet eligible to purge. Kept separate from the
-  // main list so a binned owner never leaks back into the live table.
+  // ── ?bin_detail=<owner_id> — WHAT IS ATTACHED TO A BINNED OWNER (owner, 2026-08-20) ──────────
+  // *"when you click owner and resrurant in recycle bin you could able to see inside it my clicking
+  // iindiviual able to vivit there panel too"*. A binned owner's row said only how many restaurants
+  // were "still linked". Which ones? Are any of them live and serving guests right now? That
+  // matters before a permanent removal, because purging the owner hands each restaurant to a
+  // co-owner or to "no owner" — and this is the list of restaurants that happens to.
+  //
+  // EGRESS: two scoped reads with column lists and a cap, run once when he opens the row.
+  {
+    const detailId = new URL(req.url).searchParams.get("bin_detail");
+    if (detailId) {
+      if (!UUID.test(detailId)) return bad("That user isn't an owner.", 404);
+      const oQ = await sb.from("staff_users").select("id, username, name, role, active, deleted_at, deleted_by, delete_reason, created_at, last_seen_at").eq("id", detailId).limit(1);
+      if (oQ.error) return adminFail("what is attached to this owner", oQ.error, { action: "load" });
+      const o = oQ.data?.[0];
+      if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
+      const linksQ = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", detailId).limit(200);
+      if (linksQ.error) return adminFail("this owner's restaurants", linksQ.error, { action: "load" });
+      const rids = (linksQ.data || []).map((l) => l.restaurant_id).filter(Boolean);
+      let restaurants: { id: string; name: string; slug: string; active: boolean; binned: boolean; purged: boolean; primary: boolean }[] = [];
+      if (rids.length) {
+        const rQ = await sb.from("restaurants").select("id, name, slug, active, deleted_at, purged_at, owner_user_id").in("id", rids).order("name").limit(200);
+        if (rQ.error) return adminFail("this owner's restaurants", rQ.error, { action: "load" });
+        restaurants = (rQ.data || []).map((r) => ({
+          id: r.id, name: r.name, slug: r.slug, active: r.active === true,
+          binned: !!r.deleted_at, purged: !!r.purged_at,
+          // ★ primary is DISPLAY + tie-break only — real access is the restaurant_owners row above.
+          primary: r.owner_user_id === detailId,
+        }));
+      }
+      return ok({
+        owner: {
+          id: o.id, username: o.username, name: o.name || o.username, active: o.active === true,
+          deletedAt: o.deleted_at, deletedBy: o.deleted_by || null, reason: o.delete_reason || null,
+          createdAt: o.created_at || null, lastSeenAt: o.last_seen_at || null,
+        },
+        restaurants,
+      });
+    }
+  }
+
+  // ── ?deleted=1 → the RECYCLE BIN: only binned owners, with how long each has sat there.
+  // Kept separate from the main list so a binned owner never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {
     const [binQ, linksQ] = await Promise.all([
       sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")

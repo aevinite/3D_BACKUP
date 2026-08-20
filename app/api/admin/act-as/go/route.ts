@@ -42,12 +42,27 @@ export async function GET(req: NextRequest) {
   if (!UUID.test(rid) || !ALLOWED_PATHS.has(to))
     return NextResponse.json({ error: "rid and a known panel path required" }, { status: 400 });
 
-  const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+  // ── LOOKING INSIDE A BINNED RESTAURANT IS AN EXPLICIT ASK (owner, 2026-08-20) ────────────────
+  // The default is still a refusal: a restaurant in the recycle bin has its guest menu switched off
+  // and its staff refused at sign-in, so a panel opened by accident would show a working screen for
+  // something the product treats as gone. That is why the plain door still says no.
+  //
+  // But he asked to be able to look: *"when you click owner and resrurant in recycle bin you could
+  // able to see inside it my clicking iindiviual able to vivit there panel too"* — and he is right
+  // that he needs it, because the recycle bin is where he decides whether to restore something or
+  // remove it for good, and "what does its manager panel actually look like" is the question that
+  // decides it. So the RECYCLE BIN passes `bin=1`, and only from there.
+  //
+  // What this does NOT do: it does not bring the restaurant back. Its guest menu stays 404 (the
+  // resolver reads deleted_at, which this never touches), its own staff still cannot sign in, and
+  // it stays out of every list. Only the admin, who could restore it in one press anyway, gets in.
+  // A PURGED restaurant is still refused outright — its menu, staff and settings are gone, so its
+  // panels would be an empty shell pretending to be a restaurant.
+  const fromBin = req.nextUrl.searchParams.get("bin") === "1";
+  const r = (await sb.from("restaurants").select("id, name, deleted_at, purged_at").eq("id", rid).limit(1)).data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-  // A restaurant in the recycle bin has its guest menu switched off and its staff refused at
-  // sign-in — so opening its panels would show a working screen for something the product treats
-  // as gone. Refuse it here too, so all three doors agree.
-  if (r.deleted_at) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
+  if (r.purged_at) return NextResponse.json({ error: "That restaurant was permanently removed — its panels no longer exist. Its bills are still on record in the Bills ledger." }, { status: 409 });
+  if (r.deleted_at && !fromBin) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
 
   // WALKING INTO A RESTAURANT IS RECORDED (T20 sweep, 2026-08-16). Reaching any restaurant's panel
   // with no password is the strongest thing this console can do, and it was the ONE admin action
@@ -57,7 +72,9 @@ export async function GET(req: NextRequest) {
   // record for HIM, not a hint for them.
   await logAction("admin", "admin_enter_panel", {
     restaurant_id: rid, actor: "admin", device_id: deviceIdFrom(req), level: "info",
-    detail: `opened ${to} at "${r.name}"${uid ? " as a specific person" : ""}`,
+    // Says so when it was a BINNED restaurant, because that is a different thing to have done and
+    // the admin's own trail is the only place it is recorded.
+    detail: `opened ${to} at "${r.name}"${r.deleted_at ? " (in the recycle bin)" : ""}${uid ? " as a specific person" : ""}`,
   });
 
   // Same cookie the POST route sets; the redirect carries ?rid= so THIS tab stays

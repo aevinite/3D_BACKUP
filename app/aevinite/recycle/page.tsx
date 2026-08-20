@@ -1,31 +1,57 @@
 "use client";
-// Admin · Recycle bin — things that were DELETED (soft-deleted) sit here for 90
-// days: RESTORE any time, and only AFTER 90 days can they be PERMANENTLY purged.
-// Two kinds live here now: deleted RESTAURANTS (mig 128) and deleted OWNERS (mig
-// 208). Each purge button stays locked (with a countdown) until the retention
-// window elapses — there is no early-purge override. Purge is irreversible.
+// Admin · Recycle bin — things that were DELETED (soft-deleted) live here until the admin either
+// brings them back or removes them for good. Two kinds: deleted RESTAURANTS (mig 128) and deleted
+// OWNERS (mig 208).
+//
+// ── WHAT CHANGED ON 2026-08-20, AND WHY (owner) ────────────────────────────────────────────────
+// Three of his instructions, in his words:
+//
+//  1. *"i wanna chnage the rule that you camn't permamnetly delete from recycle bin what i wanna do
+//     is you can able to dlete from recycyle bin"* — the 90-day wait is GONE. Every row can be
+//     removed for good the moment it is in the bin. The countdown chip became a plain "in the bin
+//     for N days", which is a fact rather than a permission. Migration 342 removed the database's
+//     half of the lock so the two can't disagree. What did NOT go with it: typing the exact name to
+//     confirm, the offer to download a backup first, and the money — bills, invoices, payments and
+//     credit notes survive a removal and stay readable in Bills (mig 309).
+//
+//  2. *"if the name is available in the resutrant and recycle and recycle want to restore so it say
+//     like name already tke 2 option can show 1 opion close 2nd chnage name and restore"* — a
+//     restaurant restore that collides on its web address used to RENAME ITSELF silently
+//     (aangan → aangan-2) and mention it afterwards. Now it asks, with exactly the two ways out he
+//     named, and nothing is written until he presses one. This is the same shape the owner rows
+//     have used since mig 245.
+//
+//  3. *"when you click owner and resrurant in recycle bin you could able to see inside it my
+//     clicking iindiviual able to vivit there panel too"* — every row OPENS. A restaurant shows
+//     what is actually in it (menu, staff, tables, orders, unpaid tabs) and buttons into its
+//     panels; an owner shows which restaurants they hold and a way into each one. The bin used to
+//     be a name, a date and an irreversible button, which meant deciding blind.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+import { openRestaurantPanel } from "@/components/admin/shared";
 
 type Trashed = {
   id: string; slug: string; name: string;
   deletedAt: string; deletedBy: string | null; reason: string | null;
-  purgeEligibleAt: string; daysLeft: number; canPurge: boolean;
+  daysHeld: number; canPurge: boolean;
 };
 
 type OwnerTrashed = {
   id: string; username: string; name: string; restaurants: number;
   deletedAt: string; deletedBy: string | null; reason: string | null;
-  purgeEligibleAt: string; daysLeft: number; canPurge: boolean;
+  daysHeld: number; canPurge: boolean;
 };
 
 const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch { return iso; } };
+const heldFor = (days: number) => days <= 0 ? "In the bin since today" : `In the bin ${days} day${days === 1 ? "" : "s"}`;
+/** A count that couldn't be read draws as "?" — never as a confident 0. This screen decides a
+ *  permanent delete, so "0 orders" had better not mean "we didn't manage to ask". */
+const num = (n: number | null | undefined) => (n === null || n === undefined ? "?" : String(n));
 
 export default function RecycleBin() {
   const [list, setList] = useState<Trashed[] | null>(null);
   const [owners, setOwners] = useState<OwnerTrashed[] | null>(null);
-  const [retentionDays, setRetentionDays] = useState(90);
   const [msg, setMsg] = useState<string | null>(null);
   const [ownerMsg, setOwnerMsg] = useState<string | null>(null);
   // A restore that had to rename the restaurant says so here, and STAYS until dismissed — it means
@@ -36,12 +62,12 @@ export default function RecycleBin() {
     setMsg(null); setOwnerMsg(null);
     try {
       const j = await (await fetch("/api/admin/restaurants?deleted=1", { cache: "no-store" })).json();
-      if (!j.error) { setList(j.trashed || []); if (j.retentionDays) setRetentionDays(j.retentionDays); }
+      if (!j.error) { setList(j.trashed || []); }
       else { setMsg(j.error); setList([]); } // show the error + Retry, not a perpetual "Loading…" (audit 2026-07-08)
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); setList([]); }
     try {
       const j = await (await fetch("/api/admin/owners?deleted=1", { cache: "no-store" })).json();
-      if (!j.error) { setOwners(j.trashed || []); if (j.retentionDays) setRetentionDays(j.retentionDays); }
+      if (!j.error) { setOwners(j.trashed || []); }
       else { setOwnerMsg(j.error); setOwners([]); }
     } catch (e) { setOwnerMsg(e instanceof Error ? e.message : String(e)); setOwners([]); }
   }, []);
@@ -56,8 +82,8 @@ export default function RecycleBin() {
       </nav>
       <h1 className="adm-page-h">Recycle bin</h1>
       <p className="adm-page-sub">
-        Deleted restaurants and owners stay here for <b>{retentionDays} days</b>. Restore any of them any time. Anything can only be
-        <b> permanently removed</b> once its {retentionDays} days are up — until then, removal is locked for everyone.
+        Deleted restaurants and owners wait here. <b>Restore</b> any of them at any time, or open one to see what is
+        inside it first. Anything here can also be <b>removed for good</b> whenever you choose — there is no waiting period.
       </p>
       {/* WHAT "PERMANENTLY REMOVED" ACTUALLY MEANS, ON THE SCREEN THAT OFFERS IT (T20 sweep,
           2026-08-16). This page used to promise that removal erases "ALL its data (menu, orders,
@@ -113,12 +139,93 @@ export default function RecycleBin() {
   );
 }
 
+// ── WHAT IS INSIDE A BINNED RESTAURANT ─────────────────────────────────────────────────────────
+// Fetched ONCE, the first time the row is opened, and kept — reopening the same row costs nothing.
+// The server answers in head-counts only (no rows), so this is a handful of numbers on the wire.
+type BinInside = {
+  restaurant: { id: string; name: string; slug: string; active: boolean; createdAt: string | null; deletedAt: string; deletedBy: string | null; reason: string | null; purged: boolean };
+  owners: { id: string; name: string; binned: boolean }[];
+  inside: {
+    categories: number | null; dishes: number | null; staff: number | null;
+    staffByRole: Record<string, number>; tables: number | null;
+    panels: Record<string, boolean> | null;
+    orders: number | null; sessions: number | null; savedCustomers: number | null;
+    unpaidPayLaterBills: number | null; feedback: number | null;
+  };
+  settingsUnread?: boolean;
+  unread?: string[];
+};
+
+const PANEL_DOORS: { to: string; label: string; icon: string }[] = [
+  { to: "/manager", label: "Manager", icon: "fa-table-columns" },
+  { to: "/editor", label: "Menu editor", icon: "fa-pen-to-square" },
+  { to: "/kitchen", label: "Kitchen", icon: "fa-fire-burner" },
+  { to: "/tablet", label: "Tablet", icon: "fa-tablet-screen-button" },
+  { to: "/owner", label: "Owner", icon: "fa-crown" },
+];
+
+function InsideCounts({ d }: { d: BinInside }) {
+  const i = d.inside;
+  const cells: { k: string; v: string }[] = [
+    { k: "Dishes", v: num(i.dishes) },
+    { k: "Categories", v: num(i.categories) },
+    { k: "Staff logins", v: num(i.staff) },
+    { k: "Tables", v: num(i.tables) },
+    { k: "Orders on record", v: num(i.orders) },
+    { k: "Table sessions", v: num(i.sessions) },
+    { k: "Saved customers", v: num(i.savedCustomers) },
+    { k: "Unpaid pay-later bills", v: num(i.unpaidPayLaterBills) },
+    { k: "Guest feedback", v: num(i.feedback) },
+  ];
+  const roles = Object.entries(i.staffByRole).filter(([, n]) => n > 0);
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div className="adm-stats" style={{ marginBottom: 0 }}>
+        {cells.map((c) => <div key={c.k} className="adm-stat"><div className="k">{c.k}</div><div className="v">{c.v}</div></div>)}
+      </div>
+      {roles.length > 0 && (
+        <p className="adm-muted" style={{ margin: 0, fontSize: 12 }}>
+          Staff: {roles.map(([r, n]) => `${n} ${r}`).join(" · ")}
+        </p>
+      )}
+      {/* AN UNPAID TAB IS THE ONE FIGURE THAT SHOULD STOP A HAND. Removing the restaurant deletes the
+          pay-later person book with it — the bills themselves survive, but who owed them does not. */}
+      {!!i.unpaidPayLaterBills && (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--adm-warn)" }}>
+          <i className="fas fa-circle-exclamation" style={{ marginRight: 6 }} aria-hidden="true" />
+          {i.unpaidPayLaterBills} pay-later bill{i.unpaidPayLaterBills === 1 ? " is" : "s are"} still unpaid here. The bills are kept, but
+          removing this restaurant deletes the record of <b>who</b> owes them.
+        </p>
+      )}
+      {(d.unread?.length || d.settingsUnread) && (
+        <p className="adm-muted" style={{ margin: 0, fontSize: 12, fontStyle: "italic" }}>
+          Some of these couldn&apos;t be read just now and show as &ldquo;?&rdquo; — close and reopen this row to try again.
+        </p>
+      )}
+      {d.owners.length > 0 && (
+        <p className="adm-muted" style={{ margin: 0, fontSize: 12 }}>
+          Owned by {d.owners.map((o) => o.name + (o.binned ? " (also in the bin)" : "")).join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void; onRenamed: (msg: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [wantBackup, setWantBackup] = useState(true);
+  // Open the row → what is actually inside it. Fetched once and kept.
+  const [open, setOpen] = useState(false);
+  const [inside, setInside] = useState<BinInside | null>(null);
+  const [insideErr, setInsideErr] = useState<string | null>(null);
+  const [insideBusy, setInsideBusy] = useState(false);
+  // Set when the server says its web address was taken while it sat here.
+  const [clash, setClash] = useState<SlugClash | null>(null);
+  const [clashErr, setClashErr] = useState<string | null>(null);
+  const [pendingActivate, setPendingActivate] = useState(false);
 
   // ONE typing rule on this page (owner, 2026-08-16: "keep that rule, remove other one"). The
   // owner row below has always compared case-insensitively; this one demanded exact capitals, and
@@ -126,21 +233,57 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
   // the one a person actually met — the button just stayed grey with nothing saying why.
   const nameMatches = confirmName.trim().toLowerCase() === r.name.trim().toLowerCase();
 
-  const restore = async (activate: boolean) => {
-    setBusy(true); setErr(null);
+  const loadInside = useCallback(async () => {
+    setInsideBusy(true); setInsideErr(null);
+    try {
+      const res = await fetch(`/api/admin/restaurants?bin_detail=${encodeURIComponent(r.id)}`, { cache: "no-store" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Couldn't read what's inside.");
+      setInside(d as BinInside);
+    } catch (e) { setInsideErr(e instanceof Error ? e.message : String(e)); }
+    setInsideBusy(false);
+  }, [r.id]);
+
+  const toggleOpen = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !inside && !insideBusy) loadInside();
+  };
+
+  // resolve = undefined for the plain first attempt; the dialog re-calls with one.
+  const restore = async (activate: boolean, resolve?: { name: string; slug: string }) => {
+    setBusy(true); setErr(null); setClashErr(null);
+    const dialogOpen = clash !== null;
     try {
       const res = await fetch("/api/admin/restaurants", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "restore_restaurant", restaurant_id: r.id, activate }),
+        body: JSON.stringify({ action: "restore_restaurant", restaurant_id: r.id, activate, ...(resolve ? { resolve } : {}) }),
       });
-      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't restore.");
-      // ITS WEB ADDRESS MAY HAVE CHANGED WHILE IT SAT HERE (T20 sweep, 2026-08-16). The server
-      // renames the returning restaurant when a live one has taken its name (mig 319) and says so
-      // in `renamed` — which nothing was reading, so the admin walked away with the old QR codes
-      // in mind and no idea the link had moved.
-      if (d.renamed) onRenamed(`${r.name} is back, but its web address was taken — it came back as /r/${d.renamed}/menu. Its QR codes need remaking.`);
+      const d = await res.json();
+      // A NAME CLASH IS A QUESTION, NOT AN ERROR (owner, 2026-08-20). Open the chooser rather than
+      // dumping a red line on the row — and remember which Restore button was pressed, so the
+      // answer restores it the same way (suspended, or live).
+      if (res.status === 409 && d.conflict) {
+        if (dialogOpen && resolve) setClashErr(`“/r/${d.conflict.slug}/menu” is taken as well — pick another.`);
+        setPendingActivate(activate);
+        setClash(d.conflict as SlugClash);
+        setBusy(false); return;
+      }
+      // A refusal while the chooser is OPEN has to be shown INSIDE it — the row's error line sits
+      // behind the overlay, so pressing the button would look like it did nothing. (The same rule
+      // the owner chooser was fixed for on 2026-08-01: a tap must never vanish in silence.)
+      if (!res.ok) {
+        if (dialogOpen) { setClashErr(d.error || "Couldn't restore."); setBusy(false); return; }
+        throw new Error(d.error || "Couldn't restore.");
+      }
+      if (d.renamed) onRenamed(`${r.name} is back as “${d.name}” at /r/${d.renamed}/menu — its old web address was taken. Its QR codes need remaking.`);
+      setClash(null); setClashErr(null);
       onChanged();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (dialogOpen) setClashErr(m); else setErr(m);
+      setBusy(false);
+    }
   };
 
   const downloadBackup = async (): Promise<boolean> => {
@@ -167,14 +310,20 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "purge_restaurant", restaurant_id: r.id }),
       });
-      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't purge.");
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't remove it.");
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   };
 
   return (
-    <div style={{ border: "var(--border)", borderRadius: 12, padding: 14, background: "var(--bg)" }}>
+    // data-restaurant: a stable hook so a checker can act on ONE named row rather than "the last
+    // button on the page" — the same reason the owner rows below carry data-owner.
+    <div data-restaurant={r.slug} style={{ border: "var(--border)", borderRadius: 12, padding: 14, background: "var(--bg)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={toggleOpen} aria-expanded={open} className="adm-btn" title="See what's inside it"
+          style={{ padding: "6px 9px", background: "transparent", border: "none" }}>
+          <i className={`fas fa-chevron-${open ? "down" : "right"}`} aria-hidden="true" style={{ fontSize: 12, opacity: 0.65 }} />
+        </button>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{r.name}</div>
           <div className="adm-muted" style={{ fontSize: 12.5, fontFamily: "ui-monospace, monospace" }}>/r/{r.slug}/menu</div>
@@ -182,12 +331,41 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
             Deleted {fmtDate(r.deletedAt)}{r.deletedBy ? ` by ${r.deletedBy}` : ""}{r.reason ? ` · “${r.reason}”` : ""}
           </div>
         </div>
-        <span className="adm-chip" style={r.canPurge
-          ? { background: "color-mix(in srgb, var(--adm-danger) 20%, transparent)", color: "var(--adm-danger)" }
-          : { background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
-          {r.canPurge ? "Ready to purge" : `${r.daysLeft} day${r.daysLeft === 1 ? "" : "s"} left`}
+        <span className="adm-chip" style={{ background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
+          {heldFor(r.daysHeld)}
         </span>
       </div>
+
+      {open && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "var(--border)", display: "grid", gap: 12 }}>
+          {insideBusy && <div className="adm-empty" style={{ padding: 8 }}>Reading what&apos;s inside…</div>}
+          {insideErr && (
+            <div style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>
+              {insideErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadInside}>Retry</button>
+            </div>
+          )}
+          {inside && <InsideCounts d={inside} />}
+          {/* WALK INTO IT. It is still in the bin — its guest menu stays offline and its own staff
+              still cannot sign in. This is the admin looking, which is exactly what he asked for. */}
+          <div>
+            <div className="adm-muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              Open its panels to see what is really in there. It stays in the recycle bin — its guest menu is still offline and its staff still can&apos;t sign in.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {PANEL_DOORS.map((p) => (
+                <button key={p.to} className="adm-btn" style={{ fontSize: 12 }}
+                  onClick={async () => {
+                    const w = await openRestaurantPanel(r.id, p.to, undefined, true);
+                    // Never claim "now viewing" when the popup was blocked (audit 2026-07-08).
+                    if (!w) setInsideErr("Your browser blocked that tab — allow pop-ups for this site and try again.");
+                  }}>
+                  <i className={`fas ${p.icon}`} style={{ marginRight: 6 }} aria-hidden="true" />{p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
         <button className="adm-btn primary" disabled={busy} onClick={() => restore(false)} title="Bring it back, suspended (turn it live from the Restaurants page)">
@@ -197,20 +375,16 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
           <i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />Restore &amp; make live
         </button>
         <span style={{ flex: 1 }} />
-        {r.canPurge ? (
-          !purgeOpen && (
-            <button className="adm-btn danger" disabled={busy} onClick={() => { setPurgeOpen(true); setErr(null); }}>
-              <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />Delete permanently…
-            </button>
-          )
-        ) : (
-          <button className="adm-btn" disabled title={`Locked until ${fmtDate(r.purgeEligibleAt)}`} style={{ opacity: 0.6, cursor: "not-allowed" }}>
-            <i className="fas fa-lock" style={{ marginRight: 7 }} aria-hidden="true" />Purge locked until {fmtDate(r.purgeEligibleAt)}
+        {/* NO LOCK, NO COUNTDOWN (owner, 2026-08-20). The confirm step below is what stops an
+            accident now — and it is the same one that always did the real work. */}
+        {!purgeOpen && (
+          <button className="adm-btn danger" disabled={busy} onClick={() => { setPurgeOpen(true); setErr(null); }}>
+            <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />Delete permanently…
           </button>
         )}
       </div>
 
-      {purgeOpen && r.canPurge && (
+      {purgeOpen && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: "var(--border)", display: "grid", gap: 10, maxWidth: 460 }}>
           {/* Says exactly what goes and exactly what stays — see the note at the top of this page. */}
           <p className="hint" style={{ margin: 0, color: "var(--adm-danger)" }}>
@@ -221,6 +395,12 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
             Its <b>bills, invoices, payments and the removals record are kept</b> and stay readable in Bills —
             those have to survive for the years the records rules expect.
           </p>
+          {!!inside?.inside.unpaidPayLaterBills && (
+            <p className="hint" style={{ margin: "-4px 0 0", color: "var(--adm-warn)" }}>
+              <i className="fas fa-circle-exclamation" style={{ marginRight: 6 }} aria-hidden="true" />
+              {inside.inside.unpaidPayLaterBills} pay-later bill{inside.inside.unpaidPayLaterBills === 1 ? "" : "s"} here {inside.inside.unpaidPayLaterBills === 1 ? "is" : "are"} still unpaid.
+            </p>
+          )}
           <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={wantBackup} onChange={(e) => setWantBackup(e.target.checked)} disabled={busy} />
             Download a backup file of this restaurant&apos;s data first (recommended)
@@ -239,26 +419,136 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
           {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="adm-btn danger" disabled={busy || !nameMatches} onClick={purge}>
-              <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Purging…" : "Permanently delete"}
+              <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Removing…" : "Permanently delete"}
             </button>
             <button className="adm-btn" disabled={busy} onClick={() => { setPurgeOpen(false); setConfirmName(""); setErr(null); }}>Cancel</button>
           </div>
         </div>
       )}
       {err && !purgeOpen && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
+
+      {clash && (
+        <SlugClashDialog key={clash.holder.id} clash={clash} busy={busy} error={clashErr}
+          onClose={() => { setClash(null); setClashErr(null); }}
+          onResolve={(res) => restore(pendingActivate, res)} />
+      )}
     </div>
   );
 }
 
+// ── The restaurant name chooser (owner, 2026-08-20) ────────────────────────────────────────────
+// Exactly the two ways out he asked for: CLOSE, or CHANGE THE NAME AND RESTORE. There is
+// deliberately no third option to rename the restaurant that currently holds the address — it is
+// live and serving guests, and its QR codes are printed on real tables.
+type SlugClash = {
+  slug: string;
+  restored: { id: string; name: string; slug: string };
+  holder: { id: string; name: string; active: boolean };
+  suggestedName: string;
+  suggestedSlug: string;
+  retry?: boolean;
+};
+
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
+function SlugClashDialog({ clash, busy, error, onClose, onResolve }: {
+  clash: SlugClash; busy: boolean; error: string | null; onClose: () => void; onResolve: (r: { name: string; slug: string }) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAdminModal(ref, "restaurant-name-clash", onClose);
+  const [name, setName] = useState(clash.suggestedName);
+  // The address FOLLOWS the name while he is typing, and stops following the moment he edits it
+  // himself — otherwise the two fields fight and whichever he touched last wins by accident.
+  const [slug, setSlug] = useState(clash.suggestedSlug);
+  const [slugTouched, setSlugTouched] = useState(false);
+  const onName = (v: string) => { setName(v); if (!slugTouched) setSlug(slugify(v)); };
+  const nameOk = name.trim().replace(/\s+/g, " ").length >= 2;
+  const slugOk = slug.trim().length >= 2;
+
+  // PORTAL, not an inline overlay — this dialog renders from deep inside a bin ROW and an ancestor
+  // there establishes a containing block, so `position: fixed` would anchor to the ROW. Target
+  // `.adm`, NOT <body>: the whole admin palette is scoped to that element, so a body portal comes
+  // out as a WHITE card in the dark console. (Both learned the hard way on the owner twin.)
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => { setHost(document.querySelector<HTMLElement>(".adm") ?? document.body); }, []);
+  if (!host) return null;
+
+  return createPortal(
+    <>
+      <div onClick={busy ? undefined : onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="rclash-title" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div className="adm-card" style={{ pointerEvents: "auto", width: "min(94vw, 520px)", maxHeight: "90dvh", overflowY: "auto" }}>
+          <h3 id="rclash-title" style={{ margin: "0 0 6px", fontSize: 17, fontWeight: 800 }}>
+            That name is already taken
+          </h3>
+          <p className="adm-muted" style={{ margin: "0 0 14px", fontSize: 13, lineHeight: 1.5 }}>
+            While <b>{clash.restored.name}</b> sat in the recycle bin, <b>{clash.holder.name}</b>
+            {clash.holder.active ? "" : " (suspended)"} took its web address <b style={{ fontFamily: "ui-monospace, monospace" }}>/r/{clash.slug}/menu</b>.
+            Two restaurants can&apos;t share one. Give the one coming back a different name, or close this and leave it in the bin.
+          </p>
+
+          {error && (
+            <div role="alert" style={{ margin: "0 0 12px", padding: "9px 12px", borderRadius: 9, fontSize: 12.5,
+              color: "var(--adm-danger)", border: "1px solid color-mix(in srgb, var(--adm-danger) 45%, transparent)",
+              background: "color-mix(in srgb, var(--adm-danger) 12%, transparent)" }}>
+              <i className="fas fa-circle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />{error}
+            </div>
+          )}
+
+          <div style={{ border: "var(--border)", borderRadius: 10, padding: 12, display: "grid", gap: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+              <i className="fas fa-pen" style={{ marginRight: 7, opacity: 0.8 }} aria-hidden="true" />
+              Change its name and restore it
+            </div>
+            <label style={{ fontSize: 12.5 }}>
+              New name
+              <input value={name} onChange={(e) => onName(e.target.value)} disabled={busy} autoFocus
+                aria-label="New name for the restaurant being restored"
+                style={{ width: "100%", marginTop: 4, padding: "8px 11px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+            </label>
+            <label style={{ fontSize: 12.5 }}>
+              Its web address
+              <input value={slug} onChange={(e) => { setSlugTouched(true); setSlug(slugify(e.target.value)); }} disabled={busy}
+                aria-label="New web address for the restaurant being restored"
+                style={{ width: "100%", marginTop: 4, padding: "8px 11px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, fontFamily: "ui-monospace, monospace" }} />
+              <span className="adm-muted" style={{ display: "block", marginTop: 4, fontSize: 11.5 }}>
+                Guests will reach it at <b style={{ fontFamily: "ui-monospace, monospace" }}>/r/{slug || "…"}/menu</b> — its old QR codes will need remaking.
+              </span>
+            </label>
+            <button className="adm-btn primary" disabled={busy || !nameOk || !slugOk}
+              onClick={() => onResolve({ name: name.trim().replace(/\s+/g, " "), slug })}>
+              {busy ? "Restoring…" : "Change name & restore"}
+            </button>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+            <button className="adm-btn" disabled={busy} onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </>,
+    host,
+  );
+}
+
 // Deleted OWNER row (mig 208). Restore brings them back SUSPENDED (reactivate from
-// the Owners list). Purge is the old permanent delete — locked until 90 days — and
-// releases their restaurants to a co-owner / "no owner". No data-backup step: an
-// owner is just a login; its restaurants aren't erased.
+// the Owners list). Permanent removal releases their restaurants to a co-owner / "no owner" and
+// is available at any time (owner, 2026-08-20). No data-backup step: an owner is just a login,
+// its restaurants aren't erased.
+type OwnerInside = {
+  owner: { id: string; username: string; name: string; active: boolean; deletedAt: string; deletedBy: string | null; reason: string | null; createdAt: string | null; lastSeenAt: string | null };
+  restaurants: { id: string; name: string; slug: string; active: boolean; binned: boolean; purged: boolean; primary: boolean }[];
+};
+
 function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  const [open, setOpen] = useState(false);
+  const [inside, setInside] = useState<OwnerInside | null>(null);
+  const [insideErr, setInsideErr] = useState<string | null>(null);
+  const [insideBusy, setInsideBusy] = useState(false);
   // Set when the server says this name was taken while the owner sat in the bin —
   // the admin picks who keeps it, then we re-send the same restore with a resolve.
   const [clash, setClash] = useState<NameClash | null>(null);
@@ -266,6 +556,23 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
   const [clashErr, setClashErr] = useState<string | null>(null);
 
   const nameMatches = confirmName.trim().toLowerCase() === o.username.trim().toLowerCase();
+
+  const loadInside = useCallback(async () => {
+    setInsideBusy(true); setInsideErr(null);
+    try {
+      const res = await fetch(`/api/admin/owners?bin_detail=${encodeURIComponent(o.id)}`, { cache: "no-store" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "Couldn't read this owner's restaurants.");
+      setInside(d as OwnerInside);
+    } catch (e) { setInsideErr(e instanceof Error ? e.message : String(e)); }
+    setInsideBusy(false);
+  }, [o.id]);
+
+  const toggleOpen = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !inside && !insideBusy) loadInside();
+  };
 
   // resolve = undefined for the plain first attempt; the dialog re-calls with one.
   const restore = async (resolve?: Resolve) => {
@@ -310,7 +617,7 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "purge_owner", owner_id: o.id }),
       });
-      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't purge.");
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't remove them.");
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   };
@@ -320,6 +627,10 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
     // used to click the last Restore button on the page, which could be a real account).
     <div data-owner={o.username} style={{ border: "var(--border)", borderRadius: 12, padding: 14, background: "var(--bg)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <button onClick={toggleOpen} aria-expanded={open} className="adm-btn" title="See their restaurants"
+          style={{ padding: "6px 9px", background: "transparent", border: "none" }}>
+          <i className={`fas fa-chevron-${open ? "down" : "right"}`} aria-hidden="true" style={{ fontSize: 12, opacity: 0.65 }} />
+        </button>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{o.name} <span className="adm-muted" style={{ fontWeight: 400, fontSize: 12.5 }}>@{o.username}</span></div>
           <div className="adm-muted" style={{ fontSize: 12.5 }}>{o.restaurants} restaurant{o.restaurants === 1 ? "" : "s"} still linked (returned on restore)</div>
@@ -327,32 +638,73 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
             Deleted {fmtDate(o.deletedAt)}{o.deletedBy ? ` by ${o.deletedBy}` : ""}{o.reason ? ` · “${o.reason}”` : ""}
           </div>
         </div>
-        <span className="adm-chip" style={o.canPurge
-          ? { background: "color-mix(in srgb, var(--adm-danger) 20%, transparent)", color: "var(--adm-danger)" }
-          : { background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
-          {o.canPurge ? "Ready to remove" : `${o.daysLeft} day${o.daysLeft === 1 ? "" : "s"} left`}
+        <span className="adm-chip" style={{ background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
+          {heldFor(o.daysHeld)}
         </span>
       </div>
+
+      {open && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "var(--border)", display: "grid", gap: 10 }}>
+          {insideBusy && <div className="adm-empty" style={{ padding: 8 }}>Reading their restaurants…</div>}
+          {insideErr && (
+            <div style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>
+              {insideErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadInside}>Retry</button>
+            </div>
+          )}
+          {inside && inside.restaurants.length === 0 && (
+            <p className="adm-muted" style={{ margin: 0, fontSize: 12.5 }}>They hold no restaurants. Removing them for good affects nothing else.</p>
+          )}
+          {inside && inside.restaurants.map((rr) => (
+            <div key={rr.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", border: "var(--border)", borderRadius: 10, padding: 10 }}>
+              <div style={{ flex: 1, minWidth: 170 }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                  {rr.name}{rr.primary && <span title="Primary owner" style={{ marginLeft: 6, color: "var(--accent)" }}>★</span>}
+                </div>
+                <div className="adm-muted" style={{ fontSize: 11.5, fontFamily: "ui-monospace, monospace" }}>/r/{rr.slug}/menu</div>
+              </div>
+              <span className="adm-chip" style={{ fontSize: 11 }}>
+                {rr.purged ? "Removed for good" : rr.binned ? "In the recycle bin" : rr.active ? "Live" : "Suspended"}
+              </span>
+              {/* VISIT THEIR PANEL — the "clicking individual able to visit there panel" ask. A
+                  purged restaurant has no panels left, so it gets no button. */}
+              {!rr.purged && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button className="adm-btn" style={{ fontSize: 11.5 }}
+                    onClick={async () => {
+                      // uid = THIS owner, so the cockpit opens through their eyes (ownerScope
+                      // re-checks the membership server-side on every call).
+                      const w = await openRestaurantPanel(rr.id, "/owner", o.id, rr.binned);
+                      if (!w) setInsideErr("Your browser blocked that tab — allow pop-ups for this site and try again.");
+                    }}>
+                    <i className="fas fa-crown" style={{ marginRight: 6 }} aria-hidden="true" />Their owner panel
+                  </button>
+                  <button className="adm-btn" style={{ fontSize: 11.5 }}
+                    onClick={async () => {
+                      const w = await openRestaurantPanel(rr.id, "/manager", undefined, rr.binned);
+                      if (!w) setInsideErr("Your browser blocked that tab — allow pop-ups for this site and try again.");
+                    }}>
+                    <i className="fas fa-table-columns" style={{ marginRight: 6 }} aria-hidden="true" />Manager
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
         <button className="adm-btn primary" disabled={busy} onClick={() => restore()} title="Bring the owner back, suspended (reactivate from the Owners list)">
           <i className="fas fa-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Restore (suspended)
         </button>
         <span style={{ flex: 1 }} />
-        {o.canPurge ? (
-          !purgeOpen && (
-            <button className="adm-btn danger" disabled={busy} onClick={() => { setPurgeOpen(true); setErr(null); }}>
-              <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />Delete permanently…
-            </button>
-          )
-        ) : (
-          <button className="adm-btn" disabled title={`Locked until ${fmtDate(o.purgeEligibleAt)}`} style={{ opacity: 0.6, cursor: "not-allowed" }}>
-            <i className="fas fa-lock" style={{ marginRight: 7 }} aria-hidden="true" />Purge locked until {fmtDate(o.purgeEligibleAt)}
+        {!purgeOpen && (
+          <button className="adm-btn danger" disabled={busy} onClick={() => { setPurgeOpen(true); setErr(null); }}>
+            <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />Delete permanently…
           </button>
         )}
       </div>
 
-      {purgeOpen && o.canPurge && (
+      {purgeOpen && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: "var(--border)", display: "grid", gap: 10, maxWidth: 460 }}>
           <p className="hint" style={{ margin: 0, color: "var(--adm-danger)" }}>
             This permanently deletes the owner login <b>{o.name}</b>. Their {o.restaurants} restaurant{o.restaurants === 1 ? "" : "s"} are handed to a co-owner or become “no owner” — the restaurants themselves are NOT deleted. This cannot be undone.
@@ -384,7 +736,7 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
   );
 }
 
-// ── The name chooser (owner, 2026-08-01) ────────────────────────────────────────
+// ── The owner name chooser (owner, 2026-08-01) ──────────────────────────────────
 // A binned login no longer reserves its name (mig 245), so by restore time someone
 // else may be called "rishi" too. Rather than failing — or silently renaming a real
 // person's login — the admin says which one keeps the name. Every path renames

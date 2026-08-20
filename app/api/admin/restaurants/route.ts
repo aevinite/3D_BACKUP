@@ -60,6 +60,95 @@ const RETENTION_DAYS = 0;
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
 
+  // ── ?bin_detail=<rid> — WHAT IS ACTUALLY INSIDE A BINNED RESTAURANT (owner, 2026-08-20) ──────
+  // *"when you click owner and resrurant in recycle bin you could able to see inside it"*. Before
+  // this the bin was a name, a date and two buttons: nothing told him whether the thing he was
+  // about to remove for good was an empty test restaurant or a real one with six months of trade
+  // in it. Permanent removal is the one irreversible button in the console, and he had to press it
+  // blind.
+  //
+  // EGRESS: every figure here is a HEAD COUNT — `select("id", { count: "exact", head: true })`
+  // scoped `.eq("restaurant_id", rid)` — so the database returns a number and no rows at all. The
+  // only real rows read are the settings cell and up to 12 owner names. It runs once, when he
+  // opens a row, and never polls.
+  //
+  // NO MONEY FIGURES, deliberately. The admin console does not show a tenant's takings anywhere
+  // (the same rule the Full report states in its own header), and "what is in the bin" is not the
+  // exception. It reports HOW MANY bills are kept, never what they came to.
+  {
+    const detailRid = new URL(req.url).searchParams.get("bin_detail");
+    if (detailRid) {
+      if (!UUID.test(detailRid)) return bad("Restaurant not found.", 404);
+      const rQ = await sb.from("restaurants")
+        .select("id, name, slug, active, created_at, deleted_at, deleted_by, delete_reason, purged_at, owner_user_id")
+        .eq("id", detailRid).limit(1);
+      if (rQ.error) return adminFail("what is inside this restaurant", rQ.error, { action: "load" });
+      const r = rQ.data?.[0];
+      if (!r) return bad("Restaurant not found.", 404);
+
+      const [ownersQ, setQ, catsQ, dishesQ, staffQ, ordersQ, sessionsQ, custQ, khataQ, feedbackQ] = await Promise.all([
+        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", detailRid).limit(12),
+        sb.from("settings").select("table_count, enabled_panels").eq("restaurant_id", detailRid).maybeSingle(),
+        sb.from("categories").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("menu_items").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("staff_users").select("role").eq("restaurant_id", detailRid).is("deleted_at", null).limit(500),
+        sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid).is("deleted_at", null),
+        sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("customers").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        // Bills still parked on somebody's tab. mig 309's predicate, so this can never disagree
+        // with what Pay Later shows — a COUNT, not a total: the console never prints their money.
+        sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid)
+          .not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled").is("deleted_at", null),
+        sb.from("feedback").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+      ]);
+      // A figure that could not be read says so rather than drawing a confident 0 — the same rule
+      // the Full report adopted (T20 item 14). This screen decides a PERMANENT DELETE, so a 0 that
+      // really means "couldn't read it" is the worst possible thing for it to print.
+      const unread: string[] = [];
+      const n = (q: { count?: number | null; error: unknown }, key: string): number | null => {
+        if (q.error) { console.error(`[admin/bin_detail] ${key} failed:`, (q.error as { message?: string })?.message); unread.push(key); return null; }
+        return q.count || 0;
+      };
+      let ownerNames: { id: string; name: string; binned: boolean }[] = [];
+      if (ownersQ.error) unread.push("owners");
+      else {
+        const ids = (ownersQ.data || []).map((o) => o.user_id).filter(Boolean);
+        if (ids.length) {
+          const uQ = await sb.from("staff_users").select("id, name, username, deleted_at").in("id", ids).limit(12);
+          if (uQ.error) unread.push("owners");
+          else ownerNames = (uQ.data || []).map((u) => ({ id: u.id, name: u.name || u.username, binned: !!u.deleted_at }));
+        }
+      }
+      const staffByRole: Record<string, number> = {};
+      if (staffQ.error) unread.push("staff");
+      else for (const st of staffQ.data || []) staffByRole[st.role] = (staffByRole[st.role] || 0) + 1;
+
+      return ok({
+        restaurant: {
+          id: r.id, name: r.name, slug: r.slug, active: r.active === true,
+          createdAt: r.created_at || null, deletedAt: r.deleted_at, deletedBy: r.deleted_by || null,
+          reason: r.delete_reason || null, purged: !!r.purged_at,
+        },
+        owners: ownerNames,
+        inside: {
+          categories: n(catsQ, "categories"),
+          dishes: n(dishesQ, "dishes"),
+          staff: staffQ.error ? null : (staffQ.data || []).length,
+          staffByRole,
+          tables: setQ.error ? null : Number(setQ.data?.table_count) || 0,
+          panels: setQ.error ? null : ((setQ.data as { enabled_panels?: Record<string, boolean> | null } | null)?.enabled_panels || null),
+          orders: n(ordersQ, "orders"),
+          sessions: n(sessionsQ, "sessions"),
+          savedCustomers: n(custQ, "savedCustomers"),
+          unpaidPayLaterBills: n(khataQ, "unpaidPayLaterBills"),
+          feedback: n(feedbackQ, "feedback"),
+        },
+        ...(setQ.error ? { settingsUnread: true } : {}),
+        ...(unread.length ? { unread } : {}),
+      });
+    }
+  }
+
   // ?deleted=1 → the RECYCLE BIN: only trashed restaurants, with how long each has sat there.
   // Kept separate from the main list so a deleted restaurant never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {

@@ -285,7 +285,11 @@ export function formatActionDetail(action: string, detail: string | null | undef
 // 2026-07-04 — the old await-POST-then-open flow felt slow and risked popup
 // blockers). The ?rid= pin keeps THAT tab on the restaurant even if the
 // browser-wide cookie later changes (owner 2026-07-03).
-export async function openRestaurantPanel(restaurantId: string, path: string, ownerUid?: string): Promise<Window | null> {
+// fromBin (owner, 2026-08-20): this restaurant is in the RECYCLE BIN and he asked to look inside it
+// anyway. The redirect refuses a binned restaurant unless it is told the click came from there, so
+// the flag is the recycle bin's opt-in and nothing else ever passes it. See the long note in
+// app/api/admin/act-as/go/route.ts — it does not restore anything, it only lets the admin look.
+export async function openRestaurantPanel(restaurantId: string, path: string, ownerUid?: string, fromBin?: boolean): Promise<Window | null> {
   // Open WITHOUT the "noopener" feature so we still get a window handle back (with it,
   // window.open always returns null, making a blocked popup undetectable). We null `opener`
   // ourselves to keep the same safety. Returns null if the popup was blocked, so callers
@@ -293,7 +297,7 @@ export async function openRestaurantPanel(restaurantId: string, path: string, ow
   // ownerUid (owner panel only): pin to a SPECIFIC owner when a restaurant has several
   // (the "which owner?" chooser, owner 2026-07-25) — act-as/go forwards it as ?as=.
   const uidQ = ownerUid ? `&uid=${encodeURIComponent(ownerUid)}` : "";
-  const w = window.open(`/api/admin/act-as/go?rid=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}${uidQ}`, "_blank");
+  const w = window.open(`/api/admin/act-as/go?rid=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}${uidQ}${fromBin ? "&bin=1" : ""}`, "_blank");
   if (w) { try { w.opener = null; } catch {} }
   return w;
 }

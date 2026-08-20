@@ -28,13 +28,18 @@ export async function POST(req: NextRequest) {
   // two gaps the /go route had (T20 sweep, 2026-08-16); both doors set the same cookie, so both
   // need the same rules or the stricter one is decoration.
   if (!UUID.test(rid)) return NextResponse.json({ error: "restaurant_id required" }, { status: 400 });
-  const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+  // Same rule as the /go twin, and it has to BE the same rule: both doors set the same cookie, so
+  // the stricter one would be decoration. A binned restaurant needs an explicit `bin: true` (the
+  // recycle bin sends it); a PURGED one is refused outright. See the long note in act-as/go.
+  const fromBin = body?.bin === true;
+  const r = (await sb.from("restaurants").select("id, name, deleted_at, purged_at").eq("id", rid).limit(1)).data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-  if (r.deleted_at) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
+  if (r.purged_at) return NextResponse.json({ error: "That restaurant was permanently removed — its panels no longer exist." }, { status: 409 });
+  if (r.deleted_at && !fromBin) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
   // Recorded for the admin only — see the note in act-as/go.
   await logAction("admin", "admin_enter_panel", {
     restaurant_id: rid, actor: "admin", device_id: deviceIdFrom(req), level: "info",
-    detail: `started viewing panels as "${r.name}"`,
+    detail: `started viewing panels as "${r.name}"${r.deleted_at ? " (in the recycle bin)" : ""}`,
   });
 
   // CRITICAL: set the cookie on the SAME response we return. The old code set it on
