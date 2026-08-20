@@ -9,6 +9,7 @@
 // never read this table directly.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
+import { readInChunks } from "@/lib/inChunks";
 
 // Owner-panel SECTIONS the admin can switch off (nav + API both honour these).
 // "ratings" (mig 138) gates the guest star-ratings view/management the owner + manager
@@ -111,10 +112,16 @@ export async function getOwnerEntitlements(restaurantId: string): Promise<OwnerE
 
 // The subset of these restaurants still entitled to a key — how the owner APIs
 // filter a multi-restaurant owner's queries down to what the admin still allows.
+// CHUNKED + LIMITED (T25 sweep, 2026-08-21) — see lib/inChunks.ts for the measured limits. All three
+// helpers below decide what an owner may SEE, and each of them read the whole estate's ids into one
+// URL with no `.limit()`. A truncated answer here is a section the admin left ON that reads as
+// absent, or a union that quietly stops covering part of the estate — and in both cases the screen
+// looks like a setting rather than a failed read.
 export async function entitledSubset(restaurantIds: string[], key: string): Promise<string[]> {
   if (!restaurantIds.length) return [];
-  const rows = (await sb.from("restaurants").select("id, owner_entitlements").in("id", restaurantIds)).data || [];
-  return rows.filter((r) => mergeOwnerEntitlements(r.owner_entitlements)[key] !== false).map((r) => r.id as string);
+  const { rows } = await readInChunks<{ id: string; owner_entitlements: unknown }>(restaurantIds, (chunk) =>
+    sb.from("restaurants").select("id, owner_entitlements").in("id", chunk).limit(chunk.length));
+  return (rows || []).filter((r) => mergeOwnerEntitlements(r.owner_entitlements)[key] !== false).map((r) => r.id);
 }
 
 // Which of these restaurants still show a given VIEW of the owner's Audit & logs page
@@ -124,21 +131,24 @@ export async function entitledSubset(restaurantIds: string[], key: string): Prom
 // already narrowed to the "logs" section via entitledSubset — this is the finer cut.
 export async function logViewSubset(restaurantIds: string[], part: "removals" | "activity"): Promise<string[]> {
   if (!restaurantIds.length) return [];
-  const rows = (await sb.from("restaurants").select("id, access_config").in("id", restaurantIds)).data || [];
+  const { rows: got } = await readInChunks<{ id: string; access_config: unknown }>(restaurantIds, (chunk) =>
+    sb.from("restaurants").select("id, access_config").in("id", chunk).limit(chunk.length));
+  const rows = got || [];
   return rows
     .filter((r) => {
       const opts = (r.access_config as { view_logs?: { owner_opts?: Record<string, boolean> } } | null)?.view_logs?.owner_opts;
       return !opts || typeof opts !== "object" || opts[part] !== false;
     })
-    .map((r) => r.id as string);
+    .map((r) => r.id);
 }
 
 // Union across a multi-restaurant owner's estate: a section shows if ANY owned
 // restaurant still has it (per-restaurant data is filtered separately by the APIs).
 export async function getOwnerEntitlementsUnion(restaurantIds: string[]): Promise<OwnerEntitlements> {
   if (!restaurantIds.length) return mergeOwnerEntitlements(null);
-  const rows = (await sb.from("restaurants").select("owner_entitlements").in("id", restaurantIds)).data || [];
-  const merged = rows.map((r) => mergeOwnerEntitlements(r.owner_entitlements));
+  const { rows } = await readInChunks<{ owner_entitlements: unknown }>(restaurantIds, (chunk) =>
+    sb.from("restaurants").select("owner_entitlements").in("id", chunk).limit(chunk.length));
+  const merged = (rows || []).map((r) => mergeOwnerEntitlements(r.owner_entitlements));
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = merged.length ? merged.some((m) => m[k]) : true;
   return out;
