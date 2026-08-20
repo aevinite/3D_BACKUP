@@ -70,3 +70,15 @@ GRANT EXECUTE ON FUNCTION lfh_request_verification(text, text) TO anon;
 GRANT EXECUTE ON FUNCTION lfh_check_verification(text, text)  TO anon;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `lfh_check_verification` above is RETIRED — twice over. Migration 267 dropped it as dead code
+-- ("the mig-037 OTP stub… nothing calls it"), migration 296 restored it by mistake, and migration
+-- 297 — named "undo a resurrection" — dropped it again and wrote down why. Running THIS file alone
+-- is the third route to the same resurrection: it re-creates the two-argument version and re-grants
+-- it to the public menu key. Its surviving partner `lfh_request_verification` is deliberately kept
+-- (mig 296 hardened it, and verify-families asserts it answers 'disabled'); this half is not.
+--
+-- A FULL re-seed ends correctly (267 and 297 both sort after this file). This closes the
+-- partial-run route so the next reader does not have to discover it a fourth time. Idempotent.
+DROP FUNCTION IF EXISTS lfh_check_verification(text, text);

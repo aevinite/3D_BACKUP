@@ -155,3 +155,12 @@ CREATE TABLE IF NOT EXISTS aggregator_orders (
 );
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `lfh_request_otp` above is RETIRED. Migration 040 renamed the backend-only verification pair
+-- and dropped this signature; the live phone path is `lfh_send_otp` / `lfh_verify_otp` over
+-- `otp_codes`, and `verification_codes` carries a RETIRED comment from migration 267. Running
+-- this file alone re-creates the stub AND re-grants it to the public menu key, which is a second
+-- code-issuing door beside the real one and is invisible while `verification` is a backend-only
+-- flag. A FULL re-seed ends correctly (040 sorts after this file). Idempotent.
+DROP FUNCTION IF EXISTS lfh_request_otp(text, text);
