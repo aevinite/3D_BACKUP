@@ -81,6 +81,26 @@ const CSS = `
 .blz-chip:hover{color:var(--text);border-color:var(--muted)}
 .blz-row{transition:background .14s ease}
 .blz-row:hover{background:color-mix(in srgb, var(--accent) 6%, transparent)}
+/* THE ROW'S SHAPE LIVES HERE SO IT CAN REFLOW (T18 sweep, 2026-08-20).
+   It used to be an inline 6-column grid with minWidth:640 inside a card styled overflow:hidden, so
+   on a phone the card reported scrollWidth 640 / clientWidth 330 and simply CUT the right-hand
+   columns off with no way to reach them. Measured at 360x780 in both skins: state and bill number
+   visible; table, AMOUNT, time and chevron all outside the viewport. The amount is the whole point
+   of this screen. A sideways scroll is not the answer — he has ruled that out ("there shouldn't be
+   horizontal scroll anywhere") — so below 760px the row becomes three short lines instead. The
+   desktop grid is exactly the one it was. */
+.blz-rowgrid{display:grid;grid-template-columns:148px 1.3fr 60px 116px 92px 24px;gap:12px;align-items:center;min-width:640px}
+.blz-rowgrid > .c-amt,.blz-rowgrid > .c-when{text-align:right}
+.blz-rowgrid > .c-chev{justify-self:end}
+@media (max-width:760px){
+  .blz-rowgrid{min-width:0;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"state amt" "who when" "tbl chev";gap:4px 10px;row-gap:5px}
+  .blz-rowgrid > .c-state{grid-area:state}
+  .blz-rowgrid > .c-who{grid-area:who;min-width:0}
+  .blz-rowgrid > .c-tbl{grid-area:tbl}
+  .blz-rowgrid > .c-amt{grid-area:amt}
+  .blz-rowgrid > .c-when{grid-area:when}
+  .blz-rowgrid > .c-chev{grid-area:chev}
+}
 .blz-chev{transition:transform .2s ease}
 .blz-row.open .blz-chev{transform:rotate(180deg)}
 .blz-act{transition:all .15s ease}
@@ -115,7 +135,16 @@ export default function AdminBills() {
     const p = new URLSearchParams();
     if (rid) p.set("restaurant_id", rid);
     if (state) p.set("state", state);
-    if (from) p.set("from", from);
+    // BOTH ENDS OF THE WINDOW ARE PINNED TO IST (T18 sweep, 2026-08-20). The end already was; the
+    // start was sent as a bare `YYYY-MM-DD`, which `new Date()` reads as UTC midnight — 05:30 IST.
+    // So the window opened five and a half hours late, right across the late-night trade, and the
+    // two ends disagreed: a bill taken at 03:56 IST on the 19th is AFTER "to: 18 Aug" (23:59:59 IST
+    // on the 18th) and BEFORE "from: 19 Aug" (05:30 IST), so a single-day search on either day could
+    // not find it at all. Measured on the backup database: "From 19 Aug, To 19 Aug" returned 30
+    // bills of the 181 taken that IST day — 151 unreachable, including #373/#374/#375 at 03:55 IST.
+    // That is the exact opposite of this screen's stated job ("the admin must be able to reach a
+    // deleted bill at any time"), so the start now says which midnight it means, like the end does.
+    if (from) p.set("from", from + "T00:00:00.000+05:30");
     // An end DATE means the whole of that day, not midnight at its start — otherwise picking
     // "to: today" hides everything taken today, the exact off-by-one the report window rule warns about.
     if (to) p.set("to", to + "T23:59:59.999+05:30");
@@ -320,19 +349,19 @@ export default function AdminBills() {
             const del = b.state === "deleted";
             return (
               <div key={b.sessionId} style={{ borderBottom: "1px solid var(--adm-line, rgba(255,255,255,0.06))", background: del ? "color-mix(in srgb, #ef4444 8%, transparent)" : undefined }}>
-                <button onClick={() => expand(b)} className={`blz-row${isOpen ? " open" : ""}`} style={{ width: "100%", display: "grid", gridTemplateColumns: "148px 1.3fr 60px 116px 92px 24px", gap: 12, alignItems: "center", padding: "12px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", color: "var(--text)", minWidth: 640 }}>
-                  <span className="hue-ink" style={{ display: "inline-flex", alignItems: "center", gap: 7, ["--hue" as string]: m.tone, fontWeight: 700, fontSize: 12.5 }}><Ico n={m.icon} s={15} />{m.label}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <button onClick={() => expand(b)} className={`blz-row blz-rowgrid${isOpen ? " open" : ""}`} style={{ width: "100%", padding: "12px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", color: "var(--text)" }}>
+                  <span className="hue-ink c-state" style={{ display: "inline-flex", alignItems: "center", gap: 7, ["--hue" as string]: m.tone, fontWeight: 700, fontSize: 12.5 }}><Ico n={m.icon} s={15} />{m.label}</span>
+                  <span className="c-who" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <b style={{ fontVariantNumeric: "tabular-nums" }}>{b.billNo != null ? `#${b.billNo}` : "—"}</b>
                     <span style={{ color: "var(--muted)", margin: "0 6px" }}>·</span>
                     <span style={{ color: "var(--muted)" }}>{b.restaurantName}</span>
                     {b.invoiceGens > 1 && <span title={`Invoice re-issued ${b.invoiceGens} times`} style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: "color-mix(in srgb, #f59e0b 18%, transparent)", ["--hue" as string]: "#f59e0b" }} className="hue-ink">re-issued ×{b.invoiceGens}</span>}
                     {b.invoiceVoided && <span title="Invoice currently voided (reopened)" style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: "color-mix(in srgb, #f59e0b 14%, transparent)", ["--hue" as string]: "#f59e0b", display: "inline-flex", alignItems: "center", gap: 4 }} className="hue-ink"><Ico n="reopen" s={11} />reopened</span>}
                   </span>
-                  <span style={{ color: "var(--muted)", fontSize: 12.5 }}>{b.table ? `T${b.table}` : "—"}</span>
-                  <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", textAlign: "right", textDecoration: del ? "line-through" : undefined, opacity: del ? 0.7 : 1 }}>{inr(b.amount)}</span>
-                  <span style={{ color: "var(--muted)", fontSize: 12, textAlign: "right", fontVariantNumeric: "tabular-nums" }} title={b.at || undefined}>{b.at ? timeAgo(b.at) : "—"}</span>
-                  <span className="blz-chev" style={{ color: "var(--muted)", justifySelf: "end", display: "inline-flex" }}><Ico n="chev" s={14} /></span>
+                  <span className="c-tbl" style={{ color: "var(--muted)", fontSize: 12.5 }}>{b.table ? `T${b.table}` : "—"}</span>
+                  <span className="c-amt" style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", textDecoration: del ? "line-through" : undefined, opacity: del ? 0.7 : 1 }}>{inr(b.amount)}</span>
+                  <span className="c-when" style={{ color: "var(--muted)", fontSize: 12, fontVariantNumeric: "tabular-nums" }} title={b.at || undefined}>{b.at ? timeAgo(b.at) : "—"}</span>
+                  <span className="blz-chev c-chev" style={{ color: "var(--muted)", display: "inline-flex" }}><Ico n="chev" s={14} /></span>
                 </button>
 
                 {isOpen && (
