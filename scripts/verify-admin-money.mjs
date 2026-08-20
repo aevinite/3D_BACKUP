@@ -126,6 +126,85 @@ head("D-H · the four screens' source rules");
     "the hand-rolled Escape listener is gone (the hook owns it)");
 }
 
+// ── I-M · the five things he asked for on 2026-08-20 (source) ────────────────────────────────
+// These are the FOLLOW-UPS to the eight above: the handoffs he told me to take on, plus the two
+// decisions he answered. Same rule as sections A-H — one section per numbered item, so a single
+// regression names itself.
+head("I-M · the ledger's net, the platform count, the guest filter, the loss split, the pager");
+{
+  // I · 12 — the ledger reads the database's own net. The deep version of this check lives in
+  // `verify:one-number` (which owns the "one revenue number" rule and now scans app code too);
+  // this is the shallow one, so a person running only the admin guard still sees it break.
+  const led = R("lib/billLedger.ts");
+  ok(/if \(o\.net_amount != null[\s\S]{0,120}return Number\(o\.net_amount\)/.test(led),
+    "12 · netOf() answers from orders.net_amount before it computes anything (₹475.00 vs the paper's ₹472.50)");
+  const bills = R("app/api/admin/bills/route.ts");
+  ok(/const ORDER_COLS = "[^"]*\bnet_amount\b/.test(bills), "12 · the ledger list selects net_amount");
+  ok(/const MONEY_COLS = "[^"]*\bnet_amount\b/.test(bills),
+    "12 · so does the read behind `deletion_audit.amount` — the permanent record of what was removed");
+
+  // J · 13 — the platform's order count and the list under it are one population.
+  const an = R("app/api/admin/analytics/route.ts");
+  ok(/sb\.rpc\("lfh_admin_orders_count"/.test(an), "13 · the ORDERS tile counts through lfh_admin_orders_count (mig 348)");
+  ok(!/from\("orders"\)\.select\("id", \{ count: "exact", head: true \}\)/.test(an),
+    "13 · no bare head count of `orders` is left on the analytics route");
+  const dash = R("app/api/admin/dashboard/route.ts");
+  ok(/sb\.rpc\("lfh_admin_orders_count"/.test(dash), "13 · so does the Dashboard's Orders-today card");
+  const mig = R("supabase/migrations/348_the_platform_count_ignores_a_binned_restaurant.sql");
+  for (const fn of ["lfh_admin_orders_count", "lfh_admin_orders_by_source", "lfh_admin_orders_timeseries"])
+    ok(new RegExp(`FUNCTION public\\.${fn}`).test(mig), `13 · mig 348 guards ${fn}`);
+  ok((mig.match(/deleted_at IS NULL/g) || []).length >= 5,
+    "13 · every leg of all four function bodies tests deleted_at (the tile, the chart and both source legs)");
+  ok(/REVOKE EXECUTE ON FUNCTION public\.lfh_admin_orders_count[\s\S]{0,120}FROM PUBLIC, anon, authenticated/.test(mig),
+    "13 · the new function is not public-executable (the mig 038/267 lesson)");
+
+  // K · 14 — the guest filter offers restaurants that exist, and the names still resolve.
+  const cust = R("app/api/admin/customers/route.ts");
+  ok(/select\("id, name, slug, accent_color, deleted_at"\)/.test(cust), "14 · the restaurants read carries deleted_at");
+  ok(/const liveRests = rests\.filter\(\(r\) => r\.deleted_at == null\)/.test(cust), "14 · a live-only list is derived from it");
+  ok(/restaurants: liveRests\.map/.test(cust), "14 · the DROPDOWN is built from the live list");
+  ok(/liveIds\.has\(s2\.restaurant_id\)/.test(cust), "14 · so are the per-restaurant guest bars");
+  ok(/const nameOf = \(id: string\) => \{[\s\S]{0,200}rests\.find/.test(cust),
+    "14 · but the NAME map still holds every restaurant, so a binned restaurant's guest row is not left reading '—'");
+
+  // L · 15 — the Closed-unpaid tile splits its value, and never guesses.
+  ok(/export function lossOfClosedUnpaid/.test(led), "15 · one function decides whether a closed-unpaid bill was a loss");
+  ok(/if \(!cancelled\.length\) return "no"/.test(led), "15 · a bill that ordered nothing is stated, not left to `[].every()`");
+  ok(/return "unknown"/.test(led), "15 · an unanswered cancellation stays unanswered — nothing is guessed");
+  ok(/FIRED = new Set\(\["preparing", "ready", "served"\]\)/.test(led),
+    "15 · the boundary is the kitchen fire, the same one mig 224's stock movement uses");
+  ok(/kind", "order_cancelled"\)[\s\S]{0,200}\.in\("session_id"/.test(bills) || /\.eq\("kind", "order_cancelled"\)/.test(bills),
+    "15 · the answers are read scoped to the page's sessions, not per bill");
+  const ledger = R("app/aevinite/bill-audit/page.tsx");
+  ok(/food was made/.test(ledger) && /never made/.test(ledger), "15 · the tile names both halves");
+  ok(/not answered/.test(ledger), "15 · and says so when nobody has answered");
+  ok(/Was the food made\?/.test(ledger), "15 · each closed-unpaid bill states its own answer when opened");
+  // R10 is the manager floor's rule and it did NOT change. This is here because the two are one
+  // decision away from each other and the doc row says so.
+  ok(/REJECTED \(owner, 2026-08-11\)[\s\S]{0,600}Do not read the admin change as permission for this one/.test(R("public/panels/editor/app.js")),
+    "15 · the manager floor's count still carries R10, with the boundary written on it");
+
+  // M · 10 — the Change log is paged, and every page is reachable.
+  const api = R("app/api/admin/bill-audit/route.ts");
+  ok(/\.range\(offset, offset \+ per - 1\)/.test(api), "10 · the log is read one page at a time");
+  ok(/\.order\("id", \{ ascending: false \}\)/.test(api),
+    "10 · with a stable tiebreak, so no row can appear on two pages (bill actions land in the same millisecond)");
+  ok(/wantCount = url\.searchParams\.get\("count"\) === "1"/.test(api), "10 · the exact total is only counted when asked");
+  ok(/count: "exact", head: true/.test(api), "10 · and counted without pulling rows");
+  ok(/riskCount = riskQ && !riskQ\.error \? \(riskQ\.count \?\? null\) : null/.test(api),
+    "10 · the risk banner counts the WHOLE log, and says null rather than 0 when it could not");
+  ok(/MAX_RETENTION_DAYS = 30/.test(api), "10 · the reply states how long a change survives (mig 158)");
+  const chg = R("app/aevinite/bill-audit/changes/page.tsx");
+  ok(/function Pager\(/.test(chg) && /function pageWindow\(/.test(chg), "10 · numbered pages with a window");
+  ok(/id="chg-jump"/.test(chg), "10 · and a box to type a page number into");
+  ok(/aria-current=\{p === page \? "page" : undefined\}/.test(chg), "10 · the current page is announced, not just coloured");
+  ok(/older changes are removed automatically/.test(chg), "10 · the foot says the log ends because of retention, not because the list stopped");
+  ok(!/Showing the most recent \{d\.rows\.length\} changes/.test(chg), "10 · the old 500-row dead end is gone");
+  const migIdx = R("supabase/migrations/349_two_new_reads_get_their_index.sql");
+  ok(/idx_staff_actions_action_created/.test(migIdx), "10 · the paged read has an index that leads with `action`");
+  ok(/idx_deletion_audit_session_kind/.test(migIdx), "15 · so does the cancellation-answer lookup");
+}
+
 // ── everything below needs the real console ──────────────────────────────────────────────────
 const BASE = await requireAppUp(process.argv, "the admin money-view checks");
 const { chromium } = await import("playwright");
@@ -180,19 +259,46 @@ try {
   // ── B(live) · the label and the number describe the same window ────────────────────────────
   head("B(live) · ?range= shows that range's own number");
   {
-    const truth = {};
-    for (const r of ["today", "30d"]) truth[r] = (await api(`/api/admin/analytics?range=${r}`)).totals.totalOrders.toLocaleString("en-IN");
+    // THE TRUTH IS READ FROM THE PAGE'S OWN REPLY, NOT FETCHED ONCE UP FRONT (fixed 2026-08-20).
+    // It used to GET each range once, keep the figure, and then compare four page-opens against it
+    // over the next forty seconds. On a quiet database that works. On this one it cried wolf: other
+    // sessions place orders while a sweep runs, so "today" climbed 68 → 87 → 94 → 102 during a
+    // single run and three of four opens were marked as showing "another window's figure" when
+    // every one of them was correct. A guard that fails because the data moved teaches you to
+    // ignore it.
+    //
+    // What this fault was ever about is whether the NUMBER ON SCREEN belongs to the window the page
+    // says it is showing — so the comparison is now against the reply that page actually received
+    // for that range. Immune to the data changing, and a strictly tighter test: a stale reply
+    // landing under the wrong label is exactly what it now catches.
     const c = await ctx();
     let mismatches = 0;
+    const notes = [];
     for (const r of ["30d", "today", "30d", "today"]) {
       const p = await c.newPage();
+      const replies = [];
+      p.on("response", (res) => {
+        const u = res.url();
+        if (!u.includes("/api/admin/analytics")) return;
+        const q = new URL(u).searchParams.get("range") || "7d";
+        replies.push({ q, body: res.json().catch(() => null) });
+      });
       await p.goto(`${BASE}/aevinite/analytics?range=${r}`, { waitUntil: "domcontentloaded" });
       await p.waitForTimeout(8500);
       const v = await p.evaluate(() => document.querySelector(".adm-stat .v")?.textContent);
-      if (v !== truth[r]) mismatches++;
+      const label = await p.evaluate(() => document.querySelector(".adm-stat")?.textContent || "");
+      // The LAST reply for the range that was asked for — the one whose figure must be on screen.
+      const mine = [...replies].reverse().find((x) => x.q === r);
+      const want = mine ? (await mine.body)?.totals?.totalOrders : null;
+      const wantText = want == null ? null : want.toLocaleString("en-IN");
+      const rangeWord = r === "30d" ? "last 30 days" : "today";
+      if (wantText == null || v !== wantText || !label.toLowerCase().includes(rangeWord)) {
+        mismatches++;
+        notes.push(`?range=${r}: tile ${JSON.stringify(v)}, its own reply said ${JSON.stringify(wantText)}, label ${JSON.stringify(label.slice(0, 40))}`);
+      }
       await p.close();
     }
-    ok(mismatches === 0, `four opens alternating ?range=30d / ?range=today — ${mismatches} showed another window's figure`);
+    ok(mismatches === 0, `four opens alternating ?range=30d / ?range=today — ${mismatches} showed a figure that was not its own reply's${notes.length ? ` (${notes.join(" | ")})` : ""}`);
     await c.close();
   }
 
@@ -352,6 +458,83 @@ try {
     ok(m.strayRight === 0, `${tag} ${w}px ${skin}: ${m.stacked ? `${m.strayRight} stacked KPI cells still carry a right-hand divider` : "KPI cells sit side by side, dividers correct"}`);
     await p.close(); await c.close();
   }
+  // ── N · the same five, against the RUNNING server ──────────────────────────────────────────
+  // The source checks above prove the code says the right thing. These prove the DATABASE agrees —
+  // a migration that never reached this database, or was replaced from an older copy, is exactly the
+  // failure a source-only guard cannot see (mig 310's own "a later CREATE OR REPLACE from a stale
+  // copy silently reverts a fix"). Read-only: four GETs.
+  head("N · the live numbers");
+  {
+    const H = adminHeaders(BASE);
+    // A 500 from these routes comes back with an EMPTY body, so a bare .json() threw and killed the
+    // whole run with "Unexpected end of JSON input" — a guard that crashes tells you nothing. The
+    // status and the first of the body come back instead, and the checks below name what is wrong.
+    const get = async (p) => {
+      const r = await fetch(BASE + p, { headers: H, cache: "no-store" });
+      const t = await r.text();
+      try { return { ...JSON.parse(t || "{}"), _status: r.status }; }
+      catch { return { _status: r.status, _body: t.slice(0, 200) }; }
+    };
+
+    // 13 · the tile must equal the sum of the list printed under it.
+    const a = await get("/api/admin/analytics?range=30d&refresh=1");
+    // MIGRATION 348 MUST BE ON THIS DATABASE, and this is checked before the numbers because
+    // without it the route throws and every count below reads `undefined` for no stated reason.
+    // It happened once for real on the shared dev database: the function went missing between two
+    // runs of this guard and the only symptom was an empty 500.
+    ok(a._status === 200,
+      a._status === 200 ? "13 · Platform analytics answers" :
+        `13 · Platform analytics returned ${a._status} — if this says the function lfh_admin_orders_count is not in the schema cache, migration 348 has not been applied to this database (node scripts/run-migration.mjs 348_the_platform_count_ignores_a_binned_restaurant.sql)`);
+    const tile = a?.totals?.totalOrders ?? -1;
+    const busiest = (a?.busiest || []).reduce((s, r) => s + (Number(r.orders) || 0), 0);
+    const trend = (a?.trend || []).reduce((s, r) => s + (Number(r.orders) || 0), 0);
+    ok(tile === busiest, `13 · ORDERS (30d) ${tile} === the busiest table's sum ${busiest}`);
+    ok(tile === trend, `13 · and === the trend chart's sum ${trend} (all three exclude binned restaurants)`);
+    const dineIn = (a?.bySource || []).find((s) => s.source === "dine_in")?.orders ?? -1;
+    ok(dineIn === tile, `13 · and === the by-source dine-in leg ${dineIn}`);
+    const dash = await get("/api/admin/dashboard");
+    const today = await get("/api/admin/analytics?range=today&refresh=1");
+    ok(dash?.ordersToday === today?.totals?.totalOrders,
+      `13 · the Dashboard's Orders today (${dash?.ordersToday}) === the analytics tile for today (${today?.totals?.totalOrders})`);
+
+    // 14 · the guest filter offers only restaurants that exist.
+    const cu = await get("/api/admin/customers");
+    const binned = (cu?.restaurants || []).length;
+    ok(binned > 0 && binned === (a?.totals?.totalRestaurants ?? -1),
+      `14 · the Customers dropdown lists ${binned} restaurants, the same number analytics calls live (${a?.totals?.totalRestaurants})`);
+
+    // 10 · the log is paged, the last page is real, and no row sits on two pages.
+    const p1 = await get("/api/admin/bill-audit?page=1&count=1");
+    ok(Number.isInteger(p1?.total) && Number.isInteger(p1?.pages) && p1.pages >= 1,
+      `10 · the log reports an exact total (${p1?.total}) and a last page (${p1?.pages})`);
+    ok((p1?.rows || []).length <= p1?.per, `10 · a page holds at most ${p1?.per} rows`);
+    const noCount = await get("/api/admin/bill-audit?page=2");
+    ok(noCount?.total === null, "10 · a page hop does NOT re-count (the total comes back null)");
+    const ids = new Set((p1?.rows || []).map((r) => r.id));
+    const dupes = (noCount?.rows || []).filter((r) => ids.has(r.id)).length;
+    ok(dupes === 0, `10 · page 2 shares ${dupes} rows with page 1`);
+    const last = await get(`/api/admin/bill-audit?page=${p1?.pages}`);
+    ok((last?.rows || []).length > 0, `10 · the last page (${p1?.pages}) has rows on it`);
+    const past = await get(`/api/admin/bill-audit?page=${(p1?.pages || 1) + 3}`);
+    ok((past?.rows || []).length === 0 && !past?.error, "10 · a page past the end is empty, not an error");
+    ok(p1?.riskCount === null || p1.riskCount >= (p1?.rows || []).filter((r) => r.risk).length,
+      "10 · the risk count is the whole log's, not this page's");
+
+    // 15 · every closed-unpaid bill carries an answer; nothing else does.
+    const bl = await get("/api/admin/bills?limit=200");
+    const bills = bl?.bills || [];
+    const unpaid = bills.filter((b) => b.state === "cancelled");
+    ok(unpaid.length === 0 || unpaid.every((b) => ["yes", "no", "unknown"].includes(b.loss)),
+      `15 · all ${unpaid.length} closed-unpaid bills carry a loss answer`);
+    ok(bills.filter((b) => b.state !== "cancelled").every((b) => b.loss == null),
+      "15 · and no other state carries one — the question does not apply to a bill that was paid");
+
+    // 12 · no bill's amount can exceed the sum of its orders' stored net. The ledger used to read
+    // HIGH, so this is the direction that matters.
+    ok(bills.every((b) => Number.isFinite(b.amount) && b.amount >= 0 && b.amount >= b.paid - 0.01),
+      "12 · every bill's total is a real number and at least what was collected on it");
+  }
+
 } finally {
   await br.close();
 }

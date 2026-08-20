@@ -34,7 +34,13 @@ export async function GET(req: NextRequest) {
       // The owner⇄restaurant join (mig 097) — so the "Owner" quick-open knows when a
       // restaurant has SEVERAL owners and shows a "which owner?" chooser (owner 2026-07-25).
       sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000),
-      sb.from("orders").select("id", head).neq("status", "cancelled").gte("created_at", sinceIso),
+      // "Orders today" — the SAME population the Platform analytics tile counts, and the same
+      // population its Busiest-restaurants table lists (mig 348). This was a bare head count with
+      // no restaurant test, so a restaurant in the recycle bin still added its orders to the
+      // admin's home screen; the card links straight through to that page, where the number would
+      // then disagree with the table under it. Today's figures happened to match, which is exactly
+      // what kept it quiet.
+      sb.rpc("lfh_admin_orders_count", { p_from: sinceIso, p_to: new Date().toISOString() }),
       sb.from("settings").select("restaurant_id").eq("service_mode", true).limit(2000),
       // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
       // hauling the ENTIRE staff_users table every 60s just to filter it on the client.
@@ -139,7 +145,7 @@ export async function GET(req: NextRequest) {
     restaurants,
     maintenance: maintenanceNames.length > 0,
     maintenanceNames,
-    ordersToday: ordersTodayQ.count || 0,
+    ordersToday: Number(ordersTodayQ.data) || 0,   // the RPC returns the number (mig 348)
     online,
     onlineCount: onlineQ.count ?? online.length, // exact total (list capped at 200) so the KPI can't under-report at scale
     issues,

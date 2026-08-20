@@ -107,7 +107,15 @@ export async function GET(req: NextRequest) {
   // true, [])), and the change-detector is the same cheap orders fingerprint the owner reports
   // use — with ids = null meaning "every restaurant", so a single order anywhere refreshes it.
   const payload = await cachedOwnerPayload({
-    key: `admin:v1:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
+    // v1 → v2 (mig 348, 2026-08-20). THE VERSION IN THIS KEY IS NOT DECORATION. The change-detector
+    // is an ORDERS fingerprint: it notices a new order, and it cannot notice that the definition of
+    // the count changed. So every snapshot stored before mig 348 would have gone on serving the old
+    // inflated total — measured on the dev database straight after applying it: the cached 30-day
+    // figure read 5,948 while a fresh compute read 5,929 — until an order happened to land in that
+    // window, which for a 30-day window could be hours and for an old drilled day is never. Bumping
+    // the version retires every stale snapshot the moment this deploys. Any future change to what
+    // these numbers MEAN has to bump it again.
+    key: `admin:v2:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
     force,
     fingerprint: () => ordersFingerprint(null, fromIso, toIso),
     compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay),
@@ -125,7 +133,14 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000),
     sb.from("sessions").select("restaurant_id").eq("status", "open").limit(20000),
     sb.from("settings").select("restaurant_id, table_count").limit(2000),
-    sb.from("orders").select("id", { count: "exact", head: true }).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
+    // THE TILE MUST EQUAL THE LIST UNDER IT (mig 348, 2026-08-20). This was a plain head count
+    // over `orders` with no restaurant test, while `lfh_admin_busiest_restaurants` right below has
+    // excluded binned restaurants since mig 135 — so the "ORDERS · LAST 30 DAYS" tile read 6,260
+    // above a table that added up to 6,116, and the missing 144 belonged to two restaurants in the
+    // recycle bin. The RPC applies the same live-restaurant test the busiest list uses, so the two
+    // now agree by construction instead of by two people remembering the same rule. The trend and
+    // by-source RPCs below carry the identical guard in the same migration.
+    sb.rpc("lfh_admin_orders_count", { p_from: fromIso, p_to: toIso }),
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
     // hours, never one flat day bucket); 7d/30d bucket by day. 4-arg overload = mig 129.
     sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: hourly || range === "today" ? "hour" : "day" }),
@@ -166,7 +181,8 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
   return {
     range,
     totals: {
-      totalOrders: ordersCountQ.count || 0,
+      // `.data` now, not `.count` — the RPC returns the number itself (mig 348).
+      totalOrders: Number(ordersCountQ.data) || 0,
       activeTablesNow,
       activeRestaurants,
       totalRestaurants: restaurants.length,

@@ -31,6 +31,11 @@ export type BillOrder = {
   total: number | null;
   discount: number | null;
   tax_rate: number | null;       // the rate THIS order was charged at (mig 284) — see netOf()
+  // THE net of this order, computed by the DATABASE (mig 310, GENERATED ALWAYS AS
+  // total − disc_gross STORED). Optional on the type only because a caller may not have selected
+  // it; when it is here, netOf() returns it and does no arithmetic of its own. See netOf().
+  net_amount?: number | null;
+  disc_gross?: number | null;    // discount × (1 + the rate this order was charged at), mig 301
   status: string | null;         // received/preparing/served/cancelled
   payment_status: string | null; // pending/paid
   payment_method: string | null;
@@ -65,9 +70,28 @@ export type BillSession = {
 // missing, so its figures being higher than every bill, Z-report line and dashboard number
 // undermined the oversight it exists for. `BillOrder.discount` was already declared and unread.
 //
-// The rate comes from the order's own `tax_rate` (mig 284) so a bill is never re-priced by a rate
-// changed later; with no stamped rate we fall back to the plain `total − discount`, which is what
-// those pre-284 bills charged.
+// THE LEDGER NO LONGER DOES THE ARITHMETIC AT ALL (2026-08-20). The paragraph above describes the
+// rule correctly and then got the FALLBACK wrong, and the fallback is not rare: `orders.tax_rate`
+// is NULL on every row written before mig 284. This code read "no stamped rate" as "no tax", i.e.
+// rate 0, and returned the plain `total − discount`. The database reads it as "the rate this
+// restaurant is configured at", which is what those bills were actually charged — that is what
+// `lfh_fill_disc_gross` (mig 301) puts in `orders.disc_gross`, and what
+// `orders.net_amount` (mig 310, GENERATED ALWAYS AS total − disc_gross STORED) therefore holds.
+//
+// One real bill, order ae738fc4 on Little French House: subtotal 500, tax 25, total 525, discount
+// 50, tax_rate NULL, configured rate 5%. The guest's paper prints tax on `subtotal − discount`
+// (public/panels/billdoc.js → billRows(): `taxable = subtotal − discount`), so the bill reads
+// 450 + 22.50 = ₹472.50, and `net_amount` says 472.50. This function said ₹475.00. Eleven orders
+// on the dev database, ₹80 of overstatement — on the ONE screen whose comment two paragraphs up
+// says that figures higher than the bill "undermined the oversight it exists for".
+//
+// So the rule mig 310 wrote down for the database — "EVERY money reader sums THIS column, so no
+// two screens can compute revenue differently" — now holds for the last reader outside it. The
+// arithmetic below survives ONLY as the answer for a caller that did not select `net_amount`
+// (there is none in this repo, and `verify:one-number` fails if one appears); it can never be
+// reached for a row the database wrote, because `net_amount` is generated and NOT NULL for all
+// 32,274 of them. Measured before the switch: zero rows where the stored net is HIGHER than the
+// old arithmetic, so this can only ever bring an overstated figure down.
 //
 // EXPORTED because it existed TWICE (2026-08-11, T7 improvement I1): `app/api/admin/bills/route.ts`
 // carried its own copy called `netAmount`, used for the "amount removed" recorded in the permanent
@@ -76,7 +100,13 @@ export type BillSession = {
 // charged at" were every one of them consolidated after a copy went its own way. The ledger's
 // figures and the audit's record of what was taken out are the last pair you want disagreeing.
 export const netOf = (o: BillOrder) => {
+  // ONE DEFINITION, AND IT IS THE DATABASE'S. `net_amount` is generated, so it is present and
+  // correct for every stored row; `disc_gross` is the same rule one step back and is used when a
+  // caller selected it but not the generated column.
+  if (o.net_amount != null && Number.isFinite(Number(o.net_amount))) return Number(o.net_amount);
   const total = Number(o.total) || 0;
+  if (o.disc_gross != null && Number.isFinite(Number(o.disc_gross)))
+    return Math.round((total - Number(o.disc_gross)) * 100) / 100;
   const disc = Number(o.discount) || 0;
   if (disc <= 0) return total;
   const rate = Number(o.tax_rate) > 0 ? Number(o.tax_rate) : 0;
@@ -101,6 +131,50 @@ export function deriveBillState(session: BillSession, orders: BillOrder[]): Bill
   return "cancelled"; // closed with nothing collected (walk-out / all cancelled)
 }
 
+// ── WAS THIS CLOSED-UNPAID BILL A REAL LOSS? (owner, 2026-08-20) ─────────────────────────────
+// His words: "we have 2 option in close out also — one with the food was made, to count as loss;
+// one is food was not made and cancelled, so no loss detected."
+//
+// "Closed unpaid" is TWO events wearing one name, exactly as a cancellation was before mig 340:
+//   · a WALK-OUT — the kitchen cooked it, the guest ate and left, nothing was collected. Real loss,
+//     and nothing to ask: the order's own status says the kitchen fired it.
+//   · a bill CANCELLED before anything was cooked — no food, no cost. The sale is gone; nothing was
+//     lost but the sale.
+// The answer for the cancelled case is the one migration 340 already collects ("was the food
+// made?"). It is merged onto the `order_cancelled` audit row's meta by lfh_cancel_classify, which is
+// the row a list reads — that migration's own comment says why ("a list cannot afford a sub-query
+// per line"). So this needs no new question, no new column and no guess.
+//
+// UNANSWERED IS ITS OWN ANSWER. Every one of the 538 cancellations on the dev database predates the
+// question, so `made` is NULL on all of them. Calling those "no loss" would be inventing a fact, and
+// calling them "loss" would be inflating one. They come back as "unknown" and the tile says so —
+// the same rule mig 340 set for the Audit screens ("Nothing is guessed").
+//
+// WHAT THIS IS NOT. It does not write an expense, touch revenue, or put a cancelled bill's value on
+// the owner's dashboard — the line settled on 2026-08-18 (mig 340's header): the ingredient cost of
+// food made and binned is a cost; a cancelled bill's VALUE is not. This is the admin's oversight
+// ledger splitting the value of bills that closed with nothing collected, by whether food was made.
+export type BillLoss = "yes" | "no" | "unknown";
+// The kitchen-fire boundary, and it is the same one the stock movements use: mig 224 posts the
+// ingredient consumption when an order is ACCEPTED into the kitchen. An order still sitting at
+// 'received' was never started, so it cost nothing — which is why it is not on this list.
+const FIRED = new Set(["preparing", "ready", "served"]);
+export function lossOfClosedUnpaid(orders: BillOrder[], madeByOrder: Map<string, boolean>): BillLoss {
+  const live = orders.filter((o) => !o.deleted_at);
+  // Cooked and never paid for. No question needed — the status is the answer.
+  if (live.some((o) => FIRED.has(String(o.status || "")))) return "yes";
+  const cancelled = live.filter((o) => o.status === "cancelled");
+  // NOTHING WAS CANCELLED AND NOTHING WAS COOKED, so there is nothing to ask. This is the common
+  // case and it is stated rather than left to fall out of `[].every() === true`: a bill that took a
+  // number and never ordered (58 of them on the dev database, every one worth ₹0), or one whose
+  // orders never left 'received'. No food, no cost.
+  if (!cancelled.length) return "no";
+  if (cancelled.some((o) => madeByOrder.get(o.id) === true)) return "yes";
+  // Every cancellation on the bill was answered, and the answer was "never made".
+  if (cancelled.every((o) => madeByOrder.get(o.id) === false)) return "no";
+  return "unknown";
+}
+
 // One rolled-up ledger record for the UI.
 export type BillRecord = {
   sessionId: string;
@@ -121,6 +195,9 @@ export type BillRecord = {
   deletedAt: string | null;
   deletedBy: string | null;
   deleteReason: string | null;
+  // Only ever set on a CLOSED-UNPAID bill (see lossOfClosedUnpaid) — null on every other state,
+  // because the question does not apply to a bill that was paid, parked or comped.
+  loss?: BillLoss | null;
 };
 
 export function rollUpBill(session: BillSession, orders: BillOrder[], restaurantName: string): BillRecord {
@@ -147,5 +224,8 @@ export function rollUpBill(session: BillSession, orders: BillOrder[], restaurant
     deletedAt: session.deleted_at || (orders.find((o) => o.deleted_at)?.deleted_at ?? null),
     deletedBy: session.deleted_by || (orders.find((o) => o.deleted_by)?.deleted_by ?? null),
     deleteReason: session.delete_reason || (orders.find((o) => o.delete_reason)?.delete_reason ?? null),
+    // Filled in by the ledger endpoint once it has the cancellation answers, like invoiceGens
+    // above — one scoped read for the whole page rather than one per bill.
+    loss: null,
   };
 }

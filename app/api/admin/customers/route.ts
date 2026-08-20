@@ -52,10 +52,22 @@ export async function GET(req: NextRequest) {
     // the same read fills the filter. With the failure swallowed, every chip fell back to "—" and the
     // dropdown came back empty: a page of anonymous phone numbers the admin can neither read nor
     // narrow, served with a confident 200.
-    const restsQ = await sb.from("restaurants").select("id, name, slug, accent_color").order("slug").limit(2000);
+    // `deleted_at` comes back too, because this ONE read feeds two different things and they need
+    // different populations (T18 sweep handoff H3, approved 2026-08-20 — a restaurant in the
+    // recycle bin "is not in execution, only like deleted, just info is there"):
+    //   · the FILTER DROPDOWN offers restaurants that exist. It listed 17 where 9 were live, so the
+    //     admin could narrow the platform guest list to a restaurant that has been deleted. Every
+    //     other admin screen reads this table with `.is("deleted_at", null)`; this was the one that
+    //     did not.
+    //   · the NAME MAP keeps every restaurant, binned ones included. Filtering the read itself was
+    //     the obvious fix and the wrong one: a guest row belonging to a binned restaurant would
+    //     have lost its chip and read "—", which is the exact failure the comment above warns
+    //     about. A deleted restaurant's guests are still real people with a real history.
+    const restsQ = await sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").limit(2000);
     if (restsQ.error) return adminFail("the restaurant list", restsQ.error, { action: "load" });
     const rests = (restsQ.data || []) as
-      Array<{ id: string; name: unknown; slug: string; accent_color: string | null }>;
+      Array<{ id: string; name: unknown; slug: string; accent_color: string | null; deleted_at: string | null }>;
+    const liveRests = rests.filter((r) => r.deleted_at == null);
     // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
     // string on others — read both, fall back to the slug so a chip is never blank.
     const label = (r: { name: unknown; slug: string }) => {
@@ -147,7 +159,11 @@ export async function GET(req: NextRequest) {
       },
     });
     const { total, regulars, blocked, newThisMonth: fresh } = agg;
+    // The per-restaurant bars follow the dropdown: a bar you cannot then filter to, for a
+    // restaurant that has been deleted, is the same fault one row down.
+    const liveIds = new Set(liveRests.map((r) => r.id));
     const spread = agg.spreadRaw
+      .filter((s2) => liveIds.has(s2.restaurant_id))
       .map((s2) => ({ id: s2.restaurant_id, name: nameOf(s2.restaurant_id), count: s2.guests, regulars: s2.regulars }))
       .filter((s2) => s2.count > 0)
       .slice(0, 8);
@@ -155,7 +171,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       summary: { total, regulars, blocked, newThisMonth: fresh, matched: count || 0, page, pageSize: PAGE },
       cachedAt: agg.cachedAt,
-      restaurants: rests.map((r) => ({ id: r.id, name: label(r) })),
+      restaurants: liveRests.map((r) => ({ id: r.id, name: label(r) })),
       spread,
       customers,
     });

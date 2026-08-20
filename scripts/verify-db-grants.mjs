@@ -361,6 +361,16 @@ function checkMigrations() {
     // ── written, then renumbered before merge (the process working as intended) ──
     275: "was 275_refusals_carry_a_code_not_a_sentence.sql on its branch; renumbered to 278 on merge",
     276: "was 276_private_paperwork_buckets.sql on its branch; renumbered to 279 on merge",
+    // ── skipped to get OUT of a live collision (2026-08-20) ──
+    346: "skipped on purpose. TWO other sessions each held an uncommitted 346 on disk at the same "
+       + "moment — 346_usage_and_cost_answers_for_any_window.sql and "
+       + "346_a_purge_clears_the_printing_setup.sql — and this check's own collision rule below is "
+       + "why: two unrelated files under one number tie-break on the FILENAME, not on intent. "
+       + "Migrations 348/349 took the next clear pair instead. Whichever of the two 346s lands "
+       + "first keeps the number and this line goes away; if the other is renumbered, it should "
+       + "take 347.",
+    347: "skipped with 346, as headroom for the second of the two colliding 346s to be renumbered "
+       + "into. Expected to be filled, not to stay a gap.",
   };
   const gaps = [];
   for (let n = nums[0]; n < nums[nums.length - 1]; n++) if (!byNum[String(n).padStart(3, "0")]) gaps.push(n);

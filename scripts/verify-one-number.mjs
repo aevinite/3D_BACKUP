@@ -21,7 +21,7 @@
 //
 //   node scripts/verify-one-number.mjs
 //   node scripts/verify-one-number.mjs --quiet    # only failures
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -164,6 +164,86 @@ head("the stored column cannot be stale");
 const drift = await q(`SELECT count(*)::int AS n FROM public.orders WHERE net_amount IS DISTINCT FROM (total - disc_gross)`);
 if (drift[0].n === 0) pass(`all orders agree with the definition (0 rows out of step)`);
 else fail(`${drift[0].n} orders have a net_amount that disagrees with total - disc_gross`);
+
+// ── THE APP-CODE HALF (2026-08-20) ───────────────────────────────────────────────────────────
+// Everything above this line guards the DATABASE. Every check passed, and the admin Bill ledger
+// was still overstating discounted bills — because it is TypeScript, and nothing here looked at
+// TypeScript. `netOf()` in lib/billLedger.ts fell back to a rate of 0 whenever `orders.tax_rate`
+// was NULL (every row written before mig 284), so a ₹525 bill discounted ₹50 at a configured 5%
+// read ₹475.00 where the guest's paper, orders.net_amount and every other screen said ₹472.50.
+// Eleven orders on the dev database, and the same figure was being written into
+// `deletion_audit.amount` — the permanent record of what was removed, which nothing prunes.
+//
+// So the rule mig 310 wrote for the database is now checked on both sides of the wire.
+const SRC_DIRS = ["app", "lib", "components", "public/panels"];
+// A file is allowed to work a net out by hand only for a written-down reason. Each entry is a
+// decision someone recorded, exactly like ROLLUP_READERS and RATE_FOR_LIMITS above.
+const HAND_NET_ALLOWED = new Map([
+  ["lib/billLedger.ts",
+    "the documented FALLBACK under netOf(), reached only by a caller that did not select net_amount — unreachable for any stored row, since the column is generated and NOT NULL"],
+  ["app/api/editor/[...path]/route.ts",
+    "the LIVE bill: due-now, close-the-table and the manager's own day figures, on an OPEN session whose rate is being applied as it is charged. mig 310's own 'STILL LEFT' note names this path (lfh_session_state) as its next pass"],
+  ["lib/sessionClose.ts",
+    "closing a live table — the same live-bill path as the editor route above, and the same named next pass"],
+  ["public/panels/tablet/app.js",
+    "the waiter's LIVE table: the tile's due, the split-settle amount and the move-order picker, all on UNPAID open orders, all through effRate(). The same live-bill next pass — named here so it shows up as work rather than as a silent exception"],
+]);
+
+head("the app code does not work the net out either");
+const walk = (dir) => {
+  const out = [];
+  for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
+    if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) out.push(...walk(rel));
+    else if (/\.(ts|tsx|js|mjs)$/.test(e.name)) out.push(rel);
+  }
+  return out;
+};
+// Comment lines are skipped: several files EXPLAIN the identity in prose (lib/tax.ts, the tablet
+// route) and describing a rule is not computing one.
+const isComment = (l) => /^\s*(\/\/|\/\*|\*)/.test(l);
+const handNet = [];
+for (const dir of SRC_DIRS) {
+  for (const rel of walk(dir)) {
+    const lines = readFileSync(join(root, rel), "utf8").split(/\r?\n/);
+    const hits = lines
+      .map((l, i) => ({ l, n: i + 1 }))
+      .filter(({ l }) => !isComment(l) && /\*\s*\(\s*1\s*\+/.test(l) && /disc/i.test(l));
+    if (hits.length) handNet.push({ rel, hits });
+  }
+}
+for (const { rel, hits } of handNet) {
+  if (HAND_NET_ALLOWED.has(rel)) pass(`${rel} (${hits.length} line${hits.length === 1 ? "" : "s"}) — allowed: ${HAND_NET_ALLOWED.get(rel)}`);
+  else fail(`${rel}:${hits.map((h) => h.n).join(",")} grosses a discount by a rate in app code — read orders.net_amount instead (mig 310)`);
+}
+if (!handNet.some(({ rel }) => !HAND_NET_ALLOWED.has(rel)))
+  pass(`${handNet.length} file${handNet.length === 1 ? "" : "s"} touch the expression at all, and every one of them is on the written-down list`);
+
+head("the admin Bill ledger reads the stored net, and asks for it");
+const ledger = readFileSync(join(root, "lib/billLedger.ts"), "utf8");
+// The ORDER of the two branches is the fix. netOf() must answer from net_amount BEFORE it can
+// reach any arithmetic, or a row with a NULL tax_rate is overstated again.
+const netFirst = /export const netOf[\s\S]{0,400}?if \(o\.net_amount != null[\s\S]{0,120}?return Number\(o\.net_amount\)/.test(ledger);
+if (netFirst) pass("netOf() returns orders.net_amount before it computes anything");
+else fail("netOf() in lib/billLedger.ts no longer answers from net_amount first — discounted bills with a NULL tax_rate will read HIGH again");
+if (/net_amount\?: number \| null/.test(ledger)) pass("BillOrder declares net_amount, so a caller cannot forget it silently");
+else fail("BillOrder no longer declares net_amount");
+const billsRoute = readFileSync(join(root, "app/api/admin/bills/route.ts"), "utf8");
+// Two column lists feed netOf() on this route: the ledger LIST, and the money read the
+// delete/restore paths use for the permanent `deletion_audit.amount`. Selecting the column is what
+// makes the fix real — the code above is correct and does nothing if the column never arrives.
+for (const [name, re] of [["ORDER_COLS", /const ORDER_COLS = "([^"]+)"/], ["MONEY_COLS", /const MONEY_COLS = "([^"]+)"/]]) {
+  const m = billsRoute.match(re);
+  if (!m) fail(`${name} is gone from app/api/admin/bills/route.ts — cannot tell whether the ledger still asks for the net`);
+  else if (/\bnet_amount\b/.test(m[1])) pass(`${name} selects net_amount`);
+  else fail(`${name} does not select net_amount — the ledger is back to computing its own net`);
+}
+// The figure the ledger shows and the figure written into the permanent record must come from ONE
+// function. They were two copies once (T7 improvement I1) and this is what keeps them one.
+if (/const netAmount = \(o: MoneyCols\) => netOf\(o as BillOrder\)/.test(billsRoute))
+  pass("the audit's “amount removed” still goes through the same netOf()");
+else fail("app/api/admin/bills/route.ts no longer routes its audit amount through netOf() — the screen and the permanent record can drift");
 
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — two screens can now show different revenue`

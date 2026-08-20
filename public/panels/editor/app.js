@@ -8697,6 +8697,11 @@ function floorTableList(baseN) {
 // rebuilding the grid. Shared by floorHtml and patchFloorTiles.
 // REJECTED (owner, 2026-08-11) — docs/REJECTED-IDEAS.md R10: "To pay" stays a COUNT. Do not add the
 // rupee total beside it ("To pay 2 · ₹1,659"); it was offered and refused.
+// STILL REJECTED HERE, and here is where the line is (2026-08-20). He asked for a money split on the
+// ADMIN console's Bills → CLOSED UNPAID tile ("₹… food was made · ₹… never made") and it was built.
+// That is a different screen, a different reader and a different question: an oversight ledger the
+// admin opens to check a day that has finished, not the live floor a manager works off during
+// service. This line stays a count. Do not read the admin change as permission for this one.
 function floorStatsHtml() {
   const s = state.data.settings || {};
   // Shown WHATEVER the session setting says (fixed 2026-07-31). It used to return nothing at
