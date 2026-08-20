@@ -69,7 +69,7 @@ want(/const autoSaveNow = \(k: string, v: unknown\) =>/.test(CARD),
 }
 {
   // The unmount cleanup must FLUSH what it owes, not clear it and walk away.
-  const cleanup = CARD.match(/useEffect\(\(\) => \(\) => \{[\s\S]{0,600}?\}, \[postSetting\]\);/);
+  const cleanup = CARD.match(/useEffect\(\(\) => \{[\s\S]{0,1600}?\}, \[postSetting\]\);/);
   want(!!cleanup && /postSetting\(k, v, true\)/.test(cleanup[0]),
     "leaving the row FLUSHES a pending write to the server instead of dropping it");
   want(!!cleanup && /keepalive/.test(CARD),
@@ -79,6 +79,29 @@ want(/const discard = \(\) => \{[\s\S]{0,400}?cancelPending\(\);/.test(CARD),
   "Discard CANCELS a pending auto-save (it used to be overtaken and write the discarded value)");
 want(/if \(!alive\.current\) return;/.test(CARD),
   "a write that lands after the card is gone updates no state");
+
+// ── 1a · the word under the control is the only report, so it has to be true ──────────────────
+console.log("\n1a. Access → a self-saving control reports itself honestly, with no button");
+want(/\{done \? "✓ Saved" : saving \? "Saving…" : "Saves on its own"\}/.test(CARD),
+  "the line has three states: Saves on its own → Saving… → ✓ Saved");
+want((CARD.match(/savedHint\(k\)/g) || []).length === 3,
+  "…and ONE hint serves the number picker, the switch and the choice cards, so they cannot drift apart");
+want(/const done = autoSaved === k;/.test(CARD) && /setAutoSaved\(k\);/.test(CARD)
+  && CARD.indexOf("setAutoSaved(k);") > CARD.indexOf("if (!r.ok) throw new Error"),
+  "\"✓ Saved\" is set only AFTER the server answered ok — never optimistically");
+want(/KEYS\.filter\(\(k\) => !selfSaving\[k\] &&/.test(CARD),
+  "a key a self-saving control owns is kept OUT of the Save bar, so no button appears beside it");
+want(/setDraft\(\(x\) => \(\{ \.\.\.x, \[k\]: base\[k\] \}\)\);/.test(CARD)
+  && /the setting was put back/.test(CARD),
+  "a REFUSED save puts the control back on the stored value and says so");
+{
+  // A ref used as a liveness flag is a ONE-SHOT unless it is re-armed: React remounts every
+  // component in development, and the first unmount left this false for good — so every state
+  // update after a save was skipped and none of the three states above did anything.
+  const eff = CARD.match(/useEffect\(\(\) => \{[\s\S]{0,1400}?\}, \[postSetting\]\);/);
+  want(!!eff && /alive\.current = true;/.test(eff[0]) && /alive\.current = false;/.test(eff[0]),
+    "the liveness ref is set TRUE on every mount, not only false on unmount (a remount used to kill it for good)");
+}
 
 // ── 1b · a brand-new restaurant's settings card must not lock itself on the first open ─────────
 console.log("\n1b. Access → a settings card on a JUST-CREATED restaurant loads");
@@ -106,15 +129,31 @@ console.log("\n3. Live floor: opening a restaurant either opens it or says why n
   const raw = FLOOR.match(/onClick=\{\(\) => openRestaurantPanel\(/g) || [];
   want(raw.length === 0,
     "no door on this page throws away the window handle (the helper returns null on a blocked pop-up)");
-  want(/const openPanel = useCallback\(async \(rid: string, name: string\)/.test(FLOOR),
+  want(/const openPanel = useCallback\(async \(r: \{ id: string; name: string; slug: string \}\)/.test(FLOOR),
     "every door goes through ONE opener that awaits the handle");
-  want(/if \(!w\) toast\(/.test(FLOOR),
-    "…and a null handle tells the admin to allow pop-ups");
+  want(/if \(!w\) setBlocked\(\{ rid: r\.id, name: r\.name, slug: r\.slug \}\);/.test(FLOOR),
+    "…and a null handle opens the card that gets him in anyway (see 3a)");
   want(/catch \(e\) \{\s*toast\(/.test(FLOOR),
     "…and a thrown error is reported too, never swallowed");
-  const doors = (FLOOR.match(/onClick=\{\(\) => openPanel\(r\.id, r\.name\)\}/g) || []).length;
+  const doors = (FLOOR.match(/onClick=\{\(\) => openPanel\(r\)\}/g) || []).length;
   want(doors >= 4, `all ${doors} restaurant doors use it (expected at least 4)`);
 }
+
+// ── 3a · a blocked tab is not a locked door ───────────────────────────────────────────────────
+console.log("\n3a. Live floor: a blocked new tab still gets the admin in");
+want(/function BlockedDoor\(/.test(FLOOR),
+  "a blocked pop-up opens a card, not a bare refusal toast");
+want(!/allow pop-ups for this site/.test(strip(FLOOR)),
+  "…and the old \"allow pop-ups, then tap again\" wording is gone (the admin reaches every restaurant)");
+want(/nothing else is in the way/.test(FLOOR),
+  "…the card says nothing is stopping him");
+want(/api\/admin\/act-as\/go\?rid=\$\{encodeURIComponent\(r\.rid\)\}/.test(FLOOR),
+  "…it offers the manager panel IN THIS TAB, which needs no pop-up at all");
+want(/\/aevinite\/restaurants\?focus=\$\{encodeURIComponent\(r\.slug\)\}/.test(FLOOR)
+  && /go to its details &amp; settings/.test(FLOOR),
+  "…and the line at the bottom goes to that restaurant's details & settings");
+want(/useAdminModal\(ref, "adm-floor-blocked", onClose\)/.test(FLOOR),
+  "…and it is a real dialog: Escape, phone Back, focus trap, scroll lock");
 
 // ── 3b · a tile must stay inside its own square, whatever the label turns out to be ───────────
 console.log("\n3b. Live floor: a label that is not a table number cannot smear over its neighbours");
@@ -155,6 +194,28 @@ want(/takenSlugs: string\[\]/.test(REST), "the create card is given the slugs al
 want(/for \(let i = 2; slugTaken\.has\(slugPreview\); i\+\+\)/.test(REST),
   "…and applies the SAME numeric-suffix loop the create route applies");
 want(/slugSuffixed/.test(REST), "…and says so on screen when the typed name had to be suffixed");
+
+// ── 6b · the create form asks the one question that matters, and states the rest ───────────────
+console.log("\n6b. Restaurants → New restaurant: no question that decides nothing");
+{
+  // Scoped to the create form: "Manager panel" is a legitimate DOOR label on a restaurant's own
+  // detail page, and that door is exactly the thing the admin still needs.
+  const form = (strip(REST).match(/function NewRestaurant\([\s\S]*?\n\}/) || [""])[0];
+  want(!/NR_PANELS/.test(strip(REST)) && !/Manager panel|Kitchen display|Waiter tablet|Owner dashboard/.test(form),
+    "the four panel switches are gone from the create form — they decided no panel, only which starter logins were minted");
+}
+want(/const STARTER_LOGINS: Record<string, boolean> = \{ manager: true, kitchen: true, tablet: true, owner: false \}/.test(REST),
+  "…replaced by a FIXED set: a login for each of the three staff screens");
+want(/owner: false/.test(REST) && /an owner is a person/i.test(REST),
+  "…and NO owner login, so no placeholder primary owner is planted on a new restaurant");
+want(!/nr-preset/.test(strip(REST)) && !/My saved setup/.test(strip(REST)),
+  "the saved-setup dropdown went with them (it chose between two presets of one switch)");
+want(!/Turn on at least one panel/.test(strip(REST)),
+  "…and a create can no longer be refused over a panel choice that changes no panel");
+want(/All four staff apps/.test(REST) && /No owner yet/.test(REST) && /The standard permissions/.test(REST),
+  "the form STATES what a restaurant starts with instead of pretending to ask");
+want(/Start with a sample menu/.test(REST),
+  "the one real choice — a sample menu or an empty one — survives");
 
 // ── 7 · the admin's own income figure names what it counted ────────────────────────────────────
 console.log("\n7. Billing & plans: 'Collected this year' cannot silently omit money");
