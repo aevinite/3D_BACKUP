@@ -32,8 +32,35 @@
     padding:11px 15px;font-size:14.5px;font-weight:650;text-decoration:none;cursor:pointer}
   .btn.ghost{background:rgba(255,255,255,.14);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.34)}
   .btn:hover{filter:brightness(.97)}
-  h2{font-size:22px;margin:34px 0 12px;letter-spacing:-.3px;scroll-margin-top:18px}
-  h3{font-size:17px;margin:24px 0 8px}
+  /* THE SECTION NUMBERS COUNT THEMSELVES (owner, 2026-08-20: "make it like three proper menus, it
+     should not scroll"). They used to be typed into the HTML — so picking Windows, which HIDES the Mac
+     and Linux menus, left a reader looking at "1, 2, 3, 4, 7, 8": a visible gap that gives away that
+     this is one long page being filtered rather than a menu of its own. A counter skips what is
+     hidden, so each menu reads 1..n with nothing missing. */
+  .wrap{counter-reset:sec}
+  h2{font-size:22px;margin:34px 0 12px;letter-spacing:-.3px;scroll-margin-top:18px;counter-increment:sec}
+  h2::before{content:counter(sec) " · ";color:var(--accent);font-weight:700}
+  h2.nonum{counter-increment:none}
+  h2.nonum::before{content:none}
+  /* Rows inside the SHARED tables that only apply to one operating system (the fault table, the
+     device table). Hidden with their menu, for the same reason: a Windows reader should not be reading
+     the macOS Gatekeeper row. */
+  body[data-os="win"] [data-only]:not([data-only~="win"]),
+  body[data-os="mac"] [data-only]:not([data-only~="mac"]),
+  body[data-os="linux"] [data-only]:not([data-only~="linux"]){display:none}
+  /* WHICH MENU AM I IN. Shown only once a menu is picked — the whole page is one menu then, and this
+     is the way back out of it. */
+  .inmenu{display:none;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-soft);
+    border:1px solid #d9c9ff;border-radius:12px;padding:11px 14px;margin:0 0 16px;font-size:14.5px}
+  body[data-os] .inmenu{display:flex}
+  .inmenu b{color:#4c2091}
+  .inmenu button{background:#fff;border:1px solid #cbb6f5;border-radius:9px;padding:6px 11px;
+    font:650 13px/1 inherit;color:#4c2091;cursor:pointer}
+  .inmenu button:hover{background:#f3ecff}
+  @media print{.inmenu{display:none !important}}
+  h2{counter-reset:sub}
+  h3{font-size:17px;margin:24px 0 8px;counter-increment:sub}
+  h3.step::before{content:counter(sec) "." counter(sub) " · ";color:var(--accent)}
   h4{font-size:15px;margin:18px 0 6px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.06em}
   p,li{color:#1c2733}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:14px 0}
@@ -168,9 +195,9 @@
     <li><a href="#helper">Let a computer print, not a screen</a></li>
     <li><a href="#why">Why printing used to stop</a></li>
     <li><a href="#buy">What to buy</a></li>
-    <li><a href="#windows">① Windows — set it up by hand</a></li>
-    <li><a href="#mac">② Mac — set it up by hand</a></li>
-    <li><a href="#linux">③ Linux &amp; Raspberry Pi — by hand</a></li>
+    <li data-only="win"><a href="#windows">① Windows — set it up by hand</a></li>
+    <li data-only="mac"><a href="#mac">② Mac — set it up by hand</a></li>
+    <li data-only="linux"><a href="#linux">③ Linux &amp; Raspberry Pi — by hand</a></li>
     <li><a href="#devices">Which devices can be the printer</a></li>
     <li><a href="#switches">The switches in the app</a></li>
     <li><a href="#which">One printer at a time — and how to switch</a></li>
@@ -181,6 +208,18 @@
     <li><a href="#next">Better setups you can move to</a></li>
   </ol>
 </nav>
+
+<!-- WHICH MENU YOU ARE IN, and the way back out. Only visible once a menu is picked; on paper it is
+     hidden and all three menus print (a saved PDF goes on a wall and has to hold everything). -->
+<div class="inmenu">
+  <span>You are reading the <b data-osname>Windows</b> menu — everything on this page now applies to
+    that computer.</span>
+  <span style="margin-left:auto">Switch:</span>
+  <button type="button" data-pick="win">🪟 Windows</button>
+  <button type="button" data-pick="mac">🍎 Mac</button>
+  <button type="button" data-pick="linux">🐧 Linux / Pi</button>
+  <button type="button" data-pick="all">Show all three</button>
+</div>
 
 <!-- YOUR printer, not ours (owner, 2026-08-20: "it should be applicable for all printer not for
      that printer, make whole thing dynamic"). Two answers — the name the computer shows and the roll
@@ -206,7 +245,7 @@
   </div>
 </div>
 
-<h2 id="quick">1 · Start here — the short version</h2>
+<h2 id="quick">Start here — the short version</h2>
 <div class="card">
   <ol class="steps">
     <li><b>Plug the printer in and print one test page from the computer itself</b>
@@ -233,7 +272,7 @@
   check it still prints when the window is hidden. <b>The long tables of settings are only for when
   something looked wrong</b> — they are a repair kit, not a checklist.</div>
 
-<h2 id="helper">1b · The best way now: let a <i>computer</i> print, not a screen <span class="tag">new</span></h2>
+<h2 id="helper">The best way now: let a <i>computer</i> print, not a screen <span class="tag">new</span></h2>
 <div class="card">
   <div class="ok"><b>Nothing has to stay open any more.</b> A tiny program — we call it the
     <b>helper</b> — sits on the computer your printers are plugged into. Every two seconds it asks the
@@ -285,7 +324,7 @@
     app uses it. The helper is the better path, not the only one.</div>
 </div>
 
-<h2 id="why">2 · Why printing used to stop (worth 60 seconds)</h2>
+<h2 id="why">Why printing used to stop (worth 60 seconds)</h2>
 <div class="card">
   <p>Kitchen tickets used to be printed by whichever screen happened to <i>notice</i> a new order. That
     only works while that screen is the window you are looking at. Minimise it — <b>or simply open any
@@ -302,7 +341,7 @@
     specific settings that stop it dozing off behind other windows, and keeps the computer itself awake.</p>
 </div>
 
-<h2 id="buy">3 · What to buy</h2>
+<h2 id="buy">What to buy</h2>
 <div class="card">
   <h3>The printer</h3>
   <table>
@@ -317,7 +356,7 @@
             the computer can be anywhere.</td>
         <td>Needs steady Wi-Fi in the kitchen.</td></tr>
     <tr><td><b>Cloud printer</b><br>(Star CloudPRNT, Epson Server Direct Print)</td><td>₹15,000–25,000</td>
-        <td>Needs <b>no computer at all</b>.</td><td>Not switched on in the app yet — <a href="#next">§14</a>.</td></tr>
+        <td>Needs <b>no computer at all</b>.</td><td>Not switched on in the app yet — <a href="#next">better setups</a>.</td></tr>
   </table>
   <h3>The computer</h3>
   <p>Any Windows PC, Mac, Linux box or <b>Raspberry Pi</b> already there is fine — it does not need to be
@@ -340,7 +379,7 @@
      to it. That is the whole reason the download is gone rather than re-explained.
      ══════════════════════════════════════════════════════════════════════════════════════════════ -->
 <section class="os" data-osid="win">
-<h2 id="windows">4 · ① Windows — every step <span class="tag win">Windows 10 / 11</span></h2>
+<h2 id="windows">① Windows — every step <span class="tag win">Windows 10 / 11</span></h2>
 <div class="card">
   <div class="ok"><b>Nothing to download.</b> You will type (paste) one small file yourself in Notepad.
     Windows never shows the <b>“Windows protected your PC”</b> warning for a file you made on your own
@@ -350,7 +389,7 @@
     the moment Windows sees them. Steps 4.1 and 4.2 are the whole job for nine printers out of ten.
     <b>4.3 is a repair kit, not a checklist</b> — open it only if your test ticket came out wrong.</div>
 
-  <h3>4.1 · Plug it in and let Windows find it</h3>
+  <h3 class="step">Plug it in and let Windows find it</h3>
   <ol class="steps">
     <li><b>Put the paper in the right way round.</b> Thermal paper only prints on one side. If the roll
       is in upside down you get blank paper for ever and think the printer is broken. Pull a little out,
@@ -367,7 +406,7 @@
     the computer can see it. A <b>driver</b> is just the small translator that teaches a computer to talk
     to one exact printer model — Windows carries thousands of them and usually finds the right one alone.</div>
 
-  <h3>4.2 · The first test — and the two things you must set</h3>
+  <h3 class="step">The first test — and the two things you must set</h3>
   <ol class="steps">
     <li><b>Print a test page.</b> Click your printer in that list → <b>Manage → Print test page</b>.
       <b>If Windows itself can't print, the app certainly can't</b> — so this comes first, always.</li>
@@ -383,7 +422,7 @@
       <br>· <b>No</b> → 4.3 has one row for each thing that can look wrong.</li>
   </ol>
 
-  <h3>4.3 · Only if the test came out wrong — one fix each <span class="tag win">skip if it looked fine</span></h3>
+  <h3 class="step">Only if the test came out wrong — one fix each <span class="tag win">skip if it looked fine</span></h3>
   <p>Everything here is done in one place: <b>Printers &amp; scanners → your printer →
     Printer properties → Preferences</b>. No typing, no commands — just find the setting named in the
     middle column. Words differ between makes; the middle column gives the usual spellings.</p>
@@ -417,7 +456,7 @@
     with no page size of its own so that <i>your</i> printer's own paper setting wins. Forcing a size in
     the app is what produces sideways tickets and 20 cm of blank paper.</div>
 
-  <h3>4.4 · If Windows didn't find your printer — getting the driver</h3>
+  <h3 class="step">If Windows didn't find your printer — getting the driver</h3>
   <ol class="steps">
     <li><b>Search the exact model plus the word driver.</b> The model is printed on the label under or
       behind the printer — for example <i>XP-80C driver</i>, <i>TVS RP 3200 driver</i>,
@@ -429,7 +468,7 @@
       drives them all. Try one of those.</li>
   </ol>
 
-  <h3>4.5 · Make the print-station file — every click</h3>
+  <h3 class="step">Make the print-station file — every click</h3>
   <p>This one file opens Chrome with the settings that make tickets print by themselves and stop the
     window dozing off when it is minimised or covered.</p>
   <ol class="steps">
@@ -480,7 +519,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     end for a screen in or near the kitchen, or change it to <code>/manager</code> for the counter
     screen. Nothing else in the file ever needs touching.</div>
 
-  <h3>4.6 · Start it and log in — once</h3>
+  <h3 class="step">Start it and log in — once</h3>
   <ol class="steps">
     <li><b>Double-click <code>print-station.bat</code></b> on the Desktop. A black box flashes, then a
       Chrome window opens full-screen with no address bar. That full-screen window is normal: it is
@@ -490,19 +529,19 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
       Chrome is left completely untouched.</li>
   </ol>
   <div class="ok"><b>Nothing happens when you double-click?</b> The file is almost certainly saved as
-    <code>print-station.bat.txt</code> — go back to step 4.5.8.</div>
+    <code>print-station.bat.txt</code> — go back to the file-making steps above.</div>
 
-  <h3>4.7 · Tell the app that THIS screen is the printer</h3>
+  <h3 class="step">Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
     <li><b>Ask us to switch printing on</b> for your restaurant, and to say whether tickets come out on
       the <b>kitchen screen</b> or the <b>counter screen</b>. That is one switch on our side
-      (<a href="#switches">§8</a>).</li>
+      (<a href="#switches">the switches</a>).</li>
     <li><b>On this computer:</b> kitchen screen → <b>☰ → Settings → 🖨 Printing → Print here</b>.
       Counter screen → <b>Settings → Printing</b>, or the strip that appears above the Tables grid.</li>
     <li><b>Send one order</b> and watch a ticket come out. Then do <a href="#test">the real test</a>.</li>
   </ol>
 
-  <h3>4.8 · Make it start by itself (strongly recommended)</h3>
+  <h3 class="step">Make it start by itself (strongly recommended)</h3>
   <ol class="steps">
     <li>Right-click <code>print-station.bat</code> → <b>Show more options → Create shortcut</b>.</li>
     <li><b>Open the Startup folder.</b> Press <b>Win + R</b>, type <code>shell:startup</code>, press
@@ -516,7 +555,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
 </section>
 
 <section class="os" data-osid="mac">
-<h2 id="mac">5 · ② Mac — every step <span class="tag mac">macOS</span></h2>
+<h2 id="mac">② Mac — every step <span class="tag mac">macOS</span></h2>
 <div class="card">
   <div class="ok"><b>Nothing to download — on purpose.</b> macOS <b>blocks any script that came from the
     web</b>: double-clicking one gives <b>“Not Opened — Apple could not verify it is free of malware”</b>
@@ -528,7 +567,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     like a normal shop receipt, <b>you are done</b> — skip 5.3 and 5.4 completely. They are a repair kit
     for a ticket that came out wrong, not a list everybody has to work through.</div>
 
-  <h3>5.1 · Plug it in and let the Mac find it</h3>
+  <h3 class="step">Plug it in and let the Mac find it</h3>
   <ol class="steps">
     <li><b>Put the paper in the right way round.</b> Thermal paper prints on one side only. Pull a bit
       out and scratch it with a fingernail: the side that goes <b>grey</b> is the printing side, and it
@@ -552,7 +591,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     Mac to talk to one exact printer model. Big brands supply one. The cheap 80 mm printers often don't,
     which is what 5.4 is for.</div>
 
-  <h3>5.2 · The first test — and the one thing you must set</h3>
+  <h3 class="step">The first test — and the one thing you must set</h3>
   <ol class="steps">
     <li><b>Make it the default printer.</b> In <b>Printers &amp; Scanners</b>, set <b>Default printer</b>
       to your printer. Automatic printing always goes to the default — this one setting is not optional.</li>
@@ -565,7 +604,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
       <br>· <b>No</b> → 5.3 has one row for each way it can look wrong.</li>
   </ol>
 
-  <h3>5.3 · Only if the test came out wrong — one fix each <span class="tag mac">skip if it looked fine</span></h3>
+  <h3 class="step">Only if the test came out wrong — one fix each <span class="tag mac">skip if it looked fine</span></h3>
   <p><b>You can do all of this by clicking, no commands needed.</b> Open Safari or Chrome and go to
     <code>http://localhost:631/printers</code> — that page is your Mac's own printer control panel,
     already installed, no internet needed. Click your printer, then <b>Administration → Set Default
@@ -612,7 +651,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     size of its own, on purpose, so that <i>your</i> printer's paper setting wins. Forcing a size in the
     app is what produces sideways tickets and long blank lead-ins.</div>
 
-  <h3>5.4 · If the Mac has no driver for your printer</h3>
+  <h3 class="step">If the Mac has no driver for your printer</h3>
   <p>Work down this list and stop at the first one that works.</p>
   <ol class="steps">
     <li><b>The maker's website.</b> Search the exact model from the label under the printer plus
@@ -638,11 +677,11 @@ sudo cp zj80.ppd /Library/Printers/PPDs/Contents/Resources/</pre>
         <b>Use</b> menu.</p></li>
     <li><b>If neither works</b>, your model may simply never have had a Mac driver — that happens, and it
       is not your fault or the printer's. The same printer will work from a Windows PC
-      (<a href="#windows">§4</a>) or a Raspberry Pi (<a href="#linux">§6</a>), and either of those makes a
+      (<a href="#windows">the Windows menu</a>) or a Raspberry Pi (<a href="#linux">the Linux menu</a>), and either of those makes a
       better print station anyway because it can be left switched on.</li>
   </ol>
 
-  <h3>5.5 · The 30-second way — one line in Terminal, no file at all <span class="tag mac">try this first</span></h3>
+  <h3 class="step">The 30-second way — one line in Terminal, no file at all <span class="tag mac">try this first</span></h3>
   <ol class="steps">
     <li><b>Open Terminal.</b> Press <b>⌘ + Space</b>, type <code>terminal</code>, press <b>Enter</b>.</li>
     <li><b>Paste the command.</b> Press <b>Copy</b> on the box below, click inside Terminal, press
@@ -664,7 +703,7 @@ sudo cp zj80.ppd /Library/Printers/PPDs/Contents/Resources/</pre>
     hand. Perfect for checking everything works today. Make the file (5.6) for every day after that, so
     nobody has to remember a command.</div>
 
-  <h3>5.6 · The every-day way — make the file yourself, every click</h3>
+  <h3 class="step">The every-day way — make the file yourself, every click</h3>
   <ol class="steps">
     <li><b>Open TextEdit.</b> Press <b>⌘ + Space</b>, type <code>textedit</code>, press <b>Enter</b>.
       Choose <b>New Document</b> if it asks.</li>
@@ -714,22 +753,22 @@ wait $CHROME_PID</pre>
     <code><span data-site-url>https://www.aevinite.shop</span></code>; keep <code>/kitchen</code> for a
     kitchen screen or put <code>/manager</code> for the counter. Nothing else needs touching.</div>
 
-  <h3>5.7 · Tell the app that THIS screen is the printer</h3>
+  <h3 class="step">Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
     <li><b>Ask us to switch printing on</b> for your restaurant, and whether tickets come out on the
-      <b>kitchen screen</b> or the <b>counter screen</b> (<a href="#switches">§8</a>).</li>
+      <b>kitchen screen</b> or the <b>counter screen</b> (<a href="#switches">the switches</a>).</li>
     <li><b>On this Mac:</b> kitchen screen → <b>☰ → Settings → 🖨 Printing → Print here</b>. Counter
       screen → <b>Settings → Printing</b>, or the strip above the Tables grid.</li>
     <li><b>Send one order.</b> A ticket should come out in a few seconds — then do
       <a href="#test">the real test</a>.</li>
   </ol>
 
-  <h3>5.8 · Open it automatically at login</h3>
+  <h3 class="step">Open it automatically at login</h3>
   <p><b>System Settings → General → Login Items &amp; Extensions → Open at Login → +</b> and pick your
     <code>print-station.command</code> from the Desktop.</p>
   <div class="ok"><b>To finish for the day:</b> press <b>⌘Q</b> in the Chrome window.</div>
 
-  <h3>5.9 · Already got a downloaded starter file sitting in Downloads?</h3>
+  <h3 class="step">Already got a downloaded starter file sitting in Downloads?</h3>
   <p>Older versions of this guide offered one to download, and that is the file that shows <b>“Apple
     could not verify…”</b> (a macOS protection called <b>Gatekeeper</b>). You don't need it — 5.4 above
     replaces it — but if you'd rather use it, either of these gets you past it:</p>
@@ -744,7 +783,7 @@ chmod +x ~/Downloads/print-station-mac.command</pre>
 </section>
 
 <section class="os" data-osid="linux">
-<h2 id="linux">6 · ③ Linux &amp; Raspberry Pi — every step <span class="tag">Ubuntu · Debian · Raspberry Pi OS</span></h2>
+<h2 id="linux">③ Linux &amp; Raspberry Pi — every step <span class="tag">Ubuntu · Debian · Raspberry Pi OS</span></h2>
 <div class="card">
   <p>The cheapest print station that nobody ever touches: a <b>Raspberry Pi (₹4,000–5,000)</b> behind the
     till, 3 watts, no fan to clog with kitchen grease, and it comes back by itself after a power cut.</p>
@@ -755,7 +794,7 @@ chmod +x ~/Downloads/print-station-mac.command</pre>
     and if it looks like a shop receipt you are done. 6.3 is the repair kit for a ticket that came out
     wrong — most people never open it.</div>
 
-  <h3>6.1 · Plug it in and add it</h3>
+  <h3 class="step">Plug it in and add it</h3>
   <ol class="steps">
     <li><b>Paper the right way round</b> — thermal paper prints on one side only. Scratch it: the side
       that turns <b>grey</b> faces the glass bar inside.</li>
@@ -780,14 +819,14 @@ lpoptions -d "<span data-pname>Kitchen</span>"</pre>
       <pre data-copy>sudo lpadmin -p "<span data-pname>Kitchen</span>" -E -v socket://192.168.1.50:9100 -m raw</pre></li>
   </ol>
 
-  <h3>6.2 · The first test</h3>
+  <h3 class="step">The first test</h3>
   <ol class="steps">
     <li><b>Print something:</b>
       <pre data-copy>echo "hello" | lp -d "<span data-pname>Kitchen</span>"</pre></li>
     <li><b>Look at the paper.</b> Like a shop receipt → <b>done, skip 6.3</b>. Wrong in some way → 6.3.</li>
   </ol>
 
-  <h3>6.3 · Only if it came out wrong <span class="tag">skip if it looked fine</span></h3>
+  <h3 class="step">Only if it came out wrong <span class="tag">skip if it looked fine</span></h3>
   <p>Ask the printer what it can do — this changes nothing, it only lists the settings your driver has,
     with <code>*</code> on the one in use:</p>
   <pre data-copy>lpoptions -p "<span data-pname>Kitchen</span>" -l</pre>
@@ -813,7 +852,7 @@ lpoptions -d "<span data-pname>Kitchen</span>"</pre>
   <div class="warn"><b>Never set a paper size inside the app.</b> It sends the ticket with no page size
     of its own on purpose, so your printer's own setting wins.</div>
 
-  <h3>6.4 · Make the print-station file — every step</h3>
+  <h3 class="step">Make the print-station file — every step</h3>
   <ol class="steps">
     <li><b>Open a Terminal.</b> Type <code>nano ~/print-station.sh</code> and press <b>Enter</b> — an
       empty editor fills the window.</li>
@@ -851,17 +890,17 @@ exec "$BROWSER" \
     <code><span data-site-url>https://www.aevinite.shop</span></code>, plus <code>/kitchen</code> or
     <code>/manager</code>.</div>
 
-  <h3>6.5 · Tell the app that THIS screen is the printer</h3>
+  <h3 class="step">Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
     <li><b>Ask us to switch printing on.</b> We also set whether tickets come out in the kitchen or at
-      the counter (<a href="#switches">§8</a>).</li>
+      the counter (<a href="#switches">the switches</a>).</li>
     <li><b>On this machine:</b> kitchen screen → <b>☰ → Settings → 🖨 Printing → Print here</b>.
       Counter screen → <b>Settings → Printing</b>.</li>
     <li><b>Send one order.</b> A ticket should come out in a few seconds — then do
       <a href="#test">the real test</a>.</li>
   </ol>
 
-  <h3>6.6 · Start on boot (what makes it maintenance-free)</h3>
+  <h3 class="step">Start on boot (what makes it maintenance-free)</h3>
   <pre data-copy>mkdir -p ~/.config/autostart
 cat &gt; ~/.config/autostart/print-station.desktop &lt;&lt;EOF
 [Desktop Entry]
@@ -875,24 +914,24 @@ EOF</pre>
 </div>
 </section>
 
-<h2 id="devices">7 · Which devices can be the printer</h2>
+<h2 id="devices">Which devices can be the printer</h2>
 <div class="card">
   <table>
     <tr><th>Device</th><th>Can it print automatically?</th><th>What to know</th></tr>
-    <tr><td><b>Windows PC</b></td><td>✅ Yes — the usual choice</td><td><a href="#windows">§4</a>. Turn OFF “let Windows manage my default printer” — see §4.2.</td></tr>
-    <tr><td><b>Mac</b></td><td>✅ Yes</td><td><a href="#mac">§5</a>. Cheap unbranded printers may need the free driver in §5.4.</td></tr>
-    <tr><td><b>Linux PC / Raspberry Pi</b></td><td>✅ Yes — best unattended</td><td><a href="#linux">§6</a>.</td></tr>
+    <tr data-only="win mac linux"><td><b>Windows PC</b></td><td>✅ Yes — the usual choice</td><td><a href="#windows">the Windows menu</a>. Turn OFF “let Windows manage my default printer” — see the first test in your own menu.</td></tr>
+    <tr><td><b>Mac</b></td><td>✅ Yes</td><td><a href="#mac">the Mac menu</a>. Cheap unbranded printers may need the free driver in the driver steps in the Mac menu.</td></tr>
+    <tr><td><b>Linux PC / Raspberry Pi</b></td><td>✅ Yes — best unattended</td><td><a href="#linux">the Linux menu</a>.</td></tr>
     <tr><td><b>Chromebook</b></td><td>⚠️ Only as a backup</td><td>Network printers work; most USB thermal printers don't, and Chrome's kiosk flags aren't available — so every ticket waits for a tap.</td></tr>
     <tr><td><b>Android tablet / phone</b></td><td>❌ No</td><td>No silent-print mode. Use the tablet for taking orders — that is its job — and let a computer print.</td></tr>
     <tr><td><b>iPad / iPhone</b></td><td>❌ No</td><td>Same reason, and AirPrint does not cover ESC/POS thermal printers.</td></tr>
-    <tr><td><b>Cloud printer</b></td><td>✅ Best — no computer at all</td><td>Not switched on in the app yet — <a href="#next">§14</a>.</td></tr>
+    <tr><td><b>Cloud printer</b></td><td>✅ Best — no computer at all</td><td>Not switched on in the app yet — <a href="#next">better setups</a>.</td></tr>
   </table>
   <div class="warn"><b>Never make a phone the printer.</b> The app asks each screen whether it should
     print — answer <b>No</b> on phones. A phone that took a ticket would put it in a dialog nobody looks
     at, and the kitchen would never get the paper.</div>
 </div>
 
-<h2 id="switches">8 · The switches in the app</h2>
+<h2 id="switches">The switches in the app</h2>
 <div class="card">
   <p>Four things decide whether a ticket comes out, and where. Two are ours, one is the restaurant's
     choice of room, one belongs to the computer with the printer.</p>
@@ -907,7 +946,7 @@ EOF</pre>
         <td><b>Kitchen screen: ☰ → Settings → 🖨 Printing.</b><br>
             <b>Counter screen: Settings → Printing</b>, or the strip above the Tables grid.</td>
         <td>whoever is at that computer</td></tr>
-    <tr><td>4</td><td><b>The print-station file</b> (<a href="#windows">§4</a> / <a href="#mac">§5</a> / <a href="#linux">§6</a>)</td><td>on that computer</td><td>whoever sets it up</td></tr>
+    <tr><td>4</td><td><b>The print-station file</b> (<a href="#windows">the Windows menu</a> / <a href="#mac">the Mac menu</a> / <a href="#linux">the Linux menu</a>)</td><td>on that computer</td><td>whoever sets it up</td></tr>
   </table>
   <div class="plain"><b>In simple words:</b> we allow it and say which room prints, then the computer with
     the printer says “that's me”, and the print-station file keeps that window awake.</div>
@@ -919,7 +958,7 @@ EOF</pre>
     you can check paper, width and cut before service without touching a real order.</p>
 </div>
 
-<h2 id="which">9 · One printer at a time — and how to switch</h2>
+<h2 id="which">One printer at a time — and how to switch</h2>
 <div class="card">
   <p><b>Exactly one screen prints for a restaurant.</b> The server enforces it, so two screens can never
     both print the same ticket — and every other screen can see which one holds it.</p>
@@ -951,7 +990,7 @@ EOF</pre>
     one, and one tap moves it to you.</div>
 </div>
 
-<h2 id="test">10 · The test that actually matters</h2>
+<h2 id="test">The test that actually matters</h2>
 <div class="card">
   <ol class="steps">
     <li><b>Send a real order</b> from the waiter tablet or the guest menu to a test table. A ticket should
@@ -974,13 +1013,13 @@ EOF</pre>
     printer back as default when you are done.</p>
 </div>
 
-<h2 id="flags">11 · Every setting explained</h2>
+<h2 id="flags">Every setting explained</h2>
 <div class="card">
   <h3>The printer's own settings — what each one actually does</h3>
   <p>These live on the printer, not in the app, and <b>every make spells them differently</b>. That is why
     this page never tells you to paste a fixed list: ask your own printer what it has
-    (<a href="#mac">§5.3</a> · <a href="#linux">§6.3</a>), or read them off the driver window on Windows
-    (<a href="#windows">§4.3</a>), and set only what is there.</p>
+    (<a href="#mac">the “only if it came out wrong” table</a> · <a href="#linux">the “only if it came out wrong” table</a>), or read them off the driver window on Windows
+    (<a href="#windows">the “only if it came out wrong” table</a>), and set only what is there.</p>
   <table>
     <tr><th>Called something like</th><th>In plain words</th></tr>
     <tr><td><b>Paper size</b> · Media Size · PageSize</td>
@@ -1017,21 +1056,21 @@ EOF</pre>
   </table>
 </div>
 
-<h2 id="wrong">12 · When something goes wrong</h2>
+<h2 id="wrong">When something goes wrong</h2>
 <div class="card">
   <table>
     <tr><th>What you see</th><th>What it means</th><th>What to do</th></tr>
-    <tr><td><b>Nothing prints at all, ever</b></td><td>One of the four switches is off, or the printer isn't the computer's default.</td><td>Work through <a href="#switches">§8</a> in order, then press <b>🖨 Preview a sample KOT</b>. If the sample prints but real tickets don't, switch 1 or 3 is off.</td></tr>
+    <tr><td><b>Nothing prints at all, ever</b></td><td>One of the four switches is off, or the printer isn't the computer's default.</td><td>Work through <a href="#switches">the switches</a> in order, then press <b>🖨 Preview a sample KOT</b>. If the sample prints but real tickets don't, switch 1 or 3 is off.</td></tr>
     <tr><td><b>There is no Printing section anywhere</b></td><td>Automatic printing is off for the restaurant — the app hides it rather than showing a dead control.</td><td>Ask us to switch it on.</td></tr>
     <tr><td><b>“Printing right now: some other screen”</b></td><td>One screen prints at a time and it isn't this one.</td><td>If the printer is here, <b>🖨 Print here instead</b>. Otherwise nothing — that is correct.</td></tr>
-    <tr><td><b>macOS: “Not Opened — Apple could not verify…”</b></td><td>Gatekeeper — the macOS guard that blocks any script that came from the web. Nothing is wrong with the file.</td><td>You never need such a file: make your own in <a href="#mac">§5.6</a> (a file you typed carries no such flag) or use the one-line Terminal command in §5.5. To rescue a file already in Downloads, §5.9.</td></tr>
-    <tr><td><b>Windows: “Windows protected your PC”</b></td><td>SmartScreen, the same idea — and it only appears on a file that came off the internet.</td><td><b>More info → Run anyway</b> (once per file). A file you typed in Notepad yourself (<a href="#windows">§4.5</a>) never shows this.</td></tr>
-    <tr><td><b>Windows: double-clicking the file opens Notepad</b></td><td>It was saved as <code>.bat.txt</code>.</td><td>Rename it so it ends in <b>.bat</b> — and next time set <b>Save as type: All Files</b> (<a href="#windows">§4.5</a>).</td></tr>
-    <tr><td><b>Linux: “Permission denied”</b></td><td>Not marked executable.</td><td><code>chmod +x print-station.sh</code>, or run <code>sh print-station.sh</code>.</td></tr>
+    <tr data-only="mac"><td><b>macOS: “Not Opened — Apple could not verify…”</b></td><td>Gatekeeper — the macOS guard that blocks any script that came from the web. Nothing is wrong with the file.</td><td>You never need such a file: make your own in <a href="#mac">the “make the file yourself” steps</a> (a file you typed carries no such flag) or use the one-line Terminal command in the one-line Terminal command in the Mac menu. To rescue a file already in Downloads, the last part of the Mac menu (a file already in Downloads).</td></tr>
+    <tr data-only="win"><td><b>Windows: “Windows protected your PC”</b></td><td>SmartScreen, the same idea — and it only appears on a file that came off the internet.</td><td><b>More info → Run anyway</b> (once per file). A file you typed in Notepad yourself (<a href="#windows">the print-station file in your own menu</a>) never shows this.</td></tr>
+    <tr data-only="win"><td><b>Windows: double-clicking the file opens Notepad</b></td><td>It was saved as <code>.bat.txt</code>.</td><td>Rename it so it ends in <b>.bat</b> — and next time set <b>Save as type: All Files</b> (<a href="#windows">the print-station file in your own menu</a>).</td></tr>
+    <tr data-only="linux"><td><b>Linux: “Permission denied”</b></td><td>Not marked executable.</td><td><code>chmod +x print-station.sh</code>, or run <code>sh print-station.sh</code>.</td></tr>
     <tr><td><b>A print dialog appears for every ticket</b></td><td>Chrome was opened normally, without <code>--kiosk-printing</code>.</td><td>Close it and start Chrome with your <b>print-station</b> file instead.</td></tr>
     <tr><td><b>It printed while I watched, stopped when I looked away</b></td><td>Chrome opened without the covered-window settings.</td><td>Start it with your <b>print-station</b> file — that is the exact problem it exists for.</td></tr>
-    <tr><td><b>Blank paper, or a huge gap before each ticket</b></td><td>Paper size — almost always A4 selected.</td><td>Set the receipt size on the printer (<a href="#windows">§4.3</a> / <a href="#mac">§5.3</a> / <a href="#linux">§6.3</a>). Never set a page size in the app.</td></tr>
-    <tr><td><b>Ticket cut through the middle</b></td><td>The cut happens before the paper feed.</td><td>The cut setting must say <b>after the job</b>, never “after each page” — Windows <a href="#windows">§4.3</a>, Mac <a href="#mac">§5.3</a>, Linux <a href="#linux">§6.3</a>.</td></tr>
+    <tr><td><b>Blank paper, or a huge gap before each ticket</b></td><td>Paper size — almost always A4 selected.</td><td>Set the receipt size on the printer (<a href="#windows">the “only if it came out wrong” table</a> / <a href="#mac">the “only if it came out wrong” table</a> / <a href="#linux">the “only if it came out wrong” table</a>). Never set a page size in the app.</td></tr>
+    <tr><td><b>Ticket cut through the middle</b></td><td>The cut happens before the paper feed.</td><td>The cut setting must say <b>after the job</b>, never “after each page” — Windows <a href="#windows">the “only if it came out wrong” table</a>, Mac <a href="#mac">the “only if it came out wrong” table</a>, Linux <a href="#linux">the “only if it came out wrong” table</a>.</td></tr>
     <tr><td><b>Right-hand edge of every line missing</b></td><td>Printing too wide.</td><td>The app prints 66 mm on purpose; check nothing has forced 80 mm in the driver, and that the roll really is 80 mm.</td></tr>
     <tr><td><b>Half a ticket, or random characters</b></td><td>Usually a too-long or loose USB cable.</td><td>Shorten it (under 5 m) or move to a LAN printer. Then tap <b>🖨 → Ticket came out half</b> so the manager knows.</td></tr>
     <tr><td><b>Two identical tickets</b></td><td>Almost always a genuine reprint.</td><td>Look at the paper: a reprint says <b>*** Reprint · Duplicate ***</b> across the top. Two clean copies should be impossible — tell us if you see it.</td></tr>
@@ -1041,7 +1080,7 @@ EOF</pre>
   </table>
 </div>
 
-<h2 id="daily">13 · The daily routine</h2>
+<h2 id="daily">The daily routine</h2>
 <div class="card">
   <h4>Opening</h4>
   <ul>
@@ -1064,7 +1103,7 @@ EOF</pre>
   </ul>
 </div>
 
-<h2 id="next">14 · Better setups you can move to</h2>
+<h2 id="next">Better setups you can move to</h2>
 <div class="card">
   <p>Everything above uses a browser window as the printer. It works, and with these settings it works
     reliably — but two setups have fewer moving parts, and the app is already built to accept both.</p>
@@ -1141,13 +1180,21 @@ EOF</pre>
       if (os === "all") { delete document.body.dataset.os; } else { document.body.dataset.os = os; }
       for (const b of btns) b.setAttribute("aria-pressed", String(b.dataset.pick === os));
       all.hidden = os === "all";
+      // Say which menu this is, in the words the buttons use.
+      const NAME = { win: "Windows", mac: "Mac", linux: "Linux / Raspberry Pi" };
+      for (const el of document.querySelectorAll("[data-osname]")) el.textContent = NAME[os] || "";
       try { localStorage.setItem("lfh_print_setup_os", os); } catch (e) {}
-      if (scroll) {
-        const sec = os === "all" ? pick : document.querySelector('section.os[data-osid="' + os + '"]');
-        if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      // NO SCROLLING (owner, 2026-08-20: "it will not scroll… proper different menu for Windows, for
+      // Mac and for Linux"). Picking an OS used to fling the page 5,000 pixels down into the middle of
+      // itself, which is what made this feel like one long document being filtered instead of a menu.
+      // Picking a menu now leaves you exactly where you are, at the top, reading YOUR menu from its
+      // first line — the other two menus are gone and the numbers close up behind them.
+      if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
     }
-    for (const b of [...btns, all]) b.addEventListener("click", () => show(b.dataset.pick, true));
+    // Every [data-pick] on the page switches menus — the three big cards at the top AND the small
+    // switcher inside the "you are reading the X menu" bar. One handler, so a second copy of the
+    // switching rule cannot drift from this one.
+    for (const el of document.querySelectorAll("[data-pick]")) el.addEventListener("click", () => show(el.dataset.pick, true));
 
     // A contents-list click on a menu that is currently hidden must reveal it first.
     for (const a of document.querySelectorAll('a[href^="#"]')) {
