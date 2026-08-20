@@ -47,6 +47,11 @@ export type PrintRoute = {
   backupAgent?: string | null;
   backupPrinter?: string | null;
   backupAfterMs?: number;
+  /** Overrides what the machine reported. This is the line the owner needs for his banquet machine:
+   *  an A4 printer that is loaded with sheets "almost half or smaller than half of it" — so the
+   *  paper is a per-route answer (A4 · A5 · A6 · or two typed numbers), never a guess from the
+   *  printer's model name. */
+  paper?: PaperSize;
 };
 export type PrintRoutes = Record<PrintKind, PrintRoute>;
 
@@ -54,23 +59,45 @@ const EMPTY_ROUTE: PrintRoute = { agent: null, printer: null };
 const emptyRoutes = (): PrintRoutes =>
   PRINT_KINDS.reduce((a, k) => { a[k] = { ...EMPTY_ROUTE }; return a; }, {} as PrintRoutes);
 
+/** The paper a printer is set to, in millimetres. Reported by the machine when it can work it out
+ *  (macOS/Linux read it straight out of the queue's own PPD), and otherwise chosen by the admin per
+ *  route. It matters more than it looks: a PDF page that is a DIFFERENT SIZE from the paper in the
+ *  printer is what makes a driver rotate the ticket or shrink it to half size — the exact fault the
+ *  owner photographed on 2026-08-19. Page size and media are made to agree, always. */
+export type PaperSize = { name?: string; wMm: number; hMm: number };
+
 export type AgentRow = {
   id: string;
   restaurant_id: string;
   name: string;
   fingerprint: string | null;
-  printers: { name: string; desc?: string }[];
+  printers: { name: string; desc?: string; paper?: PaperSize }[];
   last_seen_at: string | null;
   revoked_at: string | null;
 };
 export type AgentView = AgentRow & { connected: boolean; secondsAgo: number | null; fingerprintClash: boolean };
 
+const asPaper = (v: unknown): PaperSize | undefined => {
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const w = Number(o.wMm), h = Number(o.hMm);
+  // Sanity, not trust: a receipt roll is 58-80mm and the longest sheet anyone prints is a 3.2m
+  // continuous roll. Anything outside that is a parse gone wrong on the machine's side, and a wrong
+  // page size is worse than none — it is the rotation fault.
+  if (!(w >= 20 && w <= 500 && h >= 20 && h <= 3600)) return undefined;
+  return { name: o.name ? String(o.name).slice(0, 60) : undefined, wMm: Math.round(w * 10) / 10, hMm: Math.round(h * 10) / 10 };
+};
+
 const AGENT_COLS = "id, restaurant_id, name, fingerprint, seen_fingerprints, printers, last_seen_at, revoked_at";
 
-const asPrinters = (v: unknown): { name: string; desc?: string }[] =>
+const asPrinters = (v: unknown): { name: string; desc?: string; paper?: PaperSize }[] =>
   Array.isArray(v)
-    ? v.map((p) => (p && typeof p === "object" ? p as { name?: unknown; desc?: unknown } : { name: p }))
-        .map((p) => ({ name: String((p as { name?: unknown }).name ?? "").slice(0, 120), desc: (p as { desc?: unknown }).desc ? String((p as { desc?: unknown }).desc).slice(0, 160) : undefined }))
+    ? v.map((p): Record<string, unknown> => (p && typeof p === "object" ? p as Record<string, unknown> : { name: p }))
+        .map((p) => ({
+          name: String(p.name ?? "").slice(0, 120),
+          desc: p.desc ? String(p.desc).slice(0, 160) : undefined,
+          paper: asPaper(p.paper),
+        }))
         .filter((p) => p.name)
         .slice(0, 40)
     : [];
@@ -173,9 +200,25 @@ export async function readRoutes(rid: string): Promise<PrintRoutes> {
       backupAgent: o.backupAgent ? String(o.backupAgent) : null,
       backupPrinter: o.backupPrinter ? String(o.backupPrinter).slice(0, 120) : null,
       backupAfterMs: typeof o.backupAfterMs === "number" && o.backupAfterMs >= 5000 ? o.backupAfterMs : BACKUP_AFTER_MS_DEFAULT,
+      paper: asPaper(o.paper),
     };
   }
   return out;
+}
+
+/**
+ * The page size a document must be built at for THIS printer: the route's own answer if the admin
+ * pinned one, else what the machine said the printer is loaded with, else nothing at all.
+ *
+ * "Nothing at all" is a real answer and not a failure: it means the document is served exactly as a
+ * browser would print it, which is how every thermal ticket already works today. A GUESSED size is
+ * the one thing that must never happen here — a page that disagrees with the paper is what rotates
+ * a ticket or halves it.
+ */
+export function paperFor(route: PrintRoute | undefined, agent: AgentRow | null, printer: string | null): PaperSize | null {
+  if (route?.paper) return route.paper;
+  const p = (agent?.printers || []).find((x) => x.name === printer);
+  return p?.paper || null;
 }
 
 /**
@@ -210,10 +253,12 @@ export async function writeRoutes(rid: string, patch: Record<string, unknown>): 
     if (typeof main === "string") return { error: main };
     const backup = pick("backupAgent", "backupPrinter");
     if (typeof backup === "string") return { error: backup };
+    const paper = asPaper(o.paper);
     next[kind] = {
       ...main,
       backupAgent: backup.agent, backupPrinter: backup.printer,
       backupAfterMs: typeof o.backupAfterMs === "number" && o.backupAfterMs >= 5000 ? o.backupAfterMs : BACKUP_AFTER_MS_DEFAULT,
+      ...(paper ? { paper } : {}),
     };
   }
 

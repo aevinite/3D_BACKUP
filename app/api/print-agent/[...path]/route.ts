@@ -17,9 +17,9 @@
 // blast radius is paper — and one press of Remove in the admin console ends it.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { agentByToken, helloAgent, claimNext, readRoutes, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
+import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
 import { finishKotJob } from "@/lib/printQueue";
-import { kotHtmlForOrder, billHtmlForSession, testHtml } from "@/lib/printDocs";
+import { kotHtmlForOrder, billHtmlForSession, testHtml, withPaper } from "@/lib/printDocs";
 
 export const dynamic = "force-dynamic";
 
@@ -160,13 +160,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       }).eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
       return new NextResponse(null, { status: 204 });
     }
-    return new NextResponse(html, {
+    // The paper the target printer is actually loaded with — the route's answer if the admin pinned
+    // one, else what this machine reported. Page size and media must agree or the driver rotates the
+    // ticket; a document that already declares its own size (the banquet sheet) is left alone.
+    const routes = await readRoutes(agent.restaurant_id);
+    const paper = paperFor(routes[job.kind as keyof typeof routes], agent, job.printer);
+    return new NextResponse(withPaper(html, paper), {
       status: 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
         // The helper reads the printer off the header, so the file it prints and the printer it
         // prints on can never come from two different answers.
         "x-lfh-printer": job.printer || "",
+        "x-lfh-paper": paper ? `${paper.wMm}x${paper.hMm}mm` : "",
         "cache-control": "no-store",
       },
     });

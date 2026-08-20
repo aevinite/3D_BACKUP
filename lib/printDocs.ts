@@ -137,3 +137,27 @@ export function testHtml(o: { restaurant: string; printer: string; agent: string
     <div class="f">If you can read this, this printer is ready.<br/>Nothing was charged and nothing was recorded as a sale.</div>
   </body></html>`;
 }
+
+/**
+ * Stamp the page size on a document that is about to be turned into a PDF by the helper.
+ *
+ * WHY THIS EXISTS, and why it is NOT the mistake it looks like. billdoc.js deliberately declares no
+ * @page size for a thermal ticket, and verify:print-format guards that — because in the BROWSER
+ * chain the page size comes from the printer queue itself, and declaring a different one is what
+ * printed the owner's bill sideways at half size on 2026-08-19.
+ *
+ * The helper's chain is not that chain. It renders with headless Chrome, which has no queue to take
+ * a size from and will happily produce a US-Letter page with a 66mm strip floating on it — and THAT
+ * mismatch is the same rotation fault by another road. So here, and only here, the document is told
+ * exactly the size of the paper the target printer is loaded with (from the machine's own report, or
+ * the admin's per-route answer — never a guess). Page and media then agree to the millimetre.
+ *
+ * A document that already declares its own size — the A4/A5 banquet sheet does — is left alone: its
+ * size IS the answer, and overriding it would be this same fault a third time.
+ */
+export function withPaper(html: string, paper: { wMm: number; hMm: number } | null): string {
+  if (!paper) return html;
+  if (/@page\s*\{[^}]*\bsize\s*:/.test(html)) return html;
+  const rule = `<style>@page{size:${paper.wMm}mm ${paper.hMm}mm;margin:0}</style>`;
+  return html.includes("</head>") ? html.replace("</head>", rule + "</head>") : rule + html;
+}
