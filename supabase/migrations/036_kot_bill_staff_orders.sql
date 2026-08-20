@@ -97,3 +97,22 @@ END; $$;
 -- Deliberately NO anon grant: only the staff panels' service-role key may call this.
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `trg_assign_bill` above is RETIRED, and it is the one object in this file whose return would
+-- change what a restaurant SEES. It fires BEFORE INSERT ON sessions, so every table a waiter
+-- opens immediately spends a bill number from `lfh_next_counter('bill')` — whether or not that
+-- party ever orders. Migration 040 replaced it with `trg_assign_bill_on_order` (AFTER INSERT ON
+-- orders) precisely to stop that, and docs/NUMBERING.md records why: "before it, tapping a table
+-- to open it burned a bill number, so a day of ordinary floor work left big holes in the series
+-- for tables that never ordered."
+--
+-- A FULL re-seed ends correctly (040 sorts after this file and drops the trigger; 267 drops the
+-- function). The hole is running THIS FILE ALONE — the workflow CLAUDE.md recommends — which puts
+-- both back in one step and quietly returns the app to pre-040 numbering. Migration 040 chose to
+-- leave the function in place ("harmless, in case an old migration re-run expects it"); that is
+-- true of the function and NOT of the trigger, which is why this block exists.
+--
+-- Trigger first, then the function it calls. Idempotent, and safe where neither exists.
+DROP TRIGGER IF EXISTS trg_assign_bill ON sessions;
+DROP FUNCTION IF EXISTS lfh_assign_bill();
