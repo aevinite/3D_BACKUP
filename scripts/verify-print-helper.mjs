@@ -9,6 +9,11 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const read = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
+// EVERY "this must NOT appear" test runs against code with the comments stripped. Four checks in this
+// file tripped on their own explanations while it was being written — the ESC/POS one, the awaited
+// gate, the parity harness and the owner read — and a guard that fails because of the sentence
+// explaining it is a guard the next person deletes.
+const code = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
 let pass = 0; const fails = [];
 const check = (cond, ok, bad) => { if (cond) { pass++; console.log("  ok   " + ok); } else fails.push(bad); };
 
@@ -59,7 +64,7 @@ check(/billdoc\.js/.test(docs) && /kotDocHtml|billDocHtml|banquetDocHtml/.test(d
   "the helper path has grown its own document builder: a second layout drifts the moment either side is touched");
 // Looks for the BYTES, not the phrase: both files talk ABOUT ESC/POS in comments explaining why the
 // helper must never emit it, and a guard that trips on its own explanation is a guard people delete.
-check(!/\\x1[bd]|\\u001[bd]|0x1[bd],|Buffer\.from\(\[/.test(docs + script),
+check(!/\\x1[bd]|\\u001[bd]|0x1[bd],|Buffer\.from\(\[/.test(code(docs + script)),
   "…and nobody writes raw printer bytes by hand — that would be a second bill layout",
   "raw printer commands have appeared in the helper path; the document must stay the one HTML file");
 check(/withPaper/.test(docs) && /@page\{size:/.test(docs) && /already declares/.test(docs),
@@ -83,6 +88,31 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
   "the kitchen sheet NAMES the computer and printer, so a quiet screen is never a mystery",
   "the kitchen printer sheet no longer says where the paper comes out");
 
+// ── 4b · EVERY panel, not just the two that print ─────────────────────────────────────────────
+// The owner sits at the counter (at Aangan he is also the manager) and the waiter carries the tablet.
+// Both were missed on the first pass: the owner panel only had LINKS to the guide, and the tablet still
+// opened its own window for a bill — so the same bill behaved differently depending on which panel
+// issued it. Owner, 2026-08-20: "in the admin panel, in the owner panel, in the manager panel, in the
+// kitchen print panel — everywhere".
+{
+  const ownerApi = read("app/api/owner/printing/route.ts");
+  const ownerPage = read("app/owner/settings/page.tsx");
+  const tabletRoute = read("app/api/tablet/[...path]/route.ts");
+  const tabletPanel = read("public/panels/tablet/app.js");
+  check(/ownerScope/.test(ownerApi) && /allowed: false/.test(ownerApi) && !/token_hash|fingerprint/.test(code(ownerApi)),
+    "the owner can SEE where the paper comes out — read-only, and never a code or a fingerprint",
+    "the owner printing read has lost its scope check, its withheld answer, or has started exposing credentials");
+  check(/Where your paper comes out right now/.test(ownerPage) && /kotHelper/.test(ownerPage),
+    "…and the owner panel shows it, with the old screen-station line yielding to it (two answers to one question is worse than none)",
+    "the owner panel no longer shows which computer prints, or contradicts itself by still naming a screen");
+  check(/print" && b === "send"/.test(tabletRoute) && /helperFor\(rid, "bill"\)/.test(tabletRoute),
+    "a WAITER's bill takes the same road as a manager's",
+    "the tablet prints a bill its own way again — the same bill must not behave differently depending on which panel issued it");
+  check(/print\/send/.test(tabletPanel) && /openBillWindow/.test(tabletPanel) && !/sessionId: sid\b/.test(code(tabletPanel)),
+    "…through the shared door, with its own window still the fallback",
+    "the tablet's bill send is gone, or reaches for `sid` again — a variable from another function, which parses and throws the moment a waiter presses Print");
+}
+
 // ── 5 · the admin looking is not the restaurant printing ──────────────────────────────────────
 check(/adminView: true/.test(eroute) && /force/.test(eroute) && /print_sent_by_admin/.test(eroute),
   "the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited",
@@ -92,7 +122,7 @@ check(/adminView: true/.test(eroute) && /force/.test(eroute) && /print_sent_by_a
 check(/HELPER_FILENAME/.test(script) && /print-helper\.command/.test(script) && /print-helper\.bat/.test(script) && /print-helper\.sh/.test(script),
   "all three operating systems get a helper, by hand",
   "an operating system lost its helper script");
-check(!/api\/print-agent\/(mac|windows|linux)|download>/.test(script + page),
+check(!/api\/print-agent\/(mac|windows|linux)|download>/.test(code(script + page)),
   "…and nothing is offered as a DOWNLOAD (macOS blocks a downloaded script outright)",
   "a downloadable helper is back: on a Mac that is the 'Apple could not verify' dialog with only Done / Move to Bin");
 check(/does not exit after --print-to-pdf|DOES NOT EXIT after --print-to-pdf/i.test(script) && /kill "\$CPID"/.test(script),
@@ -108,7 +138,7 @@ check(/lpstat -W completed/.test(script) && /cancel "\$CUPSID"/.test(script),
 // restaurant's printing state to an uncookied request. The await is the whole check.
 check(/tokenIsValid/.test(adminR)
   && (adminR.match(/if \(!\(await admin\(req\)\)\) return err/g) || []).length >= 2
-  && !/if \(!admin\(req\)\)/.test(adminR.replace(/^\s*\/\/[^\n]*$/gm, "")),
+  && !/if \(!admin\(req\)\)/.test(code(adminR)),
   "the admin printing API is gated on every verb — and the gate is AWAITED (a Promise is always truthy)",
   "an /api/admin/printing verb lost its gate, or tests tokenIsValid without awaiting it — which is the same as having no gate at all");
 check(/aevinite\/printing/.test(read("components/admin/AdminShell.tsx")),
@@ -148,6 +178,32 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "")),
   }
   check(agree, "the panel and the server label a ticket's table identically (T7 · a named table · no table)",
     "the two table-label rules have drifted: " + detail + "— the owner ruled 2026-08-05 'it should always be T7', and paper that disagrees with the screen sends staff to the wrong table");
+}
+
+// ── 8b · THREE REAL MENUS, not one page being filtered ────────────────────────────────────────
+// Owner, 2026-08-20: "I want it like three proper menus — if you click Windows it will NOT scroll".
+// Before this, picking an OS hid the other two but flung the page 5,000px into its own middle, and the
+// section numbers read 1, 2, 3, 4, 7, 8 — a gap that gives away that nothing became a menu.
+{
+  const guide = read("public/print-setup.html");
+  check(/window\.scrollTo\(\{ top: 0/.test(guide) && !/sec\.scrollIntoView/.test(code(guide)),
+    "picking a menu does not scroll the reader into the middle of the page",
+    "the guide scrolls to the chosen OS section again — that is what made three menus feel like one filtered page");
+  check(/counter-increment:sec/.test(guide) && /h2::before\{content:counter\(sec\)/.test(guide) && !/<h2 id="[a-z]+">\d/.test(code(guide)),
+    "…the section numbers count themselves, so a hidden menu leaves no gap",
+    "typed-in section numbers are back: hiding two menus then shows 1, 2, 3, 4, 7, 8");
+  check(/counter\(sec\) "\." counter\(sub\)/.test(guide) && !/<h3>\d+\.\d/.test(code(guide)),
+    "…and so do the step numbers inside each menu",
+    "typed-in step numbers are back — they disagree with the section number the moment a menu is hidden");
+  check(/class="inmenu"/.test(guide) && /You are reading the/.test(guide) && /data-osname/.test(guide),
+    "…and the page says which menu you are in, with the way back out",
+    "the 'you are reading the X menu' bar is gone — nothing then tells a reader they are inside one menu of three");
+  check(/\[data-only\]/.test(guide) && /data-only="mac"/.test(guide),
+    "…and a Windows reader is not shown the macOS rows of the shared tables",
+    "the OS-only rows in the shared tables show for every menu again");
+  check(!/§\d/.test(code(guide)),
+    "…and nothing refers to a section by NUMBER any more (the numbers move per menu)",
+    "a §number cross-reference is back in the guide: with automatic numbering it points at the wrong section in two of the three menus");
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

@@ -9,6 +9,15 @@ import { useCallback, useEffect, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
 
 type Module = { restaurant_id: string; name: string; key: string; label: string; enabled: boolean };
+type PrintingState = {
+  allowed: boolean; on: boolean; waiting: number;
+  computers: { name: string; connected: boolean; secondsAgo: number | null; printers: string[] }[];
+  routes: { kind: string; printer: string | null; computer: string | null; connected: boolean }[];
+};
+const KIND_WORDS: Record<string, string> = {
+  kot: "Kitchen slips", bill: "Bills", banquet: "Banquet sheets", label: "Parcel labels", test: "Test pages",
+};
+
 type Data = {
   name: string; isAdmin: boolean; canChangePassword: boolean;
   sections: Record<string, boolean>; restaurants: { id: string; name: string }[];
@@ -52,6 +61,11 @@ export default function OwnerSettings() {
 
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // WHERE THE PAPER COMES OUT (mig 341). An owner at the counter — who at Aangan is also the manager —
+  // must be able to SEE this without asking us: is that computer awake, which printer gets the kitchen
+  // slips, is anything waiting. Read-only: printing is hardware and the admin grants it.
+  // `allowed:false` (or a failed read) means NOTHING renders — the owner never sees what is withheld.
+  const [printing, setPrinting] = useState<PrintingState | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -61,6 +75,20 @@ export default function OwnerSettings() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scp]);
   useEffect(() => { load(); }, [load]);
+
+  // Its own small read, refreshed while the page is open so "connected · seen 2s ago" is true rather
+  // than a snapshot from whenever the page was opened. 15s is slow enough to cost nothing.
+  const loadPrinting = useCallback(async () => {
+    try {
+      const j = await (await fetch(`/api/owner/printing${scp}`, { cache: "no-store" })).json();
+      setPrinting(j && j.allowed ? j : null);
+    } catch { /* leave whatever we had; this card never blocks the page */ }
+  }, [scp]);
+  useEffect(() => {
+    loadPrinting();
+    const t = setInterval(loadPrinting, 15000);
+    return () => clearInterval(t);
+  }, [loadPrinting]);
 
   // ── Appearance (mirrors OwnerShell.toggleSkin) ──
   const [skin, setSkin] = useState<"light" | "dark">("dark");
@@ -136,25 +164,87 @@ export default function OwnerSettings() {
             standing at the printer, the two switches belong to the admin, and the per-screen switch
             belongs to the computer the printer is attached to. */}
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
-          {data.printing.map((p) => (
+          {data.printing.map((p) => {
+            // Only for the restaurant this page is scoped to — /api/owner/printing answers for one.
+            const kotHelper = printing && printing.routes.find((r) => r.kind === "kot" && r.printer) || null;
+            return (
             <div key={p.restaurant_id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", border: "var(--border)", borderRadius: 9, padding: "8px 11px" }}>
               <b style={{ fontSize: 13 }}>{p.name || "This restaurant"}</b>
-              <span className="adm-muted" style={{ fontSize: 12 }}>
-                tickets print on {p.target === "counter" ? "the counter screen" : p.target === "both" ? "the kitchen screen (counter as backup)" : "the kitchen screen"}
-              </span>
-              <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
-                {p.station
-                  ? <>printing now: <b>{p.station}</b>{p.stale ? <span className="adm-muted"> · gone quiet</span> : null}</>
-                  : <span className="adm-muted">no screen has taken it yet</span>}
-              </span>
+              {/* A COMPUTER MAY OWN THE KITCHEN SLIPS NOW (mig 341), and then this row must not still
+                  talk about screens: it said "tickets print on the kitchen screen · printing now:
+                  Kitchen screen" directly above a card explaining that a program on a computer does
+                  it — two answers to one question, on one screen. Seen in a screenshot, 2026-08-20. */}
+              {kotHelper ? (
+                <>
+                  <span className="adm-muted" style={{ fontSize: 12 }}>
+                    tickets print on <b>{kotHelper.printer}</b> — no screen needed
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
+                    printing now: <b>{kotHelper.computer}</b>
+                    {kotHelper.connected ? null : <span className="adm-muted"> · asleep, tickets waiting</span>}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="adm-muted" style={{ fontSize: 12 }}>
+                    tickets print on {p.target === "counter" ? "the counter screen" : p.target === "both" ? "the kitchen screen (counter as backup)" : "the kitchen screen"}
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
+                    {p.station
+                      ? <>printing now: <b>{p.station}</b>{p.stale ? <span className="adm-muted"> · gone quiet</span> : null}</>
+                      : <span className="adm-muted">no screen has taken it yet</span>}
+                  </span>
+                </>
+              )}
             </div>
-          ))}
+          ); })}
         </div>
+        {printing ? (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Where your paper comes out right now</div>
+            <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+              {printing.computers.length
+                ? "A printer program on your own computer does this — no screen has to be open, and nothing you close can stop it."
+                : "No computer is set up to print yet, so a screen has to do it. Ask us to set one up and this becomes automatic."}
+            </p>
+            {printing.computers.map((c) => (
+              <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "5px 0" }}>
+                <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: c.connected ? "#30a46c" : "#e5484d" }} />
+                <b style={{ fontSize: 13.5 }}>{c.name}</b>
+                <span className="adm-muted" style={{ fontSize: 12 }}>
+                  {c.connected ? `ready · seen ${c.secondsAgo ?? 0}s ago`
+                    : c.secondsAgo == null ? "has never checked in"
+                    : `asleep — last seen ${c.secondsAgo > 3600 ? Math.round(c.secondsAgo / 3600) + "h" : Math.round(c.secondsAgo / 60) + " min"} ago`}
+                </span>
+                {c.printers.length ? <span className="adm-muted" style={{ fontSize: 12 }}>· {c.printers.join(" · ")}</span> : null}
+              </div>
+            ))}
+            {printing.routes.length ? (
+              <div style={{ marginTop: 8, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+                {printing.routes.map((r) => (
+                  <div key={r.kind} style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0", flexWrap: "wrap" }}>
+                    <span className="adm-muted" style={{ minWidth: 130 }}>{KIND_WORDS[r.kind] || r.kind}</span>
+                    <b>{r.printer}</b>
+                    {r.computer ? <span className="adm-muted">on {r.computer}{r.connected ? "" : " (asleep — waiting)"}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <p className="adm-muted" style={{ fontSize: 12, marginTop: 9 }}>
+              {printing.on ? "" : "Automatic printing is switched off at the moment — tickets wait and nothing is lost. "}
+              {printing.waiting > 0
+                ? `${printing.waiting} ${printing.waiting === 1 ? "thing is" : "things are"} waiting to print.`
+                : "Nothing is waiting to print."}
+              {" "}Changing which printer gets which paper is done for you by Aevidine — ask and it is one line.
+            </p>
+          </div>
+        ) : null}
         <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
           A kitchen ticket is queued by the server the moment an order is placed, so it can never be
-          lost — it waits until a screen prints it. The full written guide covers setting a printer up
+          lost — it waits until a printer takes it, whether that is a computer running the printer
+          program or a screen. The full written guide covers setting a printer up
           on <b>Windows</b>, a <b>Mac</b>, <b>Linux</b> or a <b>Raspberry Pi</b>: the printer itself, the
-          paper settings, the one window to open so printing never stops when it is minimised, and what
+          paper settings, the printer program that prints with no window open at all, and what
           to do when something goes wrong. It opens as its own page and can be saved as a PDF. There is
           nothing to download — the guide has one menu per operating system and every command has a Copy
           button, because a downloaded script is blocked by macOS and warned about by Windows.

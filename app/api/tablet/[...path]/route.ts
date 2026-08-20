@@ -16,6 +16,11 @@ import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
+// A waiter's bill must take the SAME road as a manager's (mig 341). Before this, printing a bill from
+// the tablet opened a window and used whatever printer THAT device defaults to — which on a waiter's
+// tablet is usually none at all, so the same bill behaved differently depending on which panel issued
+// it. Now it goes into the basket for the computer the address book names, exactly like the manager's.
+import { helperFor, queueJob } from "@/lib/printHelpers";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
@@ -755,6 +760,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // `rid` is resolved above (the route already refuses without one), so the ban is read against
     // this restaurant instead of platform-wide; see the note on deviceBlocked in lib/oplog.ts.
     if (await deviceBlocked(dev, rid)) return err("This device has been blocked by staff.", 403);
+
+    // ── print/send — the same door the manager panel uses ────────────────────────────────────────
+    // Kept identical on purpose, including `noRoute` meaning "open your window as you always did":
+    // one bill, one road, whichever panel pressed the button.
+    if (a === "print" && b === "send") {
+      const kind = String((body as Record<string, unknown>)?.kind || "");
+      if (kind !== "bill") return err("Only a bill can be sent this way from the tablet.", 400);
+      const own = await helperFor(rid, "bill");
+      if (!own.owned) return ok({ noRoute: true });
+      const sid = String((body as Record<string, unknown>)?.sessionId || "");
+      if (!sid) return err("Which bill?", 400);
+      const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+      if (!sess) return err("That table's bill is not this restaurant's.", 404);
+      const q = await queueJob(rid, "bill", { sessionId: sid, ...((body as Record<string, unknown>)?.parcel ? { parcel: true } : {}) },
+        { requestedBy: g.user?.name || g.user?.username || "waiter" });
+      if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      await logAction("tablet", "print_sent", { restaurant_id: rid, device_id: dev, detail: `bill sent to ${own.printer} on ${own.agent}` });
+      return ok({ queued: true, id: q.id, printer: own.printer, agent: own.agent, connected: !!own.connected,
+        note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back` });
+    }
 
     // ── WAITER SECTIONS (mig 222) — ONE gate for every table-scoped write ──────
     // Deliberately checked HERE, once, instead of inside each of the ~38 action branches

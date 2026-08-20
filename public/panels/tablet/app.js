@@ -798,11 +798,30 @@ function printTableBill(t) {
         .catch(() => {});
     } catch (e) { /* offline — the paper still came out */ }
   }
+  // Does a COMPUTER own the bills? (mig 341) Filled from the answer to /print/send itself — the tablet
+  // has no printing poll of its own and does not need one: it TRIES the basket, and the server says
+  // `noRoute` when no computer owns this paper, which is the same fallback the manager panel uses.
   // One reusable named window, and nothing here ever closes it — Print and Cancel are the same
   // event to the page, so closing on afterprint threw the bill away when someone pressed Cancel.
   // Opened tall on purpose: the bill sizes itself to fit the window (billdoc.js zFit), so a taller
   // window means a bigger, easier-to-read bill rather than a scrollbar. A REUSED window keeps its
   // own size, so this is the first-open default only.
+  // TRY THE BASKET FIRST. If a computer owns the bills, the paper comes out on ITS printer and this
+  // tablet opens nothing at all — which is the whole point on a device that usually has no printer.
+  // Any other answer (noRoute, an error, no signal) falls through to the window, exactly as before:
+  // a waiter must never be left holding a guest's bill with nothing on screen.
+  // sess.id, NOT `sid` — my first version reached for a variable that lives in a DIFFERENT function
+  // (billPrintedBefore's local), which parses perfectly and throws the moment a waiter presses Print.
+  // The session is `sess` here, named twenty lines above.
+  if (!sess.id) { openBillWindow(html); return; }
+  api("POST", "/print/send", { kind: "bill", sessionId: sess.id })
+    .then((r) => {
+      if (r && r.queued) { toast(r.note || ("Sent to " + r.printer), true); return; }
+      openBillWindow(html);
+    })
+    .catch(() => openBillWindow(html));
+}
+function openBillWindow(html) {
   const w = window.open("", "lfh_bill_print", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups to print the bill.", false); return; }
   try { w.document.open(); } catch (e) {}
