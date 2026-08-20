@@ -96,6 +96,15 @@
   body[data-os="win"] section.os:not([data-osid="win"]),
   body[data-os="mac"] section.os:not([data-osid="mac"]),
   body[data-os="linux"] section.os:not([data-osid="linux"]){display:none}
+  .minerow{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .minerow label{display:block;font-weight:650;font-size:14.5px}
+  .minerow input,.minerow select{display:block;width:100%;margin:6px 0 4px;padding:10px 12px;font:15px/1.3 inherit;
+    border:1.5px solid var(--line);border-radius:10px;background:#fbfcfe;color:var(--ink)}
+  .minerow input:focus,.minerow select:focus{outline:0;border-color:var(--accent);background:#fff}
+  .minerow small{display:block;font-weight:400;font-size:12.5px;color:var(--ink-soft);line-height:1.45}
+  b.you{background:#fff6d8;box-shadow:0 0 0 2px #fff6d8;border-radius:3px}
+  @media (max-width:640px){.minerow{grid-template-columns:1fr}}
+  @media print{#mine{display:none}}
   .nowrap{white-space:nowrap}
   @media (max-width:640px){
     .pickrow{grid-template-columns:1fr}
@@ -129,9 +138,10 @@
      <b>Linux</b> or a <b>Raspberry Pi</b> — every step, every click, and the exact code to paste.
      Written for someone who has never set up a printer before. Your site is
      <b><span data-site>this site</span></b>; every command below already uses it.</p>
-  <p style="margin:14px 0 0;color:#d6c9f7;font-size:14px"><b>Nothing to download.</b> You make one
-     small file yourself by pasting the code we give you — so no security warning can ever block it.
-     Every code block below already carries <b>your own site address</b>; press <b>Copy</b> and paste.</p>
+  <p style="margin:14px 0 0;color:#d6c9f7;font-size:14px"><b>Any thermal printer, any make.</b> Tell us
+     its name and your roll width in the box below and every command on this page is written for
+     <b>your</b> printer — and for <b>your</b> site address. <b>Nothing is downloaded:</b> you make one
+     small file yourself by pasting code, so no security warning can ever block it.</p>
   <div class="btns">
     <button class="btn" onclick="window.print()">🖨 Save this as a PDF / print it</button>
   </div>
@@ -171,10 +181,38 @@
   </ol>
 </nav>
 
+<!-- YOUR printer, not ours (owner, 2026-08-20: "it should be applicable for all printer not for
+     that printer, make whole thing dynamic"). Two answers — the name the computer shows and the roll
+     width — are pasted into every command on the page, so nobody has to work out which word in a
+     command is a placeholder. Kept in localStorage so a second visit is already filled in. With
+     JavaScript off the defaults below are still sensible words, so nothing reads as broken. -->
+<div class="pick" id="mine">
+  <b>Make this page yours — two answers</b>
+  <p>Fill these in and every command below is written for <i>your</i> printer. Nothing is sent anywhere;
+     it stays in this browser.</p>
+  <div class="minerow">
+    <label>1 · What is your printer called?
+      <input id="pname" type="text" spellcheck="false" placeholder="Kitchen" value="Kitchen" />
+      <small>The name your computer shows in its printer list. If it is not installed yet, leave
+        <b>Kitchen</b> — you can name it that when you add it.</small></label>
+    <label>2 · How wide is the paper roll?
+      <select id="pwidth">
+        <option value="80" selected>80 mm — the usual kitchen roll</option>
+        <option value="58">58 mm — the narrow one, like a card-machine receipt</option>
+      </select>
+      <small>Measure the roll, or read the box. Getting this wrong is the single most common reason a
+        ticket prints half off the edge.</small></label>
+  </div>
+</div>
+
 <h2 id="quick">1 · Start here — the short version</h2>
 <div class="card">
   <ol class="steps">
-    <li><b>Plug the thermal printer into one computer</b> and make it that computer's <b>default printer</b>.</li>
+    <li><b>Plug the printer in and print one test page from the computer itself</b>
+      Make that printer the computer's <b>default printer</b> first — automatic printing always goes to
+      the default. If the test page looks like a normal shop receipt, <b>the printer half is already
+      finished</b>: you do not have to set any paper options at all. Each menu below only sends you to
+      its settings table if the test came out wrong.</li>
     <li><b>Pick your computer’s menu</b> — ① Windows, ② Mac or ③ Linux / Raspberry Pi —
       and follow it once. Each menu walks you through <b>making one small file yourself</b>: open the text
       editor, press <b>Copy</b> on the code, paste it, save it with the exact name. <b>There is nothing to
@@ -189,8 +227,10 @@
       whole point of this setup. (<a href="#test">the test</a>)</li>
   </ol>
 </div>
-<div class="plain"><b>In simple words:</b> plug the printer in, open one special window on that computer,
-  tell the app that this screen is the printer, then check it still prints when the window is hidden.</div>
+<div class="plain"><b>In simple words:</b> plug the printer in, print one test from the computer to see
+  it works, open one special window on that computer, tell the app that this screen is the printer, then
+  check it still prints when the window is hidden. <b>The long tables of settings are only for when
+  something looked wrong</b> — they are a repair kit, not a checklist.</div>
 
 <h2 id="why">2 · Why printing used to stop (worth 60 seconds)</h2>
 <div class="card">
@@ -214,8 +254,9 @@
   <h3>The printer</h3>
   <table>
     <tr><th>Option</th><th>Roughly</th><th>Good because</th><th>Watch out</th></tr>
-    <tr><td><b>80mm USB thermal printer</b><br>(POS-80 / ZJ-80, Xprinter)</td><td>₹2,000–4,000</td>
-        <td>Cheapest. Works with everything here.</td>
+    <tr><td><b>80mm USB thermal printer</b><br>(any make — POS-80, ZJ-80, Xprinter, TVS, Epson…)</td><td>₹2,000–4,000</td>
+        <td>Cheapest. <b>The app does not care about the brand</b> — it prints to whatever your computer
+          calls its default printer, so any thermal printer your computer can print to will work.</td>
         <td>Must sit within a cable's reach. USB is only rated to ~5 m — a longer cable is a real cause
             of half-printed tickets.</td></tr>
     <tr><td><b>80mm LAN / Wi-Fi printer</b><br>(Epson TM-T82X LAN)</td><td>₹8,000–12,000</td>
@@ -230,8 +271,10 @@
     fast. It needs three things: it stays <b>on</b> during service, it is <b>on the internet</b>, and the
     printer is plugged into it (or reachable on the same network).</p>
   <h3>Paper</h3>
-  <p><b>80mm thermal rolls</b> — keep two spare. Thermal paper has no ink: if nothing prints, the roll is
-    finished or in upside down.</p>
+  <p><b>Thermal rolls to match your printer</b> — <b>80 mm</b> is the usual kitchen size, <b>58 mm</b> is
+    the narrow card-machine size. Keep two spare. Thermal paper has no ink at all: if nothing prints, the
+    roll is either finished or in upside down (the printing side is the one that goes grey when you
+    scratch it).</p>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -250,24 +293,90 @@
     Windows never shows the <b>“Windows protected your PC”</b> warning for a file you made on your own
     computer — that warning only ever appears on files that came off the internet.</div>
 
-  <h3>4.1 · Install the printer and make it the default</h3>
-  <ol class="steps">
-    <li><b>Plug it in.</b> Windows usually finds it. If not, install the driver from the CD or the
-      maker's site (search the exact model, e.g. “XP-80C driver”).</li>
-    <li><b>Settings → Bluetooth &amp; devices → Printers &amp; scanners</b> — your printer should be listed.
-      Click it → <b>Print test page</b>. <b>If Windows can't print, the app certainly can't</b>, so fix
-      this first.</li>
-    <li><b>Set as default:</b> same screen → <b>Set as default</b>. Then turn <b>OFF</b> “Let Windows
-      manage my default printer” — otherwise Windows quietly switches the default to whatever was used
-      last and tickets go to the wrong printer.</li>
-    <li><b>Paper size:</b> <b>Printer properties → Preferences → Paper size</b> → pick the 80 mm ×
-      receipt option (names vary: <i>80(72.1)mm × Receipt</i>, <i>80mm × 297mm</i>…). <b>Never A4.</b></li>
-  </ol>
-  <div class="plain"><b>In simple words:</b> make sure Windows itself can print a test page on the
-    thermal printer, that this printer is the default one, and that the paper is set to the small
-    receipt size — not A4.</div>
+  <div class="plain"><b>Do I have to type in all the settings? No.</b> Most printers print perfectly
+    the moment Windows sees them. Steps 4.1 and 4.2 are the whole job for nine printers out of ten.
+    <b>4.3 is a repair kit, not a checklist</b> — open it only if your test ticket came out wrong.</div>
 
-  <h3>4.2 · Make the print-station file — every click</h3>
+  <h3>4.1 · Plug it in and let Windows find it</h3>
+  <ol class="steps">
+    <li><b>Put the paper in the right way round.</b> Thermal paper only prints on one side. If the roll
+      is in upside down you get blank paper for ever and think the printer is broken. Pull a little out,
+      scratch it with a fingernail — the side that goes <b>grey</b> is the printing side, and it must
+      face the little glass bar inside.</li>
+    <li><b>Plug the USB cable straight into the computer</b> — not through a hub if you can help it —
+      and switch the printer on.</li>
+    <li><b>Open the printer list:</b> <b>Settings → Bluetooth &amp; devices → Printers &amp; scanners</b>.</li>
+    <li><b>Look for your printer's name in that list.</b>
+      <br>· <b>It is there</b> → Windows already knows it. Go to <b>4.2</b>.
+      <br>· <b>It is not there</b> → it needs a driver. Go to <b>4.4</b>, then come back here.</li>
+  </ol>
+  <div class="plain"><b>In simple words:</b> paper in the right way round, cable in, switch on, and check
+    the computer can see it. A <b>driver</b> is just the small translator that teaches a computer to talk
+    to one exact printer model — Windows carries thousands of them and usually finds the right one alone.</div>
+
+  <h3>4.2 · The first test — and the two things you must set</h3>
+  <ol class="steps">
+    <li><b>Print a test page.</b> Click your printer in that list → <b>Manage → Print test page</b>.
+      <b>If Windows itself can't print, the app certainly can't</b> — so this comes first, always.</li>
+    <li><b>Make it the default printer.</b> Same screen → <b>Set as default</b>. Automatic printing
+      always goes to whatever the computer calls its default printer.</li>
+    <li><b>Turn OFF “Let Windows manage my default printer”</b> (top of the Printers &amp; scanners
+      screen). Leave it on and Windows quietly makes the last-used printer the default — a week later
+      tickets are going to the office printer and nobody knows why.</li>
+    <li><b>Now look at the paper that came out</b> and answer one question: <b>does it look like a
+      normal shop receipt?</b>
+      <br>· <b>Yes — clean lines, the right way up, cut at the end</b> → <b>you are finished with
+      printer settings. Skip 4.3 entirely</b> and go to 4.4.
+      <br>· <b>No</b> → 4.3 has one row for each thing that can look wrong.</li>
+  </ol>
+
+  <h3>4.3 · Only if the test came out wrong — one fix each <span class="tag win">skip if it looked fine</span></h3>
+  <p>Everything here is done in one place: <b>Printers &amp; scanners → your printer →
+    Printer properties → Preferences</b>. No typing, no commands — just find the setting named in the
+    middle column. Words differ between makes; the middle column gives the usual spellings.</p>
+  <table>
+    <tr><th>What the paper looked like</th><th>The setting to look for</th><th>Set it to</th></tr>
+    <tr><td><b>A big blank gap before each ticket</b>, or one ticket per huge sheet</td>
+        <td><b>Paper size</b> (Preferences → Paper/Quality)</td>
+        <td>The receipt size — a name with your roll's width in it, like
+          <i><b class="you" data-pwidth>80</b>(72.1)mm × Receipt</i> or
+          <i><b class="you" data-pwidth>80</b>mm × 297mm</i>. <b>Never A4.</b></td></tr>
+    <tr><td><b>Sideways</b>, or shrunk to half size</td>
+        <td><b>Orientation</b> / <b>Scaling</b> / <b>Fit to page</b></td>
+        <td>Orientation <b>Portrait</b>, scaling <b>100%</b> or “none”. A page shaped wrongly is what
+          makes a printer turn the ticket on its side.</td></tr>
+    <tr><td><b>The right-hand edge of every line is missing</b></td>
+        <td><b>Paper width</b> / <b>Paper size</b></td>
+        <td>Check the roll really is <b class="you" data-pwidth>80</b> mm and that the size chosen says
+          the same. A 58 mm roll with an 80 mm setting always loses its right edge.</td></tr>
+    <tr><td><b>It cuts through the middle of the ticket</b></td>
+        <td><b>Cut</b> / <b>Cutter</b> / <b>Paper cut</b></td>
+        <td><b>After the job</b> (not “after each page”) — the cut must happen after the paper has been
+          fed out, or the blade lands in the middle of your ticket.</td></tr>
+    <tr><td><b>It never cuts at all</b></td><td><b>Cutter</b></td>
+        <td>Turn it on — <i>if</i> your model has a blade. Many cheap ones don't; then you tear it off,
+          and that is normal.</td></tr>
+    <tr><td><b>Nothing comes out at all</b></td><td>—</td>
+        <td>Roll in upside down (4.1), printer not the default (4.2), or the cable is too long — USB is
+          only good for about 5 m.</td></tr>
+  </table>
+  <div class="warn"><b>Never set a paper size inside the app.</b> The app deliberately sends the ticket
+    with no page size of its own so that <i>your</i> printer's own paper setting wins. Forcing a size in
+    the app is what produces sideways tickets and 20 cm of blank paper.</div>
+
+  <h3>4.4 · If Windows didn't find your printer — getting the driver</h3>
+  <ol class="steps">
+    <li><b>Search the exact model plus the word driver.</b> The model is printed on the label under or
+      behind the printer — for example <i>XP-80C driver</i>, <i>TVS RP 3200 driver</i>,
+      <i>Epson TM-T82 driver</i>. Use the maker's own website.</li>
+    <li><b>Install it, then unplug and replug the printer.</b> Windows now names it properly in
+      Printers &amp; scanners.</li>
+    <li><b>Still nothing?</b> There is often a driver CD in the box, and cheap 80 mm printers are nearly
+      all clones of the same design — a driver named <b>POS-80</b>, <b>ZJ-80</b> or <b>XP-80</b> usually
+      drives them all. Try one of those.</li>
+  </ol>
+
+  <h3>4.5 · Make the print-station file — every click</h3>
   <p>This one file opens Chrome with the settings that make tickets print by themselves and stop the
     window dozing off when it is minimised or covered.</p>
   <ol class="steps">
@@ -318,7 +427,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     end for a screen in or near the kitchen, or change it to <code>/manager</code> for the counter
     screen. Nothing else in the file ever needs touching.</div>
 
-  <h3>4.3 · Start it and log in — once</h3>
+  <h3>4.6 · Start it and log in — once</h3>
   <ol class="steps">
     <li><b>Double-click <code>print-station.bat</code></b> on the Desktop. A black box flashes, then a
       Chrome window opens full-screen with no address bar. That full-screen window is normal: it is
@@ -328,9 +437,9 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
       Chrome is left completely untouched.</li>
   </ol>
   <div class="ok"><b>Nothing happens when you double-click?</b> The file is almost certainly saved as
-    <code>print-station.bat.txt</code> — go back to step 4.2.8.</div>
+    <code>print-station.bat.txt</code> — go back to step 4.5.8.</div>
 
-  <h3>4.4 · Tell the app that THIS screen is the printer</h3>
+  <h3>4.7 · Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
     <li><b>Ask us to switch printing on</b> for your restaurant, and to say whether tickets come out on
       the <b>kitchen screen</b> or the <b>counter screen</b>. That is one switch on our side
@@ -340,7 +449,7 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     <li><b>Send one order</b> and watch a ticket come out. Then do <a href="#test">the real test</a>.</li>
   </ol>
 
-  <h3>4.5 · Make it start by itself (strongly recommended)</h3>
+  <h3>4.8 · Make it start by itself (strongly recommended)</h3>
   <ol class="steps">
     <li>Right-click <code>print-station.bat</code> → <b>Show more options → Create shortcut</b>.</li>
     <li><b>Open the Startup folder.</b> Press <b>Win + R</b>, type <code>shell:startup</code>, press
@@ -362,41 +471,125 @@ start "" "%CHROME%" --kiosk --kiosk-printing ^
     macOS Sequoia. Nothing is wrong with such a file — but a file <b>you</b> type on your own Mac never
     gets that flag in the first place, so it simply opens. Everything below is typed by you.</div>
 
-  <h3>5.1 · Install the printer and make it the default</h3>
-  <p>Most cheap 80mm printers have <b>no macOS driver of their own</b>. For the POS-80 / ZJ-80 family the
-    open-source <code>zj-58</code> driver works. Open <b>Terminal</b> (⌘ + Space, type
-    <code>terminal</code>, Enter) and paste these four lines:</p>
-  <pre data-copy>git clone https://github.com/klirichek/zj-58
-cd zj-58 &amp;&amp; make
+  <div class="plain"><b>Do I have to type in all those settings? No.</b> If the test ticket in 5.2 looks
+    like a normal shop receipt, <b>you are done</b> — skip 5.3 and 5.4 completely. They are a repair kit
+    for a ticket that came out wrong, not a list everybody has to work through.</div>
+
+  <h3>5.1 · Plug it in and let the Mac find it</h3>
+  <ol class="steps">
+    <li><b>Put the paper in the right way round.</b> Thermal paper prints on one side only. Pull a bit
+      out and scratch it with a fingernail: the side that goes <b>grey</b> is the printing side, and it
+      must face the little glass bar inside the printer. A roll in upside down gives blank paper for
+      ever — and looks exactly like a broken printer.</li>
+    <li><b>Plug the USB cable straight into the Mac</b> (not through a hub if you can avoid it) and
+      switch the printer on.</li>
+    <li><b>Open the printer list.</b> <b>Apple menu  → System Settings → Printers &amp; Scanners</b>.</li>
+    <li><b>Is your printer in the list?</b>
+      <br>· <b>Yes</b> → go to <b>5.2</b>. The Mac already knows it.
+      <br>· <b>No</b> → press <b>Add Printer, Scanner or Fax… (+)</b>, pick your printer, and see what
+      the <b>Use</b> menu offers. If it names your printer or something like <i>ZJ-80 / POS-80 /
+      Generic Thermal</i>, choose that, name it <code><b class="you" data-pname>Kitchen</b></code>,
+      press <b>Add</b>, and go to 5.2. If the <b>Use</b> menu has nothing but
+      <i>Generic PostScript Printer</i>, go to <b>5.4</b> first.</li>
+  </ol>
+  <div class="warn"><b>Never accept “Generic PostScript Printer”.</b> PostScript is a language big office
+    printers speak and receipt printers do not. Choose it and the very first print comes out wrong or as
+    pages of gibberish — for that reason alone.</div>
+  <div class="plain"><b>In simple words:</b> a <b>driver</b> is the little translator that teaches your
+    Mac to talk to one exact printer model. Big brands supply one. The cheap 80 mm printers often don't,
+    which is what 5.4 is for.</div>
+
+  <h3>5.2 · The first test — and the one thing you must set</h3>
+  <ol class="steps">
+    <li><b>Make it the default printer.</b> In <b>Printers &amp; Scanners</b>, set <b>Default printer</b>
+      to your printer. Automatic printing always goes to the default — this one setting is not optional.</li>
+    <li><b>Print anything.</b> Open <b>TextEdit</b>, type the word <i>hello</i>, press <b>⌘P</b>, choose
+      your printer, press <b>Print</b>. <b>If the Mac itself can't print, the app can't either</b>, so
+      always start here.</li>
+    <li><b>Look at the paper</b> and answer one question — <b>does it look like a normal shop receipt?</b>
+      <br>· <b>Yes: upright, clean, cut or torn off at the end</b> → <b>finished with printer settings.
+      Skip 5.3 and 5.4</b> and go to 5.5.
+      <br>· <b>No</b> → 5.3 has one row for each way it can look wrong.</li>
+  </ol>
+
+  <h3>5.3 · Only if the test came out wrong — one fix each <span class="tag mac">skip if it looked fine</span></h3>
+  <p><b>You can do all of this by clicking, no commands needed.</b> Open Safari or Chrome and go to
+    <code>http://localhost:631/printers</code> — that page is your Mac's own printer control panel,
+    already installed, no internet needed. Click your printer, then <b>Administration → Set Default
+    Options</b>. Everything in the middle column below is on that page.</p>
+  <table>
+    <tr><th>What the paper looked like</th><th>The setting to look for</th><th>Set it to</th></tr>
+    <tr><td><b>A big blank gap before each ticket</b> (sometimes 20 cm of nothing)</td>
+        <td><b>Media Size</b> / <b>Page Size</b></td>
+        <td>The <b>shortest receipt size in the list</b> whose width matches your roll — names look like
+          <code>X<b class="you" data-pwidth70>70</b>MMY65MM</code> or
+          <code><b class="you" data-pwidth>80</b>x297mm</code>. <b>Never A4 or Letter.</b></td></tr>
+    <tr><td><b>Sideways</b>, or shrunk to about half size</td>
+        <td><b>Media Size</b> again</td>
+        <td>Same as above. A page that is a different shape from the roll is exactly what makes the
+          driver rotate the ticket and shrink it to fit.</td></tr>
+    <tr><td><b>The right-hand edge of every line is missing</b></td>
+        <td><b>Media Size</b> (its width part)</td>
+        <td>Check the roll really is <b class="you" data-pwidth>80</b> mm and that the size you picked
+          says the same width.</td></tr>
+    <tr><td><b>It cuts through the middle of the ticket</b></td>
+        <td><b>Cut Media</b> / <b>Cutter</b></td>
+        <td><b>End of Job</b> — not “end of page”. The blade must fall after the paper has been fed out.</td></tr>
+    <tr><td><b>It never cuts, or the ticket won't clear the tear bar</b></td>
+        <td><b>Feed Where</b> / <b>Feed Distance</b> / <b>Cutter</b></td>
+        <td>Feed <b>after the job</b>, distance about <b>30 mm</b>, cutter on if your model has a blade.
+          Plenty of cheap ones have none — then you tear it off, which is normal.</td></tr>
+    <tr><td><b>Nothing at all</b></td><td>—</td>
+        <td>Roll upside down (5.1), not the default printer (5.2), or a USB cable over about 5 m.</td></tr>
+  </table>
+  <h4>The same thing typed, if you prefer</h4>
+  <p>Two commands. The first one <b>asks your printer what it can do</b> — it is safe, it changes
+    nothing, and it prints a list where every line is one setting and the <code>*</code> marks what is in
+    use right now. The second one sets the ones you chose from that list. Open <b>Terminal</b>
+    (⌘ + Space, type <code>terminal</code>, Enter):</p>
+  <pre data-copy>lpoptions -p "<span data-pname>Kitchen</span>" -l</pre>
+  <pre data-copy>lpadmin -p "<span data-pname>Kitchen</span>" \
+  -o PageSize=PUT-A-SIZE-FROM-YOUR-OWN-LIST-HERE \
+  -o CutMedia=EndOfJob \
+  -o FeedWhere=AfterJob</pre>
+  <div class="warn"><b>Type only the settings your own list showed.</b> Copying a setting name from
+    someone else's printer is the usual way to get <i>“Unknown option”</i> — every make spells them
+    differently, which is exactly why the first command exists.</div>
+  <div class="warn"><b>Never set a paper size inside the app.</b> The app sends the ticket with no page
+    size of its own, on purpose, so that <i>your</i> printer's paper setting wins. Forcing a size in the
+    app is what produces sideways tickets and long blank lead-ins.</div>
+
+  <h3>5.4 · If the Mac has no driver for your printer</h3>
+  <p>Work down this list and stop at the first one that works.</p>
+  <ol class="steps">
+    <li><b>The maker's website.</b> Search the exact model from the label under the printer plus
+      <i>driver mac</i> — <i>Epson TM-T82 driver mac</i>, <i>Star TSP100 driver mac</i>. Every brand-name
+      printer has one, it installs by double-clicking, and then your printer appears in the <b>Use</b>
+      menu in 5.1. <b>Try this first — it needs no Terminal at all.</b></li>
+    <li><b>The free community driver</b>, for the cheap unbranded 80 mm printers (sold as POS-80, ZJ-80,
+      XP-80, Zjiang and a dozen other names — they are nearly all the same machine inside). Open
+      <b>Terminal</b> and paste these lines <b>one at a time</b>, pressing Enter after each:
+      <pre data-copy>xcode-select --install</pre>
+      <p style="margin:6px 0">That one may open a small Apple installer — let it finish, it is Apple's own
+        free developer tools and the next line needs them. If it says “already installed”, carry on.</p>
+      <pre data-copy>cd ~/Downloads
+git clone https://github.com/klirichek/zj-58
+cd zj-58
+make
 sudo cp rastertozj /usr/libexec/cups/filter/
 sudo cp zj80.ppd /Library/Printers/PPDs/Contents/Resources/</pre>
-  <p>Then  → <b>System Settings → Printers &amp; Scanners → Add Printer</b>, pick the USB printer, choose
-    the <b>ZJ-80</b> driver, and name it plainly — <code>Printer_POS_80</code>. Finally set it as the
-    <b>Default printer</b> on that same screen: silent printing always goes to the default.</p>
-  <div class="warn"><b>Never let macOS pick “Generic PostScript Printer”.</b> A thermal printer cannot
-    read PostScript, and the first print comes out wrong for that reason alone. Choose the thermal
-    driver for your model.</div>
+      <p style="margin:6px 0">In plain words, line by line: go to your Downloads folder · fetch the
+        driver · step into it · build it · put its two pieces where macOS looks for drivers. The two
+        <code>sudo</code> lines will ask for your Mac password — typing it shows nothing on screen, which
+        is normal. Then go back to <b>5.1</b>, add the printer again, and pick <b>ZJ-80</b> in the
+        <b>Use</b> menu.</p></li>
+    <li><b>If neither works</b>, your model may simply never have had a Mac driver — that happens, and it
+      is not your fault or the printer's. The same printer will work from a Windows PC
+      (<a href="#windows">§4</a>) or a Raspberry Pi (<a href="#linux">§6</a>), and either of those makes a
+      better print station anyway because it can be left switched on.</li>
+  </ol>
 
-  <h3>5.2 · The four paper settings that matter</h3>
-  <pre data-copy>lpadmin -p Printer_POS_80 \
-  -o PageSize=X70MMY65MM \
-  -o CutMedia=EndOfJob \
-  -o FeedWhere=AfterJob \
-  -o FeedDist=9feed30mm \
-  -o OptionCutter=True</pre>
-  <dl class="kv">
-    <dt>PageSize=X70MMY65MM</dt><dd>A short receipt page. Chrome flows a long ticket across several of
-      these and never slices a line of text in half.</dd>
-    <dt>CutMedia=EndOfJob</dt><dd>Cut <b>once</b>, after the ticket. <code>EndOfPage</code> cuts
-      mid-ticket, because the cut happens before the final paper feed.</dd>
-    <dt>FeedWhere / FeedDist</dt><dd>Feed the paper out after the job, so the ticket clears the tear bar.</dd>
-    <dt>OptionCutter=True</dt><dd>Only if your unit has a blade. If it doesn't, leave this out.</dd>
-  </dl>
-  <div class="warn"><b>Never set a paper size in the app's print settings.</b> A pinned or
-    landscape-shaped page makes the printer turn the ticket sideways; a size that doesn't match the roll
-    pushes the ticket to the bottom of an imaginary page — that is the 20 cm blank lead-in.</div>
-
-  <h3>5.3 · The 30-second way — one line in Terminal, no file at all <span class="tag mac">try this first</span></h3>
+  <h3>5.5 · The 30-second way — one line in Terminal, no file at all <span class="tag mac">try this first</span></h3>
   <ol class="steps">
     <li><b>Open Terminal.</b> Press <b>⌘ + Space</b>, type <code>terminal</code>, press <b>Enter</b>.</li>
     <li><b>Paste the command.</b> Press <b>Copy</b> on the box below, click inside Terminal, press
@@ -415,10 +608,10 @@ sudo cp zj80.ppd /Library/Printers/PPDs/Contents/Resources/</pre>
   <p><b>Leave that Terminal window open</b> — it is what keeps the Mac awake. Closing the Chrome window
     (⌘Q) ends it. Change <code>/kitchen</code> to <code>/manager</code> for a counter screen.</p>
   <div class="plain"><b>In simple words:</b> this is the same thing as the file below, just run once by
-    hand. Perfect for checking everything works today. Make the file (5.4) for every day after that, so
+    hand. Perfect for checking everything works today. Make the file (5.6) for every day after that, so
     nobody has to remember a command.</div>
 
-  <h3>5.4 · The every-day way — make the file yourself, every click</h3>
+  <h3>5.6 · The every-day way — make the file yourself, every click</h3>
   <ol class="steps">
     <li><b>Open TextEdit.</b> Press <b>⌘ + Space</b>, type <code>textedit</code>, press <b>Enter</b>.
       Choose <b>New Document</b> if it asks.</li>
@@ -468,7 +661,7 @@ wait $CHROME_PID</pre>
     <code><span data-site-url>https://www.aevinite.shop</span></code>; keep <code>/kitchen</code> for a
     kitchen screen or put <code>/manager</code> for the counter. Nothing else needs touching.</div>
 
-  <h3>5.5 · Tell the app that THIS screen is the printer</h3>
+  <h3>5.7 · Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
     <li><b>Ask us to switch printing on</b> for your restaurant, and whether tickets come out on the
       <b>kitchen screen</b> or the <b>counter screen</b> (<a href="#switches">§8</a>).</li>
@@ -478,12 +671,12 @@ wait $CHROME_PID</pre>
       <a href="#test">the real test</a>.</li>
   </ol>
 
-  <h3>5.6 · Open it automatically at login</h3>
+  <h3>5.8 · Open it automatically at login</h3>
   <p><b>System Settings → General → Login Items &amp; Extensions → Open at Login → +</b> and pick your
     <code>print-station.command</code> from the Desktop.</p>
   <div class="ok"><b>To finish for the day:</b> press <b>⌘Q</b> in the Chrome window.</div>
 
-  <h3>5.7 · Already got a downloaded starter file sitting in Downloads?</h3>
+  <h3>5.9 · Already got a downloaded starter file sitting in Downloads?</h3>
   <p>Older versions of this guide offered one to download, and that is the file that shows <b>“Apple
     could not verify…”</b> (a macOS protection called <b>Gatekeeper</b>). You don't need it — 5.4 above
     replaces it — but if you'd rather use it, either of these gets you past it:</p>
@@ -505,24 +698,69 @@ chmod +x ~/Downloads/print-station-mac.command</pre>
   <div class="ok"><b>Nothing to download here either.</b> You type the file with <code>nano</code>, the
     plain text editor that is already on the machine.</div>
 
-  <h3>6.1 · Install the printer (CUPS) and make it the default</h3>
-  <pre data-copy>sudo apt update &amp;&amp; sudo apt install -y cups printer-driver-escpr
-sudo usermod -aG lpadmin $USER
-lpinfo -v</pre>
-  <p><code>lpinfo -v</code> prints the printer's address, e.g. <code>usb://Zjiang/POS-80</code>. Add it,
-    make it the default, and test:</p>
-  <pre data-copy>sudo lpadmin -p POS80 -E -v "usb://Zjiang/POS-80" -m raw
-sudo lpoptions -d POS80
-echo "hello" | lp -d POS80</pre>
-  <p><b><code>-m raw</code> is deliberate:</b> an 80mm thermal printer speaks ESC/POS, and “raw” means
-    CUPS passes the job through untouched — which is what Chrome's output needs. If your model has a
-    proper PPD (Epson's <code>escpr</code> covers many), use that instead.</p>
-  <p><b>A network printer instead of USB</b> (recommended on a Pi) — give it a fixed address in your
-    router first, or it will move and printing will stop for no visible reason:</p>
-  <pre data-copy>sudo lpadmin -p POS80 -E -v socket://192.168.1.50:9100 -m raw
-sudo lpadmin -p POS80 -o PageSize=Custom.72x200mm -o fit-to-page=false</pre>
+  <div class="plain"><b>Do I have to set all the paper options? No.</b> Add the printer, print one test,
+    and if it looks like a shop receipt you are done. 6.3 is the repair kit for a ticket that came out
+    wrong — most people never open it.</div>
 
-  <h3>6.2 · Make the print-station file — every step</h3>
+  <h3>6.1 · Plug it in and add it</h3>
+  <ol class="steps">
+    <li><b>Paper the right way round</b> — thermal paper prints on one side only. Scratch it: the side
+      that turns <b>grey</b> faces the glass bar inside.</li>
+    <li><b>Install the printing system</b> (once per machine), then let your user manage printers:
+      <pre data-copy>sudo apt update &amp;&amp; sudo apt install -y cups
+sudo usermod -aG lpadmin $USER</pre>
+      Log out and back in after that second line, or it won't take effect yet.</li>
+    <li><b>The easy way — by clicking.</b> Open a browser on that machine and go to
+      <code>http://localhost:631/admin</code>. That is your own printing control panel, already
+      installed, no internet needed. Press <b>Add Printer</b>, choose your USB printer, and give it the
+      name <code><b class="you" data-pname>Kitchen</b></code>. If the driver list has nothing for your
+      model, choose <b>Raw</b> — see the note in 6.3.</li>
+    <li><b>Or by typing,</b> if you prefer. The first line asks the machine what printers it can see and
+      prints their addresses; put the address it shows into the second line:
+      <pre data-copy>lpinfo -v
+sudo lpadmin -p "<span data-pname>Kitchen</span>" -E -v "PUT-THE-ADDRESS-FROM-THE-LINE-ABOVE" -m raw
+lpoptions -d "<span data-pname>Kitchen</span>"</pre>
+      The last line makes it the <b>default</b> printer, which automatic printing always uses.</li>
+    <li><b>A network printer instead of USB</b> (the best choice on a Pi): give the printer a fixed
+      address in your router first — otherwise it moves house one day and printing stops for no visible
+      reason — then:
+      <pre data-copy>sudo lpadmin -p "<span data-pname>Kitchen</span>" -E -v socket://192.168.1.50:9100 -m raw</pre></li>
+  </ol>
+
+  <h3>6.2 · The first test</h3>
+  <ol class="steps">
+    <li><b>Print something:</b>
+      <pre data-copy>echo "hello" | lp -d "<span data-pname>Kitchen</span>"</pre></li>
+    <li><b>Look at the paper.</b> Like a shop receipt → <b>done, skip 6.3</b>. Wrong in some way → 6.3.</li>
+  </ol>
+
+  <h3>6.3 · Only if it came out wrong <span class="tag">skip if it looked fine</span></h3>
+  <p>Ask the printer what it can do — this changes nothing, it only lists the settings your driver has,
+    with <code>*</code> on the one in use:</p>
+  <pre data-copy>lpoptions -p "<span data-pname>Kitchen</span>" -l</pre>
+  <table>
+    <tr><th>What the paper looked like</th><th>The setting</th><th>Set it to</th></tr>
+    <tr><td><b>Blank gap before each ticket</b>, or one ticket per big page</td><td><code>PageSize</code></td>
+        <td>The shortest receipt size in <i>your</i> list whose width matches the roll
+          (<b class="you" data-pwidth>80</b> mm). Never A4.</td></tr>
+    <tr><td><b>Sideways or half size</b></td><td><code>PageSize</code></td>
+        <td>Same — a page shaped differently from the roll is what makes a driver rotate and shrink it.</td></tr>
+    <tr><td><b>Cuts mid-ticket</b></td><td><code>CutMedia</code></td><td><code>EndOfJob</code></td></tr>
+    <tr><td><b>Won't clear the tear bar</b></td><td><code>FeedWhere</code> · <code>FeedDist</code></td>
+        <td>After the job, about 30 mm.</td></tr>
+    <tr><td><b>Right edge missing</b></td><td><code>PageSize</code></td>
+        <td>Roll width and setting width must agree.</td></tr>
+  </table>
+  <pre data-copy>sudo lpadmin -p "<span data-pname>Kitchen</span>" -o PageSize=ONE-FROM-YOUR-OWN-LIST -o CutMedia=EndOfJob</pre>
+  <div class="plain"><b>What “Raw” means, in plain words:</b> it tells the printing system to pass the job
+    straight through without translating it. For many cheap thermal printers that is exactly right and
+    needs no driver at all. The catch: a raw queue has no paper settings to change — so if a raw printer
+    prints wrongly, look for a real driver for your model instead (search the model plus
+    <i>linux ppd</i>).</div>
+  <div class="warn"><b>Never set a paper size inside the app.</b> It sends the ticket with no page size
+    of its own on purpose, so your printer's own setting wins.</div>
+
+  <h3>6.4 · Make the print-station file — every step</h3>
   <ol class="steps">
     <li><b>Open a Terminal.</b> Type <code>nano ~/print-station.sh</code> and press <b>Enter</b> — an
       empty editor fills the window.</li>
@@ -560,7 +798,7 @@ exec "$BROWSER" \
     <code><span data-site-url>https://www.aevinite.shop</span></code>, plus <code>/kitchen</code> or
     <code>/manager</code>.</div>
 
-  <h3>6.3 · Tell the app that THIS screen is the printer</h3>
+  <h3>6.5 · Tell the app that THIS screen is the printer</h3>
   <ol class="steps">
     <li><b>Ask us to switch printing on.</b> We also set whether tickets come out in the kitchen or at
       the counter (<a href="#switches">§8</a>).</li>
@@ -570,7 +808,7 @@ exec "$BROWSER" \
       <a href="#test">the real test</a>.</li>
   </ol>
 
-  <h3>6.4 · Start on boot (what makes it maintenance-free)</h3>
+  <h3>6.6 · Start on boot (what makes it maintenance-free)</h3>
   <pre data-copy>mkdir -p ~/.config/autostart
 cat &gt; ~/.config/autostart/print-station.desktop &lt;&lt;EOF
 [Desktop Entry]
@@ -588,8 +826,8 @@ EOF</pre>
 <div class="card">
   <table>
     <tr><th>Device</th><th>Can it print automatically?</th><th>What to know</th></tr>
-    <tr><td><b>Windows PC</b></td><td>✅ Yes — the usual choice</td><td><a href="#windows">§4</a>. Turn OFF “let Windows manage my default printer”.</td></tr>
-    <tr><td><b>Mac</b></td><td>✅ Yes</td><td><a href="#mac">§5</a>. Cheap 80mm printers need the open-source driver.</td></tr>
+    <tr><td><b>Windows PC</b></td><td>✅ Yes — the usual choice</td><td><a href="#windows">§4</a>. Turn OFF “let Windows manage my default printer” — see §4.2.</td></tr>
+    <tr><td><b>Mac</b></td><td>✅ Yes</td><td><a href="#mac">§5</a>. Cheap unbranded printers may need the free driver in §5.4.</td></tr>
     <tr><td><b>Linux PC / Raspberry Pi</b></td><td>✅ Yes — best unattended</td><td><a href="#linux">§6</a>.</td></tr>
     <tr><td><b>Chromebook</b></td><td>⚠️ Only as a backup</td><td>Network printers work; most USB thermal printers don't, and Chrome's kiosk flags aren't available — so every ticket waits for a tap.</td></tr>
     <tr><td><b>Android tablet / phone</b></td><td>❌ No</td><td>No silent-print mode. Use the tablet for taking orders — that is its job — and let a computer print.</td></tr>
@@ -685,6 +923,32 @@ EOF</pre>
 
 <h2 id="flags">11 · Every setting explained</h2>
 <div class="card">
+  <h3>The printer's own settings — what each one actually does</h3>
+  <p>These live on the printer, not in the app, and <b>every make spells them differently</b>. That is why
+    this page never tells you to paste a fixed list: ask your own printer what it has
+    (<a href="#mac">§5.3</a> · <a href="#linux">§6.3</a>), or read them off the driver window on Windows
+    (<a href="#windows">§4.3</a>), and set only what is there.</p>
+  <table>
+    <tr><th>Called something like</th><th>In plain words</th></tr>
+    <tr><td><b>Paper size</b> · Media Size · PageSize</td>
+        <td>How wide the paper is and how long one “page” is. A receipt roll wants a <b>narrow, short</b>
+          size — width matching your roll (<b class="you" data-pwidth>80</b> mm). Choosing A4 is the single
+          most common mistake: the printer then waits for an A4-sized page, which is where a long blank
+          lead-in and a sideways ticket both come from.</td></tr>
+    <tr><td><b>Cut</b> · Cut Media · Cutter</td>
+        <td>When the blade cuts, if your printer has one. It must cut <b>after the whole job</b>. “After
+          each page” cuts before the paper has finished moving — straight through your ticket.</td></tr>
+    <tr><td><b>Feed</b> · Feed Where · Feed Distance</td>
+        <td>How much paper is pushed out at the end, so the ticket clears the tear bar and the writing
+          isn't still inside the machine. About <b>30 mm</b> is right.</td></tr>
+    <tr><td><b>Orientation</b> · Scaling · Fit to page</td>
+        <td>Leave as <b>Portrait</b> and <b>100%</b>. Anything that “fits” the ticket to a page is
+          shrinking your ticket for no reason.</td></tr>
+    <tr><td><b>Density</b> · Darkness · Print quality</td>
+        <td>How hard the head burns the paper. Only worth touching if your tickets are faint — turning it
+          up shortens the printer's life a little, so try a fresh roll first.</td></tr>
+  </table>
+  <h3>The Chrome settings in your print-station file</h3>
   <table>
     <tr><th>Setting</th><th>In plain words</th></tr>
     <tr><td><code>--kiosk</code></td><td>Full screen, no address bar, no tabs — nobody can wander off to another site on the printing computer.</td></tr>
@@ -707,14 +971,14 @@ EOF</pre>
     <tr><td><b>Nothing prints at all, ever</b></td><td>One of the four switches is off, or the printer isn't the computer's default.</td><td>Work through <a href="#switches">§8</a> in order, then press <b>🖨 Preview a sample KOT</b>. If the sample prints but real tickets don't, switch 1 or 3 is off.</td></tr>
     <tr><td><b>There is no Printing section anywhere</b></td><td>Automatic printing is off for the restaurant — the app hides it rather than showing a dead control.</td><td>Ask us to switch it on.</td></tr>
     <tr><td><b>“Printing right now: some other screen”</b></td><td>One screen prints at a time and it isn't this one.</td><td>If the printer is here, <b>🖨 Print here instead</b>. Otherwise nothing — that is correct.</td></tr>
-    <tr><td><b>macOS: “Not Opened — Apple could not verify…”</b></td><td>Gatekeeper — the macOS guard that blocks any script that came from the web. Nothing is wrong with the file.</td><td>You never need such a file: make your own in <a href="#mac">§5.4</a> (a file you typed carries no such flag) or use the one-line Terminal command in §5.3. To rescue a file already in Downloads, §5.7.</td></tr>
-    <tr><td><b>Windows: “Windows protected your PC”</b></td><td>SmartScreen, the same idea — and it only appears on a file that came off the internet.</td><td><b>More info → Run anyway</b> (once per file). A file you typed in Notepad yourself (<a href="#windows">§4.2</a>) never shows this.</td></tr>
-    <tr><td><b>Windows: double-clicking the file opens Notepad</b></td><td>It was saved as <code>.bat.txt</code>.</td><td>Rename it so it ends in <b>.bat</b> — and next time set <b>Save as type: All Files</b> (<a href="#windows">§4.2</a>).</td></tr>
+    <tr><td><b>macOS: “Not Opened — Apple could not verify…”</b></td><td>Gatekeeper — the macOS guard that blocks any script that came from the web. Nothing is wrong with the file.</td><td>You never need such a file: make your own in <a href="#mac">§5.6</a> (a file you typed carries no such flag) or use the one-line Terminal command in §5.5. To rescue a file already in Downloads, §5.9.</td></tr>
+    <tr><td><b>Windows: “Windows protected your PC”</b></td><td>SmartScreen, the same idea — and it only appears on a file that came off the internet.</td><td><b>More info → Run anyway</b> (once per file). A file you typed in Notepad yourself (<a href="#windows">§4.5</a>) never shows this.</td></tr>
+    <tr><td><b>Windows: double-clicking the file opens Notepad</b></td><td>It was saved as <code>.bat.txt</code>.</td><td>Rename it so it ends in <b>.bat</b> — and next time set <b>Save as type: All Files</b> (<a href="#windows">§4.5</a>).</td></tr>
     <tr><td><b>Linux: “Permission denied”</b></td><td>Not marked executable.</td><td><code>chmod +x print-station.sh</code>, or run <code>sh print-station.sh</code>.</td></tr>
     <tr><td><b>A print dialog appears for every ticket</b></td><td>Chrome was opened normally, without <code>--kiosk-printing</code>.</td><td>Close it and start Chrome with your <b>print-station</b> file instead.</td></tr>
     <tr><td><b>It printed while I watched, stopped when I looked away</b></td><td>Chrome opened without the covered-window settings.</td><td>Start it with your <b>print-station</b> file — that is the exact problem it exists for.</td></tr>
-    <tr><td><b>Blank paper, or a huge gap before each ticket</b></td><td>Paper size — almost always A4 selected.</td><td>Set the receipt size on the printer (<a href="#windows">§4.1</a> / <a href="#mac">§5.2</a> / <a href="#linux">§6.1</a>). Never set a page size in the app.</td></tr>
-    <tr><td><b>Ticket cut through the middle</b></td><td>The cut happens before the paper feed.</td><td>Mac: <code>CutMedia=EndOfJob</code>. Windows: turn off “cut per page” in the driver.</td></tr>
+    <tr><td><b>Blank paper, or a huge gap before each ticket</b></td><td>Paper size — almost always A4 selected.</td><td>Set the receipt size on the printer (<a href="#windows">§4.3</a> / <a href="#mac">§5.3</a> / <a href="#linux">§6.3</a>). Never set a page size in the app.</td></tr>
+    <tr><td><b>Ticket cut through the middle</b></td><td>The cut happens before the paper feed.</td><td>The cut setting must say <b>after the job</b>, never “after each page” — Windows <a href="#windows">§4.3</a>, Mac <a href="#mac">§5.3</a>, Linux <a href="#linux">§6.3</a>.</td></tr>
     <tr><td><b>Right-hand edge of every line missing</b></td><td>Printing too wide.</td><td>The app prints 66 mm on purpose; check nothing has forced 80 mm in the driver, and that the roll really is 80 mm.</td></tr>
     <tr><td><b>Half a ticket, or random characters</b></td><td>Usually a too-long or loose USB cable.</td><td>Shorten it (under 5 m) or move to a LAN printer. Then tap <b>🖨 → Ticket came out half</b> so the manager knows.</td></tr>
     <tr><td><b>Two identical tickets</b></td><td>Almost always a genuine reprint.</td><td>Look at the paper: a reprint says <b>*** Reprint · Duplicate ***</b> across the top. Two clean copies should be impossible — tell us if you see it.</td></tr>
@@ -782,6 +1046,33 @@ EOF</pre>
 </script>
 
 </div>
+<script>
+  // MAKE EVERY COMMAND THE READER'S OWN (owner, 2026-08-20: "it should be applicable for all printer
+  // not for that printer, make whole thing dynamic"). Two answers are written into every command and
+  // every table row, so nothing on the page is a placeholder the reader has to notice and translate.
+  // The printable width is DERIVED, not asked for: an 80mm roll images about 70mm and a 58mm roll about
+  // 48mm — the paper is always wider than the print head, which is why a receipt has bare edges.
+  (function () {
+    const nameEl = document.getElementById("pname"), widthEl = document.getElementById("pwidth");
+    if (!nameEl || !widthEl) return;
+    const KEY = "lfh_print_setup_mine";
+    const paint = () => {
+      const n = (nameEl.value || "").trim() || "Kitchen", w = widthEl.value === "58" ? "58" : "80";
+      for (const el of document.querySelectorAll("[data-pname]")) el.textContent = n;
+      for (const el of document.querySelectorAll("[data-pwidth]")) el.textContent = w;
+      for (const el of document.querySelectorAll("[data-pwidth70]")) el.textContent = w === "58" ? "48" : "70";
+      try { localStorage.setItem(KEY, JSON.stringify({ n, w })); } catch (e) {}
+    };
+    try {
+      const was = JSON.parse(localStorage.getItem(KEY) || "null");
+      if (was && was.n) nameEl.value = was.n;
+      if (was && was.w) widthEl.value = was.w;
+    } catch (e) {}
+    nameEl.addEventListener("input", paint);
+    widthEl.addEventListener("change", paint);
+    paint();
+  })();
+</script>
 <script>
   // THE OS MENU. Picking one hides the other two (CSS above), remembers the choice for the next visit,
   // and — the part that is easy to miss — a link to a HIDDEN menu (the contents list, or a cross
