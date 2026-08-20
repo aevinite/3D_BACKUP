@@ -227,12 +227,36 @@ export default function AdminUsers() {
           </label>
           {/* When scoped to one restaurant the target is locked (shown read-only) so a
               new user can't land in the wrong restaurant. Pick "All restaurants" above
-              to choose freely again. */}
+              to choose freely again.
+
+              THE NAME IS SHOWN IN FULL, NOT CUT OFF (owner, 2026-08-20, with a screenshot:
+              "whenever I tab on it, it should show full name. right now it is covering the role
+              thing"). Both halves of that were the same fault. The name was clipped with an
+              ellipsis, so the ONLY way to read it was the tooltip — and the tooltip said
+              nothing about the name, only about the lock. A native `title` always draws
+              down-and-right, which on this grid lands on the Role picker beside it, and its
+              position cannot be moved. So rather than fight where it appears, there is now
+              nothing to hover FOR: the name wraps and is readable in place. The title is kept
+              as a fallback and LEADS WITH THE FULL NAME, for the hover case.
+
+              NO LINE CLAMP ON PURPOSE. A two-line clamp was tried first and still cut "AANGAN
+              GARDEN RESTAURANT" off, because this grid column is only ~105px wide and that name
+              needs three lines. Any clamp just moves the same fault to a slightly longer name,
+              so the box GROWS instead: a long name makes it taller, which is honest, and the
+              other fields stay bottom-aligned (the form grid sets alignItems: "end"). */}
           {scopedName ? (
-            <label style={label}>
+            /* alignSelf: "start" so a name that needs two or three lines grows DOWNWARD. The form
+               grid bottom-aligns its fields (alignItems: "end"), which made the taller box climb
+               above the row and read as broken; the grid row still stretches to fit it, so nothing
+               below is covered. */
+            <label style={{ ...label, alignSelf: "start" }}>
               Restaurant
-              <div style={{ ...field, display: "flex", alignItems: "center", gap: 6, opacity: 0.85 }} title="Scoped by the filter above — switch to “All restaurants” to change">
-                <span aria-hidden>🔒</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{scopedName}</span>
+              <div
+                style={{ ...field, display: "flex", alignItems: "flex-start", gap: 6, opacity: 0.85, lineHeight: 1.3 }}
+                title={`${scopedName} — locked by the filter above; switch to “All restaurants” to change`}
+              >
+                <span aria-hidden>🔒</span>
+                <span style={{ overflowWrap: "anywhere" }}>{scopedName}</span>
               </div>
             </label>
           ) : (
