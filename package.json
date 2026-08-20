@@ -62,6 +62,7 @@
     "verify:fix-survives": "node scripts/verify-fix-survives.mjs",
     "verify:guest-recovery": "node scripts/verify-guest-recovery.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
+    "verify:admin-restaurants": "node scripts/verify-admin-restaurants.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "verify:owner-money": "node scripts/verify-owner-money-screens.mjs",
     "check:current": "node scripts/check-folder-current.mjs",

@@ -180,7 +180,9 @@ export default function AdminRestaurants() {
         </a>
       </div>
 
-      <NewRestaurant onCreated={loadList} />
+      {/* The live slugs, so the guest-link preview can show the address the server will really
+          mint rather than the one the typed name suggests (see slugPreview below). */}
+      <NewRestaurant onCreated={loadList} takenSlugs={(list || []).map((r) => r.slug)} />
 
       <div className="adm-card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -244,7 +246,22 @@ export default function AdminRestaurants() {
               >
                 <span style={{ fontWeight: 700 }}>{r.name}</span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
-                <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ownerName || "—"}</span>
+                {/* AN OWNER WHO CANNOT SIGN IN IS STILL AN OWNER (T16 sweep, 2026-08-19).
+                    /api/admin/restaurants only lists ACTIVE owners, and a suspended one — or one
+                    in the recycle bin, which always goes through suspend first — is therefore not
+                    in that list, so `ownerName` came back "—" and this column read exactly like a
+                    restaurant nobody owns. The Owners page already went to the trouble of naming a
+                    binned primary holder for this very reason; this column had the same hole. */}
+                {(() => {
+                  const known = r.ownerUserId ? owners.find((o) => o.id === r.ownerUserId) : null;
+                  const label = !r.ownerUserId ? "—" : known ? known.name : "assigned · not active";
+                  return (
+                    <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={r.ownerUserId && !known ? "This restaurant has an owner, but that account is suspended or in the recycle bin — open Owners to see who." : undefined}>
+                      {label}
+                    </span>
+                  );
+                })()}
                 {(() => {
                   const hs = healthStatus(r.active, health[r.id], r.createdAt);
                   return (
@@ -274,9 +291,28 @@ export default function AdminRestaurants() {
   );
 }
 
-// ＋ New restaurant — create a restaurant in one go: name, panels, sample menu. Whatever the
-// admin picks is REMEMBERED (app_config, mig 186) and auto-fills the next create form
-// (owner 2026-07-24). The backend mints one starter login per ENABLED panel (shown ONCE).
+// ＋ New restaurant — a NAME, and whether it starts with a sample menu. That is the whole form
+// (owner, 2026-08-20). The backend mints a starter login for each staff screen, shown ONCE.
+//
+// ── THE PANELS PICKER LEFT THIS FORM TOO (owner, 2026-08-20: "the panel is something that you
+//    pick — we don't even need that. Solve that thing") ────────────────────────────────────────
+// Four switches — Manager panel, Kitchen display, Waiter tablet, Owner dashboard — used to sit
+// here, and they had stopped meaning anything. The per-restaurant panel switches were removed on
+// 2026-07-31 ("all panels always on"); /api/admin/restaurants/panels answers all-on whatever is
+// stored and its POST returns 410 Gone. So the switches decided only which starter LOGINS were
+// minted, while a section headed "Panels" told the admin they were choosing which staff apps the
+// restaurant would HAVE. Two real consequences, not just wording:
+//
+//   1. A restaurant created with "Kitchen display" off got a working kitchen screen and NO login
+//      for it. Nothing said so; the admin found out when the kitchen could not sign in.
+//   2. "Turn on at least one panel." refused a create over a choice that changes no panel.
+//
+// So the form asks nothing about panels and sends a FIXED set instead: a login for each of the
+// three staff screens, and NO owner login — an owner is a person you add on the Owners page, and
+// minting one here also planted a placeholder primary owner on every new restaurant.
+//
+// The "My saved setup / System defaults" dropdown went with them: with panels gone it chose
+// between two presets of a single switch. The sample-menu choice is still remembered silently.
 //
 // ── THE ACCESS BLOCK LEFT THIS FORM (sweep T6, 2026-08-06) ──────────────────────────────
 // It used to carry a whole second permissions screen: "Modules · On / Owner controls",
@@ -301,11 +337,9 @@ export default function AdminRestaurants() {
 // manager_permissions absent → MANAGER_GRANT_DEFAULTS · owner_entitlements absent → all on ·
 // settings → lib/settingsClone (money caps off, floor caps on, modules off). Permissions are
 // set on ONE screen, after creation: /aevinite/access.
-const NR_PANELS = [
-  { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
-  { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
-] as const;
-const SYS_PANELS: Record<string, boolean> = { manager: true, kitchen: true, tablet: true, owner: false };
+// Which starter LOGINS a new restaurant is given. Not a choice, and not about which panels exist —
+// every restaurant has all four staff apps. `owner: false` on purpose: see the note above.
+const STARTER_LOGINS: Record<string, boolean> = { manager: true, kitchen: true, tablet: true, owner: false };
 
 // The create card's two building blocks.
 //
@@ -324,64 +358,65 @@ function Tog({ on, k, label, onClick, busy }: { on: boolean; k: string; label: s
   );
 }
 
-function NewRestaurant({ onCreated }: { onCreated: () => void }) {
+function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; takenSlugs: string[] }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [panels, setPanels] = useState<Record<string, boolean>>({ ...SYS_PANELS });
   const [seedMenu, setSeedMenu] = useState(true);
-  const [preset, setPreset] = useState<"saved" | "system">("system");
-  const [saved, setSaved] = useState<{ panels?: Record<string, boolean>; seedMenu?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState<{ id?: string; name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
   const creatingRef = useRef(false); // sync double-submit guard (bug #12)
 
-  // On open, load the admin's remembered setup and auto-fill from it (editable). First
-  // time (no saved row) → system defaults. One scoped admin read; only while the card is open.
+  // On open, pick up the one thing worth remembering: whether the last restaurant started with a
+  // sample menu. One scoped admin read, only while the card is open. (There used to be a
+  // "My saved setup / System defaults" dropdown here as well — a control to choose between two
+  // presets of a single switch, which is why it went with the panels.)
   useEffect(() => {
     if (!open) return;
     let live = true;
     (async () => {
       try {
         const d = await (await fetch("/api/admin/restaurants/create-defaults", { cache: "no-store" })).json();
-        if (!live) return;
-        if (d?.defaults) {
-          setSaved(d.defaults);
-          setPreset("saved");
-          setPanels({ ...SYS_PANELS, ...(d.defaults.panels || {}) });
-          setSeedMenu(d.defaults.seedMenu !== false);
-        } else { setPreset("system"); }
-      } catch { /* fall back to the system defaults already in state */ }
+        if (live && d?.defaults) setSeedMenu(d.defaults.seedMenu !== false);
+      } catch { /* fall back to the default already in state */ }
     })();
     return () => { live = false; };
   }, [open]);
-
-  const applyPreset = (p: "saved" | "system") => {
-    setPreset(p);
-    if (p === "system") { setPanels({ ...SYS_PANELS }); setSeedMenu(true); }
-    else if (saved) { setPanels({ ...SYS_PANELS, ...(saved.panels || {}) }); setSeedMenu(saved.seedMenu !== false); }
-  };
-  const slugPreview = (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
-  const setPanel = (k: string) => setPanels((s) => ({ ...s, [k]: !s[k] }));
+  // THE PREVIEW HAS TO BE THE ADDRESS THAT WILL ACTUALLY EXIST (T16 sweep, 2026-08-19).
+  //
+  // It used to be the bare slug of the typed name, but the create route makes the slug unique with
+  // a numeric suffix when a LIVE restaurant already holds it (a binned one no longer reserves the
+  // name, mig 319). So the form promised "/r/aangan/menu", the restaurant was minted as
+  // "aangan-2", and the admin had already read the wrong address off the screen - the address that
+  // goes on printed QR codes. Same loop as the server's, over the slugs already on this page.
+  const slugBase = (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
+  const slugTaken = new Set(takenSlugs);
+  let slugPreview = slugBase;
+  for (let i = 2; slugTaken.has(slugPreview); i++) slugPreview = `${slugBase}-${i}`;
+  const slugSuffixed = slugPreview !== slugBase;
 
   const create = async () => {
     if (creatingRef.current) return;
     if (name.trim().length < 2) { setMsg("Enter a name (at least 2 characters)."); return; }
-    if (!Object.values(panels).some(Boolean)) { setMsg("Turn on at least one panel."); return; }
     creatingRef.current = true;
     setBusy(true); setMsg(null);
     try {
       const r = await fetch("/api/admin/restaurants", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        // NO `access` KEY (sweep T6, 2026-08-06 — see the note above NR_PANELS). Sending nothing
+        // NO `access` KEY (sweep T6, 2026-08-06 — see the note above STARTER_LOGINS). Sending nothing
         // is what makes the route fall through to MP_DEFAULT + cleanClonedSettings, which ARE the
         // model's documented new-restaurant state. Permissions are set on /aevinite/access after.
-        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels, seedMenu, saveDefaults: true }),
+        // `panels` is FIXED now, not asked (owner, 2026-08-20 — see the note above STARTER_LOGINS):
+        // the three staff screens each get a starter login, and the owner is a PERSON added on the
+        // Owners page rather than a login called "owner". The route reads this to decide which
+        // logins to mint, so sending it is what keeps a panel from existing with nobody able to
+        // sign in — the fault the old picker created every time a switch was left off.
+        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels: STARTER_LOGINS, seedMenu, saveDefaults: true }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
       setDone({ id: d.id, name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
       // Remember locally too so the very next open pre-fills instantly, and mark preset "saved".
-      setSaved({ panels, seedMenu }); setPreset("saved"); setName("");
+      setName("");
       onCreated();
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); creatingRef.current = false; }
   };
@@ -399,49 +434,61 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   return (
     <div className="adm-card nr-card" style={{ marginBottom: 14 }}>
       <h2>New restaurant</h2>
-      <p className="hint">Set it up in one go — name, panels, sample menu. Whatever you pick is remembered and pre-fills the next restaurant you create. One starter login is made per panel you turn on (passwords show once). It starts on the standard permissions; change them on Access &amp; permissions once it exists.</p>
+      <p className="hint">Give it a name. Everything else a restaurant needs is already decided — you can change any of it afterwards.</p>
 
-      {/* BASICS */}
+      {/* ── ONE QUESTION THAT MATTERS ─────────────────────────────────────────────────────────
+          The name, and the address it produces. Everything that used to sit around it either
+          stopped meaning anything (the panels) or was a preset of one switch (the dropdown). */}
       <div className="nr-sec">
-        {/* The preset picker lives HERE, not under the Access heading (sweep T6, 2026-08-06):
-            it only chooses which PANELS and whether a sample menu is seeded now that this form
-            sets no permissions, and a control named "System defaults" sitting under "Access &
-            permissions" would read as picking a permission set that no longer exists. */}
-        <div className="nr-sec-h" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span>Basics</span>
-          <select className="nr-preset" disabled={busy} value={preset} onChange={(e) => applyPreset(e.target.value as "saved" | "system")}>
-            {saved && <option value="saved">My saved setup</option>}
-            <option value="system">System defaults</option>
-          </select>
-          {preset === "saved" && saved && <span className="adm-muted" style={{ fontSize: 11.5 }}>panels and sample menu pre-filled from your last restaurant</span>}
-        </div>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy} className="nr-input" />
+        <div className="nr-sec-h">Name</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy} className="nr-input" autoFocus />
         <div className="nr-slug">Guest link: <code>/r/{slugPreview}/menu</code></div>
-        <div className="adm-togglegrid" style={{ marginTop: 8 }}>
-          <Tog on={seedMenu} k="seed" label="Start with sample menu" onClick={() => setSeedMenu((v) => !v)} busy={busy} />
-        </div>
+        {slugSuffixed && (
+          <div className="hint" style={{ margin: "4px 0 0", color: "var(--adm-warn, #d97706)" }}>
+            <i className="fas fa-circle-info" style={{ marginRight: 6 }} aria-hidden="true" />
+            <b>/r/{slugBase}/menu</b> is already in use, so this one gets <b>{slugPreview}</b>. That is the address
+            its QR codes will carry &mdash; rename it now if you&rsquo;d rather have a different one.
+          </div>
+        )}
       </div>
 
-      {/* PANELS */}
+      {/* The ONE remaining choice, and it earns its place: a restaurant whose real menu comes from
+          a PDF does not want 70-odd demo dishes to delete first, and one that has nothing yet is
+          far easier to show to a client with a menu already in it. Remembered from last time. */}
       <div className="nr-sec">
-        <div className="nr-sec-h">Panels</div>
+        <div className="nr-sec-h">Menu</div>
         <div className="adm-togglegrid">
-          {NR_PANELS.map((p) => <Tog key={p.key} on={panels[p.key] === true} k={p.key} label={p.label} onClick={() => setPanel(p.key)} busy={busy} />)}
+          <Tog on={seedMenu} k="seed" label="Start with a sample menu" onClick={() => setSeedMenu((v) => !v)} busy={busy} />
         </div>
+        <p className="hint" style={{ margin: "6px 0 0" }}>
+          {seedMenu
+            ? "A few categories and dishes to edit or delete — the quickest way to show the restaurant to a client."
+            : "It starts with an empty menu, ready for the real one. Best when you already have their card or PDF."}
+        </p>
       </div>
 
-      {/* ACCESS — NOT SET HERE ANY MORE (sweep T6, 2026-08-06; see the note above NR_PANELS).
-          Every permission lives on ONE screen, and this form's copy of them was both a second
-          vocabulary for one idea AND three real faults on every restaurant it created. */}
+      {/* ── WHAT IT GETS, STATED RATHER THAN ASKED ────────────────────────────────────────────
+          Both of these used to be questions on this form. Neither was a real choice: every
+          restaurant has all four staff apps (owner, 2026-07-31), and permissions live on one
+          screen (sweep T6, 2026-08-06). So the form says what happens instead of pretending. */}
       <div className="nr-sec">
-        <div className="nr-sec-h">Access &amp; permissions</div>
-        <p className="hint" style={{ margin: "6px 0 0" }}>
-          A new restaurant starts on the standard setup: its guest menu on, every manager menu on,
-          the extra modules (pay later, banquet, staff pay, inventory) off, waiters able to work the
-          floor but not to settle or discount a bill. Change any of it on{" "}
-          <b>Access &amp; permissions</b> once the restaurant exists — that is the only screen that
-          decides what anyone can do.
-        </p>
+        <div className="nr-sec-h">What it starts with</div>
+        <ul className="hint" style={{ margin: "6px 0 0", paddingLeft: 18, display: "grid", gap: 5 }}>
+          <li>
+            <b>All four staff apps</b> — manager panel, kitchen display, waiter tablet and owner
+            dashboard. A starter login is made for the <b>manager, kitchen and waiter</b> screens
+            (passwords show once, and stay on its Logins &amp; passwords card).
+          </li>
+          <li>
+            <b>No owner yet.</b> An owner is a person, not a starter login — add or attach one on{" "}
+            <b>Owners</b>, where one person can own several restaurants.
+          </li>
+          <li>
+            <b>The standard permissions</b> — its guest menu on, every manager menu on, the extra
+            modules (pay later, banquet, staff pay, inventory) off, waiters able to work the floor
+            but not to settle or discount a bill. Change any of it on <b>Access &amp; permissions</b>.
+          </li>
+        </ul>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
@@ -497,10 +544,10 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
                 These stay readable on this restaurant&rsquo;s <b>Logins &amp; passwords</b> card, where you can also print a handover sheet.
               </p>
             </>
-          ) : <span> No panels were enabled.</span>}
+          ) : <span> No starter logins were made — add a user for it in Users.</span>}
           {done.loginErrors && done.loginErrors.length > 0 && (
             <p className="hint" style={{ margin: "8px 0 0", color: "var(--adm-bad, #c0392b)" }}>
-              ⚠ Couldn&rsquo;t create a login for: <b>{done.loginErrors.join(", ")}</b>. Those panels are on but have no sign-in yet — add a user for them in Users.
+              ⚠ Couldn&rsquo;t create a login for: <b>{done.loginErrors.join(", ")}</b>. Those screens work but have no sign-in yet — add a user for them in Users.
             </p>
           )}
         </div>
@@ -1015,6 +1062,9 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
   const [msg, setMsg] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [newName, setNewName] = useState("");
+  // An owner IS assigned, but they are not in the (active-only) owners list — see the note on the
+  // select below. `sel` is the truth; `owners` is only who can be picked.
+  const assignedUnknown = !!sel && !owners.some((o) => o.id === sel);
 
   const assign = async (ownerId: string) => {
     setBusy(true); setMsg(null);
@@ -1043,10 +1093,25 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
         <select value={sel} disabled={busy} onChange={(e) => assign(e.target.value)}
           style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
           <option value="">— no owner —</option>
+          {/* A SELECT WITH NO MATCHING OPTION SHOWS ITS FIRST ONE (T16 sweep, 2026-08-19). The
+              owners list is active-only, so a restaurant whose owner is suspended or sitting in
+              the recycle bin had no option to select and this box displayed "— no owner —" for a
+              restaurant that HAS one. The admin would then pick somebody and quietly replace an
+              owner they were never told about. An explicit option for the real assignee makes the
+              truth visible, and leaves replacing them a deliberate act. */}
+          {assignedUnknown && <option value={sel}>— currently assigned (suspended or in the recycle bin) —</option>}
           {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
         {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
+      {assignedUnknown && (
+        <p className="hint" style={{ margin: "8px 0 0" }}>
+          <i className="fas fa-circle-info" style={{ marginRight: 7 }} aria-hidden="true" />
+          This restaurant already has an owner, but that account is <b>suspended or in the recycle bin</b>, so
+          it isn&rsquo;t in the list above. <a href="/aevinite/owners">Open Owners</a> to see who it is —
+          picking somebody here replaces them.
+        </p>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
         <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New owner username"
           style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />

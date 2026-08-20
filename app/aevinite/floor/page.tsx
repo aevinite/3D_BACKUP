@@ -15,6 +15,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Dropdown from "@/components/admin/Dropdown";
 import { openRestaurantPanel } from "@/components/admin/shared";
+import { useToast } from "@/components/admin/toast";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type MiniTable = { n: string; s: string; p: string; c: boolean; g?: string };
@@ -123,6 +125,31 @@ function UpdatedAgo({ at }: { at: number }) {
 }
 
 export default function AdminFloor() {
+  const toast = useToast();
+  // OPENING A RESTAURANT MUST NEVER JUST DO NOTHING (T16 sweep, 2026-08-19).
+  //
+  // Every restaurant name and every open-table chip on this page is a door into that
+  // restaurant's manager panel. They all called openRestaurantPanel and THREW THE HANDLE
+  // AWAY — and that helper returns null precisely so a caller can tell the admin when the
+  // browser blocked the pop-up (its own comment says so, and the Restaurants page has always
+  // obeyed it). With a blocker on, tapping a restaurant here produced nothing at all: no tab,
+  // no message, nothing to retry — a dead button, which is the one thing a tap may never be.
+  //
+  // …AND A BLOCKED TAB IS NOT A LOCKED DOOR (owner, 2026-08-20: "admin has access to everything,
+  // so it shouldn't be 'you can't access the restaurant' — it should take you to the restaurant").
+  // The first version said "allow pop-ups for this site, then tap again", which reads like a
+  // refusal — and the admin can reach every restaurant, always. So a blocked new tab now opens a
+  // small card that takes him there instead: the manager panel IN THIS TAB (no pop-up needed at
+  // all), or the restaurant's own details page, which is where its owner, settings and access live.
+  const [blocked, setBlocked] = useState<{ rid: string; name: string; slug: string } | null>(null);
+  const openPanel = useCallback(async (r: { id: string; name: string; slug: string }) => {
+    try {
+      const w = await openRestaurantPanel(r.id, "/manager");
+      if (!w) setBlocked({ rid: r.id, name: r.name, slug: r.slug });
+    } catch (e) {
+      toast(`Couldn't open ${r.name} — ${e instanceof Error ? e.message : String(e)}`, "err");
+    }
+  }, [toast]);
   const [rests, setRests] = useState<RestFloor[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);
@@ -310,13 +337,13 @@ export default function AdminFloor() {
                   <div className="adm-muted" style={{ fontSize: 13, padding: "8px 0" }}>No tables occupied right now.</div>
                 ) : occ.map(({ r, ts }) => (
                   <div key={r.id} style={{ padding: "9px 0", borderBottom: "var(--border)" }}>
-                    <button onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Open ${r.name}'s manager panel`}
+                    <button onClick={() => openPanel(r)} title={`Open ${r.name}'s manager panel`}
                       style={{ background: "none", border: 0, color: "var(--accent)", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 7 }}>
                       {r.name} <span className="adm-muted" style={{ fontWeight: 400 }}>· {ts.length} open</span>
                     </button>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                       {ts.map((t) => (
-                        <button key={t.n} onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Table ${t.n} · ${t.s}${t.c ? " · waiter call" : ""}`}
+                        <button key={t.n} onClick={() => openPanel(r)} title={`Table ${t.n} · ${t.s}${t.c ? " · waiter call" : ""}`}
                           style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "var(--border)", borderRadius: 8, padding: "4px 9px", background: "var(--card)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>
                           <span style={{ width: 8, height: 8, borderRadius: 999, background: STATE_COLOR[t.s] || "var(--muted)" }} aria-hidden="true" />#{t.n}{t.c ? " •" : ""}
                         </button>
@@ -379,7 +406,7 @@ export default function AdminFloor() {
             return (
               <section key={r.id} className="adm-card adm-floormonth" aria-label={`${r.name} floor`}>
                 <header>
-                  <button className="adm-floormonth-name" onClick={() => openRestaurantPanel(r.id, "/manager")}
+                  <button className="adm-floormonth-name" onClick={() => openPanel(r)}
                     title={`Open ${r.name}'s manager panel (new tab, no password)`}>
                     {r.name}
                   </button>
@@ -402,6 +429,18 @@ export default function AdminFloor() {
                   <div className="adm-minigrid">
                     {r.tables.map((t) => {
                       const tg = t.g ? TAG_MINI[t.g] : undefined;
+                      // A LABEL THAT IS NOT A TABLE NUMBER MUST NOT SMEAR ACROSS ITS NEIGHBOURS
+                      // (T16 sweep, 2026-08-19). A tile is a 22px square with an 8.5px font, built
+                      // for "1".."300". But the floor's table list is generate_series(1, table_count)
+                      // UNION the table_number of every session and order — so an order keyed by
+                      // something else (French House carries eight 7-digit ones) arrives as a
+                      // "table", and with nothing clipping the tile its digits ran straight over the
+                      // tiles beside it: two of that restaurant's four rows rendered as one
+                      // unreadable run of numbers. Seen in a 1280×800 screenshot of this page.
+                      // Clipped, shortened with a leading ellipsis so it never pretends to be the
+                      // whole value, and the full label stays in the tooltip below.
+                      const long = String(t.n).length > 3;
+                      const face = t.c ? "•" : tg ? tg.emoji : long ? "…" + String(t.n).slice(-2) : t.n;
                       return (
                       <span key={t.n}
                         className="adm-minitile"
@@ -411,9 +450,12 @@ export default function AdminFloor() {
                           // still wins (money state beats decoration).
                           boxShadow: t.p === "red" ? "inset 0 0 0 2px #f87171" : t.p === "green" ? "inset 0 0 0 2px #34d399" : tg ? `inset 0 0 0 2px ${tg.color}` : undefined,
                           color: t.s === "free" ? "var(--muted)" : "#fff",
+                          // Nothing may leave its own square, whatever the label turns out to be.
+                          overflow: "hidden",
+                          ...(long ? { fontSize: 7 } : null),
                         }}
                         title={`Table ${t.n} — ${t.s}${tg ? ` · ${tg.label}` : ""}${t.p === "red" ? " · UNPAID" : t.p === "green" ? " · paid" : ""}${t.c ? " · waiter called" : ""}`}>
-                        {t.c ? "•" : tg ? tg.emoji : t.n}
+                        {face}
                       </span>
                       );
                     })}
@@ -466,7 +508,7 @@ export default function AdminFloor() {
                   {sorted.map((r) => (
                     <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "1fr 64px 60px 66px 76px" }}>
                       <span>
-                        <button className="adm-floormonth-name" style={{ fontSize: 13 }} onClick={() => openRestaurantPanel(r.id, "/manager")}
+                        <button className="adm-floormonth-name" style={{ fontSize: 13 }} onClick={() => openPanel(r)}
                           title={`Open ${r.name}'s manager panel (new tab, no password)`}>{r.name}</button>
                         {!r.active && <span style={{ color: "var(--adm-danger)", fontWeight: 700, fontSize: 11 }}> · suspended</span>}
                       </span>
@@ -518,16 +560,64 @@ export default function AdminFloor() {
       </>
       )}
 
+      {blocked && <BlockedDoor r={blocked} onClose={() => setBlocked(null)} />}
+
       <style href="adm-floor" precedence="default">{`
         .floor-gate { text-align: center; padding: 44px 24px; max-width: 560px; margin: 8px auto; }
         .floor-gate-ic { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 16px; display: grid; place-items: center; font-size: 24px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
         .floor-gate h2 { font-size: 18px; font-weight: 800; margin: 0 0 8px; }
         .floor-gate p { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 0 auto 20px; max-width: 440px; }
-        .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
+        /* THIS BUTTON ASKED FOR 44px AND GOT 40 (T16 sweep, 2026-08-19). It is the only thing to
+           press on an otherwise empty screen, so it was given a 44px floor — but on a phone
+           globals.css sets ".adx .adm-btn { min-height: 40px }" inside a media query, which is a
+           two-class selector and therefore beats a one-class ".floor-gate-btn". The declaration
+           was live, readable and doing nothing; measured 40px on an A35 at 360px. Three classes
+           wins it back without touching the platform-wide 40px every other admin button uses. */
+        .adx .floor-gate .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
         .adm-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
         .adm-btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
         .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
       `}</style>
+    </>
+  );
+}
+
+// A blocked new tab, answered the way an admin's screen should answer it: not "you can't get in",
+// but two ways in (owner, 2026-08-20). "Open it here" needs no pop-up at all — it is an ordinary
+// navigation — so it always works, and the line at the bottom points at the one page that holds
+// everything about the restaurant.
+function BlockedDoor({ r, onClose }: { r: { rid: string; name: string; slug: string }; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAdminModal(ref, "adm-floor-blocked", onClose);
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(3px)", zIndex: 1000 }} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div ref={ref} role="dialog" aria-modal="true" aria-label={`Open ${r.name}`} className="adm-card"
+          style={{ pointerEvents: "auto", width: "min(100%, 460px)", maxHeight: "90dvh", overflowY: "auto" }}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 17 }}>Open {r.name}</h2>
+          <p className="hint" style={{ margin: "0 0 14px" }}>
+            Your browser blocked the new tab — nothing else is in the way. You can open this
+            restaurant right here instead.
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            <a className="adm-btn primary" href={`/api/admin/act-as/go?rid=${encodeURIComponent(r.rid)}&to=${encodeURIComponent("/manager")}`}
+              style={{ textAlign: "center" }}>
+              <i className="fas fa-table-columns" style={{ marginRight: 7 }} aria-hidden="true" />Open its manager panel here
+            </a>
+            <a className="adm-btn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" style={{ textAlign: "center" }}>
+              <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />See its guest menu
+            </a>
+          </div>
+          <p className="hint" style={{ margin: "14px 0 0", paddingTop: 12, borderTop: "var(--border)" }}>
+            Everything about {r.name} — its owner, its bill, its tables, its access and who may sign
+            in — is on its own page: <a href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`}><b>go to its details &amp; settings</b></a>.
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <button className="adm-btn" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
     </>
   );
 }
