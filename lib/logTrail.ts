@@ -85,6 +85,15 @@ const PLACE: Record<string, Place> = {
   order_serve: { area: "Orders & bills", screen: "Kitchen tickets" },
   item_status: { area: "Orders & bills", screen: "Kitchen tickets" },
   order_cancel: { area: "Orders & bills", screen: "Kitchen tickets" },
+  // ── "WAS THE FOOD ACTUALLY MADE?" (migration 340) ────────────────────────────────────────────
+  // Both rows are written by app/api/editor/[...path]/route.ts when somebody answers that question
+  // on a cancellation, so both happened on the MANAGER panel's kitchen tickets. They were declared
+  // in components/admin/shared.tsx's ACT_LABEL and never here, so placeOf() fell through to
+  // "System › Other" and the two rows lost their restaurant › panel › area › screen path in the
+  // Activity log's detail card — against the standing rule that every row says where it happened
+  // (owner, 2026-08-12). Found by T20, whose own territory did not include this file.
+  cancel_classified:      { area: "Orders & bills", screen: "Kitchen tickets" },
+  cancel_classify_failed: { area: "Orders & bills", screen: "Kitchen tickets" },
   order_uncancel: { area: "Orders & bills", screen: "Kitchen tickets" },
   kot_reprint_sent: { area: "Orders & bills", screen: "Kitchen tickets" },
   // A ticket actually reaching paper, and failing to (mig 269 recorded them; mig 335 made them
@@ -220,6 +229,24 @@ const PLACE: Record<string, Place> = {
   retention_change: { area: "Settings & features", screen: "Settings" },
   printer_problem: { area: "Settings & features", screen: "Printing" },
   printer_problem_resolved: { area: "Settings & features", screen: "Printing" },
+  // ── THE PRINT HELPER (migration 341, shipped 2026-08-20) ────────────────────────────────────
+  // Six of these are written by app/api/admin/printing/[...path] — the admin console's Printing
+  // screen, where a COMPUTER is given the paper. They were declared in ACT_LABEL and nowhere here,
+  // so every one read "System › Other" in the Activity log's detail card, against the standing
+  // rule that every row says where it happened (owner, 2026-08-12). Added on 2026-08-20 with the
+  // two cancel_* rows above, which had the identical gap.
+  print_helper_added: { area: "Aevidine console", screen: "Printing" },
+  print_helper_recoded: { area: "Aevidine console", screen: "Printing" },
+  print_helper_removed: { area: "Aevidine console", screen: "Printing" },
+  print_routes_changed: { area: "Aevidine console", screen: "Printing" },
+  print_switch: { area: "Aevidine console", screen: "Printing" },
+  print_test: { area: "Aevidine console", screen: "Printing" },
+  // These two are written by app/api/editor/[...path] when a bill or ticket actually goes to
+  // paper, so they happened where the printing did — the manager panel, not the console. The
+  // `_by_admin` twin is the same act done through act-as; its LABEL already says so, and its place
+  // is still the screen the paper came out of.
+  print_sent: { area: "Orders & bills", screen: "Kitchen tickets" },
+  print_sent_by_admin: { area: "Orders & bills", screen: "Kitchen tickets" },
 
   // ── Sign-in & security ──────────────────────────────────────────────────────────────────────
   // The admin stepping into a restaurant's own panel (act-as). Already red on main before the print

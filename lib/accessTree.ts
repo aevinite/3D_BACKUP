@@ -353,7 +353,33 @@ export const WAITER_NEVER: readonly string[] = ["tablet_invoice"];
 // admin_only_setting hides them from every real manager), so their switches governed nothing a
 // manager could ever see — the dead-switch shape the access rebuild exists to remove. A stored
 // menus.mgrset.billing/kitchen/sessions=false is ignored from now on, like every retired key.
-export const MANAGER_SETTINGS: { key: string; name: string; what: string }[] = [
+// ── THE THREE FINER STAFF POWERS (owner-approved 2026-08-20, T20 sweep item 11) ────────────────
+// "Users — staff logins" was ONE yes covering three very different amounts of trust: making a new
+// login, resetting somebody's password, and switching a person off. `/api/owner/staff` has read
+// `access_config.manage_staff.manager_opts.*` for those since 2026-08-01 — but NO node anywhere
+// wrote that path, so all three fell back to their defaults and one of them was a wasted database
+// read on every manager password reset. Half-built, in other words: the server was listening and
+// nothing was ever going to speak.
+//
+// THERE IS NO FOURTH SWITCH FOR DELETING, AND THERE MUST NOT BE. The stub the server carried had a
+// `delete` key too, and finishing it would have contradicted a decision he had already made
+// (2026-08-02: *"it can disable the user, it can't delete the user"*). `DELETE /api/owner/staff`
+// refuses a manager outright, before any of this is consulted — so the key was dead code arguing
+// with a live rule. It is gone rather than given a box.
+//
+// Every one defaults to ON, and an absent key already read as the default, so no restaurant changes
+// behaviour until somebody deliberately switches one off.
+export const MANAGER_USER_POWERS = [
+  { key: "create", name: "Add a new login", what: "Whether this restaurant's manager may create a staff login themselves. New logins always start on the restaurant's defaults — a manager never sets anybody's permissions. They can only ever add a role below their own (kitchen or tablet). Off means only the owner and you can add people." },
+  { key: "reset_pw", name: "Reset a password", what: "Whether the manager may set a new password for someone below them. This is the one people ask for most (a waiter forgets theirs mid-shift), and it can be given without letting the manager add or remove anybody." },
+  { key: "disable", name: "Switch a login off", what: "Whether the manager may disable someone's login — the person is told they've been disabled when they try to sign in, and nothing about them is deleted. Deleting a login is never a manager's to do, with or without this switch." },
+] as const satisfies readonly { key: string; name: string; what: string }[];
+
+/** The three keys, derived from the list above so the screen and the server can never drift apart —
+ *  the same "one list feeds both ends" rule lib/staffCaps.ts follows. */
+export type MgrStaffPower = (typeof MANAGER_USER_POWERS)[number]["key"];
+
+export const MANAGER_SETTINGS: { key: string; name: string; what: string; subs?: readonly { key: string; name: string; what: string }[] }[] = [
   { key: "tables", name: "Tables — name & seats", what: "Renaming a table and how many people sit at it. Adding or removing tables — and how many tables sit on one row of the floor — stay admin-only, with no switch that can hand them over." },
   // The owner's rules for Users (2026-08-02), enforced by the editor API, not just worded here:
   // a manager can CREATE a login (its permissions start on Default automatically — a manager
@@ -361,7 +387,7 @@ export const MANAGER_SETTINGS: { key: string; name: string; what: string }[] = [
   // been disabled when they try to sign in). A manager can NEVER DELETE a login — deleting
   // people is the admin's job, and the panels' user lists all read the same rows, so a person
   // the admin deletes disappears everywhere at once.
-  { key: "users", name: "Users — staff logins", what: "Creating this restaurant's staff logins (new logins start on the restaurant's defaults), resetting a password, and disabling a login — a disabled person is told so when they try to sign in. Deleting a login stays admin-only. A manager can only ever touch roles below their own." },
+  { key: "users", name: "Users — staff logins", what: "Creating this restaurant's staff logins (new logins start on the restaurant's defaults), resetting a password, and disabling a login — a disabled person is told so when they try to sign in. Deleting a login stays admin-only. A manager can only ever touch roles below their own. The three switches inside say which of these they get.", subs: MANAGER_USER_POWERS },
   { key: "access", name: "Sections — who serves which table", what: "Giving each waiter their own part of the floor, so their tablet shows only those tables." },
 ];
 
@@ -857,6 +883,14 @@ export const SECTIONS: Section[] = [
         children: MANAGER_SETTINGS.map((x) => ({
           id: `mgrset_${x.key}`, name: x.name, what: x.what, def: true, fresh: true,
           bind: { t: "tab", panel: "mgrset", key: x.key } as Bind,
+          // The three finer powers hang off "Users" — see MANAGER_USER_POWERS above. Switching the
+          // parent off removes the section entirely, so these only ever narrow it further.
+          ...(x.subs ? {
+            children: x.subs.map((p) => ({
+              id: `mgr_users_${p.key}`, name: p.name, what: p.what, def: true, fresh: true,
+              bind: { t: "opt", id: "manage_staff", side: "manager", key: p.key } as Bind,
+            })),
+          } : {}),
         })),
       },
     ],

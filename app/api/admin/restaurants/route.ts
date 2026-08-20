@@ -89,17 +89,22 @@ export async function GET(req: NextRequest) {
       const [ownersQ, setQ, catsQ, dishesQ, staffQ, ordersQ, sessionsQ, custQ, khataQ, feedbackQ] = await Promise.all([
         sb.from("restaurant_owners").select("user_id").eq("restaurant_id", detailRid).limit(12),
         sb.from("settings").select("table_count, enabled_panels").eq("restaurant_id", detailRid).maybeSingle(),
-        sb.from("categories").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
-        sb.from("menu_items").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        // EVERY COUNT NAMES `restaurant_id`, NOT `id`. Found live before this shipped: `categories`
+        // and `customers` have no `id` column, so counting on it failed — and because a head-count
+        // response carries NO BODY, PostgREST's explanation comes back EMPTY. The row would have
+        // shown "?" for those two forever with nothing anywhere saying why. `restaurant_id` is the
+        // column being filtered on, so it is present on all of these by definition.
+        sb.from("categories").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("menu_items").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
         sb.from("staff_users").select("role").eq("restaurant_id", detailRid).is("deleted_at", null).limit(500),
-        sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid).is("deleted_at", null),
-        sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
-        sb.from("customers").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("orders").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid).is("deleted_at", null),
+        sb.from("sessions").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("customers").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
         // Bills still parked on somebody's tab. mig 309's predicate, so this can never disagree
         // with what Pay Later shows — a COUNT, not a total: the console never prints their money.
-        sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid)
+        sb.from("orders").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid)
           .not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled").is("deleted_at", null),
-        sb.from("feedback").select("id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
+        sb.from("feedback").select("restaurant_id", { count: "exact", head: true }).eq("restaurant_id", detailRid),
       ]);
       // A figure that could not be read says so rather than drawing a confident 0 — the same rule
       // the Full report adopted (T20 item 14). This screen decides a PERMANENT DELETE, so a 0 that

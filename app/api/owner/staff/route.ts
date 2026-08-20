@@ -26,7 +26,7 @@ import { logAction } from "@/lib/oplog";
 // A second hand-picked constant is what let `delete_bill` be a manager row on screen and an
 // "Unknown permission" here (fixed 2026-08-04).
 import { mergeOwnerEntitlements, entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
-import { managerSettingsOff } from "@/lib/accessTree";
+import { managerSettingsOff, type MgrStaffPower } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { capsForRole, capGroupsForRole, capVisible, roleDefault, effectiveCap } from "@/lib/staffCaps";
@@ -703,6 +703,32 @@ async function target(s: Extract<Scope, { ok: true }>, id: string) {
 // AT MOST ONCE. The manager panel's staff writes now travel through its offline queue like every
 // other write there, so a replay after a lost reply must not create the same person twice (or
 // re-run a reset/disable). No X-LFH-Action-Id header → passes straight through, unchanged.
+// ── ONE PLACE THAT ANSWERS "MAY THIS MANAGER DO THAT TO A LOGIN?" ──────────────────────────────
+// Lifted to module scope on 2026-08-20 because the CREATE gate lives in postImpl and the reset /
+// disable gates live in patchImpl, and two copies of a permission check is how the two ends of one
+// switch quietly stop agreeing.
+//
+// A GATE MUST FAIL CLOSED (T9 finding F9, fixed 2026-08-12). This used to ignore its read error, so
+// a database blip made `cfg` null and handed the manager the DEFAULT power — a failure to read the
+// restriction removed the restriction. `null` means "couldn't check" and every caller refuses with
+// cantCheckPower(); every other rung in this file refuses on doubt, and so does this one now.
+async function mgrStaffPower(
+  s: Extract<Scope, { ok: true }>, key: MgrStaffPower, dflt: boolean,
+): Promise<boolean | null> {
+  if (s.actor !== "manager") return true;             // the owner and the admin are never narrowed
+  const rid = s.restaurants[0]?.id;
+  if (!rid) return false;
+  const got = await rd("access_config", () => sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle());
+  if (got.error) return null;                         // couldn't check → the caller must refuse
+  const cfg = (got.data as { access_config?: unknown } | null)?.access_config as
+    { manage_staff?: { manager_opts?: Record<string, boolean> } } | null;
+  const v = cfg?.manage_staff?.manager_opts?.[key];
+  return typeof v === "boolean" ? v : dflt;
+}
+/** "couldn't check" → a retryable refusal, never a silent grant. */
+const cantCheckPower = () => NextResponse.json(
+  { error: "Couldn't check your staff access just now — please try again.", transient: true }, { status: 503 });
+
 export const POST = withIdempotency(postImpl, "owner");
 async function postImpl(req: NextRequest): Promise<Response> {
   const s = await scope(req); if (!s.ok) return s.resp;
@@ -735,6 +761,14 @@ async function postImpl(req: NextRequest): Promise<Response> {
     });
     return ok({ ok: true, payment: data });
   }
+
+  // THE "ADD A NEW LOGIN" SWITCH (owner-approved 2026-08-20). The server has read this option since
+  // 2026-08-01 and NOTHING ever called it — the one switch of the three with no call site at all, so
+  // a restaurant that switched it off still had its manager adding people. Checked before any of the
+  // work below, so a refusal costs one indexed read and writes nothing.
+  const mayCreate = await mgrStaffPower(s, "create", true);
+  if (mayCreate === null) return cantCheckPower();
+  if (!mayCreate) return bad("Adding a new login isn't part of your staff access.", 403);
 
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
@@ -936,29 +970,25 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (overwrite) return clashJson(overwrite);
   }
 
-  // A MANAGER'S FINER STAFF POWERS (owner, 2026-08-01). "Manage staff" used to be one yes covering
-  // creating a login, resetting somebody's password and deleting them outright. Those are three
-  // very different amounts of trust, so each is its own switch now
+  // A MANAGER'S FINER STAFF POWERS (owner, 2026-08-01; FINISHED 2026-08-20). "Manage staff" used to
+  // be one yes covering creating a login, resetting somebody's password and switching them off.
+  // Those are three very different amounts of trust, so each is its own switch
   // (access_config.manage_staff.manager_opts.*). The OWNER and the admin are unaffected — this
-  // only ever narrows a manager, and an unset option keeps the row's own default.
+  // only ever narrows a manager, and an unset option keeps the row's own default (open).
+  //
+  // FOR TWO AND A HALF WEEKS THIS WAS HALF-BUILT and T20 found it: only `reset_pw` had a call site,
+  // and NO node in lib/accessTree.ts wrote the path at all, so the switches existed on the server
+  // and nowhere else. All three now have both ends — a row under Access & permissions → Manager
+  // settings → Users, and a gate here.
+  //
+  // The stub's fourth key, `delete`, is GONE rather than finished: deleting a login is refused for a
+  // manager outright in deleteImpl below (owner, 2026-08-02 — "it can disable the user, it can't
+  // delete the user"), so a switch for it would have been a box arguing with a decided rule.
   // A GATE MUST FAIL CLOSED (T9 finding F9, fixed 2026-08-12). This ignored its read error, so a
   // database blip made `cfg` null and handed the manager the DEFAULT power — i.e. a failure to read
   // the restriction removed the restriction. `null` is now returned for "couldn't check", and the
   // caller refuses. Every other rung in this file refuses on doubt; these two allowed on doubt.
-  const mgrStaffOpt = async (key: "create" | "reset_pw" | "delete", dflt: boolean): Promise<boolean | null> => {
-    if (s.actor !== "manager") return true;
-    const rid = s.restaurants[0]?.id;
-    if (!rid) return false;
-    const got = await rd("access_config", () => sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle());
-    if (got.error) return null;                       // couldn't check → the caller must refuse
-    const cfg = (got.data as { access_config?: unknown } | null)?.access_config as
-      { manage_staff?: { manager_opts?: Record<string, boolean> } } | null;
-    const v = cfg?.manage_staff?.manager_opts?.[key];
-    return typeof v === "boolean" ? v : dflt;
-  };
-  /** "couldn't check" → a retryable refusal, never a silent grant. */
-  const cantCheckPower = () => NextResponse.json(
-    { error: "Couldn't check your staff access just now — please try again.", transient: true }, { status: 503 });
+  const mgrStaffOpt = (key: MgrStaffPower, dflt: boolean) => mgrStaffPower(s, key, dflt);
 
   if (action === "reset_password") {
     const mayReset = await mgrStaffOpt("reset_pw", true);
@@ -980,6 +1010,15 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     // active:"false" is a truthy string → enabled), flipping state the wrong way.
     if (typeof body?.active !== "boolean") return bad("`active` must be true or false.");
     const active = body.active;
+    // THE "SWITCH A LOGIN OFF" SWITCH (owner-approved 2026-08-20 — see mgrStaffOpt above). Only the
+    // OFF direction is gated: taking someone's access away is the act of trust this switch is about,
+    // and a manager who may not do it must not be able to strand a waiter mid-shift. Turning a login
+    // back ON is the undo, and refusing the undo while allowing nothing is a state nobody wants.
+    if (!active) {
+      const mayDisable = await mgrStaffOpt("disable", true);
+      if (mayDisable === null) return cantCheckPower();
+      if (!mayDisable) return bad("Switching a login off isn't part of your staff access.", 403);
+    }
     const { error } = await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
     if (error) return bad("Couldn't update that account — please try again.", 500);
     await logAction(logPanel(s), active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
