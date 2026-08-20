@@ -139,6 +139,18 @@ export default function AdminCustomers() {
 
   return (
     <>
+      {/* A focusable row with no visible focus ring is worse than one that cannot be reached at
+          all — the person tabbing has no idea where they are. `:focus-visible` only, so a mouse
+          click never paints it, and the ring is drawn INSIDE the row (outline-offset: -2px)
+          because a table row's outline would otherwise be clipped by the scrolling wrapper. The
+          accent token is the same one every other focus ring in the console uses. */}
+      <style>{`
+        tr.cust-row:focus-visible {
+          outline: 2px solid var(--accent, #6366f1);
+          outline-offset: -2px;
+          background: color-mix(in srgb, var(--accent, #6366f1) 8%, transparent);
+        }
+      `}</style>
       <h1 className="adm-page-h">Customers</h1>
       <p className="adm-page-sub">
         Every guest across every restaurant, and which restaurant they belong to. Counts and dates only —
@@ -238,8 +250,24 @@ export default function AdminCustomers() {
               </thead>
               <tbody>
                 {rows.map((c) => (
+                  // THE ROW OPENS FROM THE KEYBOARD TOO (owner, 2026-08-20). This is the only door
+                  // into a guest's cross-restaurant record — "Meera has eaten at 3 of our
+                  // restaurants" — and it was reachable with a mouse and nothing else: no tab stop,
+                  // no Enter, and a screen reader announced a plain table cell. `role="button"` on
+                  // a <tr> would throw away the row/column semantics that make the table readable,
+                  // so the row keeps being a row and simply becomes focusable and answers the two
+                  // keys that mean "open this": Enter and Space. Space is preventDefault-ed or the
+                  // page scrolls underneath the drawer as it opens.
                   <tr key={`${c.restaurant_id}:${c.phone}`}
                     onClick={() => openDetail(c.phone)}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      openDetail(c.phone);
+                    }}
+                    className="cust-row"
+                    aria-label={`Open the record for ${c.name || "this guest"}, ${showPhone(c.phone)}`}
                     style={{ borderTop: "1px solid var(--border-c, #e5e7eb)", opacity: c.blocked ? 0.6 : 1, cursor: "pointer" }}
                     title="See this guest's full record">
                     <td style={{ padding: "9px 10px" }}>
