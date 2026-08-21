@@ -191,16 +191,12 @@ head("BACKUP / DEV database — no table guesses which restaurant a row belongs 
 // for 300 migrations a writer that forgot to name a restaurant silently filed the row under French
 // House. Migration 351 dropped the default on 20 of the 25.
 //
-// These FIVE are still defaulted ON PURPOSE, because three test scripts insert into them without a
-// restaurant and those files were not migration 352's to change. Each is a one-line fix:
-//   orders          → scripts/seed-today.mjs:65, scripts/verify-tablet-parity.mjs:39
-//   sessions        → scripts/verify-realtime.mjs:69, scripts/verify-tablet-parity.mjs:37
-//   session_members → scripts/verify-tablet-parity.mjs:38
-//   blocklist       → scripts/verify-tablet-parity.mjs:48
-//   staff_actions   → scripts/verify-realtime.mjs:82 (and lfh_prune_audit's own platform-level line,
-//                     which SHOULD be null rather than French House — that is the point of fixing it)
-// SHRINK this list as those land. Never grow it: a new name here means a table went back to guessing.
-const STILL_DEFAULTED = new Set(["orders", "sessions", "session_members", "blocklist", "staff_actions"]);
+// Migration 352 covers all 25, so this list is EMPTY and must stay empty. It exists because the
+// first version of 352 held five back (orders, sessions, session_members, blocklist, staff_actions)
+// while two test fixtures still inserted into them without a restaurant; those fixtures now pass it
+// explicitly, so nothing is exempt any more. A NAME APPEARING HERE MEANS A TABLE WENT BACK TO
+// GUESSING — treat it as a regression to fix, not an exception to record.
+const STILL_DEFAULTED = new Set();   // all 25 done — migration 352 covers every one of them
 if (STATIC_ONLY) {
   console.log("  – skipped (--static)");
 } else if (!existsSync(join(root, ".env.local"))) {

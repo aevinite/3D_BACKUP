@@ -19,37 +19,34 @@
 -- branding leaked onto another tenant" bug, and it is the shape that is hardest to notice: the row
 -- is not missing, it is in somebody else's restaurant.
 --
--- WHAT THIS DOES. Drops the DEFAULT on 20 of the 25. The column stays NOT NULL, so a writer that
--- forgets now gets an immediate, loud `null value in column "restaurant_id"` instead of a wrong row.
--- No data changes. No column is added or removed. Reversible with one ALTER per table.
+-- WHAT THIS DOES. Drops the DEFAULT on all 25. The column stays as it was — NOT NULL on 24 of
+-- them, and deliberately NULLABLE on `staff_actions`, where a platform-level row (an owner-account
+-- admin action, a failed login, the nightly prune's own log line) genuinely belongs to no
+-- restaurant. So a writer that forgets now gets an immediate `null value in column "restaurant_id"`
+-- on 24 tables, and on `staff_actions` gets an honest NULL instead of being mis-filed under French
+-- House. No data changes. No column is added or removed. Reversible with one ALTER per table.
 --
--- WHY 20 AND NOT 25 — read this before "finishing the job". Five are deliberately left alone
--- because three TEST scripts still insert into them without a restaurant, and those files are not
--- this migration's to change:
---     orders           · scripts/seed-today.mjs:65, scripts/verify-tablet-parity.mjs:39
---     sessions         · scripts/verify-realtime.mjs:69, scripts/verify-tablet-parity.mjs:37
---     session_members  · scripts/verify-tablet-parity.mjs:38
---     blocklist        · scripts/verify-tablet-parity.mjs:48
---     staff_actions    · scripts/verify-realtime.mjs:82, and lfh_prune_audit() writes its own
---                        platform-level log line with no restaurant — which is CORRECT, because
---                        that column is deliberately nullable here (an owner-account action or a
---                        failed login belongs to no restaurant). Dropping its default is still the
---                        right end state — the prune's line would become NULL instead of being
---                        mis-filed under French House — but it belongs with the script fix.
--- Each of those is one line: add `restaurant_id: <the test restaurant>` to the insert. Once they
--- are fixed, the remaining five are five more ALTERs exactly like the ones below. `orders` and
--- `sessions` are the two that matter most, so this is not finished until that follow-up lands.
+-- WHY THE LAST FIVE WERE HELD BACK AT FIRST, AND WHAT UNBLOCKED THEM. `orders`, `sessions`,
+-- `session_members`, `blocklist` and `staff_actions` were left defaulted in the first version of
+-- this file because two TEST fixtures still inserted into them without naming a restaurant:
+--   scripts/verify-realtime.mjs      — a throwaway session, and its staff_actions self-test row
+--   scripts/verify-tablet-parity.mjs — a throwaway session, member, order and blocklist row
+-- Both always meant restaurant #1; they simply never said so. They now pass it explicitly (one
+-- `R1` constant each), so the last five are included here and the split is gone. `orders` and
+-- `sessions` are the two that matter most, which is exactly why this file is not worth shipping
+-- half-done. `scripts/seed-today.mjs` needed no change — it already passes `restaurant_id: r.id`.
 --
--- VERIFIED BEFORE WRITING, against the live dev database and the whole repo — for these 20:
---   · 0 live function bodies insert into them without naming restaurant_id (all 190 checked,
---     including the high-traffic ones: lfh_rt_emit → realtime_events, lfh_next_counter_on →
---     daily_counters, lfh_next_seq → seq_counters all pass it explicitly);
---   · 0 places in app/, lib/, components/ or public/panels/ insert into them without it;
---   · 0 scripts insert into them without it;
---   · all 20 already have restaurant_id NOT NULL, so nothing about what is allowed changes —
---     only what happens when a writer stays silent.
--- Earlier migrations are unaffected: this file sorts after all of them, so every INSERT in the
--- seed sequence has already run while the default was still in place.
+-- VERIFIED BEFORE WRITING, against the live dev database and the whole repo:
+--   · 0 live function bodies insert into any of the 25 without naming restaurant_id (all 190
+--     checked, including the high-traffic ones: lfh_rt_emit -> realtime_events,
+--     lfh_next_counter_on -> daily_counters, lfh_next_seq -> seq_counters all pass it explicitly).
+--     The ONE exception is lfh_prune_audit(), which writes its own platform-level line into
+--     staff_actions with no restaurant — and that is CORRECT: it should be NULL, not French House.
+--     Dropping the default there is the fix, not the risk.
+--   · 0 places in app/, lib/, components/ or public/panels/ insert into any of them without it;
+--   · 0 scripts, after the two fixture fixes above.
+-- Earlier migrations are unaffected: this file sorts after all of them, so every INSERT in the seed
+-- sequence has already run while the default was still in place.
 
 ALTER TABLE aggregator_orders    ALTER COLUMN restaurant_id DROP DEFAULT;
 ALTER TABLE categories           ALTER COLUMN restaurant_id DROP DEFAULT;
@@ -71,5 +68,12 @@ ALTER TABLE settings             ALTER COLUMN restaurant_id DROP DEFAULT;
 ALTER TABLE staff_users          ALTER COLUMN restaurant_id DROP DEFAULT;
 ALTER TABLE verification_codes   ALTER COLUMN restaurant_id DROP DEFAULT;
 ALTER TABLE waiter_calls         ALTER COLUMN restaurant_id DROP DEFAULT;
+
+ALTER TABLE orders               ALTER COLUMN restaurant_id DROP DEFAULT;
+ALTER TABLE sessions             ALTER COLUMN restaurant_id DROP DEFAULT;
+ALTER TABLE session_members      ALTER COLUMN restaurant_id DROP DEFAULT;
+ALTER TABLE blocklist            ALTER COLUMN restaurant_id DROP DEFAULT;
+-- staff_actions keeps its NULLABLE column on purpose (platform-level rows). Only the guess goes.
+ALTER TABLE staff_actions        ALTER COLUMN restaurant_id DROP DEFAULT;
 
 NOTIFY pgrst, 'reload schema';
