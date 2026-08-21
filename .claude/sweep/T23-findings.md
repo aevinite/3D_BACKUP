@@ -130,11 +130,15 @@ fallback into a re-pricing.
 
 ---
 
-## 🟡 D1 — the bill-chain verifier cannot tell a BINNED bill from an ALTERED one
+## ✅ F4 — the bill-chain verifier could not tell a BINNED bill from an ALTERED one
 
-**NOT FIXED — it needs the owner's decision.** Reported, not built.
+**FIXED — migration 353, on the owner's instruction (2026-08-21). It was reported as a 🟡 first; he
+read it and said do it.** Severity: **high**, higher than first written up — see WHERE below.
 
-**Where it lives:** admin console → Bills (and wherever `lfh_verify_bill_chain` is surfaced).
+**Where it lives:** Manager panel → 🧾 KOT ▾ → **Z-report**, the day-close sheet. Migration 332's
+verification is PRINTED there on purpose — *"that is the moment a restaurant states its takings, it
+is the paper an inspector is handed"*. That is what raises this from untidy to serious: the sheet was
+printing `⚠ Bill ledger — 11 problems — tell the owner` every single day-close.
 
 **What happens:** migration 332 signs every issued bill into an append-only chain and
 `lfh_verify_bill_chain` reports three things — `row_rewritten`, `chain_broken`, and `bill_changed`
@@ -160,19 +164,35 @@ binned bill lights up as changed, the one bill that really was altered is buried
 owner learns to stop reading the page — which is precisely the failure migration 344 was written to
 undo on the Repair board.
 
-**Why it is not fixed here:** what the verifier should SAY is a product and compliance decision, and
-this wave was gated because a confident wrong fix in the money layer costs the most. Three shapes:
+**Fixed as shape (1) — the recommendation, which he approved.** `bill_binned`, `bill_cancelled` and
+`bill_gone` join `row_rewritten`, `chain_broken` and `bill_changed`; the `checked` summary counts each,
+so nothing can be silently dropped. The route splits problems from notes and the Z-report prints the
+notes as information under a verified ledger.
 
-1. give a binned bill its own kind (`bill_binned`) so it is listed but not accused;
-2. skip a tombstoned bill entirely and count it in the `checked` line;
-3. keep reporting it, but change the wording to *"the bill is in the recycle bin"*.
+**THE TAMPER TEST IS NOT WEAKENED**, and this is the load-bearing line: a bill is only re-labelled when
+it has **no live orders left** AND the reason is visible in the data. Proved on the dev database after
+applying migration 353:
 
-My recommendation is (1): it stays visible — nothing is hidden — but it stops reading as tampering.
-That is one new branch in `lfh_verify_bill_chain` and one new migration.
+```
+french-house              bill_binned 9 · bill_gone 2 · checked 1
+                          "12 bill(s) verified · 11 cancelled or binned (recorded)"
+                          Z-report now prints: ✓ Bill ledger verified (notes listed below it)
+
+aangan-garden-restaurant  bill_changed 1 · checked 1
+                          "2 bill(s) verified · 1 unexplained"
+                          Z-report still prints: ⚠ 1 problem
+                          [bill_changed] signed at 1450.58, the bill now adds up to 1933.38
+```
+
+Aangan's one real finding **survived** — a bill that still holds live orders whose total moved up by
+₹482.80 after it was signed. That is the shape an actual alteration takes, and it is still flagged.
 
 ---
 
-## 🔗 HANDOFF H1 — extend the re-seed guard to cover the three new keys (`scripts/`, not my territory)
+## ✅ H1 — the re-seed guard now asserts the invariant instead of a list (BUILT on his instruction)
+
+Reported as a handoff first because `scripts/` was outside this terminal's fence; he read it and said
+do it. Below is the write-up as it stood, then what was actually built.
 
 `scripts/verify-db-grants.mjs` already has the machinery. Around line 460 it carries:
 
@@ -197,7 +217,14 @@ The other seven already-wrapped ones worth adding while you are there: 198, 209,
 
 Stronger still, and cheap: instead of a hand-typed list, assert the invariant directly —
 **every `lfh_already_applied('<key>')` in the folder must have a matching row inserted somewhere in the
-folder, and vice versa.** That version cannot rot. It passes today: 12 keys used, 12 recorded.
+folder, and vice versa.** That version cannot rot.
+
+**BUILT, as the invariant.** The map is gone. The guard derives the population from the folder and
+checks both directions, plus 043/093 still named individually for their measured blast radius. It now
+covers **14 keys instead of 2**. Checked against two deliberate faults — an orphaned check and an
+orphaned ledger row — and it caught both, naming the file and what to do. And it invented a failure on
+its very first run, which is recorded in the code: the terminator for an `INSERT … lfh_applied_once`
+block is `on conflict`, not `;`, because migration 344's note text contains a semicolon.
 
 ---
 

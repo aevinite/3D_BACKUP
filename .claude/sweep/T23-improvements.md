@@ -62,19 +62,27 @@ Scanned all 115 files afterwards: every header in 231 → 350 now names its own 
 
 ---
 
-## 🟡 J1 — the bill-chain verifier cannot tell a binned bill from an altered one
+## 🟢 I3 — BUILT (on his instruction): the bill-chain verifier tells a binned bill from an altered one
 
-Full write-up in `T23-findings.md` → 🟡 D1. Needs one new branch in `lfh_verify_bill_chain`, one
-migration, and a decision about what the report should SAY. Not built: it is compliance-facing, and the
-shape of the answer is his.
+Reported as 🟡 J1 first; he read it and said do it. Migration **353**, plus the Z-report route and the
+manager panel so it lands end to end. Full write-up in `T23-findings.md` → F4. The measured proof that
+it does not weaken the tamper test: French House's 11 false alarms became 9 `bill_binned` + 2
+`bill_gone` and its day-close sheet now reads verified, while Aangan's one genuine finding survived.
 
-## 🟡 J2 — replace the hand-typed one-time-rewrite list with the invariant itself
+## 🟢 I4 — BUILT (on his instruction): a purge clears the retired web addresses
 
-`scripts/verify-db-grants.mjs` protects 2 of the folder's 12 one-time data rewrites, by name. The
-invariant it is reaching for is checkable directly: *every `lfh_already_applied('<key>')` in the folder
-must have a matching row inserted somewhere in the folder, and vice versa.* That version cannot rot as
-the folder grows, and it passes today (12 used, 12 recorded). It lives in `scripts/`, so it is
-🔗 HANDOFF H1 rather than something this terminal could build.
+Migration **354**. `verify:purge` went red the moment `restaurant_slug_history` merged onto main —
+the table carries a `restaurant_id` and the purge neither cleared it nor kept it on purpose. Same
+shape as migration 346: the cascade that used to clear a tenant table stopped firing at 309, so a new
+table is invisible to the explicit list. Deleted, because a retired address describes how the
+restaurant was ADDRESSED, not what it SOLD — and it could only ever resolve to a restaurant the
+resolver already refuses.
+
+## 🟢 I5 — BUILT (on his instruction): the re-seed guard asserts the invariant, not a list of two
+
+Reported as 🟡 J2 / handoff H1 first. `scripts/verify-db-grants.mjs` no longer keeps a hand-typed map;
+it derives the population from the folder and checks both directions. 14 keys instead of 2. Checked
+against two deliberate faults and it caught both.
 
 ## Ideas considered and deliberately NOT written down as improvements
 
