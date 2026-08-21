@@ -9,6 +9,13 @@
   /* The UI was built around a --blue accent; alias it to GOLD so every accent
      (selected tile, primary buttons, chips, focus rings) matches the editor. */
   --blue: #d4a574;
+  /* THE ACCENT WHEN IT CARRIES WORDS OR A GLYPH — the same token the manager panel and the kitchen
+     board already declare (--gold-ink / --blue-ink). --gold and --gold-strong are tuned to be FILLS
+     with dark ink on top, so they must not get darker; but the same gold is also used as INK in a
+     few places, and on the light skin those measured 2.09-3.13:1 (the ＋ and ✎ on a dish tile, the
+     Take-order category heading). In the DARK skin the bright gold on a dark panel already reads
+     6.4-10.4:1, so ink IS the accent here; the light block darkens it. */
+  --gold-ink: var(--gold);
   --green: #22c55e; --amber: #fbbf24; --red: #ef4444;
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element instead of a
      hand-rolled max(). env() covers the iPhone notch/home bar when this page is top-level;
@@ -472,7 +479,9 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .drow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
 .dprice { font-size: 12.5px; color: var(--muted); }
 .dish.in .dprice { color: var(--blue); font-weight: 700; }
-.dadd { width: 22px; height: 22px; flex: 0 0 auto; border-radius: 7px; display: grid; place-items: center; font-size: 15px; font-weight: 700; line-height: 1; background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold, #b8923f); }
+/* the ＋ is INK on a 16% tint of itself, so it needs --gold-ink on the light skin (it measured
+   2.09:1 there, the faintest mark on the dish tile). The tint keeps the bright gold. */
+.dadd { width: 22px; height: 22px; flex: 0 0 auto; border-radius: 7px; display: grid; place-items: center; font-size: 15px; font-weight: 700; line-height: 1; background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold-ink); }
 /* The QUANTITY on a dish tile — a number a waiter reads mid-order, so it gets the same dark ink
    on gold as every other filled control here (was white at 2.81/2.23:1). */
 .dqty { flex: 0 0 auto; background: var(--blue); color: #1a140c; border-radius: 999px; padding: 2px 9px; font-size: 12.5px; font-weight: 800; }
@@ -693,6 +702,11 @@ html[data-theme="light"]{
      floor legend, the seat counts, the filter buttons and the take-order dish price
      (T11 sweep, 2026-08-13). Same hue, one step deeper: 5.37:1 / 4.53:1. */
   --text:#2c2219; --muted:#77694c; --gold:#c98f3f; --gold-strong:#b07a28;
+  /* Gold mixed 65% with black — identical to the manager panel's --gold-ink, so the two screens a
+     waiter moves between agree. 5.91:1 on white, 4.98:1 on --bg, 4.39:1 on the 16% gold tint the
+     ＋ and ✎ sit on (a glyph, where the 3:1 floor applies). Fills, borders and glows keep the
+     bright gold and look exactly as they did. */
+  --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
 }
 /* Hardcoded dark surfaces → light. */
@@ -910,7 +924,9 @@ body.om-mode .panel.om-open { position: fixed; inset: 0; z-index: 40; border: 0;
 .om-scroll { position: relative; overflow-y: auto; padding: 12px 14px 40px; scroll-behavior: smooth; }
 .om-hint { padding: 0 2px 8px; }
 .om-sec { margin: 0 0 18px; }
-.om-sec-h { position: sticky; top: -12px; z-index: 2; margin: 0 0 8px; padding: 10px 2px 6px; font-size: 12.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--gold-strong); background: linear-gradient(var(--bg) 78%, transparent); }
+/* the Take-order category heading is WORDS in gold, so --gold-ink (it measured 3.13:1 on the light
+   skin's --bg, and it is the label a waiter scans the dish list by). */
+.om-sec-h { position: sticky; top: -12px; z-index: 2; margin: 0 0 8px; padding: 10px 2px 6px; font-size: 12.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; color: var(--gold-ink); background: linear-gradient(var(--bg) 78%, transparent); }
 .om-sec-n { color: var(--muted); font-weight: 600; }
 .om-sec .dishgrid { max-height: none; overflow: visible; }   /* sections share the ONE browser scroll */
 .dish .dbadge { display: inline-flex; align-items: center; gap: 6px; }
@@ -1067,8 +1083,8 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 /* #U4: bump the ✎ to a ~34px tap target with a clearer boundary vs the tile's quick-add zone. */
 .dedit { position: absolute; top: 5px; right: 5px; width: 40px; height: 40px; border-radius: 9px;
   display: grid; place-items: center; font-size: 14px; line-height: 1; cursor: pointer;
-  background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold-strong, #8a6d2f);
-  border: 1px solid transparent; }
+  background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold-ink);
+  border: 1px solid transparent; }   /* the ✎ is INK on its own tint — 2.76:1 in the light skin before --gold-ink */
 .dedit:hover { border-color: var(--gold, #b8923f); }
 
 /* Floating "View order" pill — guest-menu style; shown only on the phone browse screen
