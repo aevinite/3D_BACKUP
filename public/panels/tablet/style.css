@@ -709,6 +709,19 @@ html[data-theme="light"]{
   --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
 }
+/* ── THE TILE'S TWO FIGURES, ON THE LIGHT SKIN (T26 sweep, 2026-08-22) ────────────────────────
+   The manager floor and this floor show the SAME two things about a table — how many of its dishes
+   are served, and how many seats it has — and the manager's versions were deepened for the light
+   skin long ago (editor/style.css: .ft-linenum at 42% of the state hue, .ft-seats at #6b5d46). This
+   panel's identical lines never were, so on the running floor the manager read 6.43:1 and 6.40:1
+   while the waiter holding the tablet read 3.49:1 and 3.18:1 — for the same table, in the same
+   restaurant, in the skin both panels open in by default. Same values as the manager's, so the two
+   screens finally agree. The STATE HUE survives in both; only how far the ink leans towards --text
+   changes, which is what buys the contrast. The dark skin is untouched (8.03-9.56:1 already). */
+html[data-theme="light"] .t-linenum,
+html[data-theme="light"] .t-line-plain .t-linenum { color: color-mix(in srgb, var(--c) 42%, var(--text)); }
+html[data-theme="light"] .tseats { color: #6b5d46; }
+
 /* Hardcoded dark surfaces → light. */
 html[data-theme="light"] .ord{ background:var(--panel); border-color:var(--line); }
 html[data-theme="light"] .ordh{ background:var(--panel-2); border-bottom-color:var(--line); }
