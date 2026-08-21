@@ -204,7 +204,8 @@ async function postImpl(req: NextRequest) {
     }
     // They knew it → clear the counter, so a person who legitimately changes their password twice in
     // one sitting is never walled (the same rule login already follows, lib/rateLimit).
-    await rateResetOnSuccess("password_change", u.id);
+    // Scoped to the same restaurant the wall was counted under (see rateAllowed above).
+    await rateResetOnSuccess("password_change", u.id, u.restaurant_id ?? null);
     if (next.length < 6) return NextResponse.json({ error: "New password must be at least 6 characters." }, { status: 400 });
     if (next === current) return NextResponse.json({ error: "New password must be different." }, { status: 400 });
     // Bump token_version → every existing cookie (incl. this one) is invalidated;
