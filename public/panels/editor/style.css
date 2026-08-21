@@ -2414,6 +2414,12 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .fstat-n { font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .fstat-l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
 .fstat.warn .fstat-n { color: var(--gold-strong); }
+/* …and on the LIGHT skin --gold-strong is still a FILL colour: this number measured 3.71:1 on the
+   white floor header at 15px/800 while .fstat.alert's number was given a light value long ago
+   (see the light block below) and the neutral one sits at 15.56:1. --gold-ink is the file's own
+   answer for gold carrying words: 5.91:1. The dark skin measured 9.75:1 and is untouched.
+   (T26 sweep, 2026-08-22, measured on the running floor header.) */
+html[data-theme="light"] .fstat.warn .fstat-n { color: var(--gold-ink); }
 .fstat.alert .fstat-n { color: #f59e0b; }
 
 /* ---- the floor's header row: title · stats · legend ——— KOT ▾ · QO/P ----
