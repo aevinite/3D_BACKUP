@@ -132,7 +132,19 @@ else fail("lib/tableTags.ts no longer branches on m.bag — declaring moduleBag:
 // nothing on any screen to explain why. Guarded here because this is a rule about the SHAPE of the
 // settings row, which is what this file is for — rather than as a third new guard nobody remembers.
 const LEGACY_KEY = /\.eq\(\s*["']id["']\s*,\s*["']site["']\s*\)/;
-const stripped = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+/**
+ * Source with LINE comments blanked — and DELIBERATELY NOT block comments.
+ *
+ * ⚠️ A NAIVE `/\*[\s\S]*?\*\/` STRIPPER SILENTLY EATS THE FILE. Measured on
+ * app/api/editor/[...path]/route.ts: 412,233 chars in, 370,262 out — 42 KB gone, including the whole
+ * of `canDeleteBill()`, because a `/*` inside a regex literal or a string pairs with a `*\/` tens of
+ * thousands of characters later. A guard that cannot see the code it is checking reports a PASS, and
+ * a guard that invents a pass is worse than no guard at all.
+ *
+ * Line comments are enough: every explanatory note in this repo's own style is `//`, and the
+ * `[^:\\]` guard keeps a `//` inside a URL intact.
+ */
+const stripped = (t) => t.replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
 // SCOPED TO lib/ ON PURPOSE, and this is not laziness — it is the difference between a guard that
 // is trusted and one that is muted. Widening it to app/ finds two more, and BOTH turn out to be
 // deliberate legacy fallbacks for the flagship row, documented where they sit:

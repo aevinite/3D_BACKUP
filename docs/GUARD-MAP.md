@@ -100,6 +100,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | a login in the recycle bin | `verify:recycle-name` | nothing | no |
 | opening a table that had a join request (the "Attend" flash) | `verify:no-attend-flash`, `verify:open-request-guard` | nothing | no |
 | a parcel, or the 🛵 Platform / 🥡 Parcels tab appearing/disappearing | `verify:parcel-home` ← a parcel has ONE home; the floor must never grow a parcel strip again (owner, 2026-08-14) | nothing | no |
+| a table on the floor whose number is outside the plan ("off-plan") | `verify:floor-offplan` ← an off-plan tile is shown while a party is LIVE on it and never hidden while it is, so a seven-digit number reads as odd rather than vanishing with a real party on it | nothing | no |
 
 ## 4 · Kitchen panel — `/kitchen`
 

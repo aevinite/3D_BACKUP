@@ -62,11 +62,20 @@ const SERVER_ENV = /process\.env\.(?!NEXT_PUBLIC_)[A-Z0-9_]+/;
 // shape rather than a bare word.
 const SERVICE_ROLE_IMPORT = /(?:import|require)[^;\n]*["'][^"']*(?:supabaseAdmin|lib\/alerts)["']/;
 
-/** Source with comments and string bodies blanked, so nothing here can be fooled by prose. */
+/**
+ * Source with LINE comments blanked — and DELIBERATELY NOT block comments.
+ *
+ * ⚠️ A NAIVE `/\*[\s\S]*?\*\/` STRIPPER SILENTLY EATS THE FILE. Measured on
+ * app/api/editor/[...path]/route.ts: 412,233 chars in, 370,262 out — 42 KB gone, including the whole
+ * of `canDeleteBill()`, because a `/*` inside a regex literal or a string pairs with a `*\/` tens of
+ * thousands of characters later. A guard that cannot see the code it is checking reports a PASS, and
+ * a guard that invents a pass is worse than no guard at all.
+ *
+ * Line comments are enough: every explanatory note in this repo's own style is `//`, and the
+ * `[^:\\]` guard keeps a `//` inside a URL intact.
+ */
 function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, " ")          // block comments
-    .replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");   // line comments (but not a "://" in a url)
+  return src.replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
 }
 
 function walk(dir, out = []) {
