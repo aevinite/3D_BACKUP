@@ -75,55 +75,58 @@ to the legacy key. Deliberately scoped to `lib/`: widening it finds two more in 
 both are documented legacy fallbacks for the flagship row, so failing on them would make the guard
 red on clean main for two things nobody agreed are wrong.
 
-## 🔗 HANDOFF — for whoever owns `app/api/admin/**`
+## ✅ THE OWNER SAID "DO EVERYTHING EXCEPT REDESIGN" (2026-08-21) — so all three 🟡 items were built
 
-Two routes still read `settings` by the retired single-row key. **Neither looks like a fault** — both
-are documented legacy fallbacks for the flagship row — but they are the last two, so whoever owns
-them should decide rather than inherit them by accident:
+Recorded here because this file previously listed them as open.
 
-- `app/api/admin/settings/route.ts` — the log-retention numbers (`oplog_retention_days`,
-  `custlog_retention_days`, `audit_retention_years`) read off `id='site'`. There is no
-  per-restaurant screen for them, so "restaurant #1's value" and "the platform's value" are the same
-  statement today. If they are meant to be platform-wide, they arguably want their own table.
-- `app/api/admin/maintenance/route.ts` — falls back to `id='site'` only when no `restaurant_id` was
-  given, and says so in its own comment: *"`rid` is null for the legacy flagship row"*. Deliberate.
+### I3 → BUILT · a bulk clear can no longer tombstone a bill that still has live orders
+`lib/softDelete.ts`. The "which of these sessions still has a live order?" read is chunked through
+`lib/inChunks.ts` with `.limit(1000)` per chunk, and a failed chunk ABORTS the tombstone instead of
+producing a shorter list. It hits the row cap sooner than an estate read does — it returns one row per
+ORDER, not per session. Still worth fixing even though the bulk clear went the same day: the ADMIN
+bill ledger can still hand it a long selection, and a delete path must be right on its own terms.
+Guarded by `verify:id-chunks` (softDeleteOrders added to its list, with the reason).
 
-## 🅿️ PARKED BY THE OWNER, 2026-08-21
+### I4 → ALREADY ON MAIN, not rebuilt · a complaint knows its printer
+Migration **351** (`351_a_complaint_knows_its_printer.sql`) plus the `lib/printQueue.ts` narrowing
+(`printer.is.null,printer.eq.<name>`) landed on main while this branch was open — same fault, same
+reasoning, same "narrower, never wider" rule. Checked before writing a line, so nothing was
+duplicated. This is what the handoff was for and it worked.
 
-- **The manager panel's bulk bill-deleting** (🗑 Clear freed, the tick-box bulk bar, and the dead
-  `{all:true}` server path no screen reaches). He asked for it removed, then parked the whole Bills
-  tab piece: *"leave this idea for now will do it later."* **So 🟡 I3 below stays OPEN** — the
-  unbounded read only gets large on those bulk paths, and they are still there.
-- **The Bills record screen redesign.** Same instruction.
-- **R27 CONFIRMED, not reversed.** Asked directly whether a manager should be able to delete an
-  unsettled bill, he chose *"No — keep R27 exactly as it is."* `canDeleteBill()` returning `!g.user`
-  (admin console only) is correct and stays. Worth recording because his first phrasing —
-  *"he can delete one bill but with reason"* — reads like a reversal, and it is not one.
+### I5 → BUILT · liveBoard stops shadowing two shared helpers
+Split in two on purpose, because the trade-off was real:
+- **the fan-out was safe to share** → now `lib/mapLimit.ts`. The local copy ran in batches (fire 6,
+  wait for all 6, fire 6 more); the shared one is a worker pool, so the ceiling stays FULL. Same
+  maximum in flight, same input order, strictly less waiting. Measured: 12 chunks at limit 6 with one
+  slow chunk — the eleven fast ones done in 34ms while the slow one took 300ms.
+- **the paging was NOT** → renamed `pageBoard`, behaviour untouched. It throws where the shared one
+  returns `{ error }`, and it logs-and-truncates past 20k where the shared one refuses past 50k.
+  A kitchen board that draws 20,000 of 20,001 tickets beats one that refuses during a rush; a money
+  total short by one row is a lie. The finding was "one name, two answers" — so the NAME was fixed,
+  not the behaviour, which is the resolution that does not take the risk I flagged.
+Guarded by a NAME rule in `verify:id-chunks`: no `lib/` file may define its own `pageAll`,
+`mapLimit`, `readInChunks` or `idChunks` without importing it.
 
----
+### The bulk bill-deleting → BUILT (his original instruction)
+🗑 Clear freed, the dead tick-box bar, and the `{all:true}` server sweep are all gone. The server now
+enforces ONE BILL per request on the session, not a count. R27 unchanged and re-confirmed. Guarded by
+`verify:one-bill-delete`, proven red three ways.
 
-## 🟡 NOT BUILT — needs a decision from him
+## 🅿️ STILL PARKED BY THE OWNER
 
-### I3 · a bulk "clear all freed records" could tombstone a bill that still has live orders
-`lib/softDelete.ts`. After stamping the orders, it asks which of the touched sessions still have a
-live order — `.in("session_id", sessionIds)` with no `.limit()` and no chunking. Past 1,000 returned
-rows that answer comes back SHORT, so a session with live orders is missing from the "busy" set and
-gets tombstoned: the ledger shows the bill as deleted while its orders read alive. That is precisely
-the half-state the function's own comment was written to stop.
-**Why I did not build it:** it is the money-delete path, in the wave he gated, and the right fix is
-not obvious — chunking shrinks the window without closing it, and adding a refusal could block a
-legitimate bulk clear. Needs his call on which he prefers.
+- **The Bills record screen REDESIGN.** *"leave this idea for now will do it later"*, and confirmed
+  again with *"do everything except redesign"*. Nothing in this branch restyles that screen — the
+  button removal leaves the "Today's bills" divider intact with no hole (watched, screenshot read).
 
-### I4 · one successful KOT print clears a complaint about a DIFFERENT printer
-`lib/printQueue.ts` → `finishKotJob(ok)` resolves EVERY open `printer_events` row for the restaurant
-— the auto-solve he asked for on 2026-08-04. `printer_events` has no printer or agent column
-(mig 269), so per-printer resolution is impossible without a migration. Since mig 341 made
-multi-printer real, a restaurant with a separate bill printer that has run out of paper has its
-complaint cleared by a KOT coming out of the kitchen printer. Needs a migration → his call.
+## 🔗 HANDOFF — two things that are NOT mine
 
-### I5 · `lib/liveBoard.ts` keeps private copies of `pageAll` and `mapLimit`
-Shared versions exist (`lib/pageAll.ts`, `lib/mapLimit.ts`) with DIFFERENT failure behaviour — the
-shared `pageAll` refuses past a cap, liveBoard's logs and truncates at 20k rows. Two same-named
-helpers with different answers is the drift shape this codebase keeps consolidating away. But
-liveBoard's are deliberate and documented for a hot board, and unifying them changes kitchen-board
-behaviour under load. A taste call with a real trade-off either way.
+- **`app/api/admin/settings/route.ts` and `app/api/admin/maintenance/route.ts`** still read `settings`
+  by the retired single-row key `.eq("id","site")`. **Neither looks like a fault** — both are
+  documented legacy fallbacks for the flagship row — but they are the last two. Whoever owns
+  `app/api/admin/**` should decide rather than inherit them by accident.
+- **`scripts/verify-realtime.mjs` is broken on main, and it is not in my territory.** My copy is
+  byte-identical to main's. Its fixture inserts a throwaway session WITHOUT `restaurant_id`
+  (line 69) — the column is NOT NULL — so the insert is refused; then line 72 dereferences `s.id`
+  on the null result and the guard CRASHES instead of failing cleanly. Two-line fix: pass a
+  restaurant id on the insert, and `return`/fail on the error instead of falling through. I touched
+  no migrations and nothing session-related.
