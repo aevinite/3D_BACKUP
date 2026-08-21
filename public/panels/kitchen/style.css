@@ -47,6 +47,7 @@
   --panel-2: #2b2118;   /* a second surface, one step off --panel */
   --fg: var(--text);
   --accent: var(--blue);
+  --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -165,7 +166,14 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
    render() overwrites these lists, so the skeleton vanishes the moment real data
    (or a true "Nothing here") arrives — no JS needed to show or hide it. */
 .skel-ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; overflow: hidden; }
-.skel-line { height: 12px; border-radius: 6px; margin: 8px 0; background: linear-gradient(90deg, var(--line) 25%, #4a3f29 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
+/* THE SHEEN IS A TOKEN, NOT A LITERAL - the same fault the waiter tablet had, in the same rule
+   (T26 sweep, 2026-08-22). #4a3f29 is one gentle step LIGHTER than the dark skin's --line; on the
+   LIGHT skin, which is the DEFAULT skin for every panel, --line is a pale cream and the same
+   literal is a near-BLACK bar crossing a white ticket. This board's skeleton is written straight
+   into the HTML, so it is on screen before any script runs - the first thing a cook sees while the
+   board is in flight, and it reads as broken rather than loading. Proven on the tablet's identical
+   rule with a screenshot; --skel-hi keeps the same 1.25:1 step off --line in each skin. */
+.skel-line { height: 12px; border-radius: 6px; margin: 8px 0; background: linear-gradient(90deg, var(--line) 25%, var(--skel-hi) 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
 .skel-line.title { height: 16px; width: 55%; margin-top: 0; }
 .skel-line.short { width: 40%; }
 .skel-line.wide { width: 80%; }
@@ -360,6 +368,7 @@ html[data-theme="light"]{
      floor legend, the seat counts, the filter buttons and the take-order dish price
      (T11 sweep, 2026-08-13). Same hue, one step deeper: 5.37:1 / 4.53:1. */
   --bg:#f1ebe1; --panel:#ffffff; --line:#e6dcc9; --text:#2c2219; --muted:#77694c;
+  --skel-hi:#d3c5a8;   /* the sheen, one step DARKER than this skin's --line - the same 1.25:1 step */
   --panel-2:#f7f2e9;   /* the light skin's second surface (--fg and --accent alias tokens that already flip) */
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
   /* --blue (the house gold) is a FILL/BORDER colour. On white it measured 2.81:1, so anything

@@ -16,6 +16,7 @@
      Take-order category heading). In the DARK skin the bright gold on a dark panel already reads
      6.4-10.4:1, so ink IS the accent here; the light block darkens it. */
   --gold-ink: var(--gold);
+  --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
   --green: #22c55e; --amber: #fbbf24; --red: #ef4444;
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element instead of a
      hand-rolled max(). env() covers the iPhone notch/home bar when this page is top-level;
@@ -141,7 +142,13 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    floor shows structure instantly instead of a blank grid while /state loads. The
    first render of #tiles overwrites them, so they vanish when real tiles arrive. */
 .skel-tile { aspect-ratio: 1 / 1; border-radius: 15px; border: 1.5px solid var(--line); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-.skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--line) 25%, #4a3f29 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
+/* THE SHEEN IS A TOKEN, NOT A LITERAL (T26 sweep, 2026-08-22). #4a3f29 is one gentle step LIGHTER
+   than the dark skin's --line (1.26:1) — a soft sweep. On the LIGHT skin --line is a pale cream and
+   the same literal is a near-BLACK bar crossing a white tile: the very first thing a waiter sees on
+   every open, in the default skin, and it reads as "something is broken", not "loading". Screenshot
+   read at 1280×800 with the floor read held open. --skel-hi keeps the same 1.25:1 relationship to
+   --line in each skin. */
+.skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--line) 25%, var(--skel-hi) 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
 .skel-line.title { height: 18px; width: 45%; }
 .skel-line.short { width: 60%; }
 .skel-line.foot { margin-top: auto; width: 75%; }
@@ -707,6 +714,7 @@ html[data-theme="light"]{
      ＋ and ✎ sit on (a glyph, where the 3:1 floor applies). Fills, borders and glows keep the
      bright gold and look exactly as they did. */
   --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
+  --skel-hi:#d3c5a8;   /* the sheen, one step DARKER than this skin's --line — same 1.25:1 step */
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
 }
 /* ── THE TILE'S TWO FIGURES, ON THE LIGHT SKIN (T26 sweep, 2026-08-22) ────────────────────────
