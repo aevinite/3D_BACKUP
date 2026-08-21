@@ -131,7 +131,16 @@ if (fr) {
   }, printTable);
   const h = printed.html || "";
   const css = h.slice(h.indexOf("<style"), h.indexOf("</style>"));
-  ok("prints as ONE continuous slip", h.includes("size:80mm"));
+  // ONE CONTINUOUS SLIP, MEASURED THE WAY IT IS BUILT TODAY (sweep #6 / T28, 2026-08-22). This asked
+  // for `size:80mm` in the printed document's CSS. That declaration was DELIBERATELY REMOVED: an
+  // @page size bigger or squarer than the roll makes the driver scale and rotate the job — measured at
+  // 80x134mm onto a 70x65mm head, 0.49x and sideways. The rule now is the opposite of what this line
+  // wanted: NO @page size on a thermal document, `@page{margin:0}` so no browser header reaches the
+  // paper, and one 66mm ink column. So it went red on the fix. (verify:print-format holds the same
+  // rule for the document itself; here it is held on the HTML this panel actually produced.)
+  ok("prints as ONE continuous slip — no @page size to rotate it, and the browser's own header kept off",
+    !/@page\s*\{[^}]*size\s*:/.test(h) && /@page\s*\{\s*margin:\s*0\s*\}/.test(h.replace(/\\n/g, "\n")));
+  ok("…on the one 66mm ink column the preview promises", /66mm/.test(css));
   ok("column header prints once (thead as row-group)", h.includes("table-row-group"));
   ok("no grey ink left in the styles", !/color:\s*#(777|555|333|444)\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
   ok("no dotted/dashed pale rules", !/dotted #e2e2e2|dashed #(999|aaa)/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
@@ -186,28 +195,40 @@ if (fr) {
     ok("sheet opens on invoice generation", sheetOpen);
     if (sheetOpen) {
       const val = (sel) => fr.evaluate((q) => { const el = document.querySelector(q); return el ? (el.value !== undefined ? el.value : el.textContent) : null; }, sel);
-      const disabled = () => fr.evaluate(() => { const g = document.querySelector(".bc-go"); return g ? g.disabled : null; });
+      // "Not ready" is aria-disabled now, never the real attribute — see the note below on why.
+      const notReady = () => fr.evaluate(() => { const g = document.querySelector(".bc-go"); return g ? g.getAttribute("aria-disabled") === "true" : null; });
       const type = (sel, v) => fr.evaluate(([q, v2]) => { const e = document.querySelector(q); e.value = v2; e.dispatchEvent(new Event("input")); }, [sel, v]);
 
       ok("opens empty for a bill with no customer yet", (await val(".bc-phone")) === "" && (await val(".bc-name")) === "");
-      ok("Generate is disabled while empty", (await disabled()) === true);
-      // A disabled button never dispatches a click, so "disabled" IS the visible refusal —
-      // the sheet can't swallow a tap here. (The in-code red "which box is missing" message
-      // only exists for the case where the button is somehow reachable.)
+      ok("Generate looks not-ready while empty", (await notReady()) === true);
+      // THE REAL `disabled` ATTRIBUTE WAS DELIBERATELY REMOVED (T8 sweep, 2026-08-17), and this
+      // section still read `goBtn.disabled`. A disabled button emits NO click at all, so the careful
+      // handler that says WHICH box is missing and puts the cursor in it could never run: exactly when
+      // a waiter needed telling — nine digits typed, or a number with no name — tapping the primary
+      // button did nothing whatsoever. That is the panel's own "a tap must never vanish in silence"
+      // rule, broken by the very attribute meant to be helpful. So the button now only LOOKS not-ready
+      // (aria-disabled + the greyed styles) and stays tappable, and the RULE to hold is the stronger
+      // one: the tap is answered. Three checks here were red on that fix.
       await fr.evaluate(() => document.querySelector(".bc-go").click());
-      await mp.waitForTimeout(350);
-      ok("a tap on the disabled button changes nothing", !!(await fr.$(".bcust-overlay")) && (await disabled()) === true);
+      await mp.waitForTimeout(500);
+      const answered = await fr.evaluate(() => {
+        const st = document.querySelector(".bc-status");
+        const focused = document.activeElement && document.activeElement.className || "";
+        return { said: (st && st.textContent || "").trim(), focused, open: !!document.querySelector(".bcust-overlay") };
+      });
+      ok("a tap on the not-ready button is ANSWERED, not swallowed — it says what is missing or puts the cursor in it",
+        answered.open && (!!answered.said || /bc-phone|bc-name/.test(answered.focused)), JSON.stringify(answered));
 
       await type(".bc-phone", "9700011122");
       const newMsg = await until(async () => { const v = await val(".bc-status"); return v && v.toLowerCase().includes("new customer") ? v : null; });
       ok('unknown number says "New customer"', !!newMsg, newMsg || (await val(".bc-status")) || "(no answer in 9s — server slow?)");
-      ok("still disabled without a name", (await disabled()) === true);
+      ok("still not-ready without a name", (await notReady()) === true);
 
       await type(".bc-phone", "9876543210");
       const backMsg = await until(async () => { const v = await val(".bc-status"); return v && v.toLowerCase().includes("returning") ? v : null; });
       ok("known number is recognised", !!backMsg, backMsg || (await val(".bc-status")) || "(no answer in 9s — server slow?)");
       ok("known number auto-fills the name", (await until(async () => (await val(".bc-name")) === "QA Guest" || null)) === true, await val(".bc-name"));
-      ok("Generate enabled once both are there", (await disabled()) === false);
+      ok("Generate becomes ready once both are there", (await notReady()) === false);
 
       await fr.evaluate(() => history.back());
       await mp.waitForTimeout(900);
