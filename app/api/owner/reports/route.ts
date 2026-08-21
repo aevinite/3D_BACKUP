@@ -21,6 +21,9 @@ import { ownerScopeOr503, scopedRestaurantIds, dbFail, type PartialKey } from "@
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
+// The ONE rule for dividing a tax total across its named lines, shared with the report screen and
+// the export — see lib/taxFiling.ts's header for the two-different-CGST-figures bug that made it one.
+import { splitTax } from "@/lib/taxFiling";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollLadder, inventoryLadder, payrollEffectiveByRid, inventoryEffectiveByRid } from "@/lib/tableTags";
 import { mapLimit, FANOUT, FANOUT_HEAVY } from "@/lib/mapLimit";
@@ -425,19 +428,18 @@ export async function GET(req: NextRequest) {
         const effective = composition ? [] : comps.length ? comps : [
           { label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 },
         ];
-        const rateSum = effective.reduce((a, c) => a + c.rate, 0) || 1;
-        // The per-line amounts MUST sum back to the merged tax exactly — a GST filing
-        // where CGST+SGST ≠ total tax is wrong. Rounding each line independently drifts
-        // by a paisa (58.75 → 29.38+29.38 = 58.76), so round every line except the LAST
-        // and give the last the remainder. (found + fixed 2026-07-04)
-        let running = 0;
-        const components = effective.map((c, i) => {
-          const amount = i === effective.length - 1
-            ? num(totals.tax - running)
-            : num(totals.tax * (c.rate / rateSum));
-          running = num(running + amount);
-          return { ...c, amount };
-        });
+        // The per-line amounts MUST sum back to the merged tax exactly — a GST filing where
+        // CGST + SGST ≠ total tax is wrong. Rounding each line independently drifts by a paisa
+        // (58.75 → 29.38 + 29.38 = 58.76), so every line except the LAST is rounded and the last
+        // takes the remainder. (found + fixed 2026-07-04)
+        //
+        // ONE COPY OF THAT RULE (2026-08-21). This spelled the loop out here — same running
+        // remainder, same 2dp `num()` — a few hundred lines from `splitTax` in lib/taxFiling.ts,
+        // which exists precisely because three copies of it once printed TWO different CGST figures
+        // for the same period on a table captioned "ready to copy into a return". The screen and the
+        // export already call the shared one; this was the fourth copy, and the one feeding both.
+        const amounts = splitTax(effective.map((c) => c.rate), totals.tax);
+        const components = effective.map((c, i) => ({ ...c, amount: amounts[i] ?? 0 }));
         tax = { effectivePct: pct, components, configured: comps.length > 0, composition };
       }
 
