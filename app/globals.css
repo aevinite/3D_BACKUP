@@ -3627,7 +3627,7 @@ body[data-lfh-outbox] .order-tracker { bottom: calc(76px + env(safe-area-inset-b
   bottom: calc(12px + var(--lfh-offbar-h, 0px) + env(safe-area-inset-bottom, 0px));
   z-index: 60; display: flex; align-items: center; gap: 12px;
   margin: 0 auto; width: min(560px, calc(100% - 24px)); padding: 10px 12px;
-  border-radius: 16px; border: 1px solid var(--line, rgba(212,165,116,0.25));
+  border-radius: 16px; border: 1px solid var(--border-color);   /* --line is not a guest token; the literal was the light skin's tan, in both skins */
   background: color-mix(in srgb, var(--card, #1a120c) 92%, transparent);
   backdrop-filter: blur(20px);
   box-shadow: 0 14px 34px rgba(0,0,0,0.34);
@@ -3750,7 +3750,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 /* "View more / Show less" toggle under the Previous-orders list. */
 .hist-more-btn {
   display: block; width: 100%; margin: 6px 0 2px; padding: 10px;
-  background: transparent; border: 1px dashed var(--line, rgba(212,165,116,0.35));
+  background: transparent; border: 1px dashed var(--border-color);   /* was the light skin's tan pinned into both skins */
   border-radius: 12px; color: var(--accent, #d4a574);
   font-size: 13px; font-weight: 700; cursor: pointer;
 }
@@ -4194,12 +4194,15 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 /* ── Ban wall (components/BanGate.tsx) — covers the whole menu for a blocked
    device; sits above EVERYTHING incl. toasts so a banned guest can't get past it. */
 .ban-overlay { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--bg, #1a140e); }
-.ban-card { max-width: 420px; width: 100%; text-align: center; background: var(--card, rgba(255,255,255,0.04)); border: 1px solid var(--line, rgba(255,255,255,0.12)); border-radius: 20px; padding: 32px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+/* --border-color, not a white literal: --line is not a token on the guest side, so this card and the
+   field below it drew a WHITE hairline — invisible on the light skin, where the card is also white.
+   The field is the one a banned guest has to find to type into. (T26 sweep, 2026-08-22.) */
+.ban-card { max-width: 420px; width: 100%; text-align: center; background: var(--card, rgba(255,255,255,0.04)); border: 1px solid var(--border-color); border-radius: 20px; padding: 32px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
 .ban-emoji { font-size: 54px; line-height: 1; margin-bottom: 14px; }
 .ban-title { font-family: "Playfair Display", Georgia, serif; font-size: 26px; font-weight: 700; color: var(--text, #f4ece0); margin: 0 0 10px; }
 .ban-sub { font-size: 14px; line-height: 1.55; color: var(--muted, #b8ab98); margin: 0 0 20px; }
 .ban-form { display: flex; flex-direction: column; gap: 10px; }
-.ban-input { width: 100%; box-sizing: border-box; padding: 13px 14px; font-size: 16px; border-radius: 12px; border: 1px solid var(--line, rgba(255,255,255,0.15)); background: var(--bg, #1a140e); color: var(--text, #f4ece0); text-align: center; }
+.ban-input { width: 100%; box-sizing: border-box; padding: 13px 14px; font-size: 16px; border-radius: 12px; border: 1px solid var(--border-color); background: var(--bg, #1a140e); color: var(--text, #f4ece0); text-align: center; }
 .ban-btn { width: 100%; padding: 13px 16px; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; background: var(--accent, #c9a35b); color: #1a140e; }
 .ban-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ban-done { font-size: 14px; line-height: 1.5; color: #16a34a; font-weight: 600; margin: 4px 0 0; }
