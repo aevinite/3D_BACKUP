@@ -142,20 +142,27 @@ export async function settleBillInParts(
   // subtotal − discount + tax: one formula that also holds at a zero rate, where the discount can
   // legitimately land outside the taxable base.
   const due = r2(sub - disc + tax);
-  const sum = splits.reduce((s, x) => s + Number(x.amount), 0);
+  // ROUND EACH PART ONCE, AND CHECK THE ROUNDED PARTS (2026-08-21). The sum used to be taken from
+  // the amounts exactly as they arrived, while the legs were rounded to the paise on the way into
+  // session_payments — two different numbers for one settle. A client sending three decimals could
+  // therefore pass the ±2p gate and leave a money trail that adds up to something the bill was
+  // never settled at. One rounding, used for the check AND for the row, so what was agreed is what
+  // is recorded. Every panel already sends whole rupees, so nothing normal moves.
+  const parts = splits.map((s) => ({ amount: r2(Number(s.amount)), method: String(s.method), note: s.note }));
+  const sum = r2(parts.reduce((s, x) => s + x.amount, 0));
   if (Math.abs(sum - due) > 0.02) {
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };
   }
 
-  const legs = splits.map((s) => ({
-    session_id: sid, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
-    method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
+  const legs = parts.map((s) => ({
+    session_id: sid, restaurant_id: rid, amount: s.amount,
+    method: s.method, note: String(s.note || "").slice(0, 200) || null,
   }));
   const ins = await sb.from("session_payments").insert(legs).select("id");
   if (ins.error) return { ok: false, message: ins.error.message, status: 500 };
   const legIds = ((ins.data || []) as { id: string }[]).map((l) => l.id);
 
-  const note = `${splits.length}-way split: ` + splits.map((s) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ");
+  const note = `${parts.length}-way split: ` + parts.map((s) => `₹${s.amount.toFixed(0)} ${s.method}`).join(" + ");
   const ids = rows.map((o) => o.id);
   const upd = await sb.from("orders")
     .update({ payment_status: "paid", paid_at: new Date().toISOString(), payment_method: "Split", payment_note: note.slice(0, 200) })
