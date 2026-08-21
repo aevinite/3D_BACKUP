@@ -92,6 +92,25 @@ jobs:
       - name: access model
         run: npm run -s verify:access
 
+      # The NUMBERS in the rulebooks. Cheap, repo-only, and here rather than in verify:static
+      # because it lives in .github/ — it is the one guard whose job is the files right beside it.
+      #
+      # WHY (T29 sweep, 2026-08-22): CLAUDE.md said "all 48 /api/admin/* routes check tokenIsValid"
+      # while there were 50, and the same rule tells the reader the route count must EQUAL the number
+      # that grep the gate. So a session obeying the rule counts 50, reads 48, and goes looking for
+      # two ungated admin routes. There are none — all 50 carry the gate. Five such numbers had
+      # drifted, each copied into three or four documents. verify:pointers already checks that every
+      # PATH and every `npm run` in CLAUDE.md resolves; nothing checked the numbers.
+      - name: doc counts
+        run: node .github/scripts/verify-doc-counts.mjs
+
+      # A panel exists at TWO addresses — /manager and /r/<slug>/manager — and they drift, because a
+      # fix goes into whichever file was open. The T15 sweep named the browser tab on /manager,
+      # /kitchen and /tablet so a manager with three open could tell them apart mid-service; the
+      # three twins never got the line, so the tabs a restaurant's OWN staff use were all identical.
+      - name: twin route parity
+        run: node .github/scripts/verify-twin-route-parity.mjs
+
       # The packages we install. NOT in verify:static because it is the one check here that needs
       # the network (it asks npm for the current advisory list), and verify:static is deliberately
       # a repo-only, offline set. It fails ONLY on a NEW high/critical advisory — today's fifteen
