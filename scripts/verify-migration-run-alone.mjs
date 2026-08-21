@@ -1,7 +1,7 @@
 // verify-migration-run-alone.mjs — THE DECISIONS THE MIGRATIONS-001-118 SWEEP MADE, KEPT MADE.
 //
 // Two of them: (1) running ONE old migration by hand must not undo a later decision, and (2) a
-// pre-tenancy table must not go back to guessing which restaurant a row belongs to (migration 352).
+// pre-tenancy table must not go back to guessing which restaurant a row belongs to (migration 358).
 //
 // WHY THIS EXISTS. CLAUDE.md and `scripts/run-migration.mjs` both recommend applying ONE migration
 // instead of a full re-seed, and that script's header states the assumption plainly: "Idempotent
@@ -184,19 +184,19 @@ if (STATIC_ONLY) {
   }
 }
 
-// ── 3. A pre-tenancy table must not go back to guessing the restaurant (migration 352) ──────
+// ── 3. A pre-tenancy table must not go back to guessing the restaurant (migration 358) ──────
 head("BACKUP / DEV database — no table guesses which restaurant a row belongs to");
 // Migration 078 gave every table that already existed `restaurant_id DEFAULT <restaurant #1>` as its
 // backfill device. That is step one of default → backfill → ENFORCE; step three never happened, so
 // for 300 migrations a writer that forgot to name a restaurant silently filed the row under French
 // House. Migration 351 dropped the default on 20 of the 25.
 //
-// Migration 352 covers all 25, so this list is EMPTY and must stay empty. It exists because the
+// Migration 358 covers all 25, so this list is EMPTY and must stay empty. It exists because the
 // first version of 352 held five back (orders, sessions, session_members, blocklist, staff_actions)
 // while two test fixtures still inserted into them without a restaurant; those fixtures now pass it
 // explicitly, so nothing is exempt any more. A NAME APPEARING HERE MEANS A TABLE WENT BACK TO
 // GUESSING — treat it as a regression to fix, not an exception to record.
-const STILL_DEFAULTED = new Set();   // all 25 done — migration 352 covers every one of them
+const STILL_DEFAULTED = new Set();   // all 25 done — migration 358 covers every one of them
 if (STATIC_ONLY) {
   console.log("  – skipped (--static)");
 } else if (!existsSync(join(root, ".env.local"))) {
@@ -222,7 +222,7 @@ if (STATIC_ONLY) {
     if (unexpected.length) {
       fail(`${unexpected.length} table(s) guess the restaurant when a writer stays silent: ${unexpected.join(", ")}`);
       console.log("      A row written without a restaurant lands in French House instead of failing.");
-      console.log("      Fix: ALTER TABLE <t> ALTER COLUMN restaurant_id DROP DEFAULT; (migration 352's pattern)");
+      console.log("      Fix: ALTER TABLE <t> ALTER COLUMN restaurant_id DROP DEFAULT; (migration 358's pattern)");
     } else {
       pass(`no table guesses the restaurant beyond the ${STILL_DEFAULTED.size} written down (${defaulted.length} defaulted, all expected)`);
     }

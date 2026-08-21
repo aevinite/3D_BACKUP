@@ -1,4 +1,4 @@
--- 353_a_rating_is_given_not_typed.sql
+-- 359_a_rating_is_given_not_typed.sql
 --
 -- Drops `menu_items.rating` and `menu_items.reviews`. Both have been dead since migration 030 and
 -- both were still WRITABLE from a screen, which is the part that made them worth removing rather

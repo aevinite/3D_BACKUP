@@ -1,4 +1,4 @@
--- 354_the_last_half_of_a_retired_stub.sql
+-- 360_the_last_half_of_a_retired_stub.sql
 --
 -- Drops `lfh_request_verification` — the surviving half of the migration-037 verification stub.
 --
@@ -35,7 +35,7 @@ DROP FUNCTION IF EXISTS public.lfh_request_verification(text, text, uuid);
 
 COMMENT ON TABLE verification_codes IS
   'RETIRED (migs 037/267). Both of its functions are now gone: lfh_check_verification (dropped by '
-  'mig 267, again by 297) and lfh_request_verification (dropped by mig 354). The live phone path is '
+  'mig 267, again by 297) and lfh_request_verification (dropped by mig 360). The live phone path is '
   'lfh_send_otp / lfh_verify_otp over `otp_codes`. This table is kept ONLY because '
   'admin_purge_restaurant still deletes from it; drop both together when that function is next '
   'edited. It holds no rows and nothing reads it.';

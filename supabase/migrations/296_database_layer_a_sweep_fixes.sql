@@ -356,10 +356,10 @@ DROP INDEX IF EXISTS idx_otp_phone;
 
 NOTIFY pgrst, 'reload schema';
 
--- ⚠️ RUN-ALONE GUARD (added 2026-08-21 when migration 354 retired this function).
+-- ⚠️ RUN-ALONE GUARD (added 2026-08-21 when migration 360 retired this function).
 -- `lfh_request_verification` above is RETIRED. Migration 297 already recorded that it is "the
 -- SURVIVING HALF OF A RETIRED STUB… nothing in the app calls it… safe to drop when someone
--- decides to"; the owner decided, and migration 354 dropped it. This file re-creates the
+-- decides to"; the owner decided, and migration 360 dropped it. This file re-creates the
 -- three-argument version AND re-grants it to the public menu key, so running it by hand puts a
 -- code-issuing door back beside the real one — which is exactly what happened on the shared dev
 -- database while the 001-118 sweep was running, and what npm run verify:run-alone caught.

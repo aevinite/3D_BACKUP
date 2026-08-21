@@ -382,6 +382,20 @@ function checkMigrations() {
        + "take 347.",
     347: "skipped with 346, as headroom for the second of the two colliding 346s to be renumbered "
        + "into. Expected to be filled, not to stay a gap.",
+    // ── skipped to get OUT of a live collision (2026-08-21) ──
+    // The migrations-001-118 sweep was given 350-354. main consumed 350 and 351 while it worked, and
+    // THREE other live worktrees then claimed 352-354 (T23 ×3, T24 ×1) with 355-357 held by T22 — so
+    // the whole reserved block was contested by four sessions at once. Rather than let the number
+    // decide itself on whoever merged last, that sweep moved its three files to the next clear block
+    // (358-360) and left these six for the branches that already hold them.
+    // ALL SIX ARE EXPECTED TO BE FILLED, not to stay gaps. Delete each line as its branch merges.
+    352: "held by sweep6/t23 (a_reseed_cannot_undo_an_admins_choice) and by T24's split-pay work — "
+       + "both uncommitted on disk when this was written.",
+    353: "held by sweep6/t23 (a_binned_bill_is_not_a_tampered_bill), uncommitted on disk.",
+    354: "held by sweep6/t23 (a_purge_clears_the_retired_web_addresses), uncommitted on disk.",
+    355: "held by sweep6/t22 (a_removed_order_leaves_every_board), uncommitted on disk.",
+    356: "held by sweep6/t22 (the_owner_dashboard_keeps_its_working_memory), uncommitted on disk.",
+    357: "held by sweep6/t22 (the_accept_is_only_skipped_for_an_order_still_on_the_floor), uncommitted.",
   };
   const gaps = [];
   for (let n = nums[0]; n < nums[nums.length - 1]; n++) if (!byNum[String(n).padStart(3, "0")]) gaps.push(n);

@@ -83,7 +83,7 @@ export function toItemRows(menu: StarterMenu, restaurantId: string): ItemRow[] {
     model_optimized_url: null,
     description: item.description ?? null,
     long_description: item.longDescription ?? null,
-    // No `rating` / `reviews` here: migration 353 dropped both columns. A dish's stars come from
+    // No `rating` / `reviews` here: migration 359 dropped both columns. A dish's stars come from
     // real customer reviews (the `reviews` table via the `item_ratings` view, migrations 030/116),
     // so a brand-new restaurant correctly starts with no ratings rather than empty placeholders.
     time: item.time ?? null,

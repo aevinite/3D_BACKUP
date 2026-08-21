@@ -2,7 +2,7 @@
 
 ## 🟢 Built (inside my territory)
 
-1. **Migration 352 — a forgotten restaurant fails loudly.** BUILT after the owner approved it.
+1. **Migration 358 — a forgotten restaurant fails loudly.** BUILT after the owner approved it.
    Drops the `restaurant_id` DEFAULT on 20 of the 25 pre-tenancy tables, so a writer that stays
    silent gets `23502` instead of a row filed under French House. Column stays NOT NULL; no data
    changes. Five held back (`orders`, `sessions`, `session_members`, `blocklist`, `staff_actions`)
@@ -18,9 +18,9 @@
 ## 🟡 Not built — and why each one would have broken something
 
 0. **DONE — see item 1 above.** (This was the `restaurant_id` DEFAULT item; the owner approved it
-   on 2026-08-21 and it shipped as migration 352, minus the five tables the test scripts block.)
+   on 2026-08-21 and it shipped as migration 358, minus the five tables the test scripts block.)
 
-1. **~~Drop the `restaurant_id` DEFAULT on the 25 pre-tenancy tables.~~ SUPERSEDED by migration 352.**
+1. **~~Drop the `restaurant_id` DEFAULT on the 25 pre-tenancy tables.~~ SUPERSEDED by migration 358.**
    Original note kept for the reasoning: They still default to
    restaurant #1 (`orders`, `sessions`, `menu_items`, `settings`, `staff_users`, `categories`,
    `filters`, `customers`, `waiter_calls`, `staff_actions`, `order_items`, `reviews`, `requests`,

@@ -1,4 +1,4 @@
--- 352_a_forgotten_restaurant_fails_loudly.sql
+-- 358_a_forgotten_restaurant_fails_loudly.sql
 --
 -- THE TRAP. When multi-restaurant support landed (migration 078), every table that already existed
 -- was given `restaurant_id … DEFAULT '00000000-0000-0000-0000-000000000001'`. That default was the

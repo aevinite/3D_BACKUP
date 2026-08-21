@@ -1292,7 +1292,7 @@ function ingredientRows(it) {
 // by the `item_ratings` view (migrations 030 and 116). The old `menu_items.rating` and
 // `menu_items.reviews` columns were emptied by migration 030 and read by nobody afterwards — 0 of
 // 464 dishes carried a value — yet the boxes still saved into them, so a manager could type 4.8,
-// press save, and see nothing change anywhere. Migration 353 drops the two columns. Do NOT put these
+// press save, and see nothing change anywhere. Migration 359 drops the two columns. Do NOT put these
 // fields back: a rating is something a guest gives, not something the restaurant types.
 
 // ---------- forms ----------
