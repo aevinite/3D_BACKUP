@@ -4,22 +4,31 @@ Hard-won lessons from the 2026-06-26 egress incident + the follow-up audits. Thi
 "how we keep this SaaS cheap, fast, and safe as it grows" reference. The short version lives
 in `CLAUDE.md` (NEW-FEATURE CHECKLIST item 9) and in the global `~/.claude/CLAUDE.md`.
 
-> ⚠️ **THREE LATER LESSONS ARE NOT IN THIS FILE YET (noted 2026-08-04).** CLAUDE.md points here
-> as "the full pattern", so a feature written by this document alone gets the June rules and not
-> the ones learned by taking the database down twice since. Read these three in CLAUDE.md before
-> building a data feature:
->
-> 1. **Analytics go through the compute-on-view snapshot cache** — `lib/ownerCache.ts`
->    (`cachedOwnerPayload`) + `owner_analytics_cache` (mig 196). This is the DEFAULT for any
->    dashboard/report number, not an optimisation to add later.
-> 2. **A change-detector may never scan the table it guards.** `lfh_owner_orders_fingerprint`
->    cost **21,591 ms and ~2.9 GB** of page reads — 2.7x the 8s statement ceiling, so the
->    dashboard burned the CPU and then FAILED. Mig 246 replaced it with a trigger-maintained
->    watermark: **5 ms, 157 buffers**. If a guard costs more than the query it protects, it is
->    not a guard.
-> 3. **The floor is read once and shared** — `lib/floorSummary.ts` (a ~1.5s window) plus mig 238.
->    Every write handler must call `invalidateFloor(rid)`, a `?table=N` refetch is NEVER shared,
->    and the window stays ~1.5s. Guarded by `npm run verify:floor`.
+---
+
+## 0. The three rules learned AFTER the June incident — read these first
+
+These were a "not in this file yet" banner from 2026-08-04 to 2026-08-21, which meant a feature
+written from this document alone got the June rules and none of the ones learned by taking the
+database down twice since. They are part of the playbook now.
+
+1. **Analytics go through the compute-on-view snapshot cache.** `lib/ownerCache.ts`
+   (`cachedOwnerPayload`) + `owner_analytics_cache` (mig 196), fingerprint-gated; Refresh forces
+   live. This is the DEFAULT for any dashboard or report number — not an optimisation to add later,
+   and never a blind cron. **Bump the cache key when a number changes MEANING**, not only when the
+   data changes: the fingerprint watches rows, so a redefinition served stale figures that looked
+   fine.
+2. **A change-detector may never scan the table it guards.** `lfh_owner_orders_fingerprint` cost
+   **21,591 ms and ~2.9 GB** of page reads — 2.7× the 8s statement ceiling, so the dashboard burned
+   the CPU and then FAILED. Mig 246 replaced it with a trigger-maintained watermark: **5 ms, 157
+   buffers**. If a guard costs more than the query it protects, it is not a guard. The same
+   migration is why **a busy server is treated exactly like being offline** (5xx/timeout ⇒ queue,
+   4xx ⇒ tell the person), with a deadline and jittered backoff on every write and no fixed fast
+   poll while reads are failing. `npm run verify:busy`.
+3. **The floor is read once and shared.** `lib/floorSummary.ts` (a ~1.5s window) plus mig 238.
+   Every write handler must call `invalidateFloor(rid)`, a `?table=N` refetch is NEVER shared, and
+   the window stays ~1.5s (measured — do not "simplify" it back). Guarded by
+   `npm run verify:floor`. ⚠️ AV live does not have mig 238; it needs its own ask.
 
 ---
 
@@ -124,25 +133,33 @@ readable; blocking devtools only annoys real users. Real protection:
   (the migration-038 pattern).
 - **Rate-limit** public endpoints; re-lock the open staff panels before public launch.
 
-> A dedicated security audit was attempted but a tooling safeguard blocked the agent
-> (false positive on "security audit" framing). The RLS/secrets/grants review should be
-> redone by hand — it is legitimate defensive work on our own code.
+> **The list to work from is `docs/SECURITY-CHECKLIST.md`** — the owner's own 20 points plus the
+> eight this app actually needs, with a place to log each run. It did not exist when the paragraph
+> below was written, and "do it by hand" without saying *from what* is why nobody did.
+>
+> Wording first, every time: describe each item in product-correctness language ("does each
+> restaurant only see its own numbers?"), verify by READING the code and watching normal signed-in
+> use, and never by trickery. `CLAUDE.md` → "AVOID THE CYBER-SAFEGUARD HALT" is the full rule, and
+> it is the reason an earlier attempt at this review was killed mid-run rather than finished.
 
 ---
 
 ## 5. Remaining work (prioritized — from the 2026-06-26 audits)
 
-### High
-- [ ] **`lfh_owner_overview` full-scans ALL orders (all-time, no window) on every owner
-  dashboard load** — the real ~147s freeze. Fix: pre-aggregated per-restaurant summary
-  (trigger/rollup), or drop the all-time totals from the default cockpit. (mig 088)
-- [ ] **Verify analytics indexes are LIVE in prod** (`select * from pg_indexes where
-  tablename='orders'`). Migrations 094/095 add `idx_orders_restaurant_created`; prod was
-  migrated ~093. **RESOLVED 2026-06-26:** confirmed via `pg_indexes` that `idx_orders_created_at`
-  + `idx_orders_restaurant_created` (mig 095) ARE live in prod → the windowed analytics RPCs
-  are index-covered. Only the all-time `orders_all`/`revenue_all` aggregate in `lfh_owner_overview`
-  still scans (can't be range-indexed). **YAGNI per CLAUDE.md** at current scale; revisit with a
-  pre-aggregated summary table when order volume actually demands it (Stage-3).
+### High — BOTH RESOLVED (do not re-do them)
+
+- [x] **`lfh_owner_overview` no longer full-scans all orders.** This was the real ~147s freeze
+  (mig 088). Since **mig 190** its history pass reads the pre-aggregated `orders_daily_agg` rollup
+  rather than raw `orders` — which is exactly the "pre-aggregated per-restaurant summary" this line
+  asked for — and **mig 266** made the two remaining CTEs (`hist`, `rates`) honour the caller's
+  `p_ids`, so one owner opening their dashboard stopped re-aggregating the whole platform's rollup
+  and computing a tax rate for every restaurant on the table. The endpoint is polled every 60s by
+  every open owner tab and shared for 8s by `lib/ownerOverviewCache.ts` on top of that. Checked
+  again on 2026-08-21: still the rollup, still scoped.
+- [x] **Analytics indexes are live** — `idx_orders_created_at` + `idx_orders_restaurant_created`
+  (mig 095) confirmed via `pg_indexes` on 2026-06-26, so the windowed analytics RPCs are
+  index-covered. The all-time `orders_all` / `revenue_all` aggregate cannot be range-indexed and is
+  **YAGNI per CLAUDE.md** at this scale; it now reads the rollup, so there is nothing owed here.
 
 ### Medium — ALL RESOLVED 2026-06-26
 - [x] **Kitchen + tablet targeted refetch** — now refetch only the changed table(s) like the
@@ -154,14 +171,28 @@ readable; blocking devtools only annoys real users. Real protection:
 - [x] **autoSettle multi-tenant bug** — now derives restaurant_id from the session's orders and
   reads that restaurant's settings (was always #1). (PR #48)
 
-### Still open (lower priority)
-- [ ] **Unbounded reads:** `.limit()` on the `blocklist` reads (admin custlog / editor route).
-- [ ] **N+1:** batch the allergen per-item UPDATE loop (editor route ~505-511); cap the
-  userAuth candidate loop. (manager-PIN loop is now restaurant-scoped, so much smaller.)
-- [ ] Trim `orders.select("*")` (editor `/orders`) to rendered columns; `s-maxage` on menu reads.
-- [ ] **Full RLS/secrets sweep** — the dedicated security-audit agent was blocked by a tooling
-  safeguard; do it by hand. (The concrete bugs it would target — cross-tenant manager-PIN — were
-  found + fixed; a systematic per-table RLS review is still owed.)
+### Still open (lower priority) — re-checked against the code on 2026-08-21
+
+- [x] **Unbounded `blocklist` reads — done.** Both now cap and name their columns: the admin
+  custlog read takes `.limit(200)`, and the editor route's read takes an explicit column list plus
+  `.limit(500)`.
+- [x] **Cap the userAuth candidate loop — done 2026-08-21.** `loginUser` fetches at most
+  `MAX_LOGIN_CANDIDATES` (50) rows for one typed name and says so in the logs if it ever reaches
+  that ceiling. Every live match costs one PBKDF2 verify at 120,000 iterations, so this was CPU per
+  login attempt as well as egress.
+- [ ] **N+1: batch the allergen per-item UPDATE loop.** Still one `order_items` UPDATE per item,
+  inside a `for` loop — `app/api/editor/[...path]/route.ts` around line **3440** (the old "~505-511"
+  in this file pointed at nothing after the route grew). The manager-PIN loop beside it is
+  restaurant-scoped now, so it is much smaller.
+- [ ] **Trim `orders.select("*")` (editor `/orders`) to rendered columns.** Still `select(billsMode
+  ? BILLS_COLS : "*")` — the Bills view already names its columns; the floor/board view does not.
+  Plus `s-maxage` on the menu reads.
+- [ ] **Full RLS/secrets sweep** — work from `docs/SECURITY-CHECKLIST.md` (§4 above), in
+  product-correctness wording, inline and never in a sub-agent. The concrete bugs it would have
+  targeted (the cross-restaurant manager-PIN scope) were found and fixed; a systematic per-table
+  read-policy review is still owed. Note the related trap already learned twice: **a read policy
+  with no matching GRANT does nothing**, and narrowing a grant without matching the code is how a
+  guest config read broke.
 
 ### Done (2026-06-26)
 - [x] Targeted per-table refetch on the manager (PR #45) + kitchen + tablet (PR #50).
