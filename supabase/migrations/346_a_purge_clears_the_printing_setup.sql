@@ -137,4 +137,12 @@ end $$;
 -- A new function is PUBLIC-executable by default (the mig 038/267 lesson), and CREATE OR REPLACE
 -- keeps the existing grants — but state them anyway so a future recreate from this file alone
 -- cannot quietly hand the purge to anon. `verify:grants` guards this.
-REVOKE ALL ON FUNCTION admin_purge_restaurant(uuid) FROM public, anon, authenticated;
+--
+-- BOTH lines, not just the revoke (sweep T23, 2026-08-21) — see the same note in migration 345.
+-- Migrations 128 / 190 / 309 / 321 / 342 all write the pair; 345 and this file stated only the
+-- REVOKE, which on a rebuild from this file alone would leave service_role with no EXECUTE and
+-- break Admin console → Restaurants → Recycle bin → "Remove permanently".
+REVOKE ALL     ON FUNCTION admin_purge_restaurant(uuid) FROM public, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION admin_purge_restaurant(uuid) TO service_role;
+
+NOTIFY pgrst, 'reload schema';

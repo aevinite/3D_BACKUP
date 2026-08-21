@@ -131,4 +131,17 @@ end $$;
 -- A new function is PUBLIC-executable by default (the mig 038/267 lesson), and CREATE OR REPLACE
 -- keeps the existing grants — but state them anyway so a future recreate from this file alone
 -- cannot quietly hand the purge to anon. `verify:grants` guards this.
-REVOKE ALL ON FUNCTION admin_purge_restaurant(uuid) FROM public, anon, authenticated;
+--
+-- BOTH lines, not just the revoke (sweep T23, 2026-08-21). Migrations 128, 190, 309, 321 and 342 all
+-- write the REVOKE and the GRANT as a pair; this file and 346 stated only the first half. On every
+-- existing database that changes nothing — CREATE OR REPLACE keeps what 342 granted — but the
+-- comment above promises the file can stand alone, and half a pair cannot. Rebuilt from this file
+-- on a database that did not already have the function, the REVOKE would land on a brand-new
+-- object and service_role would be left with no EXECUTE at all: Admin console → Restaurants →
+-- Recycle bin → "Remove permanently" would answer "permission denied for function
+-- admin_purge_restaurant", which is the exact case `verify:grants`' "no route can be locked out of
+-- its own RPC" check exists for.
+REVOKE ALL     ON FUNCTION admin_purge_restaurant(uuid) FROM public, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION admin_purge_restaurant(uuid) TO service_role;
+
+NOTIFY pgrst, 'reload schema';
