@@ -285,8 +285,8 @@ update the detail doc's section in the same commit.
   `claude mcp` output to null; masked reads only. Treat a pasted key as compromised.
 - MCP servers load from `~/.claude.json` / root `.mcp.json`, NOT `.claude/settings.json`;
   config changes need a full restart.
-- **Light mode: which surfaces even HAVE it.** GUEST menu: a toggle (`lfh_theme`, tenants default
-  DARK). Manager/kitchen/tablet panels: `lfh_panel_theme`, default LIGHT, **remembered per staff
+- **Light mode: which surfaces even HAVE it.** GUEST menu: a toggle (`lfh_theme`; a tenant's default is an
+  ADMIN setting, not always dark). Manager/kitchen/tablet panels: `lfh_panel_theme`, default LIGHT, **remembered per staff
   member**. The **owner console DOES have light mode** — its own ☀/🌙 in `OwnerShell.tsx`, stored as
   **`aevidine_skin`** (localStorage + cookie), survives a reload, and pushed into the embed by
   postMessage (`useOwnerSkin`). DARK stays the default. So light-skin checks on `/owner` are real:

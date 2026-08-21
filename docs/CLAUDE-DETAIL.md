@@ -1232,9 +1232,22 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
 - **Light mode — which surfaces have it, and what persists.** Three separate answers, so check
   before writing a "both skins" test:
-  - **Guest menu** — toggle in the brand bar, stored as `lfh_theme`. A tenant menu
-    (`/r/<slug>/menu`, `/q/<code>`) defaults to **DARK** when nothing is saved; the root layout
-    otherwise defaults light.
+  - **Guest menu** — toggle in the brand bar, stored as `lfh_theme`. The root layout
+    (`app/layout.tsx`) stamps `data-theme="light"` when nothing is saved, because it cannot know
+    WHICH restaurant is opening. A tenant door (`/r/<slug>/menu`, `/q/<code>`) then re-stamps
+    **dark** — but only when that restaurant's own **Access → Menu → Format → Default** is set to
+    dark (`settings.menuDefaultMode === "dark"`). **It is a per-restaurant ADMIN setting, not an
+    unconditional dark default** — the older wording here said tenants default dark full stop, and a
+    "both skins" test written from that line expects dark and gets light. Checked 2026-08-22 (T29):
+    neither restaurant on the dev database has it set, so both tenant doors open LIGHT today.
+    ⚠️ **AND THE DISH PAGE DOES NOT REPEAT IT.** `app/r/[restaurant]/item/[slug]/page.tsx` renders
+    outside `AppShell`, which is why the maintenance switch, the menu switch and the accent each had
+    to be repeated there. The tenant default-skin boot script is a FOURTH thing of exactly that
+    shape and it is missing: for a dark-default restaurant, a **full page load** of a dish URL (a
+    shared link, a refresh, a QR pointing at a dish) renders in the LIGHT skin while the menu is
+    dark. A client-side tap through from the menu is fine — `data-theme` survives the navigation —
+    so this only shows on a cold load. Reported by the T29 sweep; the file belongs to another
+    terminal's territory, so the code fix was handed off rather than made there.
   - **Manager / kitchen / tablet panels** — their own toggle (`#themeToggle`, wired by
     `public/panels/theme.js`), stored as `lfh_panel_theme`, default **LIGHT** (owner 2026-06-26).
     **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back
