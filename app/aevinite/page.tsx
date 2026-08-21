@@ -320,7 +320,10 @@ export default function AdminCommand() {
         /* M K T O chips: filled = enabled, hollow = off */
         .cmd-chips { display: inline-flex; gap: 4px; }
         .cmd-pchip { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 700; border: 1px solid var(--border-c, #1d2430); color: var(--muted); }
-        .cmd-pchip.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+        /* --accent-ink, not --accent: the accent as INK on a 16% tint of itself measured 4.13:1 on
+           the light console and 4.14:1 on the dark one (T26 sweep, 2026-08-22). --accent-ink is the
+           tint half of --accent-on and is declared per console skin in globals.css. */
+        .cmd-pchip.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent-ink, var(--accent)); }
         /* quick-open buttons */
         .cmd-open { display: inline-flex; gap: 5px; flex-wrap: wrap; padding: 6px 0; }
         .cmd-obtn { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; border: var(--border); background: transparent; color: var(--text); font-size: 11.5px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background .15s ease, border-color .15s ease; white-space: nowrap; }

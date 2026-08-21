@@ -713,7 +713,11 @@ export default function OwnerStaffPage() {
         .ost-bar { display: block; width: 74px; height: 6px; border-radius: 99px; background: var(--muted2); overflow: hidden; }
         .ost-bar i { display: block; height: 100%; background: var(--adm-ok, #34d399); }
         .ost-bar.part i { background: var(--adm-warn, #fbbf24); }
-        .ost-mini.paylist { color: var(--own-cta, var(--accent)); border-color: color-mix(in srgb, var(--own-cta, var(--accent)) 45%, transparent); }
+        /* --adm-warn, not --own-cta: --own-cta is the amber a CTA is FILLED with (white text sits on
+           it), and it is the same value in both console skins — so used as INK it measured 3.68:1 on
+           the dark card. --adm-warn is the amber that flips per skin: bright on the dark card, amber
+           one step deeper on the light one. The border keeps the CTA amber. (T26, 2026-08-22.) */
+        .ost-mini.paylist { color: var(--adm-warn, var(--accent)); border-color: color-mix(in srgb, var(--own-cta, var(--accent)) 45%, transparent); }
         .ost-nopay { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--adm-warn) 16%, transparent); color: var(--adm-warn); }
         .ost-mini.open { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
         .ost-mini.open:hover { border-color: var(--accent); }
@@ -727,6 +731,11 @@ export default function OwnerStaffPage() {
         /* The owner console's light --accent (#059669) on an 18% wash of itself was 2.92:1
            (2026-08-06). Darker, same hue; the wash stays. */
         :global([data-skin="light"]) .ost-rolebadge[data-role="manager"] { color: color-mix(in srgb, var(--accent) 62%, #000); }
+        /* …and the PLAIN badge (kitchen, waiter). It reads --muted on a flat grey chip, which measured
+           3.81:1 on the light console — the manager one beside it was given a light value and this one
+           was not, so on one row two badges of the same shape read differently. Gray-600, the next
+           step in the same family the console already uses. (T26 sweep, 2026-08-22.) */
+        :global([data-skin="light"]) .ost-rolebadge { color: #4b5563; }
         .ost-disabled { font-size: 10.5px; color: var(--adm-danger, #c0392b); font-weight: 700; }
         /* Quiet, not a warning: nothing is wrong with a kitchen login. Muted text, no chip, no colour
            that reads as a problem — it is a fact about the row, the same weight as a phone number. */
