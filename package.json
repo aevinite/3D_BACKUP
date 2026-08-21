@@ -136,6 +136,7 @@
     "test": "npm run -s test:money && npm run -s test:errors && npm run -s test:units",
     "verify:closed-session": "node scripts/verify-closed-session-orders.mjs",
     "verify:skin-ink": "node scripts/verify-skin-ink.mjs",
+    "verify:look-ink": "node scripts/verify-look-ink.mjs",
     "verify:dead-css": "node scripts/verify-dead-css.mjs",
     "verify:sweep-extras": "node scripts/verify-sweep-extras.mjs",
     "verify:css-tokens": "node scripts/verify-css-tokens.mjs",
