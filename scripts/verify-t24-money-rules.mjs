@@ -420,8 +420,11 @@ eq("orderTaxRate falls back to the settings rate when the order was never stampe
   // while the money trail said the parts had been collected on it.
   check("the inserted parts are identified, so a failed paid-stamp can be undone",
     /\.insert\(legs\)\.select\("id"\)/.test(src) && /const legIds = /.test(src));
+  // Asserts the BEHAVIOUR, not the spelling. The timestamp moved into a `stamp` variable when a
+  // split part became allowed to be a tab (mig 352), and a guard pinned to the old literal would
+  // have gone red on code that still does exactly the right thing.
   check("a failed paid-stamp REVERSES the parts it just recorded rather than leaving them standing",
-    /if \(upd\.error\) \{[\s\S]{0,900}?reversed_at: new Date\(\)\.toISOString\(\)/.test(src));
+    /if \(upd\.error\) \{[\s\S]{0,1200}?reversed_at:/.test(src));
   check("…and it stamps them (mig 285) rather than deleting them",
     /\/\/ THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN/.test(src)
     && !/session_payments"\)\s*\n?\s*\.delete\(/.test(src));
@@ -429,9 +432,13 @@ eq("orderTaxRate falls back to the settings rate when the order was never stampe
     /return \{ ok: false, message: upd\.error\.message, status: 500 \};/.test(src));
 
   // ── T24 fix 2: one rounding for the check AND the row ──────────────────────────────────
+  // Again the behaviour: ONE rounding feeds both the gate and the stored row. The object literal
+  // became a spread (`{ ...s, amount: r2(...) }`) so a pay-later part's person survives the map —
+  // same single rounding, different shape.
   check("each part is rounded ONCE, before the ±2p gate, so what was agreed is what is recorded",
-    /const parts = splits\.map\(\(s\) => \(\{ amount: r2\(Number\(s\.amount\)\)/.test(src)
-    && /const sum = r2\(parts\.reduce/.test(src));
+    /const parts = splits\.map\(\(s\) => \(\{[^)]*r2\(Number\(s\.amount\)\)/.test(src)
+    && /const sum = r2\(parts\.reduce/.test(src)
+    && /Math\.abs\(sum - due\) > 0\.02/.test(src));
   check("the stored legs and the note both come from those same rounded parts",
     /const legs = parts\.map\(/.test(src) && /parts\.map\(\(s\) => `₹\$\{s\.amount\.toFixed\(0\)\}/.test(src));
 }
