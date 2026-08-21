@@ -29,8 +29,8 @@ export type ItemRow = {
   veg: boolean; is4d: false;
   model_folder: null; model_small_url: null; model_optimized_url: null;
   description: string | null; long_description: string | null;
-  rating: null; time: string | null; nutrition: unknown; ingredients: unknown;
-  reviews: never[]; related_slugs: unknown; tags: string[]; allergens: unknown[];
+  time: string | null; nutrition: unknown; ingredients: unknown;
+  related_slugs: unknown; tags: string[]; allergens: unknown[];
   sort_order: number;
 };
 
@@ -83,11 +83,12 @@ export function toItemRows(menu: StarterMenu, restaurantId: string): ItemRow[] {
     model_optimized_url: null,
     description: item.description ?? null,
     long_description: item.longDescription ?? null,
-    rating: null,                   // real ratings live in the reviews table
+    // No `rating` / `reviews` here: migration 353 dropped both columns. A dish's stars come from
+    // real customer reviews (the `reviews` table via the `item_ratings` view, migrations 030/116),
+    // so a brand-new restaurant correctly starts with no ratings rather than empty placeholders.
     time: item.time ?? null,
     nutrition: item.nutrition ?? null,
     ingredients: item.ingredients ?? null,
-    reviews: [],
     related_slugs: item.relatedSlugs ?? null,
     tags: item.tags ?? (item.veg ? ["veg"] : ["non-veg"]),
     allergens: item.allergens ?? [],
