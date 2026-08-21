@@ -2843,6 +2843,22 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 }
 .pay-split-row .psr-del:hover { color: var(--red); border-color: var(--red); }
 .pay-split-row .psr-note { grid-column: 1 / -1; margin-bottom: 0 !important; }
+/* ── SPLIT PAYMENT: how many are paying, and who owes a pay-later part (owner, 2026-08-21) ──── */
+/* The count row wraps rather than scrolling sideways: at 360px five buttons plus the word do not
+   fit on one line, and a row that scrolls sideways is a row whose last option is invisible. */
+.pay-split-nrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.pay-split-n {
+  min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.pay-split-n.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+.pay-split-nlbl { margin: 0 0 5px; }
+/* The tab's person sits on its own line under the amount — a name is far too long to share the
+   row with an amount box and a dropdown at 360px. 44px tall so it is a real tap target. */
+.pay-split-row .psr-who {
+  grid-column: 1 / -1; min-height: 44px; text-align: left; font-weight: 600;
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
+}
+.pay-split-row .psr-who:hover { border-color: var(--gold); }
 /* Add-dish picker modal (manager). */
 .add-dish-modal { max-width: 460px; width: 92%; display: flex; flex-direction: column; max-height: 80vh; }
 .add-dish-search { margin: 10px 14px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 15px; }
