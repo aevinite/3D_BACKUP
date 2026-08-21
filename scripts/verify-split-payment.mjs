@@ -174,9 +174,31 @@ for (const [who, src] of [["manager", MGR], ["tablet", TAB]]) {
     `${who}: the figure the waiter must MATCH prints its paise (₹1,018.50, not ₹1,019)`);
   want(/openKhataPerson(Picker|Sheet)\(Number\(legs\[i\]\.amount\) \|\| 0, opts\.table\)/.test(src),
     `${who}: it reuses the existing person picker rather than growing a second one`);
+
+  // ── BY ORDER (owner, 2026-08-21: "i could able to do it by order or amount") ───────────────
+  want(/function splitByOrder\(\)/.test(src),
+    `${who}: the split can also be filled in BY ORDER — one part per kitchen ticket`);
+  want(/pay-split-byorder/.test(src) && /length > 1 \?/.test(src),
+    `${who}: …offered only when the bill actually HAS more than one ticket`);
+  want(/const last = Math\.round\(\(due - head\.reduce\(\(a, x\) => a \+ x, 0\)\) \* 100\) \/ 100;/.test(src),
+    `${who}: the last ticket absorbs the remainder, because a bill's tax rounds once and a ticket's rounds per ticket`);
+  want(/os\.length > 12/.test(src),
+    `${who}: a bill with more than 12 tickets says so instead of silently dropping parts`);
+  want(/label: o\.kot_no \? `KOT #\$\{o\.kot_no\}`/.test(src),
+    `${who}: each part is labelled with the ticket it is for`);
+  want(/l\.label \? `<div/.test(src),
+    `${who}: …and the row prints that label`);
+  want(/orders: (os|ordersOf\(t\))\.filter\(\(o\) => o\.status !== "received"/.test(src === MGR ? MGR : TAB) || /orders: /.test(src),
+    `${who}: the drawer is given the tickets, with un-accepted orders dropped`);
   want(/resolve\(\{ customer_id: pickedId, name:/.test(src),
     `${who}: …and that picker returns the name, so the row can print who owes it`);
 }
+
+head("7. the call sites hand the tickets to the drawer");
+want(/orders: os\.filter\(\(o\) => o\.status !== "received"\)/.test(MGR),
+  "manager: markTablePaid passes the payable tickets, so By order has real amounts");
+want(/orders: ordersOf\(t\)\.filter\(\(o\) => o\.status !== "received" && o\.payment_status !== "paid"\)/.test(TAB),
+  "tablet: payBillWithMethod passes the same, filtered the same way");
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — split payment does not hold its rules\n`

@@ -4026,7 +4026,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <div class="dish-edit-lbl">Split payment</div>
             <div class="muted small" style="margin:-2px 0 8px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
             <div class="muted small pay-split-nlbl">How many are paying?</div>
-            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}</div>
+            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}${(opts.orders || []).filter((o) => o.status !== "received").length > 1 ? `<button type="button" class="btn pay-split-byorder">🧾 By order</button>` : ""}</div>
             <div class="pay-split-rows"></div>
             <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
             <div class="pay-split-sum small" style="margin:9px 0 8px;font-weight:700"></div>
@@ -4159,12 +4159,43 @@ function openPaymentMethodModal(due, label, opts = {}) {
         });
       }
       wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === n));
+      const bo0 = wrap.querySelector(".pay-split-byorder"); if (bo0) bo0.classList.remove("sel");
       renderSplit();
     }
     wrap.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
+
+    // ── SPLIT BY ORDER (owner, 2026-08-21: "i could able to do it by order or amount") ────────
+    // One part per KITCHEN TICKET, each at what that ticket actually cost — so when four friends
+    // ordered separately, nobody has to work out who had what. The amounts stay editable like any
+    // other split; this only fills them in.
+    //
+    // The LAST part absorbs the remainder, because a bill's tax is rounded ONCE over the whole
+    // bill while a per-ticket figure is rounded per ticket — summing them drifts by up to half a
+    // paisa each (see lib/paySplit.ts's own note). Without this the parts would miss the due by a
+    // paisa or two on a long bill and the server would rightly refuse them.
+    function splitByOrder() {
+      const os = (opts.orders || []).filter((o) => o.status !== "received");
+      if (os.length < 2) { toast("This bill is one ticket — split it by amount instead.", "err"); return; }
+      if (os.length > 12) { toast(`This bill has ${os.length} tickets — a split can hold 12 parts. Split it by amount instead.`, "err"); return; }
+      const raw = os.map((o) => Math.round((billMath([o]).total || 0) * 100) / 100);
+      const head = raw.slice(0, -1);
+      const last = Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100;
+      legs.length = 0;
+      os.forEach((o, i) => legs.push({
+        amount: String(i === os.length - 1 ? last : raw[i]),
+        method: i === 0 ? "UPI" : "Cash", note: "", khata: null,
+        label: o.kot_no ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
+      }));
+      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.remove("sel"));
+      const bo = wrap.querySelector(".pay-split-byorder"); if (bo) bo.classList.add("sel");
+      renderSplit();
+    }
+    const byOrderBtn = wrap.querySelector(".pay-split-byorder");
+    if (byOrderBtn) byOrderBtn.onclick = splitByOrder;
     function renderSplit() {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}">
+          ${l.label ? `<div class="psr-label muted small">${esc(l.label)}</div>` : ""}
           <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
           <select class="psr-method">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
           ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part">✕</button>` : `<span class="psr-del-gap"></span>`}
@@ -4375,6 +4406,10 @@ async function markTablePaid(t, mtpOpts = {}) {
     split: true,
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
+    // The TICKETS on this bill, so the split can be filled in BY ORDER as well as by an even
+    // share (owner, 2026-08-21: "i could able to do it by order or amount"). Un-accepted orders
+    // are dropped for the same reason they are dropped from the settle itself.
+    orders: os.filter((o) => o.status !== "received"),
   };
   const r = await payOrdersWithMethod(os, `Mark table ${t} paid`, opts);
   if (r && r.special === "khata") { await khataParkFlow(t, os); return; }

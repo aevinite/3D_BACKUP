@@ -2851,6 +2851,13 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
 .pay-split-n.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+/* "By order" sits in the same row as the counts and highlights the same way, so it reads as one
+   choice: fill the amounts evenly, or fill them from the tickets. */
+.pay-split-byorder { min-height: 44px; padding: 0 12px; font-weight: 700; }
+.pay-split-byorder.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+/* Which ticket a part is for. Full width above the amount: a KOT number cannot share the row with
+   an amount box and a dropdown at 360px. */
+.pay-split-row .psr-label { grid-column: 1 / -1; margin: 0 0 -2px; font-weight: 700; }
 .pay-split-nlbl { margin: 0 0 5px; }
 /* The tab's person sits on its own line under the amount — a name is far too long to share the
    row with an amount box and a dropdown at 360px. 44px tall so it is a real tap target. */
