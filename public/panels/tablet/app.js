@@ -3206,7 +3206,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <div style="font-size:13px;font-weight:700;margin:0 0 3px">Split payment</div>
             <div style="font-size:11.5px;color:var(--muted);margin:0 0 10px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
             <div style="font-size:11.5px;color:var(--muted);margin:0 0 5px">How many are paying?</div>
-            <div class="pay-split-nrow" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}" style="min-width:44px;min-height:44px;padding:0 12px;font-weight:700">${n}</button>`).join("")}</div>
+            <div class="pay-split-nrow" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}" style="min-width:44px;min-height:44px;padding:0 12px;font-weight:700">${n}</button>`).join("")}${(opts.orders || []).length > 1 ? `<button type="button" class="btn pay-split-byorder" style="min-height:44px;padding:0 12px;font-weight:700">🧾 By order</button>` : ""}</div>
             <div class="pay-split-rows"></div>
             <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
             <div class="pay-split-sum" style="margin:9px 0 8px;font-size:12.5px;font-weight:700"></div>
@@ -3307,17 +3307,46 @@ function openPaymentMethodModal(due, label, opts = {}) {
           method: was.method || (i === 0 ? "UPI" : "Cash"), note: was.note || "", khata: was.khata || null,
         });
       }
-      ov.querySelectorAll(".pay-split-n").forEach((b) => {
-        const on = Number(b.dataset.n) === n;
-        b.style.background = on ? "var(--gold, #d4a574)" : "";
-        b.style.color = on ? "#2a1d0c" : "";
-      });
+      paint(n);
       renderSplit();
     }
     ov.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
+
+    // SPLIT BY ORDER — one part per kitchen ticket at what that ticket cost. Identical to the
+    // manager panel's, deliberately: a money screen that exists twice and differs is how the two
+    // panels drifted before. The last part absorbs the remainder because a bill's tax rounds ONCE
+    // over the whole bill while a per-ticket figure rounds per ticket.
+    const paint = (which) => {
+      ov.querySelectorAll(".pay-split-n").forEach((b) => {
+        const on = which !== "order" && Number(b.dataset.n) === which;
+        b.style.background = on ? "var(--gold, #d4a574)" : "";
+        b.style.color = on ? "#2a1d0c" : "";
+      });
+      const bo = ov.querySelector(".pay-split-byorder");
+      if (bo) { bo.style.background = which === "order" ? "var(--gold, #d4a574)" : ""; bo.style.color = which === "order" ? "#2a1d0c" : ""; }
+    };
+    function splitByOrder() {
+      const os = opts.orders || [];
+      if (os.length < 2) { toast("This bill is one ticket — split it by amount instead."); return; }
+      if (os.length > 12) { toast(`This bill has ${os.length} tickets — a split can hold 12 parts. Split it by amount instead.`); return; }
+      const raw = os.map((o) => Math.round(((LFH_BILLDOC.billMoney([o], state.data.settings || {}) || {}).total || 0) * 100) / 100);
+      const head = raw.slice(0, -1);
+      const last = Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100;
+      legs.length = 0;
+      os.forEach((o, i) => legs.push({
+        amount: String(i === os.length - 1 ? last : raw[i]),
+        method: i === 0 ? "UPI" : "Cash", note: "", khata: null,
+        label: o.kot_no ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
+      }));
+      paint("order");
+      renderSplit();
+    }
+    const byOrderBtn = ov.querySelector(".pay-split-byorder");
+    if (byOrderBtn) byOrderBtn.onclick = splitByOrder;
     function renderSplit() {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}" style="display:grid;grid-template-columns:1fr auto 30px;gap:8px;align-items:center;margin-bottom:8px">
+          ${l.label ? `<div style="grid-column:1 / -1;font-size:11.5px;color:var(--muted);font-weight:700;margin-bottom:-2px">${esc(l.label)}</div>` : ""}
           <input type="number" inputmode="decimal" min="0" step="1" class="psr-amt" value="${l.amount}" placeholder="₹ amount" style="${inpCss};width:100%">
           <select class="psr-method" style="${inpCss};font-weight:600">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
           ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part" style="width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px;cursor:pointer">✕</button>` : `<span></span>`}
@@ -3431,6 +3460,9 @@ async function payBillWithMethod(t, a) {
     split: true,
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
+    // The TICKETS on this bill, so the split can be filled in BY ORDER as well as by an even
+    // share (owner, 2026-08-21: "i could able to do it by order or amount").
+    orders: ordersOf(t).filter((o) => o.status !== "received" && o.payment_status !== "paid"),
   };
   const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`, opts);
   if (!picked) return;
