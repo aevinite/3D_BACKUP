@@ -41,15 +41,42 @@ UPDATE settings SET menu_currencies = ARRAY['INR']::TEXT[] WHERE menu_currencies
 -- NOT switched them off keeps a multi-language menu rather than silently losing five
 -- languages the moment this ships. The codes MUST match LANGUAGES / CURRENCIES in
 -- lib/format.ts — a code the app can't render would show English while claiming otherwise.
-UPDATE settings
-   SET menu_languages = ARRAY['en','de','fr','ar','hi','ko']::TEXT[]
- WHERE COALESCE((features->>'languages')::BOOLEAN, TRUE) IS TRUE
-   AND menu_languages = ARRAY['en']::TEXT[];
+--
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-21 (sweep T23). Read the WHERE: it does not test ABSENCE,
+-- it tests "the list is exactly ['en']" — which is true both of a restaurant that has never been
+-- configured (the case this statement was written for) and of a restaurant whose ADMIN
+-- deliberately narrowed the guest menu to English only. That is the same shape migration 321
+-- found in 198 / 209 / 295 / 288 (findings 7510 / 7822), and it was missed here.
+-- `scripts/seed-supabase.mjs` re-runs every file in this folder with no ledger, so on a re-seed
+-- this handed five languages back to every English-only restaurant, on the GUEST MENU, with
+-- nothing on screen and nothing in the Activity log to say so. Measured on the backup database
+-- on 2026-08-21: 4 restaurants were English-only, one of them AANGAN GARDEN RESTAURANT — live,
+-- not binned. Same reasoning for the currency list one statement below.
+--
+-- The helper may not exist yet and that is not an error: `lfh_already_applied` is created by
+-- migration 307, 72 files AFTER this one, so a FRESH database runs this its single legitimate
+-- time (no ledger = "not yet applied") and then migration 360 records the key. The
+-- `to_regprocedure` gate + EXECUTE is migration 043's pattern, for the same reason.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('235_menu_language_defaults') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '235_menu_language_defaults: already applied — skipped (a re-run would hand five languages back to an English-only menu)';
+ELSE
+  UPDATE settings
+     SET menu_languages = ARRAY['en','de','fr','ar','hi','ko']::TEXT[]
+   WHERE COALESCE((features->>'languages')::BOOLEAN, TRUE) IS TRUE
+     AND menu_languages = ARRAY['en']::TEXT[];
 
-UPDATE settings
-   SET menu_currencies = ARRAY['INR','USD','EUR','AED','SAR','QAR']::TEXT[]
- WHERE COALESCE((features->>'currency')::BOOLEAN, TRUE) IS TRUE
-   AND menu_currencies = ARRAY['INR']::TEXT[];
+  UPDATE settings
+     SET menu_currencies = ARRAY['INR','USD','EUR','AED','SAR','QAR']::TEXT[]
+   WHERE COALESCE((features->>'currency')::BOOLEAN, TRUE) IS TRUE
+     AND menu_currencies = ARRAY['INR']::TEXT[];
+END IF;
+END $reseed_guard$;
 
 -- Normalise away anything the app cannot actually render (also repairs a row written
 -- with an unknown code), and never leave a row with an empty list.
@@ -70,8 +97,27 @@ ALTER TABLE settings
   ADD COLUMN IF NOT EXISTS khata_owner_control BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS khata_enabled       BOOLEAN NOT NULL DEFAULT TRUE;
 
-UPDATE settings SET khata_allowed = COALESCE(table_tags_allowed, FALSE)
- WHERE khata_allowed IS DISTINCT FROM COALESCE(table_tags_allowed, FALSE);
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-21 (sweep T23). This is the statement that SPLIT khata off
+-- table_tags: it copies the old shared switch across, once, so nothing is lost on the day the two
+-- become separate features. `WHERE … IS DISTINCT FROM …` reads as "is it not the value I want",
+-- which is right exactly once and wrong every time after — from the moment the admin sets khata
+-- independently on Access & permissions, a re-seed drags it back to whatever `table_tags_allowed`
+-- says. Pay-later is money a restaurant is owed; having it silently switched off (or on) by a seed
+-- script is the access model being rewritten by a script, which is migration 307's whole subject.
+-- Measured on the backup database on 2026-08-21: 1 settings row would be rewritten today.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('235_khata_follows_table_tags') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '235_khata_follows_table_tags: already applied — skipped (a re-run would drag pay-later back onto the table-types switch)';
+ELSE
+  UPDATE settings SET khata_allowed = COALESCE(table_tags_allowed, FALSE)
+   WHERE khata_allowed IS DISTINCT FROM COALESCE(table_tags_allowed, FALSE);
+END IF;
+END $reseed_guard$;
 
 -- ── 5 · one Takeaway & delivery switch over parcel + platform ──────────────
 ALTER TABLE settings
@@ -80,6 +126,13 @@ ALTER TABLE settings
   ADD COLUMN IF NOT EXISTS takeaway_enabled       BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- On if EITHER of the two old switches was on (non-breaking: nobody loses a board).
+--
+-- DELIBERATELY NOT GUARDED, unlike the two blocks above (sweep T23, 2026-08-21). This is the same
+-- "one-time copy" shape, but it is INERT on a re-seed: migration 263 later sets takeaway_allowed,
+-- takeaway_enabled, parcel_allowed and parcel_enabled to TRUE for every restaurant unconditionally
+-- (Parcel & delivery platforms became PERMANENT — owner, 2026-08-03), and 263 sorts after this
+-- file, so a full pass always ends with the same row whatever this statement did. Adding a ledger
+-- guard here would be noise pretending to be safety. If 263 is ever reverted, guard this too.
 UPDATE settings
    SET takeaway_allowed = TRUE
  WHERE COALESCE(parcel_allowed, FALSE) OR COALESCE(platform_allowed, FALSE);
