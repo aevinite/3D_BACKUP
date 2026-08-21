@@ -142,24 +142,49 @@ export async function settleBillInParts(
   // subtotal − discount + tax: one formula that also holds at a zero rate, where the discount can
   // legitimately land outside the taxable base.
   const due = r2(sub - disc + tax);
-  const sum = splits.reduce((s, x) => s + Number(x.amount), 0);
+  // ROUND EACH PART ONCE, AND CHECK THE ROUNDED PARTS (2026-08-21). The sum used to be taken from
+  // the amounts exactly as they arrived, while the legs were rounded to the paise on the way into
+  // session_payments — two different numbers for one settle. A client sending three decimals could
+  // therefore pass the ±2p gate and leave a money trail that adds up to something the bill was
+  // never settled at. One rounding, used for the check AND for the row, so what was agreed is what
+  // is recorded. Every panel already sends whole rupees, so nothing normal moves.
+  const parts = splits.map((s) => ({ amount: r2(Number(s.amount)), method: String(s.method), note: s.note }));
+  const sum = r2(parts.reduce((s, x) => s + x.amount, 0));
   if (Math.abs(sum - due) > 0.02) {
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };
   }
 
-  const legs = splits.map((s) => ({
-    session_id: sid, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
-    method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
+  const legs = parts.map((s) => ({
+    session_id: sid, restaurant_id: rid, amount: s.amount,
+    method: s.method, note: String(s.note || "").slice(0, 200) || null,
   }));
-  const ins = await sb.from("session_payments").insert(legs);
+  const ins = await sb.from("session_payments").insert(legs).select("id");
   if (ins.error) return { ok: false, message: ins.error.message, status: 500 };
+  const legIds = ((ins.data || []) as { id: string }[]).map((l) => l.id);
 
-  const note = `${splits.length}-way split: ` + splits.map((s) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ");
+  const note = `${parts.length}-way split: ` + parts.map((s) => `₹${s.amount.toFixed(0)} ${s.method}`).join(" + ");
   const ids = rows.map((o) => o.id);
   const upd = await sb.from("orders")
     .update({ payment_status: "paid", paid_at: new Date().toISOString(), payment_method: "Split", payment_note: note.slice(0, 200) })
     .in("id", ids).eq("restaurant_id", rid);
-  if (upd.error) return { ok: false, message: upd.error.message, status: 500 };
+  if (upd.error) {
+    // THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN (2026-08-21). The parts land first and the
+    // paid stamp second, and there is no transaction across the two. When the stamp failed, the legs
+    // were left standing: the bill stayed UNPAID while session_payments said ₹200 UPI + ₹200 Cash had
+    // been collected on it — so "how did table 6 pay?" answered for a settle that never happened, and
+    // the day's payment mix counted money nobody took. Stamp them reversed instead (mig 285's rule: a
+    // money record is corrected, never deleted), then still answer 500 so the person knows to retry.
+    if (legIds.length) {
+      try {
+        await sb.from("session_payments").update({
+          reversed_at: new Date().toISOString(),
+          reversed_by: "auto · the bill was not marked paid",
+          reversed_reason: "the settle failed after the parts were recorded",
+        }).in("id", legIds).eq("restaurant_id", rid);
+      } catch { /* best-effort: the 500 below is what tells the person, and nothing is deleted either way */ }
+    }
+    return { ok: false, message: upd.error.message, status: 500 };
+  }
 
   return { ok: true, count: ids.length, due, note, sessionId: sid, orderIds: ids };
 }

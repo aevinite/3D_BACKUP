@@ -245,7 +245,9 @@ export async function POST(req: NextRequest) {
   }
   if (!(await verifySecret(current, row.password_hash)))
     return NextResponse.json({ error: "Your current password is wrong." }, { status: 403 });
-  await rateResetOnSuccess("password_change", owner.id);
+  // The SAME restaurant the wall was counted under (see rateAllowed just above), so the reset
+  // provably clears this account's own row and not one another restaurant happens to share.
+  await rateResetOnSuccess("password_change", owner.id, owner.restaurant_id ?? null);
 
   const { error } = await sb.from("staff_users")
     .update({ ...(await passwordFields(next)), token_version: (row.token_version || 0) + 1 })

@@ -22,7 +22,7 @@
 //
 //   node scripts/verify-admin-restaurants.mjs
 //   node scripts/verify-admin-restaurants.mjs <root>    # another checkout / worktree
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -295,16 +295,36 @@ want(/RETENTION_DAYS = 0/.test(read("app/api/admin/restaurants/route.ts"))
   && /RETENTION_DAYS = 0/.test(read("app/api/admin/owners/route.ts")),
   "both purge routes agree there is no waiting period");
 {
-  // Comments-stripped, so the migration's own explanation of what it REMOVED (which quotes the old
+  // Comments-stripped, so a migration's own explanation of what it REMOVED (which quotes the old
   // code) can never be mistaken for the code still being there.
-  const mig342 = read("supabase/migrations/342_the_recycle_bin_stops_holding_the_door.sql")
-    .split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  const strip = (t) => t.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  const mig342 = strip(read("supabase/migrations/342_the_recycle_bin_stops_holding_the_door.sql"));
   want(/CREATE OR REPLACE FUNCTION admin_purge_restaurant/i.test(mig342) && !/Retention lock/i.test(mig342),
     "migration 342 rewrites admin_purge_restaurant with no retention lock left in it");
-  want(/never be purged/i.test(mig342) && /not in the recycle bin/i.test(mig342) && /already been purged/i.test(mig342),
+
+  // ── THE MONEY CHECK FOLLOWS THE PURGE THAT SHIPS, NOT MIGRATION 342 (2026-08-21) ────────────
+  // This block used to read 342's text for all three checks. admin_purge_restaurant has been
+  // rewritten twice since — 345 added the operational tables, 346 the printing setup — so from 345
+  // onwards the promise printed in docs/COMPLIANCE-GUARDRAILS.md §3 ("guarded by
+  // verify:admin-restaurants") was not the promise being checked: a later rewrite could have added
+  // `delete from orders` and this stayed green. The RULES check stays on 342, which is where the
+  // owner's 2026-08-20 decision was made; the MONEY check moves to the newest definition, which is
+  // the only one that can actually erase anything.
+  const purgeMigs = readdirSync(join(ROOT, "supabase/migrations"))
+    .filter((f) => f.endsWith(".sql") && /FUNCTION\s+(public\.)?admin_purge_restaurant/i.test(read(`supabase/migrations/${f}`)))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+  const livePurge = purgeMigs.at(-1);
+  want(!!livePurge && parseInt(livePurge, 10) >= 342,
+    `the newest migration defining admin_purge_restaurant was found (${livePurge || "none"})`);
+  const rules342 = /never be purged/i.test(mig342) && /not in the recycle bin/i.test(mig342) && /already been purged/i.test(mig342);
+  want(rules342,
     "migration 342 keeps the three rules that were never in question: not the default, not before binning, not twice");
-  want(!/delete from (orders|order_items|sessions|payments|session_payments|credit_notes|invoice_events|deletion_audit)\b/i.test(mig342),
-    "migration 342 still deletes no money — a sale can never disappear (COMPLIANCE-GUARDRAILS §3.0)");
+  const MONEY = ["orders", "order_items", "sessions", "payments", "session_payments",
+                 "credit_notes", "invoice_events", "deletion_audit", "bill_chain"];
+  const liveBody = strip(read(`supabase/migrations/${livePurge}`));
+  const kills = MONEY.filter((t) => new RegExp(`delete\\s+from\\s+${t}\\b`, "i").test(liveBody));
+  want(kills.length === 0,
+    `the purge that ships (${livePurge}) deletes no money — a sale can never disappear (COMPLIANCE-GUARDRAILS §3.0)${kills.length ? ` — but it deletes ${kills.join(", ")}` : ""}`);
 }
 want(/nameMatches/.test(BIN) && /Type <b/.test(BIN),
   "a permanent removal still demands the exact name typed — that is what stops an accident now");

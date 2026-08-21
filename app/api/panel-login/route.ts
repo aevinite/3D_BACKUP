@@ -89,7 +89,11 @@ export async function POST(req: NextRequest) {
   const uWho = u.name || u.username;
   // They knew the password → clear the login counter, so ordinary repeat sign-ins (a shared waiter
   // tablet, a staff member switching users) can never build up to a wall or an alert.
-  if (uname) await rateResetOnSuccess("staff_login", `${restaurantId || "*"}:${subjectFor(uname)}`);
+  // Scoped to the restaurant the wall was counted under (rateAllowed above passes the same
+  // `restaurantId`), so a correct sign-in here can only ever clear THIS restaurant's wall. The
+  // subject already carries the restaurant, so nothing moves today — but the plain /login door
+  // sends "*" for it, and two restaurants sharing a staff name share that counter.
+  if (uname) await rateResetOnSuccess("staff_login", `${restaurantId || "*"}:${subjectFor(uname)}`, restaurantId ?? null);
   if (u.role === "owner") {
     // OWNERS (2026-07-06): their row's restaurant_id is the #1 "home" namespace, not
     // ownership — deleted/entitlement checks must run against what they actually OWN.

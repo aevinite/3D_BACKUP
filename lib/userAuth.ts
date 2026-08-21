@@ -25,6 +25,19 @@ const LOCK_MS = 60 * 1000;                      // lockout length (1 minute)
 const PBKDF2_ITERS = 120_000;                   // slow-hash work factor
 const MAX_USERNAME_LEN = 100;                   // login inputs are length-capped so an
 const MAX_PASSWORD_LEN = 200;                   // oversize value can't waste PBKDF2 CPU
+// HOW MANY ACCOUNTS ONE TYPED NAME MAY MATCH (2026-08-21).
+//
+// A username is unique only PER restaurant (mig 091), so the same name legitimately exists at
+// several restaurants and the lookup below fetches every match. It had no `.limit()` at all, and
+// every LIVE match then costs one PBKDF2 verify at 120,000 iterations — so the read AND the CPU per
+// login attempt grew with the number of tenants sharing a common name ("admin", "manager", "raj").
+// `docs/SAAS-EFFICIENCY-PLAYBOOK.md` has carried "cap the userAuth candidate loop" as owed work
+// since 2026-06-26; this is that cap.
+//
+// Set far above anything real (nine restaurants exist today) so it is a ceiling on pathology, not a
+// rule anybody meets — and it says so out loud when it is reached, because a login that quietly
+// stopped matching would be the worst possible way to find out.
+const MAX_LOGIN_CANDIDATES = 50;
 
 // Why a login failed — the SENSITIVE detail. NEVER shown to the user (they only ever
 // see the generic "Wrong name or password."); it's returned so the route can record
@@ -164,11 +177,17 @@ export async function loginUser(
   // person who types their RIGHT password can be told the truth instead of "wrong password"
   // (owner, 2026-08-02: "if it is disabled, user will see he has been disabled"). Only a
   // verified password unlocks that message, so it reveals nothing to someone guessing names.
-  const candRes = await sb.from("staff_users").select("*").eq("username", uname).is("deleted_at", null);
+  const candRes = await sb.from("staff_users").select("*").eq("username", uname)
+    .is("deleted_at", null).limit(MAX_LOGIN_CANDIDATES);
   // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
   // waiter into resetting a password during a network blip (stress test 2026-07-03).
   if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true, reason: "transient" };
   let candidates = (candRes.data || []) as any[];
+  // Reaching the ceiling means a real account may not have been considered, which must never be
+  // silent (see MAX_LOGIN_CANDIDATES). Unreachable at today's scale; visible in the logs if it ever is.
+  if (candidates.length >= MAX_LOGIN_CANDIDATES) {
+    console.warn(`[auth] the name "${uname}" matches ${MAX_LOGIN_CANDIDATES}+ accounts — raise MAX_LOGIN_CANDIDATES or give the login door a restaurant.`);
+  }
   if (restaurantId) {
     // Tenant door (/r/<slug>/login): only THAT restaurant's people may match. Staff
     // rows carry the restaurant directly; OWNER rows carry the #1 "home" namespace,

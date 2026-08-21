@@ -87,13 +87,24 @@ async function restaurantNameOf(rid?: string | null): Promise<string | null> {
 // The open event row for this (limit, subject) — gives the REAL try count + the rule's numbers,
 // which lfh_rate_check itself only answers true/false about. Read ONLY on the rare wall-hit path
 // (scoped, explicit columns, one row). Returns null on any problem.
-async function openEventStats(key: string, subject: string): Promise<
+//
+// SCOPED TO ONE RESTAURANT (2026-08-21). `rate_limit_events` is unique on
+// (restaurant_id, key, subject) — mig 205 — and lfh_rate_check writes the row under
+// coalesce(p_rid, RID0). Reading it back on (key, subject) alone therefore answered for whichever
+// restaurant last hit that same wall, and the caller then WROTE this restaurant's `subject_label`
+// onto that row. Every subject a TypeScript caller sends today already carries its own restaurant
+// (`rid:name`, `rid:device`, or a globally-unique user id), so nothing moves — but the guest limits
+// already use a bare `table:5` subject in SQL, so the first TS caller to copy that shape would have
+// had one restaurant's admin reading another restaurant's staff on the Limits page. Naming the
+// restaurant here closes it before that happens.
+async function openEventStats(key: string, subject: string, rid?: string | null): Promise<
   { id: string; hit_count: number; max_count: number; window_seconds: number } | null
 > {
   try {
     const { data } = await supabaseAdmin.from("rate_limit_events")
       .select("id, hit_count, max_count, window_seconds")
       .eq("key", key).eq("subject", subject).eq("status", "open")
+      .eq("restaurant_id", rid || RID0)
       .order("last_at", { ascending: false }).limit(1);
     return (data?.[0] as { id: string; hit_count: number; max_count: number; window_seconds: number }) ?? null;
   } catch { return null; }
@@ -153,7 +164,7 @@ export async function rateAllowed(
       const subjKey = subj.slice(0, 200);
       const [detail, ev, restName] = await Promise.all([
         opts?.describe ? opts.describe().catch(() => null) : Promise.resolve(null),
-        openEventStats(key, subjKey),
+        openEventStats(key, subjKey, opts?.restaurantId ?? null),
         restaurantNameOf(opts?.restaurantId ?? null),
       ]);
       const rich = detail || opts?.label || null;
@@ -188,17 +199,28 @@ export async function rateAllowed(
  *
  * Wrong-password bursts are untouched: they never reach here, so they still count and still wall.
  * Best-effort and silent — a failure here can only mean a stale counter, never a broken login.
+ *
+ * `rid` is OPTIONAL and narrows the reset to ONE restaurant (2026-08-21). Both tables are unique on
+ * (restaurant_id, key, subject), so clearing on (key, subject) alone clears every restaurant that
+ * shares that pair — and marks their open walls "signed in successfully" when nobody there did.
+ * Today's callers all send a subject that already names its own restaurant, so passing nothing keeps
+ * exactly the behaviour they have; a caller that knows the restaurant should say so, and then the
+ * wall it clears is provably its own.
  */
-export async function rateResetOnSuccess(key: RateKey, subject: string): Promise<void> {
+export async function rateResetOnSuccess(key: RateKey, subject: string, rid?: string | null): Promise<void> {
   const subj = (subject || "").trim().slice(0, 200);
   if (!subj) return;
+  // Only narrow when the caller actually named a restaurant. Defaulting to RID0 instead would stop
+  // clearing the walls of every caller that DOES pass one — the opposite failure, and a worse one.
+  const scope = <T extends { eq(c: string, v: unknown): T }>(q: T): T =>
+    (rid ? q.eq("restaurant_id", rid) : q);
   try {
-    await supabaseAdmin.from("rate_limit_counters").delete().eq("key", key).eq("subject", subj);
+    await scope(supabaseAdmin.from("rate_limit_counters").delete().eq("key", key).eq("subject", subj));
     // Any wall they hit earlier is now history, not a live problem — mark it handled rather than
     // deleting it, so the record of what happened stays in the admin's list.
-    await supabaseAdmin.from("rate_limit_events")
+    await scope(supabaseAdmin.from("rate_limit_events")
       .update({ status: "allowed", resolved_at: new Date().toISOString(), resolved_by: "auto · signed in successfully" })
-      .eq("key", key).eq("subject", subj).eq("status", "open");
+      .eq("key", key).eq("subject", subj).eq("status", "open"));
   } catch { /* a stale counter is harmless; never break a login */ }
 }
 

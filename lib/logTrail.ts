@@ -331,14 +331,47 @@ const PREFIX: [RegExp, Place][] = [
   [/^maintenance_|^feature_|^quick_feature|^retention_|^access_/, { area: "Settings & features", screen: "Settings" }],
 ];
 
-/** Where in the app an action lives. Never throws; an unknown code lands in System. */
-export function placeOf(action: string | null | undefined): Place {
+/**
+ * THE SAME ACT, DONE FROM A DIFFERENT PANEL, HAPPENED ON A DIFFERENT SCREEN (2026-08-21).
+ *
+ * Two codes are written from BOTH the Aevidine console and the manager panel — `credit_note` and
+ * `order_delete` — and the map above can only give a code one home. So an admin who issued a credit
+ * note on the console's **Bills** page had their row filed under "Orders & bills › Reopen the bill":
+ * an area the console does not have, and a screen that only exists in the manager panel. The whole
+ * point of the trail is that it says where the person was standing (owner, 2026-08-12), so for those
+ * two the answer has to depend on the panel as well as the code.
+ *
+ * Deliberately tiny and explicit rather than clever: only a code that is genuinely written from two
+ * panels needs an entry, and `verify:t24-money-rules` fails when a new one appears without one. The
+ * same reasoning the print rows above already carry (`print_sent` is the manager panel, the
+ * `print_helper_*` twins are the console) — this just makes it work for a shared code.
+ */
+const PANEL_PLACE: Record<string, Record<string, Place>> = {
+  admin: {
+    // /aevinite/bill-audit — the page's own heading is "Bills". Not "Billing", which is the
+    // console's SUBSCRIPTION screen (billing_set_plan et al.) and a different place entirely.
+    credit_note: { area: "Aevidine console", screen: "Bills" },
+    order_delete: { area: "Aevidine console", screen: "Bills" },
+  },
+};
+
+/** Where in the app an action lives. Never throws; an unknown code lands in System.
+ *
+ *  `panel` is optional and only changes the answer for a code that is written from more than one
+ *  panel (see PANEL_PLACE). Callers that only hold the code keep working exactly as before. */
+export function placeOf(action: string | null | undefined, panel?: string | null): Place {
   const a = String(action || "").trim();
   if (!a) return { area: "System", screen: "Unknown" };
+  const p = String(panel || "").trim().toLowerCase();
+  if (p && PANEL_PLACE[p]?.[a]) return PANEL_PLACE[p][a];
   if (PLACE[a]) return PLACE[a];
-  for (const [re, p] of PREFIX) if (re.test(a)) return p;
+  for (const [re, p2] of PREFIX) if (re.test(a)) return p2;
   return { area: "System", screen: "Other" };
 }
+
+/** The codes that need a panel to be placed correctly — read by the guard so a THIRD dual-written
+ *  code cannot appear without one. */
+export const PANEL_SPECIFIC_PLACES = PANEL_PLACE;
 
 /** The panel, in words. An unknown panel prints itself rather than vanishing. */
 export function panelName(panel: string | null | undefined): string {
@@ -385,7 +418,9 @@ export function trailOf(row: {
   panel?: string | null; action?: string | null; table_number?: string | null;
   order_id?: string | null; detail?: string | null; restaurant_name?: string | null;
 }): LogTrail {
-  const { area, screen } = placeOf(row.action);
+  // The PANEL is passed too: a code written from both the console and the manager panel is placed
+  // on the screen the person was actually looking at (see PANEL_PLACE).
+  const { area, screen } = placeOf(row.action, row.panel);
   const panel = panelName(row.panel);
   const target = targetOf(row);
   const restaurant = row.restaurant_name || null;
