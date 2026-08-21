@@ -10,6 +10,13 @@ import AdminShell from "@/components/admin/AdminShell";
 import { AdminToastProvider } from "@/components/admin/toast";
 import AutoFitNumbers from "@/components/AutoFitNumbers";
 
+// The browser TAB title, for all 23 pages of the console. `app/owner/layout.tsx` has had this line
+// for the owner's 16 pages, and the T15 sweep (2026-08-05) named the three panel tabs, for the same
+// reason: someone with several of our surfaces open in one window had identical tabs to pick from.
+// The admin console was the last one still falling back to the root layout's generic name, and it is
+// the surface most often open BESIDE a panel. One line, 23 pages (T29 sweep, 2026-08-22).
+export const metadata = { title: "Admin console — Aevidine" };
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
   const ok = await tokenIsValid(store.get(AUTH_COOKIE)?.value);
