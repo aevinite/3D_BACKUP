@@ -102,10 +102,18 @@ database, unread. See `docs/REJECTED-IDEAS.md` R27 before ever re-adding it.
 - **Records retention 6–8 years** — even a tenant purged from the recycle bin must retain bills. The
   recycle bin no longer imposes a waiting period before a permanent removal (owner, 2026-08-20,
   migration 342), so this rule now stands entirely on its own: a purge deletes the menu, staff,
-  settings, saved customers and activity log, and **keeps** orders, order_items, sessions, payments,
-  session_payments, credit_notes, invoice_events, deletion_audit and the numbering counters — the
-  restaurants row survives, marked `purged_at`, so those bills have a parent. Guarded by
-  `npm run verify:admin-restaurants`, which fails if migration 342 ever deletes a money table.
+  settings, saved customers, the activity log and the printing setup, and **keeps** orders,
+  order_items, sessions, payments, session_payments, credit_notes, invoice_events, deletion_audit
+  and the numbering counters — the restaurants row survives, marked `purged_at`, so those bills have
+  a parent. `bill_chain` cannot be removed even deliberately: migration 332's append-only trigger
+  refuses a DELETE to every role, service role included.
+
+  **Check the LIVE purge, not one migration.** `admin_purge_restaurant` has been rewritten six times
+  (migs 128 → 309 → 321 → 342 → 345 → 346, the last two adding operational and printing tables), so
+  a check that reads one migration's text stops guarding the moment the next one lands.
+  `npm run verify:t24-money-rules` asserts that **every** migration defining that function deletes
+  no money table; `npm run verify:admin-restaurants` still reads migration 342 only and should be
+  pointed at the newest definition.
 
 ## 4. Customer data — DPDP Act 2023 (we collect phone / khata book / feedback)
 
