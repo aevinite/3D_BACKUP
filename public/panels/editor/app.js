@@ -12326,7 +12326,10 @@ function printerAlerts() {
   const out = [];
   for (const e of pr.events || []) out.push({
     key: "ev:" + e.id, id: e.id, kind: "event", icon: "🖨",
-    text: `${PRINTER_KIND_TEXT[e.kind] || "Printer problem"} — kitchen${e.reported_by ? " · " + e.reported_by : ""}${(e.count || 1) > 1 ? ` · ×${e.count}` : ""}`,
+    // NAME THE PRINTER (mig 351). This said "— kitchen" beside every complaint, which was true while a
+    // restaurant had one printer and is a wrong instruction the moment it has three: somebody walks to
+    // the kitchen to look at a bill printer that is standing at the counter.
+    text: `${PRINTER_KIND_TEXT[e.kind] || "Printer problem"} — ${e.printer ? e.printer : "kitchen"}${e.reported_by ? " · " + e.reported_by : ""}${(e.count || 1) > 1 ? ` · ×${e.count}` : ""}`,
     at: e.last_at,
   });
   for (const j of pr.stuck || []) out.push({

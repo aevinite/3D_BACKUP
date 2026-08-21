@@ -1892,7 +1892,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const printer = tbl ? null : await sharedFloorSummary(`printer:${rid}`, async () => {
         const staleIso = new Date(Date.now() - 90000).toISOString();
         const [ev, stuck] = await Promise.all([
-          sb.from("printer_events").select("id, kind, note, count, reported_by, last_at")
+          // `printer` (mig 351) so the floor can say WHICH printer to go and look at, instead of the
+          // hard-coded word "kitchen" it used to print beside every complaint.
+          sb.from("printer_events").select("id, kind, note, count, reported_by, last_at, printer")
             .eq("restaurant_id", rid).eq("status", "open").order("last_at", { ascending: false }).limit(5),
           sb.from("print_jobs").select("id, order_id, status, attempts, created_at, requested_by, error")
             .eq("restaurant_id", rid).eq("kind", "kot")

@@ -113,6 +113,29 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
     "the tablet's bill send is gone, or reaches for `sid` again — a variable from another function, which parses and throws the moment a waiter presses Print");
 }
 
+// ── 4c · A COMPLAINT CLOSES ONLY WHAT ITS OWN PRINTER DISPROVES (mig 351) ─────────────────────
+// Found by review 2026-08-21: printer_events recorded "this restaurant has a printer problem" and any
+// successful print resolved EVERY open row — right with one printer, silently wrong with three ("bill
+// printer out of paper" vanished because a kitchen ticket printed). The narrowing must stay, and it
+// must stay NARROWER-not-wider: a row with no printer keeps the old behaviour, so nothing sticks open.
+{
+  const queue = read("lib/printQueue.ts");
+  const mig342 = read("supabase/migrations/351_a_complaint_knows_its_printer.sql");
+  const kroute2 = read("app/api/kitchen/[...path]/route.ts");
+  check(/ADD COLUMN IF NOT EXISTS printer text/.test(mig342),
+    "a printer complaint records WHICH printer it is about",
+    "printer_events has lost its printer column — every complaint becomes restaurant-wide again");
+  check(/printer\.is\.null,printer\.eq\./.test(code(queue)) && /printer\?: string \| null/.test(queue),
+    "…and a successful print closes only the complaints about THAT printer (unknown-printer rows still close, so none can stick)",
+    "the auto-close is restaurant-wide again: a kitchen ticket printing clears a paper-out complaint about the bill printer, while it is still empty");
+  check(/aboutPrinter/.test(kroute2) && /printer: aboutPrinter/.test(code(kroute2)),
+    "…a cook's report is filed against the printer their slips actually go to",
+    "a complaint is filed with no printer again, so it can only ever be cleared by anything at all");
+  check(/e\.printer \? e\.printer : "kitchen"/.test(code(read("public/panels/editor/app.js"))),
+    "…and the manager's floor says which printer to go and look at",
+    "the floor strip says '— kitchen' beside every complaint again, which sends somebody to the wrong room");
+}
+
 // ── 5 · the admin looking is not the restaurant printing ──────────────────────────────────────
 check(/adminView: true/.test(eroute) && /force/.test(eroute) && /print_sent_by_admin/.test(eroute),
   "the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited",

@@ -75,9 +75,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // POST /job/:id/done  ·  POST /job/:id/failed — the report that closes the loop.
   if (seg[0] === "job" && seg[1] && (seg[2] === "done" || seg[2] === "failed")) {
     const ok = seg[2] === "done";
-    const job = (await sb.from("print_jobs").select("id, kind, agent_id, status")
+    const job = (await sb.from("print_jobs").select("id, kind, agent_id, status, printer")
       .eq("id", seg[1]).eq("restaurant_id", agent.restaurant_id).maybeSingle()).data as
-      { id: string; kind: string; agent_id: string | null; status: string } | null;
+      { id: string; kind: string; agent_id: string | null; status: string; printer: string | null } | null;
     if (!job) return err("No such print job.", 404);
     // Only the machine that claimed it may close it. Otherwise a second helper could mark a ticket
     // printed that never came out of ITS printer, and the queue's whole promise — a ticket stays
@@ -88,14 +88,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       // The kitchen ticket path already has a finisher that resolves open printer problems on a
       // success and parks a job after five failures; reusing it means the manager's floor strip
       // behaves identically whether a screen or a helper did the printing.
-      const r = await finishKotJob(agent.restaurant_id, job.id, ok, String(body.error || "").slice(0, 300));
+      const r = await finishKotJob(agent.restaurant_id, job.id, ok, String(body.error || "").slice(0, 300), job.printer);
       return NextResponse.json({ ok: true, parked: r.parked, attempts: r.attempts });
     }
     if (ok) {
       await sb.from("print_jobs").update({ status: "done", done_at: new Date().toISOString(), error: null })
         .eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
-      await sb.from("printer_events").update({ status: "resolved", resolved_at: new Date().toISOString() })
-        .eq("restaurant_id", agent.restaurant_id).eq("status", "open");
+      // Same narrowing as the kitchen path (mig 351): a printed BILL proves the bill printer works,
+      // and says nothing about the kitchen printer somebody has just reported jammed.
+      {
+        let q = sb.from("printer_events").update({ status: "resolved", resolved_at: new Date().toISOString() })
+          .eq("restaurant_id", agent.restaurant_id).eq("status", "open");
+        if (job.printer) q = q.or(`printer.is.null,printer.eq.${job.printer}`);
+        await q;
+      }
       return NextResponse.json({ ok: true });
     }
     const attempts = ((await sb.from("print_jobs").select("attempts").eq("id", job.id).maybeSingle()).data as { attempts?: number } | null)?.attempts || 0;

@@ -161,6 +161,11 @@ export async function finishKotJob(
   id: string,
   okPrint: boolean,
   error?: string,
+  /** WHICH printer put paper out, when the caller knows (a helper always does — mig 341/342). The
+   *  auto-close below is narrowed to it: paper from the KITCHEN printer is no proof at all that the
+   *  BILL printer has been refilled. Left undefined by a screen that prints to "the default printer"
+   *  and cannot name it, and then the old behaviour stands. */
+  printer?: string | null,
 ): Promise<{ found: boolean; orderId: string | null; reprint: boolean; attempts: number; parked: boolean; kotNo: number | null; tableNumber: string | null }> {
   const job = (await sb.from("print_jobs").select("order_id, reprint, attempts")
     .eq("id", id).eq("restaurant_id", rid).maybeSingle()).data as
@@ -175,8 +180,19 @@ export async function finishKotJob(
   if (okPrint) {
     await sb.from("print_jobs").update({ status: "done", done_at: new Date().toISOString(), error: null })
       .eq("id", id).eq("restaurant_id", rid);
-    await sb.from("printer_events").update({ status: "resolved", resolved_at: new Date().toISOString() })
-      .eq("restaurant_id", rid).eq("status", "open");
+    // A SUCCESSFUL PRINT CLOSES THE COMPLAINTS IT ACTUALLY DISPROVES, and no others (mig 351).
+    // Before this, ANY print resolved EVERY open row for the restaurant — right with one printer,
+    // wrong the moment a computer owns three: "bill printer out of paper" vanished off the manager's
+    // floor because a kitchen ticket printed in the kitchen, with the bill printer still empty.
+    // Rows with no printer on them (everything written before mig 351, and any report from a screen
+    // that cannot name its printer) keep the old behaviour, so this can only ever close FEWER
+    // complaints — it can never leave one stuck open.
+    {
+      let q = sb.from("printer_events").update({ status: "resolved", resolved_at: new Date().toISOString() })
+        .eq("restaurant_id", rid).eq("status", "open");
+      if (printer) q = q.or(`printer.is.null,printer.eq.${printer}`);
+      await q;
+    }
     return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts: job.attempts || 0, parked: false, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
   }
 
