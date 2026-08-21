@@ -8,12 +8,16 @@ import { chromium } from "playwright";
 import { loginAs, adminCookie } from "./sweep/login.mjs";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
 const env = Object.fromEntries(fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n")
   .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
   .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]));
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the customer-record walk");
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const RID1 = "00000000-0000-0000-0000-000000000001";      // french-house
 

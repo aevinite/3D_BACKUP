@@ -19,10 +19,14 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const B = ARG("--base", "http://localhost:4937");
 const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(B, "the void-on-a-party walk");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 const TOK = g("SUPABASE_ACCESS_TOKEN"), RID = "00000000-0000-0000-0000-000000000001";
 const REF = ARG("--db", "wnsfcizclkbobwzcxqsf");

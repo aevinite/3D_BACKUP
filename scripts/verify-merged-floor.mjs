@@ -15,6 +15,7 @@
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
 import fs from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 // --base <url> so the same simulation can be pointed at a DEPLOYED site, not just the dev server
 // (owner, 2026-08-02: "diagnose everything that you have built, it is working fine or not").
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
@@ -25,6 +26,9 @@ const B = ARG("--base", "http://localhost:4937");
 // folder asserts against whatever stack THAT copy is pointed at, which may be the other backup stack
 // entirely. A check that tests something other than what you asked for is worse than no check.
 const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(B, "the merged-party floor simulation");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 // The database follows the site: backup-2 runs its own Supabase project, so testing that URL against
 // backup-1's database would assert on rows the site never sees. --db picks the project ref.

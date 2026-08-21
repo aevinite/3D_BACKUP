@@ -25,11 +25,20 @@
 const DEFAULT_LOCAL = "http://localhost:4000";
 const DEPLOYED = "https://3-d-backup.vercel.app";
 
-/** The base URL a script should use: `--base <url>`, then $LFH_BASE, then localhost:4000. */
+/**
+ * The base URL a script should use: `--base <url>`, then $LFH_BASE / $VERIFY_BASE / $BASE, then
+ * localhost:4000.
+ *
+ * ALL THREE SPELLINGS, because all three are already in use (sweep #6 / T28, 2026-08-22): nine
+ * guards read VERIFY_BASE, four read BASE and three read LFH_BASE. A person running a lane on their
+ * own port had to know which of the three each script happened to want, and exporting the wrong one
+ * pointed the run at the DEPLOYED site or at port 4000 — which belongs to the owner — while saying
+ * nothing. Reading whichever is set costs nothing and cannot surprise anybody.
+ */
 export function baseFrom(argv = process.argv) {
   const i = argv.indexOf("--base");
   if (i >= 0 && argv[i + 1]) return argv[i + 1].replace(/\/$/, "");
-  if (process.env.LFH_BASE) return process.env.LFH_BASE.replace(/\/$/, "");
+  for (const k of ["LFH_BASE", "VERIFY_BASE", "BASE"]) if (process.env[k]) return process.env[k].replace(/\/$/, "");
   return DEFAULT_LOCAL;
 }
 
@@ -62,6 +71,30 @@ export async function requireAppUp(argv = process.argv, what = "this check drive
           `  · or point it at the deployed site:\n` +
           `                   npm run <this script> -- --base ${DEPLOYED}\n`
         : `  · check the URL, or use the deployed site: --base ${DEPLOYED}\n`) +
+      `\nThis is NOT a fault in the app and NOT a fault in this guard — nothing was checked.\n`,
+  );
+  process.exit(2);
+}
+
+/**
+ * The same refusal, for a guard that has ALREADY resolved its own base (its own flag, its own env
+ * var, its own default) and only wants the preflight. Keeps every existing default exactly as it
+ * was — this adds the plain message and the exit code, nothing else.
+ *
+ *     import { requireUp } from "./sweep/appUp.mjs";
+ *     await requireUp(BASE, "the manager floor walk");
+ *
+ * Exits 2, so a runner can tell "could not run" from "ran and found a fault". Before this, nine of
+ * these guards answered a stopped dev server with a raw ECONNREFUSED stack trace, which reads as
+ * "this guard is broken" — and the honest reaction to that is to stop trusting the tooling.
+ */
+export async function requireUp(base, what = "this check drives the real app") {
+  if (await isUp(base)) return base;
+  console.error(
+    `\nNothing is answering at ${base}, so ${what} cannot run.\n` +
+      `  · start it:      npm run dev        (it serves on 4000, not 3000)\n` +
+      `  · or point it somewhere else:   -- --base <url>\n` +
+      `  · the deployed site is ${DEPLOYED}\n` +
       `\nThis is NOT a fault in the app and NOT a fault in this guard — nothing was checked.\n`,
   );
   process.exit(2);

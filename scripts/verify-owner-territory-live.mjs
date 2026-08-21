@@ -19,10 +19,14 @@
 //      run, every row deleted BY ID, and entitlements restored and compared byte-for-byte.
 //   4. ONE SIGN-IN — through the shared cached helper, so a full run can never trip a login limit.
 import { readFileSync } from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
 const RID = arg("--rid") || "00000000-0000-0000-0000-000000000001";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the owner-screens walk");
 const SHOTS = arg("--shots");
 const TAG = "zzlive" + Date.now().toString().slice(-5);
 

@@ -18,6 +18,7 @@
 // Logs in ONCE per role and reuses the session — never put a login in a loop, it trips the
 // app's own limit alerts and pings the owner's phone about us.
 import fs from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 // Accept a target the same way every other guard here does. Requiring port 4000 meant this
 // could only run when the human's dev server happened to be up — so in practice it was skipped,
@@ -27,6 +28,9 @@ const BASE = (() => {
   return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || process.env.BASE_URL
     || process.env.BASE || "http://localhost:4000";
 })().replace(/\/$/, "");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the sections walk");
 const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 const SB = g("NEXT_PUBLIC_SUPABASE_URL"), KEY = g("SUPABASE_SERVICE_ROLE_KEY");

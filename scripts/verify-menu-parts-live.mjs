@@ -22,12 +22,16 @@
 //     finally block — including when a check fails or the run is killed.
 import { chromium } from "playwright";
 import { loginAs, adminCookie, adminHeaders, loginRequestCount } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4000");
 const RID = "00000000-0000-0000-0000-000000000001"; // French House — the one we write to
 if (!/^http:\/\/localhost:\d+$/.test(BASE)) {
   console.error(`✗ --base must be a local dev server (got ${BASE}). This script WRITES permissions.`);
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the Edit-the-menu walk");
   process.exit(1);
 }
 

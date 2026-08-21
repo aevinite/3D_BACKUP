@@ -30,10 +30,14 @@
 // session — never by deleting, which the issued-bill rule rightly refuses.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4000").replace(/\/$/, "");
 const READ_ONLY = process.argv.includes("--read-only");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the waiter-floor walk");
 const SHOTS = arg("--shots", "");
 
 let failed = 0, passed = 0;
