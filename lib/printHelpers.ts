@@ -94,7 +94,13 @@ const asPrinters = (v: unknown): { name: string; desc?: string; paper?: PaperSiz
   Array.isArray(v)
     ? v.map((p): Record<string, unknown> => (p && typeof p === "object" ? p as Record<string, unknown> : { name: p }))
         .map((p) => ({
-          name: String(p.name ?? "").slice(0, 120),
+          // A PRINTER NAME IS A QUEUE NAME, not free text — and it is reported by the machine about
+          // ITSELF, so it is untrusted input that later travels into database filters, log lines and
+          // HTML. CUPS forbids space and / # already; Windows allows spaces and brackets. So: keep
+          // what a real queue name can hold, drop control characters and the punctuation that means
+          // something in a filter (comma, quotes, backslash), and cap the length. Belt AND braces —
+          // the filters themselves stopped being built from strings in the same commit.
+          name: String(p.name ?? "").replace(/[\u0000-\u001f,"'\\]/g, "").trim().slice(0, 120),
           desc: p.desc ? String(p.desc).slice(0, 160) : undefined,
           paper: asPaper(p.paper),
         }))
@@ -298,19 +304,42 @@ export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRout
   const R = routes || await readRoutes(rid);
   const mine = PRINT_KINDS.filter((k) => R[k].agent === agent.id);
   const backup = PRINT_KINDS.filter((k) => R[k].backupAgent === agent.id && R[k].agent !== agent.id);
-  if (!mine.length && !backup.length) return null;
+  // NO EARLY RETURN when nothing is routed here. There was one, and it was the other half of the same
+  // fault: a machine with no routes at all could never be handed a job addressed to it by name — which
+  // is exactly what the admin's test page is, and what a restaurant does FIRST, before any route
+  // exists. The read below is two indexed queries; asking them is cheap enough to always ask.
 
-  // The candidate read: this restaurant's live jobs, oldest first, of the kinds this machine could
-  // possibly print. Small by construction (a restaurant has a handful of unprinted tickets), and
-  // indexed by print_jobs_kind_idx (mig 341).
+  // The candidate read, in TWO parts — and the second part is not optional.
+  //
+  //   a) jobs of the kinds this machine is the route (or backup) for, and
+  //   b) jobs ALREADY ADDRESSED to this machine, whatever their kind.
+  //
+  // (b) was missing, and my own security test found it: the admin's "Send a test page" queues a
+  // kind='test' job with the computer and printer written on it directly — and it sat in the basket
+  // for ever, because the candidate read only ever looked at kinds the ROUTES named. A page addressed
+  // to a machine by name must reach that machine even when nothing routes its kind. A reclaimed job
+  // (its first claim went stale) is the same shape and had the same hole.
+  //
+  // Two parameterised reads rather than one built `.or(...)` string: the same rule the printer_events
+  // fix landed under — server-side values still do not belong in a filter I paste together by hand.
+  const cols = "id, kind, order_id, reprint, attempts, created_at, agent_id, printer, payload";
+  type JobRow = {
+    id: string; kind: string; order_id: string | null; reprint: boolean; attempts: number;
+    created_at: string; agent_id: string | null; printer: string | null; payload?: unknown;
+  };
   const kinds = [...new Set([...mine, ...backup])];
-  const rows = (await sb.from("print_jobs")
-    .select("id, kind, order_id, reprint, attempts, created_at, agent_id, printer, payload")
-    .eq("restaurant_id", rid).in("kind", kinds).or(liveFilter())
-    .order("created_at", { ascending: true }).limit(12)).data as {
-      id: string; kind: string; order_id: string | null; reprint: boolean; attempts: number;
-      created_at: string; agent_id: string | null; printer: string | null; payload?: unknown;
-    }[] | null;
+  const [byKind, byName] = await Promise.all([
+    kinds.length
+      ? sb.from("print_jobs").select(cols).eq("restaurant_id", rid).in("kind", kinds).or(liveFilter())
+          .order("created_at", { ascending: true }).limit(12)
+      : Promise.resolve({ data: [] as JobRow[] }),
+    sb.from("print_jobs").select(cols).eq("restaurant_id", rid).eq("agent_id", agent.id).or(liveFilter())
+      .order("created_at", { ascending: true }).limit(12),
+  ]);
+  const seen = new Set<string>();
+  const rows = [...((byName.data || []) as JobRow[]), ...((byKind.data || []) as JobRow[])]
+    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 
   const now = Date.now();
   for (const row of rows || []) {
