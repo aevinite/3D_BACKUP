@@ -908,7 +908,13 @@ body {
    is why this stood for months; in the DARK skin the restaurant's name was near-black on #1d1812
    and effectively invisible. It is the one word that tells a person which restaurant they are about
    to change, so it has to be legible in both skins. Seen at 1280×800 with lfh_panel_theme=dark. */
-.brand span.brand-rest { color: var(--gold); -webkit-text-fill-color: var(--gold); }
+.brand span.brand-rest { color: var(--gold-ink); -webkit-text-fill-color: var(--gold-ink); }
+/* --gold-ink, not --gold (T26 sweep, 2026-08-22). Fixing the dark skin above put the name in the
+   raw accent, and --gold is a FILL colour: on the LIGHT skin's near-white top bar the restaurant's
+   own name measured 2.81:1 at 14px — the faintest thing on a bar whose other word ("Manager") is
+   near-black. --gold-ink is the same hue taken 65% toward black, which is exactly what this file
+   already does for every other place gold carries WORDS: 5.91:1 on the bar. In the DARK skin
+   --gold-ink IS --gold, so the fix above is unchanged at 7.92:1. */
 .tab.active {
   background: linear-gradient(180deg, var(--gold-strong), var(--gold));
   box-shadow: 0 6px 16px rgba(212,165,116,0.32);
