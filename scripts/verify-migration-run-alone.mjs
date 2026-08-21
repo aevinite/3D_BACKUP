@@ -1,4 +1,7 @@
-// verify-migration-run-alone.mjs — RUNNING ONE OLD MIGRATION BY HAND MUST NOT UNDO A LATER DECISION.
+// verify-migration-run-alone.mjs — THE DECISIONS THE MIGRATIONS-001-118 SWEEP MADE, KEPT MADE.
+//
+// Two of them: (1) running ONE old migration by hand must not undo a later decision, and (2) a
+// pre-tenancy table must not go back to guessing which restaurant a row belongs to (migration 352).
 //
 // WHY THIS EXISTS. CLAUDE.md and `scripts/run-migration.mjs` both recommend applying ONE migration
 // instead of a full re-seed, and that script's header states the assumption plainly: "Idempotent
@@ -178,6 +181,56 @@ if (STATIC_ONLY) {
     } else {
       pass(`no stale overload: every one of the ${live.length} functions carries a signature the sequence still expects`);
     }
+  }
+}
+
+// ── 3. A pre-tenancy table must not go back to guessing the restaurant (migration 352) ──────
+head("BACKUP / DEV database — no table guesses which restaurant a row belongs to");
+// Migration 078 gave every table that already existed `restaurant_id DEFAULT <restaurant #1>` as its
+// backfill device. That is step one of default → backfill → ENFORCE; step three never happened, so
+// for 300 migrations a writer that forgot to name a restaurant silently filed the row under French
+// House. Migration 351 dropped the default on 20 of the 25.
+//
+// These FIVE are still defaulted ON PURPOSE, because three test scripts insert into them without a
+// restaurant and those files were not migration 352's to change. Each is a one-line fix:
+//   orders          → scripts/seed-today.mjs:65, scripts/verify-tablet-parity.mjs:39
+//   sessions        → scripts/verify-realtime.mjs:69, scripts/verify-tablet-parity.mjs:37
+//   session_members → scripts/verify-tablet-parity.mjs:38
+//   blocklist       → scripts/verify-tablet-parity.mjs:48
+//   staff_actions   → scripts/verify-realtime.mjs:82 (and lfh_prune_audit's own platform-level line,
+//                     which SHOULD be null rather than French House — that is the point of fixing it)
+// SHRINK this list as those land. Never grow it: a new name here means a table went back to guessing.
+const STILL_DEFAULTED = new Set(["orders", "sessions", "session_members", "blocklist", "staff_actions"]);
+if (STATIC_ONLY) {
+  console.log("  – skipped (--static)");
+} else if (!existsSync(join(root, ".env.local"))) {
+  console.log("  – skipped: no .env.local, so there is no database to ask");
+} else {
+  const env = Object.fromEntries(readFileSync(join(root, ".env.local"), "utf8").split("\n")
+    .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
+    .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
+  const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
+  const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ read_only: true, query:
+      `select table_name from information_schema.columns
+        where table_schema = 'public' and column_name = 'restaurant_id'
+          and column_default is not null order by 1` }),
+  });
+  if (!r.ok) { fail(`could not read the database: ${(await r.text()).slice(0, 160)}`); }
+  else {
+    const defaulted = (await r.json()).map((x) => x.table_name);
+    const unexpected = defaulted.filter((t) => !STILL_DEFAULTED.has(t));
+    const healed = [...STILL_DEFAULTED].filter((t) => !defaulted.includes(t));
+    if (unexpected.length) {
+      fail(`${unexpected.length} table(s) guess the restaurant when a writer stays silent: ${unexpected.join(", ")}`);
+      console.log("      A row written without a restaurant lands in French House instead of failing.");
+      console.log("      Fix: ALTER TABLE <t> ALTER COLUMN restaurant_id DROP DEFAULT; (migration 352's pattern)");
+    } else {
+      pass(`no table guesses the restaurant beyond the ${STILL_DEFAULTED.size} written down (${defaulted.length} defaulted, all expected)`);
+    }
+    if (healed.length) console.log(`  – ${healed.length} of the written-down five now fixed — remove from STILL_DEFAULTED: ${healed.join(", ")}`);
   }
 }
 
