@@ -703,11 +703,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!kinds.includes(kind)) return err("invalid problem kind");
       const note = typeof body?.note === "string" ? body.note.trim().slice(0, 300) : null;
       const by = g.user?.name || g.user?.username || "Kitchen";
-      const open = must(await sb.from("printer_events").select("id, count").eq("restaurant_id", rid).eq("status", "open").eq("kind", kind).limit(1));
+      // WHICH PRINTER IS THIS ABOUT (mig 351). A cook reporting "paper out" is standing at ONE
+      // printer — the one this restaurant's address book sends kitchen slips to. Recording it is what
+      // lets a later successful print close this complaint and NOT the bill printer's, and what lets
+      // the manager's floor say which printer to go and look at.
+      // The complaint may also name the printer explicitly (a screen that knows better); a null
+      // stays null, and the old restaurant-wide behaviour applies to it, deliberately.
+      const own = await helperFor(rid, "kot");
+      const aboutPrinter = (typeof body?.printer === "string" && body.printer.trim().slice(0, 120)) || own.printer || null;
+      // Merged per KIND *and per printer*: two printers out of paper are two problems, and burying one
+      // inside the other's count is how the second one never gets looked at.
+      let openQ = sb.from("printer_events").select("id, count").eq("restaurant_id", rid).eq("status", "open").eq("kind", kind);
+      openQ = aboutPrinter ? openQ.eq("printer", aboutPrinter) : openQ.is("printer", null);
+      const open = must(await openQ.limit(1));
       if (open && open.length) {
         must(await sb.from("printer_events").update({ count: (open[0].count || 1) + 1, last_at: nowIso(), ...(note ? { note } : {}) }).eq("id", open[0].id).eq("restaurant_id", rid));
       } else {
-        must(await sb.from("printer_events").insert({ restaurant_id: rid, kind, note, reported_by: by }));
+        must(await sb.from("printer_events").insert({ restaurant_id: rid, kind, note, reported_by: by, printer: aboutPrinter }));
       }
       await logAction("kitchen", "printer_problem", { ...adminMark, detail: kind, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
