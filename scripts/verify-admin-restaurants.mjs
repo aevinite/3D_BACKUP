@@ -166,18 +166,37 @@ want(/overflow: "hidden",\s*\n\s*\.\.\.\(long \? \{ fontSize: 7 \} : null\)/.tes
 want(/title=\{`Table \$\{t\.n\}/.test(FLOOR),
   "…while the FULL label stays in the tooltip, so nothing is lost");
 
-// ── 4 · the retention card cannot overstate itself ─────────────────────────────────────────────
-console.log("\n4. Settings: log retention is a DEFAULT, and it caps nothing");
-want(!/applied to every restaurant/.test(strip(SET)),
-  "the saved message no longer claims it was applied to every restaurant");
-want(/default for every restaurant that hasn't chosen its own/.test(SET),
-  "…it says it is the default for restaurants that have not chosen their own");
-want(/platform default/.test(SET),
-  "the card is titled as the platform DEFAULT");
+// ── 4 · the retention card must describe what the code ACTUALLY does ───────────────────────────
+// THIS CARD HAS BEEN WRONG IN BOTH DIRECTIONS, AND SO WAS THIS PHASE (rewritten 2026-08-21).
+//
+// First the screen claimed a "1-month MAXIMUM" applied "to every restaurant" — it enforced no
+// maximum at all. The T16 sweep over-corrected it to "the default for every restaurant that hasn't
+// chosen its own", and THIS PHASE WAS WRITTEN TO ENFORCE THAT WORDING — which is also untrue:
+// POST /api/admin/settings ends in `update(patch).not("restaurant_id","is",null)`, so saving here
+// rewrites EVERY restaurant's window on the spot, including the ones that had chosen. PR #1076
+// corrected the screen to say exactly that and added the lock; this phase was left behind asserting
+// the retired wording, so it had been RED on a clean main ever since — which is worse than no check,
+// because a real regression here arrives as more of the same noise.
+//
+// So the checks now hang off the CODE, not off a remembered sentence: the claim on screen and the
+// write in the route have to agree, whichever way the wording goes next.
+console.log("\n4. Settings: the log-retention card says what the code actually does");
+const SET_ROUTE = read("app/api/admin/settings/route.ts");
+// The fact everything else depends on: saving really does write every restaurant.
+want(/\.update\(patch\)\.not\("restaurant_id", "is", null\)/.test(SET_ROUTE),
+  "saving retention still writes EVERY restaurant (the sentence on screen depends on this)");
+want(/applies the window to every restaurant straight away/.test(strip(SET)),
+  "…and the card says so, in those words");
+// The two claims that were each false in their turn. Neither may come back.
 want(!/1-month maximum/.test(SET),
-  "the false '1-month maximum' claim is gone");
-want(/3 months/.test(SET) && /does not cap it/.test(SET),
-  "…and the screen says a restaurant's own choice goes to 3 months and is not capped by this");
+  "the false '1-month maximum' cap claim has not come back");
+want(!/hasn't chosen its own/.test(strip(SET)),
+  "…nor the false 'only a default for restaurants that haven't chosen' claim");
+// His ask for the lock (2026-08-21): a lock the restaurant can SEE, not a hidden platform cap.
+want(/retention_lock/.test(SET_ROUTE) && /Lock this for every restaurant/.test(SET),
+  "the lock exists and is offered on the card");
+want(/return NextResponse\.json\(\{ ok: true, retentionLock: lockWrote \}\)/.test(SET_ROUTE),
+  "…and toggling the lock RETURNS before the retention write, so it never rewrites the windows as a side effect");
 
 // ── 5 · a part-failed multi-attach must not lie about what landed ──────────────────────────────
 console.log("\n5. Owners: attaching several restaurants reports what really happened");

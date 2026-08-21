@@ -142,8 +142,8 @@ export default function AdminRepair() {
   // `bulk` names the one bulk action in flight (so its own button says what it is doing and the
   // others stay put); `confirmBulk` is the are-you-sure step, which every one of these gets —
   // clearing a whole board on a mis-tap is worse than clearing one tile on a mis-tap.
-  const [bulk, setBulk] = useState<"" | "resolve" | "later" | "claude" | "limits" | "tickets">("");
-  const [confirmBulk, setConfirmBulk] = useState<"" | "resolve" | "later" | "claude" | "limits" | "tickets">("");
+  const [bulk, setBulk] = useState<"" | "resolve" | "later" | "claude" | "limits" | "tickets" | "memories">("");
+  const [confirmBulk, setConfirmBulk] = useState<"" | "resolve" | "later" | "claude" | "limits" | "tickets" | "memories">("");
   const [bulkNote, setBulkNote] = useState(""); // progress while N requests go out, e.g. "7 of 19"
   // Which tile's "Later ▾" menu is open, and how many problems are currently waiting out of sight.
   // The COUNT matters as much as the feature: a wait that isn't stated is just a quieter mute.
@@ -433,6 +433,22 @@ export default function AdminRepair() {
 
   // Forget a record, so Fix-now treats that problem as brand new again. (It was never hiding
   // anything — the record only answers "already fixed" when you press Fix-now on an old report.)
+  // FORGET ALL (owner, 2026-08-21 — "do it", after asking what it meant). The bulk twin of "Forget
+  // this". Worth stating what it costs, because the first reason I gave for withholding it was
+  // wrong: it does NOT throw away links to fixes (no record on this platform has one — they were all
+  // written by pressing Resolve). What it does cost is the red "came back after the fix" badge on a
+  // recurrence, which is the only thing that says a problem is a REPEAT and an earlier fix did not
+  // hold. So the confirm says that, in those words, instead of a bare "are you sure?".
+  const forgetAllMemories = async () => {
+    setConfirmBulk(""); setBulk("memories");
+    const r = await adminFetch<{ ok: boolean; forgotten: number }>(
+      `/api/admin/error-memory?all=1${rid ? `&restaurant_id=${rid}` : ""}`, { method: "DELETE" });
+    setBulk("");
+    if (r.ok) toast(`Forgot ${r.data.forgotten} record${r.data.forgotten === 1 ? "" : "s"}. Nothing was hidden or deleted from the board — Fix now will just look at those problems afresh.`);
+    else toast(r.error || "Couldn't clear those records.", "err");
+    loadHub();
+  };
+
   const forgetMemory = async (m: ErrMemory) => {
     setMemories((prev) => prev.filter((x) => x.id !== m.id));
     const r = await adminFetch<{ ok: boolean }>(`/api/admin/error-memory?id=${m.id}`, { method: "DELETE" });
@@ -842,6 +858,37 @@ export default function AdminRepair() {
           </button>
           {showMemories ? (
             <div style={{ marginTop: 8 }}>
+              {/* The "all" for this list too (owner, 2026-08-21). It sits INSIDE the fold, not on the
+                  collapsed line: you should have read what you are forgetting before you forget it. */}
+              <div className="rp-bulk" style={{ marginBottom: 10 }}>
+                <i className="fas fa-eraser" aria-hidden="true" style={{ opacity: 0.65 }} />
+                <span className="rp-bulk-lead">
+                  All {memories.length} record{memories.length === 1 ? "" : "s"}{scopedName ? <> for <b>{scopedName}</b></> : ""} at once:
+                </span>
+                {confirmBulk === "memories" ? (
+                  <span className="rp-bulk-ask">
+                    <span>Forget all {memories.length}?</span>
+                    <button className="adm-btn primary" onClick={forgetAllMemories}>Yes, forget them</button>
+                    <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
+                  </span>
+                ) : (
+                  <button className="adm-btn" disabled={!!bulk} onClick={() => setConfirmBulk("memories")}
+                    title="Forget every record here. Nothing is hidden and no problem is deleted — Fix now will simply look at these afresh, and a recurrence will stop being labelled 'came back after the fix'.">
+                    <i className="fas fa-eraser" aria-hidden="true" style={{ marginRight: 6, opacity: 0.85 }} />
+                    {bulk === "memories" ? "Forgetting…" : "Forget all"}
+                  </button>
+                )}
+              </div>
+              {/* What it costs, said once, above the list — not buried in a tooltip. */}
+              {confirmBulk === "memories" && (
+                <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.55, margin: "-2px 0 10px" }}>
+                  <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+                  No problem is hidden or deleted by this — anything that happens again lands on the board as normal.
+                  Two things change: <b>Fix now</b> will send Claude to look at these problems again instead of answering
+                  &ldquo;already fixed&rdquo;, and a recurrence will no longer wear the red <b>came back after the fix</b> badge
+                  that says an earlier fix didn&rsquo;t hold.
+                </p>
+              )}
               {memories.map((m) => (
                 <div key={m.id} className="rp-err" style={{ opacity: 0.85 }}>
                   <span className="rp-err-bar" style={{ background: "var(--adm-ok, #4caf82)" }} />
