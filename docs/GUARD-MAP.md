@@ -175,6 +175,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | ↳ *(`verify:clash` is kept as a short alias for the same thing — the file is `scripts/verify-clash-coverage.mjs`)* | — | — | — |
 | an order write | `verify:order`, `verify:order-retry`, `verify:closed-session` | mixed | some **YES** |
 | anything that lowers a bill | `verify:audit` ← every money change leaves a record | nothing | no |
+| **deleting a bill**, or anything that would delete more than one at a time | `verify:one-bill-delete` ← bulk bill-deleting was removed on the owner's instruction (2026-08-21). One bill per request, ENFORCED on the session (a bill is a session — there is no `bills` table), and R27 still holds: `canDeleteBill()` is true for the Aevidine admin console only, so a restaurant cancels and never deletes | nothing | no |
 | a GUEST or STAFF-PANEL api route (`app/api/menu`, `app/api/editor`, `app/api/kitchen`, `app/api/tablet`) | `verify:panel-api` ← the scoping, gating and shape rules the T10 sweep put back, so they cannot quietly come back out | nothing | no |
 | a reply we send to an outside system | `verify:outbound` | `.env.local` | no |
 | behaviour when the server is overloaded | `verify:busy` | starts its own local server | no |

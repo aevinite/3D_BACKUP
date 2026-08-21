@@ -3249,7 +3249,14 @@ function ordersPreviousHtml(today, previous) {
     const sold = shown.length - voided;
     const head = `<div class="ord-section-divider"><h3>${label}</h3>
       <span class="bill-day-total">${sold} bill${sold === 1 ? "" : "s"} · <b>${inr(collected)}</b> collected${voided ? ` · <i class="bill-day-void">${voided} cancelled</i>` : ""}</span>
-      ${label.includes("Yesterday") ? "" : `<button class="btn danger" id="clearFreed" title="Removes freed table records only; paid & cancelled bills are kept as records">🗑 Clear freed</button>`}</div>`;
+      </div>`;
+    // NO BULK CLEAR ON THIS SCREEN (owner, 2026-08-21: *"we don't want that option, remove that
+    // option completely from manager panel"*). A `🗑 Clear freed` button used to sit here and take
+    // every freed table in the day's record in one tap. Deleting a bill is now strictly one bill at
+    // a time, with its own reason, from that bill's own card — and the server refuses a request that
+    // names more than one bill (app/api/editor → `orders/delete`). Do not re-add a bulk control here,
+    // to this divider or to any other. R27 still stands over all of it: only the Aevidine admin
+    // console may delete at all, and a restaurant cancels instead.
     const body = shown.length
       ? `<div class="ord-grid">${shown.map(cardOf).join("")}</div>`
       : `<div class="empty">${q ? "No bills match that search." : emptyMsg}</div>`;
@@ -3846,17 +3853,25 @@ async function cancelOrder(id) {
   if (!stillActive) await freeTable(t, { silent: true });
 }
 
-// deleteOrders: permanently delete orders — a single one, a selected batch, or
-// every order (all=true). OPTIMISTIC: the cards vanish instantly; the server
-// catches up in the background (and the rows return + an error shows if it
-// fails). No more re-downloading all 200 orders just to delete one.
-async function deleteOrders(ids, all = false, opts = {}) {
+// deleteOrders: delete the order rows of ONE BILL. OPTIMISTIC: the cards vanish instantly; the
+// server catches up in the background (and the rows return + an error shows if it fails).
+//
+// `ids` is a LIST because one bill is often several order rows — a table's successive KOTs all sit
+// on one session, and the cancelled-bill card and the per-session delete both hand over that whole
+// group. It is NOT a bulk door: the server checks the ids resolve to a single bill and refuses
+// otherwise, so this cannot become "clear the day" again by a caller passing a wider list.
+//
+// THE `all` PARAMETER IS GONE (owner, 2026-08-21). It swept every order on the board and posted
+// `{ all: true }`, which the server answered by clearing up to 300 unpaid/cancelled bills at a
+// time. No screen had passed it for a long time — every call site names its ids — so it was a live
+// bulk delete reachable only by editing the code. Removed on both sides.
+async function deleteOrders(ids, opts = {}) {
   const before = state.data.orders || [];
   // The server KEEPS settled (paid, not voided) bills — they're financial
   // records. Mirror that rule here so the optimistic view matches what actually
   // happens (otherwise a paid bill would vanish then reappear on the next poll).
   const isRecord = (o) => o.payment_status === "paid" && o.status !== "cancelled";
-  const targetIds = all ? before.map((o) => o.id) : (ids || []);
+  const targetIds = ids || [];
   const gone = before.filter((o) => targetIds.includes(o.id) && !isRecord(o)).map((o) => o.id);
   if (!gone.length) { toast("Nothing to delete here (paid bills are kept as records).", "err"); return; }
   // Deleting a bill is permanent — REQUIRE a reason (owner 2026-07-23), with quick chips.
@@ -3884,22 +3899,20 @@ async function deleteOrders(ids, all = false, opts = {}) {
     // reason_code rides along so the SERVER writes the audit row itself (it used to be a
     // separate POST /audit from here, once per bill — see lib/removalAudit.ts).
     const rc = rr && rr.code ? `&reason_code=${encodeURIComponent(rr.code)}` : "";
-    if (all) r = await api("POST", "/orders/delete", { all: true, reason, reason_code: rr && rr.code });
-    else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason) + rc);
+    if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason) + rc);
     else r = await api("POST", "/orders/delete", { ids, reason, reason_code: rr && rr.code });
     const kept = r && r.kept ? r.kept : 0;
     // "All cleared" MUST NOT be said when it wasn't. A clear-all is done in a bounded batch now
     // (the server used to try thousands in one request and could die part-way), so the server tells
     // us whether more is waiting — and the person is offered the next tap instead of being told the
     // job is finished when it isn't.
-    const more = !!(r && r.moreToClear);
     const cleared = (r && typeof r.deleted === "number") ? r.deleted : gone.length;
-    toast(more
-      ? `Cleared ${cleared} — there are more. Tap Clear again to carry on.`
-      : kept
-        ? `Cleared ${cleared} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
-        : (all ? "All cleared" : (gone.length === 1 ? "Bill deleted" : "Bills deleted")), "ok");
-    if (more) { state.data.orders = null; await loadOrders(); }   // show what is genuinely left
+    // No "all cleared" and no "there are more" wording any more — there is no sweep to be part-way
+    // through. `kept` survives because the server still refuses a settled bill, and saying so is the
+    // difference between "nothing happened" and "that one is a record".
+    toast(kept
+      ? `Deleted ${cleared} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
+      : (gone.length === 1 ? "Bill deleted" : "Bill deleted"), "ok");
   } catch (e) {
     state.data.orders = before;   // bring the rows back — the delete failed (e.g. a single paid bill: 409)
     renderEditor();
@@ -6128,45 +6141,19 @@ function renderEditor() {
     // On-the-house display toggle (mig 166): purely client-side list preference.
     const ohT = document.getElementById("khataOhToggle");
     if (ohT) ohT.onchange = () => { lsSet("lfh_show_onhouse", ohT.checked ? "1" : "0"); renderList(); renderEditor(); };
-    const updateSel = () => {
-      const ids = [...ed.querySelectorAll(".ord-select:checked")].map((c) => c.dataset.sel);
-      const cnt = document.getElementById("ordSelCount");
-      if (cnt) cnt.textContent = ids.length ? `${ids.length} selected` : "";
-      const del = document.getElementById("ordDeleteSelected");
-      if (del) del.disabled = ids.length === 0;
-      return ids;
-    };
-    ed.querySelectorAll(".ord-select").forEach((c) => (c.onchange = updateSel));
-    const all = document.getElementById("ordSelectAll");
-    if (all) all.onchange = () => {
-      ed.querySelectorAll(".ord-select").forEach((c) => (c.checked = all.checked));
-      updateSel();
-    };
-    const delSel = document.getElementById("ordDeleteSelected");
-    if (delSel) delSel.onclick = async () => {
-      const ids = [...ed.querySelectorAll(".ord-select:checked")].map((c) => c.dataset.sel);
-      if (!ids.length) return;
-      deleteOrders(ids); // reason prompt inside deleteOrders is the confirmation
-    };
-    // Clear every freed/archived record in one go (the records you can't otherwise
-    // reach with the active-orders bulk bar).
-    const clearFreed = document.getElementById("clearFreed");
-    if (clearFreed) clearFreed.onclick = async () => {
-      // TWO FAULTS, ONE TAP (T18 sweep, 2026-08-16).
-      //   · It read `state.data.orders` — the newest-200 board — while the button sits under the
-      //     BILLS RECORD, which is the wider ?bills=1 window. So on a busy day it cleared less than
-      //     the list in front of the person showed. billOrdersPool() is the union every other
-      //     action on this screen already resolves a bill from, scoped here to the day the divider
-      //     is actually about.
-      //   · With nothing to clear it returned in SILENCE: a red button that does nothing is
-      //     indistinguishable from a broken one (the never-drop-a-tap rule). It says so now.
-      const dayStart = businessDayStartMs();
-      const ids = billOrdersPool()
-        .filter((o) => o.archived && new Date(o.created_at || 0).getTime() >= dayStart)
-        .map((o) => o.id);
-      if (!ids.length) { toast("Nothing to clear — no freed tables in today's record.", "ok"); return; }
-      deleteOrders(ids); // reason prompt inside deleteOrders is the confirmation
-    };
+    // ── THE SELECTION BAR AND THE BULK CLEAR ARE BOTH GONE (owner, 2026-08-21) ──────────────────
+    // What used to live here: `updateSel` / `ordSelectAll` / `ordDeleteSelected` (tick a set of
+    // bills, delete them together) and `clearFreed` (take every freed table in the day's record in
+    // one tap). Both were bulk deleting, and he asked for it removed completely.
+    //
+    // The tick-box half was ALREADY dead when this was written — nothing renders `.ord-select`,
+    // `#ordSelectAll` or `#ordDeleteSelected` any more, so the wiring was binding handlers to
+    // elements that never exist. Only `public/panels/editor/style.css` still carried the rule for
+    // them. Removing dead wiring costs nothing; leaving it reads as a feature that is there.
+    //
+    // A bill is still deletable ONE AT A TIME from its own card, with a typed reason, and only by
+    // the Aevidine admin console (R27 — `canDeleteBill()` returns true for no staff user). Do not
+    // re-add a multi-select, a "clear all", or anything that deletes more than one bill per tap.
     return;
   }
   // From here down we're on an editable tab (dishes/categories/filters/settings).

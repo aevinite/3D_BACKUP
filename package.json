@@ -88,6 +88,7 @@
     "verify:deps": "node scripts/verify-deps.mjs",
     "verify:panel-secrets": "node scripts/verify-panel-secrets.mjs",
     "verify:id-chunks": "node scripts/verify-id-chunks.mjs",
+    "verify:one-bill-delete": "node scripts/verify-one-bill-delete.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:print-queue": "node scripts/verify-print-queue.mjs",
     "verify:print-helper": "node scripts/verify-print-helper.mjs",
