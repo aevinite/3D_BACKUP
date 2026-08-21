@@ -15,6 +15,7 @@
      silently paints the inherited colour instead. */
   --gold-ink: var(--gold);
   --gold-strong: #e8b884;
+  --gold-grad: linear-gradient(180deg, #e8b884, #d4a574);   /* the gold FILL, per skin — dark ink sits on it */
   --green: #22c55e;
   --red: #ef4444;
   --radius: 12px;
@@ -832,7 +833,10 @@ html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
 /* Premium, warm palette to match the floor — no neon. "Mark paid" is the gold
    primary; "Serve" is a soft, deep emerald (reads as "done" without shouting);
    the status/payment PILLS still carry the bright state colour. */
-.ord-btn.pay { background: var(--gold-grad, linear-gradient(180deg, #e8b884, #d4a574)); color: #2a1d0c; }
+/* --gold-grad is declared per skin at the top of this file now: the literal here meant the Pay
+   button kept the DARK skin's gold while the tab beside it used the light one. Dark ink on gold in
+   both, ~8:1 either way, so only the hue follows the skin. (T26 sweep, 2026-08-22.) */
+.ord-btn.pay { background: var(--gold-grad); color: #2a1d0c; }
 .ord-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .ord-btn {
   flex: 1; min-width: 120px; padding: 10px 12px; border-radius: 10px;
@@ -2374,11 +2378,15 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   border: 1px solid var(--line); border-radius: 7px;
   padding: 4px 6px; font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
-.ret-select:focus { outline: 2px solid color-mix(in srgb, var(--accent, #4f8cff) 55%, transparent); outline-offset: 1px; }
+/* THE PANEL'S ACCENT IS GOLD, AND IT HAS NO --accent TOKEN (T26 sweep, 2026-08-22) — so these three
+   rules fell back to a literal BLUE and painted the retention field's focus ring and every log row's
+   hover in a colour that appears nowhere else on this panel. --gold is what the rest of the file
+   uses, and it flips per skin. */
+.ret-select:focus { outline: 2px solid color-mix(in srgb, var(--gold) 55%, transparent); outline-offset: 1px; }
 
 /* Log rows are clickable → show a pointer + a gentle hover lift so it's obvious. */
 .oprow-click, .logrow-click { cursor: pointer; transition: border-color .12s, background .12s; }
-.oprow-click:hover, .logrow-click:hover { border-color: color-mix(in srgb, var(--accent, #4f8cff) 45%, var(--line)); background: color-mix(in srgb, var(--accent, #4f8cff) 6%, var(--panel)); }
+.oprow-click:hover, .logrow-click:hover { border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); background: color-mix(in srgb, var(--gold) 6%, var(--panel)); }
 
 /* The click-to-open detail card (reuses .confirm-overlay / .confirm-box). */
 .confirm-box.logdetail { text-align: left; max-width: 460px; }
@@ -3601,6 +3609,7 @@ html[data-theme="light"]{
   --muted:#766954;
   --gold:#c98f3f;
   --gold-strong:#b07a28;
+  --gold-grad: linear-gradient(180deg, #dba75c, #c98f3f);   /* same shape, this skin's gold */
   /* THE ACCENT WHEN IT CARRIES WORDS (same idea as the guest menu's --accent-ink and the
      kitchen's --blue-ink). --gold is tuned to be a FILL — tabs, primary buttons, chips —
      where dark text sits on top of it, so it must not get darker or those pairs break.
