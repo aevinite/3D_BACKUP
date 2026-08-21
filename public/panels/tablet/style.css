@@ -17,6 +17,7 @@
      6.4-10.4:1, so ink IS the accent here; the light block darkens it. */
   --gold-ink: var(--gold);
   --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
+  --merge-ink: #c084fc;   /* "served as one party" — the one non-gold hue on this panel, per skin */
   --green: #22c55e; --amber: #fbbf24; --red: #ef4444;
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element instead of a
      hand-rolled max(). env() covers the iPhone notch/home bar when this page is top-level;
@@ -216,7 +217,10 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .tnum-xs { font-size: clamp(7.5px, 12cqw, 18px); }   /* a NAME rather than a number */
 .tseats { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
   font-size: clamp(9.5px, 8.3cqw, 12px); font-weight: 800; font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--c) 55%, var(--muted)); }
+  /* 40%, not 55%: on the DIMMEST state colours this figure came back at 4.23:1 on the dark board
+     while the manager floor's identical seat count read 6.32:1 (T26 sweep, 2026-08-22). The state
+     HUE survives; it just leans further on --muted, which is what the manager's twin does. */
+  color: color-mix(in srgb, var(--c) 40%, var(--muted)); }
 /* Row 3: the full-width progress LINE with "x/y served" above it — never a worded box. */
 .t-line { margin-top: auto; display: flex; flex-direction: column; align-items: stretch;
   min-width: 0; gap: clamp(1px, 1.6cqw, 3px); }
@@ -304,9 +308,15 @@ html[data-theme="light"] .tclose { color: #b91c1c; }
    never reads as free/solo. Accent-coloured — it is a STATE, not decoration. On a TILE it
    sits in the top row where the seat chip would be (never its own row — that overflowed the
    square and sliced the progress bar), sized in cqw like everything else on the tile. */
-.tmerge { display: inline-block; font-size: 11px; font-weight: 800; color: var(--accent, #f0b232); }
+/* THE MERGE LABEL IS PURPLE EVERYWHERE, IN BOTH SKINS (T26 sweep, 2026-08-22). This same label —
+   "⇄ one party · T11 T12" — appears twice: on the tile, where the rules below paint it the merge
+   purple per skin, and in the OPEN TABLE PANE header, where none of those rules reach it. There it
+   read `var(--accent, #f0b232)` for a token this panel never declares, so the fallback ORANGE won:
+   a colour that appears nowhere else in the panel, and 1.89:1 on the light pane. One token, used in
+   both places, so the same fact is the same colour wherever a waiter meets it. */
+.tmerge { display: inline-block; font-size: 11px; font-weight: 800; color: var(--merge-ink); }
 .tile .tmerge { flex: 1 1 auto; min-width: 0; font-size: clamp(8px, 7.4cqw, 11px); line-height: 1.2;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c084fc; }
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--merge-ink); }
 /* THE TABLE NUMBER WINS THE ROW (owner, 2026-08-15). On a merged tile the "⇄T11 T12" chip takes
    the seat count's place beside the number, and BOTH could shrink — so the number, which is the
    one thing a waiter needs to walk to the right table, was the part that got cut: tables 11-14
@@ -317,7 +327,8 @@ html[data-theme="light"] .tclose { color: #b91c1c; }
 .tile .tmerge i { font-style: normal; }
 /* Light mode: a pale violet on a pale violet tile is nearly invisible — the merged mark has
    to read in BOTH skins (the "check both skins for fixed colours" rule). */
-html[data-theme="light"] .tile .tmerge { color: #7e22ce; }
+/* (the tile inherits --merge-ink now; this rule is kept only so a future reader sees the pairing) */
+html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 /* (.tlabel / .tsub are gone with the old tile body — the tile's state is its COLOUR plus the
    "x/y served" line now, exactly like the manager's, so there is no worded state row to style.
    The per-state colours live on .t-* above, where the tile reads them through var(--c).) */
@@ -715,6 +726,7 @@ html[data-theme="light"]{
      bright gold and look exactly as they did. */
   --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
   --skel-hi:#d3c5a8;   /* the sheen, one step DARKER than this skin's --line — same 1.25:1 step */
+  --merge-ink:#7e22ce;   /* the merge purple, deepened for white: 6.98:1 (the tile already used it) */
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
 }
 /* ── THE TILE'S TWO FIGURES, ON THE LIGHT SKIN (T26 sweep, 2026-08-22) ────────────────────────
