@@ -70,11 +70,20 @@ including what does and does not count as permission, is the first thing in `CLA
 npm run verify:push
 ```
 
-That runs exactly what CI runs: type-check, lint, the unit tests, the static guards and the access
-model — about 90 seconds, no database, no login. CI (`.github/workflows/checks.yml`) runs the same
-set on every push, so a green run locally means a green run there.
+That runs type-check, lint, the unit tests, the static guards and the access model — about 90
+seconds, no database, no login. CI (`.github/workflows/checks.yml`) runs all of those **plus two
+more**, so a green run here is necessary but not sufficient:
 
-There are ~120 more `verify:*` scripts, one per bug that once reached somebody's screen.
+- `npm run verify:deps` — the only check that needs the network (it asks npm for the current
+  advisory list), which is why it is not in the offline `verify:static` set. It fails only on a
+  **new** high or critical advisory.
+- `node .github/scripts/verify-doc-counts.mjs` — the counts in `CLAUDE.md`, `README.md`,
+  `docs/CLAUDE-DETAIL.md`, `docs/GUARD-MAP.md` and `docs/SECURITY-CHECKLIST.md` must match the code
+  they describe.
+
+Run those two as well before you push and the local answer really is the CI answer.
+
+There are 130 `verify:*` scripts in all, one per bug that once reached somebody's screen.
 **`docs/GUARD-MAP.md` tells you which ones your change needs** — look up the file you touched.
 
 Do **not** run `npm run verify:everything` casually: it is the 500-phase suite, it writes to the
