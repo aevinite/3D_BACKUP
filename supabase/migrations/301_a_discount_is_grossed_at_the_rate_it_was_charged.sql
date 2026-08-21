@@ -70,10 +70,40 @@ CREATE TRIGGER zz_orders_disc_gross
   FOR EACH ROW EXECUTE FUNCTION public.lfh_fill_disc_gross();
 
 -- Backfill every existing row. Discount-free rows are already 0 by the column default.
-UPDATE public.orders o
-   SET disc_gross = o.discount * (1 + COALESCE(NULLIF(o.tax_rate, 0),
-                     lfh_effective_tax_rate(o.restaurant_id)))
- WHERE COALESCE(o.discount, 0) <> 0;
+--
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-21 (sweep T23). For a row that carries a stamped rate this
+-- statement is a deterministic recompute and re-running it is harmless. For a row whose `tax_rate`
+-- is NULL or 0 it falls back to `lfh_effective_tax_rate(restaurant_id)` — THE RATE CONFIGURED RIGHT
+-- NOW — which is correct on the day this migration first runs and wrong every day after. A re-seed
+-- following a GST change would re-gross those discounts at the NEW rate, and because
+-- `orders.net_amount` is GENERATED ALWAYS AS (total − disc_gross) (mig 310), the owner's filed
+-- revenue for past months would move with them. That is exactly what migration 321 recorded for
+-- 288 — "after a GST change a re-run would un-stamp all history and re-price it" — one column over,
+-- and this file was missed in that pass. Measured on the backup database on 2026-08-21: 11
+-- discounted orders carry no stamped rate today, out of 2,382 discounted rows.
+--
+-- The trigger above is unaffected and keeps the same fallback: at INSERT time "now" genuinely IS
+-- the rate the order is being charged at. It is only the RE-RUN of a historical backfill that turns
+-- that fallback into a re-pricing.
+--
+-- `lfh_already_applied` is created by migration 307, six files after this one, so a FRESH database
+-- runs this its single legitimate time and migration 360 records the key. The `to_regprocedure`
+-- gate + EXECUTE is migration 043's pattern, for the same reason.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('301_backfill_disc_gross') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '301_backfill_disc_gross: already applied — skipped (a re-run after a rate change would re-price every unstamped discounted bill)';
+ELSE
+  UPDATE public.orders o
+     SET disc_gross = o.discount * (1 + COALESCE(NULLIF(o.tax_rate, 0),
+                       lfh_effective_tax_rate(o.restaurant_id)))
+   WHERE COALESCE(o.discount, 0) <> 0;
+END IF;
+END $reseed_guard$;
 
 -- ── 2. The two pre-aggregated rollups carry it too ──────────────────────────────────────────
 -- Readers COALESCE onto the old maths, so a rollup that has not been refreshed yet still answers
