@@ -96,11 +96,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
         .eq("id", job.id).eq("restaurant_id", agent.restaurant_id);
       // Same narrowing as the kitchen path (mig 351): a printed BILL proves the bill printer works,
       // and says nothing about the kitchen printer somebody has just reported jammed.
+      // Parameterised, for the reason written out in lib/printQueue.finishKotJob: a printer name is
+      // reported by a helper about itself, so it must never be pasted into a filter string.
       {
-        let q = sb.from("printer_events").update({ status: "resolved", resolved_at: new Date().toISOString() })
-          .eq("restaurant_id", agent.restaurant_id).eq("status", "open");
-        if (job.printer) q = q.or(`printer.is.null,printer.eq.${job.printer}`);
-        await q;
+        const resolved = { status: "resolved", resolved_at: new Date().toISOString() };
+        const rid2 = agent.restaurant_id;
+        if (job.printer) {
+          await sb.from("printer_events").update(resolved).eq("restaurant_id", rid2).eq("status", "open").eq("printer", job.printer);
+          await sb.from("printer_events").update(resolved).eq("restaurant_id", rid2).eq("status", "open").is("printer", null);
+        } else {
+          await sb.from("printer_events").update(resolved).eq("restaurant_id", rid2).eq("status", "open");
+        }
       }
       return NextResponse.json({ ok: true });
     }

@@ -187,11 +187,21 @@ export async function finishKotJob(
     // Rows with no printer on them (everything written before mig 351, and any report from a screen
     // that cannot name its printer) keep the old behaviour, so this can only ever close FEWER
     // complaints — it can never leave one stuck open.
-    {
-      let q = sb.from("printer_events").update({ status: "resolved", resolved_at: new Date().toISOString() })
-        .eq("restaurant_id", rid).eq("status", "open");
-      if (printer) q = q.or(`printer.is.null,printer.eq.${printer}`);
-      await q;
+    // TWO PARAMETERISED UPDATES, NOT ONE BUILT STRING (security review, 2026-08-21). This was
+    // `q.or(`printer.is.null,printer.eq.${printer}`)` — and a printer NAME is not our text: a helper
+    // reports the names of its own printers, so a name containing a comma or a bracket would have
+    // rewritten the filter it was pasted into. It could not cross restaurants (every statement here
+    // is `.eq("restaurant_id", rid)`), but it could have resolved complaints it had no business
+    // touching. There is no sanitising to get right if the value never reaches a filter STRING:
+    // `.eq()` and `.is()` send it as a parameter.
+    const resolved = { status: "resolved", resolved_at: new Date().toISOString() };
+    if (printer) {
+      // Complaints about the printer that just printed — the paper IS the proof — and the
+      // unknown-printer rows, which keep the pre-mig-351 behaviour so none can stick open.
+      await sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open").eq("printer", printer);
+      await sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open").is("printer", null);
+    } else {
+      await sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open");
     }
     return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts: job.attempts || 0, parked: false, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
   }

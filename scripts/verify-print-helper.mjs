@@ -58,6 +58,16 @@ check(/printingOn/.test(agentR) && /return new NextResponse\(null, \{ status: 20
   "with printing switched off a helper is told to idle, not handed an error",
   "printing off now errors at the helper instead of quietly idling — a paused restaurant would fill a log with refusals");
 
+// ── 2b · A JOB ADDRESSED TO A MACHINE BY NAME REACHES IT, whatever its kind ───────────────────
+// Found by the security test on 2026-08-21: the admin's "Send a test page" writes the computer and the
+// printer straight onto the job — and it sat in the basket for ever, because the candidate read only
+// looked at kinds the ROUTES named, and bailed out entirely when a machine had no routes. That is the
+// state every restaurant is in on the day it installs the helper, so the very first thing anyone tries
+// was the thing that could not work.
+check(/\.eq\("agent_id", agent\.id\)/.test(code(lib)) && !/if \(!mine\.length && !backup\.length\) return null;/.test(code(lib)),
+  "a job addressed to a machine by name reaches it even when nothing routes its kind (the admin's test page)",
+  "claimNext only looks at routed kinds again — the admin's test page, and any reclaimed job, would sit in the basket for ever");
+
 // ── 3 · ONE bill, ONE ticket, one file ────────────────────────────────────────────────────────
 check(/billdoc\.js/.test(docs) && /kotDocHtml|billDocHtml|banquetDocHtml/.test(docs),
   "the paper a helper prints is built by public/panels/billdoc.js — the file every screen prints from",
@@ -125,9 +135,19 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
   check(/ADD COLUMN IF NOT EXISTS printer text/.test(mig342),
     "a printer complaint records WHICH printer it is about",
     "printer_events has lost its printer column — every complaint becomes restaurant-wide again");
-  check(/printer\.is\.null,printer\.eq\./.test(code(queue)) && /printer\?: string \| null/.test(queue),
+  check(/\.eq\("printer", printer\)/.test(code(queue)) && /\.is\("printer", null\)/.test(code(queue)) && /printer\?: string \| null/.test(queue),
     "…and a successful print closes only the complaints about THAT printer (unknown-printer rows still close, so none can stick)",
     "the auto-close is restaurant-wide again: a kitchen ticket printing clears a paper-out complaint about the bill printer, while it is still empty");
+  // A printer NAME is reported by a helper about itself. It must never be pasted into a PostgREST
+  // filter string — flagged by a security review on 2026-08-21, hours after it shipped: a name holding
+  // a comma or a bracket rewrites the filter it lands in. Parameterised .eq()/.is() have no such seam.
+  check(!/\.or\(`[^`]*\$\{[^}]*printer/.test(code(queue + read("app/api/print-agent/[...path]/route.ts")))
+    && !/\.or\(`[^`]*\$\{[^}]*printer/.test(code(read("app/api/editor/[...path]/route.ts"))),
+    "…and no database filter is ever BUILT from a printer name (it is a helper's own word, not ours)",
+    "a printer name is being interpolated into a PostgREST filter string again — a name with a comma in it rewrites the filter");
+  check(/replace\(\/\[\\u0000-\\u001f,/.test(read("lib/printHelpers.ts")),
+    "…and a reported printer name is stripped of control characters and filter punctuation at the door",
+    "printer names are stored raw again — they travel into filters, logs and HTML, and they are the machine's word, not ours");
   check(/aboutPrinter/.test(kroute2) && /printer: aboutPrinter/.test(code(kroute2)),
     "…a cook's report is filed against the printer their slips actually go to",
     "a complaint is filed with no printer again, so it can only ever be cleared by anything at all");
