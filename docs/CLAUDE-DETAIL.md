@@ -498,6 +498,15 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 - **`/api/{editor,kitchen,tablet,inventory}/**`** — `requireRole()` (`lib/userAuth.ts`), which ALSO
   re-checks the per-restaurant panel entitlement and the recycle bin on **every request** (30s
   cache), so switching a panel off cuts an already-open tab instead of only blocking new logins.
+- **`/api/maintenance`** — the same `requireRole("manager")`, which a logged-in manager OR the admin
+  super-user passes, then `panelRestaurantId` for the acting restaurant. It is NOT one of the panel
+  `[...path]` families, so a family-shaped list walks straight past it.
+- **`/api/issue-media`** — the staff cookie first, then the admin cookie; the restaurant comes from
+  the session, never the body. Its own route because the body is multipart.
+- **`/api/print-agent/**`** — an `X-LFH-Agent` token, minted per machine and stored only as a
+  sha-256 hash (mig 341). Not a cookie and not a login: a printing machine that must survive a power
+  cut cannot depend on somebody signing in afterwards. It is scoped to ONE restaurant and to three
+  verbs, so it is a printing-only credential — see `docs/PRINT-HELPER.md`.
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
@@ -515,6 +524,13 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
     have a gate") then points the next audit at a route that is entirely correct, and the list stops
     being trustworthy for the routes that genuinely ARE missing one. A new public route goes on this
     list in the same commit that creates it.
+  - **`/api/maintenance`, `/api/issue-media` and `/api/print-agent` were all missing from the
+    section above until the T29 sweep, 2026-08-22.** All three are correctly gated; the fault was
+    the list, and it is the same fault as `/api/guest/call-waiter` above. Two of them are gated by a
+    familiar helper but sit OUTSIDE the four `[...path]` panel families the list named by shape, and
+    the third is gated by a per-machine printing token rather than any cookie — so a reader checking
+    "is this route in the list?" found nothing for a route that is fine. A new API route joins one of
+    these lists in the same commit that creates it, whatever gates it.
   - `/api/health/deep` was built on 2026-08-12 and REMOVED the next day at the owner's word — see
     `docs/REJECTED-IDEAS.md` R18. Do not re-add it, and do not add "which part is broken?" checks to
     `/api/health` either.
