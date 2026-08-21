@@ -200,6 +200,24 @@ export type BillRecord = {
   loss?: BillLoss | null;
 };
 
+// REJECTED (owner, 2026-08-16, re-confirmed 2026-08-22): a cancelled bill does NOT give its number
+// back. Do not free `bill_no` (or `invoice_no`) for reuse, here or anywhere — not on cancel, not on
+// a nightly tidy-up, not to close a gap in the day's sheets.
+//
+// GAPS ARE FINE. REUSE IS THE PROBLEM. CGST Rule 46(b) wants a consecutive serial unique for the
+// financial year; Rule 49 puts the same requirement on a BILL OF SUPPLY, which is what this app
+// prints for a composition-scheme restaurant — so for those clients `bill_no` IS the statutory
+// number on the paper, not an internal reference. Rule 56 requires a cancelled document to be kept
+// WITH its number. Hand that number to the next customer and two documents share one number, which
+// an officer reads as "a sale was deleted and the next one slid into its slot" — the suppression
+// pattern docs/COMPLIANCE-GUARDRAILS.md is built around. A gap is explainable in one sentence
+// (table 12 ordered, cancelled, here is who and why); a duplicate is not explainable at all.
+//
+// Measured 2026-08-22 on the dev database: 840 sessions hold a number where every order was
+// cancelled and 250 hold one with no order at all. That is untidy and it is not a fault — the
+// Audit, the admin ledger and the signed chain (mig 332) already account for every one of them.
+// Recorded as R44 in docs/REJECTED-IDEAS.md; full legal reasoning in docs/COMPLIANCE-GUARDRAILS.md
+// under "Why number-keeping is not negotiable".
 export function rollUpBill(session: BillSession, orders: BillOrder[], restaurantName: string): BillRecord {
   const state = deriveBillState(session, orders);
   const live = orders.filter((o) => !o.deleted_at);

@@ -1282,6 +1282,13 @@
       // nothing.
       invNo: sess.invoice_no == null ? ""
         : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) + (voidedAll ? " — voided" : ""),
+      /* REJECTED (owner, 2026-08-16, re-confirmed 2026-08-22): a cancelled bill keeps its number.
+         Never free `bill_no` for reuse to tidy the series — CGST Rule 46(b), Rule 49 (a Bill of
+         Supply needs the same consecutive serial, and that is the document a composition-scheme
+         restaurant prints, so here `bill_no` IS the statutory number) and Rule 56 (keep the
+         cancelled document WITH its number). Two documents under one number reads as a deleted
+         sale. Gaps are correct and explainable. Recorded as R44 in docs/REJECTED-IDEAS.md; the
+         full legal note is in lib/billLedger.ts and docs/COMPLIANCE-GUARDRAILS.md. */
       billNo: sess.bill_no != null ? sess.bill_no : "",
       // REJECTED (owner, 2026-08-19): NO `reprint` field on bill data, deliberately. A `reprint`
       // flag existed here 2026-08-17 → 2026-08-19 and drew a band on the sheet; the owner removed
