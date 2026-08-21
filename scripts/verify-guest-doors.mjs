@@ -48,7 +48,7 @@ const HOOK = process.argv.includes("--hook");
 // The files these checks are about. Editing one re-runs the guard; editing anything else costs
 // nothing. Keep this in step with the files the checks actually read.
 const WATCHED =
-  /[/\\](lib[/\\](restaurant-context\.tsx|tenantStorage\.ts)|components[/\\](SessionGate|OrderTracker|CustomerGreeter|ChefPopup|CartPanel|GuestOutboxChip)\.tsx|app[/\\]q[/\\]\[code\][/\\]page\.tsx)$/;
+  /[/\\](lib[/\\](restaurant-context\.tsx|tenantStorage\.ts|tenant\.ts|panelGate\.ts)|components[/\\](SessionGate|OrderTracker|CustomerGreeter|ChefPopup|CartPanel|GuestOutboxChip)\.tsx|app[/\\]q[/\\]\[code\][/\\]page\.tsx|app[/\\]r[/\\]\[restaurant\][/\\].*)$/;
 
 let ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 if (HOOK) {
@@ -150,6 +150,48 @@ check("…and says so when it could not work out what to leave out",
   /if \(r\.ok\) return;[\s\S]{0,320}lfh:toast/.test(chip));
 check("the queue still refuses to re-send an unchanged basket",
   /keptLines\.length === allLines\.length/.test(read("lib/guestOutbox.ts")));
+
+// ── 7 · AN OLD PRINTED QR CODE STILL FINDS THE RESTAURANT (mig 350) ────────────────────────────
+// A QR code encodes the ADDRESS, not the restaurant. When a restaurant's address changes — which
+// happens on exactly one path, restoring a binned one whose address was taken — every laminated
+// table card it printed points at nothing. These checks hold the two halves that make an old code
+// still work, and the ONE property that keeps it safe.
+say("\n7) An old printed address still finds the restaurant");
+const tenantLib = read("lib/tenant.ts");
+check("lib/tenant exports the retired-address lookup",
+  /export async function slugMovedTo\(/.test(tenantLib));
+// THE SAFETY PROPERTY, and the only one worth failing a build over: the lookup must never answer
+// for an address a LIVE restaurant is using. That restaurant's own guests scan it, so redirecting
+// would take a diner away from the menu they meant to open. The refusal lives in the SQL.
+const mig350 = read("supabase/migrations/350_an_old_web_address_still_finds_the_restaurant.sql");
+check("…and the SQL refuses whenever a LIVE restaurant holds that address",
+  /NOT EXISTS \([\s\S]{0,220}FROM restaurants live[\s\S]{0,120}deleted_at IS NULL/.test(mig350));
+check("…and refuses for a restaurant that is itself in the recycle bin",
+  /r\.deleted_at IS NULL/.test(mig350));
+// The rename is the only moment the old address can be recorded, so if this write goes the feature
+// silently stops working for every future rename while still looking present.
+// Asserted as two separate facts rather than one window-limited match: a comment growing between
+// them is not a regression, and a check that breaks on prose gets loosened until it means nothing.
+const restRoute = read("app/api/admin/restaurants/route.ts");
+check("a rename records the address it left behind",
+  /from\("restaurant_slug_history"\)/.test(restRoute) && /replaced_by: slug/.test(restRoute));
+check("…keyed on the address, so a second rename updates rather than duplicates",
+  /onConflict: "slug"/.test(restRoute));
+// The door a QR code actually opens, and the thing on it that costs a diner something.
+const menuDoor = read("app/r/[restaurant]/menu/page.tsx");
+check("the menu door redirects a retired address instead of 404ing",
+  /if \(!r\) \{[\s\S]{0,400}slugMovedTo\(restaurant\)[\s\S]{0,200}redirect\(`\/r\/\$\{moved\}\/menu/.test(menuDoor));
+check("…and carries the query, so ?table=N survives the hop",
+  /redirect\(`\/r\/\$\{moved\}\/menu\$\{queryStringOf\(await searchParams\)\}`\)/.test(menuDoor));
+check("…and a restaurant that exists but is switched off still 404s (it is closed, not moved)",
+  /if \(!r \|\| !r\.active\) notFound\(\);/.test(menuDoor));
+check("the three scoped panels get it from one place (lib/panelGate)",
+  /slugMovedTo\(slug\)[\s\S]{0,160}redirect\(`\/r\/\$\{moved\}\$\{ROLE_HOME\[role\]\}`\)/.test(read("lib/panelGate.ts")));
+// A PERMANENT redirect would be the wrong answer here and is hard to undo in a browser cache: an
+// address on this platform can be re-taken by a different restaurant later (mig 319 frees it).
+check("no door answers a moved address with a PERMANENT redirect",
+  !/permanentRedirect\(/.test(menuDoor + read("app/r/[restaurant]/item/[slug]/page.tsx") + read("app/r/[restaurant]/login/page.tsx"))
+  && !/\b308\b/.test(read("app/r/[restaurant]/owner/route.ts").replace(/\/\/[^\n]*/g, "")));
 
 console.log(out.join("\n"));
 if (fail) {

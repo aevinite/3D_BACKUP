@@ -9,7 +9,7 @@ import { notFound, redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { ROLE_HOME } from "@/lib/panelGate";
 import { isPanelEnabled } from "@/lib/panelAccess";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 import LoginForm from "@/app/login/LoginForm";
 
 export default async function ScopedLoginPage({
@@ -22,6 +22,12 @@ export default async function ScopedLoginPage({
   const { restaurant } = await params;
   const { next } = await searchParams;
   const r = await getRestaurantBySlug(restaurant);
+  // A staff bookmark of the old address should reach the sign-in page, not a dead end (mig 350).
+  // `next` is carried so "sign in, then take me where I was going" still works after the hop.
+  if (!r) {
+    const moved = await slugMovedTo(restaurant);
+    if (moved) redirect(`/r/${moved}/login${next ? `?next=${encodeURIComponent(next)}` : ""}`);
+  }
   if (!r) notFound();
   const store = await cookies();
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);

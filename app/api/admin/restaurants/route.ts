@@ -391,6 +391,22 @@ export async function POST(req: NextRequest) {
       .eq("id", rid);
     if (error) return adminFail("restoring this restaurant", error, { action: "save" });
     const renamed = slug !== r.slug ? slug : null;
+    // ── THE ADDRESS IT LEFT BEHIND GOES ON RECORD (mig 350) ────────────────────────────────────
+    // This is the only place in the product where a restaurant's web address changes, so it is the
+    // only place that can remember the old one. With this row, an old printed QR code still finds
+    // the restaurant the moment its old address becomes free again — and it stays silent while
+    // somebody else is using it (lfh_slug_moved refuses in that case; see the migration).
+    //
+    // Best-effort on purpose: the restore has ALREADY succeeded above. Failing to write a
+    // convenience row must never turn a completed restore into an error on the admin's screen —
+    // he would press it again and the second press would find the restaurant already live.
+    if (renamed) {
+      const hist = await sb.from("restaurant_slug_history")
+        // The old address may already be on record from an earlier rename of this same restaurant,
+        // so the key is updated rather than inserted twice — and `replaced_by` moves with it.
+        .upsert({ slug: r.slug, restaurant_id: rid, replaced_by: slug, retired_at: new Date().toISOString() }, { onConflict: "slug" });
+      if (hist.error) console.error("[restaurants] slug history not recorded for", r.slug, hist.error.message);
+    }
     await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — renamed to "${name}" at /r/${renamed}/menu because its old web address was taken. Its old QR codes (/r/${r.slug}/menu) now open a different restaurant and must be reprinted` : ""}` });
     return ok({
       ok: true, restored: true, active: activate, name, slug, ...(renamed ? { renamed } : {}),

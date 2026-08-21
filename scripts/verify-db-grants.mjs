@@ -84,6 +84,12 @@ const ANON_ALLOWED = {
   // revoke would have silently broken every guest cart's pricing. Verified by reading the caller.
   lfh_resolve_tax_mode:       "decides a dish's tax mode; called BY lfh_price_order (INVOKER). DEFINER since mig 300 so its settings read works",
   lfh_phone10:                "phone-number formatter, pure",
+  // An old printed QR code is scanned by a DINER with no login, so the lookup that rescues it has
+  // to be anon-callable (mig 350). It is about as narrow as a function gets: given one address it
+  // returns one slug and nothing else — no name, no id, no settings — and only when NO live
+  // restaurant holds that address, so it can never point a guest away from a menu that is in use.
+  // Everything it can reveal is already public: the slug of a menu anyone may open.
+  lfh_slug_moved:             "a retired /r/<slug> address → the restaurant's current slug, so an old QR code still reaches the right menu (guest, no login)",
   // THE TWO DOORS (mig 282). These exist so the guest does NOT need a table-wide read on
   // `settings` / `restaurants` — they return that restaurant's guest slice as one jsonb object,
   // `to_jsonb(row)` minus a denylist. They are the narrowest thing on this list, not the widest:

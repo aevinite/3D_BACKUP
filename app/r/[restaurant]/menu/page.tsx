@@ -6,7 +6,7 @@
 // QR codes can point at /r/<slug>/menu?table=N — MenuView reads ?table / ?t.
 import { notFound, redirect } from "next/navigation";
 import MenuView from "@/components/MenuView";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import { getRestaurantBySlug, slugMovedTo, queryStringOf } from "@/lib/tenant";
 import { getSettings } from "@/lib/menu";
 
 // White-label: a guest's browser tab, its shared-link preview, AND its tab icon
@@ -63,6 +63,19 @@ export default async function RestaurantMenuPage({
 }) {
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
+  // ── AN OLD PRINTED QR CODE STILL FINDS THE RESTAURANT (mig 350) ──────────────────────────────
+  // This is the door a QR code actually opens, so it is the one that matters most. If the address is
+  // unknown, ask whether a restaurant used to answer on it and has since moved — and send the diner
+  // on WITH their query, because `?table=N` is the table they are sitting at.
+  //
+  // Only when the address resolves to NOTHING. A restaurant that exists but is switched off still
+  // gets notFound() below: it is not lost, it is closed, and a redirect would be a lie about that.
+  // lfh_slug_moved also refuses whenever a live restaurant holds the old address, so this can never
+  // take a diner away from the menu they meant to open.
+  if (!r) {
+    const moved = await slugMovedTo(restaurant);
+    if (moved) redirect(`/r/${moved}/menu${queryStringOf(await searchParams)}`);
+  }
   if (!r || !r.active) notFound();
   // MENU MASTER SWITCH (access rebuild): a restaurant whose Menu feature is off has no
   // guest menu at all — no QR menu, nothing for a diner to open. It must be genuinely
@@ -97,15 +110,9 @@ export default async function RestaurantMenuPage({
   // on /r/<Slug>/item/... never passes through here. That is a HANDOFF; this closes the door a QR
   // actually opens.
   if (restaurant !== r.slug) {
-    const sp = await searchParams;
-    const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(sp)) {
-      if (v == null) continue;
-      if (Array.isArray(v)) v.forEach((x) => qs.append(k, x));
-      else qs.append(k, v);
-    }
-    const s = qs.toString();
-    redirect(`/r/${r.slug}/menu${s ? `?${s}` : ""}`);
+    // queryStringOf (lib/tenant) — the SAME builder the moved-address redirect above uses, so the
+    // two doors on this page cannot drift apart on carrying `?table=N`.
+    redirect(`/r/${r.slug}/menu${queryStringOf(await searchParams)}`);
   }
   return (
     <>

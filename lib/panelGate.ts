@@ -13,7 +13,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, type Role } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { isPanelEnabled, isRestaurantDeleted } from "@/lib/panelAccess";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 
 // Where each role lands after login. The canonical copy — LoginForm keeps a
 // client-side duplicate (it can't import this server module).
@@ -115,7 +115,15 @@ export async function requirePanelAt(
   role: Role, slug: string,
 ): Promise<{ restaurantId: string; admin: boolean }> {
   const r = await getRestaurantBySlug(slug);
-  if (!r) notFound();
+  // ONE PLACE FOR ALL THREE SCOPED PANELS (mig 350). /r/<slug>/kitchen, /manager and /tablet all
+  // come through here, so a staff bookmark or a taped-up link to a restaurant's OLD address lands
+  // on its panel instead of a dead end. Only when the address resolves to nothing; a restaurant that
+  // exists but has this panel switched off is handled below, where it belongs.
+  if (!r) {
+    const moved = await slugMovedTo(slug);
+    if (moved) redirect(`/r/${moved}${ROLE_HOME[role]}`);
+    notFound();
+  }
   const store = await cookies();
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
   if (u && u.role === role && u.restaurant_id === r.id && r.active && (await isPanelEnabled(role, r.id))) {
