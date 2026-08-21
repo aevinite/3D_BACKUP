@@ -68,6 +68,7 @@
     "verify:owner-money": "node scripts/verify-owner-money-screens.mjs",
     "check:current": "node scripts/check-folder-current.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
+    "verify:split-payment": "node --experimental-strip-types --no-warnings scripts/verify-split-payment.mjs",
     "verify:tax-mode": "node --experimental-strip-types --no-warnings scripts/verify-tax-mode.mjs",
     "verify:t24-money-rules": "node --experimental-strip-types --no-warnings scripts/verify-t24-money-rules.mjs",
     "verify:guest-read": "node scripts/verify-guest-read.mjs",
