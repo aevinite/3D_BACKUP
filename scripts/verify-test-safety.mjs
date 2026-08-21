@@ -254,6 +254,92 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── 8. A TEST WRITE NAMES ITS RESTAURANT — BOTH WAYS ────────────────────────────────────────
+// THE SINGLE BIGGEST FAULT CLASS IN THIS FOLDER (sweep #6 / T28, 2026-08-22). This app went from one
+// restaurant to a shared pool, and the guards did not come with it. Two shapes, both measured:
+//
+//   · AN INSERT THAT OMITS restaurant_id IS REFUSED (23502), and nothing read the error, so the script
+//     crashed one line later on a null and every check after it simply never ran. FIVE guards were
+//     dead this way for weeks: verify-session-ux (11 checks), verify-edge-cases (14), verify-realtime
+//     (2 of 5), verify-tablet-parity (all 5), and verify-cancelled-tile-parity — whose dish rows were
+//     refused so quietly that its main check printed a ✓ over ZERO dishes.
+//
+//   · AN UPDATE OR DELETE FILTERED ON table_number ALONE REACHES EVERY RESTAURANT ON THE STACK.
+//     Table 9, 11 and 21 exist in all of them. `PATCH sessions?table_number=eq.11 {status:closed}`
+//     from verify-edge-cases' teardown measurably closed AND soft-deleted a table-11 session belonging
+//     to a DIFFERENT restaurant during this sweep. On a live one that ends the party's meal: the close
+//     trigger (mig 232) cancels and archives every unpaid live order on the session, silently.
+//
+// The check reads the ARGUMENT of the write, not "the lines nearby". Nearby was tried first and it let
+// both shapes through, because a neighbouring `.eq("restaurant_id", RID)` on an unrelated statement
+// satisfied it — a check that can be satisfied by the wrong line is not a check.
+{
+  const TENANT = "sessions|session_members|orders|order_items|requests|blocklist|customers|staff_actions|table_merges|feedback|reviews|calls|menu_items|categories|settings";
+  // From an opening bracket, the text up to its match. Quotes and template literals are skipped so a
+  // ")" inside a string cannot end the argument early.
+  const argOf = (src, open) => {
+    let d = 0, i = open, q = null;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (q) { if (c === "\\") i++; else if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(" || c === "[" || c === "{") d++;
+      else if (c === ")" || c === "]" || c === "}") { d--; if (d === 0) return src.slice(open, i + 1); }
+    }
+    return src.slice(open, Math.min(src.length, open + 800));
+  };
+  const lineOf = (src, idx) => src.slice(0, idx).split("\n").length;
+  const bad = [];
+  for (const f of files) {
+    // Comment TEXT is blanked but the characters are kept, so every line number this reports is the
+    // real one — and a file that explains this very rule in prose cannot fail its own check.
+    const src = read(f)
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      .replace(/^[ \t]*\/\/.*$/gm, (m) => " ".repeat(m.length));
+
+    // (a) .from("<tenant>") … .insert(/.upsert( — the chain is often broken across lines for width, so
+    // allow anything but a semicolon between the two.
+    for (const m of src.matchAll(new RegExp(`\\.from\\(\\s*["'\`](${TENANT})["'\`]\\s*\\)[^;]{0,200}?\\.(insert|upsert)\\(`, "g"))) {
+      const open = m.index + m[0].length - 1;
+      let arg = argOf(src, open);
+      // A seeder hands the insert a VARIABLE built by a .map() further up. Follow the name back.
+      const bare = arg.match(/^\(\s*([A-Za-z_$][\w$]*)\s*[,)]/);
+      if (bare && !/restaurant_id/.test(arg)) {
+        const def = src.match(new RegExp(`\\b(?:const|let|var)\\s+${bare[1]}\\s*=`));
+        if (def) arg += " " + argOf(src, src.indexOf("(", def.index) >= 0 ? def.index : def.index) + src.slice(def.index, def.index + 900);
+      }
+      if (!/restaurant_id/.test(arg)) {
+        bad.push(`${f}:${lineOf(src, m.index)} — ${m[2]}s into ${m[1]} without restaurant_id (a NOT NULL column: the write is REFUSED, and the refusal is easy to miss)`);
+      }
+    }
+
+    // (b) a REST path on a tenant table filtered by table_number. The scope may be spelled out or
+    // interpolated, so look for restaurant_id anywhere inside the SAME quoted path.
+    for (const m of src.matchAll(new RegExp(`["'\`](${TENANT})\\?([^"'\`]*table_number=eq\\.[^"'\`]*)["'\`]`, "g"))) {
+      const path = m[2];
+      const isWrite = /\b(patch|delete|put|post)\b/i.test(src.slice(Math.max(0, m.index - 90), m.index));
+      if (!isWrite) continue;                                    // a scoped READ is a different rule
+      if (/restaurant_id/.test(path) || /\$\{\s*scope\s*\}/.test(path)) continue;
+      bad.push(`${f}:${lineOf(src, m.index)} — writes to ${m[1]} filtered on table_number ALONE — that table number exists in EVERY restaurant on the stack`);
+    }
+
+    // (c) the supabase-js equivalent: .update(…)/.delete() keyed on table_number, whose chain never
+    // names restaurant_id. The chain ends at the semicolon, so nothing outside it can satisfy this.
+    for (const m of src.matchAll(new RegExp(`\\.from\\(\\s*["'\`](${TENANT})["'\`]\\s*\\)[^;]{0,400}?;`, "g"))) {
+      const chain = m[0];
+      if (!/\.(update|delete)\(/.test(chain)) continue;
+      if (!/\.eq\(\s*["'`]table_number["'`]/.test(chain)) continue;
+      if (/restaurant_id/.test(chain)) continue;
+      bad.push(`${f}:${lineOf(src, m.index)} — an update/delete on ${m[1]} keyed on table_number with no restaurant_id — it reaches every restaurant`);
+    }
+  }
+  check(
+    "every test write that names a tenant table also names its restaurant (an insert that omits it is REFUSED; an update that omits it reaches EVERY restaurant)",
+    bad.length === 0,
+    bad.join("\n    ") + "\n    Add restaurant_id to the row, and .eq(\"restaurant_id\", RID) / &restaurant_id=eq.<rid> to the filter.\n    Read the .error too: an unread refusal is how a guard goes green over zero rows.",
+  );
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
