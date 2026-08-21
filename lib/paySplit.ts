@@ -151,15 +151,33 @@ export async function settleBillInParts(
     session_id: sid, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
     method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
   }));
-  const ins = await sb.from("session_payments").insert(legs);
+  const ins = await sb.from("session_payments").insert(legs).select("id");
   if (ins.error) return { ok: false, message: ins.error.message, status: 500 };
+  const legIds = ((ins.data || []) as { id: string }[]).map((l) => l.id);
 
   const note = `${splits.length}-way split: ` + splits.map((s) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ");
   const ids = rows.map((o) => o.id);
   const upd = await sb.from("orders")
     .update({ payment_status: "paid", paid_at: new Date().toISOString(), payment_method: "Split", payment_note: note.slice(0, 200) })
     .in("id", ids).eq("restaurant_id", rid);
-  if (upd.error) return { ok: false, message: upd.error.message, status: 500 };
+  if (upd.error) {
+    // THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN (2026-08-21). The parts land first and the
+    // paid stamp second, and there is no transaction across the two. When the stamp failed, the legs
+    // were left standing: the bill stayed UNPAID while session_payments said ₹200 UPI + ₹200 Cash had
+    // been collected on it — so "how did table 6 pay?" answered for a settle that never happened, and
+    // the day's payment mix counted money nobody took. Stamp them reversed instead (mig 285's rule: a
+    // money record is corrected, never deleted), then still answer 500 so the person knows to retry.
+    if (legIds.length) {
+      try {
+        await sb.from("session_payments").update({
+          reversed_at: new Date().toISOString(),
+          reversed_by: "auto · the bill was not marked paid",
+          reversed_reason: "the settle failed after the parts were recorded",
+        }).in("id", legIds).eq("restaurant_id", rid);
+      } catch { /* best-effort: the 500 below is what tells the person, and nothing is deleted either way */ }
+    }
+    return { ok: false, message: upd.error.message, status: 500 };
+  }
 
   return { ok: true, count: ids.length, due, note, sessionId: sid, orderIds: ids };
 }
