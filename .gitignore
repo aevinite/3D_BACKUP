@@ -59,8 +59,13 @@ yarn-error.log*
 
 # local launcher scripts (machine-specific — never commit)
 *.bat
-# …EXCEPT the print-station launcher, which is a shipped deliverable: a restaurant's Windows counter
-# PC double-clicks it to open the kiosk print window (docs/KITCHEN-PRINT-SETUP.md).
+# The exception below is KEPT but is currently DEAD, and that is the honest state: there is no
+# public/print-station/ folder and nothing ships a .bat any more. We tried it and it failed —
+# macOS Gatekeeper and Windows SmartScreen flag a script because it ARRIVED FROM THE WEB, so the
+# owner met "could not verify it is free of malware" with only Done or Move to Bin. Since
+# 2026-08-19 /print-setup.html TEACHES the reader to type the file themselves, one menu per OS
+# (docs/KITCHEN-PRINT-SETUP.md §9; guarded by `npm run verify:print-helper`, which fails if
+# anything is offered as a download again). Do not re-add a ⬇ button on the strength of this line.
 !public/print-station/*.bat
 
 # typescript

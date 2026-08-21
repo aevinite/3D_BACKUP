@@ -136,9 +136,10 @@ after — 33 cancelled-order tickets retired themselves on the next two board re
 ## 8. Where the setup guide lives
 
 `public/print-setup.html`, served at **`/print-setup.html`**. Linked from the admin console's 🖨 KOT
-printing card and from the kitchen panel's 🖨❗ sheet, and it carries the two starter files as
-downloads plus its own save-as-PDF button. THIS file is the engineering record; that page is what a
-restaurant reads — keep them honest with each other.
+printing card and its Printing screen, the owner's settings screen and the kitchen panel's 🖨❗ sheet.
+It **offers nothing to download** — it teaches the reader to make the one small file by hand, one
+menu per operating system — and it has its own save-as-PDF button. THIS file is the engineering
+record; that page is what a restaurant reads — keep them honest with each other.
 
 ## 9. macOS blocks a downloaded script — and the URL trap behind it (2026-08-19)
 
@@ -151,22 +152,35 @@ There was a quieter second fault in the same file: its `URL=` line pointed at th
 every restaurant had to find and edit it. **A wrong URL and a blocked file look identical to the person
 standing at the printer** — "nothing happens".
 
-Both are fixed by generating the starters instead of shipping them:
+### The first fix was WRONG, and the second one is the live answer
 
-- `lib/printStation.ts` holds the three scripts, once. `app/api/print-station/[file]/route.ts` fills in
-  **the host it was downloaded from** (`x-forwarded-host`) and the panel (`?panel=manager` for a
-  counter screen, which also names the file `print-station-counter-…`). Nothing to edit, ever.
-- The Mac script's own header now tells the reader what to do if macOS blocks it —
-  `bash ~/Downloads/print-station-mac.command`, or `xattr -d com.apple.quarantine` once to make it
-  double-clickable for ever.
-- The guide leads with a **one-line Terminal command** (no file at all, so no Gatekeeper), keeps the
-  file route as option B, and has a **Copy button on every command block** — a hand-retyped Chrome
-  command line is how a flag goes missing.
-- Windows SmartScreen and Linux `chmod` are answered in the same troubleshooting table.
+**Attempt 1 (2026-08-19, morning) — generate the starter instead of shipping it.** `lib/printStation.ts`
+held the three scripts and `app/api/print-station/[file]/route.ts` filled in the host it was downloaded
+from, so nothing had to be edited by hand. It did not work, and it could not have: **Gatekeeper flags
+every script that arrives from the web, generated or not.** A freshly minted `.command` is downloaded
+just the same, so the person at the printer met the identical "could not verify" dialog. Windows
+SmartScreen does the same thing for the same reason.
 
-Guarded by `verify:print-queue`: the generator must cover all three platforms, must fill in the
-requesting host, must keep `--kiosk-printing` and `--disable-backgrounding-occluded-windows`, and the
-guide must still answer the "could not verify" dialog.
+**Attempt 2 (2026-08-19, evening) — teach the file by hand. THIS IS THE LIVE DESIGN.** A file the
+person types themselves carries no download flag at all, so there is nothing for Gatekeeper or
+SmartScreen to refuse. Commit `606b8969`:
+
+- **the download is gone everywhere** — the guide, the admin console, the manager panel and the owner
+  panel. `lib/printStation.ts` and `app/api/print-station/` were DELETED. Do not re-create them, and
+  do not re-add a ⬇ button anywhere: that is the change that put the owner in front of the dialog.
+- `public/print-setup.html` opens with a picker — *"Which computer is the printer plugged into?"* —
+  and then shows **one section per OS**: Windows (Notepad → `print-station.bat`), Mac (TextEdit →
+  `print-station.command`), Linux / Raspberry Pi (nano → `print-station.sh`). Picking one hides the
+  other two, the choice sticks, a link into a hidden menu opens it first, and a saved PDF still holds
+  all three.
+- every menu is the same six steps, click by click, with a **Copy button on every command block** — a
+  hand-retyped Chrome command line is how `--kiosk-printing` goes missing.
+- the page writes **the reader's own site address** into every command, read from the host it was
+  served from, so there is no `URL=` line left to find and edit.
+
+Guarded by `verify:print-helper`, which asserts all three operating systems get a by-hand menu **and
+that nothing is offered as a download**, and by `verify:print-queue` for the flags the command must
+keep. If you are about to make this easier by shipping a file: read this section again.
 
 ## 10. One screen is the printer (mig 338, 2026-08-19)
 
