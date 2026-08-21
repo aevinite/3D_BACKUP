@@ -1,4 +1,10 @@
--- 311_the_setup_script_cannot_hurt_a_live_table.sql
+-- 313_the_setup_script_cannot_hurt_a_live_table.sql
+-- (Header renumbered 311 → 313 by sweep T23, 2026-08-21: the file has always been 313 — it was
+--  written as 311 and renumbered on merge — but the first line still said 311, which points a
+--  reader at 311_the_audit_is_kept_for_years_not_days.sql. The LEDGER KEY below deliberately
+--  keeps its original spelling, `311_require_otp_backfill`: it is already recorded in
+--  lfh_applied_once on every live database and renaming it would make the guard stop matching,
+--  i.e. run the backfill again. Comment only; not one statement changes.)
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- Six of the ten problems the T8 sweep of migrations 001–150 found, fixed at the source. Each
 -- section says WHERE a real person would have met it before naming a file (owner's rule,

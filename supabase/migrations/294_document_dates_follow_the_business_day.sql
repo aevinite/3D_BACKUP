@@ -1,4 +1,10 @@
--- 290: an inventory report for "Yesterday" must cover ONE day, not two
+-- 294_document_dates_follow_the_business_day.sql
+-- (Header renumbered 290 → 294 by sweep T23, 2026-08-21: the file has always been 294 — it was
+--  written as 290 and renumbered on merge — but the first line still said 290, which points a
+--  reader at 290_the_blocked_guest_must_be_told.sql, a completely unrelated migration. Comment
+--  only; not one statement changes.)
+--
+-- An inventory report for "Yesterday" must cover ONE day, not two
 --
 -- Purchases, waste and expenses carry a DATE (bill_date / waste_date / expense_date), not an
 -- instant, so mig 227 turns the window of instants into a first/last calendar date. Its rule for
