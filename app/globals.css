@@ -36,6 +36,15 @@
      the accent itself. The light skin darkens it — see [data-theme="light"]. */
   --accent-ink: var(--accent);
   --accent-ink-dim: var(--accent-dim);
+  /* THE HAIRLINE COLOUR ON ITS OWN. --border is the whole `1px solid rgba(...)` shorthand, so a rule
+     that needs only the colour (a border-top, a border-bottom) cannot reuse it — and five rules on
+     the BILL panel read `var(--border-color, rgba(212,165,116,0.18))` for a token nothing declared,
+     so the hardcoded fallback won every time. That fallback is the LIGHT skin's tan at 0.18, which
+     meant the bill's edges were the wrong skin's colour in the dark one (1.49:1 where every other
+     card reads 1.80:1) and all but invisible in the light one (1.09:1 against 1.31:1). Declared here
+     as the colour half of --border, so the bill panel's edges are the same hairline as every other
+     card on the menu. T26 sweep, 2026-08-22, measured on the running bill in both skins. */
+  --border-color: rgba(227, 192, 111, 0.22);
 }
 
 [data-theme="light"] {
@@ -61,6 +70,7 @@
      being replaced by a fixed brown. */
   --accent-ink: color-mix(in srgb, var(--accent) 55%, #000);
   --accent-ink-dim: color-mix(in srgb, var(--accent) 62%, #000);
+  --border-color: rgba(139, 90, 43, 0.2);   /* the colour half of this skin's --border — see :root */
 }
 
 * { box-sizing: border-box; }
@@ -282,7 +292,7 @@ body.menu-scrolling .chef-call {
   position: sticky; top: 0; z-index: 6;
   display: flex; align-items: center; justify-content: space-between;
   padding: 20px 0 14px; margin: 0 0 16px;
-  background: var(--bg); border-bottom: 1px solid var(--border-color, rgba(212,165,116,0.18));
+  background: var(--bg); border-bottom: 1px solid var(--border-color);
 }
 .cart-back {
   display: inline-flex; align-items: center; gap: 8px;
@@ -339,11 +349,11 @@ body.menu-scrolling .chef-call {
 .cart-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .cart-tabs button {
   flex: 1; padding: 9px 12px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 13px;
-  background: transparent; border: 1px solid var(--border-color, rgba(212,165,116,0.3)); color: var(--muted);
+  background: transparent; border: 1px solid var(--border-color); color: var(--muted);
 }
 .cart-tabs button.active { background: var(--accent); border-color: var(--accent); color: #2a1d0c; }
 .order-history { display: flex; flex-direction: column; gap: 12px; }
-.hist-order { border: 1px solid var(--border-color, rgba(212,165,116,0.2)); border-radius: 14px; padding: 14px; }
+.hist-order { border: 1px solid var(--border-color); border-radius: 14px; padding: 14px; }
 .hist-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .hist-table { font-weight: 700; color: var(--text); }
 .hist-when { font-size: 11px; color: var(--muted); margin-left: auto; }
@@ -361,7 +371,7 @@ body.menu-scrolling .chef-call {
 .hist-line-opts { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
 .hist-line-qty { flex: none; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .hist-line-more { background: none; border: none; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 0 0 8px; align-self: flex-start; }
-.hist-total { display: flex; justify-content: space-between; font-weight: 700; color: var(--text); border-top: 1px solid var(--border-color, rgba(212,165,116,0.15)); padding-top: 8px; }
+.hist-total { display: flex; justify-content: space-between; font-weight: 700; color: var(--text); border-top: 1px solid var(--border-color); padding-top: 8px; }
 
 /* cancelled bill: greyed + a clear label */
 .hist-order.hist-cancelled { opacity: 0.6; }
@@ -2761,7 +2771,7 @@ a *:active,
   flex-shrink: 0;
   padding-top: 14px;
   margin-top: 6px;
-  border-top: 1px solid var(--border-color, rgba(212,165,116,0.18));
+  border-top: 1px solid var(--border-color);
   background: var(--card);
 }
 @keyframes confirmIn {
