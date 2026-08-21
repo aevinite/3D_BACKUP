@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **97** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **134** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 96 names in their head, so in practice a person runs none of them, or reaches for
+can hold 134 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -81,8 +81,10 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | a permission gate in the panel | `verify:manager-gates`, `verify:manager-hidden` | `.env.local` | no |
 | the "Edit the menu" sub-switches | `verify:menu-parts`, then `verify:menu-parts-live` | nothing / app running | no |
 | Bills, a bill's money, a discount | `verify:audit`, `verify:one-number`, `verify:tax-mode` | nothing / `.env.local` | no |
+| **splitting one bill between people** — the amounts, the ways to pay, or a part put on a tab | `verify:split-payment` ← the parts must add to the bill the SERVER recomputed (never the browser's figure), one rounding feeds both the check and the stored row, and a Pay-later part owes only its own slice on the khata (migration 352). Manager panel and waiter tablet → a table → Mark paid → Split payment; then owner → Pay Later. | nothing | no |
+| **any of the money or safety libraries** — `lib/tax*.ts`, `lib/paySplit.ts`, `lib/clash*.ts`, `lib/idempotency*.ts`, `lib/logTrail.ts`, `lib/userAuth.ts`, `lib/rateLimit.ts` | `verify:t24-money-rules` ← the permanent regression guard for every phase of the T24 sweep that a script can answer. It calls the REAL functions through a `@/` resolver rather than re-implementing the rule, because a guard that re-implements what it checks proves nothing about the code that ships. | nothing | no |
 | the tax on a real bill, end to end (incl. an MRP bottle) | `verify:tax-mode-e2e`, `test:totals` (client maths vs the server's, to the cent) | `.env.local` | `verify:tax-mode-e2e` **YES** |
-| **cancelling an order** — the "was the food made?" answer, the loss it records, or migration 355 | `verify:cancel-loss` ← the answer is read off the row where answers live (not the `order_cancelled` row, which is how a correction stopped being marked as one), and a record-only loss is never summed twice by the Audit screens. Makes its own order, stock and audit rows and deletes each BY ID. | `.env.local` | **YES** |
+| **cancelling an order** — the "was the food made?" answer, the loss it records, or migration 340 (`340_was_the_food_actually_made.sql`, renumbered from 337) | `verify:cancel-loss` ← the answer is read off the row where answers live (not the `order_cancelled` row, which is how a correction stopped being marked as one), and a record-only loss is never summed twice by the Audit screens. Makes its own order, stock and audit rows and deletes each BY ID. | `.env.local` | **YES** |
 | ↳ the same answer driven through the REAL endpoint (`PATCH /api/editor/orders/<id>`), not the RPC | `verify:cancel-made` ← asserts the EFFECTS — a real expense row, a real stock reversal — because the first wiring called the classifier before the row was cancelled, so the RPC refused, returned `{ok:false}`, and nothing failed and nothing was logged. | app running + `.env.local` | **YES** |
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
 | ↳ a bill printed a second time | `verify:bill-reprint` ← a reprint is a PRINT, not a new bill: same numbers, same totals, and it says DUPLICATE on the paper (added by another session, 2026-08-19; row added here so the map stays complete) | nothing | no |
