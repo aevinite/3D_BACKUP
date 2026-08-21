@@ -19,7 +19,12 @@ import fs from "node:fs";
 // (owner, 2026-08-02: "diagnose everything that you have built, it is working fine or not").
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const B = ARG("--base", "http://localhost:4937");
-const env = fs.readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8");
+// THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
+// /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
+// sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
+// folder asserts against whatever stack THAT copy is pointed at, which may be the other backup stack
+// entirely. A check that tests something other than what you asked for is worse than no check.
+const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 // The database follows the site: backup-2 runs its own Supabase project, so testing that URL against
 // backup-1's database would assert on rows the site never sees. --db picks the project ref.
