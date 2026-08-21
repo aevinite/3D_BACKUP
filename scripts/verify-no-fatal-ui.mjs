@@ -29,9 +29,13 @@
 //   · console / page errors
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "https://3-d-backup.vercel.app";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the no-fatal-UI sweep");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NOISE = /Failed to load resource|net::ERR|DevTools|GoTrueClient|favicon|sentry\.io|Download the React|status of 4(0|1|3)|preload|model/i;
 
