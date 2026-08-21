@@ -37,6 +37,34 @@ const PARENT = "27", CHILD = "28", BOTH = `'${PARENT}','${CHILD}'`;
 let fails = 0;
 const check = (name, ok, detail = "") => { console.log(`  ${ok ? "ok  " : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails++; };
 
+// THE REMOVAL SHEET ASKS **TWO** QUESTIONS NOW, AND BOTH ARE REQUIRED (owner, 2026-08-18: "while kot
+// delete button there will be one thing order was mode and order was not made like in red they have to
+// choose"). askRemovalReason(what, { askMade: true }) — which is what cancelOrder passes — adds "Was
+// the food actually made?" above the reason grid, and its `sync()` keeps the Remove button disabled
+// until BOTH are answered. `go.onclick` then returns early while disabled.
+//
+// This guard answered only the reason, clicked Remove into a dead button, and reported three failures
+// on behaviour that is exactly right: "the parent's ticket really was voided" and both halves of the
+// solo walk-out. The two answers do completely different things to the kitchen's stock — cooked means
+// the ingredients are gone, never started puts them back — so neither may be guessed, and a guard that
+// skips one is testing a flow no waiter can perform. Answer both, the way a waiter does.
+async function answerRemovalSheet(fr, page, { made = false, code = "mistake" } = {}) {
+  const madeBtn = fr.locator(`.rr-made-opt[data-made="${made ? 1 : 0}"]`).first();
+  if (await madeBtn.count()) { await madeBtn.click({ force: true }); await page.waitForTimeout(400); }
+  const reason = fr.locator(`.rr-opt[data-code="${code}"]`).first();
+  await reason.waitFor({ timeout: 15000 });
+  await reason.click({ force: true });
+  await page.waitForTimeout(600);
+  const go = fr.locator(".rr-go").first();
+  // A disabled Remove means a question is still unanswered — say which, instead of clicking a dead
+  // button and blaming the app eleven seconds later.
+  if (await go.isDisabled().catch(() => false)) {
+    const asked = (await fr.locator(".rr-modal").first().innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+    throw new Error("the removal sheet still refuses Remove after both answers — it is asking something new: " + asked);
+  }
+  await go.click({ force: true });
+}
+
 const wipe = async () => {
   await q(`delete from table_merges where restaurant_id='${RID}' and (child_table in (${BOTH}) or parent_table in (${BOTH}))`);
   await q(`update orders set status='cancelled', archived=true, archived_at=now(), cancelled_at=now()
@@ -120,13 +148,7 @@ check("the parent's own ticket offers ✕ Cancel", (await cancelBtn.count()) > 0
 if ((await cancelBtn.count()) > 0) {
   await cancelBtn.click({ force: true });
   await p.waitForTimeout(1500);
-  // The reason sheet (mig 251): pick "By mistake", then Remove. `.rr-go` starts disabled until a
-  // reason is chosen, which is itself the confirmation — there is no second yes/no.
-  const reason = fr.locator('.rr-opt[data-code="mistake"]').first();
-  await reason.waitFor({ timeout: 15000 });
-  await reason.click({ force: true });
-  await p.waitForTimeout(600);
-  await fr.locator(".rr-go").first().click({ force: true });
+  await answerRemovalSheet(fr, p);
   await p.waitForTimeout(11000);
 }
 
@@ -161,11 +183,7 @@ check("the solo ticket offers ✕ Cancel", (await soloCancel.count()) > 0);
 if ((await soloCancel.count()) > 0) {
   await soloCancel.click({ force: true });
   await p.waitForTimeout(1500);
-  const r2 = fr.locator('.rr-opt[data-code="mistake"]').first();
-  await r2.waitFor({ timeout: 15000 });
-  await r2.click({ force: true });
-  await p.waitForTimeout(600);
-  await fr.locator(".rr-go").first().click({ force: true });
+  await answerRemovalSheet(fr, p);
   await p.waitForTimeout(11000);
 }
 solo = await snap();
