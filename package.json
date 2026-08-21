@@ -69,6 +69,7 @@
     "check:current": "node scripts/check-folder-current.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "verify:tax-mode": "node --experimental-strip-types --no-warnings scripts/verify-tax-mode.mjs",
+    "verify:t24-money-rules": "node --experimental-strip-types --no-warnings scripts/verify-t24-money-rules.mjs",
     "verify:guest-read": "node scripts/verify-guest-read.mjs",
     "verify:tax-mode-e2e": "node scripts/verify-tax-mode-e2e.mjs",
     "verify:merge": "node scripts/verify-merge-party.mjs",
