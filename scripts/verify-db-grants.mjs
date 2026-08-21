@@ -135,7 +135,12 @@ const ANON_ALLOWED = {
   lfh_check_ban:              "the guest menu asks whether THIS device is blocked, on load (mig 290)",
   lfh_send_otp:               "guest phone verification (answers 'disabled' while the feature is off)",
   lfh_verify_otp:             "guest phone verification",
-  lfh_request_verification:   "mig-037 verification stub",
+  // lfh_request_verification was here until 2026-08-21 as "mig-037 verification stub". Migration
+  // 354 dropped it: the surviving half of a retired pair, reachable with the public menu key, with
+  // zero callers. Its partner lfh_check_verification was removed by mig 267, restored by mistake
+  // by 296, removed again by 297, and a fourth route back (running mig 040 alone) was closed by
+  // the migrations-001-118 sweep. Do not re-add the entry — the live phone path is lfh_send_otp /
+  // lfh_verify_otp over `otp_codes`.
   get_order_status:           "guest polls their order's status + KOT number; no money in the result",
   set_order_table_number:     "narrow relabel: digits only, refuses session orders, derives the restaurant from the order (migs 007/051)",
 
