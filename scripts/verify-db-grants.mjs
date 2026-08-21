@@ -377,11 +377,6 @@ function checkMigrations() {
        + "take 347.",
     347: "skipped with 346, as headroom for the second of the two colliding 346s to be renumbered "
        + "into. Expected to be filled, not to stay a gap.",
-    // ── skipped to get OUT of a live collision (2026-08-21) ──
-    351: "skipped on purpose. The branch fix/complaint-knows-its-printer holds an uncommitted "
-       + "351_a_complaint_knows_its_printer.sql on disk, and main had just taken 350, so the "
-       + "migrations-001-118 sweep moved its own file to 352 rather than collide. Expected to be "
-       + "FILLED by that branch, not to stay a gap — this line goes away when it merges.",
   };
   const gaps = [];
   for (let n = nums[0]; n < nums[nums.length - 1]; n++) if (!byNum[String(n).padStart(3, "0")]) gaps.push(n);
