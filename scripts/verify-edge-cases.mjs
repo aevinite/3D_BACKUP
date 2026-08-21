@@ -197,10 +197,19 @@ try {
   // era. With no EDITOR_PASSWORD the call went out with NO cookie at all, so a 401 would have satisfied
   // a check that is about a CLOSED TABLE being refused. adminHeaders() presents the gate cookie and
   // makes zero login requests, so nothing here can ever count against a limit or alert the owner.
-  const mh = await fetch(`${BASE}/api/editor/members/${pend.id}/make-head`, {
+  //
+  // ?rid= IS NOT OPTIONAL, AND ITS ABSENCE MADE THIS CHECK PASS FOR THE WRONG REASON. Every
+  // /api/editor write resolves its restaurant through lib/panelScope → panelRestaurantId: from the
+  // staff user for a member of staff, from ?rid= (or the act-as cookie) for the admin super-user. With
+  // neither, editorScope answers 400 "No restaurant scope" — the same 400 this line is looking for. So
+  // it would have gone green on a build where make-head happily promoted a head on a CLOSED table. The
+  // refusal is now read from the words as well as the number, so no other 400 can satisfy it.
+  const mh = await fetch(`${BASE}/api/editor/members/${pend.id}/make-head?rid=${RID}`, {
     method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders(BASE) },
   });
-  check(mh.status === 400, `make-head on a closed table is refused (got ${mh.status})`);
+  const mhSaid = await mh.text();
+  check(mh.status === 400 && /not open/i.test(mhSaid),
+    `make-head on a closed table is refused BECAUSE the table is closed (got ${mh.status} ${JSON.stringify(mhSaid.slice(0, 80))})`);
 
   // ── 5. DOUBLE-TAP "Ask to join" must not create the same guest twice ───────
   sess = await newSession();
