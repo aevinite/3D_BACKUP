@@ -8,6 +8,7 @@
 // restored. All three delete entry points (tablet orders/:id/delete, editor bulk
 // clear, editor single order_delete) funnel through here so the rule can't drift.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { readInChunks } from "@/lib/inChunks";
 
 const nowIso = () => new Date().toISOString();
 
@@ -75,10 +76,35 @@ export async function softDeleteOrders(
   // their bills still read as running. One read finds the sessions that still have live orders;
   // everything else in the batch is tombstoned in a single update.
   if (sessionIds.length) {
-    const stillLive = (await sb.from("orders").select("session_id")
-      .in("session_id", sessionIds).is("deleted_at", null).eq("restaurant_id", rid)).data as
-      { session_id: string | null }[] | null;
-    const busy = new Set((stillLive || []).map((o) => o.session_id).filter(Boolean) as string[]);
+    // ── THE "WHO IS STILL BUSY" READ MUST NOT COME BACK SHORT (T25 sweep, 2026-08-21) ─────────────
+    //
+    // This decides which bills get tombstoned, and it FAILS IN THE DANGEROUS DIRECTION: a session
+    // that is missing from `busy` is treated as having no live orders left, so it is marked deleted
+    // while its orders are still alive. That is exactly the half-state the note above this function
+    // says silently persisted for months — the ledger showing a bill as deleted while the floor
+    // shows its food live.
+    //
+    // Two ways it could come back short, both MEASURED on this stack (see lib/inChunks.ts):
+    //   · an `.in()` list of 800 ids is 29.6 KB of URL and PostgREST answers "Bad Request";
+    //   · a select with no `.limit()` is silently capped at 1,000 rows — and this read returns ONE
+    //     ROW PER LIVE ORDER, not per session, so a few hundred sessions with a handful of live
+    //     orders each is enough to cross it.
+    //
+    // So it is chunked, every chunk is limited, and a failed chunk is an ERROR that aborts the
+    // tombstone rather than a shorter list. `.limit(1000)` per chunk, not `chunk.length`: the rows
+    // are orders, so there are legitimately more of them than there are ids.
+    //
+    // (The bulk clear that made this large was removed from the manager panel on the same day —
+    // owner, 2026-08-21 — but this function is still reachable from the ADMIN bill ledger with a
+    // long selection, and a delete path must be right on its own terms, not because its biggest
+    // caller happens to have gone away.)
+    const live = await readInChunks<{ session_id: string | null }>(sessionIds, (chunk) =>
+      sb.from("orders").select("session_id")
+        .in("session_id", chunk).is("deleted_at", null).eq("restaurant_id", rid).limit(1000));
+    if (live.error) {
+      throw new Error(`bill tombstone check failed: ${(live.error as { message?: string })?.message ?? String(live.error)}`);
+    }
+    const busy = new Set((live.rows || []).map((o) => o.session_id).filter(Boolean) as string[]);
     const toTombstone = sessionIds.filter((sid) => !busy.has(sid));
     if (toTombstone.length) {
       const sUpd = await sb.from("sessions").update(sessionStamp)

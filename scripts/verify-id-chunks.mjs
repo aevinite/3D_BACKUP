@@ -46,6 +46,12 @@ const ESTATE_READERS = {
   // Not routed through lib/inChunks because it predates it and chunks itself, at 500, with
   // `.limit(part.length)` — the shape lib/inChunks.ts was derived FROM. Checked for its own loop.
   "lib/restaurantNames.ts": ["restaurantNames"],
+  // NOT an estate read, but the SAME failure mode pointed at a delete. `softDeleteOrders` decides
+  // which bills to tombstone from "which of these sessions still has a live order", and a SHORT
+  // answer there marks a bill deleted while its food is live — the half-state that function's own
+  // header says persisted for months. It returns one row per ORDER, so it crosses the 1,000-row cap
+  // sooner than an estate read does. (T25 sweep, 2026-08-21.)
+  "lib/softDelete.ts": ["softDeleteOrders"],
 };
 
 // What counts as chunked: the shared helper, or restaurantNames' own equivalent loop.
@@ -59,12 +65,43 @@ const CHUNKED = /readInChunks|for\s*\(\s*let\s+i\s*=\s*0;\s*i\s*<\s*unique\.leng
 // A raw `.in(` whose argument is NOT a chunk variable — the shape that breaks at ~800 ids.
 const RAW_IN = /\.in\(\s*["'][^"']+["']\s*,\s*(?!chunk\b|part\b)([A-Za-z_$][\w$]*)/g;
 
-/** The source of one function, from its `export ... name(` to the matching close brace. */
+/**
+ * The source of one function, from its `export ... name(` to the matching close brace.
+ *
+ * ⚠️ IT MUST WALK PAST THE PARAMETER LIST FIRST, and the first version did not — it took
+ * `src.indexOf("{", start)`, which for
+ *
+ *     export async function softDeleteOrders(rid, ids, meta): Promise<{ deleted: number }> {
+ *
+ * lands on the brace inside the RETURN TYPE. The "body" was then `{ deleted: number }`, which
+ * contains no read at all, so the guard reported a correctly-chunked function as unchunked. Third
+ * time a regex in one of this sweep's guards accused working code; each was caught the same way,
+ * by running the guard against the file it names before believing it.
+ */
 function bodyOf(src, name) {
   const start = src.search(new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${name}\\s*[(<]`));
   if (start < 0) return null;
-  let i = src.indexOf("{", start);
+  // 1. paren-match the parameter list, so a `{` in the return type cannot be mistaken for the body.
+  let i = src.indexOf("(", start);
   if (i < 0) return null;
+  let parens = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === "(") parens++;
+    else if (src[i] === ")") { parens--; if (parens === 0) { i++; break; } }
+  }
+  // 2. …and then past the RETURN-TYPE ANNOTATION, because that can contain a brace too:
+  //    `): Promise<{ deleted: number }> {` — the first `{` after the params is inside the generic,
+  //    not the body. Track angle depth and take the first brace at depth 0. (Paren-matching alone
+  //    was not enough; this was the second half of the same bug.)
+  let angle = 0;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (c === "<") angle++;
+    else if (c === ">") { if (angle > 0) angle--; }
+    else if (c === "{" && angle === 0) break;
+    else if (c === "=" && src[i + 1] === ">") i++;      // an arrow in a default value, not a generic
+  }
+  if (i >= src.length) return null;
   let depth = 0;
   for (; i < src.length; i++) {
     if (src[i] === "{") depth++;
@@ -106,6 +143,12 @@ Route it through lib/inChunks.ts:
       sb.from("settings").select(COLS).in("restaurant_id", chunk).limit(chunk.length));
     if (error) return /* say you could not read it — never a short list */;
 `);
+  process.exit(1);
+}
+
+if (bad.length) {
+  console.log(`\n✗ verify:id-chunks — ${bad.length} problem(s):\n`);
+  for (const b of bad) console.log("  · " + b);
   process.exit(1);
 }
 
