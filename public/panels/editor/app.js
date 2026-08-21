@@ -5404,6 +5404,18 @@ async function printZReport() {
   try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
   const di = z.dineIn;
   const row = (l, v, b) => `<div class="zr${b ? " b" : ""}"><span>${esc(l)}</span><span>${v}</span></div>`;
+  // A RECORDED ACT IS STATED, NOT ACCUSED (mig 353). A bill in the recycle bin, a sale cancelled
+  // after its invoice was issued, and a bill record that is gone all fail the ledger's "does it
+  // still add up?" test — and all three are permitted, recorded and reversible. They used to arrive
+  // as `bill_changed` and print as "⚠ Bill ledger — 11 problems", which is how a manager learns to
+  // stop reading the one line that matters. They are still on the sheet, in plain words, and they no
+  // longer make the ledger read as broken. `notes` is empty on a database without mig 353, so a
+  // panel served from cache against an older database prints exactly what it prints today.
+  const zChainNotes = (c) => ((c && c.notes) || []).map((p) => row(
+    p.kind === "bill_binned" ? `  bill #${p.bill_no ?? "—"} is in the recycle bin`
+    : p.kind === "bill_cancelled" ? `  bill #${p.bill_no ?? "—"} was cancelled after invoicing`
+    : `  bill #${p.bill_no ?? "—"} — its record is gone`,
+    esc(String(p.detail || "")).slice(0, 60))).join("");
   const w = window.open("", "_blank", "width=440,height=" + Math.min(960, Math.max(620, (screen.availHeight || 900) - 80)));
   if (!w) { toast("Allow pop-ups to print the report", "err"); return; }
   w.document.write(`<!doctype html><title>Day-close Z report — ${esc(z.date)}</title>
@@ -5485,12 +5497,14 @@ ${/* THE DAY'S BILL LEDGER, VERIFIED (mig 332, owner 2026-08-16). Every issued i
         ? row("Bill ledger", "could not be checked")
         : z.chain.ok
           ? row("Bill ledger", `✓ ${z.chain.bills} bill${z.chain.bills === 1 ? "" : "s"} verified`, true)
+            + zChainNotes(z.chain)
           : row("⚠ Bill ledger", `${z.chain.problems.length} problem${z.chain.problems.length === 1 ? "" : "s"} — tell the owner`, true)
             + (z.chain.problems || []).map((p) => row(
                 p.kind === "bill_changed" ? `  bill #${p.bill_no ?? "—"} changed after signing`
                 : p.kind === "chain_broken" ? `  an entry before #${p.bill_no ?? "—"} is missing`
                 : `  entry #${p.bill_no ?? "—"} was rewritten`,
-                esc(String(p.detail || "")).slice(0, 60))).join(""))
+                esc(String(p.detail || "")).slice(0, 60))).join("")
+            + zChainNotes(z.chain))
     : ""}
 <div class="grand"><span>GRAND TOTAL</span><span>${inr(z.grandTotal)}</span></div>
 <div class="foot">Computer-generated day-close report</div>
