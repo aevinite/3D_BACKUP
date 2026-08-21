@@ -82,3 +82,8 @@ NOTIFY pgrst, 'reload schema';
 -- A FULL re-seed ends correctly (267 and 297 both sort after this file). This closes the
 -- partial-run route so the next reader does not have to discover it a fourth time. Idempotent.
 DROP FUNCTION IF EXISTS lfh_check_verification(text, text);
+-- And its PARTNER, retired by migration 354 (owner, 2026-08-21). This file creates
+-- lfh_request_verification(text, text) and GRANTs it to anon a few lines up, so running it alone
+-- put a code-issuing door back beside the real one. Both halves of the mig-037 stub are now gone,
+-- by every route. The live phone path is lfh_send_otp / lfh_verify_otp over `otp_codes`.
+DROP FUNCTION IF EXISTS lfh_request_verification(text, text);
