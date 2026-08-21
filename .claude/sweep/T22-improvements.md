@@ -1,6 +1,9 @@
 # Sweep #6 · Terminal 22 — improvement ideas
-Territory: `supabase/migrations/` positions 121–230. None of these was built: every one needs a
-migration, which §6 of the sweep rules keeps as a decision for the owner.
+Territory: `supabase/migrations/` positions 121–230.
+
+**STATUS: the owner approved all four on 2026-08-22 ("do all the things you told in the need
+decision"), and all four are now BUILT and verified on this branch.** They are kept here with the
+reasoning that led to them, and each now ends with what was actually done.
 
 ## I1 · Take the leftover public GRANTs off the 23 server-only tables this range creates
 `agent_runs`, `app_config`, `banquet_items`, `customer_devices`, `customer_visits`, `expenses`,
@@ -44,3 +47,30 @@ the next `CREATE OR REPLACE` that forgets the SET line is caught the same day.
 **Effort:** ~30 lines added to an existing `verify:*` script. **Risk:** none to the product.
 **Why it is not built:** `scripts/` is outside this territory. Ledger row P10609 does the check;
 this asks for it to live in the repo's own guards.
+
+
+---
+
+# What was built, 2026-08-22
+
+* **I1 → migration `358_the_server_only_tables_lose_their_leftover_public_grant.sql`.** 23 REVOKEs,
+  derived from the database rather than typed, so the list is exactly the tables that still carried
+  a public grant with RLS on and no policy. Checked first that every call site for all 23 lives in
+  `app/api/**` or `lib/**` and goes through the service-role client — including the one outlier,
+  `app/q/[code]/page.tsx` reading `table_qr_codes`, which uses `supabaseAdmin`. Applied; the list
+  re-derived afterwards is empty. Nine database guards re-run green.
+* **I2 → migration `359_…` part A.** Two columns lacked the check, not one: `tablet_take_orders`
+  (mig 178) and `tablet_parcel` (mig 197), against seven siblings that have it. Repair-then-
+  constrain, so it cannot fail on existing data. Proved: a nonsense value is refused by the
+  database, all three real values still accepted, the row restored.
+* **I3 → migration `359_…` part B.** The nightly prune now forgets rate-limit counters whose window
+  is provably closed — the window resolved the same way `lfh_rate_check` resolves it, plus a day.
+  Events are untouched. Proved with a seeded 8-day-old counter and a live one: the dead one went,
+  the live one stayed. 156 counters → 17 on the dev stack.
+  **A bug of my own, caught by running it:** the first version aliased the rules table `r`, which
+  PL/pgSQL resolves to the function's existing `DECLARE r RECORD` loop variable — the prune failed
+  with `record "r" has no field "window_seconds"`. Aliased `rr`, re-applied, re-proved.
+* **I4 → `scripts/verify-db-grants.mjs`.** A check that all eleven owner-analytics functions still
+  carry their own `work_mem`, with the whole story in the comment so the next reader knows why a
+  passing-looking migration can still lose it. No new script and no `package.json` change, so it
+  cannot collide with another terminal.

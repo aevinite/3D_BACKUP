@@ -71,20 +71,36 @@ migrations 206 and 207 used, so nothing newer is reverted.
 
 ---
 
-## 🔗 HANDOFFS — the fix lives outside this territory
+## 🔗 HANDOFFS
 
-**H1 · `scripts/verify-db-grants.mjs` — declare the 350–354 gap.**
-`npm run verify:grants` is green on every grant, policy, cron and function check and fails on ONE
-thing: migration numbers 350–354 are missing from the sequence, because this terminal was given
-355–359 and the earlier block was never written. Add those numbers to `KNOWN_GAPS` (around line
-353) with the reason — only the merge terminal can see which of 350–354 other terminals actually
-used.
+**H1 · the 350–354 sequence gap — RESOLVED, no action needed.**
+`verify:grants` failed because migration numbers 350–354 were missing while this terminal held
+355–359. Those five have since landed on `main`; this branch is rebased onto it and the check reads
+"no unexplained gaps in the sequence". Nothing to hand off.
 
-**H2 · `supabase/migrations/346_*` — a duplicated migration number.**
-`npm run verify:db-parity` reports `346_a_purge_clears_the_printing_setup.sql` and
-`346_usage_and_cost_answers_for_any_window.sql` share the number 346. Its own follow-up check
-confirms they touch no object in common, so nothing is broken — but the guard stays red until the
-newer file is renumbered. Both files are outside migrations 121–230.
+**H2 · the duplicated 346 — RESOLVED by someone else, and a NEW one has appeared.**
+`346_usage_and_cost_answers_for_any_window.sql` was renumbered to 347 on main. But `main` now
+carries **two files numbered 352** — `352_a_reseed_cannot_undo_an_admins_choice.sql` and
+`352_a_split_part_can_be_pay_later.sql`. Another terminal's collision, outside migrations 121–230,
+left alone.
+
+**H3 · `lfh_request_verification` is declared by the migrations and MISSING from the database.**
+`verify:grants` fails twice on it: the allow-list names a function that does not exist, and the
+folder creates it with no later migration retiring it. Migration 296 hardened it deliberately and
+migration 297 says in as many words that it is kept on purpose, because
+`scripts/verify-families.mjs` asserts it answers 'disabled'. So either migration 296 never applied
+to this database or something dropped it by hand.
+**Not touched on purpose:** migration 297 also says retiring it is "a one-line DROP whenever the
+owner wants it gone", so a terminal may be doing exactly that right now with an unpushed migration.
+Re-creating it could fight that work. Whoever owns migration 296/297 should decide: restore it, or
+retire it in a migration so the intent is written down.
+
+**H4 · the shared dev database is ahead of `main`.**
+`lfh_block_issued_delete` in the database carries a comment citing **migration 361**, which exists
+in no branch this terminal can see. Another terminal has applied it to the shared dev stack. It is
+a good change — it tests `kot_no is not null` instead of looking up the session's `bill_no`, which
+is true from the moment an order exists and so protects earlier — but it means a check written
+against the folder can go red against the database through nobody's fault. Worth knowing at merge.
 
 ---
 
@@ -102,3 +118,30 @@ newer file is renumbered. Both files are outside migrations 121–230.
 * A tile's `₹ due` excludes an order nobody has accepted yet. Deliberate (live body line 108).
 * `lfh_admin_table_estimates` is platform-wide and not restaurant-scoped. Deliberate — it reads
   `pg_class` row estimates for the admin's own health page.
+
+
+---
+
+# Second sitting, 2026-08-22 — the owner approved the four improvements
+
+All four 🟡 items were built and verified; the detail is in `T22-improvements.md`. Two things found
+while building them are worth recording as findings in their own right:
+
+## F5 · `verify:table-lifecycle.mjs` died on the product's own double-tap protection  ·  confirmed
+**Where:** backend only, nothing on screen — but it is the guard that protects finding F1.
+The rig places identical orders back to back by design (that is what "the next party sits down"
+looks like at machine speed). Migration 202 refuses a second identical order on the same table
+within three seconds — correctly. The rig did not check the answer, so `order()` returned
+`undefined` and the run died four scenarios in with `invalid input syntax for type uuid:
+"undefined"`, which reads exactly like a product fault and is not one.
+**Fixed:** the rig now passes `p_confirm_duplicate: true` — the same "send anyway" a waiter uses —
+and throws with the refusal spelled out if anything else comes back. `verify:lifecycle` now passes
+twice in a row.
+
+## F6 · migration 221's re-seed guard recorded a ledger key it never checked  ·  confirmed
+Caught by the strengthened `verify:grants` on main: "'221_payroll_optin_backfill' is recorded … but
+no migration CHECKS it, so the ledger row protects nothing". True — the first version decided using
+`to_regprocedure` alone, which is correct in effect but leaves the ledger row decorative.
+**Fixed:** it now calls `lfh_already_applied('221_payroll_optin_backfill')` first and only falls
+back to the "the guard function exists, so an earlier pass ran this file" reasoning when the ledger
+has no answer yet — recording the key at that point so the ledger tells the truth.
