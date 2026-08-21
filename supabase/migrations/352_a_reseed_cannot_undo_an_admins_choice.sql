@@ -1,14 +1,15 @@
--- 350 · A re-seed cannot undo an admin's choice, or re-price a filed month
+-- 352 · A re-seed cannot undo an admin's choice, or re-price a filed month
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
--- ⚠ MIGRATION NUMBER: 350 — the next free number, NOT the 360–364 block this sweep terminal was
---   given. 360 was tried first and `npm run verify:grants` refused it: the folder's own sequence
---   check fails on any unexplained gap, so jumping from 349 to 360 reported ten missing migrations
---   (350–359) and turned a shared guard red. The reservation existed to avoid colliding with the
---   other database terminals in this wave; checked before taking this number, none of them holds a
---   file numbered 350–399 in its worktree, and the guard's own parked-worktree collision check will
---   say so at merge time while renumbering is still just a rename.
---   Every statement here is INSERT … ON CONFLICT DO NOTHING, so this file is correct at ANY number
---   and safe to re-run — renumber it freely if a parallel branch has taken 350 by then.
+-- ⚠ MIGRATION NUMBER: 352 — the next free number after main's 351, and the THIRD number this file
+--   has carried. The reserved 360–364 block was tried first and `npm run verify:grants` refused it:
+--   the folder's own sequence check fails on any unexplained gap, so jumping 349 → 360 reported ten
+--   missing migrations and turned a shared guard red. It then took 350, and while this branch was in
+--   review `350_an_old_web_address_still_finds_the_restaurant.sql` merged onto main under the same
+--   number — the exact collision `verify:db-parity` section A2 exists to catch, caught while
+--   renumbering was still just a rename. Every statement here is INSERT … ON CONFLICT DO NOTHING,
+--   so this file is correct at ANY number; renumber it again if a parallel branch takes 352 first.
+--   (T21 and T24 each hold an uncommitted 352 in their worktrees. Whoever merges second renumbers —
+--   the parked-worktree check in verify-db-grants.mjs prints that warning on every run.)
 --
 -- BACKEND ONLY — NOTHING ON SCREEN CHANGES. Not one row of business data is created, changed or
 -- deleted by this file. It writes three rows to the ledger migration 307 built.
