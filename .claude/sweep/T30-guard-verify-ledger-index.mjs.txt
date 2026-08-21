@@ -1,0 +1,118 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// HANDOFF from sweep #6 terminal 30. Not installed by T30, because
+// `scripts/**` belongs to T28 and the `verify:*` entry in `package.json` to T29.
+//
+// TO INSTALL, unchanged:
+//   1. save this file as  scripts/verify-ledger-index.mjs
+//   2. add to package.json:  "verify:ledger-index": "node scripts/verify-ledger-index.mjs"
+//   3. add a row to docs/GUARD-MAP.md (area: the sweep ledger; needs: nothing; WRITES: no)
+//
+// WHY IT EXISTS. `.claude/sweep/LEDGER/` is the permanent record of what this product has been
+// checked for, and `INDEX.md` is its table of contents and its ID registry. The whole scheme rests
+// on "one ID, one check, forever" — that is the only reason "re-run row P07423" is a sentence that
+// means something. Sweep #6 found three files already breaking it (T9 overran its block by 18 rows
+// into T10's; T13 repeats 15 ids inside itself; T6 repeats 3), and an index that goes stale the
+// moment a new ledger is filed is worse than no index, because the next sweep trusts it.
+//
+// ⚠ IT SHIPS RED, ON PURPOSE, AND MUST NOT BE INSTALLED ALONE. Run against origin/main aad569aa it
+// reports 51 problems — every one of them real and pre-existing: the T9→T10 block overrun (18 ids),
+// T13's 15 and T6's 3 internal repeats, and 73 rows across 15 files whose cells contain an
+// unescaped `|` so they do not render as table rows at all. Install it in the SAME change as those
+// repairs, or a guard that is red on arrival is a guard people learn to skip — which is precisely
+// the fault sweep #6 found in verify:realtime. If the repairs must land later, downgrade the
+// malformed-row check to a warning first and keep the id checks failing.
+//
+// Reads only. Writes nothing. Touches no database. Runs in well under a second.
+// ─────────────────────────────────────────────────────────────────────────────
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+
+const DIR = ".claude/sweep/LEDGER";
+const INDEX = join(DIR, "INDEX.md");
+const problems = [];
+const fail = (m) => problems.push(m);
+
+if (!existsSync(INDEX)) {
+  console.error(`\n❌ verify:ledger-index — ${INDEX} is missing.\n` +
+    `   It is the master record of what this product has been checked for, and the ID registry\n` +
+    `   every sweep reads first. Restore it from git; never delete it.\n`);
+  process.exit(1);
+}
+const index = readFileSync(INDEX, "utf8");
+const ledgers = readdirSync(DIR).filter((f) => /^T\d+\.md$/.test(f))
+  .sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+
+// A row is `| P##### | check | how | result | note |`. Cells may contain ESCAPED pipes (\|),
+// so split on unescaped ones only — splitting naively is how an earlier check miscounted.
+const cellsOf = (line) => line.split(/(?<!\\)\|/);
+const ROW = /^\|\s*(P\d{5})\s*\|/;
+
+// ── 1 · every ledger file is listed in the index, and vice versa
+for (const f of ledgers) {
+  const t = f.replace(".md", "");
+  if (!new RegExp(`\\b${t}\\.md\\b|\\|\\s*${t.slice(1)}\\s*\\|`).test(index))
+    fail(`${DIR}/${f} exists but INDEX.md has no row for it — add its territory and ID block, ` +
+         `or the next sweep will not know it is there.`);
+}
+for (const m of index.matchAll(/\bT(\d+)\.md\b/g)) {
+  const f = `T${m[1]}.md`;
+  if (!ledgers.includes(f) && !/NEVER FILED/i.test(index.slice(Math.max(0, m.index - 400), m.index + 400)))
+    fail(`INDEX.md points at ${DIR}/${f}, which does not exist — either file it, or mark it ` +
+         `"NEVER FILED" in the territory table so the gap is visible.`);
+}
+
+// ── 2 · one ID, one check, forever
+const owner = new Map();
+for (const f of ledgers) {
+  const lines = readFileSync(join(DIR, f), "utf8").split("\n");
+  const seen = new Set();
+  let rows = 0, malformed = 0;
+  for (const line of lines) {
+    const m = line.match(ROW);
+    if (!m) continue;
+    rows++;
+    if (cellsOf(line).length !== 7) malformed++;
+    const id = m[1];
+    if (seen.has(id)) fail(`${f} uses ${id} twice, for two different checks. Give the repeat a ` +
+      `fresh id from the repair block INDEX.md reserves.`);
+    seen.add(id);
+    const prev = owner.get(id);
+    if (prev && prev !== f) fail(`${id} is claimed by BOTH ${prev} and ${f}. An id means one ` +
+      `check, forever — renumber the newer one into INDEX.md's repair block.`);
+    else owner.set(id, f);
+  }
+  if (rows === 0) fail(`${f} contains no phase rows at all — a ledger with no rows records nothing.`);
+  if (malformed) fail(`${f} has ${malformed} malformed row(s): a row must be ` +
+    `\`| id | check | how to verify | result | note |\`, with any pipe INSIDE a cell escaped as \\|. ` +
+    `A malformed row does not render, so nobody re-runs it.`);
+}
+
+// ── 3 · the index still carries the instruction that makes the ledger worth anything
+const mustSay = [
+  [/RE-?RUN/i, `the instruction to RE-RUN every existing row before writing a new phase. Without ` +
+    `it the next sweep invents a different set of checks and the convergence is lost — which is ` +
+    `exactly what sweeps #1 to #5 each did.`],
+  [/next free ID/i, `the next free phase ID. A sweep with no registry reuses an id, and then two ` +
+    `different checks answer to one number.`],
+  [/never reuse an ID/i, `"never reuse an ID, never renumber anyone else's".`],
+];
+for (const [re, what] of mustSay)
+  if (!re.test(index)) fail(`INDEX.md no longer states ${what}`);
+
+// ── 4 · the next free ID really is free
+const declared = index.match(/next free ID[^P]*P(\d{5})/i);
+if (declared) {
+  const next = Number(declared[1]);
+  const taken = [...owner.keys()].map((i) => Number(i.slice(1))).filter((n) => n >= next);
+  if (taken.length) fail(`INDEX.md says the next free ID is P${String(next).padStart(5, "0")}, but ` +
+    `${taken.length} row(s) already use that id or higher (e.g. P${String(Math.min(...taken)).padStart(5, "0")}). ` +
+    `Move the registry forward, or the next sweep will collide on its first new phase.`);
+}
+
+if (problems.length) {
+  console.error(`\n❌ verify:ledger-index — ${problems.length} problem(s):\n`);
+  problems.forEach((p) => console.error("  · " + p + "\n"));
+  process.exit(1);
+}
+console.log(`✅ verify:ledger-index — ${ledgers.length} ledger(s), ${owner.size} distinct phase ids, ` +
+  `no collisions, and INDEX.md still tells the next sweep to re-run before it re-invents.`);
