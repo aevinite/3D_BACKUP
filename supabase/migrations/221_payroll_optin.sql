@@ -33,16 +33,23 @@ ALTER TABLE staff_users
 DO $payroll_optin_once$
 DECLARE v_applied boolean := false; v_n int;
 BEGIN
-  -- The guard function only exists from migration 307 onwards, so seeing it at file 221 means an
-  -- earlier pass got that far — and that pass ran this backfill. Either the key is already in the
-  -- ledger, or it belongs there; both answers are "do not run it again".
+  -- The ledger is the answer when it has one.
   IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
-    v_applied := true;
-    IF to_regclass('public.lfh_applied_once') IS NOT NULL THEN
-      INSERT INTO lfh_applied_once (key, note) VALUES
-        ('221_payroll_optin_backfill',
-         'the one-time pay-list backfill. A second run puts anyone the owner has since taken OFF the pay list back on it, because they still hold a rate or a payment history.')
-      ON CONFLICT (key) DO NOTHING;
+    EXECUTE $probe$ SELECT lfh_already_applied('221_payroll_optin_backfill') $probe$ INTO v_applied;
+
+    -- And when it does not: the guard function only exists from migration 307 onwards, so finding
+    -- it here at file 221 means an EARLIER pass of the seeder already got that far — and that pass
+    -- necessarily ran this backfill on its way. So the key belongs in the ledger; write it, and
+    -- skip. (On a genuinely fresh database the function does not exist yet at this point, this
+    -- whole branch is skipped, and the backfill runs exactly once, as it must.)
+    IF NOT v_applied THEN
+      v_applied := true;
+      IF to_regclass('public.lfh_applied_once') IS NOT NULL THEN
+        INSERT INTO lfh_applied_once (key, note) VALUES
+          ('221_payroll_optin_backfill',
+           'the one-time pay-list backfill. A second run puts anyone the owner has since taken OFF the pay list back on it, because they still hold a rate or a payment history.')
+        ON CONFLICT (key) DO NOTHING;
+      END IF;
     END IF;
   END IF;
   IF v_applied THEN
