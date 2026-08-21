@@ -230,5 +230,56 @@ if (STATIC_ONLY) {
   }
 }
 
+// ── 4. The "a sale cannot be erased" lock must not depend on WHEN a bill is numbered (mig 361) ──
+head("BACKUP / DEV database — the issued-bill lock does not depend on billing");
+// `lfh_block_issued_delete` refuses a hard delete of an order or a session that represents a real
+// sale. Until migration 361 its ORDER-level test asked whether the order's SESSION had a `bill_no`.
+// That only worked by accident: `bill_no` arrives with a table's first order, so the test happened to
+// mean "this table has ordered". Anyone moving the bill number later — which is a reasonable thing to
+// want, and what the owner asked for — would have silently loosened a compliance guard, because an
+// unpaid, unserved order on an unbilled table would have become hard-deletable.
+// It now tests `kot_no`, which every order gets at insert (mig 036) and which no billing decision can
+// move. If `bill_no` ever reappears in the order branch of this function, the coupling is back.
+if (STATIC_ONLY) {
+  console.log("  – skipped (--static)");
+} else if (!existsSync(join(root, ".env.local"))) {
+  console.log("  – skipped: no .env.local, so there is no database to ask");
+} else {
+  const env = Object.fromEntries(readFileSync(join(root, ".env.local"), "utf8").split("\n")
+    .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
+    .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
+  const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
+  const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ read_only: true, query:
+      `select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'lfh_block_issued_delete'` }),
+  });
+  if (!r.ok) { fail(`could not read the database: ${(await r.text()).slice(0, 160)}`); }
+  else {
+    const rows = await r.json();
+    if (!rows.length) fail("lfh_block_issued_delete is MISSING — nothing stops an issued bill being hard-deleted");
+    else {
+      // Strip -- comments FIRST. The function body explains why it stopped testing bill_no, and
+      // matching that sentence reported the very coupling the comment says was removed.
+      const src = rows[0].prosrc.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
+      // the orders branch runs from "if tg_table_name = 'orders'" up to the elsif
+      const oStart = src.indexOf("tg_table_name = 'orders'");
+      const oEnd = src.indexOf("elsif", oStart < 0 ? 0 : oStart);
+      const ordersBranch = oStart < 0 ? "" : src.slice(oStart, oEnd < 0 ? src.length : oEnd);
+      const problems = [];
+      if (!/kot_no/.test(ordersBranch)) problems.push("its orders branch no longer tests kot_no");
+      if (/bill_no/.test(ordersBranch)) problems.push("its orders branch tests bill_no again — the coupling to billing is back");
+      if (!/payment_status\s*=\s*'paid'/.test(ordersBranch)) problems.push("it stopped testing payment_status = 'paid'");
+      if (!/status\s*=\s*'served'/.test(ordersBranch)) problems.push("it stopped testing status = 'served'");
+      if (!/bill_no/.test(src) || !/invoice_no/.test(src)) problems.push("its sessions branch stopped testing bill_no / invoice_no");
+      if (!/lfh\.allow_purge/.test(src)) problems.push("the audited purge escape hatch is gone");
+      if (problems.length) { fail(`the issued-bill lock has drifted: ${problems.join("; ")}`); }
+      else pass("the issued-bill lock holds on kot_no + paid + served, and the session half still holds on bill_no / invoice_no");
+    }
+  }
+}
+
 console.log(failed ? `\n✗ ${failed} check(s) failed` : "\n✓ a single-file migration run cannot undo a later decision");
 process.exit(failed ? 1 : 0);
