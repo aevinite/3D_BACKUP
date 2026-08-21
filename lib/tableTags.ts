@@ -6,6 +6,7 @@
 // their API responses; the server routes re-check every write regardless of UI.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { MODULE_DEFS } from "@/lib/accessModel";
+import { readInChunks } from "@/lib/inChunks";
 
 /** One module's ladder as it is stored in settings.modules (mig 320) — the JSONB alternative to the
  *  four columns a module used to need. Absent keys read as false/false/true (new modules start OFF). */
@@ -175,13 +176,21 @@ export const payrollLadder = (rid: string) =>
 // single restaurant, wrong for the admin's whole-platform view. Callers that need a set (the owner
 // dashboard's staff-pay tile, the staff roster) use this instead. Same rule as moduleLadder:
 // allowed must be on, and a transferred switch must not be explicitly off.
+// CHUNKED + LIMITED (T25 sweep, 2026-08-21). This is the read the ADMIN's whole-platform view and
+// a multi-restaurant owner's staff-pay tile both make, and it inlined every id in one URL with no
+// `.limit()`. Measured on this stack: an `.in()` list of 800 uuids (29.6 KB) answers "Bad Request",
+// and a select with no limit is silently capped at 1,000 rows. Truncation here reads as `undefined`
+// per missing restaurant, which is falsy — so a restaurant whose Payroll the admin switched ON would
+// have its pay screens go blank with no error anywhere. `lib/restaurantNames.ts` already chunks for
+// exactly this reason; see lib/inChunks.ts for the measurements.
 export async function payrollEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { data } = await sb.from("settings")
-    .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled")
-    .in("restaurant_id", ids);
-  for (const r of (data || []) as Record<string, unknown>[]) {
+  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+    sb.from("settings")
+      .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled")
+      .in("restaurant_id", chunk).limit(chunk.length));
+  for (const r of rows || []) {
     out[String(r.restaurant_id)] =
       r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false);
   }
@@ -199,10 +208,11 @@ export const inventoryLadder = (rid: string) =>
 export async function inventoryEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { data } = await sb.from("settings")
-    .select("restaurant_id, inventory_allowed, inventory_owner_control, inventory_enabled")
-    .in("restaurant_id", ids);
-  for (const r of (data || []) as Record<string, unknown>[]) {
+  const { rows } = await readInChunks<Record<string, unknown>>(ids, (chunk) =>
+    sb.from("settings")
+      .select("restaurant_id, inventory_allowed, inventory_owner_control, inventory_enabled")
+      .in("restaurant_id", chunk).limit(chunk.length));
+  for (const r of rows || []) {
     out[String(r.restaurant_id)] =
       r.inventory_allowed === true && (r.inventory_owner_control !== true || r.inventory_enabled !== false);
   }

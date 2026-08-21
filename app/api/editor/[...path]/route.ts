@@ -3331,30 +3331,44 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && b === "delete") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete or clear bills");
       if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
-      const { ids, all } = body || {};
+      const { ids } = body || {};
       // Reason the manager typed (owner 2026-07-23 — deletes must carry a why for the bill audit).
       const delReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
-      // Small enough that the audit writes below always complete inside one request.
-      const CLEAR_ALL_BATCH = 300;
-      let deletable: string[]; let kept: number; let moreToClear = false;
-      if (all) {
-        // Scoped read: fetch ONLY the deletable rows (unpaid OR cancelled) that aren't
-        // ALREADY soft-deleted, so a "clear all" never re-picks tombstoned rows and never
-        // scans the whole orders table; cap at 5000 as a safety bound. The count of KEPT
-        // paid bills comes from a rows-free head count (no row egress).
-        // ONE BATCH THAT ALWAYS FINISHES (2026-08-04). The cap was 5000, and every one of those
-        // needed its own Audit row — a few thousand sequential RPCs inside one request, which on a
-        // busy restaurant simply died part-way: some orders tombstoned, some bills left reading
-        // "Running", and a Removals record that was incomplete for the one kind of removal that
-        // most needs to be complete. A bounded batch is finishable and repeatable; the response
-        // says how many are left so the panel can offer another tap.
-        const del = must(await sb.from("orders").select("id").eq("restaurant_id", rid).is("deleted_at", null).or("payment_status.neq.paid,status.eq.cancelled").limit(CLEAR_ALL_BATCH + 1)) as { id: string }[];
-        deletable = del.slice(0, CLEAR_ALL_BATCH).map((o) => o.id);
-        moreToClear = del.length > CLEAR_ALL_BATCH;
-        const keptQ = await sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).is("deleted_at", null).eq("payment_status", "paid").neq("status", "cancelled");
-        kept = keptQ.count || 0;
-      } else if (Array.isArray(ids) && ids.length) {
-        const candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid).is("deleted_at", null).in("id", ids)) as { id: string; payment_status: string; status: string }[];
+      // ── ONE BILL PER REQUEST. THERE IS NO SWEEP (owner, 2026-08-21) ───────────────────────────
+      // His words: *"we don't want that option, remove that option completely from manager panel"*,
+      // and then, on what may still be deleted: *"he can delete one bill but with reason."*
+      //
+      // WHAT WENT: a `{ all: true }` branch that read up to 300 deletable bills for the restaurant
+      // and tombstoned the lot, and the `🗑 Clear freed` button that fed a whole day's freed tables
+      // in as one `ids` list. The `all` branch had had no caller in the panel for a long time — every
+      // screen names its ids — so it was a live bulk delete reachable only by hand-forming a request.
+      //
+      // `ids` STAYS A LIST, because one bill is genuinely several order rows: a table's successive
+      // KOTs all hang off one session, and the cancelled-bill card and the per-session delete both
+      // hand over that whole group. So the rule is not "one id" — it is ONE BILL, enforced here on
+      // the SESSION, which is what a bill actually is in this schema (there is no `bills` table; see
+      // lib/billLedger.ts). A caller that names orders from two bills is refused, so no future screen
+      // can turn this back into "clear the day" by widening a list.
+      //
+      // An order with no session (a counter parcel, a standalone banquet line) has no bill to group
+      // by, so exactly one of those may be named at a time.
+      //
+      // R27 sits above all of it and is unchanged: canDeleteBill() is true for the Aevidine admin
+      // console only. A manager and an owner cancel; they never delete. This endpoint is the admin's
+      // support tool, and it is now a one-bill-at-a-time tool.
+      const MAX_ORDERS_PER_BILL = 60;   // a very long table; far beyond it means the ids are not one bill
+      let deletable: string[]; let kept: number;
+      if (Array.isArray(ids) && ids.length) {
+        if (ids.length > MAX_ORDERS_PER_BILL) {
+          return err(`That names ${ids.length} orders. A bill is deleted one bill at a time — there is no bulk clear.`, 400);
+        }
+        const candidates = must(await sb.from("orders").select("id,payment_status,status,session_id").eq("restaurant_id", rid).is("deleted_at", null).in("id", ids)) as { id: string; payment_status: string; status: string; session_id: string | null }[];
+        // ONE BILL: every named order must sit on the same session. `null` is not a group — an order
+        // with no session is its own bill, so only one may be named.
+        const sessions = new Set(candidates.map((o) => o.session_id));
+        if (sessions.size > 1 || (sessions.has(null) && candidates.length > 1)) {
+          return err("Those orders belong to more than one bill. Delete one bill at a time.", 400);
+        }
         deletable = candidates.filter((o) => !(o.payment_status === "paid" && o.status !== "cancelled")).map((o) => o.id);
         kept = candidates.length - deletable.length;
       } else return err("no ids");
@@ -3367,7 +3381,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       // SOFT delete — the row stays; a restore can bring it back.
       const res = deletable.length ? await softDeleteOrders(rid, deletable, { actor: actorName, actorId: g.user?.id ?? null, reason: delReason }) : { deleted: 0 };
-      await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${res.deleted})` : `deleted ${res.deleted} ${res.deleted === 1 ? "bill" : "bills"}`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
+      await log("editor", "orders_delete", { restaurant_id: rid, detail: `deleted a bill (${res.deleted} ${res.deleted === 1 ? "order" : "orders"})` + (delReason ? ` — ${delReason}` : ""), device_id: dev });
       // One Audit row per bill, written server-side (was the browser's job — see removalAudit.ts).
       // In bounded PARALLEL, not one after another: strictly sequential meant a clear-all of a few
       // hundred bills spent most of the request waiting on round-trips. recordRemoval never throws,
@@ -3381,13 +3395,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             reason: { code: typeof body?.reason_code === "string" ? body.reason_code : null, note: delReason || null },
             user: g.user, deviceId: dev, orderId: oid, sessionId: w?.session_id ?? null,
             tableNumber: w?.table_number ?? null, amount: w?.total ?? null,
-            meta: all ? { cleared_all: true, bills_in_batch: deletable.length } : { bills_in_batch: deletable.length },
+            meta: { orders_on_bill: deletable.length },
           });
         }));
       }
-      // `moreToClear` lets the panel say "300 cleared, more to go" and offer another tap, instead of
-      // implying it got everything.
-      return ok({ ok: true, deleted: res.deleted, kept, moreToClear });
+      // No `moreToClear` any more — there is no sweep to be part-way through. `kept` stays, because
+      // a settled bill is still refused and the panel says so rather than looking like it did nothing.
+      return ok({ ok: true, deleted: res.deleted, kept });
     }
 
     // orders/:id/discount | accept | serve-all | item

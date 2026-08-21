@@ -11,6 +11,7 @@
 // restaurant that predates the column (though mig 106 backfills every existing row all-on).
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import type { Role } from "@/lib/userAuth";
+import { readInChunks } from "@/lib/inChunks";
 
 export const PANEL_KEYS = ["manager", "kitchen", "tablet", "owner"] as const;
 export type PanelKey = (typeof PANEL_KEYS)[number];
@@ -135,15 +136,26 @@ export async function enabledOwnedRestaurantIds(userId: string, cached = true): 
   const owned = links.ids || [];
   let ids: string[] = [];
   if (owned.length) {
-    // One scoped read: live restaurants ∩ owned ids, joined against their settings.
+    // Two scoped reads: live restaurants ∩ owned ids, joined against their settings.
+    //
+    // BOTH GO THROUGH readInChunks, and that is the SECOND half of the T19 fix (T25 sweep,
+    // 2026-08-21). The paging above stopped the ownership LINKS being cut short at 50; these two
+    // reads FILTER that list, and they were still inlining every id in one URL with no `.limit()`.
+    // Measured on this stack: an `.in()` list of 800 uuids (29.6 KB) comes back "Bad Request", and
+    // a select with no limit is silently capped at 1,000 rows. Either way the estate comes back
+    // SHORT — and because this helper is the single source of truth for owner-panel access, a
+    // missing restaurant vanishes from the sidebar, the Menu picker, Manager mode and every
+    // /api/owner/* call at once, with nothing on any screen to say so. Same fault, one level down.
     const [restQ, setQ] = await Promise.all([
-      sb.from("restaurants").select("id").in("id", owned).is("deleted_at", null),
-      sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", owned),
+      readInChunks<{ id: string }>(owned, (chunk) =>
+        sb.from("restaurants").select("id").in("id", chunk).is("deleted_at", null).limit(chunk.length)),
+      readInChunks<{ restaurant_id: string; enabled_panels: unknown }>(owned, (chunk) =>
+        sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", chunk).limit(chunk.length)),
     ]);
     if (restQ.error) return staleOrThrow(userId, restQ.error);
     if (setQ.error) return staleOrThrow(userId, setQ.error);
-    const live = new Set((restQ.data || []).map((r) => r.id as string));
-    const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id as string, r.enabled_panels as Record<string, unknown> | null]));
+    const live = new Set((restQ.rows || []).map((r) => r.id));
+    const panelsByRid = new Map((setQ.rows || []).map((r) => [r.restaurant_id, r.enabled_panels as Record<string, unknown> | null]));
     ids = owned.filter((rid) => {
       if (!live.has(rid)) return false;
       const p = panelsByRid.get(rid);

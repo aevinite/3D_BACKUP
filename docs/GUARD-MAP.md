@@ -100,6 +100,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | a login in the recycle bin | `verify:recycle-name` | nothing | no |
 | opening a table that had a join request (the "Attend" flash) | `verify:no-attend-flash`, `verify:open-request-guard` | nothing | no |
 | a parcel, or the 🛵 Platform / 🥡 Parcels tab appearing/disappearing | `verify:parcel-home` ← a parcel has ONE home; the floor must never grow a parcel strip again (owner, 2026-08-14) | nothing | no |
+| a table on the floor whose number is outside the plan ("off-plan") | `verify:floor-offplan` ← an off-plan tile is shown while a party is LIVE on it and never hidden while it is, so a seven-digit number reads as odd rather than vanishing with a real party on it | nothing | no |
 
 ## 4 · Kitchen panel — `/kitchen`
 
@@ -174,13 +175,16 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | ↳ *(`verify:clash` is kept as a short alias for the same thing — the file is `scripts/verify-clash-coverage.mjs`)* | — | — | — |
 | an order write | `verify:order`, `verify:order-retry`, `verify:closed-session` | mixed | some **YES** |
 | anything that lowers a bill | `verify:audit` ← every money change leaves a record | nothing | no |
+| **deleting a bill**, or anything that would delete more than one at a time | `verify:one-bill-delete` ← bulk bill-deleting was removed on the owner's instruction (2026-08-21). One bill per request, ENFORCED on the session (a bill is a session — there is no `bills` table), and R27 still holds: `canDeleteBill()` is true for the Aevidine admin console only, so a restaurant cancels and never deletes | nothing | no |
 | a GUEST or STAFF-PANEL api route (`app/api/menu`, `app/api/editor`, `app/api/kitchen`, `app/api/tablet`) | `verify:panel-api` ← the scoping, gating and shape rules the T10 sweep put back, so they cannot quietly come back out | nothing | no |
 | a reply we send to an outside system | `verify:outbound` | `.env.local` | no |
 | behaviour when the server is overloaded | `verify:busy` | starts its own local server | no |
 | behaviour with no internet | `verify:offline`, `verify:outbox`, `verify:warm-shell` | mixed | no |
 | `public/offline.html` — the last-resort screen | `verify:offline-retry` ← it must keep ONE backing-off retry loop however many times the device says it is back, and must never blame the wrong side | starts its own local stub | no |
+| a read about EVERY restaurant in an owner's estate (or the admin's whole platform) | `verify:id-chunks` ← 800 uuids is 29.6 KB of URL and PostgREST answers "Bad Request"; a select with no `.limit()` is silently capped at 1,000 rows. Either way the estate comes back SHORT with no error — a restaurant missing from the owner's own sidebar, a module reading as OFF, activity hidden that they may see. Route it through `lib/inChunks.ts` (measured limits are in its header) | nothing | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
 | anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
+| a DEADLINE on anything a BROWSER runs — a fetch timeout, an abort signal | `verify:abort-guard` ← READING `AbortSignal.timeout` **throws** on a browser that lacks it, so `?? AbortSignal.timeout(ms)` does not skip the deadline, it throws out of the request. Five files in this repo already feature-test it; `lib/supabase.ts` — the client every browser database read goes through — did not, and with the API absent a guest's dish page rendered 17 characters instead of 627 and made zero of its 23 Supabase reads (T25 sweep, 2026-08-21) | nothing | no |
 
 ## 9 · Database — `supabase/migrations/*.sql`
 

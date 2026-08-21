@@ -50,6 +50,7 @@
 // it down are different universes, and this file only touches the first.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { readInChunks } from "@/lib/inChunks";
 
 /** The three switches on Access → Owner's menu → Audit and log. */
 export type LogKind = "logs_signins" | "logs_staff_changes" | "logs_service";
@@ -133,13 +134,22 @@ export async function loadLogVisibility(
   const ids = [...new Set(restaurantIds.filter(Boolean))];
   if (!ids.length) return { ok: true, visibility: new LogVisibility(false, new Map()) };
 
-  const r = await sb.from("restaurants").select("id, owner_entitlements").in("id", ids);
+  // CHUNKED + LIMITED (T25 sweep, 2026-08-21). This one matters most of the five, because of the
+  // rule in the box at the top of this file: a restaurant that is ABSENT from the map is
+  // `canSee -> false`. That is exactly right when the reason is "outside the caller's scope", and
+  // exactly wrong when the reason is "PostgREST capped the answer at 1,000 rows and said nothing".
+  // Truncation would therefore HIDE activity the owner is entitled to see, and it would look like an
+  // empty log rather than a failure — the one shape this file exists to make impossible.
+  // readInChunks turns it back into `{ error }`, which the caller already answers 503 for.
+  // Measurements: lib/inChunks.ts.
+  const r = await readInChunks<{ id: string; owner_entitlements: Record<string, boolean> | null }>(ids, (chunk) =>
+    sb.from("restaurants").select("id, owner_entitlements").in("id", chunk).limit(chunk.length));
   if (r.error) {
-    console.error("[logVisibility] could not read the log switches:", r.error.message);
+    console.error("[logVisibility] could not read the log switches:", (r.error as { message?: string })?.message ?? String(r.error));
     return { ok: false, error: r.error };
   }
   const map = new Map<string, Record<string, boolean>>();
-  for (const row of (r.data || []) as { id: string; owner_entitlements: Record<string, boolean> | null }[]) {
+  for (const row of r.rows || []) {
     map.set(row.id, mergeOwnerEntitlements(row.owner_entitlements));
   }
   // A restaurant we asked about but got no row for stays ABSENT from the map, which `canSee` reads
