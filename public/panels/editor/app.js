@@ -277,6 +277,17 @@ const fold = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 // the menu app's lib/format.ts — update both together when rates move.
 const INR_RATE = 1; // prices are stored in rupees now (migration 043) — no conversion
 const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-IN");
+// inr() rounds to whole rupees, which is right almost everywhere and wrong in exactly one place:
+// a figure the person has to MATCH. "The parts have to add up to ₹1,019" against a bill of
+// ₹1,018.50 is a sentence a waiter can obey and still be refused by the server, which recomputes
+// the due to the paise. So the split screen prints the paise when there are any, and stays the
+// familiar rounded figure when there are none (owner, 2026-08-21).
+const inrExact = (v) => {
+  const n = (parseFloat(v) || 0) * INR_RATE;
+  return Math.abs(n - Math.round(n)) < 0.005
+    ? "₹" + Math.round(n).toLocaleString("en-IN")
+    : "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 // ONE date/time format for the whole panel (T11 desktop sweep, 2026-08-05). The Bills tab stamped
 // a bill "8/4/2026, 7:55:51 AM" — a BARE toLocaleString(), i.e. the browser's default, which is
 // month-first and genuinely ambiguous to an Indian reader (8 April or 4 August?) — while the
@@ -3985,13 +3996,13 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <button type="button" class="pay-method-btn" data-method="Cash"><span class="pmi">💵</span>Cash</button>
           <button type="button" class="pay-method-btn" data-method="Card"><span class="pmi">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other"><span class="pmi">⋯</span>Other</button>
+          ${opts.split ? `<button type="button" class="pay-method-btn pay-special-split" data-special="split"><span class="pmi">⇄</span>Split payment</button>` : ""}
           ${opts.onHouse ? `<button type="button" class="pay-method-btn pay-special-onhouse" data-special="onhouse"><span class="pmi">🏠</span>On the house</button>` : ""}
           ${opts.khata ? `<button type="button" class="pay-method-btn pay-special-khata" data-special="khata"><span class="pmi">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none">
           <div class="pay-other-pick">
             <button type="button" class="btn pay-other-choice" data-oc="write"><b>✎ Another way to pay</b><small>Wallet, bank transfer, cheque — type what it was</small></button>
-            ${opts.split ? `<button type="button" class="btn pay-other-choice" data-oc="split"><b>⇄ Split the payment</b><small>Part one way, part another — ₹200 UPI, ₹200 cash, and so on</small></button>` : ""}
           </div>
           <div class="pay-other-write" style="display:none">
             <label class="dish-edit-lbl">What kind?</label>
@@ -3999,8 +4010,10 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <button type="button" class="btn primary pay-other-confirm">Confirm</button>
           </div>
           <div class="pay-other-split" style="display:none">
-            <div class="dish-edit-lbl">How much came in each way?</div>
-            <div class="muted small" style="margin:-2px 0 8px">Add a part for every way they paid. The parts have to add up to ${inr(due)}.</div>
+            <div class="dish-edit-lbl">Split payment</div>
+            <div class="muted small" style="margin:-2px 0 8px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
+            <div class="muted small pay-split-nlbl">How many are paying?</div>
+            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}</div>
             <div class="pay-split-rows"></div>
             <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
             <div class="pay-split-sum small" style="margin:9px 0 8px;font-weight:700"></div>
@@ -4046,6 +4059,16 @@ function openPaymentMethodModal(due, label, opts = {}) {
     wrap.querySelectorAll(".pay-method-btn").forEach((b) => (b.onclick = () => {
       // The two special settles (mig 166): resolve with a marker — the CALLER runs the
       // dedicated flow (person picker / no-charge settle); no payment method involved.
+      // "Split payment" is not a settle of its own — it opens the parts panel right here (owner,
+      // 2026-08-21: it was buried two taps deep under "Other", which is why nobody used it).
+      if (b.dataset.special === "split") {
+        wrap.querySelector(".pay-method-grid").style.display = "none";
+        wrap.querySelector(".pay-other-field").style.display = "";
+        wrap.querySelector(".pay-other-pick").style.display = "none";
+        wrap.querySelector(".pay-other-split").style.display = "";
+        splitTo(2);
+        return;
+      }
       if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
@@ -4074,14 +4097,14 @@ function openPaymentMethodModal(due, label, opts = {}) {
       tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
     }
     // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
-    // SPLIT the bill across ways — "₹200 from this, ₹200 from that". The split is offered only
-    // when the caller can post it (opts.split), i.e. a whole table's bill.
+    // Split payment is its own button on the grid now (owner, 2026-08-21 — it was two taps deep
+    // under here, which is why nobody used it), so "Other" has only one thing left to offer and
+    // goes straight to its text box.
     const otherWrap = wrap.querySelector(".pay-other-write");
-    const splitWrap = wrap.querySelector(".pay-other-split");
     wrap.querySelectorAll(".pay-other-choice").forEach((b) => (b.onclick = () => {
       wrap.querySelector(".pay-other-pick").style.display = "none";
-      if (b.dataset.oc === "write") { otherWrap.style.display = ""; wrap.querySelector("#payOtherInput").focus(); }
-      else { splitWrap.style.display = ""; renderSplit(); }
+      otherWrap.style.display = "";
+      wrap.querySelector("#payOtherInput").focus();
     }));
     const otherInput = wrap.querySelector("#payOtherInput");
     const confirmOther = () => finish("Other", otherInput.value.trim());
@@ -4092,33 +4115,80 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // The parts must add up to the bill EXACTLY — the server recomputes the due and refuses
     // anything else, so this UI can neither under- nor over-collect. The tip is deliberately
     // outside the split: it is not part of the bill.
-    const legs = [{ amount: "", method: "UPI", note: "" }, { amount: "", method: "Cash", note: "" }];
+    // ── SPLIT PAYMENT (owner, 2026-08-21) ──────────────────────────────────────────────────
+    // "the split doesn't mean you have to split it equally. We can able to change the amount …
+    //  Total should be same … first can pay in cash, second can pay in card. Third is pay later,
+    //  fourth will be other. make it perfectly dynamic like that."
+    //
+    // So: tap how many are paying → the amounts fill in EVENLY as a starting point, every box stays
+    // editable, and every row picks its own way to pay — including Pay later, which puts that slice
+    // on a person's tab instead of collecting it (mig 352). Only the TOTAL is enforced.
+    const PAY_LATER = "Pay later";
+    const SPLIT_WAYS = ["UPI", "Cash", "Card", "Other", PAY_LATER];
+    const legs = [];
     const legSum = () => Math.round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;
     const legLeft = () => Math.round((due - legSum()) * 100) / 100;
     const rowsEl = wrap.querySelector(".pay-split-rows");
     const sumEl = wrap.querySelector(".pay-split-sum");
+    // An EVEN starting point that adds up exactly: everyone gets the rounded-down share and the
+    // last part absorbs the odd paise, the same rule the printed bill splits its tax lines by.
+    // A method already chosen on a row is kept, so changing "how many" never loses a pick.
+    function splitTo(n) {
+      const each = Math.floor((due / n) * 100) / 100;
+      const kept = legs.slice(0, n);
+      legs.length = 0;
+      for (let i = 0; i < n; i++) {
+        const was = kept[i] || {};
+        legs.push({
+          amount: String(i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each),
+          method: was.method || (i === 0 ? "UPI" : "Cash"), note: was.note || "",
+          khata: was.khata || null,
+        });
+      }
+      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === n));
+      renderSplit();
+    }
+    wrap.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
     function renderSplit() {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}">
           <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
-          <select class="psr-method">${["UPI", "Cash", "Card", "Other"].map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
+          <select class="psr-method">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
           ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part">✕</button>` : `<span class="psr-del-gap"></span>`}
           ${l.method === "Other" ? `<input type="text" class="dish-edit-custominput psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque">` : ""}
+          ${l.method === PAY_LATER ? `<button type="button" class="btn psr-who">${l.khata ? "📒 " + esc(l.khata.label) + " — change" : "📒 Who owes this? — pick a person"}</button>` : ""}
         </div>`).join("");
       rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
         const i = Number(row.dataset.i);
+        // Typing an amount must NOT re-render — that would blur the box mid-keystroke. Only the
+        // running total updates.
         row.querySelector(".psr-amt").oninput = (e) => { legs[i].amount = e.target.value; refreshSplitSum(); };
-        row.querySelector(".psr-method").onchange = (e) => { legs[i].method = e.target.value; renderSplit(); };
+        row.querySelector(".psr-method").onchange = (e) => {
+          legs[i].method = e.target.value;
+          if (legs[i].method !== PAY_LATER) legs[i].khata = null;   // picked a way to pay → no tab
+          renderSplit();
+        };
         const nEl = row.querySelector(".psr-note"); if (nEl) nEl.oninput = (e) => { legs[i].note = e.target.value; };
         const dEl = row.querySelector(".psr-del"); if (dEl) dEl.onclick = () => { legs.splice(i, 1); renderSplit(); };
+        // WHO owes it — the SAME person picker the whole-bill Pay Later button uses, so the search,
+        // the "already owes" badge and the add-a-person fields are one implementation, not two.
+        const wEl = row.querySelector(".psr-who");
+        if (wEl) wEl.onclick = async () => {
+          const picked = await openKhataPersonPicker(Number(legs[i].amount) || 0, opts.table);
+          if (!picked) return;                                    // cancelled → the row is unchanged
+          legs[i].khata = picked.customer_id
+            ? { customer_id: picked.customer_id, label: picked.name || "that person" }
+            : { name: picked.name, phone: picked.phone || "", label: picked.name };
+          renderSplit();
+        };
       });
       refreshSplitSum();
     }
     function refreshSplitSum() {
       if (!sumEl) return;
       const left = legLeft();
-      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inr(due)}`
-        : left > 0 ? `${inr(left)} still to cover` : `${inr(-left)} more than the bill`;
+      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
+        : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
       sumEl.style.color = left === 0 ? "var(--green)" : "var(--red)";
     }
     const addBtn = wrap.querySelector(".pay-split-add");
@@ -4136,12 +4206,25 @@ function openPaymentMethodModal(due, label, opts = {}) {
       if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one.", "err"); return; }
       if (left !== 0) { toast(left > 0 ? `${inr(left)} of the bill is still uncovered.` : `The parts are ${inr(-left)} more than the bill.`, "err"); return; }
       if (legs.length < 2) { toast("A split needs at least two parts.", "err"); return; }
+      // A TAB HAS TO BE OWED BY SOMEBODY, and the same three rules the server enforces are said
+      // here in words first, so the waiter is not bounced by a 409 they could have been told about.
+      const later = legs.filter((l) => l.method === PAY_LATER);
+      if (later.some((l) => !l.khata)) { toast("Tap “Who owes this?” on the pay-later part and pick a person.", "err"); return; }
+      if (later.length > 1) { toast("Only one part can be pay-later — put the rest on cash, card or UPI.", "err"); return; }
       resolved = true;
       const cust = readCust();
       close();
       resolve({
         method: "Split", note: null, tip, cust,
-        splitLegs: legs.map((l) => ({ amount: Math.round(Number(l.amount) * 100) / 100, method: l.method, note: (l.note || "").trim().slice(0, 200) || null })),
+        splitLegs: legs.map((l) => ({
+          amount: Math.round(Number(l.amount) * 100) / 100,
+          method: l.method,
+          note: (l.note || "").trim().slice(0, 200) || null,
+          // Only a pay-later part carries a person; the server ignores these on any other method.
+          ...(l.method === PAY_LATER && l.khata
+            ? { khataCustomerId: l.khata.customer_id || null, khataName: l.khata.name || null, khataPhone: l.khata.phone || null }
+            : {}),
+        })),
       });
     };
 
@@ -4274,9 +4357,11 @@ async function markTablePaid(t, mtpOpts = {}) {
     // bill sits here — which is exactly what the server's own lookup allows (T3 sweep, 2026-08-10).
     onHouse: ["family", "guest"].includes(partyTag(t)) && tagActionAllowed("table_tags"),
     khata: tagActionAllowed("khata"),
-    // A whole table's bill can be paid in parts (Other → Split the payment). Single-order and
-    // khata-collect settles can't — there is no pay-split endpoint for those.
+    // A whole table's bill can be paid in parts ("Split payment"). Single-order and khata-collect
+    // settles can't — there is no pay-split endpoint for those.
     split: true,
+    // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
+    table: t,
   };
   const r = await payOrdersWithMethod(os, `Mark table ${t} paid`, opts);
   if (r && r.special === "khata") { await khataParkFlow(t, os); return; }
@@ -4406,7 +4491,13 @@ function openKhataPersonPicker(due, t) {
     search.oninput = () => { pickedId = null; clearTimeout(timer); timer = setTimeout(doSearch, 250); };
     doSearch(); // show the most recent people immediately
     wrap.querySelector("#khataParkBtn").onclick = () => {
-      if (pickedId) { resolved = true; close(); resolve({ customer_id: pickedId }); return; }
+      // The NAME comes back with the id (2026-08-21): a split's pay-later row has to print WHO owes
+      // it on the row itself, and it only ever held the id. Harmless for the existing caller.
+      if (pickedId) {
+        const row = list.querySelector(`.khata-pick-row[data-cid="${pickedId}"] b`);
+        resolved = true; close(); resolve({ customer_id: pickedId, name: (row && row.textContent) || "" });
+        return;
+      }
       const name = wrap.querySelector("#khataName").value.trim();
       if (!name) { toast("Pick a person from the list, or type a name to add them.", "err"); return; }
       resolved = true; close();

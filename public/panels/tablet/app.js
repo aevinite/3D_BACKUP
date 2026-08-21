@@ -42,6 +42,14 @@ const INR_RATE = 1;
 // always used en-IN, so the same bill read two different ways depending on which screen you
 // looked at. One bill, one way of writing a number.
 const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleString("en-IN");
+// See the manager panel's note: inr() rounds to whole rupees, and the ONE place that is wrong is a
+// figure the person has to MATCH — the server recomputes the due to the paise.
+const inrExact = (v) => {
+  const n = (parseFloat(v) || 0) * (typeof INR_RATE === "number" ? INR_RATE : 1);
+  return Math.abs(n - Math.round(n)) < 0.005
+    ? "₹" + Math.round(n).toLocaleString("en-IN")
+    : "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 // One dish flows new → cooking → ready → served, then wraps back so a mis-tap is
 // undoable. "ready" = kitchen finished it, waiter still has to carry it out (the
@@ -3182,12 +3190,12 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
           ${opts.onHouse ? `<button type="button" class="pay-method-btn" data-special="onhouse" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #e11d48;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">🏠</span>On the house</button>` : ""}
+          ${opts.split ? `<button type="button" class="pay-method-btn" data-special="split" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⇄</span>Split payment</button>` : ""}
           ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
           <div class="pay-other-pick" style="display:flex;flex-direction:column;gap:8px">
             <button type="button" class="btn pay-other-choice" data-oc="write" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;line-height:1.35"><b style="font-size:14px">✎ Another way to pay</b><small style="font-size:11.5px;color:var(--muted);font-weight:400">Wallet, bank transfer, cheque — type what it was</small></button>
-            ${opts.split ? `<button type="button" class="btn pay-other-choice" data-oc="split" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;line-height:1.35"><b style="font-size:14px">⇄ Split the payment</b><small style="font-size:11.5px;color:var(--muted);font-weight:400">Part one way, part another — ₹200 UPI, ₹200 cash, and so on</small></button>` : ""}
           </div>
           <div class="pay-other-write" style="display:none">
             <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
@@ -3195,8 +3203,10 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
           </div>
           <div class="pay-other-split" style="display:none">
-            <div style="font-size:13px;font-weight:700;margin:0 0 3px">How much came in each way?</div>
-            <div style="font-size:11.5px;color:var(--muted);margin:0 0 10px">Add a part for every way they paid. The parts have to add up to ${inr(due)}.</div>
+            <div style="font-size:13px;font-weight:700;margin:0 0 3px">Split payment</div>
+            <div style="font-size:11.5px;color:var(--muted);margin:0 0 10px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
+            <div style="font-size:11.5px;color:var(--muted);margin:0 0 5px">How many are paying?</div>
+            <div class="pay-split-nrow" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}" style="min-width:44px;min-height:44px;padding:0 12px;font-weight:700">${n}</button>`).join("")}</div>
             <div class="pay-split-rows"></div>
             <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
             <div class="pay-split-sum" style="margin:9px 0 8px;font-size:12.5px;font-weight:700"></div>
@@ -3239,23 +3249,31 @@ function openPaymentMethodModal(due, label, opts = {}) {
     ov.querySelectorAll(".pay-method-btn").forEach((b) => (b.onclick = () => {
       // The two special settles (mig 166): resolve with a marker — the CALLER runs the
       // dedicated flow (person picker / no-charge settle); no payment method involved.
+      // "Split payment" opens the parts panel right here — it was two taps deep under "Other",
+      // which is why nobody used it (owner, 2026-08-21).
+      if (b.dataset.special === "split") {
+        ov.querySelector(".pay-other-field").style.display = "";
+        ov.querySelector(".pay-other-pick").style.display = "none";
+        ov.querySelector(".pay-other-split").style.display = "";
+        splitTo(2);
+        return;
+      }
       if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
+        // Straight to the box. This used to open a chooser of two — "type another way" or
+        // "split the payment" — and Split is its own button now, so the chooser held one option.
         ov.querySelector(".pay-other-field").style.display = "";
+        ov.querySelector(".pay-other-pick").style.display = "none";
+        ov.querySelector(".pay-other-write").style.display = "";
         ov.querySelector(".pay-other-input").focus();
         return;
       }
       finish(m, null);
     }));
-    // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
-    // SPLIT the bill across ways — "₹200 from this, ₹200 from that". Split is offered only
-    // when the caller can post it (opts.split = a whole table's bill).
-    ov.querySelectorAll(".pay-other-choice").forEach((b) => (b.onclick = () => {
-      ov.querySelector(".pay-other-pick").style.display = "none";
-      if (b.dataset.oc === "write") { ov.querySelector(".pay-other-write").style.display = ""; ov.querySelector(".pay-other-input").focus(); }
-      else { ov.querySelector(".pay-other-split").style.display = ""; renderSplit(); }
-    }));
+    // The old "Other → write or split" chooser is gone: Split payment is its own button on the
+    // grid now (owner, 2026-08-21 — it was two taps deep, which is why nobody used it), and
+    // "Other" goes straight to its text box above.
     const otherInput = ov.querySelector(".pay-other-input");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     ov.querySelector(".pay-other-confirm").onclick = confirmOther;
@@ -3264,34 +3282,77 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // ── Split across ways to pay ────────────────────────────────────────────────────
     // The parts must add up to the bill EXACTLY — the server recomputes the due and refuses
     // anything else (lib/paySplit.ts), so this can neither under- nor over-collect.
-    const legs = [{ amount: "", method: "UPI", note: "" }, { amount: "", method: "Cash", note: "" }];
+    // SPLIT PAYMENT (owner, 2026-08-21) — kept identical to the manager panel's drawer on purpose:
+    // a money screen that exists twice and differs is how the two panels drifted before.
+    // Tap how many are paying → even amounts as a STARTING point, every box editable, and each part
+    // picks its own way to pay including Pay later, which puts that slice on a tab (mig 352).
+    const PAY_LATER = "Pay later";
+    const SPLIT_WAYS = ["UPI", "Cash", "Card", "Other", PAY_LATER];
+    const legs = [];
     const legSum = () => Math.round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;
     const legLeft = () => Math.round((due - legSum()) * 100) / 100;
     const rowsEl = ov.querySelector(".pay-split-rows");
     const sumEl = ov.querySelector(".pay-split-sum");
     const inpCss = "box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
+    // Even to the paise: everyone gets the rounded-down share and the last part absorbs the odd
+    // paise, so the parts always add up exactly. A method already picked on a row is kept.
+    function splitTo(n) {
+      const each = Math.floor((due / n) * 100) / 100;
+      const kept = legs.slice(0, n);
+      legs.length = 0;
+      for (let i = 0; i < n; i++) {
+        const was = kept[i] || {};
+        legs.push({
+          amount: String(i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each),
+          method: was.method || (i === 0 ? "UPI" : "Cash"), note: was.note || "", khata: was.khata || null,
+        });
+      }
+      ov.querySelectorAll(".pay-split-n").forEach((b) => {
+        const on = Number(b.dataset.n) === n;
+        b.style.background = on ? "var(--gold, #d4a574)" : "";
+        b.style.color = on ? "#2a1d0c" : "";
+      });
+      renderSplit();
+    }
+    ov.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
     function renderSplit() {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}" style="display:grid;grid-template-columns:1fr auto 30px;gap:8px;align-items:center;margin-bottom:8px">
           <input type="number" inputmode="decimal" min="0" step="1" class="psr-amt" value="${l.amount}" placeholder="₹ amount" style="${inpCss};width:100%">
-          <select class="psr-method" style="${inpCss};font-weight:600">${["UPI", "Cash", "Card", "Other"].map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
+          <select class="psr-method" style="${inpCss};font-weight:600">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
           ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part" style="width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px;cursor:pointer">✕</button>` : `<span></span>`}
           ${l.method === "Other" ? `<input type="text" class="psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque" style="${inpCss};grid-column:1 / -1;width:100%">` : ""}
+          ${l.method === PAY_LATER ? `<button type="button" class="btn psr-who" style="grid-column:1 / -1;min-height:44px;text-align:left;font-weight:600;padding:0 12px">${l.khata ? "📒 " + esc(l.khata.label) + " — change" : "📒 Who owes this? — pick a person"}</button>` : ""}
         </div>`).join("");
       rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
         const i = Number(row.dataset.i);
+        // Typing must not re-render — that would blur the box mid-keystroke.
         row.querySelector(".psr-amt").oninput = (e) => { legs[i].amount = e.target.value; refreshSplitSum(); };
-        row.querySelector(".psr-method").onchange = (e) => { legs[i].method = e.target.value; renderSplit(); };
+        row.querySelector(".psr-method").onchange = (e) => {
+          legs[i].method = e.target.value;
+          if (legs[i].method !== PAY_LATER) legs[i].khata = null;
+          renderSplit();
+        };
         const nEl = row.querySelector(".psr-note"); if (nEl) nEl.oninput = (e) => { legs[i].note = e.target.value; };
         const dEl = row.querySelector(".psr-del"); if (dEl) dEl.onclick = () => { legs.splice(i, 1); renderSplit(); };
+        // The SAME person sheet the whole-bill Pay Later button opens, so there is one picker.
+        const wEl = row.querySelector(".psr-who");
+        if (wEl) wEl.onclick = async () => {
+          const picked = await openKhataPersonSheet(Number(legs[i].amount) || 0, opts.table);
+          if (!picked) return;
+          legs[i].khata = picked.customer_id
+            ? { customer_id: picked.customer_id, label: picked.name || "that person" }
+            : { name: picked.name, phone: picked.phone || "", label: picked.name };
+          renderSplit();
+        };
       });
       refreshSplitSum();
     }
     function refreshSplitSum() {
       if (!sumEl) return;
       const left = legLeft();
-      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inr(due)}`
-        : left > 0 ? `${inr(left)} still to cover` : `${inr(-left)} more than the bill`;
+      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
+        : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
       sumEl.style.color = left === 0 ? "#16a34a" : "#e11d48";
     }
     const addBtn = ov.querySelector(".pay-split-add");
@@ -3309,12 +3370,23 @@ function openPaymentMethodModal(due, label, opts = {}) {
       if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one."); return; }
       if (left !== 0) { toast(left > 0 ? `${inr(left)} of the bill is still uncovered.` : `The parts are ${inr(-left)} more than the bill.`); return; }
       if (legs.length < 2) { toast("A split needs at least two parts."); return; }
+      // The three tab rules, said in words before the server has to refuse them.
+      const later = legs.filter((l) => l.method === PAY_LATER);
+      if (later.some((l) => !l.khata)) { toast("Tap “Who owes this?” on the pay-later part and pick a person."); return; }
+      if (later.length > 1) { toast("Only one part can be pay-later — put the rest on cash, card or UPI."); return; }
       resolved = true;
       const cust = readCust();
       close();
       resolve({
         method: "Split", note: null, cust,
-        splitLegs: legs.map((l) => ({ amount: Math.round(Number(l.amount) * 100) / 100, method: l.method, note: (l.note || "").trim().slice(0, 200) || null })),
+        splitLegs: legs.map((l) => ({
+          amount: Math.round(Number(l.amount) * 100) / 100,
+          method: l.method,
+          note: (l.note || "").trim().slice(0, 200) || null,
+          ...(l.method === PAY_LATER && l.khata
+            ? { khataCustomerId: l.khata.customer_id || null, khataName: l.khata.name || null, khataPhone: l.khata.phone || null }
+            : {}),
+        })),
       });
     };
 
@@ -3355,8 +3427,10 @@ async function payBillWithMethod(t, a) {
   const opts = {
     onHouse: ["family", "guest"].includes(ttagOf(t)),
     khata: tabletKhataOn() && tshow("tablet_khata"),
-    // A whole table's bill can be collected in parts (Other → Split the payment).
+    // A whole table's bill can be collected in parts ("Split payment").
     split: true,
+    // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
+    table: t,
   };
   const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`, opts);
   if (!picked) return;
@@ -3454,7 +3528,12 @@ function openKhataPersonSheet(due, t) {
     search.oninput = () => { pickedId = null; clearTimeout(timer); timer = setTimeout(doSearch, 250); };
     doSearch();
     ov.querySelector(".kp-go").onclick = () => {
-      if (pickedId) { resolved = true; close(); resolve({ customer_id: pickedId }); return; }
+      // The NAME comes back with the id (2026-08-21): a split's pay-later row prints WHO owes it.
+      if (pickedId) {
+        const r0 = ov.querySelector(`[data-cid="${pickedId}"] b`);
+        resolved = true; close(); resolve({ customer_id: pickedId, name: (r0 && r0.textContent) || "" });
+        return;
+      }
       const name = ov.querySelector(".kp-name").value.trim();
       if (!name) { toast("Pick a person from the list, or type a name to add them.", false); return; }
       resolved = true; close();

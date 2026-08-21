@@ -67,7 +67,7 @@ async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; bac
   if (helper.owned) return { mayPrint: false, backup: false, target, helper };
   return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
 }
-import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
+import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
@@ -3907,10 +3907,29 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Un-accepted (received) orders stay OUT of the scope — the same graceful rule as
       // mark-paid: settle the accepted part, leave a just-added order to be accepted and paid
       // separately (was: a 409 the client could never satisfy — owner deep-QA 2026-07-23).
-      const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
+      const splitParts = Array.isArray(body?.splits) ? body.splits : [];
+      // A PAY-LATER PART IS STILL PAY-LATER (mig 352). It needs the khata module AND the khata
+      // power on top of mark_paid — otherwise a split would be a way round both, which is exactly
+      // the hole the mark_paid line above closes for the money half.
+      if (splitParts.some((s: { method?: unknown }) => String(s?.method) === PAY_LATER)) {
+        if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+        if (!(await managerCan(g, rid, "khata"))) return permDenied("put part of a bill on a tab");
+      }
+      const rSp = await settleBillInParts(sb, { rid, table: t, splits: splitParts });
       if (!rSp.ok) return err(rSp.message, rSp.status);
+      // A tab leaves the bill UNPAID and in the book, so the table has to be closed the same way
+      // the whole-bill Pay Later button closes it — orders were archived by the settle first, so
+      // the close's cook-guard cancels nothing.
+      if (rSp.parked && rSp.sessionId) {
+        const closed = await closeSession(rSp.sessionId, { force: true }, { panel: "editor", deviceId: dev, restaurantId: rid, user: g.user, reason: reasonFromBody(body) });
+        if (!closed.ok) return err(closed.message, closed.status);
+      }
       await log("editor", "bill_split", { restaurant_id: rid, table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
-      return ok({ ok: true, count: rSp.count, due: rSp.due });
+      // The tab itself is a khata event, so it reads in the book's own history too, not only as a split.
+      if (rSp.parked && rSp.customer) {
+        await log("editor", "khata_park", { restaurant_id: rid, table_number: t, detail: `₹${rSp.owed.toFixed(0)} of a split → ${rSp.customer.name} (₹${rSp.collected.toFixed(0)} collected)`, device_id: dev });
+      }
+      return ok({ ok: true, count: rSp.count, due: rSp.due, parked: rSp.parked, owed: rSp.owed, collected: rSp.collected, customer: rSp.customer });
     }
 
     // order-items/:id/move — move ONE dish line to another table (KOT ▾ menu; the
@@ -4454,8 +4473,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (body?.session_id) pq = pq.eq("session_id", String(body.session_id));
       else if (body?.order_id) pq = pq.eq("id", String(body.order_id));
       else return err("session_id or order_id required");
-      const paidRows = must(await pq.select("id,table_number")) as { id: string; table_number: string }[];
+      const paidRows = must(await pq.select("id,table_number,session_id")) as { id: string; table_number: string; session_id: string | null }[];
       if (!paidRows.length) return err("Nothing outstanding on that bill.", 409);
+      // A TAB TAKEN AS PART OF A SPLIT IS NOW REAL MONEY (mig 352). When only part of a bill went on
+      // the tab, that part is a session_payments row still marked owed. Marking the orders paid
+      // clears the DEBT, but left alone the money trail would keep saying "₹121 Pay later" for a
+      // bill that has since been collected in cash — so the part is stamped settled and re-labelled
+      // with the way the money actually arrived. The person it was owed by stays on the row, which
+      // is what makes "this was Ravi's tab, collected in cash" readable afterwards.
+      const paidSessions = [...new Set(paidRows.map((r) => r.session_id).filter(Boolean))] as string[];
+      if (paidSessions.length) {
+        try {
+          await sb.from("session_payments")
+            .update({ settled_at: nowIso(), method, note: note || "collected from the pay-later book" })
+            .in("session_id", paidSessions).eq("restaurant_id", rid)
+            .not("khata_customer_id", "is", null).is("settled_at", null).is("reversed_at", null);
+        } catch { /* the debt is already cleared by the orders above; the label is best-effort */ }
+      }
       await log("manager", "khata_collect", { restaurant_id: rid, table_number: paidRows[0]?.table_number ?? null, detail: `${paidRows.length} ${paidRows.length === 1 ? "order" : "orders"} · ${method}`, device_id: dev });
       return ok({ ok: true, count: paidRows.length });
     }

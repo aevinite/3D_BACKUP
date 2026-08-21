@@ -22,19 +22,61 @@ import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 // path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
 import BILLDOC from "@/public/panels/billdoc.js";
 
-export type SplitLeg = { amount: number; method: string; note?: string | null };
+export type SplitLeg = {
+  amount: number;
+  method: string;
+  note?: string | null;
+  // A PAY-LATER part (mig 352): this slice was not collected, it is owed. Either an existing person
+  // from the khata book, or a name (+ optional phone) to add. Ignored on any other method.
+  khataCustomerId?: string | null;
+  khataName?: string | null;
+  khataPhone?: string | null;
+};
 export type SplitResult =
-  | { ok: true; count: number; due: number; note: string; sessionId: string; orderIds: string[] }
+  | {
+      ok: true; count: number; due: number; note: string; sessionId: string; orderIds: string[];
+      /** true = a part was left on someone's tab, so the bill is NOT marked paid and the caller
+       *  must close the table (the same thing the whole-bill Pay Later button does). */
+      parked: boolean;
+      /** who owes the parked part, when there is one — for the caller's log line. */
+      customer: { id: string; name: string } | null;
+      owed: number;
+      collected: number;
+    }
   | { ok: false; message: string; status: number };
+
+/** The method that means "not collected — it goes on a tab" (owner, 2026-08-21).
+ *
+ *  Deliberately NOT added to PAYMENT_METHODS: that list is what a WHOLE bill can be settled with,
+ *  and pay-later already has its own button there. This is a method a single PART of a split may
+ *  carry, which is a different question. Keeping the lists apart is what stops "Pay later" quietly
+ *  becoming a whole-bill payment method that records money nobody collected. */
+export const PAY_LATER = "Pay later";
+export const SPLIT_METHODS: readonly string[] = [...PAYMENT_METHODS, PAY_LATER];
+
+/** Is this part a tab rather than money? */
+const isPayLater = (s: SplitLeg) => String(s?.method) === PAY_LATER;
 
 /** Validate the parts a client sent. Returns null when they're structurally fine. */
 export function badSplitShape(splits: unknown): string | null {
   if (!Array.isArray(splits) || splits.length < 2 || splits.length > 12) return "Give at least two parts (max 12).";
   for (const s of splits as SplitLeg[]) {
     if (!(Number(s?.amount) > 0)) return "Every part needs an amount above zero.";
-    if (!(PAYMENT_METHODS as readonly string[]).includes(String(s?.method))) return "invalid payment method in a split part";
+    if (!SPLIT_METHODS.includes(String(s?.method))) return "invalid payment method in a split part";
     if (s?.note != null && String(s.note).length > 200) return "split note too long";
+    // A tab has to be owed by SOMEBODY. Without this the amount would go into the book against
+    // nobody, which is the one way a debt can quietly disappear.
+    if (isPayLater(s) && !String(s?.khataCustomerId || "").trim() && !String(s?.khataName || "").trim())
+      return "A pay-later part needs a person — pick who owes it.";
   }
+  const later = (splits as SplitLeg[]).filter(isPayLater);
+  // ONE tab per bill, for now. The khata book groups a debt by `orders.khata_customer_id`, and one
+  // bill's orders can only name one person — so two tabs on one bill would show the whole remainder
+  // against whichever name won. Refusing out loud beats recording it against the wrong person.
+  // …which also means a split can never be ENTIRELY a tab: that would need every part to be
+  // pay-later, and a split needs at least two parts, so the rule above catches it first. (The
+  // whole bill on a tab is the Pay Later button, and it is still there.)
+  if (later.length > 1) return "Only one part can be pay-later — put the rest on a card, cash or UPI.";
   return null;
 }
 
@@ -142,51 +184,104 @@ export async function settleBillInParts(
   // subtotal − discount + tax: one formula that also holds at a zero rate, where the discount can
   // legitimately land outside the taxable base.
   const due = r2(sub - disc + tax);
-  // ROUND EACH PART ONCE, AND CHECK THE ROUNDED PARTS (2026-08-21). The sum used to be taken from
-  // the amounts exactly as they arrived, while the legs were rounded to the paise on the way into
-  // session_payments — two different numbers for one settle. A client sending three decimals could
-  // therefore pass the ±2p gate and leave a money trail that adds up to something the bill was
-  // never settled at. One rounding, used for the check AND for the row, so what was agreed is what
-  // is recorded. Every panel already sends whole rupees, so nothing normal moves.
-  const parts = splits.map((s) => ({ amount: r2(Number(s.amount)), method: String(s.method), note: s.note }));
+  // ROUND EACH PART ONCE, AND CHECK THE ROUNDED PARTS. The sum used to be taken from the amounts
+  // exactly as they arrived while the rows were rounded to the paise on the way in — two different
+  // numbers for one settle, so a client sending three decimals could pass the ±2p gate and leave a
+  // money trail adding up to something the bill was never settled at. One rounding, used for the
+  // check AND for the row. Every panel sends whole rupees, so nothing normal moves.
+  const parts = splits.map((s) => ({ ...s, amount: r2(Number(s.amount)) }));
   const sum = r2(parts.reduce((s, x) => s + x.amount, 0));
   if (Math.abs(sum - due) > 0.02) {
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };
   }
 
+  // ── IS ONE OF THE PARTS A TAB? (mig 352) ────────────────────────────────────────────────────
+  // Split payment IS mark-paid — the bill is settled and the table frees either way (owner,
+  // 2026-08-21: "it should work like mark as paid but the amount is being split"). The one
+  // difference a tab makes is that its slice was not collected, so the bill cannot be stamped paid
+  // and the remainder goes into the khata book, exactly as the whole-bill Pay Later button does.
+  const laterPart = parts.find(isPayLater) || null;
+  const owed = laterPart ? laterPart.amount : 0;
+  const collected = r2(sum - owed);
+
+  // Resolve WHO owes it — an existing person, or add them. Same rule as the khata handler: a phone
+  // that already exists reuses that person rather than creating a second row for one human.
+  let customer: { id: string; name: string } | null = null;
+  if (laterPart) {
+    const wantId = String(laterPart.khataCustomerId || "").trim();
+    if (wantId) {
+      const got = (await sb.from("khata_customers").select("id,name")
+        .eq("restaurant_id", rid).eq("id", wantId).maybeSingle()).data as { id: string; name: string } | null;
+      if (!got) return { ok: false, status: 404, message: "That person isn't in this restaurant's pay-later book." };
+      customer = got;
+    } else {
+      const name = String(laterPart.khataName || "").trim().slice(0, 80);
+      if (!name) return { ok: false, status: 400, message: "A pay-later part needs a person — pick who owes it." };
+      const phone = String(laterPart.khataPhone || "").trim().slice(0, 20) || null;
+      if (phone) {
+        customer = (await sb.from("khata_customers").select("id,name")
+          .eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as { id: string; name: string } | null;
+      }
+      if (!customer) {
+        const made = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone }).select("id,name");
+        if (made.error) return { ok: false, message: made.error.message, status: 500 };
+        customer = (made.data as { id: string; name: string }[])[0];
+      }
+    }
+  }
+
+  // Every part of ONE tap shares a settle group, so the book can subtract what arrived ALONGSIDE
+  // the tab and nothing else (see mig 352 — without it an earlier settle on the same session would
+  // be subtracted from this debt).
+  const group = crypto.randomUUID();
   const legs = parts.map((s) => ({
     session_id: sid, restaurant_id: rid, amount: s.amount,
-    method: s.method, note: String(s.note || "").slice(0, 200) || null,
+    method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
+    settle_group: group,
+    khata_customer_id: isPayLater(s) ? customer!.id : null,
   }));
   const ins = await sb.from("session_payments").insert(legs).select("id");
   if (ins.error) return { ok: false, message: ins.error.message, status: 500 };
   const legIds = ((ins.data || []) as { id: string }[]).map((l) => l.id);
 
-  const note = `${parts.length}-way split: ` + parts.map((s) => `₹${s.amount.toFixed(0)} ${s.method}`).join(" + ");
+  const note = `${parts.length}-way split: ` + parts.map((s) => `₹${s.amount.toFixed(0)} ${s.method}`).join(" + ")
+    + (customer ? ` (${customer.name}'s tab)` : "");
   const ids = rows.map((o) => o.id);
-  const upd = await sb.from("orders")
-    .update({ payment_status: "paid", paid_at: new Date().toISOString(), payment_method: "Split", payment_note: note.slice(0, 200) })
-    .in("id", ids).eq("restaurant_id", rid);
+  const stamp = new Date().toISOString();
+
+  // A TAB PARKS THE BILL; NO TAB PAYS IT. The parked shape is the khata handler's, byte for byte:
+  // payment_status stays 'pending' so the money is not claimed, khata_at / khata_customer_id put it
+  // in the book, and `archived` takes it off the live floor. The CALLER closes the session — that is
+  // where the close reason, the ladder and the log line already live.
+  const upd = laterPart
+    ? await sb.from("orders")
+        .update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
+        .in("id", ids).eq("restaurant_id", rid)
+    : await sb.from("orders")
+        .update({ payment_status: "paid", paid_at: stamp, payment_method: "Split", payment_note: note.slice(0, 200) })
+        .in("id", ids).eq("restaurant_id", rid);
   if (upd.error) {
-    // THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN (2026-08-21). The parts land first and the
-    // paid stamp second, and there is no transaction across the two. When the stamp failed, the legs
-    // were left standing: the bill stayed UNPAID while session_payments said ₹200 UPI + ₹200 Cash had
-    // been collected on it — so "how did table 6 pay?" answered for a settle that never happened, and
-    // the day's payment mix counted money nobody took. Stamp them reversed instead (mig 285's rule: a
-    // money record is corrected, never deleted), then still answer 500 so the person knows to retry.
+    // THE TRAIL MUST NOT CLAIM MONEY THAT WAS NEVER TAKEN. The parts land first and the stamp
+    // second, with no transaction across the two. Left alone, a failed stamp leaves the bill unpaid
+    // while session_payments says the parts were collected on it — so "how did table 6 pay?"
+    // answers for a settle that never happened. Stamp them reversed (mig 285's rule: a money record
+    // is corrected, never deleted), then still answer 500 so the person knows to retry.
     if (legIds.length) {
       try {
         await sb.from("session_payments").update({
-          reversed_at: new Date().toISOString(),
-          reversed_by: "auto · the bill was not marked paid",
+          reversed_at: stamp,
+          reversed_by: "auto · the bill was not settled",
           reversed_reason: "the settle failed after the parts were recorded",
         }).in("id", legIds).eq("restaurant_id", rid);
-      } catch { /* best-effort: the 500 below is what tells the person, and nothing is deleted either way */ }
+      } catch { /* best-effort: the 500 below is what tells the person, and nothing is deleted */ }
     }
     return { ok: false, message: upd.error.message, status: 500 };
   }
 
-  return { ok: true, count: ids.length, due, note, sessionId: sid, orderIds: ids };
+  return {
+    ok: true, count: ids.length, due, note, sessionId: sid, orderIds: ids,
+    parked: !!laterPart, customer, owed, collected,
+  };
 }
 
 /**

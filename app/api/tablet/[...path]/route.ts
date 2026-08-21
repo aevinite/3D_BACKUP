@@ -38,7 +38,7 @@ import { worthLogging, pgError } from "@/lib/dbRefusal";
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { settleBillInParts, reverseSplitLegs, badSplitShape } from "@/lib/paySplit";
+import { settleBillInParts, reverseSplitLegs, badSplitShape, PAY_LATER } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
@@ -1833,10 +1833,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // A merged child's bill lives on its parent — split the PARTY's bill (lib/tableMerge).
       const t = await mergeParentTable(sb, rid, tRaw);
       const gs = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!gs.allow) return gs.resp;
-      const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
+      const splitParts = Array.isArray(body?.splits) ? body.splits : [];
+      // A PAY-LATER PART IS STILL PAY-LATER (mig 352): it needs the khata module and the tablet's
+      // khata power on top of mark_paid, or a split would be a way round both.
+      if (splitParts.some((s: { method?: unknown }) => String(s?.method) === PAY_LATER)) {
+        if (actor && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+        const kg = recordPin(await tabletPerm("tablet_khata", req, body, rid, actor)); if (!kg.allow) return kg.resp;
+      }
+      const rSp = await settleBillInParts(sb, { rid, table: t, splits: splitParts });
       if (!rSp.ok) return err(rSp.message, rSp.status);
+      // A tab leaves the bill UNPAID and in the book, so the table closes the same way the
+      // whole-bill Pay Later button closes it (the settle archived the orders first).
+      if (rSp.parked && rSp.sessionId) {
+        const closed = await closeSession(rSp.sessionId, { force: true }, { panel: "tablet", deviceId: dev, restaurantId: rid, user: actor ?? null, reason: reasonFromBody(body) });
+        if (!closed.ok) return err(closed.message, closed.status);
+      }
       await log("bill_split", { table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
-      return ok({ ok: true, count: rSp.count, due: rSp.due });
+      if (rSp.parked && rSp.customer) {
+        await log("khata_park", { table_number: t, detail: `₹${rSp.owed.toFixed(0)} of a split → ${rSp.customer.name} (₹${rSp.collected.toFixed(0)} collected)`, device_id: dev });
+      }
+      return ok({ ok: true, count: rSp.count, due: rSp.due, parked: rSp.parked, owed: rSp.owed, collected: rSp.collected, customer: rSp.customer });
     }
 
     // tables/:t/pay — settle the WHOLE bill: mark every unpaid, non-cancelled
@@ -1887,11 +1903,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const gs = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gs.allow) return gs.resp;
         const shape = badSplitShape(splits);
         if (shape) return err(shape, 400);
+        // The same pay-later gate the dedicated pay-split route applies (mig 352) — this older
+        // door must not be the loose one.
+        if ((splits as { method?: unknown }[]).some((x) => String(x?.method) === PAY_LATER)) {
+          if (actor && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+          const kg2 = recordPin(await tabletPerm("tablet_khata", req, body, rid, actor)); if (!kg2.allow) return kg2.resp;
+        }
         const rSp = await settleBillInParts(sb, { rid, table: t, splits });
         if (!rSp.ok) return err(rSp.message, rSp.status);
+        if (rSp.parked && rSp.sessionId) {
+          const closed = await closeSession(rSp.sessionId, { force: true }, { panel: "tablet", deviceId: dev, restaurantId: rid, user: actor ?? null, reason: reasonFromBody(body) });
+          if (!closed.ok) return err(closed.message, closed.status);
+        }
         await log("bill_split", { table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
+        if (rSp.parked && rSp.customer) {
+          await log("khata_park", { table_number: t, detail: `₹${rSp.owed.toFixed(0)} of a split → ${rSp.customer.name} (₹${rSp.collected.toFixed(0)} collected)`, device_id: dev });
+        }
         invalidateFloor(rid);
-        return ok({ ok: true, count: rSp.count, due: rSp.due });
+        return ok({ ok: true, count: rSp.count, due: rSp.due, parked: rSp.parked, owed: rSp.owed, collected: rSp.collected, customer: rSp.customer });
       } else if (body && body.payment_method !== undefined) {
         if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
         payUpdate.payment_method = body.payment_method;
