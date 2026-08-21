@@ -434,7 +434,13 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .btn { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 11px; padding: 11px 16px; font-size: 14.5px; cursor: pointer; font-family: inherit; }
 .btn:hover { border-color: var(--blue); }
 .btn.small { padding: 7px 12px; font-size: 13px; }
-.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 800; }
+/* DARK INK ON THE GOLD FILL, not white (T26 sweep, 2026-08-22). --blue is aliased to the house
+   GOLD at the top of this file, and white on gold measured 2.81:1 on the light skin and 2.23:1 on
+   the dark one — under the floor in BOTH skins, so no toggle rescued it. Every other gold fill in
+   this same file already carries #1a140c (.qo-top, .t-take, .accept) and the manager panel does the
+   same with #2a1d0c, so a waiter was reading three different answers to one question. 6.51:1 light,
+   8.21:1 dark. */
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #1a140c; font-weight: 800; }
 .btn.big { padding: 15px; font-size: 16px; letter-spacing: 0.5px; }
 .btn.danger { color: #ff8a8a; border-color: rgba(239,68,68,.4); }
 .btn.danger:hover { border-color: var(--red); background: rgba(239,68,68,.08); }
@@ -448,7 +454,7 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
 .chip { flex: 0 0 auto; background: var(--bg); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font-size: 13.5px; cursor: pointer; font-family: inherit; }
-.chip.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 700; }
+.chip.on { background: var(--blue); border-color: var(--blue); color: #1a140c; font-weight: 700; }  /* dark ink on gold — see .btn.primary */
 .dishgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; max-height: 60vh; overflow-y: auto; padding: 2px; }
 .dish { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; min-height: 90px; cursor: pointer; color: var(--text); font-family: inherit; transition: border-color .12s, background .12s, transform .08s; }
 .dish:hover:not(.out) { border-color: var(--gold, #b8923f); }
@@ -467,7 +473,9 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .dprice { font-size: 12.5px; color: var(--muted); }
 .dish.in .dprice { color: var(--blue); font-weight: 700; }
 .dadd { width: 22px; height: 22px; flex: 0 0 auto; border-radius: 7px; display: grid; place-items: center; font-size: 15px; font-weight: 700; line-height: 1; background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold, #b8923f); }
-.dqty { flex: 0 0 auto; background: var(--blue); color: #fff; border-radius: 999px; padding: 2px 9px; font-size: 12.5px; font-weight: 800; }
+/* The QUANTITY on a dish tile — a number a waiter reads mid-order, so it gets the same dark ink
+   on gold as every other filled control here (was white at 2.81/2.23:1). */
+.dqty { flex: 0 0 auto; background: var(--blue); color: #1a140c; border-radius: 999px; padding: 2px 9px; font-size: 12.5px; font-weight: 800; }
 /* Minus button shown once a dish is in the cart (owner 2026-07-08): tap it to remove one,
    tap anywhere else on the tile to add one. ~34px tap target, mirrors the ✎ corner size. */
 .dminus { flex: 0 0 auto; width: 34px; height: 30px; padding: 0; border-radius: 8px; display: grid; place-items: center; font-size: 22px; font-weight: 700; line-height: 1; cursor: pointer; font-family: inherit; border: 1px solid var(--line); background: color-mix(in srgb, var(--blue) 14%, var(--bg)); color: var(--blue); }
