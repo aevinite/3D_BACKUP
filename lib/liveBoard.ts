@@ -14,6 +14,8 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+// The SHARED bounded fan-out. See the note on pageBoard below for why the paging helper is NOT shared.
+import { mapLimit } from "@/lib/mapLimit";
 
 // We only touch id / created_at / session_id here; the rest of the row passes
 // through untouched, hence the index signature.
@@ -57,13 +59,33 @@ const KITCHEN_ACTIVE_STATUSES = ["received", "preparing"];
 // PostgREST silently caps any response at 1000 rows. With ascending ordering that
 // means a board past 1000 live rows keeps the OLDEST and DROPS the NEWEST — the
 // 2026-07-03 stress test showed the kitchen going blind to every new KOT once a
-// backlog passed the cap, with no error anywhere. pageAll() walks .range() windows
+// backlog passed the cap, with no error anywhere. pageBoard() walks .range() windows
 // until a short page so the board is COMPLETE again. PAGE must not exceed the
 // server's max-rows (1000). MAX_PAGES is runaway protection only (20k rows is far
 // beyond any real floor); if it ever trips we log — never silently truncate again.
+//
+// ── WHY THIS IS `pageBoard` AND NOT `lib/pageAll.ts` (T25 sweep, 2026-08-21) ─────────────────────
+// It used to be called `pageAll`, which is also the name of a SHARED helper in lib/pageAll.ts — two
+// functions, one name, and they answer differently on the two things that matter:
+//
+//                        this one (the board)              lib/pageAll.ts (a small table)
+//   a failed page        THROWS                            returns { error }
+//   past the cap         logs and returns what it has      returns { error: TooManyRows }
+//   the cap             20,000 rows                        50,000 rows
+//
+// Neither is wrong. A kitchen board that shows 20,000 of 20,001 tickets and writes a line to the log
+// is better than a board that refuses to draw during a rush; a money total that is short by one row
+// is a lie. But sharing a NAME while disagreeing about failure is the drift this codebase keeps
+// consolidating away, and the next person to reach for "pageAll" in this file gets whichever one the
+// import happens to resolve.
+//
+// So the BEHAVIOUR is deliberately kept — it was measured for this board — and the NAME is made
+// honest instead. Do not "unify" this with lib/pageAll.ts: that would trade a proven kitchen
+// behaviour for a tidier one, which is the wrong direction for the screen that must never go blank.
+// (The fan-out helper next to it WAS shared — see the note there. That one was safe.)
 const PAGE = 1000;
 const MAX_PAGES = 20;
-async function pageAll<T>(
+async function pageBoard<T>(
   makePage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = [];
@@ -74,7 +96,7 @@ async function pageAll<T>(
     all.push(...rows);
     if (rows.length < PAGE) return all;
   }
-  console.error(`liveBoard: pageAll hit MAX_PAGES (${MAX_PAGES * PAGE} rows) — board truncated`);
+  console.error(`liveBoard: pageBoard hit MAX_PAGES (${MAX_PAGES * PAGE} rows) — board truncated`);
   return all;
 }
 
@@ -100,13 +122,12 @@ const chunkIds = (ids: string[]): string[][] => {
   return out;
 };
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = [];
-  for (let i = 0; i < items.length; i += limit) {
-    out.push(...(await Promise.all(items.slice(i, i + limit).map(fn))));
-  }
-  return out;
-}
+// THE FAN-OUT IS THE SHARED ONE NOW (lib/mapLimit.ts — T25 sweep, 2026-08-21). The copy that lived
+// here ran in BATCHES: fire `limit`, wait for all of them, fire the next `limit`. The shared helper
+// is a worker pool — `limit` workers pulling from a queue — so it keeps the ceiling FULL instead of
+// idling five connections while a sixth slow chunk finishes. Same maximum in flight (6, the owner's
+// connection budget), same input order preserved, strictly less waiting on a big backlog. That is
+// why this half was safe to share and the paging half above was not.
 
 // Merge the chunk/pass results back into ONE list that looks exactly like the old single
 // query's output: unique by id, ordered by created_at then id (the stable tiebreak).
@@ -156,10 +177,10 @@ export async function liveOrdersAndItems(
     return q;
   };
   const orderPasses: Row[][] = [
-    await pageAll<Row>((from, to) => baseOrders().gte("created_at", since)
+    await pageBoard<Row>((from, to) => baseOrders().gte("created_at", since)
       .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     ...(await mapLimit(chunkIds(openIds), CHUNK_CONCURRENCY, (ids) =>
-      pageAll<Row>((from, to) => baseOrders().lt("created_at", since).in("session_id", ids)
+      pageBoard<Row>((from, to) => baseOrders().lt("created_at", since).in("session_id", ids)
         .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)))),
   ];
   const orders = mergeRows(orderPasses);
@@ -167,7 +188,7 @@ export async function liveOrdersAndItems(
   // Every dish row for a set of order ids, chunked so the URL can never overflow.
   const itemsForOrderIds = async (ids: string[]): Promise<Row[]> =>
     mergeRows(await mapLimit(chunkIds(ids), CHUNK_CONCURRENCY, (c) =>
-      pageAll<Row>((from, to) => sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
+      pageBoard<Row>((from, to) => sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
         .in("order_id", c)
         .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to))));
 
@@ -198,7 +219,7 @@ export async function liveOrdersAndItems(
   const sinceMs = new Date(since).getTime();
   const oldOrderIds = orders.filter((o) => new Date(o.created_at).getTime() < sinceMs).map((o) => o.id);
   const items = mergeRows([
-    await pageAll<Row>((from, to) =>
+    await pageBoard<Row>((from, to) =>
       sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId).gte("created_at", since)
         .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
     oldOrderIds.length ? await itemsForOrderIds(oldOrderIds) : [],

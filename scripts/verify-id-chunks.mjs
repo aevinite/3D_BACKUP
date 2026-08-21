@@ -146,10 +146,40 @@ Route it through lib/inChunks.ts:
   process.exit(1);
 }
 
+// ── NO lib/ FILE MAY SHADOW A SHARED READ HELPER'S NAME (T25 sweep, 2026-08-21) ────────────────
+//
+// lib/liveBoard.ts defined its own `pageAll` and its own `mapLimit`, both names of SHARED helpers in
+// lib/pageAll.ts and lib/mapLimit.ts — and the paging pair genuinely disagreed: the shared one
+// refuses past its cap and returns `{ error }`, the board's logged and returned a truncated list.
+// Neither was wrong for its own job, but one name with two answers is how the next person picks the
+// wrong behaviour by accident.
+//
+// Resolved by SHARING the half that was safe (the fan-out — same ceiling, strictly less waiting) and
+// RENAMING the half that was not (`pageBoard`, behaviour untouched, because a kitchen board that
+// draws 20,000 of 20,001 tickets beats one that refuses during a rush).
+//
+// This keeps that settled. It checks NAMES, not behaviour: a local helper may differ all it likes,
+// as long as it is not pretending to be the shared one.
+const SHARED_HELPERS = ["pageAll", "mapLimit", "readInChunks", "idChunks"];
+for (const [rel] of Object.entries(ESTATE_READERS).concat([["lib/liveBoard.ts"]])) {
+  const file = join(ROOT, rel);
+  if (!existsSync(file)) continue;
+  const src = readFileSync(file, "utf8");
+  const imports = new Set([...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']@\/lib\/(?:pageAll|mapLimit|inChunks)["']/g)]
+    .flatMap((m) => m[1].split(",").map((x) => x.trim())));
+  for (const h of SHARED_HELPERS) {
+    // A LOCAL definition of the name — `function h(`, `const h =` — while not importing it.
+    const defines = new RegExp(`(?:^|\\n)\\s*(?:export\\s+)?(?:async\\s+)?(?:function\\s+${h}\\s*[(<]|const\\s+${h}\\s*=)`).test(src);
+    if (defines && !imports.has(h)) {
+      bad.push(`${rel} defines its own \`${h}\` — that is the name of the shared helper in lib/. If the behaviour must differ, give it a name that says so (lib/liveBoard.ts \`pageBoard\` is the worked example); if it need not, import the shared one.`);
+    }
+  }
+}
+
 if (bad.length) {
   console.log(`\n✗ verify:id-chunks — ${bad.length} problem(s):\n`);
   for (const b of bad) console.log("  · " + b);
   process.exit(1);
 }
 
-console.log(`✓ verify:id-chunks — ${checked} estate-wide read(s) chunk their id list (500 max per URL, .limit() per chunk)`);
+console.log(`✓ verify:id-chunks — ${checked} estate-wide read(s) chunk their id list, and no lib/ file shadows a shared read helper`);
