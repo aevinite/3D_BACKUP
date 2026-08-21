@@ -21,8 +21,8 @@
 // READ-ONLY. Two catalog SELECTs.
 //
 //   node scripts/verify-settings-columns.mjs          (npm run verify:settings-columns)
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,6 +119,59 @@ else pass(`${bagDecls} permission(s) declare moduleBag: true — their ladder is
 if (/bag\?: boolean/.test(model) && /m\.bag/.test(readFileSync(join(root, "lib/tableTags.ts"), "utf8")))
   pass("the reader honours the flag (lib/tableTags.ts branches on m.bag), so a declaration actually takes effect");
 else fail("lib/tableTags.ts no longer branches on m.bag — declaring moduleBag: true would silently read nothing");
+
+// 5. NOTHING MAY READ `settings` BY THE PRE-MULTI-TENANT SINGLE-ROW KEY (T25 sweep, 2026-08-21).
+//
+// Migration 003 created `settings` with `id TEXT PRIMARY KEY` and one row, `id = 'site'`. Everything
+// since is keyed on `restaurant_id` — but that row is still there, and measured on the dev database
+// it IS restaurant #1's row. So a `.eq("id", "site")` read is not "the site's setting" any more; it
+// is "My Little French House's setting, answering for every restaurant on the platform".
+//
+// lib/aggregators.ts did exactly that for the one door an outside company POSTs through, and on a
+// stack trimmed down to one client's restaurant (no #1) it would have answered `false` for ever with
+// nothing on any screen to explain why. Guarded here because this is a rule about the SHAPE of the
+// settings row, which is what this file is for — rather than as a third new guard nobody remembers.
+const LEGACY_KEY = /\.eq\(\s*["']id["']\s*,\s*["']site["']\s*\)/;
+const stripped = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+// SCOPED TO lib/ ON PURPOSE, and this is not laziness — it is the difference between a guard that
+// is trusted and one that is muted. Widening it to app/ finds two more, and BOTH turn out to be
+// deliberate legacy fallbacks for the flagship row, documented where they sit:
+//
+//   · app/api/admin/settings/route.ts — the log-retention numbers. One platform-wide policy read
+//     off #1's row. Arguably it should be its own table, but there is no per-restaurant screen for
+//     it, so today "restaurant #1's value" and "the platform's value" are the same statement.
+//   · app/api/admin/maintenance/route.ts — falls back to `id='site'` only when no restaurant_id was
+//     given, and says so in its own comment: "`rid` is null for the legacy flagship row".
+//
+// Failing on those would make this guard red on clean main for two things nobody agreed are wrong,
+// which is how a guard stops being run at all. They are named in the T25 handoff notes for the
+// terminal that owns app/api/admin instead. `lib/` is where it was a real fault and where the rule
+// is unambiguous: a shared library must never answer a per-restaurant question from one row.
+const legacyReaders = [];
+for (const dir of ["lib"]) {
+  const stack = [join(root, dir)];
+  while (stack.length) {
+    const d = stack.pop();
+    let entries = [];
+    try { entries = readdirSync(d, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const full = join(d, e.name);
+      if (e.isDirectory()) { stack.push(full); continue; }
+      if (!/\.(ts|tsx|mjs|js)$/.test(e.name)) continue;
+      // Code only — a comment EXPLAINING the retired key (lib/aggregators.ts has a long one) is
+      // documentation, and counting it would make this guard accuse the file that fixed the fault.
+      if (LEGACY_KEY.test(stripped(readFileSync(full, "utf8")))) legacyReaders.push(relative(root, full));
+    }
+  }
+}
+if (legacyReaders.length) {
+  for (const f of legacyReaders) {
+    fail(`${f} reads settings by the pre-multi-tenant key .eq("id","site") — that is restaurant #1's row answering for everybody. Key it on restaurant_id, and for a platform-wide question ask "does ANY restaurant have it?" (lib/aggregators.ts is the worked example).`);
+  }
+} else {
+  pass('nothing reads settings by the retired single-row key .eq("id","site")');
+}
 
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — the settings row is growing again`
