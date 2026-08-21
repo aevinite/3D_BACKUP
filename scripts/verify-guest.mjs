@@ -163,11 +163,19 @@ const T1 = { menuPage: code("app/r/[restaurant]/menu/page.tsx") };
 // "french-house". Measured: /menu?table=4 on the capitalised link wrote `lfh_table:French-House`,
 // and the menu's own dish links are built from r.slug — so the first dish tapped moved the guest to
 // the lower-case address, where getScannedTable() returns "". The door canonicalises instead.
+// ASSERT THE RULE, NOT WHERE THE CODE HAPPENS TO SIT (sweep #6 / T28, 2026-08-22). This wanted
+// "URLSearchParams" and "qs.append" IN THE MENU PAGE. The query-building was then factored out into
+// `queryStringOf()` in lib/tenant.ts — deliberately, so the two redirects on this page (a moved
+// address and a mis-cased one) cannot drift apart on carrying `?table=N`. Nothing about the guest's
+// experience changed, and the check went red on the tidier code. What must hold is the behaviour: the
+// door redirects to the canonical slug, and the query goes with it — wherever the builder lives.
 check("P00155", "an oddly-cased menu link is sent to the canonical one, query and all", () => {
   const guard = rx(T1.menuPage, /if \(restaurant !== r\.slug\)/);
-  const keepsQuery = has(T1.menuPage, "searchParams", "URLSearchParams", "qs.append");
-  const redirects = rx(T1.menuPage, /redirect\(`\/r\/\$\{r\.slug\}\/menu/);
-  return { ok: guard && keepsQuery && redirects, note: `guard=${guard} query=${keepsQuery} redirect=${redirects}` };
+  const redirects = rx(T1.menuPage, /redirect\(`\/r\/\$\{r\.slug\}\/menu\$\{queryStringOf\(await searchParams\)\}`\)/);
+  // …and the builder it hands the query to really does carry EVERY parameter across, arrays included.
+  const tenant = code("lib/tenant.ts");
+  const builder = has(tenant, "export function queryStringOf", "new URLSearchParams", "qs.append");
+  return { ok: guard && redirects && builder, note: `guard=${guard} redirect=${redirects} builder=${builder}` };
 });
 
 // A menu that isn't serving must not preview as an open one. app/q/[code] always did this; the
