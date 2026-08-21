@@ -1747,8 +1747,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             if (v.error) return { ok: false, error: "could not be checked" };
             const rows = (v.data || []) as { kind: string; seq: number; invoice_no: number | null; bill_no: number | null; detail: string }[];
             const checked = rows.find((r) => r.kind === "checked");
-            const problems = rows.filter((r) => r.kind !== "checked");
-            return { ok: problems.length === 0, bills: Number(checked?.seq) || 0, problems: problems.slice(0, 20) };
+            // A RECORDED ACT IS NOT A PROBLEM (mig 353). The verifier used to answer `bill_changed`
+            // for three different things: a sale altered after signing, a bill put in the RECYCLE
+            // BIN, and a sale CANCELLED after its invoice was issued. The last two are permitted,
+            // recorded and reversible — and they are the common ones, so the day-close sheet printed
+            // "⚠ Bill ledger — 11 problems" for eleven bills that were all fine (measured on the
+            // backup stack). A sheet that cries wolf is a sheet a manager stops reading, and then the
+            // one line that matters is buried in it.
+            //
+            // So the two lists are separate, and NEITHER is dropped: `problems` is what actually
+            // needs telling the owner, `notes` is stated as information on the same sheet.
+            const REAL = new Set(["row_rewritten", "chain_broken", "bill_changed"]);
+            const findings = rows.filter((r) => r.kind !== "checked");
+            const problems = findings.filter((r) => REAL.has(r.kind));
+            const notes = findings.filter((r) => !REAL.has(r.kind));
+            return {
+              ok: problems.length === 0, bills: Number(checked?.seq) || 0,
+              problems: problems.slice(0, 20), notes: notes.slice(0, 20), noteCount: notes.length,
+            };
           } catch { return { ok: false, error: "could not be checked" }; }
         })(),
         // GRAND TOTAL = money actually COLLECTED today, so use paidNet (paid-only dine-in),

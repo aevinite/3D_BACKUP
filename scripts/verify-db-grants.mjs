@@ -457,31 +457,100 @@ function checkMigrations() {
     pass("no new migration hides a cron/extension failure behind EXCEPTION WHEN OTHERS");
   }
 
-  // THE TWO MIGRATIONS THAT DAMAGE DATA ON A SECOND RUN (mig 307). seed-supabase.mjs step 1 runs
-  // EVERY file in this folder, every time, with no ledger — so a one-time migration that rewrites
-  // data is a loaded gun. 043 multiplies all money by 84 (measured: ₹36.6M -> ₹3.08bn on a second
-  // run) and 093 replaces restaurant #1's 24 permission keys with 5. Both are now wrapped in a
-  // `lfh_already_applied(...)` guard. Unwrapping either — or "tidying" the DO block away — puts
-  // the gun back, silently, and nothing else in the repo would notice.
+  // THE MIGRATIONS THAT DAMAGE DATA ON A SECOND RUN (mig 307). seed-supabase.mjs step 1 runs EVERY
+  // file in this folder, every time, with no ledger — so a one-time migration that rewrites data is
+  // a loaded gun. 043 multiplies all money by 84 (measured: ₹36.6M -> ₹3.08bn on a second run); 093
+  // replaces restaurant #1's 24 permission keys with 5; 295 forces all six of a waiter's capability
+  // switches back on; 288 un-stamps every historical tax rate after a GST change; 235 hands five
+  // languages back to a guest menu an admin narrowed to English. Each is wrapped in an
+  // `lfh_already_applied(...)` guard. Unwrapping one — or "tidying" the DO block away — puts the gun
+  // back, silently.
+  //
+  // ── THIS USED TO BE A HAND-TYPED LIST OF TWO, AND THE LIST ROTTED (owner, 2026-08-21) ──────────
+  // It named 043 and 093. By the time the T23 sweep read this folder there were TWELVE such
+  // migrations — 307 wrapped two, 313 wrapped two more, 321 wrapped four, 344 wrapped two, and T23
+  // wrapped three — and ten of them were protected by nothing at all. A guard whose coverage has to
+  // be remembered is a guard that goes stale, which is the whole reason the sweeps keep finding the
+  // same family of fault.
+  //
+  // So it no longer keeps a list. It asserts THE INVARIANT, in both directions, and derives the
+  // population from the folder itself:
+  //
+  //   1. every `lfh_already_applied('<key>')` a migration CHECKS must be RECORDED by some migration
+  //      — otherwise the guard can never become true and the one-time statement runs on every
+  //      re-seed for ever, which is exactly as bad as having no guard;
+  //   2. every key a migration RECORDS must be CHECKED by some migration — otherwise the ledger
+  //      carries a row that guards nothing, which reads as protection and is not;
+  //   3. and the two originals must still be individually named, because their blast radius is
+  //      measured and worth spelling out in the failure message.
+  //
+  // That cannot rot as the folder grows: a new one-time migration is covered the moment it is
+  // written, and forgetting the recording half is caught rather than assumed.
   {
-    const GUARDED = {
+    const bad = [];
+    const checkedIn = new Map();   // key -> [files that call lfh_already_applied('key')]
+    const recordedIn = new Map();  // key -> [files that INSERT it into lfh_applied_once]
+    const add = (m, k, f) => m.set(k, [...(m.get(k) || []), f]);
+
+    for (const f of files) {
+      const sql = readFileSync(join(root, "supabase", "migrations", f), "utf8");
+      for (const m of sql.matchAll(/lfh_already_applied\(\s*'([^']+)'\s*\)/g)) add(checkedIn, m[1], f);
+      // A recorded key is a string literal inside an INSERT … lfh_applied_once … VALUES block. The
+      // helper call above is excluded by construction: it never appears inside those parentheses.
+      //
+      // ⚠ THE TERMINATOR IS `on conflict`, NOT `;` — and that is not a style choice. Every one of
+      // these inserts ends `ON CONFLICT (key) DO NOTHING`, and their NOTE text is prose that
+      // contains semicolons ("One-time; a re-run is harmless but pointless." — mig 344). Stopping at
+      // the first `;` therefore cut migration 344's block in half and reported its SECOND key as
+      // unrecorded — a guard inventing a failure on its very first run, which is the one thing a
+      // guard must never do. Anchoring on `on conflict` cannot be fooled by punctuation in a string.
+      for (const ins of sql.matchAll(/insert\s+into\s+(?:public\.)?lfh_applied_once\b/gi)) {
+        const rest = sql.slice(ins.index);
+        const end = rest.search(/on\s+conflict/i);
+        for (const m of (end > 0 ? rest.slice(0, end) : rest).matchAll(/\(\s*'([^']+)'\s*,/g)) add(recordedIn, m[1], f);
+      }
+    }
+
+    // 1 · checked but never recorded — the guard could never fire
+    for (const [key, where] of checkedIn) {
+      if (!recordedIn.has(key)) {
+        bad.push(`'${key}' is checked by ${where.join(" + ")} but NO migration ever records it in `
+               + `lfh_applied_once, so that guard can never become true — the one-time statement runs `
+               + `on every re-seed`);
+      }
+    }
+    // 2 · recorded but never checked — a ledger row that guards nothing
+    for (const [key, where] of recordedIn) {
+      if (!checkedIn.has(key)) {
+        bad.push(`'${key}' is recorded by ${where.join(" + ")} but no migration CHECKS it, so the `
+               + `ledger row protects nothing — either wrap the statement it was written for, or `
+               + `remove the row`);
+      }
+    }
+    // 3 · the two originals, still named for their measured blast radius
+    for (const [file, key] of Object.entries({
       "043_inr_base_currency.sql": "043_inr_base_currency",
       "093_grandfather_r1_manager_powers.sql": "093_grandfather_r1_manager_powers",
-    };
-    const bad = [];
-    for (const [file, key] of Object.entries(GUARDED)) {
+    })) {
       const f = files.find((x) => x === file);
       if (!f) { bad.push(`${file} is missing from the folder entirely`); continue; }
       const sql = readFileSync(join(root, "supabase", "migrations", f), "utf8");
-      if (!sql.includes(`lfh_already_applied('${key}')`)) bad.push(`${file} no longer checks lfh_already_applied('${key}')`);
+      if (!sql.includes(`lfh_already_applied('${key}')`)) {
+        bad.push(`${file} no longer checks lfh_already_applied('${key}') — without it a re-seed `
+               + (key.startsWith("043") ? `multiplies every price and bill by 84`
+                                        : `wipes 19 of restaurant #1's permission keys`));
+      }
     }
+
     if (bad.length) {
-      fail(`a one-time DATA migration lost its re-run guard: ${bad.join("; ")}. `
-         + `seed-supabase.mjs re-runs every file in this folder, so without the guard a re-seed `
-         + `multiplies every price and bill by 84 (043) or wipes 19 of restaurant #1's permission `
-         + `keys (093). Restore the guard — see migration 307.`);
+      fail(`the re-seed guards do not hold: ${bad.join("; ")}. seed-supabase.mjs re-runs every file `
+         + `in this folder with no ledger, so a one-time DATA migration without a working guard `
+         + `rewrites live rows every time. See migration 307 for the mechanism and 352 for the `
+         + `most recent three.`);
     } else {
-      pass("the two one-time data migrations (043 ×84 money, 093 permission bag) still refuse to run twice");
+      const keys = [...checkedIn.keys()].sort();
+      pass(`all ${keys.length} one-time data migrations refuse to run twice, and every ledger key is `
+         + `both checked and recorded (${keys.join(", ")})`);
     }
   }
 }

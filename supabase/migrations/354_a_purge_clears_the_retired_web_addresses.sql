@@ -1,42 +1,57 @@
--- 346 · A purge clears the printing setup too
+-- 354 · A purge clears the retired web addresses too
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
--- WHERE THIS BITES: Admin console → Restaurants → Recycle bin → "Remove permanently". Nothing on
--- screen changes. This is the database half of a purge, and it was leaving two tables behind.
+-- ⚠ MIGRATION NUMBER: 354, contiguous with this branch's 353 (an unexplained gap fails the
+--   folder's own sequence check). T21 holds an uncommitted 354 of its own — `the last half of a
+--   retired stub`, which drops lfh_request_verification; this branch merges first, so that one
+--   renumbers on its way in, and verify-db-grants.mjs's parked-worktree check prints the clash on
+--   every run until it does. CREATE OR REPLACE on one function plus one extra DELETE, no schema
+--   change and no data rewrite, so this file is correct at ANY number.
 --
--- WHY IT WAS MISSED: `npm run verify:purge` has been RED since migration 341, naming three tenant
--- tables that admin_purge_restaurant() neither deletes nor keeps on purpose. The printing feature
--- landed after the purge list was last written, and nothing failed when it was forgotten — which is
--- exactly the silent drift that guard exists to stop. Sweep T16 reported it (handoff H1) but the
--- decision was nobody's to take at the time; taking it now.
+-- WHERE IT LIVES: Admin console → Restaurants → Recycle bin → "Remove permanently". Nothing on
+-- screen changes. This is the database half of a purge, and it was leaving one table behind.
 --
---   · print_stations (mig 338) — WHICH SCREEN prints this restaurant's paper. Operational setup:
---     it describes how the restaurant RAN, not what it SOLD. → DELETED here.
---   · print_agents   (mig 341) — the helper COMPUTERS allowed to fetch this restaurant's print
---     jobs, each holding a sha-256 of its own printing code. Operational, and leaving it behind
---     would leave a live printing credential pointing at a restaurant that no longer operates.
---     → DELETED here. (`print_jobs` and `printer_events` were already cleared by mig 345, so the
---     three printing tables now go together instead of one surviving its own queue.)
+-- WHY IT WAS MISSED — the same shape as migration 346, four days later. `npm run verify:purge` went
+-- RED the moment `restaurant_slug_history` merged (mig 350, an old printed QR still finding the
+-- restaurant):
 --
--- THE THIRD TABLE IS NOT A JUDGEMENT CALL — bill_chain (mig 332) is KEPT, and could not be deleted
--- even if someone wanted to: it carries mig 332's `trg_bill_chain_append_only` trigger, so a DELETE
--- against it RAISES and would abort the entire purge. It is the tamper-evidence for the bills a
--- purge keeps on purpose (mig 309) — throwing it away would leave the kept sales with nothing to
--- prove they were never altered, which is the opposite of what it is for. It is recorded on the
--- KEEP list in scripts/verify-purge-classified.mjs in the same commit as this file.
+--     ✗ restaurant_slug_history carries a restaurant_id but the purge neither clears it nor keeps
+--       it on purpose — add it to admin_purge_restaurant(), or to KEEP/UNDECIDED with the reason
 --
--- WHAT THIS MIGRATION DOES NOT CHANGE:
---   · THE MONEY IS STILL KEPT. Migration 309's rule is untouched — orders, order_items, sessions,
+-- That guard exists because migration 190's purge ended with `delete from restaurants`, so every
+-- table declaring `REFERENCES restaurants(id) ON DELETE CASCADE` was cleared for free and none was
+-- ever written down. Migration 309 stopped deleting that row — the kept bills hang off it — so
+-- **the cascade never fires any more**, and from that moment the only thing clearing a tenant table
+-- is the explicit list. `restaurant_slug_history` declares exactly that cascade, so it looks covered
+-- and is not.
+--
+-- ── THE DECISION, AND WHY IT IS DELETE ─────────────────────────────────────────────────────────
+-- The rule this function states about itself: *"Everything below is operational: it describes how
+-- the restaurant RAN, not what it SOLD."* A retired web address is precisely that — it describes how
+-- the restaurant was ADDRESSED. Its sibling `table_qr_codes` (the printed codes that carry those
+-- addresses) has been on the delete list since migration 321 for the same reason, and the purge
+-- guard classifies it "the printed QR codes — operational".
+--
+-- It also cannot usefully survive. A purge deletes `settings` and `menu_items`, so the restaurant
+-- has no menu left to serve; and `lib/tenant.ts` hides any restaurant with `deleted_at` set, which a
+-- purged restaurant always has (being in the recycle bin is the precondition for getting here at
+-- all). So an old address kept here could only ever resolve to a restaurant the resolver already
+-- refuses. Keeping it would leave a live-looking claim on an address a NEW restaurant might want,
+-- against `slug` being the PRIMARY KEY of that table — one row per address, for ever.
+--
+-- ── WHAT THIS DOES NOT CHANGE ──────────────────────────────────────────────────────────────────
+--   · THE MONEY IS STILL KEPT. Migration 309's rule is untouched: orders, order_items, sessions,
 --     payments, session_payments, credit_notes, invoice_events, deletion_audit and the numbering
---     counters all survive, mig 190's immutability trigger still guards them, and the restaurants
---     row itself survives (marked `purged_at`). A sale can never disappear
---     (docs/COMPLIANCE-GUARDRAILS.md §3.0) and this migration opens no route around that.
---   · THE RETENTION LOCK STAYS GONE (owner, 2026-08-20, mig 342 — *"you can able to dlete from
---     recycyle bin"*). Deliberately not reinstated. Neither is the DEFAULT-restaurant block, the
---     must-be-binned-first rule, or the never-purge-twice rule: all three stay exactly as they are.
+--     counters all survive, `lfh.allow_purge` is never opened, mig 190's immutability trigger still
+--     stands guard, and the restaurants row itself survives marked `purged_at`. A sale can never
+--     disappear (docs/COMPLIANCE-GUARDRAILS.md §3.0) and this opens no route around that.
+--   · `bill_chain` is still KEPT — mig 332's append-only trigger refuses a delete, and it is the
+--     proof the kept bills were never altered (classified KEEP by migration 346).
+--   · The retention lock stays gone (owner, 2026-08-20, mig 342), and the three rules that stop an
+--     accident — never the default restaurant, never before it is binned, never twice — are as they
+--     were.
 --
--- Additive and re-runnable: CREATE OR REPLACE on one function, two extra DELETEs, no data rewrite,
--- no new column, no new grant. Both tables cascade from restaurants(id), but the restaurants row is
--- KEPT by design, so that cascade never fires — which is why they must be named here.
+-- Body is migration 346's, verbatim, with ONE extra DELETE. Restated in full because that is how a
+-- function is replaced, and because 342 lost 22 tables by writing this function from an older copy.
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION admin_purge_restaurant(p_rid uuid)
@@ -52,8 +67,7 @@ begin
     raise exception 'Restaurant is not in the recycle bin — delete it first';
   end if;
   -- ── THE RETENTION LOCK IS GONE (owner, 2026-08-20, migration 342) ───────────────────────────
-  -- Deliberately NOT reinstated here. This migration is only putting back the delete list that
-  -- 342 dropped by accident; his decision about the 90-day wait stands.
+  -- Deliberately NOT reinstated here; his decision about the 90-day wait stands.
   if r.purged_at is not null then
     raise exception 'This restaurant has already been purged (purged_at=%) — its bills are kept on purpose', r.purged_at;
   end if;
@@ -86,9 +100,8 @@ begin
   update restaurants set owner_user_id = null where id = p_rid;
   delete from staff_users where restaurant_id = p_rid;
   delete from settings    where restaurant_id = p_rid;
-  -- ── the operational tables that used to go with the restaurants ROW (mig 321, restored here) ──
-  -- These are the 22 that migration 342 dropped. They are named explicitly because the cascade that
-  -- used to clear them stopped firing at migration 309 — see this file's header.
+  -- ── the operational tables that used to go with the restaurants ROW (mig 321, restored by 345) ──
+  -- Named explicitly because the cascade that used to clear them stopped firing at migration 309.
   -- Child-before-parent order matters: item_id on movements/waste/count_lines is NOT a cascade.
   delete from inv_recipe_lines    where restaurant_id = p_rid;
   delete from inv_movements       where restaurant_id = p_rid;
@@ -102,14 +115,21 @@ begin
   delete from expenses            where restaurant_id = p_rid;
   delete from printer_events      where restaurant_id = p_rid;
   delete from print_jobs          where restaurant_id = p_rid;
-  -- ── the printing SETUP, added by migration 346 ──────────────────────────────────────────────
-  -- The queue above was already cleared; these two are what fed it. Both cascade from
-  -- restaurants(id), but the restaurants row is KEPT on purpose (mig 309) so that cascade never
-  -- fires — they have to be named. print_agents last: deleting it retires that computer's
-  -- printing code, which must not outlive the restaurant it printed for.
+  -- ── the printing SETUP (mig 346) ─────────────────────────────────────────────────────────────
+  -- print_agents last: deleting it retires that computer's printing code, which must not outlive
+  -- the restaurant it printed for.
   delete from print_stations      where restaurant_id = p_rid;
   delete from print_agents        where restaurant_id = p_rid;
   delete from table_qr_codes      where restaurant_id = p_rid;
+  -- ── the RETIRED WEB ADDRESSES, added by migration 354 ────────────────────────────────────────
+  -- `restaurant_slug_history` (mig 350) keeps the addresses a restaurant used to answer on so its
+  -- old printed QR codes still work. It sits beside table_qr_codes above and is the same kind of
+  -- thing: how the restaurant was ADDRESSED, not what it SOLD. It also cannot usefully survive —
+  -- a purge deletes settings and menu_items, and lib/tenant.ts hides any restaurant with
+  -- deleted_at set, so a kept address could only resolve to a restaurant the resolver already
+  -- refuses. `slug` is that table's PRIMARY KEY, so leaving the row would hold an address a new
+  -- restaurant might want, for ever.
+  delete from restaurant_slug_history where restaurant_id = p_rid;
   delete from table_tags          where restaurant_id = p_rid;
   delete from error_signatures    where restaurant_id = p_rid;
   delete from rate_limit_rules    where restaurant_id = p_rid;
@@ -135,13 +155,9 @@ begin
 end $$;
 
 -- A new function is PUBLIC-executable by default (the mig 038/267 lesson), and CREATE OR REPLACE
--- keeps the existing grants — but state them anyway so a future recreate from this file alone
--- cannot quietly hand the purge to anon. `verify:grants` guards this.
---
--- BOTH lines, not just the revoke (sweep T23, 2026-08-21) — see the same note in migration 345.
--- Migrations 128 / 190 / 309 / 321 / 342 all write the pair; 345 and this file stated only the
--- REVOKE, which on a rebuild from this file alone would leave service_role with no EXECUTE and
--- break Admin console → Restaurants → Recycle bin → "Remove permanently".
+-- keeps the existing grants — but state the PAIR anyway, so a rebuild from this file alone can
+-- neither hand the purge to anon nor lock service_role out of it. (345/346 stated only the REVOKE;
+-- fixed in the same branch as this file.)
 REVOKE ALL     ON FUNCTION admin_purge_restaurant(uuid) FROM public, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION admin_purge_restaurant(uuid) TO service_role;
 
