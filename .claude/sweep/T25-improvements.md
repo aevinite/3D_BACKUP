@@ -51,9 +51,60 @@ when one is renamed away. Row added to `docs/GUARD-MAP.md`.
 
 ---
 
+## 🟢 BUILT — I2 · the delivery-app switch is per restaurant, not restaurant #1's row
+
+**Approved by the owner, 2026-08-21** ("can do this too"). Backend only, nothing on screen.
+
+`aggregatorsEnabled()` read `.eq("id","site")` — migration 003's pre-multi-tenant single-row key,
+which measured on the dev database **is restaurant #1's row**. So the gate on the one door an outside
+company POSTs through was My Little French House's own feature flag, answering for every restaurant.
+On a stack trimmed to one client's restaurant (no #1) it would have answered `false` for ever and the
+integration could never be switched on, with nothing on screen to explain why.
+
+Now `aggregatorsEnabled(rid)` answers for that restaurant, and the no-argument form answers "does ANY
+restaurant have intake on?" — the platform gate the webhook route needs before it knows which
+restaurant the payload is for. **No route change was needed**, and the gate is not weakened: it is the
+outermost of four, and the per-restaurant Platform ladder plus the per-channel switch are the ones
+that decide. The no-argument form is a rows-free COUNT with the filter pushed into Postgres, plus a
+30s cache — verified against the dev database, where the filter found exactly the 7 restaurants a
+row-by-row read found for a flag that IS on. Behaviour today is identical (nobody has intake on).
+
+**Guard:** folded into `verify:settings-columns` — it is a rule about the SHAPE of the settings row,
+which is what that file is for, so it needed no third new guard. Green now, red when `lib/` goes back
+to the legacy key. Deliberately scoped to `lib/`: widening it finds two more in `app/api/admin` and
+both are documented legacy fallbacks for the flagship row, so failing on them would make the guard
+red on clean main for two things nobody agreed are wrong.
+
+## 🔗 HANDOFF — for whoever owns `app/api/admin/**`
+
+Two routes still read `settings` by the retired single-row key. **Neither looks like a fault** — both
+are documented legacy fallbacks for the flagship row — but they are the last two, so whoever owns
+them should decide rather than inherit them by accident:
+
+- `app/api/admin/settings/route.ts` — the log-retention numbers (`oplog_retention_days`,
+  `custlog_retention_days`, `audit_retention_years`) read off `id='site'`. There is no
+  per-restaurant screen for them, so "restaurant #1's value" and "the platform's value" are the same
+  statement today. If they are meant to be platform-wide, they arguably want their own table.
+- `app/api/admin/maintenance/route.ts` — falls back to `id='site'` only when no `restaurant_id` was
+  given, and says so in its own comment: *"`rid` is null for the legacy flagship row"*. Deliberate.
+
+## 🅿️ PARKED BY THE OWNER, 2026-08-21
+
+- **The manager panel's bulk bill-deleting** (🗑 Clear freed, the tick-box bulk bar, and the dead
+  `{all:true}` server path no screen reaches). He asked for it removed, then parked the whole Bills
+  tab piece: *"leave this idea for now will do it later."* **So 🟡 I3 below stays OPEN** — the
+  unbounded read only gets large on those bulk paths, and they are still there.
+- **The Bills record screen redesign.** Same instruction.
+- **R27 CONFIRMED, not reversed.** Asked directly whether a manager should be able to delete an
+  unsettled bill, he chose *"No — keep R27 exactly as it is."* `canDeleteBill()` returning `!g.user`
+  (admin console only) is correct and stays. Worth recording because his first phrasing —
+  *"he can delete one bill but with reason"* — reads like a reversal, and it is not one.
+
+---
+
 ## 🟡 NOT BUILT — needs a decision from him
 
-### I2 · a bulk "clear all freed records" could tombstone a bill that still has live orders
+### I3 · a bulk "clear all freed records" could tombstone a bill that still has live orders
 `lib/softDelete.ts`. After stamping the orders, it asks which of the touched sessions still have a
 live order — `.in("session_id", sessionIds)` with no `.limit()` and no chunking. Past 1,000 returned
 rows that answer comes back SHORT, so a session with live orders is missing from the "busy" set and
@@ -62,14 +113,6 @@ the half-state the function's own comment was written to stop.
 **Why I did not build it:** it is the money-delete path, in the wave he gated, and the right fix is
 not obvious — chunking shrinks the window without closing it, and adding a refusal could block a
 legitimate bulk clear. Needs his call on which he prefers.
-
-### I3 · the aggregator master switch reads restaurant #1's row
-`lib/aggregators.ts` → `aggregatorsEnabled()` reads `settings` by the pre-multi-tenant key
-`.eq("id", "site")` — i.e. restaurant #1's row — and uses it as the gate for EVERY restaurant's
-inbound webhook. The feature is dormant (no keys, flag off), so nothing is broken. But on a stack
-trimmed to one client's restaurant (the exact case `lib/ownerHome.ts` exists for) that row may not
-exist, and the integration could then never be switched on. Product decision: is that switch
-platform-wide or per-restaurant?
 
 ### I4 · one successful KOT print clears a complaint about a DIFFERENT printer
 `lib/printQueue.ts` → `finishKotJob(ok)` resolves EVERY open `printer_events` row for the restaurant
