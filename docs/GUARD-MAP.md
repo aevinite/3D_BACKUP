@@ -145,7 +145,7 @@ Code: `app/owner/*`, `components/owner/*`, `app/api/owner/*`, `lib/ownerCache.ts
 | staff, profiles or pay | `verify:staff-accounts` | `.env.local` | **YES** |
 | **deleting a person who has been PAID** — or anything about the pay ledger and the recycle route | `verify:pay-history-delete` ← a salary or an advance is part of the books (docs/COMPLIANCE-GUARDRAILS.md), so a login delete must never take one with it. This was a written MANUAL check for three sweep passes and therefore never run: proving it needs real money rows. It now makes its OWN throwaway person, records one ₹1 entry through the product's endpoint, asserts the 409 AND that the owner is told on screen with the "Mark as left" way forward, then removes the payment row and the person BY ID and fails if it left anything behind. | app running + `.env.local` | **YES** |
 
-## 7 · Admin console — `/aevinite/…` (22 pages)
+## 7 · Admin console — `/aevinite/…` (23 pages)
 
 Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.ts`
 

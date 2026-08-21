@@ -141,14 +141,14 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 
 ## Stack & app map
 
-- Next 16.2.6 App Router (async params), React 19.2.4, TS strict, Tailwind 4, GSAP (npm only).
+- Next 16.3.0 App Router (async params), React 19.2.8, TS strict, Tailwind 4, GSAP (npm only).
   `<model-viewer>` via CDN inside `components/PublicModelViewer.tsx`. GLBs on Supabase Storage.
 - **ONE app on port 4000** (`npm run dev`). Panels are routes: `/menu` guest · `/aevinite` admin
-  console (22 pages, password-gated; there is NO `/admin` route) · `/manager` + `/editor` (both
+  console (23 pages, password-gated; there is NO `/admin` route) · `/manager` + `/editor` (both
   embed `public/panels/editor/` — a "manager panel" bug = edit `app.js` there) · `/kitchen` ·
   `/tablet` · `/owner` (16 pages) · `/login`, `/staff-login`. Panel APIs live at
   `app/api/<name>/[...path]/route.ts`.
-- **55 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
+- **56 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
   `/r/<slug>/menu`, `/q/<code>` — every guest rule must hold in all three (PR #761's lesson).
 - Menu data via `lib/menu.ts` (anon key); categories/filters are DB-driven; multilingual via
   `lib/i18n.ts`. **A re-seed re-runs EVERY migration with no ledger** — prefer
@@ -159,7 +159,7 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 ## Security gate (verified per-route 2026-08-04/05 — full route list in docs/CLAUDE-DETAIL.md)
 
 **There is NO `middleware.ts` — deliberate.** The gate moved per-route: `/aevinite` layout +
-all 48 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-08-11, handler by handler;
+all 50 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-08-22, handler by handler;
 `find app/api/admin -name route.ts | wc -l` must equal the number that grep `tokenIsValid`); panel APIs use
 `requireRole()` (re-checks entitlement every request); `/api/owner/*` uses `ownerScope()`.
 The deliberately-public list is COMPLETE in the detail doc — an API route absent from it must

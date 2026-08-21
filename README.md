@@ -33,7 +33,7 @@ It is **one app on one port**. Every "panel" is a route, not a separate server.
 | Kitchen panel | `/kitchen` | the cooks | `public/panels/kitchen/*` |
 | Tablet panel | `/tablet` | the waiter, walking the floor | `public/panels/tablet/*` |
 | Owner panel | `/owner/…` (16 pages) | the owner: reports, staff, settings | `app/owner/*`, `components/owner/*` |
-| Admin console | `/aevinite/…` (22 pages) | us: every restaurant, every switch | `app/aevinite/*` |
+| Admin console | `/aevinite/…` (23 pages) | us: every restaurant, every switch | `app/aevinite/*` |
 | Printed paper | — | the bill and the kitchen ticket | `public/panels/billdoc.js` — one file for both |
 
 **Three of those panels are plain HTML+JS in `public/panels/`, not React.** That surprises people.
@@ -46,7 +46,7 @@ admin's at `app/api/admin/*`.
 
 ## There is no `middleware.ts`, and that is deliberate
 
-The login check moved to each route: the admin console's layout and all 48 `/api/admin/*` handlers
+The login check moved to each route: the admin console's layout and all 50 `/api/admin/*` handlers
 check `tokenIsValid`, the panel APIs use `requireRole()`, the owner's use `ownerScope()`. Looking
 for a middleware file finds nothing and makes it look like the gate is missing — it isn't.
 The complete list of the few deliberately login-free routes is in `docs/CLAUDE-DETAIL.md`
