@@ -3,8 +3,8 @@
 // page but resolves the restaurant first and hands its id + slug to <ItemClient>, so
 // the dish, its reviews, its features and every in-page link stay scoped to this
 // restaurant (a guest browsing /r/pizza-palace never falls back to restaurant #1).
-import { notFound } from "next/navigation";
-import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { notFound, redirect } from "next/navigation";
+import { getRestaurantBySlug, slugMovedTo, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { getMenuItem, getSettings } from "@/lib/menu";
 import { accentPaletteCss, accentCanvasCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
@@ -54,6 +54,12 @@ export default async function RestaurantItemPage({
   const { restaurant, slug } = await params;
   const { cat } = await searchParams;
   const r = await getRestaurantBySlug(restaurant);
+  // A shared dish link outlives the address the same way a printed code does (mig 350). Only when
+  // the address resolves to nothing — a restaurant that exists but is switched off still 404s below.
+  if (!r) {
+    const moved = await slugMovedTo(restaurant);
+    if (moved) redirect(`/r/${moved}/item/${slug}${cat ? `?cat=${encodeURIComponent(cat)}` : ""}`);
+  }
   if (!r || !r.active) notFound();
   // Menu master switch (access rebuild): no guest menu means no dish pages either —
   // gating only the list would leave every dish reachable by its own URL.

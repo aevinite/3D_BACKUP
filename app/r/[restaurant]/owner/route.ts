@@ -11,7 +11,7 @@
 // A route handler (not a page) because entering as admin must SET a cookie,
 // which a server-component redirect cannot do.
 import { NextRequest, NextResponse } from "next/server";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import { getRestaurantBySlug, slugMovedTo } from "@/lib/tenant";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
@@ -22,7 +22,19 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest, ctx: { params: Promise<{ restaurant: string }> }) {
   const { restaurant } = await ctx.params;
   const r = await getRestaurantBySlug(restaurant);
-  if (!r) return new NextResponse("Not found", { status: 404 });
+  // An owner's bookmark of the old address still gets them in (mig 350).
+  //
+  // TEMPORARY (307), NOT PERMANENT (308) — and on this platform that is the important choice. A
+  // web address here can be RE-TAKEN: freeing a binned restaurant's name is deliberate (mig 319),
+  // so /r/<slug>/ may belong to a different restaurant next month. A 308 is cached hard by browsers
+  // and is very difficult to clear, so one permanent redirect would keep sending that restaurant's
+  // own owner to the wrong cockpit long after the address changed hands. Every other door here uses
+  // Next's redirect(), which is a 307 for the same reason. Only when the address resolves to nothing.
+  if (!r) {
+    const moved = await slugMovedTo(restaurant);
+    if (moved) return NextResponse.redirect(new URL(`/r/${moved}/owner`, req.url), 307);
+    return new NextResponse("Not found", { status: 404 });
+  }
 
   let u = null;
   try {

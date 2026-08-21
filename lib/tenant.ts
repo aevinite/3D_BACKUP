@@ -122,3 +122,67 @@ export async function getRestaurantBySlug(slugRaw: string): Promise<Restaurant |
 // regardless of the slug, so any caller would silently treat every restaurant as
 // #1. It had no callers — deleted so it can't become a trap. Use
 // getRestaurantBySlug() to resolve a slug to its real id.)
+
+// ── AN OLD PRINTED QR CODE STILL FINDS THE RESTAURANT (mig 350) ─────────────────────────────────
+// A QR code encodes the ADDRESS, not the restaurant, so when a restaurant's address changes every
+// laminated table card it printed stops working. This answers "that address is retired — where did
+// they go?" and the guest routes turn the answer into a redirect.
+//
+// COST: this is only ever asked AFTER getRestaurantBySlug has already returned null, i.e. for an
+// address that resolves to nothing. The happy path — every real menu load, every dish page — never
+// reaches it and pays nothing. A genuinely unknown slug (a typo, a bot, a stale link) costs one
+// tiny function call, and the answer is cached either way, so a crawler hammering one bad URL is a
+// single round-trip and then memory.
+//
+// It can only ever answer into a VACANCY: lfh_slug_moved refuses if a live restaurant currently
+// holds the address (that restaurant owns it, and its own guests scan it). So this can never take
+// a diner away from the menu they meant to open.
+const movedSlug = new Map<string, { value: string | null; at: number }>();
+// Longer than the restaurant TTL on purpose: a retired address is a fact about the past, and the
+// thing it points AT is re-resolved separately on the next request anyway.
+const MOVED_TTL_MS = 60_000;
+
+/**
+ * The current address of the restaurant that used to answer on `slug`, or null.
+ *
+ * Null means "no redirect" and is the answer for almost every caller: an unknown slug, a slug a
+ * live restaurant still holds, or a retired slug whose restaurant is now in the recycle bin (a
+ * binned restaurant's menu stays closed — every guest surface already treats it as absent).
+ *
+ * NEVER THROWS. A failed lookup here must not turn a plain 404 into a crash: the caller is already
+ * on its way to notFound(), and this is only trying to do better than that.
+ */
+export async function slugMovedTo(slugRaw: string): Promise<string | null> {
+  const slug = String(slugRaw || "").trim().toLowerCase();
+  if (!slug) return null;
+  const hit = movedSlug.get(slug);
+  if (hit && Date.now() - hit.at < MOVED_TTL_MS) return hit.value;
+  try {
+    const { data, error } = await supabase.rpc("lfh_slug_moved", { p_slug: slug });
+    if (error) return hit ? hit.value : null;   // stand on a known answer, never invent one
+    const to = typeof data === "string" && data ? data : null;
+    movedSlug.set(slug, { value: to, at: Date.now() });
+    return to;
+  } catch {
+    return hit ? hit.value : null;
+  }
+}
+
+/**
+ * A URL query string rebuilt from Next's `searchParams`, or "" when there is none.
+ *
+ * `?table=N` IS THE WHOLE POINT of carrying it: a QR code encodes the table, so any redirect on a
+ * guest door that drops the query has taken the diner's table away from them and they will be asked
+ * to join one again at a table the app had already been told about. Shared so the case-folding
+ * redirect and the moved-address redirect cannot drift apart on it.
+ */
+export function queryStringOf(sp: Record<string, string | string[] | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (v == null) continue;
+    if (Array.isArray(v)) v.forEach((x) => qs.append(k, x));
+    else qs.append(k, v);
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : "";
+}
