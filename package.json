@@ -152,7 +152,8 @@
     "verify:bill-reprint": "node scripts/verify-bill-reprint-is-silent.mjs",
     "verify:owner-scope": "node scripts/verify-owner-scope-503.mjs",
     "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs",
-    "verify:retention": "node scripts/verify-retention-lock.mjs"
+    "verify:retention": "node scripts/verify-retention-lock.mjs",
+    "verify:floor-offplan": "node scripts/verify-floor-offplan.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",

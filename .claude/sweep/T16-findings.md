@@ -42,10 +42,14 @@ sat ~2px off a 360px screen. Both fixed.
 
 | H4 | `lfh_floor_state` (mig 126) / `app/api/admin/floor/route.ts` | decide whether an order keyed by something that is not a table number should arrive as a "table" — the list is `generate_series(1, table_count)` UNION every session/order `table_number`, and French House carries eight 7-digit ones | I stopped them smearing across the tile grid; whether they belong on a floor at all is not a display question |
 
+> **CLOSED 2026-08-21 — NOT A BUG, no change made. Checked the data before changing anything: all eight seven-digit rows carried a real bill number and one order (genuine sales), and they left the floor on their own when their sessions closed — `lfh_admin_floor_all()`'s `universe` CTE already unions ONLY open sessions and un-archived orders. At the same moment table **288** was live on a 30-table floor with food PREPARING, so dropping off-plan numbers would have HIDDEN a real open order. The display fix (item 9, clipped label) was the whole job. Pinned both ways by `npm run verify:floor-offplan`.**
+
+
 
 ## Still open after round 3 (2026-08-20)
 
-Only **H2** and **H4** remain, and both are a DECISION, not a fix:
+**Nothing remains.** H2 was built as a visible LOCK (PR #1076) and H4 was investigated and closed as
+correct behaviour (below). Kept for the record:
 
 * **H2** — enforcing the 1-month log cap would take the manager panel's 3-month option away from every restaurant that chose it. That is the owner's call about his own product, not a correctness fix; the admin screen already stopped claiming it enforces one.
 * **H4** — hiding the eight 7-digit non-table keys from the Live floor could hide a genuinely open order. Their smearing across the tile grid is fixed; whether they belong on a floor is a product question.
