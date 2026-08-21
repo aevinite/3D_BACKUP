@@ -258,6 +258,38 @@ async function checkDb(label, env) {
   if (noPath.length) fail(`${noPath.length} SECURITY DEFINER function(s) have no SET search_path: ${noPath.map((f) => f.name).join(", ")}`);
   else pass("every SECURITY DEFINER function pins its search_path");
 
+  // 4b. A function-level SET is part of a function's DEFINITION, so a later CREATE OR REPLACE that
+  //     does not restate it silently DROPS it. That is not a theory: migration 192 measured the
+  //     owner dashboard spilling 75-340MB to disk at ~398k orders and gave eleven analytics
+  //     functions `work_mem = 128MB`; migrations 190, 195 and 266 re-asserted it; and by the time
+  //     sweep #6 looked, migrations 310, 315, 321, 327 and 337 had quietly dropped it from SIX of
+  //     them. Migration 266's own comment says the opposite out loud ("CREATE OR REPLACE preserves
+  //     settings"), which is exactly why nobody noticed — the folder looked like it set the tuning
+  //     and the database did not. Migration 356 put it back; this check is what stops it going
+  //     again, and it is the only kind of check that can, because nothing about the SQL looks wrong.
+  //     Add a name here when a new analytics function needs the same treatment.
+  const WORK_MEM_FNS = [
+    "lfh_owner_overview", "lfh_owner_restaurant_revenue", "lfh_owner_revenue_timeseries",
+    "lfh_owner_payment_breakdown", "lfh_owner_dish_breakdown", "lfh_owner_category_breakdown",
+    "lfh_owner_hourly", "lfh_owner_payment_trend", "lfh_owner_records", "lfh_owner_sales_report",
+    "lfh_owner_samehour_compare",
+  ];
+  const byName = new Map();
+  for (const f of fns) { if (!byName.has(f.name)) byName.set(f.name, []); byName.get(f.name).push(f); }
+  const lostTuning = WORK_MEM_FNS.filter((n) => byName.has(n) && !byName.get(n).every((f) => /work_mem/.test(f.cfg)));
+  const goneAltogether = WORK_MEM_FNS.filter((n) => !byName.has(n));
+  if (lostTuning.length) {
+    fail(`${lostTuning.length} owner-analytics function(s) have LOST their SET work_mem: ${lostTuning.join(", ")}`
+       + ` — a CREATE OR REPLACE that did not restate it. Re-apply with ALTER FUNCTION … SET work_mem = '128MB'`
+       + ` (migration 356 is the worked example), or delete the name here if the function no longer`
+       + ` aggregates raw orders.`);
+  } else if (goneAltogether.length) {
+    fail(`${goneAltogether.length} function(s) named in the work_mem list no longer exist: ${goneAltogether.join(", ")}`
+       + ` — remove them from WORK_MEM_FNS so this check keeps meaning something.`);
+  } else {
+    pass(`all ${WORK_MEM_FNS.length} owner-analytics functions still carry their own work_mem (a CREATE OR REPLACE drops it silently)`);
+  }
+
   // 5. Scheduled maintenance exists. This is the check migs 053/060 needed and did not have.
   const jobs = await q(env, `SELECT jobname AS name, schedule, active FROM cron.job`).catch(() => null);
   if (!jobs) {
