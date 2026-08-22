@@ -97,6 +97,28 @@ for (const t of names) {
     + (hit.sessions.length ? "The guard that owns it cannot start again: one open session per table is a unique index. " : ""));
 }
 
+// ── AND THE KITCHEN TICKET IT QUEUED ────────────────────────────────────────────────────────────
+// Every order queues one print job (mig 335). lib/printQueue.ts dismisses a job whose order is gone or
+// cancelled — but only when SOMETHING READS THE QUEUE. On a stack with no kitchen screen and no print
+// helper open, nothing does, so a test's ticket sits `queued` and the manager's floor carries a red
+// "KOT #192 · T11) hasn't printed in the kitchen — is the kitchen screen open?" banner for food nobody
+// ordered. Measured and screenshotted at 1280x800: five of them at once, from one sweep's fixtures.
+// The product is behaving correctly; the litter is ours.
+const jobs = await svc.from("print_jobs")
+  .select("id, kind, order_id, created_at").eq("restaurant_id", RID).eq("status", "queued").limit(200);
+const stray = [];
+if (!jobs.error && (jobs.data || []).length) {
+  const ids = (jobs.data || []).map((j) => j.order_id).filter(Boolean);
+  const owners = ids.length
+    ? await svc.from("orders").select("id, table_number").eq("restaurant_id", RID).in("id", ids).in("table_number", names).limit(200)
+    : { data: [] };
+  const mine = new Set(((owners.data) || []).map((o) => o.id));
+  for (const j of jobs.data) if (mine.has(j.order_id)) stray.push(j);
+}
+say(stray.length === 0, stray.length
+  ? `${stray.length} kitchen ticket(s) from a test table are still queued — the manager's floor keeps a red "hasn't printed" banner for each: ${stray.map((j) => j.kind).join(", ")}`
+  : "no test ticket is left queued in the print basket");
+
 // ── --clean: retire what is left, the way the product does ───────────────────────────────────────
 // NEVER a hard delete. An order carrying a KOT number and a session carrying a bill number are both
 // refused by trg_block_issued_delete (mig 190) — that refusal is the whole reason the litter built up.
@@ -114,12 +136,21 @@ if (CLEAN && bad) {
       .eq("restaurant_id", RID).eq("id", s.id);
     console.log(`    session ${s.id} on "${s.table_number}" → ${r.error ? "REFUSED: " + r.error.message : "closed"}`);
   }
+  for (const j of stray) {
+    // The SAME sentence lib/printQueue.ts writes, so the row reads exactly like one the app retired.
+    const r = await svc.from("print_jobs")
+      .update({ status: "dismissed", done_at: now, error: "the order was cancelled before this ticket printed" })
+      .eq("restaurant_id", RID).eq("id", j.id);
+    console.log(`    ${j.kind} ticket ${j.id} → ${r.error ? "REFUSED: " + r.error.message : "dismissed"}`);
+  }
   // Say whether it actually worked, rather than assuming — that assumption is the original fault.
   const again = await svc.from("orders").select("id").eq("restaurant_id", RID).in("table_number", names)
     .eq("archived", false).neq("status", "cancelled").is("deleted_at", null).limit(50);
   const stillOpen = await svc.from("sessions").select("id").eq("restaurant_id", RID).in("table_number", names)
     .eq("status", "open").limit(50);
-  const left = (again.data || []).length + (stillOpen.data || []).length;
+  const stillQueued = await svc.from("print_jobs").select("id").eq("restaurant_id", RID).eq("status", "queued")
+    .in("id", stray.map((j) => j.id).length ? stray.map((j) => j.id) : ["00000000-0000-0000-0000-000000000000"]).limit(50);
+  const left = (again.data || []).length + (stillOpen.data || []).length + ((stillQueued.data) || []).length;
   console.log(left ? `\n❌ ${left} row(s) would not go — read the refusals above` : "\n✅ every test table is clear again");
   process.exit(left ? 1 : 0);
 }
@@ -128,5 +159,5 @@ console.log(bad
   ? `\n❌ ${bad} test table(s) are still carrying something. Run with --clean to retire them, then fix the guard that owns each one:\n`
     + "   a teardown must CANCEL + ARCHIVE the order and CLOSE + soft-delete the session (mig 190 refuses a hard delete),\n"
     + "   and it must read its own .error — an unread refusal is how a phantom table reaches a manager's floor.\n"
-  : `\n✅ all ${names.length} throwaway tables are clear — no test has left a table on anybody's floor.\n`);
+  : `\n✅ all ${names.length} throwaway tables are clear, and no test ticket is stuck in the print basket — no test has left anything on anybody's floor.\n`);
 process.exit(bad ? 1 : 0);
