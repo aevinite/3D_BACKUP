@@ -282,6 +282,14 @@ has("outbox.js", /if \(j && j\.ok === false\)/, "a 200 whose body says NO is bei
 has("outbox.js", /if \(navigator\.onLine === false\) \{ scheduleRetry\(false\); return; \}/, "a flush during a blip kills the queue's last timer again");
 has("outbox.js", /0\.75 \+ Math\.random\(\) \* 0\.5/, "the retry backoff lost its jitter — every device would retry on the same beat");
 has("outbox.js", /const UNTABLED/, "per-table ordering is gone; one stuck change would hold up every other table");
+// …AND THE HOLD HAS TO BE REAL. send() spots a blocker in `failed`, answers "behind" and then calls
+// flush() — and flush() only walks `queued`, so the change it had just promised to hold went out on
+// the wire anyway. Measured: a discount for table 5 in "Needs you", then Mark paid on table 5, and
+// 5/pay was sent immediately. The bill settles at the FULL amount and the discount the person is
+// about to retry lands on a settled bill. The round must stall a table that is already owed
+// something retryable, before the walk starts (T9 sweep #7, 2026-08-22).
+has("outbox.js", /failed\.forEach\(function \(f\) \{ if \(f\.retryable !== false\) stalled\.add\(orderKey\(f\)\); \}\);[\s\S]{0,80}?let i = 0;/,
+  "flush() no longer stalls a table that already owes a retryable change — a later Mark paid on that table is sent ahead of it, and the bill settles at the wrong amount");
 
 // realtime: the connection budget and the no-amplifier rule
 has("realtime.js", /if \(sbPromise === p\) sbPromise = null/, "a failed realtime boot is remembered forever again");

@@ -535,6 +535,25 @@
       // in order again. `i` only advances when the item is still in the queue — a delivered or
       // failed item is spliced out, so the next one has already taken its index.
       const stalled = new Set();
+      // WHAT IS ALREADY OWED TO A TABLE STALLS IT BEFORE THE WALK EVEN STARTS (T9 sweep #7,
+      // 2026-08-22).
+      //
+      // send() spots a blocker in `failed` and answers { queued:true, why:"behind" } — and then
+      // calls flush(). But this walk only ever looked at `queued`, and the blocker is in `failed`,
+      // so the change it had just promised to hold was sent by that very flush.
+      //
+      // Measured, on the exact sequence the note in send() describes: a discount for table 5 runs
+      // out of its automatic tries and moves to "Needs you"; the waiter taps Mark paid on the same
+      // table; the queue answers "behind" and then puts 5/pay on the wire immediately. The bill
+      // settles at the FULL amount, and the discount the person is about to retry would land on an
+      // already-settled bill. That is the swap the whole per-table rule exists to stop, and
+      // requeueInOrder() only fixed the order WITHIN `queued`.
+      //
+      // Only a RETRYABLE failure blocks. A clash is `retryable:false` and deliberately does not
+      // (P04033): it can never be sent, so blocking on it would block for ever. A retryable one has
+      // Retry and Dismiss on screen — in the connection panel and the offline bar — so the wait is
+      // visible and the person has two ways to clear it. Either one unblocks the table.
+      failed.forEach(function (f) { if (f.retryable !== false) stalled.add(orderKey(f)); });
       let i = 0;
       while (i < queued.length && navigator.onLine !== false) {
         const item = queued[i];
