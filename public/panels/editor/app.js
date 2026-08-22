@@ -9189,7 +9189,7 @@ function floorTileHtml(i) {
     // by how wide the tile actually is: "＋ Take order" while it genuinely fits, and the bare ＋ when
     // it does not (a crowded tile, a dense floor, a finished table).
     //
-    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO third, short "Order"
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R31: there is NO third, short "Order"
     // face, and there must never be one again. The T3 sweep (2026-08-06) added one, this sweep
     // briefly restored it after a later change had made it unreachable, and he removed it looking at
     // the real tile: "instead of order is written that should be just a plus icon, nothing else, and
@@ -9199,7 +9199,7 @@ function floorTileHtml(i) {
     // bug. The size may change; the two faces may not.
     + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
-    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R29: there is no 🍽️ Serve-all on the
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R32: there is no 🍽️ Serve-all on the
     // tile. Offered as a way to make serving one tap instead of two ("tile → 🍽️ Serve all"), he said
     // "we will not do any of that stuff". Serving stays two taps. It also protects this row, which he
     // has ruled on twice (R4, and "never make take order button small"): a fifth control on an 89px
@@ -10684,7 +10684,7 @@ function tablePanelParts(t, host = "float") {
     // instead of being counted in silence.
     const shownN = newOrders.length + liveOrders.length;
     const voidedN = os.length - shownN;
-    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R30: this sentence is where it STOPS.
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R33: this sentence is where it STOPS.
     // Offered a next step for a table in this state — a line saying what to do, or a ⏻ that ends an
     // empty party — he said "we will not do any of that stuff". State the truth and leave it: the
     // bill is in the record, the table is usable, and no table ends itself (mig 254).

@@ -1896,7 +1896,7 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
 .ft-take:hover { background: color-mix(in srgb, var(--gold) 28%, var(--panel-2)); border-color: var(--gold); color: var(--text); }
 .ft-take-x { font-weight: 800; }
 .ft-take-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO short "Order" label on this
+/* REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R31: there is NO short "Order" label on this
    button, and there must never be one again. He looked at a tile wearing it and said: *"instead of
    order is written that should be just a plus icon, nothing else, and it should stay like that"*, and
    about the tile as a whole: *"at the end of the day, UI should stay like this. I don't care if you
