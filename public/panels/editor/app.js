@@ -3166,6 +3166,94 @@ function loadBillHistory(q, type) {
 // clicking one opens the bill with its actions (print / reopen / delete / discount) inside.
 function ordersPreviousHtml(today, previous) {
   // One record per BILL: dine-in groups (one per session/visit) + finished parcel bills.
+  // ════════════════════════════════════════════════════════════════════════════════════════
+  // ONE SEARCH BOX THAT FINDS ANYTHING (owner, 2026-08-22)
+  //
+  // His words: *"make sure search also dynamic — if I search for anything including name, phone
+  // no or invoice no it should show, even though I search last 3 digits of invoice."*
+  //
+  // WHAT WAS THERE: a TYPE DROPDOWN — you first told it which field you meant (Bill no. /
+  // Invoice no. / Table / Amount / Customer) and only then typed. Pick the wrong one and a
+  // correct search finds nothing, with no reason shown. And every keystroke fired a SERVER
+  // request (`loadBillHistory`) over data the browser was already holding.
+  //
+  // WHY THIS IS FREE. The bills read already enriches every searchable fact onto each order —
+  // `invoice_no`, `bill_no`, `cust_name`, `cust_phone`, `customer_name`, `table_number`, the
+  // items — and it fetches the WHOLE allowed window (today, or today + yesterday when the Access
+  // screen hands yesterday over). So the answer is already in memory: matching here costs one
+  // pass over a few hundred records and ZERO requests. The server search stays for the one case
+  // memory cannot answer — a day so big the window hit its row cap — and `billsCapped()` below
+  // is what decides to ask.
+  //
+  // THE LAST-DIGITS RULE, which is the bit that needed thought. An invoice number is an INTEGER
+  // (`sessions.invoice_no`) that prints as `AV/2026-27/000042`. So "42", "042", "000042" and the
+  // whole pasted string must all find bill 42 — and "42" must ALSO find 1042, because he asked
+  // for the last three digits of a long number. Substring on the PADDED form does all of that in
+  // one comparison, and it is why the number is padded before matching rather than parsed.
+  /** The words that NAME a bill's state. Matched whole (see billMatches) because several of them
+   *  contain each other — "paid" inside "unpaid", "part" inside "partpaid" — and a state search
+   *  that widens instead of narrowing is worse than no search. Everything else stays substring. */
+  const BILL_STATE_TERMS = new Set(["paid", "unpaid", "settled", "part", "partpaid", "partly",
+    "outstanding", "due", "khata", "paylater", "tab", "owed", "onthehouse", "comp", "free",
+    "cancelled", "void", "reopened", "voided", "retired", "split"]);
+  const digitsOf = (v) => String(v == null ? "" : v).replace(/\D/g, "");
+  /** Every string a bill can be found by, lower-cased, joined. Built once per record per render. */
+  const searchBlob = (b) => {
+    const inv = b.invNo == null ? "" : String(b.invNo);
+    const parts = [
+      b.billNo == null ? "" : "#" + b.billNo,
+      inv, inv.padStart(6, "0"),                      // 42 → also matches "000042" and "0042"
+      String(invFmt(b.invNo, b.invoiceAt) || ""),      // the whole printed form, so a paste works
+      b.table, tableLabel(b.table),                    // "7" AND a renamed table ("Patio")
+      b.customer, b.billCust,                          // the guest's own name, and the bill's name
+      Math.round(Number(b.total) || 0),                // ₹ total, whole rupees
+      (b.methods || []).join(" "),                     // "UPI", "Cash", "Split", "On the house"
+      (b.parts || []).map((p) => p.method).join(" "),  // and the methods INSIDE a split
+      b.khata ? "khata paylater tab owed" : "",
+      b.onHouse ? "onthehouse comp free" : "",
+      b.cancelled ? "cancelled void" : "",
+      // ── A STATE WORD IS MATCHED AS A WHOLE WORD (found by driving it, 2026-08-22) ────────
+      // "paid" is a SUBSTRING of "unpaid", so with plain substring matching typing `paid` matched
+      // every bill on the screen — 81 of 81, measured. Renaming the tokens could not fix it:
+      // "unpaid" is the word a person actually types, and it contains "paid" whatever else changes.
+      // So the STATE words below are matched with word boundaries (see billMatches), while names,
+      // dishes and numbers stay substring — which is what makes "biry" find a biryani and "042"
+      // find invoice 1042, while "paid" and "unpaid" stay two different questions.
+      b.paid ? "paid settled" : "unpaid outstanding due",
+      b.partPaid ? "partpaid partly" : "",
+      b.invVoided ? "reopened voided retired" : "",
+      (b.kots || []).map((k) => "kot " + k).join(" "),
+      // the dish names, so "biryani" finds the bill that had one
+      b.kind === "parcel"
+        ? (Array.isArray(b.p && b.p.items) ? b.p.items.map((i) => i && i.title).join(" ") : "")
+        : b.g.map((o) => (Array.isArray(o.items) ? o.items.map((i) => i && i.title).join(" ") : "")).join(" "),
+    ];
+    return parts.join(" \u0001 ").toLowerCase();
+  };
+  /** A PHONE is matched on digits only, so "98250", "9825012345" and "250 12" all work. */
+  const phoneBlob = (b) => digitsOf(b.billPhone) + " " + digitsOf(b.customer && b.customer.match(/\d/) ? b.customer : "");
+  /**
+   * Does this bill match what was typed?
+   *
+   * A term of ONLY digits is tried against the numbers too (invoice, bill, phone, total) as a
+   * plain substring — that is the "last 3 digits" behaviour. Anything with a letter in it is a
+   * text search. Several words all have to match (so "riya upi" finds Riya's UPI bill), which is
+   * what makes a long query narrow rather than widen.
+   */
+  const billMatches = (b, query) => {
+    const terms = String(query || "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const blob = searchBlob(b), ph = phoneBlob(b);
+    return terms.every((t) => {
+      // A word that NAMES A STATE is matched whole, so "paid" and "unpaid" are two questions.
+      if (BILL_STATE_TERMS.has(t)) {
+        return new RegExp("(^|[^a-z0-9])" + t + "([^a-z0-9]|$)").test(blob);
+      }
+      if (blob.includes(t)) return true;
+      const d = t.replace(/\D/g, "");
+      return !!d && (ph.includes(d) || blob.includes(d));
+    });
+  };
   const recOfGroup = (g) => {
     const o0 = g[0];
     // "paid" = every non-cancelled order on the bill is paid — the SAME rule the
@@ -3174,20 +3262,57 @@ function ordersPreviousHtml(today, previous) {
     // collecting payment never inflates the Bills total above the Dashboard.
     const liveOrders = g.filter((o) => o.status !== "cancelled");
     const paid = liveOrders.length > 0 && liveOrders.every((o) => o.payment_status === "paid");
+    // ── WHAT A BILL IS, FOR SEARCHING AND FOR SHOWING (owner, 2026-08-22) ─────────────────
+    // He asked for one search box that finds a bill by "anything including name, phone no or
+    // invoice no … even if I search the last 3 digits of the invoice". Every one of those
+    // facts is ALREADY on the row the server sent (the bills read enriches invoice_no, bill_no,
+    // cust_name, cust_phone and customer_name onto each order), so the record carries them here
+    // and the matching happens in the browser. That is why the search costs nothing: see
+    // billMatches() for the rule and searchBlob() for what is searched.
+    const m = billMath(g);
+    // A bill can be PART settled — real on this data: bill #96 has two split-paid tickets and one
+    // still pending. So "paid" is not a yes/no for the money, and the screen must not imply it is.
+    const paidOrders = liveOrders.filter((o) => o.payment_status === "paid");
+    const collected = paidOrders.length ? billMath(paidOrders).total : 0;
+    const parts = (g.find((o) => Array.isArray(o.pay_parts) && o.pay_parts.length) || {}).pay_parts || [];
+    const methods = [...new Set(liveOrders.map((o) => o.payment_method).filter(Boolean))];
     return {
       kind: "dinein", g, key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
       billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at,
-      customer: o0.customer_name || "", total: billMath(g).total, paid,
+      invVoided: !!o0.invoice_voided,
+      customer: o0.customer_name || "", total: m.total, paid,
       ts: new Date(o0.created_at || 0).getTime(),
       cancelled: g.every((o) => o.status === "cancelled"),
+      // ── the extra facts the new screen needs ───────────────────────────────────────────
+      billCust: o0.bill_cust_name || "",        // who the BILL was made out to (mig 227)
+      billPhone: o0.bill_cust_phone || "",
+      khata: liveOrders.some((o) => o.khata_at && o.payment_status !== "paid"),
+      onHouse: liveOrders.some((o) => o.payment_method === "On the house"),
+      running: liveOrders.some((o) => o.status === "received" || o.status === "preparing"),
+      collected, owed: Math.max(0, Math.round((m.total - collected) * 100) / 100),
+      partPaid: paidOrders.length > 0 && paidOrders.length < liveOrders.length,
+      parts, methods,
+      printedAt: o0.bill_printed_at || null,
+      kots: g.map((o) => o.kot_no).filter((x) => x != null),
+      disc: m.disc || 0,
     };
   };
   const recOfParcel = (p) => ({
     kind: "parcel", p, key: "parcel:" + p.id, table: "parcel",
-    billNo: p.bill_no, invNo: p.invoice_no, invoiceAt: p.invoice_at,
+    billNo: p.bill_no, invNo: p.invoice_no, invoiceAt: p.invoice_at, invVoided: false,
     customer: (p.customer_name && !/^parcel$/i.test(String(p.customer_name).trim())) ? p.customer_name : "",
     total: Number(p.total) || 0, paid: !!p.paid && p.status !== "cancelled",
     ts: new Date(p.created_at || 0).getTime(), cancelled: p.status === "cancelled",
+    // A parcel has no session, so no split parts and no khata — but it MUST answer the same
+    // shape, or the one matcher and the one row renderer would each need a "which kind is this?"
+    // branch, which is how two screens start disagreeing about the same bill.
+    billCust: p.customer_name || "", billPhone: p.customer_phone || "",
+    khata: false, onHouse: p.payment_method === "On the house",
+    running: p.status !== "cancelled" && !p.paid,
+    collected: (p.paid && p.status !== "cancelled") ? (Number(p.total) || 0) : 0,
+    owed: (p.paid || p.status === "cancelled") ? 0 : (Number(p.total) || 0),
+    partPaid: false, parts: [], methods: p.payment_method ? [p.payment_method] : [],
+    printedAt: p.printed_at || null, kots: p.kot_no != null ? [p.kot_no] : [], disc: Number(p.discount) || 0,
   });
   // When searching, union in the server-side history results (state.billHistRows) so any
   // bill INSIDE the allowed window is findable even past the local rows (owner, 2026-07-03;
@@ -3208,66 +3333,29 @@ function ordersPreviousHtml(today, previous) {
   // only clue to which of the five fields was live was the dropdown beside it — and a manager
   // typing a table number into an Invoice-no search gets no matches and no reason why. The
   // placeholder now names the field and shows the shape of the thing to type.
-  const BILL_SEARCH_HINT = {
-    bill: "Search by bill no. — e.g. 42",
-    inv: "Search by invoice no. — e.g. 000042",
-    table: "Search by table — e.g. 7 or Patio",
-    amount: "Search by amount ₹ — e.g. 450",
-    cust: "Search by customer name",
-  };
-  const q = (state.billSearch || "").toLowerCase().trim();
-  const stype = ["inv", "bill", "table", "amount", "cust"].includes(state.billSearchType) ? state.billSearchType : "bill";
+  // ── ONE BOX, NO TYPE DROPDOWN (owner, 2026-08-22) ────────────────────────────────────────
+  // The five-way `BILL_SEARCH_HINT` map and its `<select>` are gone: you no longer tell the box
+  // which field you mean. billMatches() searches every field at once, including the last digits
+  // of an invoice. See its note above for why this costs no requests.
+  const q = (state.billSearch || "").trim();
   const sort = state.billSort || "new";
-  const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo, b.invoiceAt)).toLowerCase()
-    : stype === "bill" ? String(b.billNo ?? "")
-    : stype === "table" ? String(b.table).toLowerCase() // a parcel's "table" is the word parcel, so typing it finds them
-    : stype === "amount" ? String(Math.round(Number(b.total) || 0)) // ₹ total, whole rupees
-    : b.customer.toLowerCase();
-  const matchB = (b) => !q || fieldOf(b).includes(q);
-  const rankB = (b) => (!q ? 0 : fieldOf(b).startsWith(stype === "bill" ? q.replace(/[^0-9]/g, "") : q) ? 0 : 1);
-  const sortB = (x, y) => (rankB(x) - rankB(y))
-    || (sort === "new" ? y.ts - x.ts : sort === "old" ? x.ts - y.ts : sort === "hi" ? y.total - x.total : x.total - y.total);
-  const cardOf = (b) => b.kind === "parcel" ? parcelRecordCardHtml(b.p) : billRecordCardHtml(b);
-  // ONE DAY = ONE SECTION, each with its own count + collected total in the divider
-  // (owner: "both amount of bill should be shown"). Paid bills only count as collected.
-  const daySection = (label, list, emptyMsg) => {
-    const shown = list.filter(matchB).sort(sortB);
-    const collected = shown.reduce((s, b) => s + (b.paid ? b.total : 0), 0);
-    // THE VOIDS ARE NAMED, NOT BURIED IN THE COUNT (owner, 2026-08-16 — the cancellations half of
-    // the bill-safety work). This read "11 bills · ₹882 collected" on a day where NINE of the
-    // eleven were cancelled at ₹0 — so the one line a manager or the owner glances at to answer
-    // "how did today go?" made the average bill look like ₹80 when the real figure was ₹441, and
-    // a night with a lot of voids looked exactly like a quiet night. Both numbers were already in
-    // hand here; nothing extra is fetched. Cancellations only appear once there are some, so an
-    // ordinary day's divider reads exactly as it always did.
-    const voided = shown.filter((b) => b.cancelled).length;
-    const sold = shown.length - voided;
-    const head = `<div class="ord-section-divider"><h3>${label}</h3>
-      <span class="bill-day-total">${sold} bill${sold === 1 ? "" : "s"} · <b>${inr(collected)}</b> collected${voided ? ` · <i class="bill-day-void">${voided} cancelled</i>` : ""}</span>
-      </div>`;
-    // NO BULK CLEAR ON THIS SCREEN (owner, 2026-08-21: *"we don't want that option, remove that
-    // option completely from manager panel"*). A `🗑 Clear freed` button used to sit here and take
-    // every freed table in the day's record in one tap. Deleting a bill is now strictly one bill at
-    // a time, with its own reason, from that bill's own card — and the server refuses a request that
-    // names more than one bill (app/api/editor → `orders/delete`). Do not re-add a bulk control here,
-    // to this divider or to any other. R27 still stands over all of it: only the Aevidine admin
-    // console may delete at all, and a restaurant cancels instead.
-    const body = shown.length
-      ? `<div class="ord-grid">${shown.map(cardOf).join("")}</div>`
-      : `<div class="empty">${q ? "No bills match that search." : emptyMsg}</div>`;
-    return head + body;
-  };
+  const sortB = (x, y) => (sort === "new" ? y.ts - x.ts : sort === "old" ? x.ts - y.ts
+    : sort === "hi" ? y.total - x.total : x.total - y.total);
+  const shown = recs.filter((b) => billMatches(b, q)).sort(sortB);
+
+  // WHICH BILL IS OPEN. Kept by the bill's own key, not its position, so a poll that reorders the
+  // list cannot move the selection onto a different bill under the manager's eyes. If the selected
+  // bill leaves the list (settled, cleared, or filtered out by a search), the first one opens.
+  let pick = shown.find((b) => b.key === state.billPick) || shown[0] || null;
+  state.billPick = pick ? pick.key : "";
+
+  const searching = !!q;
   const bar = `<div class="bill-bar">
-      <div class="bill-search">
-        <select class="stype" data-bill-stype>
-          <option value="bill"${stype === "bill" ? " selected" : ""}>Bill no.</option>
-          <option value="inv"${stype === "inv" ? " selected" : ""}>Invoice no.</option>
-          <option value="table"${stype === "table" ? " selected" : ""}>Table</option>
-          <option value="amount"${stype === "amount" ? " selected" : ""}>Amount ₹</option>
-          <option value="cust"${stype === "cust" ? " selected" : ""}>Customer</option>
-        </select>
-        <span class="vline"></span><i class="fas fa-magnifying-glass"></i>
-        <input type="text" data-bill-q value="${esc(state.billSearch || "")}" placeholder="${esc(BILL_SEARCH_HINT[stype] || "Search bills…")}" autocomplete="off"/>
+      <div class="bill-search bill-search-one">
+        <i class="fas fa-magnifying-glass"></i>
+        <input type="text" data-bill-q value="${esc(state.billSearch || "")}"
+          placeholder="Search anything — name, phone, bill or invoice no. (even the last digits), table, dish, ₹" autocomplete="off"/>
+        ${q ? `<button type="button" class="bill-qx" data-bill-qx title="Clear the search">✕</button>` : ""}
       </div>
       <select class="bill-sort" data-bill-sort>
         <option value="new"${sort === "new" ? " selected" : ""}>Newest</option>
@@ -3276,11 +3364,284 @@ function ordersPreviousHtml(today, previous) {
         <option value="lo"${sort === "lo" ? " selected" : ""}>Lowest ₹</option>
       </select>
     </div>`;
-  const tsIn = (lo, hi) => (b) => b.ts >= lo && (hi == null || b.ts < hi);
-  let out = bar + daySection("📅 Today's bills", recs.filter(tsIn(dayStart, null)), "No bills settled today yet.");
-  if (withYesterday) out += daySection("🕐 Yesterday's bills", recs.filter(tsIn(yStart, dayStart)), "No bills from yesterday.");
-  return out;
+
+  // The day's own figures, over what is SHOWN — so a search re-totals to the search, which is what
+  // a person reading a filtered list expects. Paid-only for "collected", the same rule /stats uses.
+  const sum = (list) => ({
+    n: list.filter((b) => !b.cancelled).length,
+    voided: list.filter((b) => b.cancelled).length,
+    collected: list.reduce((t, b) => t + (b.collected || 0), 0),
+    owed: list.reduce((t, b) => t + (b.cancelled ? 0 : b.owed || 0), 0),
+  });
+  // `dayStart` / `withYesterday` are already resolved above by the enclosing function — reused
+  // rather than recomputed, so the list and the day headings can never disagree about where the
+  // business day begins (the 05:00 IST rollover).
+  const withYest = withYesterday;
+  const headFor = (label, list) => {
+    const t = sum(list);
+    return `<div class="ord-section-divider"><h3>${label}</h3>
+      <span class="bill-day-total">${t.n} bill${t.n === 1 ? "" : "s"} · <b>${inr(t.collected)}</b> collected${
+        t.owed > 0.5 ? ` · <b class="bill-owed">${inr(t.owed)}</b> still owed` : ""}${
+        t.voided ? ` · <i class="bill-day-void">${t.voided} cancelled</i>` : ""}</span></div>`;
+  };
+
+  const groups = [];
+  const todayList = shown.filter((b) => b.ts >= dayStart);
+  groups.push(["\u{1F4C5} Today's bills", todayList, "No bills settled today yet."]);
+  if (withYest) groups.push(["\u{1F550} Yesterday's bills", shown.filter((b) => b.ts < dayStart), "No bills from yesterday."]);
+
+  const listHtml = groups.map(([label, list, emptyMsg]) => headFor(label, list) +
+    (list.length ? `<div class="bill-lines">${list.map(billLineHtml).join("")}</div>`
+                 : `<div class="empty">${searching ? "" : emptyMsg}</div>`)).join("");
+
+  // NOTHING FOUND, AND WHY. A search that finds nothing must say whether that is because there is
+  // no such bill or because the record only reaches so far — the honest difference between "it
+  // isn't there" and "I can't see that far" (the reach is the Access screen's setting, not a bug).
+  const nothing = searching && !shown.length
+    ? `<div class="empty bill-noneq">Nothing matches <b>${esc(q)}</b>.
+         <div class="bill-noneq-sub">This record covers ${withYest ? "today and yesterday" : "today"}${
+           billsCapped() ? " — and today is busy enough that older bills may be past what is loaded" : ""}.
+           A bill older than that is in the owner's Reports.</div></div>`
+    : "";
+
+  return `${bar}<div class="bill-split">
+      <div class="bill-listcol">${nothing || listHtml}</div>
+      <div class="bill-rcpcol">${pick ? billReceiptHtml(pick) : `<div class="bill-rcp-empty">Pick a bill on the left to see it here.</div>`}</div>
+    </div>`;
 }
+
+
+/** Did the bills window come back AT its row cap (500)? Then memory may not hold every bill of a
+ *  very busy day, and a local search that finds nothing is worth asking the server about.
+ *  Top-level on purpose: both the renderer and the search handler read it, and they are in
+ *  different scopes — as a 'const' inside the renderer it was simply undefined in the handler.
+ *  (No backticks in a block comment in this file: the panel's stylesheet is injected through a
+ *  template literal, so one would END it and take the panel down. verify:ui guards that.) */
+function billsCapped() {
+  const r = state.billsRec || {};
+  return (Array.isArray(r.today) ? r.today.length : 0) + (Array.isArray(r.previous) ? r.previous.length : 0) >= 500;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// ONE LINE PER BILL — the left column of the owner's chosen design (2026-08-22).
+//
+// Deliberately slim: the bill number, who and where, the money, and ONE state word. Everything
+// else lives in the receipt beside it, which is the whole point of the layout he picked — the
+// list is for finding, the receipt is for reading.
+function billLineHtml(b) {
+  const st = billState(b);
+  const sel = state.billPick === b.key ? " on" : "";
+  const who = b.billCust || b.customer || (b.kind === "parcel" ? "Parcel" : "");
+  const label = b.kind === "parcel" ? "\u{1F961} Parcel" : tableLabel(b.table);
+  // The money line says what HAPPENED, never just a number: collected, owed, or nothing charged.
+  const moneySub = b.cancelled ? "not charged"
+    : b.partPaid ? `${inr(b.collected)} in · ${inr(b.owed)} left`
+    : b.paid ? (b.parts && b.parts.length > 1 ? `split \u00d7${b.parts.length}` : (b.methods[0] || "paid"))
+    : b.khata ? "on the tab" : "unpaid";
+  return `<div class="bill-line${sel}" data-bill-pick="${esc(b.key)}" role="button" tabindex="0">
+      <span class="bl-no">${b.billNo != null ? "#" + b.billNo : "\u2014"}</span>
+      <span class="bl-mid">
+        <span class="bl-1">${esc(label)}${who ? ` \u00b7 ${esc(who)}` : ""}</span>
+        <span class="bl-2">${esc(fmtWhen(b.kind === "parcel" ? b.p.created_at : b.g[0].created_at))}${
+          b.invNo != null ? ` \u00b7 ${esc(String(invFmt(b.invNo, b.invoiceAt)))}` : " \u00b7 no invoice yet"}</span>
+      </span>
+      <span class="bl-amt">${inr(b.total)}<small>${esc(moneySub)}</small></span>
+      ${billStatePill(st)}
+    </div>`;
+}
+
+// ── THE ONE PLACE A BILL'S STATE IS DECIDED ────────────────────────────────────────────────
+// Every screen below reads this, so the pill, the receipt heading and the search word can never
+// disagree. The order matters and mirrors lib/billLedger.ts's deriveBillState on the server:
+// cancelled wins, then pay-later, then on-the-house, then part-paid, then paid, then running.
+function billState(b) {
+  if (b.cancelled) return "cancelled";
+  if (b.khata) return "khata";
+  if (b.onHouse) return "onhouse";
+  if (b.partPaid) return "part";
+  if (b.paid) return "settled";
+  return "running";
+}
+const BILL_STATE_WORD = {
+  running: ["Running", "run"], settled: ["Settled", "set"], part: ["Part paid", "part"],
+  khata: ["Pay later", "kha"], onhouse: ["On the house", "hou"], cancelled: ["Cancelled", "can"],
+};
+// A word AND a colour, never a colour alone — the same rule the floor tiles follow.
+function billStatePill(st) {
+  const [word, cls] = BILL_STATE_WORD[st] || BILL_STATE_WORD.running;
+  return `<span class="bill-chip bc-${cls}"><i></i>${word}</span>`;
+}
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// THE BILL, BESIDE THE LIST (owner's chosen design, 2026-08-22)
+//
+// He asked it to "make sure of all possible scenario like when the bill is split in both cash and
+// UPI and all that … think of every possibility". So this renders, from the SAME rows the printer
+// prints from, every state a bill can actually be in on this product:
+//
+//   running · part paid · settled (one method) · settled in PARTS (split) · a split with a
+//   PAY-LATER leg (mig 352) · pay later / khata · on the house · cancelled · invoice not issued ·
+//   invoice issued · invoice reopened (voided) and re-issued · discounted · with an untaxed MRP
+//   part · composition scheme (no GST line at all) · a parcel with no table · a merged party.
+//
+// TWO RULES IT DOES NOT BREAK:
+//  1. NO MONEY IS RE-DERIVED HERE. Every figure comes from billMath() → LFH_BILLDOC.billMoney(),
+//     which is the same file the paper is built from. This screen displays; it does not calculate.
+//     That is the one-number rule, and it is why a discount, an MRP line or a composition-scheme
+//     restaurant needs no special case in this function — billTotalsRows() already knows.
+//  2. NO DEAD CONTROLS. The actions offered are the ones this bill's state can actually take, so
+//     a settled bill never shows "Mark paid" and a cancelled one never shows either.
+function billReceiptHtml(b) {
+  const st = billState(b);
+  if (b.kind === "parcel") return parcelReceiptHtml(b, st);
+  const g = b.g, o0 = g[0];
+  const m = billMath(g);
+  const label = tableLabel(b.table);
+  const who = b.billCust || b.customer || "";
+
+  // ── the two numbers he asked to see (2026-08-22: "in the view add the invoice or bill no") ──
+  // BOTH, always, and each says its own truth when it has none: a bill number exists from the
+  // moment the tab opens, while an invoice number only exists once the bill is issued — and after
+  // a reopen the old number is RETIRED, not reused (mig 331). Printing "—" for both would hide
+  // that difference, which is exactly the thing a manager is checking for.
+  const invTxt = b.invNo != null
+    ? `${esc(String(invFmt(b.invNo, b.invoiceAt)))}${b.invVoided ? ` <span class="br-retired">retired \u2014 reopened</span>` : ""}`
+    : `<span class="br-none">not issued yet</span>`;
+
+  // The totals stack is the SHARED one (mrpTotalsRows) — the same rows the bill modal and the
+  // printed paper use, so a discount's percentage, an MRP line, a composition-scheme restaurant
+  // with no GST row, and the round-off that makes the column add up all arrive already correct.
+  // Nothing about the money is decided in this file.
+  const pct = Math.round((m.rate || 0) * 10000) / 100;
+  const rows = mrpTotalsRows(m, pct)
+    + `<div class="bm-trow bm-total"><span>Total</span><b>${inr(m.total)}</b></div>`;
+
+  return `<div class="bill-rcp">
+    <div class="br-head">
+      <div class="br-ttl">${esc(label)}${who ? ` \u00b7 <span class="br-who">${esc(who)}</span>` : ""}</div>
+      ${billStatePill(st)}
+    </div>
+    <div class="br-ids">
+      <div class="br-id"><span>Bill no.</span><b>${b.billNo != null ? "#" + b.billNo : "\u2014"}</b></div>
+      <div class="br-id"><span>Invoice no.</span><b>${invTxt}</b></div>
+      <div class="br-id"><span>Opened</span><b>${esc(fmtWhen(o0.created_at))}</b></div>
+      ${b.kots.length ? `<div class="br-id"><span>KOT</span><b>${b.kots.join(", ")}</b></div>` : ""}
+      ${b.billPhone ? `<div class="br-id"><span>Phone</span><b>${esc(b.billPhone)}</b></div>` : ""}
+      ${g.length > 1 ? `<div class="br-id"><span>Tickets</span><b>${g.length} on this bill</b></div>` : ""}
+    </div>
+    <div class="br-items">${ordItemsHtml(g)}</div>
+    <div class="br-totals">${rows}</div>
+    ${billPaidHtml(b, m)}
+    ${billReceiptActions(b, st)}
+  </div>`;
+}
+
+// ── HOW THE MONEY CAME IN ───────────────────────────────────────────────────────────────────
+// The block he actually asked for. A bill settled in parts is stored as ONE paid bill whose
+// method is the word "Split", with the parts in `session_payments` (lib/paySplit.ts). Until now
+// every screen printed that bare word and the parts were nowhere a person could look — so
+// "₹200 UPI, ₹200 cash" became "Split" and the question "which was which?" had no answer on the
+// one screen that exists to answer questions about a bill.
+//
+// A PART CAN BE A TAB, NOT MONEY (mig 352): a "Pay later" leg was never collected. It is shown as
+// owed, not as taken, and it is the reason `collected` and `total` are two different numbers here.
+function billPaidHtml(b, m) {
+  if (b.cancelled) {
+    return `<div class="br-paid br-cancelled"><b>Cancelled \u2014 nothing was charged.</b>
+      <span>The bill stays in the record with its reason; it was never a sale.</span></div>`;
+  }
+  if (b.onHouse) {
+    return `<div class="br-paid br-house"><b>On the house \u2014 ${inr(0)} collected.</b>
+      <span>Comped deliberately. The bill is closed and counted at zero.</span></div>`;
+  }
+  const parts = Array.isArray(b.parts) ? b.parts : [];
+  const collectedParts = parts.filter((p) => p.method !== "Pay later");
+  const owedParts = parts.filter((p) => p.method === "Pay later");
+  let inner = "";
+  if (parts.length) {
+    // The SPLIT breakdown, oldest first — the order the money was actually taken in.
+    inner = `<div class="br-parts">${parts.map((p) => `
+        <div class="br-part${p.method === "Pay later" ? " br-part-tab" : ""}">
+          <span class="brp-m">${esc(p.method)}</span>
+          ${p.note ? `<span class="brp-n">${esc(p.note)}</span>` : ""}
+          <b class="brp-a">${inr(p.amount)}</b>
+        </div>`).join("")}</div>
+      <div class="br-partsum">
+        <span>${collectedParts.length} part${collectedParts.length === 1 ? "" : "s"} collected</span>
+        <b>${inr(collectedParts.reduce((t, p) => t + p.amount, 0))}</b>
+      </div>
+      ${owedParts.length ? `<div class="br-partsum br-partsum-owed">
+        <span>left on a tab</span><b>${inr(owedParts.reduce((t, p) => t + p.amount, 0))}</b></div>` : ""}`;
+  }
+  if (b.khata) {
+    return `<div class="br-paid br-khata"><b>Pay later \u2014 ${inr(b.owed || m.total)} owed.</b>
+      <span>Parked on ${esc(b.billCust || b.customer || "a tab")}. It is money to collect, not a write-off \u2014 the Pay Later book has it.</span>
+      ${inner}</div>`;
+  }
+  if (b.partPaid) {
+    return `<div class="br-paid br-part"><b>Part paid \u2014 ${inr(b.collected)} in, ${inr(b.owed)} still to come.</b>
+      <span>Some tickets on this bill are settled and some are not, so the bill is not closed.</span>
+      ${inner}</div>`;
+  }
+  if (b.paid) {
+    const one = parts.length ? "" : `<div class="br-onemethod"><span>Paid by</span><b>${esc(b.methods[0] || "\u2014")}</b></div>`;
+    return `<div class="br-paid br-settled"><b>Settled \u2014 ${inr(b.collected || m.total)} collected.</b>
+      ${one}${inner}
+      ${!parts.length && b.methods[0] === "Split"
+        ? `<span class="br-warn">Recorded as a split, but the parts are not available for this bill.</span>` : ""}</div>`;
+  }
+  return `<div class="br-paid br-unpaid"><b>Not paid yet \u2014 ${inr(m.total)} due.</b>
+    <span>${b.running ? "Food is still on this bill." : "Everything is served; the bill is waiting to be settled."}</span></div>`;
+}
+
+// Only the actions this bill's state can take — never a button that would do nothing.
+function billReceiptActions(b, st) {
+  const key = b.key;
+  const printLbl = b.printedAt ? "\u{1F5A8} Reprint" : "\u{1F5A8} Print";
+  const btns = [];
+  if (st === "cancelled") btns.push(`<button class="ord-btn ghost" data-print-group="${esc(key)}">${printLbl}</button>`);
+  else if (st === "settled" || st === "onhouse") {
+    btns.push(`<button class="ord-btn" data-print-group="${esc(key)}">${printLbl}</button>`);
+    if (b.invNo != null && !b.invVoided && b.g[0].session_id) {
+      btns.push(`<button class="ord-btn ghost" data-void-invoice="${esc(b.g[0].session_id)}">\u21a9 Reopen</button>`);
+      btns.push(`<button class="ord-btn ghost" data-credit-note="${esc(b.g[0].session_id)}">\u{1F9FE}\u2212 Credit note</button>`);
+    }
+  } else {
+    // running · part paid · pay later — all of them can still take money
+    btns.push(`<button class="ord-btn pay" data-sess-pay="${esc(key)}">\u{1F4B3} Mark paid</button>`);
+    btns.push(`<button class="ord-btn" data-print-group="${esc(key)}">${printLbl}</button>`);
+  }
+  return `<div class="br-acts">${btns.join("")}</div>`;
+}
+
+// A parcel has no table, no session and no split — but it is still a bill, and it answers the
+// same shape so the list and the pane need no "which kind is this?" branch.
+function parcelReceiptHtml(b, st) {
+  const p = b.p;
+  const items = Array.isArray(p.items) ? p.items : [];
+  return `<div class="bill-rcp">
+    <div class="br-head">
+      <div class="br-ttl">\u{1F961} Parcel${b.customer ? ` \u00b7 <span class="br-who">${esc(b.customer)}</span>` : ""}</div>
+      ${billStatePill(st)}
+    </div>
+    <div class="br-ids">
+      <div class="br-id"><span>Bill no.</span><b>${p.bill_no != null ? "#" + p.bill_no : "\u2014"}</b></div>
+      <div class="br-id"><span>Invoice no.</span><b>${p.invoice_no != null
+        ? esc(String(invFmt(p.invoice_no, p.invoice_at))) : `<span class="br-none">not issued yet</span>`}</b></div>
+      <div class="br-id"><span>Taken</span><b>${esc(fmtWhen(p.created_at))}</b></div>
+      ${p.customer_phone ? `<div class="br-id"><span>Phone</span><b>${esc(p.customer_phone)}</b></div>` : ""}
+    </div>
+    <div class="br-items">${items.map((i) => `<div class="oi-line"><span class="oi-q">${Number(i.qty) || 1}\u00d7</span>
+      <span class="oi-t">${esc(i.title || "")}</span></div>`).join("")}</div>
+    <div class="br-totals"><div class="bm-trow bm-total"><span>Total</span><b>${inr(b.total)}</b></div></div>
+    ${b.cancelled
+      ? `<div class="br-paid br-cancelled"><b>Cancelled \u2014 nothing was charged.</b></div>`
+      : b.paid
+        ? `<div class="br-paid br-settled"><b>Settled \u2014 ${inr(b.total)} collected.</b>
+             <div class="br-onemethod"><span>Paid by</span><b>${esc(p.payment_method || "\u2014")}</b></div></div>`
+        : `<div class="br-paid br-unpaid"><b>Not paid yet \u2014 ${inr(b.total)} due.</b></div>`}
+  </div>`;
+}
+
 // A settled bill as the SAME receipt card the Live view draws — items, money rows, pills —
 // with the record's own mood: a Paid / Unpaid / Cancelled pill instead of cooking stages,
 // and Print + open-for-actions instead of accept/serve. Clicking the card opens the bill.
@@ -3586,10 +3947,28 @@ function ordersKhataHtml() {
   if (!book) return `<div class="empty">Loading Pay Later…</div>`;
   if (book.error) return `<div class="empty">Couldn't load Pay Later: ${esc(book.error)}</div>`;
   const allCust = book.customers || [];
+  // ── PAY LATER SEARCHES THE SAME WAY THE BILLS BOX DOES (owner, 2026-08-22) ────────────────
+  // It matched `name` and `phone` with a plain `includes`, so a phone typed the way a person
+  // actually says it ("98250 12345", with the space) missed a stored "9825012345", and the amount
+  // owed and the note were not searchable at all. Same rule as the bills box now: several words
+  // must ALL match, a term of only digits is also tried against the digits of the phone and the
+  // rupees owed, and everything else is a plain substring. No request either way — the book is
+  // already in memory.
   const q = (state.khataSearch || "").trim().toLowerCase();
-  const customers = q
-    ? allCust.filter((c) => (c.name || "").toLowerCase().includes(q) || (c.phone || "").toLowerCase().includes(q))
-    : allCust;
+  const khMatch = (c) => {
+    const terms = q.split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const blob = [c.name || "", c.phone || "", c.note || "",
+      Math.round(Number(c.outstanding) || 0), (c.bills || []).map((b) => "#" + b.bill_no).join(" ")]
+      .join(" \u0001 ").toLowerCase();
+    const digits = String(c.phone || "").replace(/\D/g, "") + " " + Math.round(Number(c.outstanding) || 0);
+    return terms.every((t) => {
+      if (blob.includes(t)) return true;
+      const d = t.replace(/\D/g, "");
+      return !!d && digits.includes(d);
+    });
+  };
+  const customers = q ? allCust.filter(khMatch) : allCust;
   const peopleCount = allCust.length;
 
   // Summary bar — outstanding (liability), how many people owe, and what actually
@@ -6049,16 +6428,49 @@ function renderEditor() {
       if (!o) { toast("Couldn't load that parcel bill to print", "err"); return; }
       printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: o.discount, discount_note: o.discount_note });
     }));
-    const _bst = ed.querySelector("[data-bill-stype]");
-    if (_bst) _bst.onchange = () => { state.billSearchType = _bst.value; state.billSearch = ""; state.billHistRows = []; renderEditor(); };
+    // The TYPE DROPDOWN is gone (owner, 2026-08-22) — one box searches every field. Its handler
+    // went with it; `state.billSearchType` is left declared but unread so a stale cached panel
+    // cannot throw on a key it still remembers.
+    // PICK A BILL — by its own key, never its position, so a poll that reorders the list cannot
+    // move the selection onto a different bill. Keyboard too: the row is a real button.
+    ed.querySelectorAll("[data-bill-pick]").forEach((el) => {
+      const open = () => {
+        state.billPick = el.dataset.billPick;
+        renderEditor();
+        // ── ON A PHONE, TAKE THEM TO THE BILL (found by looking at it, 2026-08-22) ──────────
+        // The two columns STACK under 1080px, so the bill sits after the whole list — and with
+        // 82 bills in the record a tap did nothing visible: the manager would have had to scroll
+        // past every line to reach the one they just picked. On a wide screen the bill is already
+        // beside the list and must NOT jump, which is why this is width-conditional rather than
+        // always-on.
+        if (window.innerWidth <= 1080) {
+          const r = $("#editor .bill-rcpcol");
+          if (r && r.scrollIntoView) {
+            try { r.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { r.scrollIntoView(); }
+          }
+        }
+      };
+      el.onclick = open;
+      el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
+    });
+    const _bqx = ed.querySelector("[data-bill-qx]");
+    if (_bqx) _bqx.onclick = () => { state.billSearch = ""; state.billHistRows = []; renderEditor(); };
     const _bso = ed.querySelector("[data-bill-sort]");
     if (_bso) _bso.onchange = () => { state.billSort = _bso.value; renderEditor(); };
     const _bq = ed.querySelector("[data-bill-q]");
     if (_bq) _bq.oninput = () => {
       state.billSearch = _bq.value;
-      // In the PREVIOUS view, also search the server so bills older than the local 200-row
-      // window are found (debounced; results merge into the list — see ordersPreviousHtml).
-      if (ordersViewKey() === "previous") loadBillHistory(_bq.value.trim(), state.billSearchType);
+      // ── THE SEARCH COSTS NOTHING (owner, 2026-08-22) ──────────────────────────────────────
+      // It used to fire a SERVER request on every keystroke — over data the browser was already
+      // holding, because the bills read fetches the whole allowed window and enriches every
+      // searchable field onto it (invoice_no, bill_no, cust_name, cust_phone, customer_name).
+      // billMatches() answers from memory instantly, so the normal case is now zero requests.
+      //
+      // The server is still asked in exactly ONE case: the window came back AT its row cap, so
+      // memory may genuinely not hold every bill of a very busy day. Then one debounced request
+      // goes out and merges in. `type: "any"` tells the route to try every field, which is what
+      // the new box means. That is the honest split — free when it can be, correct when it can't.
+      if (ordersViewKey() === "previous" && billsCapped()) loadBillHistory(_bq.value.trim(), "any");
       renderEditor();
       const ne = $("#editor [data-bill-q]"); if (ne) { ne.focus(); const v = ne.value; try { ne.setSelectionRange(v.length, v.length); } catch {} }
     };

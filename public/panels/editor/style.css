@@ -4397,3 +4397,130 @@ html[data-theme="light"] .au-side-r.au-hot > b { color: #96690f; }
 .prstrip-txt { flex: 1 1 240px; font-size: 13px; color: var(--text); font-weight: 600; }
 .prstrip-txt small { display: block; color: var(--muted); font-weight: 500; margin-top: 2px; }
 .prstrip-row .btn { padding: 7px 11px; min-height: 38px; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   BILLS — LIST BESIDE THE BILL (owner's chosen design, 2026-08-22)
+   ══════════════════════════════════════════════════════════════════════════════════════════
+   He picked design 3 of three mock-ups: a slim scannable list on the left, and the bill it is
+   pointing at rendered in full on the right. "No popup, no losing your place" was the reason.
+
+   Every colour below is an existing token — nothing here introduces a palette, so the light and
+   dark skins both follow automatically and the money screens stay one family.
+
+   The receipt column is STICKY, so scrolling a long day's list never scrolls the bill away from
+   the person reading it. Under 1080px the two columns stack (the bill first is wrong — you pick
+   before you read — so the list stays first and the receipt follows it). */
+.bill-split { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 16px; align-items: start; }
+.bill-listcol { min-width: 0; }
+.bill-rcpcol { position: sticky; top: 12px; }
+
+/* ── ONE search box, no type dropdown ───────────────────────────────────────────────────── */
+.bill-search-one { flex: 1; min-width: 0; }
+.bill-search-one input { flex: 1; min-width: 0; }
+.bill-qx { flex: 0 0 auto; width: 30px; height: 30px; margin-right: 4px; border: none; border-radius: 50%;
+  background: var(--panel-2); color: var(--muted); font-size: 13px; cursor: pointer; }
+.bill-qx:hover { color: var(--text); background: var(--line); }
+.bill-owed { color: #e8a13c; }
+
+/* ── the list ────────────────────────────────────────────────────────────────────────────── */
+.bill-lines { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.bill-line { display: flex; align-items: center; gap: 12px; padding: 11px 13px; cursor: pointer;
+  border-bottom: 1px solid var(--line); min-height: 56px; }
+.bill-line:last-child { border-bottom: none; }
+.bill-line:hover { background: var(--panel-2); }
+.bill-line:focus-visible { outline: 3px solid var(--gold); outline-offset: -3px; }
+/* The open bill is marked by a BAR and a tint, not by colour alone — the same reason every state
+   pill carries a word. */
+.bill-line.on { background: color-mix(in srgb, var(--gold) 13%, var(--panel)); box-shadow: inset 3px 0 0 var(--gold); }
+.bl-no { font-weight: 800; font-size: 14.5px; min-width: 46px; font-variant-numeric: tabular-nums; }
+.bl-mid { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.bl-1 { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bl-2 { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bl-amt { text-align: right; font-weight: 800; font-size: 14.5px; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.bl-amt small { display: block; font-weight: 500; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+/* ── state chips: a word AND a colour, never a colour alone ───────────────────────────────── */
+.bill-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; flex: 0 0 auto;
+  border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid; white-space: nowrap; }
+.bill-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.bc-run  { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); background: color-mix(in srgb, var(--green) 12%, var(--panel)); }
+.bc-set  { color: #4b8dd6; border-color: rgba(75,141,214,.45); background: rgba(75,141,214,.12); }
+.bc-part { color: #e8a13c; border-color: rgba(232,161,60,.45); background: rgba(232,161,60,.12); }
+.bc-kha  { color: #a78bfa; border-color: rgba(167,139,250,.45); background: rgba(167,139,250,.12); }
+.bc-hou  { color: #5fd4c4; border-color: rgba(95,212,196,.45); background: rgba(95,212,196,.12); }
+.bc-can  { color: #e0863c; border-color: rgba(224,134,60,.45); background: rgba(224,134,60,.12); }
+html[data-theme="light"] .bc-set  { color: #1d4ed8; background: color-mix(in srgb, #1d4ed8 9%, var(--panel)); }
+html[data-theme="light"] .bc-part { color: #b45309; background: color-mix(in srgb, #b45309 9%, var(--panel)); }
+html[data-theme="light"] .bc-kha  { color: #6d28d9; background: color-mix(in srgb, #6d28d9 9%, var(--panel)); }
+html[data-theme="light"] .bc-hou  { color: #0f766e; background: color-mix(in srgb, #0f766e 9%, var(--panel)); }
+html[data-theme="light"] .bc-can  { color: #b45309; background: color-mix(in srgb, #b45309 9%, var(--panel)); }
+
+/* ── the bill itself ─────────────────────────────────────────────────────────────────────── */
+.bill-rcp { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 15px 16px 14px; box-shadow: var(--shadow-sm); }
+.br-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.br-ttl { font-family: var(--display); font-size: 18px; font-weight: 700; min-width: 0; flex: 1; }
+.br-who { font-family: system-ui, sans-serif; font-size: 13px; font-weight: 600; color: var(--muted); }
+/* The two numbers he asked to see, side by side, each able to say it has none. */
+.br-ids { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; padding: 10px 0 12px;
+  border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); margin-bottom: 12px; }
+.br-id { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.br-id span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.br-id b { font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.br-none { color: var(--muted); font-weight: 500; font-style: italic; }
+.br-retired { color: #e0863c; font-weight: 600; font-size: 11px; }
+.br-items { max-height: 210px; overflow-y: auto; margin-bottom: 10px; }
+.br-totals { padding-top: 8px; border-top: 1px dashed var(--line); }
+.br-totals .bm-total { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line);
+  font-size: 16px; font-weight: 800; }
+
+/* ── how the money came in: the block that did not exist before ───────────────────────────── */
+.br-paid { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px;
+  border: 1px solid var(--line); background: var(--panel-2); }
+.br-paid > b { display: block; font-size: 13.5px; margin-bottom: 2px; }
+.br-paid > span { display: block; color: var(--muted); line-height: 1.5; }
+.br-settled  { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); }
+.br-unpaid   { border-color: rgba(232,161,60,.45); }
+.br-part     { border-color: rgba(232,161,60,.5); }
+.br-khata    { border-color: rgba(167,139,250,.5); }
+.br-house    { border-color: rgba(95,212,196,.5); }
+.br-cancelled{ border-color: rgba(224,134,60,.5); }
+.br-onemethod { display: flex; justify-content: space-between; align-items: baseline; margin-top: 7px;
+  padding-top: 7px; border-top: 1px dashed var(--line); }
+.br-onemethod span { color: var(--muted); font-size: 11.5px; }
+.br-onemethod b { font-size: 13.5px; }
+/* THE SPLIT PARTS — one row per way the money arrived. */
+.br-parts { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.br-part { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
+.brp-m { font-weight: 700; font-size: 12.5px; }
+.brp-n { color: var(--muted); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brp-a { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A pay-later LEG is not money taken — it reads differently on purpose (mig 352). */
+.br-part-tab .brp-m { color: #a78bfa; }
+html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
+.br-part-tab .brp-a { color: var(--muted); }
+.br-partsum { display: flex; justify-content: space-between; margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid var(--line); font-size: 12px; }
+.br-partsum span { color: var(--muted); }
+.br-partsum b { font-variant-numeric: tabular-nums; }
+.br-partsum-owed b { color: #e8a13c; }
+.br-warn { display: block; margin-top: 6px; color: #e8a13c; font-size: 11.5px; }
+.br-acts { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 13px; }
+.br-acts .ord-btn { flex: 1; min-width: 116px; justify-content: center; }
+
+.bill-rcp-empty, .bill-noneq { padding: 46px 18px; text-align: center; color: var(--muted); font-size: 13.5px;
+  background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); }
+.bill-noneq b { color: var(--text); }
+.bill-noneq-sub { margin-top: 8px; font-size: 12px; line-height: 1.55; }
+
+@media (max-width: 1080px) {
+  .bill-split { grid-template-columns: 1fr; }
+  .bill-rcpcol { position: static; }
+  .br-ids { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .bl-2 { display: none; }               /* the line stays readable on a phone: number, who, money */
+  .br-ids { grid-template-columns: 1fr; }
+  .br-acts .ord-btn { min-width: 0; }
+}
