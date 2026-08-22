@@ -276,6 +276,40 @@ for (const [what, ts] of INSTANTS) {
     : bad("the ticket's duplicate banner regressed", "the KOT banner is the one he kept");
 }
 
+// ── 3f. WHAT THE SHEET CALLS ITSELF ───────────────────────────────────────────────────────────
+// A tax invoice must carry the supplier's GSTIN (CGST Rule 46(b)/(c); the one-liner in
+// docs/COMPLIANCE-GUARDRAILS.md is "Real GSTIN on any tax invoice"). billIdentity() has refused to
+// invent one since 2026-08-04 — an unconfigured restaurant prints no GSTIN line — but the HEADING
+// kept saying TAX INVOICE anyway, so the sheet claimed to be the one thing it could not be.
+// Measured 2026-08-22: 16 of 17 dev restaurants have no GSTIN, the flagship included.
+// Also pinned the other way: a restaurant that HAS filled its GSTIN in must be unchanged.
+{
+  const SET = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
+  const os = [{ status: "served", subtotal: 250, taxable_base: 250, nontax_amount: 0, discount: 0,
+    tax_rate: 0.05, items: [{ title: "Salad", qty: 1, price: 250, tax_mode: "excl" }] }];
+  const head = (settings, orders) => {
+    const html = BILLDOC.billDocHtml(BILLDOC.billData({ settings, restaurant: {},
+      session: { bill_no: 3 }, autoPrint: false, orders: orders || os }));
+    return [(html.match(/<div class="kind">([^<]*)/) || [])[1],
+      (html.match(/<title>([^—]*)/) || [])[1].trim()];
+  };
+  const cases = [
+    ["a restaurant with a GSTIN", { ...SET, gstin: "24ABCDE1234F1Z5" }, null, "Tax Invoice"],
+    ["a restaurant with NO GSTIN", { ...SET }, null, "Bill"],
+    ["a GSTIN of only spaces", { ...SET, gstin: "   " }, null, "Bill"],
+    ["a composition restaurant", { ...SET, price_tax_mode: "composition" }, null, "Bill of Supply"],
+    ["a cancelled sale", { ...SET, gstin: "24ABCDE1234F1Z5" },
+      [{ ...os[0], status: "cancelled" }], "Cancelled Bill"],
+  ];
+  for (const [what, settings, orders, want] of cases) {
+    const [kind, title] = head(settings, orders);
+    (kind === want && title === want)
+      ? ok(`${what} hands over a "${want}", in the heading and the tab title`)
+      : bad(`${what} is headed "${kind}" (tab "${title}"), not "${want}"`,
+        "a sheet with no GSTIN on it cannot be a tax invoice — and one WITH a GSTIN must not change");
+  }
+}
+
 // ── 3d. THE VERIFICATION LINE (mig 332) ───────────────────────────────────────────────────────
 // The signed chain is only checkable by whoever holds the paper if it is ON the paper. It prints
 // only when the caller supplies BOTH parts, so a bill printed before the columns are exposed is

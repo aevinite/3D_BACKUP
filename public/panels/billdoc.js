@@ -330,7 +330,35 @@
        Bill" — so a composition tenant's guest was handed a sheet headed TAX INVOICE with the
        restaurant's GSTIN on it. docs/COMPLIANCE-GUARDRAILS.md §3 covered the tax LINE and
        stopped at the letterhead; the money was right and the heading was not. */
-    var docName = d.cancelled ? "Cancelled Bill" : (composition ? "Bill of Supply" : "Tax Invoice");
+    /* A SHEET WITH NO GSTIN ON IT IS NOT A TAX INVOICE (T8 sweep #7, 2026-08-22).
+       This file already refuses to invent a GSTIN — "NEVER fall back to a placeholder GSTIN, a fake
+       tax number on a real bill is illegal" (2026-08-04), so an unconfigured restaurant prints no
+       GSTIN line at all. The heading was never given the same reasoning, so the sheet went on
+       calling itself a TAX INVOICE with the one field that makes it one simply absent.
+
+       CGST Rule 46(b)/(c) makes the supplier's GSTIN a mandatory particular of a tax invoice, and
+       docs/COMPLIANCE-GUARDRAILS.md carries the same rule in one line: "Real GSTIN on any tax
+       invoice". A sheet headed Tax Invoice with no registration on it is not one — the same class
+       of fault as T7's F9, where the money was right and the letterhead was not.
+
+       This is NOT hypothetical or a corner: measured on the dev database, 16 of 17 restaurants have
+       no GSTIN, the flagship included — an empty Billing card is the state every new tenant starts
+       in, and taxModel() falls back to 5% for all of them. So every one of those tenants is handing
+       guests a "Tax Invoice".
+
+       What changed, and only this: the WORD at the top. A restaurant with no GSTIN gets "Bill",
+       which is what it is and what such a restaurant wants. Nothing about the money, the numbers or
+       any row moves — the TOTAL is still passed straight through, and a restaurant that HAS filled
+       its GSTIN in prints exactly what it printed before, byte for byte.
+
+       LEFT FOR THE OWNER, deliberately not changed here: the sheet still adds and names CGST/SGST
+       rows for a restaurant with no registration. Those rupees were genuinely charged and are
+       inside the TOTAL, so removing the rows would stop the column footing — which is a real
+       product decision about what an unregistered tenant should collect, not a formatting one.
+       Written up in .claude/sweep/T8-findings.md. */
+    var registered = !!String(d.gstin == null ? "" : d.gstin).trim();
+    var docName = d.cancelled ? "Cancelled Bill"
+      : (composition ? "Bill of Supply" : (registered ? "Tax Invoice" : "Bill"));
     return '<!doctype html><title>' + docName + " — " + name + "</title>\n"
 + "<style>\n"
 + "  /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver\n"
