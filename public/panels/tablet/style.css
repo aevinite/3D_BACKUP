@@ -18,6 +18,13 @@
   --gold-ink: var(--gold);
   --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
   --merge-ink: #c084fc;   /* "served as one party" — the one non-gold hue on this panel, per skin */
+/* ── ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22) ────────────────────────────────
+   Every sheet, drawer and confirm box on this panel dims the page behind it, and each one had
+   picked its own value: rgba(3,7,16,.65), rgba(0,0,0,.5), rgba(4,8,18,.55), rgba(4,8,18,.66). Two overlays on the same
+   screen therefore dimmed by different amounts, which is the sort of thing that makes one
+   product feel like several. One token, used by all of them. The blur behind each sheet is
+   deliberately NOT unified - a heavier blur is how a stacked layer says it is on top. */
+  --scrim: rgba(3, 7, 16, 0.60);
   --green: #22c55e; --amber: #fbbf24; --red: #ef4444;
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element instead of a
      hand-rolled max(). env() covers the iPhone notch/home bar when this page is top-level;
@@ -539,7 +546,7 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
    (e.g. the dish-edit modal at z-index 99990, the options overlay at 100000). At z-index 60
    it rendered behind the dish-edit modal, making "Send back to kitchen" (un-serve) and
    "Remove from all" un-tappable — the only un-serve path. Keep it topmost. */
-.confirm-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.65); display: grid; place-items: center; z-index: 100002; }
+.confirm-overlay { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 100002; }
 /* the [hidden] attribute must win over display:grid — else it blocks taps at rest */
 .confirm-overlay[hidden] { display: none; }
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }
@@ -787,7 +794,7 @@ html[data-theme="light"] .inm .alg-removed{ color:#b45309; }
 #tabletClose { display: none; }
 
 /* Slide-in settings/profile drawer (built in app.js) */
-.tbl-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 80; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+.tbl-drawer-backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 80; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
 .tbl-drawer-backdrop.open { opacity: 1; pointer-events: auto; }
 .tbl-drawer { position: fixed; top: 0; right: 0; height: 100dvh; width: min(86vw, 340px); background: var(--panel); border-left: 1px solid var(--line); z-index: 81; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; gap: 12px; padding: 16px 16px calc(16px + var(--sab)); overflow: auto; }
 .tbl-drawer.open { transform: translateX(0); }
@@ -1153,7 +1160,7 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 .om-viewpill .vp-arrow { font-style: normal; font-weight: 900; }
 
 /* Item popup modal (quantity + allergy [+ size/extras]) — over the menu. */
-.opt-overlay { position: fixed; inset: 0; z-index: 100000; background: rgba(4,8,18,.55);
+.opt-overlay { position: fixed; inset: 0; z-index: 100000; background: var(--scrim);
   -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center; padding: 16px; }
 .opt-pop { width: min(94vw, 460px); max-height: 88vh; max-height: 88dvh; background: var(--panel, #fff); color: var(--text);
@@ -1269,7 +1276,7 @@ body:has(.detail-pop) #tabletClose { display: none; }
 .detail-pop .phead:has(.phead-step) { padding-right: 0; }
 
 /* ⚡ Quick order, step 2: "which table gets this order?" — picking sends. */
-.qdest-overlay { position: fixed; inset: 0; z-index: 100001; background: rgba(4,8,18,.66);
+.qdest-overlay { position: fixed; inset: 0; z-index: 100001; background: var(--scrim);
   -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; padding: 16px; }
 .qdest-box { width: min(94vw, 560px); max-height: 88dvh; overflow-y: auto; -webkit-overflow-scrolling: touch;
