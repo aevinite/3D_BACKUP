@@ -174,6 +174,19 @@ has("guestbell.js", /var\(--sab, env\(safe-area-inset-bottom, 0px\)\)/,
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,
   "the inventory deadline is back inside the write-only branch — a read can hang on 'Loading inventory…' forever");
 
+// ── the "→ N more" chip counts what is really off the edge (T9 sweep #7, 2026-08-22) ──────────
+// offsetLeft is measured from the nearest POSITIONED ancestor, and countChip() makes the row's
+// PARENT positioned — so any inset between the two put the count in a different coordinate system
+// from scrollLeft + clientWidth. Measured with 40px of parent padding: "→ 7 more" where six were
+// off the edge, and "→ 1 more" at the end of the row with nothing left.
+{
+  files["swipehint.js"] = read("swipehint.js");
+  has("swipehint.js", /function hiddenAtEnd\(row\) \{[\s\S]{0,200}?getBoundingClientRect\(\)\.right/,
+    "the chip's count is back on offsetLeft, which is measured from a different box than the row's own scroll position");
+  hasNot("swipehint.js", /c\.offsetLeft \+ c\.offsetWidth > right/,
+    "hiddenAtEnd() compares offsetLeft against a scroll coordinate again — the count drifts by however far the row sits inside its parent");
+}
+
 // ── no tap in the Inventory tab ends in silence (T9 sweep #7, 2026-08-22) ─────────────────────
 // verify:taps covers the three panels' own app.js but not this file, and Discard swallowed every
 // refusal with `catch {}` and cleared the sheet regardless — so a refused discard closed the sheet,

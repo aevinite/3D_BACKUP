@@ -49,12 +49,29 @@
   }
 
   // How many whole children are still off the right-hand edge — the number the chip prints.
+  //
+  // MEASURED WHERE THEY ARE ON SCREEN, NOT VIA offsetLeft (T9 sweep #7, 2026-08-22).
+  //
+  // offsetLeft is measured from the nearest POSITIONED ancestor, and countChip() above sets
+  // position:relative on the row's PARENT so the chip can sit over the row. So the moment the row
+  // is not flush against that parent's content edge — the commonest cause is padding on the parent
+  // — every child's offsetLeft carries the row's own offset as well, while scrollLeft + clientWidth
+  // does not. The two are then in different coordinate systems and the count is out by however far
+  // the row sits in. Measured on a fixture whose parent had 40px of left padding: the chip said
+  // "→ 7 more" where six were really off the edge, and at the END of the row it still said
+  // "→ 1 more" with nothing left — a chip promising a swipe that does nothing, which is the one
+  // thing measure() above exists to prevent.
+  //
+  // It happens to be exact for the one row that uses the chip today (.to-crail sits at x=0 in
+  // .to-rail), which is why it passed a real measurement in the last sweep. A number a waiter
+  // reads should not depend on that. Rects are the rendered truth and cannot drift: one forced
+  // layout for the row, then the children, in the same read pass as scrollWidth/clientWidth above.
   function hiddenAtEnd(row) {
-    var right = row.scrollLeft + row.clientWidth + EPS, n = 0;
+    var right = row.getBoundingClientRect().right + EPS, n = 0;
     for (var i = 0; i < row.children.length; i++) {
       var c = row.children[i];
       if (c === row.__lfhChip) continue;
-      if (c.offsetLeft + c.offsetWidth > right) n++;
+      if (c.getBoundingClientRect().right > right) n++;
     }
     return n;
   }
