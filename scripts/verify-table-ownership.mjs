@@ -29,6 +29,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 
 // A TILE UNDER THE STICKY HEADER IS NOT A BROKEN TILE (sweep #6 / T28, 2026-08-22). This guard failed
 // roughly half the times it ran inside a suite, always the same way:
@@ -218,6 +219,12 @@ head("C. Closing a session — its food leaves the floor with it");
   const busy = new Set([
     ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", rid).neq("status", "closed")).map((s) => String(s.table_number)),
     ...must(await sb.from("orders").select("table_number").eq("restaurant_id", rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+    // …AND THE TABLES OTHER GUARDS OWN (sweep #6 / T28, 2026-08-22). This walks DOWN from the highest
+    // number, which is exactly where verify-void-on-joined-party (27, 28) and verify-merged-floor
+    // (21-23) live. Measured in a whole-suite run: it seated a party on 28, and void then read that
+    // party as its own and reported "2 check(s) failed" about a void that had worked perfectly. A
+    // collision like that looks exactly like a product fault and cannot be reproduced alone.
+    ...claimedTables(),
   ]);
   const T = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n)));
   if (!T) console.log("  ! no empty table to test on — skipped");
@@ -286,6 +293,12 @@ if (!BASE) {
   const busy = new Set([
     ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", rid).neq("status", "closed")).map((s) => String(s.table_number)),
     ...must(await sb.from("orders").select("table_number").eq("restaurant_id", rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+    // …AND THE TABLES OTHER GUARDS OWN (sweep #6 / T28, 2026-08-22). This walks DOWN from the highest
+    // number, which is exactly where verify-void-on-joined-party (27, 28) and verify-merged-floor
+    // (21-23) live. Measured in a whole-suite run: it seated a party on 28, and void then read that
+    // party as its own and reported "2 check(s) failed" about a void that had worked perfectly. A
+    // collision like that looks exactly like a product fault and cannot be reproduced alone.
+    ...claimedTables(),
   ]);
   const free = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n)));
   if (!free) { console.log("  ! every table is occupied right now — browser checks skipped"); process.exit(failed ? 1 : 0); }

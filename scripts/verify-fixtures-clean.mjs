@@ -37,6 +37,7 @@
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
+import { OFF_PLAN } from "./sweep/fixtureTables.mjs";
 
 const env = Object.fromEntries(
   readFileSync(new URL("../.env.local", import.meta.url), "utf8").split(/\r?\n/)
@@ -58,18 +59,7 @@ const CUTOFF = new Date(Date.now() - AGE_MIN * 60_000).toISOString();
 // makes the answer unambiguous with ten lanes running at once. On-plan numbers (9, 11, 21, 27 …) are
 // deliberately NOT listed: another lane may legitimately have a party on one right now, and a guard
 // that cries wolf about that is a guard people learn to skip.
-const FIXTURES = [
-  ["288", "verify-cancelled-tile-parity.mjs"],
-  ["ALGTEST", "verify-allergy-isolation.mjs"],
-  ["9931", "verify-realtime.mjs"],
-  ["9932", "verify-tablet-parity.mjs"],
-  ["E2E-TAX", "verify-tax-mode-e2e.mjs"],
-  ["OWNCHK", "verify-table-ownership.mjs"],
-  ["T12-TEST", "verify-cancel-loss.ts"],
-  ["T12-P2", "verify-cancel-made.ts"],
-  ["9990", "verify-two-parties.mjs"],
-  ["9965", "verify-sweep-extras.mjs"],
-];
+const FIXTURES = OFF_PLAN;   // scripts/sweep/fixtureTables.mjs — one list, so a clash is visible
 const names = FIXTURES.map(([n]) => n);
 const owner = new Map(FIXTURES);
 

@@ -16,6 +16,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { dismissTicketsFor } from "./sweep/tickets.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,6 +58,7 @@ const made = { orders: [], sessions: [] };
 // A free table with nothing on it at all.
 const count = must(await sb.from("settings").select("table_count").eq("restaurant_id", RID).limit(1))[0]?.table_count || 10;
 const busy = new Set([
+  ...claimedTables(),   // the tables other guards own — see scripts/sweep/fixtureTables.mjs
   ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", RID).neq("status", "closed")).map((s) => String(s.table_number)),
   ...must(await sb.from("orders").select("table_number").eq("restaurant_id", RID).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
 ]);

@@ -28,6 +28,7 @@ import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
 import { dismissTicketsFor } from "./sweep/tickets.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -154,6 +155,9 @@ try {
     const busy = new Set([
       ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", crew.rid).neq("status", "closed")).map((s) => String(s.table_number)),
       ...must(await sb.from("orders").select("table_number").eq("restaurant_id", crew.rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+      // …and the tables other guards own, so a whole-suite run cannot have two lanes at one table
+      // (scripts/sweep/fixtureTables.mjs). A collision there looks exactly like a product fault.
+      ...claimedTables(),
     ]);
     const count = must(await sb.from("settings").select("table_count").eq("restaurant_id", crew.rid).limit(1))[0]?.table_count || 10;
     const freeList = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n)).slice(0, ROUNDS + 1);
