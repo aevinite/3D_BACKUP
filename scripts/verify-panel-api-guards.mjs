@@ -146,6 +146,31 @@ const fail = (m) => fails.push(m);
     // The movement must be keyed on the LINE id, or a replay double-posts stock.
     if (/dedupe:\s*`pur:\$\{pid\}:\$\{row\.id\}`/.test(inv)) ok("each purchase movement is deduped by its own line id");
     else fail("the purchase movement's dedupe key no longer names the line — a replay can double-post stock");
+
+    // ── EVERY ID BRANCH CHECKS ITS ID (T10 sweep #7) ────────────────────────────────────────────
+    // This file states the rule itself: "Every id this route accepts is a uuid our own UI produced.
+    // Anything else is a BAD REQUEST." Six branches enforced it and the three `counts` ones did
+    // not — and a missing client id arrives as the literal "undefined" (which is exactly why the
+    // three SIBLING catch-all routes all carry emptyIdSegment; this one has no such guard at all).
+    //
+    // `counts/:id/discard` was the one that hurt: `.eq("id","undefined")` errors 22P02, `up.error`
+    // is set, and writeFail answers 500 — which public/panels/outbox.js reads as "the server is up
+    // but can't take it", so it QUEUES the discard, retries it, and finally files it under "needs
+    // you" saying the system couldn't accept it after several tries. That is a sentence about the
+    // server for a value that will never be accepted, and it inverts this codebase's own rule that
+    // a 4xx is told to the person while only a 5xx is saved and retried.
+    for (const [branch, marker] of [
+      ["counts/:id/line", /path\[2\] === "line"\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!isUuid\(path\[1\]\)\) return badId\(\);/],
+      ["counts/:id/submit", /path\[2\] === "submit"\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!isUuid\(path\[1\]\)\) return badId\(\);/],
+      ["counts/:id/discard", /path\[2\] === "discard"\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!isUuid\(path\[1\]\)\) return badId\(\);/],
+    ]) {
+      if (marker.test(readRaw("app/api/inventory/[...path]/route.ts"))) ok(`inventory ${branch} refuses an id that is not an id, instead of answering "the server is busy"`);
+      else fail(`inventory ${branch} no longer checks its id — a stale/undefined id reaches Postgres, and the 500 it produces is QUEUED and retried as though the server were merely busy`);
+    }
+    // …and the count LINE's item id, which reaches the same kind of column from the body.
+    if (/const itemId = String\(body\.item_id \|\| ""\);[\s\S]{0,240}?if \(!isUuid\(itemId\)\) return badId\(\);/.test(readRaw("app/api/inventory/[...path]/route.ts")))
+      ok("a counted line's ingredient id is checked before it reaches the database");
+    else fail("the count line's item_id is no longer checked — the same 22P02 shape, from the body instead of the path");
   }
 
   // A REPRODUCTION, so this rule is checking behaviour and not a spelling. Two lines, one item.
