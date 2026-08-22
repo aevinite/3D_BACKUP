@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 4000",
+    "dev": "next dev -p ${PORT:-4000}",
     "build": "next build",
     "prebuild": "node scripts/set-glb-cache.mjs || exit 0",
     "start": "next start -p 4000",
