@@ -52,7 +52,7 @@ const ED = read("app/api/editor/[...path]/route.ts");
 const TB = read("app/api/tablet/[...path]/route.ts");
 const MGR = read("public/panels/editor/app.js");
 const TAB = read("public/panels/tablet/app.js");
-const MIG = read("supabase/migrations/352_a_split_part_can_be_pay_later.sql");
+const MIG = read("supabase/migrations/364_a_split_part_can_be_pay_later.sql");   // renumbered 352→364, a duplicate number
 const ps = await import("@/lib/paySplit.ts");
 
 console.log("\nSplit payment: is it still mark-paid, with one part allowed to be a tab?");
