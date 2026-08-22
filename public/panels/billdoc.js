@@ -236,7 +236,15 @@
     // measured, so the money columns below are sized to THIS bill instead of a fixed guess.
     var widest = { qty: 3, rate: 4, amt: 3 };   // never narrower than the QTY/RATE/AMT headings
     var measure = function (k, v) { widest[k] = Math.max(widest[k], String(v).length); };
-    var rows = (d.lines || []).map(function (i) {
+    /* ONE BAD LINE MUST NOT COST THE WHOLE PIECE OF PAPER (T8 sweep #7, 2026-08-22). A single
+       null in a line list threw out of the render — on all three documents — and these are drawn
+       into a window.open or a hidden iframe, so a throw here is a BLANK WINDOW: the kitchen gets no
+       ticket, or the guest gets no bill, with nothing on screen saying why. That is the worst
+       possible shape of "a tap must never vanish in silence", at the till, mid-rush.
+       Every line list this file reads now drops empty entries instead. `items` is JSONB in this
+       product, so a null element is a database write away, and printing the other nine dishes is
+       strictly better than printing nothing. */
+    var rows = (d.lines || []).filter(Boolean).map(function (i) {
       var q = Number(i.qty) || 1;
       var opts = Array.isArray(i.options) ? i.options.filter(function (x) { return Number(x.price); }) : [];
       var addUnit = opts.reduce(function (a, x) { return a + (Number(x.price) || 0); }, 0);
@@ -339,7 +347,7 @@
     // separate times for the same bill, which is three chances for two of them to disagree.)
     // What the cancelled bill WOULD have come to — added straight from the printed lines, so
     // the "Ordered value" row and the item rows above it are the same arithmetic.
-    var orderedValue = (d.lines || []).reduce(function (a, i) {
+    var orderedValue = (d.lines || []).filter(Boolean).reduce(function (a, i) {
       return a + (parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1);
     }, 0);
     var roundBlock = R.roundOff !== 0
@@ -742,6 +750,7 @@
   }
 
   function kotLineHtml(r) {
+    r = r || {};   // one bad line must not cost the whole ticket — see the note in billDocHtml
     var opts = Array.isArray(r.options) ? r.options.map(function (x) { return typeof x === "string" ? x : ((x && x.label) || ""); }).filter(Boolean).join(", ") : "";
     var rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
     return '<div class="kl"><span class="q">' + (r.qty || 1) + '×</span><span class="n">' + esc(r.title || "")
@@ -766,7 +775,7 @@
   // (The BILL is a separate document and is already clean at both widths — nothing to do there.)
   function kotDocHtml(o) {
     o = o || {};
-    var linesHtml = o.linesHtml != null ? o.linesHtml : (o.lines || []).map(kotLineHtml).join("");
+    var linesHtml = o.linesHtml != null ? o.linesHtml : (o.lines || []).filter(Boolean).map(kotLineHtml).join("");
     var allergHtml = o.allergHtml != null ? o.allergHtml
       : (Array.isArray(o.allergies) && o.allergies.length ? '<div class="al">⚠ AVOID: ' + esc(o.allergies.join(", ")) + "</div>" : "");
     return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(o.title || "KOT") + "</title><style>\n"
@@ -1002,7 +1011,7 @@
   function combineBillLines(entries) {
     var SEP = "\u0001";  // a real, visible escape — see the note above
     var out = [], at = {};
-    (entries || []).forEach(function (e) {
+    (entries || []).filter(Boolean).forEach(function (e) {
       var sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join(SEP);
       var i = at[sig];
       var qty = Math.max(1, parseInt(e.qty, 10) || 1);
@@ -1569,7 +1578,8 @@ function bqWords(amount) {
    * a = { bill, lines, settings, restaurant, logo }. Pure: no panel state, returns the HTML.
    */
 function banquetDocHtml(a) {
-    var b = a.bill || {}, lines = a.lines || [];
+    a = a || {};   // the whole sheet, like the bill and the ticket, survives a missing argument
+    var b = a.bill || {}, lines = (a.lines || []).filter(Boolean);
     var s = a.settings || {};
     var bi = billIdentity(s, a.restaurant || {});
     var P = bqPaper(s);

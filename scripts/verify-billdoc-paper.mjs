@@ -510,6 +510,51 @@ for (const [what, ts] of INSTANTS) {
       "one setting, one default — resolve it in billIdentity and read bi.taxLabel everywhere else");
 }
 
+// ── 3k. ONE BAD LINE DOES NOT COST THE WHOLE PIECE OF PAPER ───────────────────────────────────
+// A single null in a line list threw out of the render, on ALL THREE documents. They are drawn
+// into a window.open or a hidden iframe, so a throw there is a BLANK WINDOW: the kitchen gets no
+// ticket, or the guest gets no bill, with nothing on screen saying why — the worst possible shape
+// of "a tap must never vanish in silence", at the till, mid-rush. `items` is JSONB in this
+// product, so a null element is one database write away. Printing the other nine dishes beats
+// printing nothing.
+{
+  const cases = [
+    ["a ticket with a null among its lines", () => BILLDOC.kotDocHtml({ rname: "R", kot: 1,
+      lines: [{ qty: 1, title: "Dal" }, null, { qty: 2, title: "Naan" }] }), /Dal/],
+    ["a ticket of nothing but nulls", () => BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [null, undefined] }), /\(no items\)/],
+    ["kotLineHtml with no argument", () => BILLDOC.kotLineHtml(), /class="kl"/],
+    ["banquetDocHtml with no argument", () => BILLDOC.banquetDocHtml(), /Tax Invoice/],
+    ["a bill with a null among its lines", () => BILLDOC.billDocHtml({ name: "R", taxRows: [],
+      lines: [null, { title: "Dal", qty: 1, price: 100 }], subtotal: 100, total: 100 }), /Dal/],
+    ["a banquet sheet with a null line", () => BILLDOC.banquetDocHtml({ bill: { bill_no: "B", subtotal: 100, total: 100 },
+      lines: [null, { title: "Hall", qty: 1, price: 100 }], settings: {}, restaurant: {} }), /Hall/],
+    ["an ORDER carrying a null item", () => BILLDOC.billDocHtml(BILLDOC.billData({ settings: {}, restaurant: {},
+      session: { bill_no: 1 }, orders: [{ status: "served", subtotal: 100, taxable_base: 100, tax_rate: 0.05,
+        items: [null, { title: "Dal", qty: 1, price: 100 }] }] })), /Dal/],
+  ];
+  const bads = [];
+  for (const [what, fn, want] of cases) {
+    try {
+      const html = fn();
+      if (!want.test(html)) bads.push(`${what}: rendered, but the good lines are missing`);
+    } catch (e) { bads.push(`${what}: threw — ${e.message}`); }
+  }
+  bads.length === 0
+    ? ok(`all ${cases.length} bad-line shapes still produce a document, with the good lines on it`)
+    : bad(`a bad line stopped the paper: ${bads.join(" · ")}`,
+      "drop empty entries — these documents render into a window.open, so a throw is a blank window and no paper at all");
+  // every public entry point survives being called with nothing
+  const threw = [];
+  for (const [k, fn] of Object.entries(BILLDOC)) {
+    if (typeof fn !== "function") continue;
+    try { fn(); } catch (e) { threw.push(`${k}: ${e.message}`); }
+  }
+  threw.length === 0
+    ? ok(`  …and all ${Object.keys(BILLDOC).length} entry points survive being called with nothing`)
+    : bad(`an entry point throws on no argument: ${threw.join(" · ")}`,
+      "this file is the public LFH_BILLDOC API — every door defaults its argument");
+}
+
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
 // The .d.ts is what the Next server and the admin React screens see. A field the document branches
 // its whole identity on, missing from the type, means a TypeScript caller cannot render that
