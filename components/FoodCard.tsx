@@ -183,7 +183,6 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
   // The actual cart mutation, split out so the gate can run it before OR after the
   // join flow without duplicating the logic.
   const applyQty = (delta: number) => {
-    if (delta > 0) popThumb(); // little bounce only when adding
     const cart = readCart();
     // Find this dish's plain line in the cart (if it's already there).
     const idx = cart.findIndex(i => i.id === item.id && isPlainLine(i));
@@ -198,11 +197,26 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     // lib/i18n.ts. Guest sweep T1 reported them (with the offline strip) as "hardcoded English on a
     // 6-language menu"; asked directly, the owner chose *"No — English is fine for these"*. Do not
     // translate them and do not re-report them. See docs/REJECTED-IDEAS.md R15.
-    if (delta > 0 && rawQty > 99) {
+    // …AND THE CEILING IS A REFUSAL, SO NOTHING ELSE MAY CALL IT A SUCCESS (guest sweep T1,
+    // sweep #7, 2026-08-22). "A limit is not a success" was applied to the message BELOW on
+    // 2026-08-18 — `info` instead of the default success ✓ — but the "<dish> added" toast at the
+    // foot of this function still fired unconditionally on any `delta > 0`, arrived second, and
+    // WON. Measured on the real card: at 99, tapping "+" showed a green tick, "Virgin Mojito
+    // added" and "TAP TO VIEW YOUR BILL", while the count stayed at 99 and nothing was added. The
+    // app told the diner the opposite of what had happened.
+    //
+    // CartPanel's "+" has always had this right: at the ceiling it raises this same message and
+    // RETURNS. These two strings exist precisely so the bill and the dish card explain one limit
+    // the same way, so the behaviour around them has to match too.
+    const refused = delta > 0 && rawQty > 99;
+    if (refused) {
       // A LIMIT IS NOT A SUCCESS (owner asked, 2026-08-18) — see the matching note in CartPanel.
       // `info` (a neutral •) instead of the default success ✓, which was a green tick on a refusal.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Maximum 99 per dish", subtitle: "that's the most we can add to one line", kicker: "your order", variant: "info", duration: 1400 } }));
     }
+    // The photo's little bounce is the add's own success animation, so it waits for the same test.
+    // It used to run first thing in this function, before anything knew whether the add would land.
+    if (delta > 0 && !refused) popThumb();
     if (newQty <= 0) {
       // Dropped to zero or below: remove the line entirely.
       writeCart(cart.filter((i, k) => k !== idx));
@@ -218,8 +232,9 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     }
     // Update the on-card counter (never show a negative number).
     setCartQty(Math.max(0, newQty));
-    // Notify on add (so the toast fires from the menu too, not just the popup).
-    if (delta > 0) {
+    // Notify on add (so the toast fires from the menu too, not just the popup) — but only when
+    // something was actually added. See `refused` above.
+    if (delta > 0 && !refused) {
       // Tappable confirmation: tapping the toast opens the bill (the quick "+"
       // skips the customize popup, so this is its version of the success step).
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} added`, subtitle: "tap to view your bill", kicker: "your order", event: "lfh:open-cart", duration: 1200 } }));

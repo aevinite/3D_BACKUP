@@ -212,6 +212,19 @@ check("P00143", "the sold-out pill no longer swallows the card's own link", () =
   !rx(F.food, /sold-out-pill"\s*\n?\s*onClick/) &&
   !rx(F.food, /className="sold-out-pill"[^>]*onClick/));
 
+// A REFUSED ADD MUST NOT WEAR A SUCCESS TICK (guest sweep T1, sweep #7, 2026-08-22).
+// "A limit is not a success" (owner, 2026-08-18) was applied to the Maximum-99 message, but the
+// "<dish> added" toast still fired on ANY delta > 0, arrived second and won: at 99, tapping "+"
+// showed a green ✓ and "Virgin Mojito added" while nothing was added. CartPanel's "+" has always
+// returned at the ceiling; these two must behave the same, not just say the same words.
+check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
+  const gated = has(F.food, "const refused = delta > 0 && rawQty > 99", "if (delta > 0 && !refused) {");
+  const noBounce = rx(F.food, /if \(delta > 0 && !refused\) popThumb\(\);/) &&
+                   !rx(F.food, /const applyQty = \(delta: number\) => \{\s*if \(delta > 0\) popThumb\(\);/);
+  const stillSays = has(F.food, "Maximum 99 per dish", 'variant: "info"');
+  return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
+});
+
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
 // 0 over the saved position before the restore could read it, so every Back landed at the top of
