@@ -111,8 +111,19 @@ await p.waitForTimeout(6500);
 // newest-first (owner: "every table will show every order"), so the first ✕ Cancel on screen belongs
 // to whichever table ordered last — the CHILD here. Voiding that one exercises a different (and
 // safe) path and the test would pass without ever touching the bug.
-const parentOrderId = (await q(`select id from orders where restaurant_id='${RID}'
-  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`))[0].id;
+const parentOrderIdRows = await q(`select id from orders where restaurant_id='${RID}'
+  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`);
+// NEVER `[0].id` ON A LOOKUP THAT CAN COME BACK EMPTY (T28 sweep, 2026-08-22). When the fixture
+// above fails to place its order, this line threw `TypeError: Cannot read properties of undefined`
+// and the whole run died mid-way — no summary, no failing check, just a stack trace that says
+// nothing about what went wrong. A guard must report; it must not crash.
+if (!parentOrderIdRows[0]) {
+  check(`fixture: table ${PARENT} has a live ticket to void`, false,
+    "no un-archived, un-cancelled order on that table — the place_order above did not land, so "
+    + "nothing below could run. Check its reply before reading this as a voiding fault.");
+  { const bad = 1; console.log(`\n\u274c ${bad} check(s) failed — the fixture never landed`); process.exit(1); }
+}
+const parentOrderId = parentOrderIdRows[0].id;
 await fr.locator(`.ftile[data-floor-table="${PARENT}"]`).click({ force: true });
 await p.waitForTimeout(5000);
 const cancelBtn = fr.locator(`[data-cancel-order="${parentOrderId}"]`).first();
@@ -166,8 +177,19 @@ await q(`select lfh_staff_place_order('${PARENT}','[{"id":"${dish}","qty":1}]'::
 await q(`update orders set status='received' where restaurant_id='${RID}' and table_number='${PARENT}' and not archived and status<>'cancelled'`);
 let solo = await snap();
 check("fixture: one solo table with one live ticket", !!solo.live[PARENT] && !solo.live[CHILD] && solo.open.join() === PARENT, JSON.stringify(solo.live) + " open " + solo.open.join());
-const soloOrderId = (await q(`select id from orders where restaurant_id='${RID}'
-  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`))[0].id;
+const soloOrderIdRows = await q(`select id from orders where restaurant_id='${RID}'
+  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`);
+// NEVER `[0].id` ON A LOOKUP THAT CAN COME BACK EMPTY (T28 sweep, 2026-08-22). When the fixture
+// above fails to place its order, this line threw `TypeError: Cannot read properties of undefined`
+// and the whole run died mid-way — no summary, no failing check, just a stack trace that says
+// nothing about what went wrong. A guard must report; it must not crash.
+if (!soloOrderIdRows[0]) {
+  check(`fixture: table ${PARENT} has a live ticket to void`, false,
+    "no un-archived, un-cancelled order on that table — the place_order above did not land, so "
+    + "nothing below could run. Check its reply before reading this as a voiding fault.");
+  { const bad = 1; console.log(`\n\u274c ${bad} check(s) failed — the fixture never landed`); process.exit(1); }
+}
+const soloOrderId = soloOrderIdRows[0].id;
 await p.reload({ waitUntil: "networkidle", timeout: 120000 });
 await p.waitForTimeout(5000);
 try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
