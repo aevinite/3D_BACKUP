@@ -138,6 +138,12 @@ has("issue-raise.js", /function guardedClose\s*\(/,
   "the backdrop/Escape can throw away a voice note being recorded again");
 has("issue-raise.js", /ov\.onclick = function \(e\) \{ if \(e\.target === ov\) guardedClose\(\); \};/,
   "the backdrop no longer goes through the recording guard");
+// …and so does the phone's own Back button, which is the third accidental exit and the likeliest
+// one on the device somebody actually records a voice note on (T9 sweep #7, 2026-08-22). Refusing
+// it also has to RE-ARM the layer, because backstack has already popped it by then — without that,
+// the next Back press leaves the panel entirely.
+has("issue-raise.js", /function doClose\(\) \{[\s\S]{0,320}?rec\.state === "recording"[\s\S]{0,240}?armBack\(\);/,
+  "hardware Back throws away a voice note being recorded again (it must refuse AND re-arm its layer)");
 
 // ── fitnums.js — a bill's figure is the law, and this file must not feed itself ────────────────
 files["fitnums.js"] = read("fitnums.js");
