@@ -1207,7 +1207,49 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
       if (histQ) {
         const type = sp.get("type") || "inv";
-        if (type === "inv" || type === "bill") {
+        // ── `type=any` — ONE BOX, EVERY FIELD (owner, 2026-08-22) ────────────────────────────
+        // The panel's search is local now (it already holds the whole allowed window), so this
+        // branch is reached in exactly one case: the window came back AT its row cap, meaning a
+        // day busy enough that memory may not hold every bill. Then the panel asks for help and
+        // has no idea which FIELD the person meant — so we try them all and union the sessions.
+        //
+        // Still clamped to the same window as everything else on this path, so it cannot reach a
+        // day the Access screen does not hand over. Every read names its columns, is scoped by
+        // restaurant_id, and is bounded — three small indexed reads, only on a capped day, only
+        // while someone is typing.
+        //
+        // The number match is on the DIGITS of what was typed, and it matches a bill number or an
+        // invoice number ENDING in them, which is what "search the last 3 digits" means. Postgres
+        // cannot index a suffix match, but the candidate set here is one restaurant's day.
+        if (type === "any") {
+          const digits = histQ.replace(/\D/g, "");
+          const like = `%${histQ}%`;
+          const [sessQ2, memQ2] = await Promise.all([
+            // The bill's own customer (mig 227), the table, and the two numbers.
+            sb.from("sessions").select("id,bill_no,invoice_no,table_number,cust_name,cust_phone")
+              .eq("restaurant_id", rid).gte("created_at", windowStartIso).limit(2000),
+            // …and the guest's own name on their phone.
+            sb.from("session_members").select("session_id,name,phone")
+              .eq("restaurant_id", rid).ilike("name", like).limit(300),
+          ]);
+          const hit = new Set<string>();
+          for (const r of ((sessQ2.data || []) as Record<string, unknown>[])) {
+            const bn = r.bill_no == null ? "" : String(r.bill_no);
+            const iv = r.invoice_no == null ? "" : String(r.invoice_no);
+            const ph = String(r.cust_phone ?? "").replace(/\D/g, "");
+            const nm = String(r.cust_name ?? "").toLowerCase();
+            const tb = String(r.table_number ?? "").toLowerCase();
+            const okNum = !!digits && (bn.endsWith(digits) || iv.endsWith(digits)
+              || iv.padStart(6, "0").includes(digits) || ph.includes(digits) || tb === digits);
+            const okTxt = nm.includes(histQ.toLowerCase()) || tb.includes(histQ.toLowerCase());
+            if (okNum || okTxt) hit.add(String(r.id));
+          }
+          for (const m of ((memQ2.data || []) as Record<string, unknown>[])) {
+            if (m.session_id) hit.add(String(m.session_id));
+          }
+          if (!hit.size) return ok([]);
+          oq = oq.in("session_id", [...hit].slice(0, 400));
+        } else if (type === "inv" || type === "bill") {
           // invoice_no / bill_no live on the SESSION → find matching sessions, then their orders.
           const col = type === "inv" ? "invoice_no" : "bill_no";
           // Match the LAST run of digits so a full formatted invoice pasted in
@@ -1313,7 +1355,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // till and a WAITER reprinting from the tablet a minute later, whose own screen would
         // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
         // the paper or in the Audit — it changes one word on one button, nothing else.
-        const [sessQ, memQ, chainQ] = await Promise.all([
+        const [sessQ, memQ, chainQ, payQ] = await Promise.all([
           sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
@@ -1321,6 +1363,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // SERVER read of just these sessions, never something a client could ask for. Only the
           // sequence and the hash leave here; the money on that row stays where it is.
           sb.from("bill_chain").select("session_id,seq,chain_hash").eq("restaurant_id", rid).in("session_id", sids).limit(500),
+          // ── HOW THE MONEY ACTUALLY CAME IN (owner, 2026-08-22) ───────────────────────────────
+          // A bill settled in parts — "half in UPI, half in cash" — is stored as ONE paid bill with
+          // `payment_method = 'Split'`, and the parts live in `session_payments` (mig 176; a
+          // pay-later leg since mig 352). The panel could already CREATE a split and could not SHOW
+          // one back: every screen printed the bare word "Split" and the parts existed nowhere a
+          // person could look. So the manager could take ₹200 UPI + ₹200 cash and then had no way
+          // to answer "which was which?" — on the one screen that exists to answer questions about
+          // a bill.
+          //
+          // Scoped exactly like its neighbours: this restaurant, and only the sessions already
+          // being returned — no wider scope, an explicit column list, and a bound. It is ONE extra
+          // read per bills load (not per bill, and not per keystroke), which is what the parts cost.
+          // `session_payments` is RLS-locked with no policy, so this is service-role only and can
+          // never be asked for by a client.
+          sb.from("session_payments").select("session_id,amount,method,note,created_at")
+            .eq("restaurant_id", rid).in("session_id", sids)
+            .order("created_at", { ascending: true }).limit(2000),
         ]);
         const map: Record<string, any> = Object.fromEntries(((must(sessQ) || []) as any[]).map((s) => [s.id, s]));
         // A session has at most one chain row; if a re-issue ever produced two, the LATEST is the
@@ -1333,6 +1392,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         }
         const nameMap: Record<string, string> = {};
         for (const m of (must(memQ) || []) as any[]) { if (m.name && !nameMap[m.session_id]) nameMap[m.session_id] = m.name; }
+        // The parts of a split, grouped by bill, oldest first — the order they were taken in.
+        // A read failure is NOT fatal here: the bill's own total and method are already on the row,
+        // so the worst case is the parts breakdown being absent, which the panel words as
+        // "how it was split isn't available" rather than inventing a single method.
+        const payMap: Record<string, { amount: number; method: string; note: string | null; at: string }[]> = {};
+        for (const pp of ((payQ.data || []) as any[])) {
+          if (!pp.session_id) continue;
+          (payMap[pp.session_id] ||= []).push({
+            amount: Number(pp.amount) || 0, method: String(pp.method || ""),
+            note: pp.note ?? null, at: pp.created_at,
+          });
+        }
         for (const o of orders as any[]) {
           const s = map[o.session_id];
           if (s) {
@@ -1348,6 +1419,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             if (ch) { o.chain_seq = ch.seq; o.chain_hash = ch.chain_hash; }
           }
           if (nameMap[o.session_id]) o.customer_name = nameMap[o.session_id];
+          // Attached to EVERY order of the bill, because the panel resolves a bill from whichever
+          // of its orders it happens to hold — the same reason invoice_no is attached per order
+          // above rather than once per session.
+          const parts = payMap[o.session_id];
+          if (parts && parts.length) o.pay_parts = parts;
         }
       }
       if (billsMode) {
