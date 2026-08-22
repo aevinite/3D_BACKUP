@@ -119,6 +119,22 @@
       };
       phoneEl.addEventListener("input", paintCount);
       paintCount();
+      /* THE COUNTER MUST NEVER CONTRADICT THE BOX BESIDE IT (T8 sweep #7, 2026-08-22).
+         paintCount() only ran on the `input` event, and assigning `.value` from script does not
+         fire one — so on the two paths where the number arrives WITHOUT being typed the counter
+         kept whatever it last said. Measured on a 360px phone:
+
+           a reopened bill (prefill)  box "98250 12345"  counter "0/10", not green
+           tapping a suggestion       box "98250 11111"  counter  "5/10", not green
+
+         The counter exists to tell a waiter at the till "you have all ten digits", and on both of
+         those paths it said the opposite while the Generate button was live — so the sheet gave
+         two answers at once and the honest reading is "retype it". The reopen path is not an edge
+         either: it is the case the prefill feature was built for (owner, 2026-07-30 — reopening a
+         bill brings back that session's own customer so nobody retypes it).
+
+         Every write to the box now goes through setPhone(), so a third path cannot miss it. */
+      const setPhone = (v) => { phoneEl.value = v; paintCount(); };
 
       let done = false;
       // hardware BACK closes just this sheet (panel rule: every overlay is a back step)
@@ -199,7 +215,7 @@
              style="display:flex;align-items:center;width:100%;text-align:left;margin:4px 0;min-height:44px">${esc(r.name || "No name")} <span class="muted">&nbsp;· ${esc(pretty(r.phone))}</span></button>`).join("");
         matchEl.querySelectorAll(".bc-pick").forEach((b) => {
           b.onclick = () => {
-            phoneEl.value = pretty(b.dataset.p);
+            setPhone(pretty(b.dataset.p));
             if (!nameTouched) nameEl.value = b.dataset.n || "";
             matchEl.style.display = "none";
             known.set(b.dataset.p, { name: b.dataset.n || "", visits: 0 });
@@ -261,6 +277,7 @@
         const next = d.length > 5 && d.length <= 10 ? d.slice(0, 5) + " " + d.slice(5) : d;
         if (next !== phoneEl.value) {
           phoneEl.value = next;
+          paintCount();   // the listener above counted the PRE-format value; recount the box as it now reads
           if (before != null) {
             let pos = 0, seen = 0;
             while (pos < next.length && seen < before) { if (next.charCodeAt(pos) >= 48 && next.charCodeAt(pos) <= 57) seen++; pos++; }
@@ -299,7 +316,7 @@
       // confirmed, so the waiter just taps Generate — or edits it if the guest changed.
       const pre = o.prefill || null;
       if (pre && (pre.phone || pre.name)) {
-        if (pre.phone) phoneEl.value = pretty(pre.phone);
+        if (pre.phone) setPhone(pretty(pre.phone));
         if (pre.name) { nameEl.value = pre.name; known.set(norm(pre.phone), { name: pre.name, visits: known.get(norm(pre.phone))?.visits || 0 }); }
         sync();
         if (norm(pre.phone).length === 10) lookup(true);   // shows "Returning customer · N visits"

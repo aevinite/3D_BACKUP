@@ -335,6 +335,34 @@ for (const [what, ts] of INSTANTS) {
     : bad("a cancelled bill printed a verification line", "that sale was withdrawn; the band across the top is the statement");
 }
 
+// ── 3g. THE DIGIT COUNTER NEVER CONTRADICTS THE BOX BESIDE IT ─────────────────────────────────
+// "0/10" beside a complete number is the sheet giving two answers at once, and at a till the
+// honest reading of it is "retype it". paintCount() only ran on the `input` event, and assigning
+// `.value` from script fires no such event — so a reopened bill (the case the prefill feature was
+// BUILT for, owner 2026-07-30) opened showing "0/10" against "98250 12345", and tapping a
+// suggestion showed "5/10" against a ten-digit number. Measured on a 360px phone, 2026-08-22.
+// Structural, so it cannot come back by a THIRD path being added: every write to the box must
+// either go through setPhone() or be followed immediately by a paintCount().
+{
+  const { readFileSync } = await import("node:fs");
+  const cust = readFileSync(join(ROOT, "public/panels/billcustomer.js"), "utf8");
+  const lines = cust.split("\n");
+  const offenders = [];
+  lines.forEach((ln, i) => {
+    if (!/\bphoneEl\.value\s*=[^=]/.test(ln)) return;
+    if (/const setPhone\s*=/.test(ln)) return;                       // the helper itself
+    const next = (lines[i + 1] || "") + (lines[i + 2] || "");
+    if (!/paintCount\(\)/.test(next)) offenders.push(`line ${i + 1}: ${ln.trim().slice(0, 70)}`);
+  });
+  offenders.length === 0
+    ? ok("every write to the mobile box repaints the digit counter")
+    : bad(`a write to the mobile box leaves the counter stale: ${offenders.join(" · ")}`,
+      "go through setPhone(), or call paintCount() straight after — a counter that contradicts the box reads as 'retype it'");
+  /paintCount\(\);?\s*$/m.test(cust) && /const setPhone = \(v\) => \{ phoneEl\.value = v; paintCount\(\); \}/.test(cust)
+    ? ok("  …and setPhone() is the one door that does it")
+    : bad("setPhone() is gone or no longer repaints", "one door, so a new call site cannot forget");
+}
+
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
 // The .d.ts is what the Next server and the admin React screens see. A field the document branches
 // its whole identity on, missing from the type, means a TypeScript caller cannot render that
