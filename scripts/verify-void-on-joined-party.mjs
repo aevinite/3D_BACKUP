@@ -120,13 +120,31 @@ check("the parent's own ticket offers ✕ Cancel", (await cancelBtn.count()) > 0
 if ((await cancelBtn.count()) > 0) {
   await cancelBtn.click({ force: true });
   await p.waitForTimeout(1500);
-  // The reason sheet (mig 251): pick "By mistake", then Remove. `.rr-go` starts disabled until a
-  // reason is chosen, which is itself the confirmation — there is no second yes/no.
+  // The reason sheet (mig 251): pick "By mistake", then Remove.
+  //
+  // ⚠ THE SHEET GREW A SECOND QUESTION AND THIS ONLY ANSWERED THE FIRST (T28 sweep, 2026-08-22).
+  // Since 2026-08-18 it also asks "Was the food actually made?" (mig 340 — the answer decides whether
+  // the ingredients count as a loss or go back into stock), and `askRemovalReason()` is explicit:
+  // "Both questions must be answered when both are asked." `.rr-go` stays DISABLED until both are,
+  // so clicking it did nothing — silently — and the void never happened. The failures then read
+  // "the parent's ticket really was voided — {27:received, 28:received}", which looks exactly like
+  // voiding being broken on a joined party: the very bug this file exists to catch. It was not; the
+  // sheet was simply still open behind the assertion.
+  //
+  // Answer both. The ticket here is `received` — never cooked — so "No, never started" is the honest
+  // answer and it records no false loss. Then ASSERT the button is really enabled before clicking,
+  // so the next question added to this sheet fails loudly instead of silently.
   const reason = fr.locator('.rr-opt[data-code="mistake"]').first();
   await reason.waitFor({ timeout: 15000 });
   await reason.click({ force: true });
-  await p.waitForTimeout(600);
-  await fr.locator(".rr-go").first().click({ force: true });
+  await p.waitForTimeout(400);
+  const madeNo = fr.locator('.rr-made-opt[data-made="0"]').first();
+  if (await madeNo.count()) { await madeNo.click({ force: true }); await p.waitForTimeout(400); }
+  const go = fr.locator(".rr-go").first();
+  const goEnabled = await go.isEnabled().catch(() => false);
+  check("the removal sheet's Remove button is enabled once every question is answered", goEnabled,
+    "still disabled — the sheet is asking something this test has not answered");
+  await go.click({ force: true });
   await p.waitForTimeout(11000);
 }
 
@@ -164,8 +182,15 @@ if ((await soloCancel.count()) > 0) {
   const r2 = fr.locator('.rr-opt[data-code="mistake"]').first();
   await r2.waitFor({ timeout: 15000 });
   await r2.click({ force: true });
-  await p.waitForTimeout(600);
-  await fr.locator(".rr-go").first().click({ force: true });
+  await p.waitForTimeout(400);
+  // Both questions, same as the party half above — the sheet asks "was the food made?" since mig 340
+  // and Remove stays disabled until it is answered.
+  const made2 = fr.locator('.rr-made-opt[data-made="0"]').first();
+  if (await made2.count()) { await made2.click({ force: true }); await p.waitForTimeout(400); }
+  const go2 = fr.locator(".rr-go").first();
+  check("the solo walk-out's Remove button is enabled once every question is answered",
+    await go2.isEnabled().catch(() => false), "still disabled — an unanswered question on the sheet");
+  await go2.click({ force: true });
   await p.waitForTimeout(11000);
 }
 solo = await snap();
