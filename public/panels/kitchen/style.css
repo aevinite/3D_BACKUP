@@ -10,13 +10,21 @@
   --line: #38301f;      /* hairline borders */
   --text: #f3e9da;      /* warm cream text */
   --muted: #b6a48d;     /* secondary text */
-  --blue: #d8a657;      /* the accent (house gold; keeps the var name so all refs work) */
+  /* MATCHED TO THE OTHER TWO PANELS (owner, 2026-08-22). This board's dark values were each one
+     hue step off its siblings' - gold #d8a657 against #d4a574, green #5fae6e against #22c55e, red
+     #e2664f against #ef4444, amber #e6b450 against #fbbf24 - so a cook moving between the kitchen
+     board and the waiter tablet saw the same four meanings in eight colours. The LIGHT skin
+     already agreed exactly; only DARK moves. Re-measured on the board and on a ticket: green
+     8.31/7.60, amber 11.35/10.37, red 5.03/4.60, gold 8.51/7.78 - all clear, and green and amber
+     are brighter than before. The warm espresso SURFACES are untouched; that warmth was the
+     point of the 2026-06-20 redesign and it stays. */
+  --blue: #d4a574;      /* the accent (house gold; keeps the var name so all refs work) */
   /* The accent when it carries WORDS. In the dark skin the bright gold on a dark board already
      measured clean, so it is the accent itself; the light skin darkens it (see the light block). */
   --blue-ink: var(--blue);
-  --green: #5fae6e;     /* ready */
-  --amber: #e6b450;     /* new/attention */
-  --red: #e2664f;       /* allergies/sold-out */
+  --green: #22c55e;     /* ready */
+  --amber: #fbbf24;     /* new/attention */
+  --red: #ef4444;       /* allergies/sold-out */
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element. env() covers the
      iPhone notch/home bar when top-level; --safe-t/--safe-b are the real pixel insets the
      host PanelFrame injects (env() reads 0 inside an iframe, and Android's 3-button nav
