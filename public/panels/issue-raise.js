@@ -62,6 +62,14 @@
       ".lfhir-b:disabled{opacity:.55;cursor:not-allowed}",
       ".lfhir-dot{width:9px;height:9px;border-radius:50%;background:#e5484d;display:inline-block;animation:lfhirpulse 1s infinite}",
       "@keyframes lfhirpulse{0%,100%{opacity:1}50%{opacity:.25}}",
+      // …AND A WAY OUT OF ALL OF IT (T9 sweep #7, 2026-08-22). The card slides and scales in and the
+      // recording dot pulses, and none of it asked. The dot STAYS — it is what says a recording is
+      // running, and losing that would be worse than the movement — it simply stops flashing.
+      "@media (prefers-reduced-motion:reduce){",
+      "  .lfhir-ov,.lfhir-box{transition:none}",
+      "  .lfhir-ov .lfhir-box{transform:none}",
+      "  .lfhir-dot{animation:none}",
+      "}",
     ].join("");
     document.head.appendChild(s);
   }

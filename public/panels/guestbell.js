@@ -161,8 +161,13 @@
       ".lfh-bell-hd{display:flex;align-items:flex-start;gap:10px}",
       ".lfh-bell-hd h3{margin:0;font-size:16.5px;font-weight:800;flex:1}",
       ".lfh-bell-hd p{margin:6px 0 0;font-size:12.5px;opacity:.75;font-weight:500}",
+      // 40px, not 32 (T9 sweep #7, 2026-08-22). The owner grew the top bar's ✕-sized controls to 44
+      // on 2026-08-22 for exactly this reason, and this one was missed because it lives inside the
+      // sheet rather than on the bar. It matters MORE here than on the bar: a miss beside the pill
+      // costs nothing (R40's reasoning), but a miss beside this ✕ lands on a row — and a row OPENS
+      // THAT TABLE. A harmless mis-tap and a harmful one should not be the same size.
       ".lfh-bell-x{border:0;background:rgba(127,127,127,.18);color:inherit;border-radius:10px;",
-      "  width:32px;height:32px;font-size:16px;cursor:pointer;flex:0 0 auto}",
+      "  width:40px;height:40px;font-size:16px;cursor:pointer;flex:0 0 auto}",
       // A row is a doorway to the table, so it looks and behaves like a button.
       ".lfh-bell-row{display:flex;align-items:center;gap:11px;width:100%;margin-top:10px;",
       "  padding:12px 13px;border-radius:13px;text-align:left;cursor:pointer;",

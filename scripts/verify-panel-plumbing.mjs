@@ -197,6 +197,20 @@ has("guestbell.js", /\.top-actions \.lfh-bell[^"]*\{display:inline-flex\}/,
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,
   "the inventory deadline is back inside the write-only branch — a read can hang on 'Loading inventory…' forever");
 
+// ── the shared files' own look: a finger can reach it, and motion can be turned off ───────────
+// The owner grew the top bar's small controls to 44px on 2026-08-22. The bell SHEET's ✕ was missed
+// at 32px, and it matters more than the bar's: a miss beside the connection pill costs nothing
+// (R40's own reasoning), but a miss beside this ✕ lands on a row, and a row OPENS THAT TABLE.
+has("guestbell.js", /\.lfh-bell-x\{[\s\S]{0,140}?width:40px;height:40px/,
+  "the bell sheet's ✕ is back under the finger target, and a miss beside it opens a table");
+// …and every file that animates has to offer a way out. connbadge.js and undobar.js always did;
+// these two did not, so a scaling drawer and a pulsing dot could not be turned off.
+for (const f of ["connbadge.js", "undobar.js", "maint.js", "issue-raise.js"]) {
+  has(f, /prefers-reduced-motion/, "animates with no prefers-reduced-motion escape");
+}
+has("issue-raise.js", /prefers-reduced-motion:reduce\)\{[\s\S]{0,200}?\.lfhir-dot\{animation:none\}/,
+  "reduced motion no longer stops the recording dot flashing — or, worse, has hidden it: it must stay VISIBLE and stop moving");
+
 // ── the "→ N more" chip counts what is really off the edge (T9 sweep #7, 2026-08-22) ──────────
 // offsetLeft is measured from the nearest POSITIONED ancestor, and countChip() makes the row's
 // PARENT positioned — so any inset between the two put the count in a different coordinate system

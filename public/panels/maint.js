@@ -212,7 +212,16 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     .lfh-msg{font-size:12px;margin:6px 0 8px}
     .lfh-note{font-size:12px;color:var(--muted,#8aa0c9);line-height:1.5}
     .lfh-av{width:46px;height:46px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#0b1220;flex-shrink:0}
-    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}`;
+    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}
+    /* SOMEBODY MAY HAVE ASKED FOR NO MOVEMENT (T9 sweep #7, 2026-08-22). This drawer scales itself
+       in and its inputs and buttons animate, with no way out — connbadge.js and undobar.js both
+       honour the setting and these two files were the ones that did not. The card still FADES, so
+       it is never less noticeable; only the motion goes. */
+    @media (prefers-reduced-motion:reduce){
+      .lfh-dw{animation:lfhfade .2s ease}
+      .lfh-in,.lfh-bt{transition:none}
+    }
+    @keyframes lfhfade{from{opacity:0}to{opacity:1}}`;
     document.head.appendChild(el("style", { id: "lfh-set-style", html: css }));
   }
 
