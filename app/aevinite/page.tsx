@@ -332,7 +332,15 @@ export default function AdminCommand() {
         a.cmd-obtn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
         /* .cmd-manage lives in globals.css now (it's a <Link>). */
         /* two-column bottom grid */
-        .cmd-grid2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
+        /* minmax(0, ...), not a bare fr (T26 sweep, 2026-08-22). A one-fr track's automatic minimum
+           is its content's min-content width, so a card whose rows will not wrap makes the TRACK
+           grow past the grid. On a 360px phone that made the "Working now" card 359.6px wide inside
+           a 332px column: 14px of it - the View-all link and the right-hand end of every staff row
+           - sat off the right edge, and .adm-main does not scroll sideways, so there was no way to
+           reach it. minmax(0, ...) lets the track shrink and the content ellipsis instead.
+           NOTE: no backticks in this comment. It lives inside a styled-jsx template literal, and a
+           backtick here ends the literal - it cost a build error and a screenshot to notice. */
+        .cmd-grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px; }
         .cmd-sec { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text); margin-bottom: 8px; }
         .cmd-sec span { color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
         .cmd-staff { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: var(--border); font-size: 13px; }
@@ -343,7 +351,7 @@ export default function AdminCommand() {
         @media (max-width: 1100px) {
           .cmd-row { grid-template-columns: minmax(140px, 1.2fr) 84px 100px minmax(280px, 1.6fr) 80px; }
         }
-        @media (max-width: 900px) { .cmd-grid2 { grid-template-columns: 1fr; } }
+        @media (max-width: 900px) { .cmd-grid2 { grid-template-columns: minmax(0, 1fr); } }
         @media (max-width: 760px) {
           .cmd-row { grid-template-columns: 1fr; gap: 4px; padding: 10px 14px; }
           .cmd-row.head { display: none; }
