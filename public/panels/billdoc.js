@@ -1541,12 +1541,44 @@ function banquetDocHtml(a) {
      the LAST line absorbs any difference, the same rule the tax columns and the thermal bill's
      splitTax already use. When the lines do add up to the bill (every sheet today) this moves at
      most a paisa, and it is what makes the in-table TOTAL row true by construction. */
+  /* …AND NO CELL IN THAT COLUMN IS EVER NEGATIVE (T8 sweep #7, 2026-08-22).
+     The absorption above put the WHOLE difference on the last line, so whenever the lines added up
+     to MORE than the stored bill — which is the exact case I8 was written for, "a line edited after
+     the bill was saved, or a line missing from the fetch" — the last line went past zero and this
+     sheet printed negative money. Measured on the real rendered A5:
+
+       4  Stage decoration   1   28,800.00   -691.63   18.00%   -124.50
+
+     and it does not need a big gap: a ₹1,00,000 hall beside a ₹100 welcome gift, with the lines
+     ₹1,000 over the bill, printed the gift at -1,000.00 taxable and -90.00 tax.
+
+     The thermal bill has forbidden this since 2026-08-06 — "THE PAPER NEVER PRINTS A NEGATIVE
+     TAXABLE VALUE", the clamp in billRows() — and the rule was never carried to the product's
+     LARGEST-VALUE document. A negative line on a tax invoice reads as a refund nobody gave.
+
+     So the shortfall is absorbed the same way, but walking BACKWARDS from the last line and taking
+     from each only what that line actually has. The column still foots to the TOTAL row by
+     construction (that is what I8 bought), and no cell can go below zero. A sheet whose lines DO
+     add up to its bill — every sheet today — is byte-identical: the drift is 0 and this does
+     nothing. An OVER-shoot (the lines adding to less than the bill) still lands on the last line
+     exactly as before, because growing a line cannot make it negative. */
   if (L.length) {
+    const r2b = (n) => Math.round(n * 100) / 100;
     const sumTaxable = L.reduce((a, l) => a + l.taxable, 0);
-    const drift = Math.round((taxable - sumTaxable) * 100) / 100;
-    if (drift !== 0) {
+    let drift = r2b(taxable - sumTaxable);
+    if (drift > 0) {
       const last = L[L.length - 1];
-      last.taxable = Math.round((last.taxable + drift) * 100) / 100;
+      last.taxable = r2b(last.taxable + drift);
+    } else if (drift < 0) {
+      let owed = -drift;
+      for (let i = L.length - 1; i >= 0 && owed > 0; i--) {
+        const take = Math.min(Math.max(0, L[i].taxable), owed);
+        if (take > 0) { L[i].taxable = r2b(L[i].taxable - take); owed = r2b(owed - take); }
+      }
+      // Only reachable when the bill's OWN taxable is negative (a discount larger than the
+      // subtotal). Nothing on the paper can describe that, so it stays where it always was —
+      // on the last line — rather than being silently spread across lines a guest can read.
+      if (owed > 0) L[L.length - 1].taxable = r2b(L[L.length - 1].taxable - owed);
     }
   }
   /* EACH TAX COLUMN FOOTS TO ITS OWN TOTAL ROW (2026-08-11, T7 finding F10).
@@ -1559,14 +1591,25 @@ function banquetDocHtml(a) {
      tax columns add up to the summary". So the columns are allocated the same way splitTax does it
      for the thermal bill: round every cell except the LAST, and give the last the remainder. */
   const colTax = taxRows.map((c) => {
-    let run = 0;
-    return L.map((l, i) => {
-      const amt = i === L.length - 1
-        ? Math.round(((Number(c.amt) || 0) - run) * 100) / 100
-        : Math.round(l.taxable * ((Number(c.rate) || 0) / 100) * 100) / 100;
-      run = Math.round((run + amt) * 100) / 100;
-      return amt;
-    });
+    const r2c = (n) => Math.round(n * 100) / 100;
+    const target = r2c(Number(c.amt) || 0);
+    // Every cell pro-rata off its own line's taxable value…
+    const cells = L.map((l) => r2c(Math.max(0, l.taxable) * ((Number(c.rate) || 0) / 100)));
+    // …then the difference against the bill's STORED tax is absorbed from the last cell
+    // backwards, taking from each only what it holds — so the column foots to its TOTAL row
+    // AND no cell prints negative tax (T8 sweep #7, 2026-08-22; see the taxable column above,
+    // where the same last-cell-takes-everything rule printed -124.50 on a real A5 sheet).
+    let drift = r2c(target - cells.reduce((a, x) => a + x, 0));
+    if (drift > 0) cells[cells.length - 1] = r2c(cells[cells.length - 1] + drift);
+    else if (drift < 0) {
+      let owed = -drift;
+      for (let i = cells.length - 1; i >= 0 && owed > 0; i--) {
+        const take = Math.min(Math.max(0, cells[i]), owed);
+        if (take > 0) { cells[i] = r2c(cells[i] - take); owed = r2c(owed - take); }
+      }
+      if (owed > 0) cells[cells.length - 1] = r2c(cells[cells.length - 1] - owed);
+    }
+    return cells;
   });
 
   const cols = 5 + taxRows.length * 2;

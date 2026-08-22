@@ -198,6 +198,55 @@ for (const [what, ts] of INSTANTS) {
   }
 }
 
+// ── 3e. THE BANQUET SHEET PRINTS NO NEGATIVE MONEY ────────────────────────────────────────────
+// The thermal bill has forbidden a negative taxable value since 2026-08-06 (the clamp in
+// billRows). The banquet sheet — the product's largest-value document — allocated its per-line
+// taxable and tax columns by giving the LAST line the whole difference against the stored bill,
+// so whenever the lines added to MORE than the bill (the exact case that absorption exists for:
+// "a line edited after the bill was saved, or a line missing from the fetch") the last line went
+// past zero and a real A5 printed "Stage decoration  1  28,800.00  -691.63  18.00%  -124.50".
+// A negative line on a tax invoice reads as a refund nobody gave.
+// Both properties are asserted together, because they pull against each other: the columns must
+// still FOOT to their TOTAL row (T7's I8, which is what the absorption bought) AND no cell may
+// print negative.
+{
+  const SET = { tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] };
+  const shapes = [
+    ["a line missing from the fetch", { subtotal: 216000, discount: 16000, tax: 36000, total: 236000 },
+      [{ title: "Thali", qty: 180, price: 900 }, { title: "Live counter", qty: 1, price: 24000 },
+       { title: "Welcome drinks", qty: 240, price: 120 }, { title: "Stage decoration", qty: 1, price: 28800 }]],
+    ["a small gap with a cheap last line", { subtotal: 100000, discount: 0, tax: 18000, total: 118000 },
+      [{ title: "Hall", qty: 1, price: 101000 }, { title: "Welcome gift", qty: 1, price: 100 }]],
+    ["lines adding to LESS than the bill", { subtotal: 2000, discount: 0, tax: 360, total: 2360 },
+      [{ title: "A", qty: 1, price: 600 }, { title: "B", qty: 1, price: 400 }]],
+    ["lines that match the bill (every sheet today)", { subtotal: 1000, discount: 0, tax: 180, total: 1180 },
+      [{ title: "A", qty: 1, price: 600 }, { title: "B", qty: 1, price: 400 }]],
+    ["every line at zero", { subtotal: 0, discount: 0, tax: 0, total: 0 },
+      [{ title: "A", qty: 1, price: 0 }, { title: "B", qty: 1, price: 0 }]],
+  ];
+  for (const [what, bill, lines] of shapes) {
+    const html = BILLDOC.banquetDocHtml({ bill: { bill_no: "BQ", ...bill }, lines,
+      settings: SET, restaurant: {}, autoPrint: false });
+    const body = html.slice(html.indexOf("<tbody>"), html.indexOf("</tbody>"));
+    const trs = body.split("</tr>").filter((r) => r.includes("<td"));
+    const nums = (r) => [...r.matchAll(/<td class="r">(-?[\d,.]+)<\/td>/g)].map((m) => Number(m[1].replace(/,/g, "")));
+    const data = trs.filter((r) => !r.includes('class="tot"') && nums(r).length >= 3).map(nums);
+    const tot = nums(trs.find((r) => r.includes('class="tot"')) || "");
+    const neg = [].concat(...data).filter((n) => n < 0);
+    let drift = null;
+    for (let c = 0; c < tot.length && drift === null; c++) {
+      const sum = Math.round(data.reduce((a, r) => a + (r[c + 1] || 0), 0) * 100) / 100;
+      if (Math.abs(sum - tot[c]) > 0.011) drift = `column ${c} adds to ${sum} under a TOTAL row of ${tot[c]}`;
+    }
+    if (neg.length) bad(`${what}: the banquet sheet printed negative money (${neg.join(", ")})`,
+      "absorb a shortfall backwards, taking from each line only what it holds — a negative line reads as a refund nobody gave");
+    else if (drift) bad(`${what}: ${drift}`,
+      "the in-table TOTAL row is the proof the per-line columns add up — it must stay true (T7 I8)");
+    else if (!data.length) bad(`${what}: no item rows rendered`, "the sheet must list its lines");
+    else ok(`${what}: every column foots to its TOTAL row and no cell is negative`);
+  }
+}
+
 // ── 3c. THE BILL NEVER SAYS IT IS A SECOND COPY — THE TICKET ALWAYS DOES ──────────────────────
 // REJECTED (owner, 2026-08-19): a bill band existed 2026-08-17 → 2026-08-19 and he removed it —
 // "I don't even want the reprinted bill shown in the bill … make the guard also in code like never
