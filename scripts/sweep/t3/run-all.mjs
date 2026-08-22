@@ -57,6 +57,9 @@ const run = (label, file, args = []) => {
 
 const results = [];
 results.push(["blocks 1+2 — the static rules", run("BLOCKS 1+2 — the static rules", join(root, "scripts/verify-guest-doors.mjs"))]);
+// Sweep 7's own 300 code-reading rows, P16101..P16400. Same idea as the line above: the ledger says
+// WHAT is checked, this says HOW, so a re-run never has to be rebuilt from the ledger's prose.
+results.push(["sweep 7 block A — the 300 code-reading rows", run("SWEEP 7 BLOCK A — the 300 code-reading rows (P16101-P16400)", join(here, "s7-checks.mjs"), ["--quiet"])]);
 results.push(["block 3a — the basket, the doors, no signal", run("BLOCK 3a — the basket, the doors, no signal", join(here, "basket-and-doors.mjs"))]);
 await cool("the end-to-end order block");
 results.push(["block 3b — the whole journey, end to end", run("BLOCK 3b — the whole journey, end to end", join(here, "order-end-to-end.mjs"))]);

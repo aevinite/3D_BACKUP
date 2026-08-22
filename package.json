@@ -88,6 +88,7 @@
     "verify:order-retry": "node scripts/verify-order-retry.mjs",
     "verify:guest-doors": "node scripts/verify-guest-doors.mjs",
     "sweep:t3": "node scripts/sweep/t3/run-all.mjs",
+    "sweep:t3-static": "node scripts/sweep/t3/s7-checks.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:panel-canvas": "node scripts/verify-panel-canvas.mjs",
