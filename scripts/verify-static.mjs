@@ -44,6 +44,7 @@ const GUARDS = [
   ["verify-clash-coverage.mjs", "two people can't silently overwrite each other"],
   ["verify-floor-share.mjs", "a write always drops the shared floor snapshot"],
   ["verify-panel-cache.mjs", "no browser is left on a stale panel file"],
+  ["verify-fixture-pickers.mjs", "a guard that picks its own table never takes another guard's"],
   ["verify-board-sig.mjs", "the kitchen/tablet board still repaints on a real change"],
   ["verify-audit-coverage.mjs", "every change that lowers a bill leaves a record"],
   ["verify-order-retry.mjs", "a refused order is still placeable"],
