@@ -82,8 +82,21 @@ const openTable = async () => {
   return r.data.id;
 };
 const order = async (d, qty) => {
-  const r = await sb.rpc("lfh_staff_place_order", { p_table: T, p_items: [{ id: d.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: RID });
+  // TWO ROUNDS OF THE SAME DISH WITHIN THREE SECONDS ARE ONE ORDER TO THIS APP (sweep #6 / T28,
+  // 2026-08-22). lfh_staff_place_order carries a double-tap guard: a non-cancelled order for the same
+  // table with the same item signature in the last 3 seconds comes back
+  // `{ ok:false, duplicateWarning:true }` and NO order_id. A guard that walks a table through several
+  // rounds trips it constantly — and because nothing here read `ok`, the undefined id travelled six
+  // lines and died as `invalid input syntax for type uuid: "undefined"`, which names neither the cause
+  // nor the file. That made this guard fail intermittently: whether it passed depended on whether the
+  // previous identical round happened to be more than three seconds ago.
+  //
+  // p_confirm_duplicate is the product's own way to say "yes, another round" — it is what the waiter's
+  // own "send anyway" sends — so it is the honest thing for a script that means exactly that. The
+  // double-tap guard itself is held by verify:order-retry and verify:guest-recovery.
+  const r = await sb.rpc("lfh_staff_place_order", { p_table: T, p_items: [{ id: d.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: RID, p_confirm_duplicate: true });
   if (r.error) throw new Error(r.error.message);
+  if (!r.data || r.data.ok !== true) throw new Error(`place order on ${T} was refused: ${JSON.stringify(r.data)}`);
   made.orders.push(r.data.order_id);
   return r.data.order_id;
 };

@@ -87,9 +87,20 @@ async function openFloor(browser, creds) {
   if (!rid) throw new Error(`no staff_users row for ${creds.username}`);
   return { ctx, page, fr, errs, reqs, rid };
 }
+// WHAT A TILE ACTUALLY PUBLISHES (sweep #6 / T28, 2026-08-22). A tile with dishes on it prints the
+// SERVED COUNTER as its visible line — "0/1 served" — and carries the state phrase ("New order",
+// "Ready to serve", "Served") in that line's `title`, with the colour strip as the at-a-glance signal.
+// Only an EMPTY table prints its label as text ("Free"). This helper read innerText alone, so sixteen
+// checks were comparing the counter against a phrase that is no longer text: "tile 1 · 4 · 0/1 served
+// vs database New order", on a floor that was completely correct. Read both, because both are on the
+// tile — otherwise the guard is asserting where the words sit, not whether the state arrived.
 const tileText = async (crew, t) => {
-  try { return (await crew.fr.locator(`.ftile[data-floor-table="${t}"]`).innerText()).replace(/\n/g, " · "); }
-  catch { return ""; }
+  try {
+    const el = crew.fr.locator(`.ftile[data-floor-table="${t}"]`);
+    const txt = (await el.innerText()).replace(/\n/g, " · ");
+    const titles = await el.locator("[title]").evaluateAll((els) => els.map((e) => e.getAttribute("title")).filter(Boolean));
+    return [txt, ...titles].join(" · ");
+  } catch { return ""; }
 };
 // waitForTile: poll the OPEN page (never reload it) until the tile matches — that is the whole
 // point: the panel has to update itself.
@@ -106,10 +117,24 @@ async function waitForTile(crew, t, re, label) {
 
 const created = { orders: [], sessions: [] };
 async function placeOrder(rid, table, dish, qty = 1) {
+  // TWO ROUNDS OF THE SAME DISH WITHIN THREE SECONDS ARE ONE ORDER TO THIS APP (sweep #6 / T28,
+  // 2026-08-22). lfh_staff_place_order carries a double-tap guard: a non-cancelled order for the same
+  // table with the same item signature in the last 3 seconds comes back
+  // `{ ok:false, duplicateWarning:true }` and NO order_id. A guard that walks a table through several
+  // rounds trips it constantly — and because nothing here read `ok`, the undefined id travelled six
+  // lines and died as `invalid input syntax for type uuid: "undefined"`, which names neither the cause
+  // nor the file. That made this guard fail intermittently: whether it passed depended on whether the
+  // previous identical round happened to be more than three seconds ago.
+  //
+  // p_confirm_duplicate is the product's own way to say "yes, another round" — it is what the waiter's
+  // own "send anyway" sends — so it is the honest thing for a script that means exactly that. The
+  // double-tap guard itself is held by verify:order-retry and verify:guest-recovery.
   const r = await sb.rpc("lfh_staff_place_order", {
     p_table: String(table), p_items: [{ id: dish.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: rid,
+    p_confirm_duplicate: true,
   });
   if (r.error) throw new Error(r.error.message);
+  if (!r.data || r.data.ok !== true) throw new Error(`place order on ${table} was refused: ${JSON.stringify(r.data)}`);
   const id = r.data?.order_id;
   if (id) created.orders.push(id);
   return r.data;
