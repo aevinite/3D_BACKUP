@@ -39,21 +39,27 @@ again. Read those before reporting anything.
 
 ## Where the sweep got to
 
+*Recounted 2026-08-22, after T21, T22, T25, T26 and T29 merged.*
+
 | | |
 |---|---|
 | Terminals planned | **30** |
 | ID space allocated | **P00001 – P15000** (30 blocks of 500) |
-| Ledgers **filed** | **26** — T1–T25 and T30 |
-| Ledgers **never filed** | **4** — T26, T27, T28, T29 (2,000 IDs, `P12501`–`P14500`) |
-| Rows actually written | **13,036** (13,000 distinct IDs + 36 duplicated, see below) |
-| Rows passing | **12,392** |
-| Rows recording a real problem | **232** — most already fixed in that terminal's own PR |
-| Rows reserved / skipped, each with a written reason | **340** |
+| Ledgers **filed** | **27** — T1–T25, T29, T30 |
+| Ledgers **never filed** | **3** — T26, T27, T28 |
+| Phase rows on record | **13,518** |
+| Rows passing | **12,893** |
+| Rows recording a problem | **281** — most already fixed in that terminal's own PR |
+| Rows reserved, each with a written reason | **343** |
 
-**T21 and T22 are filed but not yet merged** — their ledgers live on `origin/sweep6/t21-db-migrations-a`
-and `origin/sweep6/t22-db-migrations-b`. Read them from those branches until the merge terminal lands them.
+**T26 filed its ledger but it is not in this folder yet** — it lives on
+`origin/sweep6/t26-the-look` (the LOOK: 577 rows). Read it from there until the merge terminal lands
+it. **T27 (every word on every screen, `P13001`–`P13500`) and T28 (the repo's own guards,
+`P13501`–`P14000`) have never been filed at all** — 1,000 checks never executed once.
 
----
+T28's absence is the expensive one, so T30 audited the guards' own health as a stand-in. That
+section is at the bottom of this file. It found the guards are alive — but two were red, and both
+were **stale allowances**, not dead checks.
 
 ## The 30 territories and their permanent ID blocks
 
@@ -81,46 +87,56 @@ and `origin/sweep6/t22-db-migrations-b`. Read them from those branches until the
 | 18 | P08501–P09000 | **The admin's money view** — `app/aevinite/{analytics,revenue,customers,bill-audit}/**`, `app/aevinite/page.tsx` | ✅ | 500 | 487 | 0 | 0 |
 | 19 | P09001–P09500 | **The admin server routes, part A** — the first 25 of `find app/api/admin -name route.ts \| sort` | ✅ | 500 | 498 | 0 | 2 |
 | 20 | P09501–P10000 | **The admin server routes, part B + the owner routes** — the last 24 admin routes, and all 12 `app/api/owner/**` | ✅ | 500 | 500 | 0 | 0 |
-| 21 | P10001–P10500 | **The database, migrations 001–118** (positions 1–120 of the sorted list) | ✅ *(unmerged branch)* | 500 | 498 | 0 | 2 |
-| 22 | P10501–P11000 | **The database, migrations 119–222** (positions 121–230) | ✅ *(unmerged branch)* | 500 | 364 | 0 | 135 |
+| 21 | P10001–P10500 | **The database, migrations 001–118** (positions 1–120 of the sorted list) | ✅ | 500 | 498 | 0 | 2 |
+| 22 | P10501–P11000 | **The database, migrations 119–222** (positions 121–230) | ✅ | 500 | 364 | 0 | 135 |
 | 23 | P11001–P11500 | **The database, migrations 223 onward** (positions 231 to the end) | ✅ | 500 | 443 | 4 | 49 |
 | 24 | P11501–P12000 | **The money and safety libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,logTrail,userAuth,rateLimit}.ts`, `docs/COMPLIANCE-GUARDRAILS.md`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md` | ✅ | 500 | 499 | 0 | 1 |
 | 25 | P12001–P12500 | **Every other shared library file** — the ~108 files in `lib/` no other terminal owns | ✅ | 500 | 500 | 0 | 0 |
-| 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ❌ **NEVER FILED** | 0 | — | — | — |
+| 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ⚠️ filed on `origin/sweep6/t26-the-look`, not yet merged | 577 | — | — | — |
 | 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ❌ **NEVER FILED** | 0 | — | — | — |
 | 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the 130 `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ❌ **NEVER FILED** | 0 | — | — | — |
-| 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ❌ **NEVER FILED** | 0 | — | — | — |
+| 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ✅ | 500 | — | — | — |
 | 30 | P14501–P15000 | **Cross-panel truth, and this ledger** — `LEDGER/INDEX.md`, `docs/QA-500-PHASES.md`, `.claude/skills/terminal-test-improve/**` | ✅ | 500 | 342 | 59 | 99 |
 
 ---
 
-## ⚠️ Three ID faults in the record — fix these before re-running
+## ✅ The ID faults — found, checked, and fixed (T30, 2026-08-22)
 
-The whole scheme rests on "one ID, one check, forever". Three files break it:
+The whole scheme rests on **one ID, one check, forever**. Three things were reported here; **one was
+real, two were my own detector being wrong.** Both outcomes are recorded, because a withdrawn
+finding is as useful as a confirmed one — it stops the next sweep re-filing it.
 
-| what | detail | what to do |
+| what was claimed | verdict | what happened |
 |---|---|---|
-| **T9 overran its block into T10's** | T9 wrote **518** rows, so `P04501`–`P04518` name a check in **T9.md** *and* a different check in **T10.md**. 18 IDs, two meanings each. | Renumber **T9's** overflow rows to **`P15001`–`P15018`**. T10's block is `P04501`–`P05000` and is correct as written. |
-| **T13 repeats 15 IDs inside itself** | 515 rows, 500 distinct. | Give the 15 repeats fresh IDs from **`P15019`–`P15033`**. |
-| **T6 repeats 3 IDs inside itself** | 503 rows, 500 distinct. | Give the 3 repeats fresh IDs from **`P15034`–`P15036`**. |
-| **73 rows across 15 files do not render** | A cell containing an unescaped `\|` — from a `grep -c 'a\|b'` or a `… \| wc -l` — splits the row into the wrong number of cells. T13 16, T1 14, T18 13, T15 5, T8 4, then T12/T17/T23/T6 3 each, T10/T2/T4 2 each, T11/T16/T3 1 each. | Escape the pipe inside the cell as `\|`. Mechanical; the guard below names every one. |
+| **T9 overran its block into T10's** | ✅ **REAL — now fixed** | T9 wrote **518** rows into a block of 500, so `P04501`–`P04518` were genuine phase rows in `T9.md` naming *different* checks from the ones T10 gave those ids. **Renumbered to `P15001`–`P15018`.** The checks are unchanged; only the numbers moved. `T9.md` carries a banner saying so, and T10's block was correct and untouched. |
+| **T13 repeats 15 IDs inside itself** | ❌ **WITHDRAWN** | Those 15 rows are back-references in T13's own recap table *"What this pass found that the first two did not"* — a three-column narrative table, not a second check. Legitimate and useful. **My detector was wrong**, not the ledger: it counted any line starting `\| P##### \|` as a phase row. |
+| **T6 repeats 3 IDs inside itself** | ❌ **WITHDRAWN** | Same shape — T6's *"Rows whose expectation CHANGED (not failures — the product moved)"* table. |
+| **73 rows do not render** | ✅ **55 real — now fixed** · 18 were the recap rows above | The real cause is almost always **JavaScript's `\|\|` inside a code snippet** in the `how to verify` column (`${slug \|\| DEFAULT}`), plus a few single stray pipes from a `grep -c 'a\|b'`. **55 repaired** across T1 (14), T18 (13), T15 (5), T8 (4), T12/T17/T23 (3 each), T10/T2/T4 (2 each), T11/T13/T16/T3 (1 each). |
 
-### A guard for all of this
+**A phase row is identified by its SHAPE — six pipes, five cells — never by its first column.** An
+id in the first column of any other table is a back-reference, and the guard below now checks that
+it resolves to a phase row somewhere rather than treating it as a duplicate.
 
-`.claude/sweep/T30-guard-verify-ledger-index.mjs.txt` is a complete, working
-`scripts/verify-ledger-index.mjs` — it fails when a ledger has no INDEX row, when two files claim
-one ID, when a row is malformed, when the next-free-ID has already been used, or when this file
-stops telling the next sweep to re-run before it re-invents. It was not installed by terminal 30:
-`scripts/**` belongs to T28 and the `verify:*` entry to T29. **Install it in the same change as the
-repairs above** — it reports all 51 of them today, and a guard that is red on arrival is a guard
-people learn to skip.
+**Always split on UNESCAPED pipes only** (`line.split(/(?<!\\)\|/)`). Cells legitimately contain
+`\|`, because the checks are full of `grep -c 'a\|b'`, `find … \| wc -l` and `a \|\| b`. Splitting
+naively both under-counts real rows and invents malformed ones — which is how the two withdrawn
+findings above came to be filed in the first place.
+
+### The guard that keeps this true
+
+**`npm run verify:ledger-index`** — `scripts/verify-ledger-index.mjs`, installed by T30. It fails
+when two phase rows share an id, when a ledger has no row in this file, when this file points at a
+ledger that does not exist without saying so, when a recap table references an id nothing carries,
+when a ledger has no phase rows at all, or when this file stops telling the next sweep to re-run
+before it re-invents. Reads only; no key, no database, well under a second. It is **green** as of
+this commit: 24 ledgers, 12,018 phase rows, 12,018 distinct ids, no collisions, 18 back-references
+all resolving.
 
 ### The ID repair block
 
-**`P15001`–`P15100` is reserved for exactly this repair and nothing else.** `P15001`–`P15036` are
-allocated above. A new sweep starts at **`P15101`**.
-
----
+**`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are now
+**allocated to T9**. `P15019`–`P15100` remain free for the next repair. **A new sweep starts at
+`P15101`.**
 
 ## Coverage — is every part of this product owned by some ID range?
 
@@ -159,37 +175,50 @@ filed, so an orphan is unchecked ground in practice.**
 | `reference/` | **nobody** |
 | `test-results/` | **nobody** — and it needs no phases; it is regenerated Playwright output |
 
-### 🔴 THE GAP LIST — the next sweep's first assignment
+### THE GAP LIST — checked on 2026-08-22, and here is what was actually behind it
 
-Close these **before** inventing a single new phase. They are ordered by what a real restaurant
-loses if they stay unchecked.
+The four holes below were named because **no terminal's bullet listed them**, so nobody was *told*
+to check them. T30 then went and checked them anyway. **All four came back clean** — which is worth
+knowing, because "unowned" and "broken" are not the same thing, and a gap list that cries wolf is
+one nobody reads.
 
-1. **`components/PanelFrame.tsx` and `components/RealtimeProvider.tsx`** — every panel route
-   renders through `PanelFrame`; every live update flows through the realtime layer. Both are
-   cross-panel by nature and neither is named by any of the 30 territories. **This is the
-   thinnest-checked load-bearing code in the product.**
-2. **The four per-restaurant panel doors** — `app/r/[restaurant]/{manager,kitchen,tablet,login}/page.tsx`.
-   Named by nobody, and three of the four already carry a real divergence from their
-   `/manager`, `/kitchen`, `/tablet` twins (see `T30.md`, the tab-title handoff). Unowned ground is
-   where drift lives.
-3. **The print helper's two halves** — `app/aevinite/printing/page.tsx` and
-   `app/api/print-agent/[...path]/route.ts`. A computer owns the paper (mig 341, `docs/PRINT-HELPER.md`,
-   `verify:print-helper`); neither the screen nor its endpoint is named by any territory.
-4. **`app/api/admin/rate-limits/route.ts`** — T19 took `head -25` and T20 took `tail -24` of
-   **fifty** admin routes, so the 26th belongs to neither. (Its sign-in check is present — verified.
-   The gap is that nobody was told to look.)
-5. **The remaining 6 unowned components** — `AutoFitNumbers.tsx`, `BackQuitDialog.tsx`,
-   `FitNumber.tsx`, `PointerCaptureGuard.tsx`, `ToastHost.tsx`, `VegIcon.tsx`.
-6. **`access-designs/`, `LEARN-MY-APP/`, `reference/`** — name an owner or state explicitly that
-   they are out of scope. Right now they are neither.
-7. **The 17-file tail of `supabase/migrations/`** — T23's ledger says it covered "115 files,
-   numbered 231 or higher", but positions 231→end of the sorted list hold **132** files. The
-   difference is the tail that landed while T23 was running, including migrations **350–354**.
+| the gap | what was behind it | verdict |
+|---|---|---|
+| **`components/PanelFrame.tsx`** — every panel route renders through it | It solves two real phone bugs (a `100vh` iframe hanging below the URL bar; `env()` not resolving inside a nested iframe) and its own rule is *"every panel host must render this, never a raw `<iframe>`"*. Checked every file that embeds a panel: the six fixed full-screen hosts all use `PanelFrame`; the owner console's inline embeds all use the shared `useEmbedFrame` hook, which attaches the **same** `lib/safeAreaBridge` — so the insets reach both. The one remaining raw `<iframe>`, in `components/admin/RemovalDetail.tsx`, is a **sandboxed bill document** (`srcDoc`, no `allow-scripts`, auto-grown height), not a panel, so the rule does not apply to it. | ✅ **clean** |
+| **`components/RealtimeProvider.tsx`** — every guest live update flows through it | Scopes the socket per restaurant server-side via `topic_rid` (mig 145), keeps a JavaScript restaurant check as a safety net for the async window before `rid` resolves, drops its channel after 120s hidden, force-rebuilds on wake because a backgrounded socket dies silently, throttles the 2–3 wake signals into one rebuild, refuses to reopen a socket on `online` while hidden, debounces a burst into one refetch, and tears everything down cleanly. Every realtime rule this sweep tests for holds. | ✅ **clean** |
+| **The print helper's two halves** — `app/aevinite/printing/page.tsx` and `app/api/print-agent/[...path]/route.ts` | The endpoint identifies its caller by the helper's own token (`agentByToken`) and takes `restaurant_id` **from the agent row, never from the request** — so a caller cannot name a restaurant. Every one of its ~15 queries carries `.eq("restaurant_id", agent.restaurant_id)`. And it is **not actually unwatched**: `npm run verify:print-helper` covers it (48 checks, all passing), including that every verb checks the token. | ✅ **clean** — and guarded, despite no ledger naming it |
+| **`app/api/admin/rate-limits/route.ts`** — position 26 of **50**, between T19's `head -25` and T20's `tail -24` | Read it: `const admin = (req) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)`, used by GET, PATCH **and** POST. All 50 admin routes carry the check, so CLAUDE.md's own invariant holds. | ✅ **clean** |
 
-### And the four territories that never ran at all
+**The lesson for the next sweep, and the reason this table replaced the alarm:** the arithmetic hole
+was real — `head -25` + `tail -24` over fifty files genuinely leaves the 26th to nobody, and four
+directories genuinely have no owner. But *unchecked* turned out not to mean *wrong*. **Assign these
+files to a territory so they are checked on purpose rather than by luck; do not assume they are
+broken.**
 
-`P12501`–`P14500` — **2,000 checks that have never been executed once.** The LOOK (T26), the
-WORDING (T27), **the repo's own 130 `verify:*` guards (T28)**, and the docs + remainder (T29).
+### Still genuinely unassigned — give these an owner next time
+
+1. **The six remaining unowned components** — `AutoFitNumbers.tsx`, `BackQuitDialog.tsx`,
+   `FitNumber.tsx`, `PointerCaptureGuard.tsx`, `ToastHost.tsx`, `VegIcon.tsx`. Smaller than
+   `PanelFrame`, and still rendered across more than one panel.
+2. **`access-designs/`, `LEARN-MY-APP/`, `reference/`** — name an owner, or state in one line that
+   they are out of scope. Right now they are neither, so every sweep rediscovers them and none
+   checks them. (`test-results/` genuinely needs no phases — it is regenerated Playwright output.)
+3. **The 17-file tail of `supabase/migrations/`** — T23's ledger says it covered "115 files,
+   numbered 231 or higher", but positions 231→end of the sorted list hold **132**. The difference is
+   the tail that landed while T23 was running, including migrations **350–354**.
+4. **The five orphan page routes** — `app/aevinite/printing/page.tsx` and the four
+   `app/r/[restaurant]/{manager,kitchen,tablet,login}/page.tsx`. The tab-title fault that lived in
+   three of them **has since been fixed** (T29, 2026-08-22, with
+   `.github/scripts/verify-twin-route-parity.mjs` to keep it fixed) — but the files still belong to
+   nobody's bullet.
+5. **The two orphan API routes** — `app/api/admin/rate-limits/route.ts` and
+   `app/api/print-agent/[...path]/route.ts`. Both verified clean above; both still unassigned.
+
+### And the territories that never ran at all
+
+`P13001`–`P14000` — **1,000 checks that have never been executed once.** The WORDING (T27) and
+**the repo's own 142 `verify:*` guards (T28)**. The LOOK (T26) and the docs + remainder (T29) have
+both since filed.
 
 T28 is the most expensive of the four to leave undone: a permanently-red or silently-dead guard
 hides real regressions, and this project has already lost a month to exactly that (`verify:cache`
@@ -263,3 +292,65 @@ a writer that busts it; every breadcrumb reaches a screen. Waves 1 and 2 did rea
 
 The honest summary is that **the product is healthier than the scaffolding around it.** The next
 sweep should start with T26–T29 and the gap list above — not with a fresh idea.
+
+---
+
+## The guards' own health — audited 2026-08-22 (a first slice of T28's unrun territory)
+
+T28 (`P13501`–`P14000`) owns the question *"is each of this repo's guards alive, honest, and
+cleaning up after itself?"* — and its ledger was never filed. That is the most expensive gap on this
+page, because a permanently-red or silently-dead guard hides real regressions: `verify:cache`, the
+3D no-re-fetch check CLAUDE.md tells everyone to run, sat green and asserted **nothing** for a month
+because its subject had deliberately stopped doing the thing it waited for.
+
+T30 did the core of that audit. **This is not a substitute for running T28** — it covers the health
+of the guards, not the 500 phases T28 was scoped to write — but it answers the expensive question.
+
+### Can each guard fail at all?
+
+**138 `verify:*` / `test:*` entries. Every single one can fail.** Three looked dead and all three
+were **my own detector being wrong** — recorded here so nobody re-files them:
+
+| looked dead | actually |
+|---|---|
+| `test:units` | runs `node --test lib/*.test.mjs`: **17 real tests, all passing.** A glob has no single script file, which is all my check saw. |
+| `verify:clash-coverage` | counts `problems++` and ends `process.exit(problems … ? 1 : 0)`. My detector looked for `problems.push`. |
+| `verify:avlive-release` | counts `bad++` and ends `process.exit(bad === 0 ? 0 : 1)`. **Not executed here on purpose** — it reads the client stack's folder, which this terminal does not touch. Verified by reading it. |
+
+### Do they actually pass?
+
+**67 of the 138 need no key and no running app.** Two were excluded deliberately —
+`verify:everything` is pid-locked and belongs to the merge terminal, and `verify:avlive-release`
+reads the client stack. **The remaining 65 were run. 63 were green; 2 were genuinely red; both are
+now fixed** (T30, this branch):
+
+| guard | why it was red | fix |
+|---|---|---|
+| `verify:rejected` | `scripts/verify-t24-money-rules.mjs` says `REJECTED` in a comment that *explains why the guard strips comments* — it talks **about** the convention rather than making a claim. The guard flags any file saying REJECTED without pointing at `docs/REJECTED-IDEAS.md`. | Named the doc in that comment. One line. The guard was not weakened. |
+| `verify:admin-refusals` | Its `NOT_YET` allowance for `app/api/admin/restaurants/settings/route.ts` said **2** while the file had **3**. A third `return { error: … }` had been added inside the SAME already-exempt helper (`ensureCodes`, the scoped re-read for the efficiency playbook) and nobody bumped the number. | Checked the caller first — it is `adminFail("this restaurant's table QR codes", { message: codes.error }, …)`, so the database's words reach the log and never a toast. Allowance bumped to 3, with the reasoning written beside it. **The route was correct; the guard's count was stale.** |
+
+One more shows as non-zero and is **correct**: `verify:panel-plumbing-live` refuses with
+`--base <url> is required` and exit 2. It is a live guard; my classifier called it repo-only.
+
+### What is still unaudited, and what to watch for
+
+- **71 guards need a key or a running app** and were not executed here. Running them is T28's job,
+  and the two faults above suggest what it will find: not dead guards, but **stale allowances and
+  stale expectations** — a guard whose subject moved and whose number nobody bumped.
+- **16 guards write to the database and have no `delete().eq("id", …)`**, and **11 write with no
+  restore-on-kill** (`SIGINT`/`SIGTERM`/`finally`). Both lists are worth a real look: this sweep's
+  own scar is `verify:realtime`, which flipped a category off across seven restaurants and then
+  died two steps later. Not filed as faults here — several are certainly read-then-write patterns
+  that clean up another way, and judging 27 scripts properly is T28's work, not a grep's.
+
+### How to redo this audit
+
+```sh
+node -e "const p=require('./package.json');console.log(Object.keys(p.scripts).filter(k=>/^(verify|test):/.test(k)).length)"
+```
+Then, for each guard: resolve its script file(s), check the source can reach a non-zero exit
+(`process.exit(1)`, `problems++`, `bad++`, `fail(`, `check(`, `throw`), and **run the ones needing
+neither `.env.local` nor a server**. Never run `verify:everything` (pid-locked) or
+`verify:avlive-release` (it reads the client stack).
+
+**Judge a "dead guard" by reading it, never by a grep.** Three of my three static hits were false.
