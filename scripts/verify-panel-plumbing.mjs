@@ -103,6 +103,10 @@ hasNot("myprofile.js", /catch\s*\{?\s*availability = false;? *\}?/,
   "available() caches a FAILED read as 'no profile', so one blip hides the button for the session");
 has("myprofile.js", /addEventListener\("online"/,
   "myprofile no longer re-checks when the connection comes back");
+// A save that WORKED must never be reported as a failure. The refresh that follows it has its own
+// catch, so a blip on the read cannot make the screen claim the save was refused (T9 sweep #7).
+has("myprofile.js", /btn\.textContent = "Saved ✓";[\s\S]{0,900}?try \{\s*\n\s*await load\(\);\s*\n\s*render\(\);\s*\n\s*\} catch/,
+  "the re-read after a successful save is back inside the save's own try — one dropped request and the person is told 'Couldn't save' about a save the server accepted");
 
 // ── maint.js — the guest-menu switch must never claim something the server did not do ──────────
 has("maint.js", /if \(!r\.ok\) \{[\s\S]{0,160}?throw e;? *\}\r?\n\s*maintOn = turnOn;/,

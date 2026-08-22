@@ -213,8 +213,20 @@
         return;
       }
       if (btn) btn.textContent = "Saved ✓";
-      await load();
-      render();
+      // THE RE-READ IS NOT PART OF THE SAVE (T9 sweep #7, 2026-08-22).
+      //
+      // This sat inside the same try, so a blip on the read that FOLLOWS a successful save — one
+      // dropped request, a moment out of range — landed in the catch below and told the person
+      // "Couldn't save. Please try again." about a save the server had already accepted. They then
+      // save again, on a screen whose whole job is being honest about what was kept. "Don't say
+      // saved when it isn't" has an other half: don't say it failed when it worked.
+      //
+      // If the refresh cannot be had, the button keeps saying Saved ✓ and the fields keep what was
+      // typed — which is exactly what is true. The next open reads it fresh.
+      try {
+        await load();
+        render();
+      } catch (e) { /* saved; only the read back failed. Nothing to correct and nothing to confess. */ }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
       alert(e && e.message ? e.message : "Couldn't save. Please try again.");
