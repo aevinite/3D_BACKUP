@@ -43,7 +43,7 @@ import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
-import { waiterTables, allows, blockedReason, type SectionLimit } from "@/lib/tableAssign";
+import { waiterTables, allows, blockedReason, notYoursMessage, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -772,6 +772,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // ── print/send — the same door the manager panel uses ────────────────────────────────────────
     // Kept identical on purpose, including `noRoute` meaning "open your window as you always did":
     // one bill, one road, whichever panel pressed the button.
+    //
+    // IT SITS ABOVE THE SECTION GATE DELIBERATELY, AND THAT IS WHY IT CARRIES ITS OWN (T10 sweep #7).
+    // lib/tableOfAction.affectedTables does not recognise ("print","send"), and its own rule for an
+    // unrecognised verb is `unknown: true` ⇒ refuse — "a new table-scoped endpoint is protected on
+    // the day it is added". Correct as a default, and wrong here: a waiter with a section would have
+    // been refused every bill including their OWN tables'. So the branch stays where it is and asks
+    // the question itself, against the table the bill actually belongs to.
     if (a === "print" && b === "send") {
       const kind = String((body as Record<string, unknown>)?.kind || "");
       if (kind !== "bill") return err("Only a bill can be sent this way from the tablet.", 400);
@@ -779,12 +786,35 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!own.owned) return ok({ noRoute: true });
       const sid = String((body as Record<string, unknown>)?.sessionId || "");
       if (!sid) return err("Which bill?", 400);
-      const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+      // `table_number` rides along for the section check below — one read, not two.
+      const sess = (await sb.from("sessions").select("id, table_number").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; table_number: unknown } | null;
       if (!sess) return err("That table's bill is not this restaurant's.", 404);
+      // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
+      // `g.user` is null when this is the Aevidine console viewing a restaurant's waiter tablet.
+      // Their printers are theirs: nothing comes out of a paying client's roll because we opened
+      // their screen. The manager panel's identical `print/send` was given this rule on 2026-08-20
+      // and this one — added a day earlier for mig 341, with the header above promising "the same
+      // door the manager panel uses" — was left without it. `npm run verify:print-helper` asserted
+      // the rule against the EDITOR route's source only, so nothing noticed the twin.
+      //
+      // The panel needs no change: public/panels/tablet/app.js acts on `queued` and falls through to
+      // openBillWindow() for anything else, which is exactly the wanted behaviour — the bill appears
+      // on OUR screen instead of the client's paper. `force` is the deliberate way to help them
+      // ("their printer was stuck, send it again"), and it is audited under its own action code so a
+      // mystery ticket at their counter can always be traced back to us.
+      if (!g.user && (body as Record<string, unknown>)?.force !== true) {
+        return ok({ adminView: true, printer: own.printer, agent: own.agent });
+      }
       const q = await queueJob(rid, "bill", { sessionId: sid, ...((body as Record<string, unknown>)?.parcel ? { parcel: true } : {}) },
-        { requestedBy: g.user?.name || g.user?.username || "waiter" });
+        { requestedBy: g.user?.name || g.user?.username || "Aevidine admin" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
-      await logAction("tablet", "print_sent", { restaurant_id: rid, device_id: dev, detail: `bill sent to ${own.printer} on ${own.agent}` });
+      await logAction("tablet", g.user ? "print_sent" : "print_sent_by_admin", {
+        restaurant_id: rid, device_id: dev,
+        ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+        detail: `bill sent to ${own.printer} on ${own.agent}`
+          + (g.user ? "" : " — sent deliberately from the admin console"),
+      });
       return ok({ queued: true, id: q.id, printer: own.printer, agent: own.agent, connected: !!own.connected,
         note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back` });
     }

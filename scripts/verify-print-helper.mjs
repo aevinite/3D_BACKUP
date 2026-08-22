@@ -26,6 +26,7 @@ const adminR = read("app/api/admin/printing/[...path]/route.ts");
 const page   = read("app/aevinite/printing/page.tsx");
 const kroute = read("app/api/kitchen/[...path]/route.ts");
 const eroute = read("app/api/editor/[...path]/route.ts");
+const troute = read("app/api/tablet/[...path]/route.ts");
 const kpanel = read("public/panels/kitchen/app.js");
 const epanel = read("public/panels/editor/app.js");
 const plan   = read("docs/PRINT-HELPER.md");
@@ -181,9 +182,20 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
 }
 
 // ── 5 · the admin looking is not the restaurant printing ──────────────────────────────────────
-check(/adminView: true/.test(eroute) && /force/.test(eroute) && /print_sent_by_admin/.test(eroute),
-  "the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited",
-  "the admin console can print on a paying client's roll just by looking at their panel");
+//
+// EVERY PANEL THAT CAN SEND PAPER, NOT JUST THE MANAGER'S (T10 sweep #7, 2026-08-22).
+// This check read `eroute` alone. The waiter tablet was given the SAME `print/send` verb for
+// mig 341 — its own header says "the same door the manager panel uses" — and it never got the
+// owner's 2026-08-20 rule, so the Aevidine console opening a paying client's tablet and pressing
+// Print put a sheet out at their shop, with no `print_sent_by_admin` row to trace it by. The guard
+// was green throughout, because it was only ever looking at one of the two files. So the list is
+// what is checked now: a THIRD panel that learns to send paper joins this array or fails here.
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+  if (!/a === "print" && b === "send"/.test(code(src))) continue;   // this panel cannot send paper at all
+  check(/adminView: true/.test(src) && /force/.test(src) && /print_sent_by_admin/.test(src),
+    `${name}: the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited`,
+    `${name}: the admin console can print on a paying client's roll just by looking at their panel`);
+}
 
 // ── 6 · the helper program itself ─────────────────────────────────────────────────────────────
 check(/HELPER_FILENAME/.test(script) && /print-helper\.command/.test(script) && /print-helper\.bat/.test(script) && /print-helper\.sh/.test(script),
