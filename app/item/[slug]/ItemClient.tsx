@@ -56,6 +56,14 @@ const BTN_ROW_ABOVE_NAV_STRIPS = { position: "relative" as const, zIndex: 50 };
 // no height to spare) — this is the width half of the same idea.
 const PINNED_BAR_MAX_WIDTH = 1024;
 
+// HOW LONG THIS SCREEN WILL WAIT FOR ITS DISH (sweep #7 T2, 2026-08-22 — item 6).
+//
+// 8 seconds, the same patience the floor's own reads use. Long enough for a genuinely slow first
+// load on restaurant wi-fi; short enough that a diner with no signal is not left staring at a
+// spinner. See the note on `readTimedOut`: past this the screen says so, honestly, with a way out
+// — and if the reply lands later it still wins.
+const DISH_READ_DEADLINE_MS = 8000;
+
 // This describes the "shape" of one dish — every field a dish object can have.
 // It's a TypeScript guide so the editor can catch typos; it doesn't run.
 
@@ -111,6 +119,25 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const [allItems, setAllItems] = useState<FoodItem[]>([]);  // every dish (for related/next/prev)
   const [item, setItem] = useState<FoodItem | null>(null);   // THIS dish (null until found)
   const [loading, setLoading] = useState(true);              // still fetching?
+  // THE DISH READ DID NOT COME BACK (sweep #7 T2, 2026-08-22 — item 6).
+  //
+  // Measured with the network switched off after the page had been visited once: this screen sat
+  // on "PLATING YOUR DISH" at 2 s, 5 s, 10 s, 20 s and 35 s — a spinner with no dish, no honest
+  // word and no way out. The guest MENU beside it renders fine offline, which is what makes the
+  // difference so stark to a diner: the list works, the dish is a dead screen.
+  //
+  // The reason it hangs is not this file's to fix. The menu's data comes through
+  // `/api/r/<restaurant>/menu-data`, which `public/sw.js` → DATA_PATHS serves from the device;
+  // this page's reads go STRAIGHT to Supabase, and every DATA_PATHS pattern is an `/api/…` one, so
+  // the service worker never sees them and the request simply never settles. That is a handoff
+  // (`public/sw.js` and `lib/menu.ts` belong to other territories) — recorded in the findings.
+  //
+  // What IS this file's to fix: a screen must never spin forever. Every read here gets a deadline,
+  // and when it passes the guest gets an honest card with a way out and a Try again. If the real
+  // reply lands afterwards it still wins, so the page heals itself the moment the signal returns.
+  const [readTimedOut, setReadTimedOut] = useState(false);
+  // Bumped by Try again, and a dependency of the fetch, so retrying really re-reads.
+  const [retryNonce, setRetryNonce] = useState(0);
   const [favorited, setFavorited] = useState(false);         // is this dish hearted?
   const [showFavHint, setShowFavHint] = useState(false); // one-time "tap to save" coachmark
   const [descExpanded, setDescExpanded] = useState(false);   // is the description expanded?
@@ -319,12 +346,27 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // "You might like" cards + prev/next nav need). Before, this pulled the WHOLE menu
     // with every heavy column (long_description, nutrition, ingredients, reviews…) on
     // every single dish open — the "SELECT * on a hot path" the egress rules warn about.
+    // THE DEADLINE. See the note on `readTimedOut`. 8 s is the same patience the floor's own reads
+    // use — long enough for a slow first load on restaurant wi-fi, short enough that a diner is not
+    // left staring. `landed` is a plain local, not state: it must be readable from the timer's
+    // closure without waiting for a render.
+    let landed = false;
+    const deadline = setTimeout(() => {
+      if (cancelled || landed) return;
+      setReadTimedOut(true);
+      setLoading(false);   // stop the spinner and show the honest card instead
+    }, DISH_READ_DEADLINE_MS);
     Promise.all([
       getMenuItem(slug, restaurantId).catch(() => null),        // this dish, full detail
       getMenuItems(restaurantId, CARD_COLUMNS).catch(() => []), // the rest, light (related/nav)
     ])
       .then(([dish, items]) => {
         if (cancelled) return; // a newer slug's fetch superseded this one
+        // A reply that arrives AFTER the deadline still wins — the screen heals itself rather than
+        // making the guest tap Try again for something that has already arrived.
+        landed = true;
+        clearTimeout(deadline);
+        setReadTimedOut(false);
         setAllItems(items);                 // light list for related/nav
         setItem(dish || null);              // this dish (or null if not found)
         // (Reviews load in their own effect below — see why there.)
@@ -345,10 +387,13 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       .catch((err) => {
         if (cancelled) return;
         // If the fetch failed, log it and stop the spinner.
+        landed = true;
+        clearTimeout(deadline);
         console.error(err);
+        setReadTimedOut(true);   // an outright failure is as honest a "couldn't reach it" as a stall
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(deadline); };
     // `restaurantId` belongs in here as well as `slug` (sweep #7 T2, 2026-08-22 — item 3).
     //
     // Both reads above are SCOPED BY IT — getMenuItem(slug, restaurantId) and
@@ -363,7 +408,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // another's, and a shared link opens a fresh document — which is why it has never been seen.
     // It is still the wrong dependency list, and `restaurantId` is a stable string prop, so adding
     // it costs no extra fetch on any journey that exists.
-  }, [slug, restaurantId]);
+  }, [slug, restaurantId, retryNonce]);
 
   // Real reviews, in their OWN effect keyed on the switch.
   //
@@ -636,6 +681,32 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     return (
       <div id="detail-page" className="page active item-detail-page flex items-center justify-center min-h-screen">
         <InfinityLoader label={t.loadingLabel} />
+      </div>
+    );
+  }
+
+  // THE READ NEVER CAME BACK — say so, rather than calling a dish that exists "not found".
+  // Different words from the branch below on purpose: "Dish not found" would be a lie when the
+  // truth is that this phone cannot reach the menu, and it would send a diner looking for a dish
+  // that is on the table's paper menu in front of them. Deliberately English, like the 3D screen's
+  // own unavailable card beside it (R23 — the guest translation set is parked).
+  if (!item && readTimedOut) {
+    return (
+      <div id="detail-page" className="page active item-detail-page flex flex-col items-center justify-center min-h-screen p-4">
+        <div className="text-4xl mb-4">📶</div>
+        <h2 className="text-xl font-bold text-[var(--text)] mb-2">We couldn&apos;t load this dish</h2>
+        <p className="text-[var(--muted)] mb-4 text-center">
+          Your phone can&apos;t reach the menu right now. Check your connection, or ask a member of staff.
+        </p>
+        <button
+          className="btn btn-gold"
+          onClick={() => { setReadTimedOut(false); setLoading(true); setRetryNonce((v) => v + 1); }}
+        >
+          <i className="fas fa-rotate-right" aria-hidden="true"></i> Try again
+        </button>
+        <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline mt-4">
+          ← {t.backToMenu}
+        </Link>
       </div>
     );
   }

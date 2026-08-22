@@ -317,6 +317,46 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── a screen must never spin forever (sweep #7 T2, item 6) ───────────────────────────────────
+// Measured with the dish page's data reads held open: "PLATING YOUR DISH" at 2s, 5s, 10s, 20s and
+// 35s — a spinner with no dish, no honest word and no way out. Every read on this screen now has a
+// deadline, and past it the guest gets a card that says so, with Try again and Back to menu.
+{
+  const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the dish page puts a deadline on its own read, so it can never spin forever",
+    /const DISH_READ_DEADLINE_MS = \d+/.test(code) &&
+      /const deadline = setTimeout\(/.test(code) &&
+      /setReadTimedOut\(true\)/.test(code) && /setLoading\(false\)/.test(code),
+    ITEM_CLIENT + " \u2192 keep DISH_READ_DEADLINE_MS and the timer that trips it. Without it a " +
+      "stalled read leaves the guest on 'Plating your dish' with no dish and no way out."
+  );
+  check(
+    "…the deadline is cleared when the reply lands, and when the screen goes",
+    /landed = true;\s*\n\s*clearTimeout\(deadline\)/.test(code) &&
+      /return \(\) => \{ cancelled = true; clearTimeout\(deadline\); \}/.test(code),
+    ITEM_CLIENT + " \u2192 a reply that beats the deadline must cancel it, and leaving the page must too."
+  );
+  check(
+    "…a late reply still wins, so the screen heals itself",
+    /setReadTimedOut\(false\)/.test(code),
+    ITEM_CLIENT + " \u2192 when the read finally lands, clear the honest card rather than making " +
+      "the guest tap Try again for something that has already arrived."
+  );
+  check(
+    "…and the honest card is not the 'dish not found' one, which would be a lie",
+    /if \(!item && readTimedOut\)/.test(code) && code.indexOf("if (!item && readTimedOut)") < code.indexOf("if (!item) {"),
+    ITEM_CLIENT + " \u2192 the timed-out branch must come FIRST and say something about the " +
+      "connection. 'Dish not found' would send a diner looking for a dish that is on the paper " +
+      "menu in front of them."
+  );
+  check(
+    "…and Try again really re-reads",
+    /setRetryNonce\(\(v\) => v \+ 1\)/.test(code) && /\[slug, restaurantId, retryNonce\]/.test(code),
+    ITEM_CLIENT + " \u2192 the retry counter must be a dependency of the fetch, or the button does nothing."
+  );
+}
+
 // ── do not fetch what no switch will let you draw (sweep #7 T2, item 5) ──────────────────────
 // The review fetch was keyed on `features.reviews` alone, but every surface that DRAWS a review is
 // behind `features.ratings && features.reviews`. Measured on French House, which has reviews on and
@@ -368,7 +408,12 @@ for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<s
 // remounting it — and it would keep restaurant A's dish, price and menu list under B's address.
 check(
   "the dish page's main fetch re-runs when the RESTAURANT changes, not only the dish",
-  /\}, \[slug, restaurantId\]\)/.test(src[ITEM_CLIENT]),
+  // Assert that BOTH are in the list, not that the list is exactly those two — a later fix
+  // legitimately added `retryNonce` (item 6) and an exact match turned this red for no fault.
+  (() => {
+    const m = /\}, \[slug,([^\]]*)\]\);/.exec(src[ITEM_CLIENT]);
+    return !!m && /\brestaurantId\b/.test(m[1]);
+  })(),
   `${ITEM_CLIENT} → the effect calling getMenuItem(slug, restaurantId) and ` +
     "getMenuItems(restaurantId, CARD_COLUMNS) must depend on BOTH. The reviews effect and the " +
     "Google-settings effect beside it already do."
