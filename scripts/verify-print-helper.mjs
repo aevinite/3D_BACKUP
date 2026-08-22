@@ -197,6 +197,14 @@ for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", 
     `${name}: the admin console can print on a paying client's roll just by looking at their panel`);
 }
 
+// A waiter with a SECTION may print their own tables' bills and nobody else's. The shared section
+// gate (lib/tableOfAction.affectedTables) does not recognise ("print","send") and its rule for an
+// unrecognised verb is refuse-everything, so this branch has to ask the question itself — which
+// means the question can also go missing without the shared gate noticing. (T10 sweep #7)
+check(/waiterTables\(actor, rid\)/.test(code(troute).split('a === "print" && b === "send"')[1]?.slice(0, 2000) || ""),
+  "…and a waiter with a section can only send their OWN tables' bills to the printer",
+  "the tablet's print/send has lost its section check — a waiter holding tables 1-5 can print table 20's bill");
+
 // ── 6 · the helper program itself ─────────────────────────────────────────────────────────────
 check(/HELPER_FILENAME/.test(script) && /print-helper\.command/.test(script) && /print-helper\.bat/.test(script) && /print-helper\.sh/.test(script),
   "all three operating systems get a helper, by hand",

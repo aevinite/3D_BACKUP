@@ -790,6 +790,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const sess = (await sb.from("sessions").select("id, table_number").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
         { id: string; table_number: unknown } | null;
       if (!sess) return err("That table's bill is not this restaurant's.", 404);
+      // WAITER SECTIONS (mig 222) — the same answer every other table-scoped write on this route
+      // gives, asked here because the shared gate below cannot resolve this verb (see above).
+      // `waiterTables` returns null for the admin, for a manager/owner looking in, and for every
+      // restaurant with sections off, so this costs one lookup only for a real sectioned waiter.
+      {
+        const psLimit = await waiterTables(actor, rid);
+        if (psLimit !== null && !allows(psLimit, sess.table_number)) {
+          return err(notYoursMessage(String(sess.table_number ?? "")), 403);
+        }
+      }
       // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
       // `g.user` is null when this is the Aevidine console viewing a restaurant's waiter tablet.
       // Their printers are theirs: nothing comes out of a paying client's roll because we opened
