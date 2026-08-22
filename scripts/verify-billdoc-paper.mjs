@@ -247,6 +247,57 @@ for (const [what, ts] of INSTANTS) {
   }
 }
 
+// ── 3i. A FIELD OF SPACES IS EMPTY, AND NO MONEY BOX GOES BELOW ZERO ──────────────────────────
+// Two rules this file states about itself, each defeated by one value:
+//  · "empty prints NO line at all" / "NEVER fall back to a placeholder GSTIN" — beaten by a single
+//    typed space, because `s.x || fallback` treats "  " as real. A Billing card of spaces printed a
+//    blank restaurant name, a bare "Ph" and a bare "GSTIN" with nothing after it.
+//  · "THE PAPER NEVER PRINTS A NEGATIVE TAXABLE VALUE" (2026-08-06) — billRows clamped a discount
+//    bigger than its row but not a NEGATIVE one, and never floored the taxable value, while
+//    billMoney in this same file has always ended `taxable: Math.max(0, ...)`.
+{
+  const ws = BILLDOC.billIdentity({ gstin: "   ", restaurant_address: "  ", restaurant_phone: " ",
+    restaurant_name: "  ", invoice_prefix: " ", bill_footer: "  " }, { slug: "x", name: { en: "Green Bowl" } });
+  (ws.gstin === "" && ws.address === "" && ws.phone === "" && ws.name === "Green Bowl" && ws.prefix === "INV")
+    ? ok("a Billing card of spaces prints no address, no phone and no GSTIN line")
+    : bad(`whitespace fields survived: ${JSON.stringify(ws)}`,
+      "trim in billIdentity — a 'GSTIN' label with nothing after it is the placeholder this file refuses to print");
+  const real = BILLDOC.billIdentity({ gstin: "24ABCDE1234F1Z5", restaurant_address: "12 Rue Verte",
+    restaurant_phone: "+91 90999 14418", restaurant_name: "Little French House" }, { slug: "french-house" });
+  (real.gstin === "24ABCDE1234F1Z5" && real.address === "12 Rue Verte" && real.name === "Little French House")
+    ? ok("  …and a filled-in Billing card is untouched")
+    : bad(`a real identity changed: ${JSON.stringify(real)}`, "the trim must only remove whitespace");
+  const shapes = [
+    ["a negative discount", { subtotal: 100, discount: -50, total: 105 }],
+    ["a discount bigger than its row", { subtotal: 100, discount: 150, total: 0 }],
+    ["an untaxed pile bigger than the subtotal", { subtotal: 100, nontax: 400, total: 105 }],
+    ["a negative untaxed pile", { subtotal: 100, nontax: -40, total: 105 }],
+    ["a negative subtotal", { subtotal: -100, total: -100 }],
+    ["everything null", { subtotal: null, discount: null, nontax: null, total: null }],
+  ];
+  let bads = [];
+  for (const [what, d] of shapes) {
+    const R = BILLDOC.billRows(d);
+    if (R.discount < 0) bads.push(`${what}: discount ${R.discount}`);
+    if (R.taxable < 0) bads.push(`${what}: taxable ${R.taxable}`);
+    if (R.nontax < 0) bads.push(`${what}: untaxed pile ${R.nontax}`);
+    if (R.nontax > Math.max(0, R.subtotal + R.nontax)) bads.push(`${what}: untaxed pile exceeds the bill`);
+  }
+  bads.length === 0
+    ? ok(`no money box goes below zero on any of the ${shapes.length} contradictory shapes`)
+    : bad(`a negative figure reached a labelled money box: ${bads.join(" · ")}`,
+      "billRows must floor the discount and the taxable value, as billMoney already does");
+  // and the label, the MRP row and the arithmetic must all read ONE decision about the pile
+  const split = BILLDOC.billRows({ subtotal: 442, nontax: 42, total: 462 });
+  const dropped = BILLDOC.billRows({ subtotal: 100, nontax: 400, total: 105 });
+  const html = BILLDOC.billDocHtml({ name: "R", lines: [{ title: "A", qty: 1, price: 100 }],
+    subtotal: 100, nontax: 400, total: 105, taxRows: [], tableDisp: "5", dateStr: "x" });
+  (split.nontax === 42 && dropped.nontax === 0 && /<span>Subtotal<\/span>/.test(html) && !/MRP items/.test(html))
+    ? ok("  …and the label, the MRP row and the arithmetic read ONE decision about the untaxed pile")
+    : bad("the label and the arithmetic disagree about the untaxed pile",
+      "billDocHtml must read R.nontax, not re-derive d.nontax — two reads is how they drift");
+}
+
 // ── 3c. THE BILL NEVER SAYS IT IS A SECOND COPY — THE TICKET ALWAYS DOES ──────────────────────
 // REJECTED (owner, 2026-08-19): a bill band existed 2026-08-17 → 2026-08-19 and he removed it —
 // "I don't even want the reprinted bill shown in the bill … make the guard also in code like never

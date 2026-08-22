@@ -99,21 +99,34 @@
       "spice-route": "Dhanyavaad — padharo! 🍛",
       "green-bowl": "Stay fresh — see you soon! 🥗",
     };
+    /* A FIELD OF SPACES IS AN EMPTY FIELD (T8 sweep #7, 2026-08-22).
+       Every rule below says "empty prints NO line at all", and every one of them was defeated by a
+       single typed space, because `s.x || fallback` treats "  " as a real value. A restaurant whose
+       Billing card held a space in each box printed a letterhead reading
+
+           <blank>            ← the h2, where the biggest text on a customer's bill goes
+           Ph
+           GSTIN
+
+       — a "GSTIN" label with nothing after it on a document headed Tax Invoice, which is the exact
+       thing the note below refuses to do with a placeholder. Trimmed at the one place that resolves
+       the identity, so the document, the preview and the printer all agree. */
+    var pick = function (v) { return String(v == null ? "" : v).trim(); };
     return {
       isDefault: isDefault,
-      name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
+      name: pick(s.restaurant_name) || (isDefault ? "Little French House" : (pick(r.logo_text) || pick(r.name && r.name.en) || "Restaurant")),
       // NO INVENTED IDENTITY ON A REAL BILL (2026-08-04). These used to fall back to
       // DEFAULT_BILL for any restaurant that had not filled its Billing card — so a paying
       // client's tax invoice carried another company's address and a phone number that does not
       // exist, beside a real bill number. The GSTIN line below already refused to invent a value,
       // with a comment saying why; the same reasoning applies here. Empty prints NO line at all.
-      address: s.restaurant_address || "",
-      phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : ""),
+      address: pick(s.restaurant_address),
+      phone: pick(s.restaurant_phone) || (isDefault ? "+91 90999 14418" : ""),
       // NEVER fall back to a placeholder GSTIN — a fake tax number on a real bill is illegal.
       // Empty prints no GSTIN line (the document handles it).
-      gstin: s.gstin || "",
-      prefix: s.invoice_prefix || "INV",
-      footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
+      gstin: pick(s.gstin),
+      prefix: pick(s.invoice_prefix) || "INV",
+      footer: pick(s.bill_footer) || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
       taxLabel: ((s.tax_label || "Tax") + "").trim() || "Tax",
     };
   }
@@ -145,17 +158,40 @@
     d = d || {};
     var disc = Number(d.discount) || 0;
     var inclusive = !!d.taxIncluded;
+    /* THE UNTAXED PILE IS A PART OF THIS BILL, SO IT CANNOT BE BIGGER THAN IT (T8 sweep #7,
+       2026-08-22). `nontax` is the MRP slice OF the subtotal, and the split is only meaningful while
+       that is true. With nontax 400 against a subtotal of 100 the paper read "Food subtotal ₹-300"
+       beside "MRP items ₹400" — a negative figure in a labelled money box, which is what the
+       2026-08-06 rule forbids. `mrpPart()` already reasons exactly this way for a composition
+       restaurant ("splitting into food and MRP says nothing and reads as broken"), so the same
+       answer is right here: when the pile is not a genuine part of the subtotal, drop the split and
+       print the plain single Subtotal the caller handed us. Unreachable through billData, which
+       builds subtotalShown as foodShown + mrpPart(m) — so nontax is a subset by construction. */
+    var subtotalRaw = Math.round(Number(d.subtotal) || 0);
     var nontax = Math.round(Number(d.nontax) || 0);
-    var subAmount = Math.round((Number(d.subtotal) || 0) - (Number(d.nontax) || 0));
-    var subtotalShown = nontax > 0 ? subAmount : Math.round(Number(d.subtotal) || 0);
+    if (nontax > subtotalRaw || nontax < 0) nontax = 0;
+    var subAmount = subtotalRaw - nontax;
+    var subtotalShown = nontax > 0 ? subAmount : subtotalRaw;
     // THE PAPER NEVER PRINTS A NEGATIVE TAXABLE VALUE (2026-08-06). A discount larger than the row
     // it comes off produced `taxable: -50` and a matching round-off — billRows(subtotal 100,
     // discount 150) measured exactly that. Every real caller clamps first (billMoney caps a discount
     // at its own base), but billDocHtml is also called DIRECTLY by lib/billPreview.ts and the admin
     // preview with hand-built figures, and this function is the last thing between an arithmetic slip
     // and a guest's hands. Clamping here changes nothing for any current caller.
-    var discount = Math.min(Math.round(disc), Math.max(0, subtotalShown));
-    var taxable = subtotalShown - discount;
+    /* THE SAME TWO FLOORS billMoney ALREADY HAS (T8 sweep #7, 2026-08-22). The clamp above stops a
+       discount BIGGER than its row; it did not stop a NEGATIVE one, and the taxable value was not
+       floored at all — while billMoney, thirty lines away in this same file, has always ended
+       `taxable: Math.max(0, ...)`. Two money functions on one document disagreeing about whether a
+       figure can go below zero is how the 2026-08-06 rule ("THE PAPER NEVER PRINTS A NEGATIVE
+       TAXABLE VALUE") gets quietly re-broken. Measured before this: a discount of -50 on a ₹100 row
+       printed no Discount row at all and a phantom "Round off + ₹5"; nontax of 400 against a
+       subtotal of 100 printed "Food subtotal ₹-300".
+       Neither is reachable through billData (it clamps both), and that is exactly why the clamp is
+       here — billDocHtml is also called directly with hand-built figures by lib/billPreview.ts, the
+       admin preview and lib/auditDetail.ts replaying a stored snapshot. No reachable bill moves by
+       a paisa. */
+    var discount = Math.min(Math.max(0, Math.round(disc)), Math.max(0, subtotalShown));
+    var taxable = Math.max(0, subtotalShown - discount);
     var tax = (d.taxRows || []).reduce(function (a, c) { return a + (Math.round(Number(c.amt)) || 0); }, 0);
     var total = Math.round(parseFloat(d.total) || 0);
     // What the rows above the TOTAL actually add up to, in the order a person reads them.
@@ -291,7 +327,11 @@
        between them reads as an arithmetic error even though it isn't.)
        When there are no such lines — every restaurant today — nothing here renders and the
        bill is byte-identical to the one before this feature. */
-    var nontax = Number(d.nontax) || 0;
+    // ONE DECISION ABOUT THE UNTAXED PILE, read from billRows rather than recomputed here (T8
+    // sweep #7, 2026-08-22). These were two separate reads of d.nontax — so the label, the MRP row
+    // and the arithmetic could each answer differently, which is precisely the twin-value hazard
+    // the dead second `subAmount` note above this block was removed for.
+    var nontax = R.nontax;
     var subLabel = nontax > 0 ? "Food subtotal" : "Subtotal";
     // (There used to be a second `subAmount` computed here. It was dead — the render below reads
     // R.subtotal — so a later editor "fixing" one of the two would have changed nothing. Gone.)
