@@ -109,13 +109,13 @@ P("P16118", "…and never prints the count of an empty basket for one",
 P("P16119", "the row's second line says what will happen to a call, not 'waiting to send'",
   /\{isCall\(o\) \? "Staff will be called" : "Waiting to send"\}/.test(F.chip));
 P("P16120", "the chip counts requests for staff as requests",
-  /if \(list\.every\(isCall\)\) return "request for staff";/.test(F.chip));
-P("P16121", "…uses a word true of both when the queue is mixed",
-  /if \(list\.some\(isCall\)\) return "thing";/.test(F.chip));
+  /return n === 1 \? "1 request for staff" : `\$\{n\} requests for staff`;/.test(F.chip));
+P("P16121", "…and drops the noun entirely when the queue is mixed, rather than picking a wrong one",
+  /if \(list\.some\(isCall\)\) return `\$\{n\}`;/.test(F.chip));
 P("P16122", "…and still says 'order' when that is all there is",
-  /return "order";/.test(F.chip));
+  /return n === 1 \? "1 order" : `\$\{n\} orders`;/.test(F.chip));
 P("P16123", "the plural of 'request for staff' is not 'request for staffs'",
-  /word === "request for staff" \? "requests for staff"/.test(F.chip));
+  /`\$\{n\} requests for staff`/.test(F.chip));
 P("P16124", "a call has no price, so no money is invented on its row",
   /o\.track\?\.total \? ` · \$\{formatPrice/.test(F.chip));
 P("P16125", "'Order the rest' cannot appear on a call (it has no lines and nothing blocked)",

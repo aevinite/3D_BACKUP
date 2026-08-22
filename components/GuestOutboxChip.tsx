@@ -124,17 +124,19 @@ export default function GuestOutboxChip() {
   // saved request for water. When everything waiting is a call it says so; when the queue is mixed
   // it uses the neutral word that covers both, because "2 orders" would be a plain untruth about
   // one of them.
-  const noun = (list: GuestOrder[]): string => {
-    if (!list.length) return "order";
-    if (list.every(isCall)) return "request for staff";
-    if (list.some(isCall)) return "thing";
-    return "order";
+  // A MIXED queue drops the noun altogether rather than reaching for an awkward one. "2 waiting to
+  // send" is exactly the voice of the connection badge at the top of the same screen ("Offline · 2
+  // waiting"), so the two read as one app — and it cannot be untrue about either kind, which
+  // "2 orders" would be.
+  const count2 = (list: GuestOrder[]): string => {
+    const n = list.length;
+    if (list.every(isCall)) return n === 1 ? "1 request for staff" : `${n} requests for staff`;
+    if (list.some(isCall)) return `${n}`;
+    return n === 1 ? "1 order" : `${n} orders`;
   };
-  const plural = (n: number, word: string) =>
-    n === 1 ? `1 ${word}` : `${n} ${word === "request for staff" ? "requests for staff" : `${word}s`}`;
   const label = failed.length
-    ? `${plural(failed.length, noun(failed))} couldn’t send`
-    : `${plural(queued.length, noun(queued))} waiting to send`;
+    ? `${count2(failed)} couldn’t send`
+    : `${count2(queued)} waiting to send`;
 
   return (
     <>

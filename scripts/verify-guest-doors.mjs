@@ -223,8 +223,10 @@ check("…and names what was asked for instead of counting an empty basket",
   /if \(isCall\(o\)\) return callText\(o\);/.test(chip) && /String\(o\.reason \|\| ""\)/.test(chip));
 check("…and the chip does not call a request for water an 'order'",
   /list\.every\(isCall\)/.test(chip) && /request for staff/.test(chip));
+// A MIXED queue drops the noun rather than picking one that is untrue about half of it, matching
+// the connection badge's own voice at the top of the same screen ("Offline · 2 waiting").
 check("…and says nothing about 'orders' when the queue holds both kinds",
-  /list\.some\(isCall\)/.test(chip));
+  /if \(list\.some\(isCall\)\) return `\$\{n\}`;/.test(chip));
 // The guard that keeps the ORIGINAL behaviour: an order still reads as its dishes.
 check("an ORDER still names its dishes, unchanged",
   /list\.map\(\(i\) => `\$\{i\.qty\} × \$\{i\.title\}`\)\.join\(", "\)/.test(chip));
