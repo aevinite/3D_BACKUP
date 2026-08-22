@@ -36,6 +36,7 @@
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
     "verify:guards-alive": "node scripts/verify-guards-alive.mjs",
     "verify:fixtures": "node scripts/verify-fixtures-clean.mjs",
+    "verify:fixture-pickers": "node scripts/verify-fixture-pickers.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
     "verify:server-only": "node scripts/verify-server-only-imports.mjs",
     "verify:abort-guard": "node scripts/verify-abort-guard.mjs",
