@@ -79,10 +79,16 @@ for (const f of ledgers) {
 }
 
 // A recap row must point at an id that actually exists, or it is a dangling reference.
+// The overwhelmingly likely cause is NOT a typo: it is a PHASE row whose cell holds an unescaped
+// pipe, so it parsed as a narrative row and its id looks unclaimed. Say that first, because sending
+// someone hunting for a renumbering when the real fix is one backslash wastes the whole trip.
+// (T22's P10509 was exactly this: `topic||':'||restaurant_id` in its check column.)
 for (const [id, files] of referenced)
-  if (!owner.has(id)) fail(`${[...new Set(files)].join(", ")} reference ${id} in a summary table, ` +
-    `but no phase row anywhere carries that id. Either the row was renumbered and the reference ` +
-    `was not, or the id is a typo.`);
+  if (!owner.has(id)) fail(`${[...new Set(files)].join(", ")}: ${id} appears in a first column but ` +
+    `no PHASE row carries it. Most likely that very row IS a phase row whose cell contains an ` +
+    `unescaped \`|\` — from a \`grep -c 'a|b'\`, a \`… | wc -l\`, or JavaScript's \`a || b\` — so it ` +
+    `parsed as narrative. Escape the pipe as \`\\|\` and re-run. Only if the row really is a ` +
+    `back-reference is this a renumbering that was not followed through, or a typo.`);
 
 // ── 2 · every ledger is in the index, and every index entry is real ────────────────────────────
 for (const f of ledgers) {

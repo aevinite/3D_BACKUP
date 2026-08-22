@@ -39,21 +39,27 @@ again. Read those before reporting anything.
 
 ## Where the sweep got to
 
+*Recounted 2026-08-22, after T21, T22, T25, T26 and T29 merged.*
+
 | | |
 |---|---|
 | Terminals planned | **30** |
 | ID space allocated | **P00001 – P15000** (30 blocks of 500) |
-| Ledgers **filed** | **26** — T1–T25 and T30 |
-| Ledgers **never filed** | **4** — T26, T27, T28, T29 (2,000 IDs, `P12501`–`P14500`) |
-| Rows actually written | **13,036** (13,000 distinct IDs + 36 duplicated, see below) |
-| Rows passing | **12,392** |
-| Rows recording a real problem | **232** — most already fixed in that terminal's own PR |
-| Rows reserved / skipped, each with a written reason | **340** |
+| Ledgers **filed** | **27** — T1–T25, T29, T30 |
+| Ledgers **never filed** | **3** — T26, T27, T28 |
+| Phase rows on record | **13,518** |
+| Rows passing | **12,893** |
+| Rows recording a problem | **281** — most already fixed in that terminal's own PR |
+| Rows reserved, each with a written reason | **343** |
 
-**T21 and T22 are filed but not yet merged** — their ledgers live on `origin/sweep6/t21-db-migrations-a`
-and `origin/sweep6/t22-db-migrations-b`. Read them from those branches until the merge terminal lands them.
+**T26 filed its ledger but it is not in this folder yet** — it lives on
+`origin/sweep6/t26-the-look` (the LOOK: 577 rows). Read it from there until the merge terminal lands
+it. **T27 (every word on every screen, `P13001`–`P13500`) and T28 (the repo's own guards,
+`P13501`–`P14000`) have never been filed at all** — 1,000 checks never executed once.
 
----
+T28's absence is the expensive one, so T30 audited the guards' own health as a stand-in. That
+section is at the bottom of this file. It found the guards are alive — but two were red, and both
+were **stale allowances**, not dead checks.
 
 ## The 30 territories and their permanent ID blocks
 
@@ -81,15 +87,15 @@ and `origin/sweep6/t22-db-migrations-b`. Read them from those branches until the
 | 18 | P08501–P09000 | **The admin's money view** — `app/aevinite/{analytics,revenue,customers,bill-audit}/**`, `app/aevinite/page.tsx` | ✅ | 500 | 487 | 0 | 0 |
 | 19 | P09001–P09500 | **The admin server routes, part A** — the first 25 of `find app/api/admin -name route.ts \| sort` | ✅ | 500 | 498 | 0 | 2 |
 | 20 | P09501–P10000 | **The admin server routes, part B + the owner routes** — the last 24 admin routes, and all 12 `app/api/owner/**` | ✅ | 500 | 500 | 0 | 0 |
-| 21 | P10001–P10500 | **The database, migrations 001–118** (positions 1–120 of the sorted list) | ✅ *(unmerged branch)* | 500 | 498 | 0 | 2 |
-| 22 | P10501–P11000 | **The database, migrations 119–222** (positions 121–230) | ✅ *(unmerged branch)* | 500 | 364 | 0 | 135 |
+| 21 | P10001–P10500 | **The database, migrations 001–118** (positions 1–120 of the sorted list) | ✅ | 500 | 498 | 0 | 2 |
+| 22 | P10501–P11000 | **The database, migrations 119–222** (positions 121–230) | ✅ | 500 | 364 | 0 | 135 |
 | 23 | P11001–P11500 | **The database, migrations 223 onward** (positions 231 to the end) | ✅ | 500 | 443 | 4 | 49 |
 | 24 | P11501–P12000 | **The money and safety libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,logTrail,userAuth,rateLimit}.ts`, `docs/COMPLIANCE-GUARDRAILS.md`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md` | ✅ | 500 | 499 | 0 | 1 |
 | 25 | P12001–P12500 | **Every other shared library file** — the ~108 files in `lib/` no other terminal owns | ✅ | 500 | 500 | 0 | 0 |
-| 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ❌ **NEVER FILED** | 0 | — | — | — |
+| 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ⚠️ filed on `origin/sweep6/t26-the-look`, not yet merged | 577 | — | — | — |
 | 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ❌ **NEVER FILED** | 0 | — | — | — |
 | 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the 130 `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ❌ **NEVER FILED** | 0 | — | — | — |
-| 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ❌ **NEVER FILED** | 0 | — | — | — |
+| 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ✅ | 500 | — | — | — |
 | 30 | P14501–P15000 | **Cross-panel truth, and this ledger** — `LEDGER/INDEX.md`, `docs/QA-500-PHASES.md`, `.claude/skills/terminal-test-improve/**` | ✅ | 500 | 342 | 59 | 99 |
 
 ---
@@ -208,10 +214,11 @@ broken.**
 5. **The two orphan API routes** — `app/api/admin/rate-limits/route.ts` and
    `app/api/print-agent/[...path]/route.ts`. Both verified clean above; both still unassigned.
 
-### And the four territories that never ran at all
+### And the territories that never ran at all
 
-`P12501`–`P14500` — **2,000 checks that have never been executed once.** The LOOK (T26), the
-WORDING (T27), **the repo's own 130 `verify:*` guards (T28)**, and the docs + remainder (T29).
+`P13001`–`P14000` — **1,000 checks that have never been executed once.** The WORDING (T27) and
+**the repo's own 142 `verify:*` guards (T28)**. The LOOK (T26) and the docs + remainder (T29) have
+both since filed.
 
 T28 is the most expensive of the four to leave undone: a permanently-red or silently-dead guard
 hides real regressions, and this project has already lost a month to exactly that (`verify:cache`
