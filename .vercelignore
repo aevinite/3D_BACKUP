@@ -21,6 +21,19 @@
 /access-designs
 # The frozen pre-rewrite reference (the code snapshot is already gitignored).
 /reference
+# The migrations. 362 SQL files / 371 files in all, and the SINGLE SOURCE OF TRUTH for both
+# stacks' schema — but read by a person and by scripts/run-migration.mjs on a laptop, never by
+# `next build` and never at runtime. Nothing under app/, lib/, components/, next.config.ts,
+# instrumentation*.ts or the prebuild step reads this folder; the only mention anywhere in the
+# shipped code is a COMMENT in lib/money.mjs pointing at migration 029.
+#
+# PROVEN, NOT ASSUMED (2026-08-22). This exclusion was held back for a whole sweep because a wrong
+# line in THIS file has already 404'd the entire manager panel (see the /editor note at the top),
+# and "I grepped and found nothing" is not the same as "the next build is fine". So before adding
+# it: supabase/ was moved out of the tree, `npm run build` was run to completion — BUILD_ID and
+# routes-manifest.json written, every route listed — and the folder was moved back with all 371
+# files byte-identical. If you ever doubt this line, repeat exactly that.
+/supabase
 # Engineering docs + plans. Read in the repo, never at runtime.
 /docs
 /*.md
