@@ -1219,6 +1219,21 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
 
 ## Known gotchas (read before editing)
 
+- **A panel lives at TWO addresses, and they drift.** Every staff panel is reachable at `/manager`
+  (what the admin console opens) and at `/r/<slug>/manager` (the restaurant's OWN address, which is
+  what its own staff use) — same for kitchen and tablet. A fix goes into whichever file the person
+  had open, and nothing looks wrong in either file alone; only the PAIR is wrong. Two of these have
+  already happened: the T15 sweep named the browser tab on the `/panel` side only, so for two weeks
+  the three tabs a restaurant's own staff switch between during a rush were all called
+  "Aevidine — Restaurant OS"; and the tenant side built its iframe URL by hand, carrying `rid` but
+  silently dropping `view=real` and `as=<staff id>`, so "Visit their panel" and the real-view toggle
+  did nothing at that address. **Both fixed 2026-08-22 and guarded** by
+  `node .github/scripts/verify-twin-route-parity.mjs`. Change one side of a pair, change both — and
+  build the iframe URL with `panelIframeSrc()`, never by concatenation: it is the single place those
+  admin-only pins are defined and validated, and it is what makes them safe (it returns the bare URL
+  untouched when there is no admin, and `requirePanelAt` reports `admin: true` only for a valid admin
+  cookie).
+
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The `/kitchen` and
   `/tablet` panels only repaint when a fingerprint (`boardSig` in their `app.js`) changes, so a
   realtime refetch whose data "looks the same" is dropped (prevents flicker). `boardSig` serialises

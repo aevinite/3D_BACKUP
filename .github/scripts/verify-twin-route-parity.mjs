@@ -84,6 +84,36 @@ wrong.length
   ? bad(`${wrong.length} panel route(s) hard-code the root default as their own title`, wrong.join("\n      "))
   : ok(`no panel route uses the root layout's generic "${ROOT_DEFAULT}" as its tab name`);
 
+// BOTH ADDRESSES MUST BUILD THE IFRAME URL THE SAME WAY (added 2026-08-22).
+//
+// panelIframeSrc() carries three admin-only pins into the panel — rid (which restaurant), view=real
+// (show the role's real, un-X-rayed panel) and as=<staff id> ("Visit their panel"). The /r/<slug>/…
+// doors used to build that URL by hand and carried only rid, so the SAME tab behaved differently
+// depending on which address it was opened at, and nothing said so. A hand-built URL is how that
+// happens, so this fails on one: the builder is the single place those pins are defined and
+// validated, and it is also what makes them safe (it returns the bare URL when there is no admin).
+for (const [panel, plain, tenant] of PANELS) {
+  for (const f of [plain, tenant]) {
+    if (!existsSync(path.join(ROOT, f))) continue;
+    // COMMENTS STRIPPED FIRST. The first version of this check grepped the raw source and went red
+    // on the very comment that EXPLAINS the rule — the comment quotes the hand-built URL it is
+    // warning you off. A guard that fails on its own documentation is a guard people switch off.
+    const src = readFileSync(path.join(ROOT, f), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    if (/index\.html"\s*\+/.test(src)) {
+      bad(`${f} builds its panel URL by hand instead of through panelIframeSrc()`,
+        `Only rid survives a hand-built URL; view=real and as=<staff id> are silently dropped, so the\n      ` +
+        `same tab does two different things at /${panel} and at /r/<slug>/${panel}. Use\n      ` +
+        `panelIframeSrc("/panels/…/index.html", admin ? restaurantId : null, { as, view }).`);
+    } else if (!/panelIframeSrc\(/.test(src)) {
+      bad(`${f} neither builds its panel URL by hand nor calls panelIframeSrc() — re-teach this guard`, f);
+    } else {
+      ok(`${f} builds its panel URL through panelIframeSrc()`);
+    }
+  }
+}
+
 // The two CONSOLES have one layout each, covering every page under them, and they must name their
 // tab too — the admin console was the last surface still falling back to the root default, across
 // all 23 of its pages.
