@@ -163,6 +163,14 @@ has("fitnums.js", /if \(el\.textContent === el\.dataset\.lfhShort\)/,
 has("fitnums.js", /function setText\(el, s\) \{ selfNodes\.add\(el\)/,
   "our own text rewrite no longer marks itself, so the observer feeds this file a scan every frame for ever");
 has("fitnums.js", /if \(mine\) return;/, "the self-write guard was removed from the observer callback");
+// A shortened tile gets a tooltip with the whole figure; the CLIPPED exact one got nothing, so a
+// part-figure on the Bills tab could not be read at all. It carries the same title now — marked as
+// ours, so a panel's own title is never overwritten and ours is withdrawn when a shorter value fits
+// (T9 sweep #7, 2026-08-22).
+has("fitnums.js", /isExact\(el\)\) \{[\s\S]{0,320}?dataset\.lfhTitle/,
+  "a clipped exact figure has nothing that shows the digits the box cut off");
+has("fitnums.js", /if \(over <= 1\) break;/,
+  "fit() returns early when a figure fits, so a tooltip added while it was clipped is left quoting the old value");
 
 // ── guestbell.js — cheap enough to call on every paint, and clear of the home indicator ────────
 has("guestbell.js", /var seenSet = null;/,
@@ -332,6 +340,11 @@ has("errlog.js", /addEventListener\("online", flushPending\)/,
   "nothing delivers the kept crashes when the connection returns");
 has("errlog.js", /offline, "/,
   "a replayed crash no longer says it happened earlier, so it reads as a fault happening now");
+// …and says it ONCE. A refused delivery re-stashes the row, and the row already carries the note, so
+// each attempt used to append another one — squeezing the code location towards the 120-char cut
+// (T9 sweep #7, 2026-08-22).
+has("errlog.js", /replace\(\/ · offline, \[\^·\]\*earlier\/g, ""\)/,
+  "a re-kept crash stacks another 'offline, N earlier' on every attempt, pushing the code line out of the 120-character field");
 has("errlog.js", /if \(!queued\) stash\(payload\)/,
   "a beacon the browser refused to queue is dropped instead of kept");
 
