@@ -582,6 +582,9 @@ head("8. the two docs I own tell the truth about the code they name");
   // COMMENTS STRIPPED FIRST. This check used to grep the raw source, so it went red on the four
   // `REJECTED (owner, 2026-08-16)` comments that CLAUDE.md REQUIRES to be there — a guard failing on
   // the very note that records the decision. Only a live declaration counts.
+  // (Those four decisions, and R27 below, are written down in docs/REJECTED-IDEAS.md — naming the
+  //  doc here is what `npm run verify:rejected` asks of any file that mentions a rejection, so a
+  //  reader who lands on this line can find the decision and its date.)
   {
     const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     const model = strip(read("lib/accessTree.ts")) + strip(read("lib/accessModel.ts"));

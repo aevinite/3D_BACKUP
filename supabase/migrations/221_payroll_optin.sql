@@ -16,12 +16,56 @@ ALTER TABLE staff_users
   ADD COLUMN IF NOT EXISTS payroll_added_by text;
 
 -- Backfill: anyone already set up with pay, or already paid, is on the list.
-UPDATE staff_users s SET in_payroll = true, payroll_added_at = now(), payroll_added_by = 'migration 221'
- WHERE s.in_payroll = false
-   AND (
-     (s.pay_type IS NOT NULL AND s.pay_amount IS NOT NULL)
-     OR EXISTS (SELECT 1 FROM staff_payments p WHERE p.staff_id = s.id)
-   );
+--
+-- ⚠️ ONCE ONLY — and this guard is why (sweep #6 terminal 22, 2026-08-21).
+-- A re-seed re-runs every migration in this folder with no ledger of its own. This UPDATE is not
+-- safe to repeat: it puts a person back on the pay list whenever they still carry a pay rate or
+-- have any payment history — which is exactly true of somebody the OWNER has since deliberately
+-- taken OFF the list. Their pay would silently reappear in the monthly cost and in the profit
+-- figure, and `payroll_added_by` would blame 'migration 221' for a decision the owner reversed.
+-- On the first run (a genuinely fresh database) it must still happen, so nothing that was already
+-- being paid falls off the books.
+--
+-- The test is the guard function migration 307 creates. Reaching 307 can only have happened on an
+-- EARLIER pass of the seeder, and that pass necessarily ran this file too — so if the function is
+-- here at all, the backfill is already done. On a fresh database it does not exist yet at file
+-- 221, and the backfill runs exactly once, as intended.
+DO $payroll_optin_once$
+DECLARE v_applied boolean := false; v_n int;
+BEGIN
+  -- The ledger is the answer when it has one.
+  IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+    EXECUTE $probe$ SELECT lfh_already_applied('221_payroll_optin_backfill') $probe$ INTO v_applied;
+
+    -- And when it does not: the guard function only exists from migration 307 onwards, so finding
+    -- it here at file 221 means an EARLIER pass of the seeder already got that far — and that pass
+    -- necessarily ran this backfill on its way. So the key belongs in the ledger; write it, and
+    -- skip. (On a genuinely fresh database the function does not exist yet at this point, this
+    -- whole branch is skipped, and the backfill runs exactly once, as it must.)
+    IF NOT v_applied THEN
+      v_applied := true;
+      IF to_regclass('public.lfh_applied_once') IS NOT NULL THEN
+        INSERT INTO lfh_applied_once (key, note) VALUES
+          ('221_payroll_optin_backfill',
+           'the one-time pay-list backfill. A second run puts anyone the owner has since taken OFF the pay list back on it, because they still hold a rate or a payment history.')
+        ON CONFLICT (key) DO NOTHING;
+      END IF;
+    END IF;
+  END IF;
+  IF v_applied THEN
+    RAISE NOTICE '221: the pay-list backfill has already run once — skipped (nobody is put back on the list)';
+    RETURN;
+  END IF;
+
+  UPDATE staff_users s SET in_payroll = true, payroll_added_at = now(), payroll_added_by = 'migration 221'
+   WHERE s.in_payroll = false
+     AND (
+       (s.pay_type IS NOT NULL AND s.pay_amount IS NOT NULL)
+       OR EXISTS (SELECT 1 FROM staff_payments p WHERE p.staff_id = s.id)
+     );
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RAISE NOTICE '221: % person(s) who already had a pay rate or a payment were put on the pay list', v_n;
+END $payroll_optin_once$;
 
 -- The reports read "who is on the pay list" constantly; keep it a cheap indexed answer.
 CREATE INDEX IF NOT EXISTS idx_staff_users_payroll

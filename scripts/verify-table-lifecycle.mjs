@@ -69,9 +69,19 @@ const openTable = async (t) => {
   if (r.error || r.data?.error) throw new Error(r.error?.message || r.data.error);
   made.sessions.push(r.data.id); return r.data.id;
 };
+// p_confirm_duplicate: THIS RIG IS THE "SEND ANYWAY" CALLER (sweep #6 T22, 2026-08-22).
+// Migration 202 refuses a second identical order on the same table within 3 seconds — a real
+// protection, tested on its own terms elsewhere. This rig places identical orders back to back by
+// design (that is what "the next party sits down" looks like at machine speed), and another
+// terminal driving the same floor can collide with it too. When it hit that wall the RPC answered
+// { ok:false, duplicateWarning:true }, `order()` returned undefined, and the run died four
+// scenarios in with `invalid input syntax for type uuid: "undefined"` — a guard failing on itself,
+// which reads exactly like a product fault and is not one. So: say "send anyway", the same thing a
+// waiter says, and REFUSE LOUDLY if anything else comes back rather than handing on an undefined id.
 const order = async (t, d, qty = 1) => {
-  const r = await sb.rpc("lfh_staff_place_order", { p_table: t, p_items: [{ id: d.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: RID });
+  const r = await sb.rpc("lfh_staff_place_order", { p_table: t, p_items: [{ id: d.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: RID, p_confirm_duplicate: true });
   if (r.error) throw new Error(r.error.message);
+  if (!r.data?.order_id) throw new Error(`place-order on T${t} was refused: ${JSON.stringify(r.data)}`);
   made.orders.push(r.data.order_id); return r.data.order_id;
 };
 const accept = async (id) => { must(await sb.from("order_items").update({ status: "preparing" }).eq("order_id", id).select("id")); must(await sb.from("orders").update({ status: "preparing" }).eq("id", id).select("id")); };
