@@ -372,14 +372,33 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // landed, and fetched up to 20 review rows on every dish open for a restaurant that had
   // reviews switched OFF. Keying the fetch on features.reviews means it happens once the
   // truth is known, and not at all when the answer is "off" (guest sweep 2026-08-04).
+  //
+  // …AND ON THE SAME CONDITION THAT DECIDES WHETHER THEY CAN BE SEEN (sweep #7 T2 — item 5).
+  //
+  // The fetch was keyed on `features.reviews` alone, but NOTHING on this page draws a review
+  // unless BOTH switches are on: the list, the star row and the tab count are all behind
+  // `features.ratings && features.reviews` (see `normalOn` below, and the star row's own
+  // `!features.ratings` test). So a restaurant with reviews ON and ratings OFF paid for up to
+  // twenty review rows on EVERY dish open and could not render one of them.
+  //
+  // Not hypothetical: measured on French House, which is in exactly that state today — one
+  // `reviews` read per dish open, `select=name,stars,comment,device_id,created_at ... limit=20`,
+  // for a section that returns null. That is the egress rule's own case: the cheapest read is
+  // the one you do not make.
+  //
+  // `showNormal` below adds one more condition (Google-ONLY mode also replaces the list), but it
+  // is derived during render from state this effect would have to duplicate. The two switches are
+  // the part worth gating on: they are per-restaurant and permanent, where the Google mode is one
+  // restaurant's choice among four and still shows the list in two of them.
+  const reviewsCanBeSeen = !!features.reviews && !!features.ratings;
   useEffect(() => {
-    if (!item || !features.reviews) { setLocalReviews([]); return; }
+    if (!item || !reviewsCanBeSeen) { setLocalReviews([]); return; }
     let cancelled = false;
     getItemReviews(item.slug, restaurantId)
       .then((r) => { if (!cancelled) setLocalReviews(r); })
       .catch(() => {}); // a failure just leaves the list empty
     return () => { cancelled = true; };
-  }, [item, restaurantId, features.reviews]);
+  }, [item, restaurantId, reviewsCanBeSeen]);
 
   // Load THIS restaurant's Google-review mode + link once (getSettings is cached per
   // restaurant, so this is effectively free). Drives the persistent Google call-to-action

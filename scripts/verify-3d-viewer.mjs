@@ -317,6 +317,30 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── do not fetch what no switch will let you draw (sweep #7 T2, item 5) ──────────────────────
+// The review fetch was keyed on `features.reviews` alone, but every surface that DRAWS a review is
+// behind `features.ratings && features.reviews`. Measured on French House, which has reviews on and
+// ratings off: one `reviews` read per dish open, limit 20, for a section that returns null.
+{
+  const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the dish page only fetches reviews when BOTH switches let it show them",
+    /const reviewsCanBeSeen = !!features\.reviews && !!features\.ratings/.test(code) &&
+      /if \(!item \|\| !reviewsCanBeSeen\)/.test(code) &&
+      /\}, \[item, restaurantId, reviewsCanBeSeen\]\)/.test(code),
+    ITEM_CLIENT + " \u2192 gate getItemReviews on the same pair the display uses. Keying it on " +
+      "features.reviews alone makes a ratings-off restaurant pay for 20 review rows on every " +
+      "dish open and render none of them."
+  );
+  // …and the display condition must not drift away from the fetch condition.
+  check(
+    "…and the condition that DRAWS them still asks for the same two switches",
+    /const normalOn = features\.ratings && features\.reviews/.test(code),
+    ITEM_CLIENT + " \u2192 if `normalOn` ever stops requiring both, the fetch gate above becomes " +
+      "wrong in the other direction and a restaurant would show an empty review list."
+  );
+}
+
 // ── a maintenance restaurant does not preview its dish either (sweep #7 T2, item 4) ──────────
 // Both doors already RETURN the maintenance screen for Service mode. Both doors' generateMetadata
 // checked only the Menu master switch — so the page said "we'll be right back" while the same link
