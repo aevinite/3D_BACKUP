@@ -32,8 +32,11 @@
     chip.className = "lfh-swipe-more";
     chip.setAttribute("aria-hidden", "true");   // the row itself is already reachable by swipe/keys
     chip.tabIndex = -1;
-    // Built as nodes, not innerHTML: the count is our own integer, but this file is loaded by four
-    // panels and "it was only a number" is how an innerHTML habit spreads to somewhere it matters.
+    // Built as nodes, not innerHTML: the count is our own integer, but "it was only a number" is how
+    // an innerHTML habit spreads to somewhere it matters.
+    // (This said "loaded by four panels". It is loaded by ONE — the manager. The waiter tablet has
+    // four sideways-scrolling rows of its own and does not load this file, which is worth knowing
+    // before anyone assumes the hint is already there. T9 sweep #7, 2026-08-22.)
     chip.append(document.createTextNode("→ "), document.createElement("b"), document.createTextNode(" more"));
     // Tapping it scrolls one screenful, which is what the floor's own "more" chip does.
     chip.addEventListener("click", function () {
