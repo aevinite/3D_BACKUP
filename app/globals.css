@@ -36,6 +36,15 @@
      the accent itself. The light skin darkens it — see [data-theme="light"]. */
   --accent-ink: var(--accent);
   --accent-ink-dim: var(--accent-dim);
+  /* THE HAIRLINE COLOUR ON ITS OWN. --border is the whole `1px solid rgba(...)` shorthand, so a rule
+     that needs only the colour (a border-top, a border-bottom) cannot reuse it — and five rules on
+     the BILL panel read `var(--border-color, rgba(212,165,116,0.18))` for a token nothing declared,
+     so the hardcoded fallback won every time. That fallback is the LIGHT skin's tan at 0.18, which
+     meant the bill's edges were the wrong skin's colour in the dark one (1.49:1 where every other
+     card reads 1.80:1) and all but invisible in the light one (1.09:1 against 1.31:1). Declared here
+     as the colour half of --border, so the bill panel's edges are the same hairline as every other
+     card on the menu. T26 sweep, 2026-08-22, measured on the running bill in both skins. */
+  --border-color: rgba(227, 192, 111, 0.22);
 }
 
 [data-theme="light"] {
@@ -61,6 +70,7 @@
      being replaced by a fixed brown. */
   --accent-ink: color-mix(in srgb, var(--accent) 55%, #000);
   --accent-ink-dim: color-mix(in srgb, var(--accent) 62%, #000);
+  --border-color: rgba(139, 90, 43, 0.2);   /* the colour half of this skin's --border — see :root */
 }
 
 * { box-sizing: border-box; }
@@ -282,7 +292,7 @@ body.menu-scrolling .chef-call {
   position: sticky; top: 0; z-index: 6;
   display: flex; align-items: center; justify-content: space-between;
   padding: 20px 0 14px; margin: 0 0 16px;
-  background: var(--bg); border-bottom: 1px solid var(--border-color, rgba(212,165,116,0.18));
+  background: var(--bg); border-bottom: 1px solid var(--border-color);
 }
 .cart-back {
   display: inline-flex; align-items: center; gap: 8px;
@@ -339,11 +349,11 @@ body.menu-scrolling .chef-call {
 .cart-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .cart-tabs button {
   flex: 1; padding: 9px 12px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 13px;
-  background: transparent; border: 1px solid var(--border-color, rgba(212,165,116,0.3)); color: var(--muted);
+  background: transparent; border: 1px solid var(--border-color); color: var(--muted);
 }
 .cart-tabs button.active { background: var(--accent); border-color: var(--accent); color: #2a1d0c; }
 .order-history { display: flex; flex-direction: column; gap: 12px; }
-.hist-order { border: 1px solid var(--border-color, rgba(212,165,116,0.2)); border-radius: 14px; padding: 14px; }
+.hist-order { border: 1px solid var(--border-color); border-radius: 14px; padding: 14px; }
 .hist-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .hist-table { font-weight: 700; color: var(--text); }
 .hist-when { font-size: 11px; color: var(--muted); margin-left: auto; }
@@ -361,7 +371,7 @@ body.menu-scrolling .chef-call {
 .hist-line-opts { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
 .hist-line-qty { flex: none; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .hist-line-more { background: none; border: none; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 0 0 8px; align-self: flex-start; }
-.hist-total { display: flex; justify-content: space-between; font-weight: 700; color: var(--text); border-top: 1px solid var(--border-color, rgba(212,165,116,0.15)); padding-top: 8px; }
+.hist-total { display: flex; justify-content: space-between; font-weight: 700; color: var(--text); border-top: 1px solid var(--border-color); padding-top: 8px; }
 
 /* cancelled bill: greyed + a clear label */
 .hist-order.hist-cancelled { opacity: 0.6; }
@@ -2761,7 +2771,7 @@ a *:active,
   flex-shrink: 0;
   padding-top: 14px;
   margin-top: 6px;
-  border-top: 1px solid var(--border-color, rgba(212,165,116,0.18));
+  border-top: 1px solid var(--border-color);
   background: var(--card);
 }
 @keyframes confirmIn {
@@ -3617,7 +3627,7 @@ body[data-lfh-outbox] .order-tracker { bottom: calc(76px + env(safe-area-inset-b
   bottom: calc(12px + var(--lfh-offbar-h, 0px) + env(safe-area-inset-bottom, 0px));
   z-index: 60; display: flex; align-items: center; gap: 12px;
   margin: 0 auto; width: min(560px, calc(100% - 24px)); padding: 10px 12px;
-  border-radius: 16px; border: 1px solid var(--line, rgba(212,165,116,0.25));
+  border-radius: 16px; border: 1px solid var(--border-color);   /* --line is not a guest token; the literal was the light skin's tan, in both skins */
   background: color-mix(in srgb, var(--card, #1a120c) 92%, transparent);
   backdrop-filter: blur(20px);
   box-shadow: 0 14px 34px rgba(0,0,0,0.34);
@@ -3740,7 +3750,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 /* "View more / Show less" toggle under the Previous-orders list. */
 .hist-more-btn {
   display: block; width: 100%; margin: 6px 0 2px; padding: 10px;
-  background: transparent; border: 1px dashed var(--line, rgba(212,165,116,0.35));
+  background: transparent; border: 1px dashed var(--border-color);   /* was the light skin's tan pinned into both skins */
   border-radius: 12px; color: var(--accent, #d4a574);
   font-size: 13px; font-weight: 700; cursor: pointer;
 }
@@ -4184,12 +4194,15 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 /* ── Ban wall (components/BanGate.tsx) — covers the whole menu for a blocked
    device; sits above EVERYTHING incl. toasts so a banned guest can't get past it. */
 .ban-overlay { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--bg, #1a140e); }
-.ban-card { max-width: 420px; width: 100%; text-align: center; background: var(--card, rgba(255,255,255,0.04)); border: 1px solid var(--line, rgba(255,255,255,0.12)); border-radius: 20px; padding: 32px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+/* --border-color, not a white literal: --line is not a token on the guest side, so this card and the
+   field below it drew a WHITE hairline — invisible on the light skin, where the card is also white.
+   The field is the one a banned guest has to find to type into. (T26 sweep, 2026-08-22.) */
+.ban-card { max-width: 420px; width: 100%; text-align: center; background: var(--card, rgba(255,255,255,0.04)); border: 1px solid var(--border-color); border-radius: 20px; padding: 32px 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
 .ban-emoji { font-size: 54px; line-height: 1; margin-bottom: 14px; }
 .ban-title { font-family: "Playfair Display", Georgia, serif; font-size: 26px; font-weight: 700; color: var(--text, #f4ece0); margin: 0 0 10px; }
 .ban-sub { font-size: 14px; line-height: 1.55; color: var(--muted, #b8ab98); margin: 0 0 20px; }
 .ban-form { display: flex; flex-direction: column; gap: 10px; }
-.ban-input { width: 100%; box-sizing: border-box; padding: 13px 14px; font-size: 16px; border-radius: 12px; border: 1px solid var(--line, rgba(255,255,255,0.15)); background: var(--bg, #1a140e); color: var(--text, #f4ece0); text-align: center; }
+.ban-input { width: 100%; box-sizing: border-box; padding: 13px 14px; font-size: 16px; border-radius: 12px; border: 1px solid var(--border-color); background: var(--bg, #1a140e); color: var(--text, #f4ece0); text-align: center; }
 .ban-btn { width: 100%; padding: 13px 16px; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; background: var(--accent, #c9a35b); color: #1a140e; }
 .ban-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ban-done { font-size: 14px; line-height: 1.5; color: #16a34a; font-weight: 600; margin: 4px 0 0; }
@@ -4212,6 +4225,11 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent: #3b82f6; --accent-dim: rgba(59,130,246,0.6);
   --accent-grad: linear-gradient(120deg, #0066ff 0%, #8b5cf6 50%, #ff5e7e 100%);
   --accent-glow: rgba(59,130,246,0.32);
+  /* On a DARK tint the bright accent already reads clean, so ink IS the accent here. DECLARED, never
+     inherited: the GUEST theme key declares --accent-ink too, and a console must never take its ink
+     from whichever skin the guest menu happens to be left on — leaving this out put a brown guest
+     value on the admin console's active nav label at 2.60:1. (T26 sweep, 2026-08-22.) */
+  --accent-ink: var(--accent);
   /* White text sits ON this fill (.adx .adm-btn.primary), and on #d97706 that measured
      3.19:1 — under the 4.5:1 a 12px label needs (T11 sweep, 2026-08-13: "New restaurant",
      "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
@@ -4243,6 +4261,12 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent: #2563eb; --accent-dim: rgba(37,99,235,0.6);
   --accent-grad: linear-gradient(120deg, #2563eb 0%, #7c3aed 52%, #fb7185 100%);
   --accent-glow: rgba(37,99,235,0.18);
+  /* THE ACCENT AS INK ON A TINT OF ITSELF — the active sidebar item. --accent-on is the ink for a
+     FULL accent fill; this is the other half, and it was missing, so the active nav label measured
+     4.13-4.24:1 on its own 14% tint. Same hue 15% deeper: 5.30-6.64:1. DECLARED IN EVERY CONSOLE
+     BLOCK, never inherited: the GUEST theme key declares --accent-ink too, and a console must never
+     take its ink from whichever skin the guest menu happens to be left on. (T26, 2026-08-22.) */
+  --accent-ink: color-mix(in srgb, var(--accent) 85%, #000);
   /* White text sits ON this fill (.adx .adm-btn.primary), and on #d97706 that measured
      3.19:1 — under the 4.5:1 a 12px label needs (T11 sweep, 2026-08-13: "New restaurant",
      "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
@@ -4253,7 +4277,13 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
      and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
      values — bright-on-dark was already fine there. */
-  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
+  /* --adm-ok ONE MORE STEP (T26 sweep, 2026-08-22). The note above is right about the pills, but
+     the value it landed on was measured against a paler tint than the ones actually shipped: on
+     the live 16-18% tints (the command-strip Active pill, the restaurant chips, the owner's
+     Active pill) #15803d came back at 3.69-4.05:1. #106230 is the same hue and reads 5.50-6.02:1
+     there. --adm-warn is the same story on the "on pay list · rate not set" chip (3.87:1 -> 4.93:1),
+     so it takes the same one step: #9a4708. --adm-danger measured clean on its own tint. */
+  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
   /* The same four one step deeper for the LIGHT card, where the bright values measured
      1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
      5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
@@ -4378,8 +4408,8 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 }
 .adx-navlink i { width: 16px; text-align: center; font-size: 13px; color: var(--muted); }
 .adx-navlink:hover { background: var(--muted2); }
-.adx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent) !important; font-weight: 600; }
-.adx-navlink.active i { color: var(--accent); }
+.adx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-ink, var(--accent)) !important; font-weight: 600; }
+.adx-navlink.active i { color: var(--accent-ink, var(--accent)); }
 .adx-navlink .navsoon {
   margin-left: auto; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--muted); border: var(--border); padding: 1px 5px; border-radius: 999px;
@@ -4595,6 +4625,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      already does for its filled accent chips (.oc-choice.on). Consoles whose accent is dark
      (the admin's purple) keep #fff via the default below. */
   --accent-on: #06251a;
+  --accent-ink: var(--accent);   /* on a dark tint the bright accent already reads clean — see the light block */
   --own-cta: #b45309;   /* same fix as --adm-cta above: white on it was 3.19:1 */
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
@@ -4625,7 +4656,13 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
      and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
      values — bright-on-dark was already fine there. */
-  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
+  /* --adm-ok ONE MORE STEP (T26 sweep, 2026-08-22). The note above is right about the pills, but
+     the value it landed on was measured against a paler tint than the ones actually shipped: on
+     the live 16-18% tints (the command-strip Active pill, the restaurant chips, the owner's
+     Active pill) #15803d came back at 3.69-4.05:1. #106230 is the same hue and reads 5.50-6.02:1
+     there. --adm-warn is the same story on the "on pay list · rate not set" chip (3.87:1 -> 4.93:1),
+     so it takes the same one step: #9a4708. --adm-danger measured clean on its own tint. */
+  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
   /* The same four one step deeper for the LIGHT card, where the bright values measured
      1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
      5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
@@ -4639,6 +4676,14 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      (4.91:1); on the new #04825b it would fall to 3.83:1. White on the darker fill is
      4.83:1, so the ink flips rather than the fix being half-done. */
   --accent-on: #ffffff;
+  /* THE ACCENT WHEN IT IS INK ON A TINT OF ITSELF — the active sidebar item, the chosen range
+     button, the report eyebrow. --accent-on covers ink on a FULL accent fill; this is the other
+     half, and it was missing: the accent on its own 14-16% tint measured 3.64-4.01:1 on the running
+     console, under the 4.5:1 a 12.5-13px label needs. The earlier fix that deepened --accent was
+     measured against WHITE and --bg (4.83 / 4.50) and never against the tint the label actually
+     sits on. Same hue 15% deeper: 4.70-6.24:1. The DARK block keeps ink = the accent, where it
+     already measures clean. (T26 sweep, 2026-08-22.) */
+  --accent-ink: color-mix(in srgb, var(--accent) 85%, #000);
   --elev: 0 1px 2px rgba(16,24,40,.04);
   background: var(--bg);
 }
@@ -4682,8 +4727,8 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .owx-navlink .lbl, .owx-navlink span { overflow: hidden; text-overflow: ellipsis; }
 .owx-navlink i { width: 16px; text-align: center; font-size: 13px; color: var(--muted); }
 .owx-navlink:hover { background: var(--muted2); }
-.owx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent) !important; font-weight: 600; }
-.owx-navlink.active i { color: var(--accent); }
+.owx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-ink, var(--accent)) !important; font-weight: 600; }
+.owx-navlink.active i { color: var(--accent-ink, var(--accent)); }
 .owx-navlink .navsoon {
   margin-left: auto; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--muted); border: var(--border); padding: 1px 5px; border-radius: 999px;

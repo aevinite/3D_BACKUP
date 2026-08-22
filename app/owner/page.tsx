@@ -314,7 +314,11 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
         .owr-btn.sm { padding: 3px 8px; font-size: 10.5px; }
         .owr-btn:hover { color: var(--accent); border-color: var(--accent); }
         .owr-btn i { font-size: 9px; opacity: .7; }
-        .owr-btn.main { background: color-mix(in srgb, var(--accent) 16%, transparent); border: 1px solid var(--accent); color: var(--accent); font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
+        /* --accent-ink, not --accent: this is the accent used as INK on a 16% tint of ITSELF, which
+           measured 3.65:1 on the light console (T26 sweep, 2026-08-22). --accent-on covers ink on a
+           full accent fill; --accent-ink is the tint half, declared per console skin in globals.css.
+           The dark override below is unchanged. */
+        .owr-btn.main { background: color-mix(in srgb, var(--accent) 16%, transparent); border: 1px solid var(--accent); color: var(--accent-ink, var(--accent)); font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
         .owr-btn.main:hover { background: color-mix(in srgb, #34d399 26%, transparent); color: #047857; }
         :global([data-skin="dark"]) .owr-btn.main { color: #34d399; }
         :global([data-skin="dark"]) .owr-btn.main:hover { color: #6ee7b7; }

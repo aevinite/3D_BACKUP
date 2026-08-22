@@ -15,6 +15,7 @@
      silently paints the inherited colour instead. */
   --gold-ink: var(--gold);
   --gold-strong: #e8b884;
+  --gold-grad: linear-gradient(180deg, #e8b884, #d4a574);   /* the gold FILL, per skin — dark ink sits on it */
   --green: #22c55e;
   --red: #ef4444;
   --radius: 12px;
@@ -140,7 +141,7 @@ body.nav-compact .nav-burger {
 body.nav-compact .nav-burger.has-news::after {
   content: ""; position: absolute; top: -3px; right: -3px;
   width: 10px; height: 10px; border-radius: 50%;
-  background: var(--danger, #ef4444); border: 2px solid var(--bg);
+  background: var(--red); border: 2px solid var(--bg);
 }
 body.nav-compact .nav-burger span {
   display: block; width: 18px; height: 2px; border-radius: 2px;
@@ -198,7 +199,12 @@ body.nav-compact .tab {
 .tab-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; margin-left: 7px; padding: 0 5px;
-  border-radius: 999px; background: var(--red, #e5484d); color: #fff;
+  /* A FIXED deeper red, because WHITE sits on it: the dark skin's --red is #ef4444, and white on
+     that measured 3.76:1 at 11px/800 - this is the count that says how many bills or tables are
+     waiting. #dc2626 is the red the LIGHT skin already uses here, so the light skin does not
+     move and the dark one comes up to 4.83:1. Same fix as --adm-cta in globals.css, same
+     reason. (T26 sweep, 2026-08-22.) */
+  border-radius: 999px; background: #dc2626; color: #fff;
   font-size: 11px; font-weight: 800; vertical-align: middle;
   animation: badgePulse 1.4s ease-in-out infinite;
 }
@@ -832,7 +838,10 @@ html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
 /* Premium, warm palette to match the floor — no neon. "Mark paid" is the gold
    primary; "Serve" is a soft, deep emerald (reads as "done" without shouting);
    the status/payment PILLS still carry the bright state colour. */
-.ord-btn.pay { background: var(--gold-grad, linear-gradient(180deg, #e8b884, #d4a574)); color: #2a1d0c; }
+/* --gold-grad is declared per skin at the top of this file now: the literal here meant the Pay
+   button kept the DARK skin's gold while the tab beside it used the light one. Dark ink on gold in
+   both, ~8:1 either way, so only the hue follows the skin. (T26 sweep, 2026-08-22.) */
+.ord-btn.pay { background: var(--gold-grad); color: #2a1d0c; }
 .ord-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .ord-btn {
   flex: 1; min-width: 120px; padding: 10px 12px; border-radius: 10px;
@@ -908,7 +917,13 @@ body {
    is why this stood for months; in the DARK skin the restaurant's name was near-black on #1d1812
    and effectively invisible. It is the one word that tells a person which restaurant they are about
    to change, so it has to be legible in both skins. Seen at 1280×800 with lfh_panel_theme=dark. */
-.brand span.brand-rest { color: var(--gold); -webkit-text-fill-color: var(--gold); }
+.brand span.brand-rest { color: var(--gold-ink); -webkit-text-fill-color: var(--gold-ink); }
+/* --gold-ink, not --gold (T26 sweep, 2026-08-22). Fixing the dark skin above put the name in the
+   raw accent, and --gold is a FILL colour: on the LIGHT skin's near-white top bar the restaurant's
+   own name measured 2.81:1 at 14px — the faintest thing on a bar whose other word ("Manager") is
+   near-black. --gold-ink is the same hue taken 65% toward black, which is exactly what this file
+   already does for every other place gold carries WORDS: 5.91:1 on the bar. In the DARK skin
+   --gold-ink IS --gold, so the fix above is unchanged at 7.92:1. */
 .tab.active {
   background: linear-gradient(180deg, var(--gold-strong), var(--gold));
   box-shadow: 0 6px 16px rgba(212,165,116,0.32);
@@ -1588,6 +1603,13 @@ html[data-theme="light"] .lgcap { opacity: 1; }   /* .75 of a pale ink was half 
 /* The tile's live line ("0/6 served", "Free"): keep the state hue, but let the dark text carry it. */
 html[data-theme="light"] .ft-linenum,
 html[data-theme="light"] .ft-line-plain .ft-linenum { color: color-mix(in srgb, var(--c) 42%, var(--text)); }
+/* AND THE TABLE NUMBER ITSELF, for the same reason and by the same method (T26 sweep,
+   2026-08-22). It is 78% of the state colour, which on a DENSE tile lands at 12.5px and measured
+   3.13:1 on an amber table and 3.34:1 on a green one against the white tile - the one field on
+   the floor a manager must not misread, and the palest thing on its own tile. 45%, so it still
+   carries more of the state hue than the served line under it: 6.02:1 amber, 6.44:1 green, and
+   the states that were already fine only get clearer. The dark skin is untouched. */
+html[data-theme="light"] .ft-num { color: color-mix(in srgb, var(--c) 45%, var(--text)); }
 /* ＋ Take order: gold ink on a gold button is the one combination that cannot work on cream. */
 html[data-theme="light"] .ft-take { color: color-mix(in srgb, var(--gold) 26%, var(--text)); }
 html[data-theme="light"] .ft-take:hover { color: var(--text); }
@@ -1917,6 +1939,15 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
 /* A new order waiting to be accepted is the one thing that should pull the eye. */
 .ft-ico-go { color: #86efac; background: color-mix(in srgb, #22c55e 16%, var(--panel-2)); border-color: color-mix(in srgb, #22c55e 42%, var(--line)); }
 .ft-ico-go:hover { background: color-mix(in srgb, #22c55e 30%, var(--panel-2)); border-color: #22c55e; color: #fff; }
+/* …AND THE SAME MARK ON THE LIGHT SKIN, which is the DEFAULT skin for every panel (T26 sweep,
+   2026-08-22, pixel-measured on the running floor). #86efac is a PALE green tuned for a dark tile;
+   on the light skin the box behind it is a pale green tint of white, so the tick measured 1.10:1 at
+   rest and 1.43:1 on hover — the one control that says "a new order is waiting, accept it" was the
+   only invisible thing on the floor, in the skin a manager opens by default. The dark skin measured
+   8.81:1 and is untouched. Green-800 is the same hue this file already uses for green ink on cream
+   (--role-kitchen in the light block): 5.56:1 at rest, 5.00:1 on hover. */
+html[data-theme="light"] .ft-ico-go { color: #166534; }
+html[data-theme="light"] .ft-ico-go:hover { color: #14532d; }
 /* THE PRINTER HAS ITS OWN COLOUR (owner, 2026-08-01: "print notification icon should have its own
    COLOUR"). Every other tile control inherits var(--c), the table's state colour — so on a green
    Served table the bill button was a green icon in a green box on a green tile, exactly when you
@@ -2216,7 +2247,16 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .list { scrollbar-color: color-mix(in srgb, var(--gold) 55%, transparent) transparent; } /* Firefox */
 
   /* the editor's sticky title would collide with the sticky topbar — make it normal */
-  .ed-head { position: static; margin: 0 -16px 18px; padding: 16px; }
+  /* -14px, matching .editor's padding at these widths, NOT -16px (T26 sweep, 2026-08-22). The
+     header is meant to bleed to the container's edges; bleeding 16px out of a 14px pad put it 2px
+     wider than the screen at every width up to 760px — measured at 360 and 600, flush from 761 up
+     where the pair already matches (-28 against 28). Nothing was lost (the right 2px is the
+     header's own hairline), but it is the only thing standing between this panel and a clean
+     "nothing crosses an edge" at all four sizes, and the owner's rule is that there is no
+     sideways scroll anywhere. The safe-area inset is deliberately NOT added back here: .editor's
+     padding already carries it, and under-bleeding by an inset shows a sliver of page colour,
+     while over-bleeding would put the header off-screen on the first device that reports one. */
+  .ed-head { position: static; margin: 0 -14px 18px; padding: 16px; }
   .ed-head h2 { font-size: 21px; }
 
   /* --- forms & grids: stack to one column so fields aren't squashed --- */
@@ -2359,11 +2399,15 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   border: 1px solid var(--line); border-radius: 7px;
   padding: 4px 6px; font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
-.ret-select:focus { outline: 2px solid color-mix(in srgb, var(--accent, #4f8cff) 55%, transparent); outline-offset: 1px; }
+/* THE PANEL'S ACCENT IS GOLD, AND IT HAS NO --accent TOKEN (T26 sweep, 2026-08-22) — so these three
+   rules fell back to a literal BLUE and painted the retention field's focus ring and every log row's
+   hover in a colour that appears nowhere else on this panel. --gold is what the rest of the file
+   uses, and it flips per skin. */
+.ret-select:focus { outline: 2px solid color-mix(in srgb, var(--gold) 55%, transparent); outline-offset: 1px; }
 
 /* Log rows are clickable → show a pointer + a gentle hover lift so it's obvious. */
 .oprow-click, .logrow-click { cursor: pointer; transition: border-color .12s, background .12s; }
-.oprow-click:hover, .logrow-click:hover { border-color: color-mix(in srgb, var(--accent, #4f8cff) 45%, var(--line)); background: color-mix(in srgb, var(--accent, #4f8cff) 6%, var(--panel)); }
+.oprow-click:hover, .logrow-click:hover { border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); background: color-mix(in srgb, var(--gold) 6%, var(--panel)); }
 
 /* The click-to-open detail card (reuses .confirm-overlay / .confirm-box). */
 .confirm-box.logdetail { text-align: left; max-width: 460px; }
@@ -2399,6 +2443,12 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .fstat-n { font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .fstat-l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
 .fstat.warn .fstat-n { color: var(--gold-strong); }
+/* …and on the LIGHT skin --gold-strong is still a FILL colour: this number measured 3.71:1 on the
+   white floor header at 15px/800 while .fstat.alert's number was given a light value long ago
+   (see the light block below) and the neutral one sits at 15.56:1. --gold-ink is the file's own
+   answer for gold carrying words: 5.91:1. The dark skin measured 9.75:1 and is untouched.
+   (T26 sweep, 2026-08-22, measured on the running floor header.) */
+html[data-theme="light"] .fstat.warn .fstat-n { color: var(--gold-ink); }
 .fstat.alert .fstat-n { color: #f59e0b; }
 
 /* ---- the floor's header row: title · stats · legend ——— KOT ▾ · QO/P ----
@@ -3580,6 +3630,7 @@ html[data-theme="light"]{
   --muted:#766954;
   --gold:#c98f3f;
   --gold-strong:#b07a28;
+  --gold-grad: linear-gradient(180deg, #dba75c, #c98f3f);   /* same shape, this skin's gold */
   /* THE ACCENT WHEN IT CARRIES WORDS (same idea as the guest menu's --accent-ink and the
      kitchen's --blue-ink). --gold is tuned to be a FILL — tabs, primary buttons, chips —
      where dark text sits on top of it, so it must not get darker or those pairs break.
@@ -3994,7 +4045,10 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
   border-radius: clamp(6px, 6.5cqw, 10px);
   background: color-mix(in srgb, #a855f7 22%, transparent);
   border: 1px solid color-mix(in srgb, #a855f7 55%, transparent);
-  line-height: 1.1; color: color-mix(in srgb, #a855f7 78%, var(--text));
+  /* 60%, not 78%: on the DARK board this label measured 4.46:1 against its own tint at 8px on a
+     dense tile - the smallest text anywhere on the floor. Leaning further on --text keeps the
+     purple unmistakable and clears the floor. (T26 sweep, 2026-08-22.) */
+  line-height: 1.1; color: color-mix(in srgb, #a855f7 60%, var(--text));
   min-width: 0; overflow: hidden; }
 /* On the PARENT it is a slim chip under the progress line — the line is still the main reading. */
 .ft-merge-parent { margin-top: clamp(2px, 2.5cqw, 5px); flex-direction: row; align-items: center;
@@ -4002,6 +4056,10 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 64px) { .ft-merge-parent { font-size: 8px; padding: 0 3px; } }
 html[data-theme="light"] .ft-merge { background: color-mix(in srgb, #a855f7 20%, #fff); }
+/* ...and its INK, which was 4.18:1 on that tint at 8px on a dense tile - the smallest text on
+   the floor. #7e22ce is the same purple the waiter tablet already uses for the same label on
+   the light skin, so both floors say "one party" in one colour: 5.45:1. (T26, 2026-08-22.) */
+html[data-theme="light"] .ft-merge, html[data-theme="light"] .ft-merge-parent { color: #7e22ce; }
 
 /* The merged-party card in a table's detail (mig 249). Purple, because purple means merged on the
    floor too, and one row per table so three, four or five joined tables all read the same. */
@@ -4119,25 +4177,30 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
    is a loss. Framed in RED — his word — because the danger is the LEFT choice: "yes, it was cooked"
    means the ingredients are gone and the money is spent. Both options are full-width rows rather than
    a tight pair, so a thumb mid-service cannot catch the wrong one. */
-.rr-made { border: 1.5px solid color-mix(in srgb, var(--danger, #dc2626) 55%, transparent);
-  background: color-mix(in srgb, var(--danger, #dc2626) 8%, var(--panel-2));
+/* --red, NOT var(--danger, #dc2626): THE PANEL HAS NO --danger TOKEN, so the hex won in both
+   skins — the exact undeclared-token trap the note ~80 lines below this one warns about for --warn.
+   #dc2626 is the LIGHT skin's red, so the dark skin was drawing this box in the wrong skin's colour;
+   the burger's news dot did the same thing with #ef4444 the other way round. --red is declared per
+   skin at the top of this file. (T26 sweep, 2026-08-22.) */
+.rr-made { border: 1.5px solid color-mix(in srgb, var(--red) 55%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, var(--panel-2));
   border-radius: 12px; padding: 11px 12px; margin-bottom: 12px; }
 .rr-made-q { font-size: 13px; font-weight: 800; margin-bottom: 8px;
-  color: color-mix(in srgb, var(--danger, #dc2626) 72%, var(--text)); }
+  color: color-mix(in srgb, var(--red) 72%, var(--text)); }
 .rr-made-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .rr-made-opt { text-align: left; padding: 11px 12px; border-radius: 11px; border: 1.5px solid var(--line);
   background: var(--panel); color: var(--text); cursor: pointer; line-height: 1.25; min-height: 46px;
   transition: border-color .12s ease, background .12s ease, transform .1s ease; }
 .rr-made-opt b { display: block; font-size: 13px; font-weight: 800; }
 .rr-made-opt small { display: block; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
-.rr-made-opt:hover { border-color: var(--danger, #dc2626); }
+.rr-made-opt:hover { border-color: var(--red); }
 .rr-made-opt:active { transform: scale(.985); }
 /* the chosen one is unmistakable either way — a wrong answer here moves stock and money */
 .rr-made-opt.sel { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 16%, var(--panel));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 20%, transparent); }
-.rr-made-opt.danger.sel { border-color: var(--danger, #dc2626);
-  background: color-mix(in srgb, var(--danger, #dc2626) 18%, var(--panel));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger, #dc2626) 22%, transparent); }
+.rr-made-opt.danger.sel { border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 18%, var(--panel));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 22%, transparent); }
 @media (max-width: 480px) { .rr-made-opts { grid-template-columns: 1fr; } }
 .rr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .rr-opt { text-align: left; padding: 11px 12px; border-radius: 12px; border: 1.5px solid var(--line);
