@@ -31,6 +31,7 @@
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
 import { requireUp } from "./sweep/appUp.mjs";
+import { seatParty, retireTables, retireOnCrash } from "./sweep/fixture.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4000").replace(/\/$/, "");
@@ -403,9 +404,27 @@ expect(await resetToFloor(), "back on the floor before the merged-tile check");
   }
 }
 
-expect(await resetToFloor(), "back on the floor before the popup checks");
 // ── 6 · the table popup: KOT operations on TOP, money + close at the bottom ───
-const busyT = await F.evaluate(() => {
+// IT SEATS ITS OWN TWO PARTIES (sweep #6 / T28, 2026-08-22). This used to take "the first tile that is
+// not free" and then demand the full table-operations row and the ‹ › stepper. Neither is a free gift:
+// the ops row needs an OPEN SESSION (a tile can be non-free with its session already closed), and the
+// stepper only appears when there are TWO busy tables to step between. So on a tidy floor with one
+// stale tile, three checks failed on behaviour that was exactly right — and on a messy floor they
+// passed for reasons that had nothing to do with this guard. Two fixture parties make both conditions
+// true on purpose, on tables nothing else uses, retired in a finally and on a crash.
+const FIXTURE_TABLES = ["9966", "9967"];
+retireOnCrash(FIXTURE_TABLES);
+const seatedTables = await seatParty(FIXTURE_TABLES, (m) => console.log(m));
+try {
+expect(await resetToFloor(), "back on the floor before the popup checks");
+// Wait for the floor to draw them ITSELF — never reload, which would detach the frame handle every
+// later check uses (and the panel updating itself is a property this file asserts elsewhere).
+for (let i = 0; i < 24 && seatedTables.length; i++) {
+  const there = await F.evaluate((t) => !!document.querySelector(`.tile[data-t="${t}"]:not(.t-free)`), seatedTables[0]).catch(() => false);
+  if (there) break;
+  await page.waitForTimeout(1000);
+}
+const busyT = seatedTables[0] || await F.evaluate(() => {
   const t = [...document.querySelectorAll(".tile")].find((x) => !/t-free/.test(x.className));
   return t && t.dataset.t;
 });
@@ -787,6 +806,10 @@ if (READ_ONLY) {
 }
 
 expect(errors.length === 0, errors.length ? `page errors: ${errors.join(" | ")}` : "no page errors anywhere in the walk");
+
+} finally {
+  await retireTables(FIXTURE_TABLES, (m) => console.log(m));
+}
 
 await browser.close();
 console.log(failed ? `\n${failed} of ${passed + failed} checks FAILED — the waiter's floor is not right yet.` : `\nAll ${passed} checks passed — the waiter's floor looks and works the way it was asked for.`);

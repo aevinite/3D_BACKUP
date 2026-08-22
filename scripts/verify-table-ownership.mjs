@@ -47,12 +47,20 @@ import { claimedTables } from "./sweep/fixtureTables.mjs";
 // So: put the tile in the MIDDLE of the viewport first, then click. `force` is deliberately NOT used —
 // it would skip the hit-test entirely and hide a tile that really is covered, which is a thing worth
 // knowing about. This keeps the assertion honest and stops the false failures.
+// `block: "end"` puts the tile as far from a TOP-sticky header as the scroller allows, which is the
+// whole problem: centring it left it under the header often enough to fail about half the runs. If the
+// hit-test still refuses after that, the tile really is covered where a person would tap it — so say
+// that, in those words, instead of timing out with a Playwright stack. `force` is deliberately never
+// used: it would skip the hit-test and turn a genuinely covered tile into a silent pass.
 const clickTile = async (frame, sel, timeout = 30000) => {
   const el = frame.locator(sel).first();
   await el.waitFor({ state: "visible", timeout });
-  await el.evaluate((n) => n.scrollIntoView({ block: "center", inline: "center" })).catch(() => {});
-  await new Promise((r) => setTimeout(r, 350));   // let one redraw settle before we aim
-  await el.click({ timeout });
+  for (const block of ["end", "center", "start"]) {
+    await el.evaluate((n, b) => n.scrollIntoView({ block: b, inline: "nearest" }), block).catch(() => {});
+    await new Promise((r) => setTimeout(r, 400));      // let one redraw settle before we aim
+    try { await el.click({ timeout: 8000 }); return; } catch { /* try the next resting place */ }
+  }
+  throw new Error(`${sel} could not be tapped from any scroll position — something is covering it where a person would tap`);
 };
 
 

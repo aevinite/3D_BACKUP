@@ -26,6 +26,8 @@ export const OFF_PLAN = [
   ["9931", "verify-realtime.mjs"],
   ["9932", "verify-tablet-parity.mjs"],
   ["9965", "verify-sweep-extras.mjs"],
+  ["9966", "verify-tablet-floor.mjs"],
+  ["9967", "verify-tablet-floor.mjs"],
   ["9990", "verify-two-parties.mjs"],
   ["E2E-TAX", "verify-tax-mode-e2e.mjs"],
   ["OWNCHK", "verify-table-ownership.mjs"],
