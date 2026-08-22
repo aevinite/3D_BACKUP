@@ -141,7 +141,7 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 
 ## Stack & app map
 
-- Next 16.3.0 App Router (async params), React 19.2.8, TS strict, Tailwind 4, GSAP (npm only).
+- Next 16.3.1 App Router (async params), React 19.2.8, TS strict, Tailwind 4, GSAP (npm only).
   `<model-viewer>` via CDN inside `components/PublicModelViewer.tsx`. GLBs on Supabase Storage.
 - **ONE app on port 4000** (`npm run dev`). Panels are routes: `/menu` guest · `/aevinite` admin
   console (23 pages, password-gated; there is NO `/admin` route) · `/manager` + `/editor` (both
