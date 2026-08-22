@@ -4837,6 +4837,10 @@ async function onHouseSettle(t) {
       seconds: 5,
       onUndo: () => editorUndoOnHouse(ids),
     });
+    // A QUEUED WRITE HAS NO COUNT (T5 sweep #7, 2026-08-22): with no signal the outbox resolves
+    // { ok:true, queued:true }, so this read "On the house 🏠 — undefined orders settled at no
+    // charge" — the word `undefined` in a message about money given away.
+    else if (wasQueued(r)) toast("Saved on this device ✓ — the bill will be settled at no charge the moment you're back online.", "ok");
     else toast(`On the house 🏠 — ${r.count} order${r.count === 1 ? "" : "s"} settled at no charge`, "ok");
   } catch (e) { toast("Couldn't settle on the house: " + e.message, "err"); }
 }
@@ -13340,6 +13344,10 @@ async function openSplitSettle(t) {
     closeM();
     try {
       const r = await api("POST", `/tables/${t}/pay-split`, { splits });
+      // A QUEUED WRITE HAS NO COUNT (T5 sweep #7, 2026-08-22) — this said "Paid in 3 parts 💳 —
+      // undefined orders settled" with no signal. The sibling split path a few hundred lines
+      // below already checks `r.queued`; this one was the odd one out.
+      if (wasQueued(r)) { toast(`Saved on this device ✓ — the ${splits.length} parts will settle the moment you're back online.`, "ok"); await pollTables([String(t)]); return; }
       toast(`Paid in ${splits.length} parts 💳 — ${r.count} order${r.count === 1 ? "" : "s"} settled`, "ok");
       await pollTables([String(t)]);
     } catch (e) { toast("Couldn't split-settle: " + e.message, "err"); }
@@ -15164,7 +15172,14 @@ async function creditNote(sid) {
   if (!amount || amount <= 0) { toast("Enter a valid amount", "err"); return; }
   const reason = await promptDialog("Why this credit note? (required)", { confirmLabel: "Issue credit note", placeholder: "overcharge, refund, correction…", required: true });
   if (reason == null) return;
-  try { const cn = await api("POST", `/sessions/${sid}/credit-note`, { amount, reason }); await loadOrders(); toast(`Credit note #${cn && cn.credit_no ? cn.credit_no : ""} issued`, "ok"); }
+  // A CREDIT NOTE IS A NUMBERED DOCUMENT, AND THE SERVER GIVES THE NUMBER (T5 sweep #7,
+  // 2026-08-22). With no signal the outbox resolves { ok:true, queued:true }, so this printed
+  // the sentence "Credit note # issued" — a document announced with a blank number.
+  try {
+    const cn = await api("POST", `/sessions/${sid}/credit-note`, { amount, reason });
+    if (wasQueued(cn)) { toast("Saved on this device ✓ — no internet, so the credit note has no number yet. It will be issued the moment you're back online.", "ok"); return; }
+    await loadOrders(); toast(`Credit note #${cn && cn.credit_no ? cn.credit_no : ""} issued`, "ok");
+  }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 async function loadOrders() {
