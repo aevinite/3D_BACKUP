@@ -2,6 +2,13 @@
 // RE-RUN TERMINAL 3'S 500 PHASES — one command.
 //
 //   npm run sweep:t3          # needs a dev server on 4103 (npm run dev -- -p 4103)
+//   T3_BASE=http://localhost:4203 npm run sweep:t3     # …or on whatever port is proved YOURS
+//
+// PORT. Every sweep terminal is given its own port, and 4103 was sweep #6's. A hard-coded base URL
+// meant a later run either measured NOTHING (nothing answers there) or, worse, measured ANOTHER
+// live session's dev server and reported its state as this branch's. So all four runners now read
+// `T3_BASE` and fall back to 4103. Set it to the port you have proved is yours
+// (CLAUDE.md: "verify on a port you PROVED is yours").
 //
 // The ledger (.claude/sweep/LEDGER/T3.md) is the permanent record of WHAT is checked; these
 // runners are the permanent record of HOW. They were scratch on the first sweep and had to be

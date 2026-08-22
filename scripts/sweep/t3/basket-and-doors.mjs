@@ -12,7 +12,7 @@ const env = Object.fromEntries(readFileSync(new URL("../../../.env.local", impor
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 const AANGAN_ID = "6c6fadb6-da23-4ab3-9f90-d164773f60b3";
 const runStartedAt = new Date().toISOString();
-const BASE = "http://localhost:4103";
+const BASE = process.env.T3_BASE || "http://localhost:4103";
 const FH = "/r/french-house/menu", AA = "/r/aangan-garden-restaurant/menu";
 let pass = 0, fail = 0; const fails = [];
 const t = (id, name, ok, extra = "") => { if (ok) pass++; else { fail++; fails.push(id); } console.log(`${ok ? "ok  " : "FAIL"} ${id} ${name}${extra ? " — " + extra : ""}`); };
