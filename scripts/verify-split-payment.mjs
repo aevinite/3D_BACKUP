@@ -7,7 +7,7 @@
 // WHY IT EXISTS (owner, 2026-08-21). Split payment already existed but was two taps deep under
 // "Other" and opened with empty boxes, so nobody used it. It now fills the amounts in evenly as a
 // starting point, keeps every box editable, and lets each part pick its own way to pay — including
-// Pay later, which puts that slice on a person's tab (migration 352). The rules below are the ones
+// Pay later, which puts that slice on a person's tab (migration 364). The rules below are the ones
 // that make that safe, and every one of them is a number or a sentence a person could be wronged by:
 //
 //   · the parts must add up to the bill the SERVER recomputed — never the browser's figure,
@@ -52,7 +52,7 @@ const ED = read("app/api/editor/[...path]/route.ts");
 const TB = read("app/api/tablet/[...path]/route.ts");
 const MGR = read("public/panels/editor/app.js");
 const TAB = read("public/panels/tablet/app.js");
-const MIG = read("supabase/migrations/352_a_split_part_can_be_pay_later.sql");
+const MIG = read("supabase/migrations/364_a_split_part_can_be_pay_later.sql");
 const ps = await import("@/lib/paySplit.ts");
 
 console.log("\nSplit payment: is it still mark-paid, with one part allowed to be a tab?");

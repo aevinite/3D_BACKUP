@@ -1,4 +1,17 @@
--- 352_a_split_part_can_be_pay_later.sql
+-- 364_a_split_part_can_be_pay_later.sql
+--
+-- ⚠ RENUMBERED 352 → 364 (T28 sweep, 2026-08-22). Two parallel branches both took 352 — this file
+--   and `352_a_reseed_cannot_undo_an_admins_choice.sql` — and `npm run verify:db-parity` refuses a
+--   NEW duplicate number: with two files at one number the outcome depends on filename sort order,
+--   which is not a decision anybody made. (Eighteen historical duplicates are grandfathered; new
+--   ones are not.) This is the newer of the two by 75 seconds, so it moved.
+--
+--   Checked before moving: this file defines lfh_khata_outstanding, lfh_khata_outstanding_summary,
+--   idx_session_payments_khata_open, idx_session_payments_group and columns on session_payments —
+--   and NONE of the eleven migrations numbered above 352 touches any of them, so running it later
+--   changes nothing. Every statement in it is CREATE OR REPLACE / IF NOT EXISTS, so re-running it
+--   at its new position is safe. Nothing else in the repo referenced the old filename except
+--   scripts/verify-split-payment.mjs, updated in the same commit.
 --
 -- SPLIT PAYMENT IS MARK-PAID, AND ONE OF THE PARTS MAY BE "PAY LATER" (owner, 2026-08-21).
 --

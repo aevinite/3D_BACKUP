@@ -33,6 +33,43 @@ const ok = (name, pass, note = "") => { results.push({ name, pass, note }); cons
 const section = (t) => console.log("\n" + t);
 const cleanupPhones = new Set();
 
+// ── PUT BACK WHAT WE FLIPPED, EVEN IF THIS RUN IS KILLED (T28 sweep, 2026-08-22) ────────────────
+// Section C flips the restaurant's `bill_customer_print` switch OFF in the DATABASE — the only
+// honest way to prove the panel reads it from the server rather than from JS. Two things were
+// wrong with how it put it back:
+//
+//   1 · it restored to a hard-coded `true`. If the restaurant had that switch OFF, this guard
+//       turned it ON and left it on. A guard must restore the value it FOUND, not the value it
+//       assumes.
+//   2 · nothing ran on a kill. Between the flip and the restore sit an `until(...)` poll and two
+//       browser evaluates, every one of which can time out or throw — and the sweep rules open with
+//       exactly this scar: "a guard once died with a restaurant's Menu switch off and real scans got
+//       a 404 for an hour." Here the cost is Customer and Mobile silently missing from every
+//       printed bill at this restaurant until somebody noticed.
+//
+// So: remember the original, register the undo, and run the undo on the way out — normally, on
+// SIGINT/SIGTERM, and on an uncaught failure. Mirrors scripts/verify-realtime.mjs.
+const undo = [];
+let undoing = false;
+async function restoreAll(why) {
+  if (undoing) return; undoing = true;
+  if (undo.length) console.log(`\n↩︎ restoring ${undo.length} change(s)${why ? " (" + why + ")" : ""}…`);
+  for (const fn of undo.reverse()) { try { await fn(); } catch (e) { console.error("  restore FAILED:", e?.message || e); } }
+  undo.length = 0;
+}
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await restoreAll(sig); process.exit(130); });
+process.on("uncaughtException", async (e) => { console.error("\nunexpected failure:", e?.message || e); await restoreAll("crash"); process.exit(1); });
+process.on("unhandledRejection", async (e) => { console.error("\nunexpected failure:", e?.message || e); await restoreAll("crash"); process.exit(1); });
+
+/** Flip one settings column, remembering what it was so the undo restores the REAL value. */
+async function flipSetting(column, value) {
+  const before = (await sb.from("settings").select(column).eq("restaurant_id", RID1).maybeSingle()).data;
+  const was = before ? before[column] : null;
+  undo.push(() => sb.from("settings").update({ [column]: was }).eq("restaurant_id", RID1));
+  await sb.from("settings").update({ [column]: value }).eq("restaurant_id", RID1);
+  return was;
+}
+
 const b = await chromium.launch();
 
 /* ─────────────── A. the money + gate rules on the server ─────────────── */
@@ -142,8 +179,10 @@ if (fr) {
   ok("money columns sized from the bill", h.includes("colgroup"));
   ok("Customer + Mobile print when captured", h.includes(">Customer<") && h.includes(">Mobile<"));
 
-  // the print switch OFF must hide both lines — flipped in the DATABASE, not just in JS
-  await sb.from("settings").update({ bill_customer_print: false }).eq("restaurant_id", RID1);
+  // the print switch OFF must hide both lines — flipped in the DATABASE, not just in JS.
+  // flipSetting remembers what it was, so the restore below (and the one on a kill) puts the
+  // restaurant's OWN value back rather than an assumed `true`.
+  await flipSetting("bill_customer_print", false);
   await until(async () => (await fr.evaluate(async () => {
     const all = await api("GET", "/all");
     if (all && all.settings) state.data.settings = all.settings;
@@ -164,7 +203,7 @@ if (fr) {
   }, printTable);
   ok("panel picked up print=OFF from the server", off.printFlag === false, String(off.printFlag));
   ok("print switch OFF hides Customer + Mobile", !off.html.includes(">Customer<") && !off.html.includes(">Mobile<"));
-  await sb.from("settings").update({ bill_customer_print: true }).eq("restaurant_id", RID1);
+  await restoreAll(); // put the switch back to what it WAS, now, rather than assuming `true`
 
   /* ── D. the capture sheet itself ── */
   // Builds its OWN fixture: a bill with no customer AND no invoice. Picking "whatever session
