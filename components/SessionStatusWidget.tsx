@@ -285,25 +285,56 @@ export default function SessionStatusWidget() {
   useBackClose("ssw-confirm-leave", confirming, () => setConfirming(false));
 
   // ── actions ────────────────────────────────────────────────────────────────
+  //
+  // LEAVING ALWAYS WORKS ON THE PHONE; ONLY THE SENTENCE CHANGES (sweep 7 T3).
+  //
+  // Both handlers below used to throw the server's answer away and say "You left the table"
+  // regardless. leaveSession() never throws — a timeout comes back as { ok:false,
+  // reason:"timed_out" } — so a diner on a bad connection was told they had left a table the
+  // restaurant still had them sitting at. That is the same shape as the false "we've let the staff
+  // know" this territory already has a fix and a guard for: a promise is worse than a dead button,
+  // because they stop trying.
+  //
+  // The local clean-up still happens either way, deliberately — refusing to let someone go because
+  // the network is down would TRAP them, which is worse than a stale row the head can clear and the
+  // heartbeat will age out. What changes is that we stop claiming the restaurant heard it.
+  // Why ok===true is a safe test and cannot cry wolf: lfh_leave_session (mig 146) has no refusing
+  // branch at all — a token that is not a live member returns { ok:true, already_gone:true }, and
+  // the normal path returns { ok:true, ... }. So anything other than ok:true came from the
+  // transport, i.e. the restaurant genuinely did not hear it.
+  const leftForReal = async (token: string): Promise<boolean> => {
+    const r = await leaveSession(token);
+    return r?.ok === true;
+  };
   // This runs when the guest taps "Leave": tell the server, clean up locally,
-  // and show a confirmation. Their cart goes back to private + empty.
+  // and say honestly whether the restaurant heard it. Their cart goes back to private + empty.
   const doLeave = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await leaveSession(token);
+    const told = await leftForReal(token);
     clearLocal(); // also drops lfh_active_orders + nudges the tracker to hide
     wasActive.current = false;
     setSt(null);
     setBusy(false);
-    toast("You left the table", "table");
+    if (told) toast("You left the table", "table");
+    else toast("You've left on this phone — but we couldn't tell the restaurant, so please let a member of staff know", "table", "error");
   };
   // This runs when the guest taps "Change table": leave the current one, clean
   // up, then send them back to the menu to pick/scan a different table.
   const doChange = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await leaveSession(token);
+    const told = await leftForReal(token);
     clearLocal(); // also drops lfh_active_orders so the old table's tracker won't follow you
+    // A page load is about to wipe any toast, so a guest who was NOT actually let go has to be
+    // stopped here and told — not sent off to pick another table believing the old one is free.
+    if (!told) {
+      wasActive.current = false;
+      setSt(null);
+      setBusy(false);
+      toast("We couldn't tell the restaurant you're moving — please ask a member of staff before you sit somewhere else", "table", "error");
+      return;
+    }
     // Back to THIS restaurant's menu to pick/scan a different table. The bare
     // /menu is restaurant #1's own menu, so only send there for the #1 default.
     const dest = restaurantSlug && restaurantSlug !== DEFAULT_RESTAURANT_SLUG ? `/r/${restaurantSlug}/menu` : "/menu";
