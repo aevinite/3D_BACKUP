@@ -33,7 +33,20 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P15101`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P35101`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+
+> **SWEEP #7 took `P15101`–`P35100`** — 40 terminals × 500, contiguous and in terminal order, so
+> T1 is `P15101`–`P15600`, T5 is `P17101`–`P17600`, and T40 is `P34601`–`P35100`. Each terminal
+> RE-RAN its own existing rows before writing one new id, and appends its new block to the bottom
+> of its own `T<n>.md`.
+>
+> | terminal | block | filed |
+> |---|---|---|
+> | T5 · the manager panel | `P17101`–`P17600` | ✅ 500 written, 500 executed, 500 ✅ — plus all 500 of `P02001`–`P02500` re-run (499 ✅ · 1 ⏭ · **no regression**) |
+>
+> Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
+> is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
+> deliberately small so it does not collide with that rebuild.
 
 ---
 
