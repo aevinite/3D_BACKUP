@@ -874,8 +874,33 @@
    dozens of times a shift and nobody wants to re-zoom every time. The word 'fit' is stored so a
    longer bill still fits later, rather than freezing today's percentage. */
 + "var ZKEY = \"lfh_bill_zoom\", ZMIN = .6, ZMAX = 2, Zn = 0;\n"
+/* THE ROOM RESERVED FOR THE TOOLBAR HAS TO BE IN THE TOOLBAR'S OWN UNITS (T8 sweep #7,
+   2026-08-22). The bar is `position:fixed` and wound back to life-size with the INVERSE zoom, so
+   its height on screen is constant — but the space kept clear for it is `body{padding-top:calc(2mm
+   + 34px)}`, which sits INSIDE the zoomed body and therefore shrinks with the zoom. The two scale
+   in opposite directions, so the moment the fit lands at or below about 1.0 the bar starts eating
+   the restaurant name — the biggest thing on a customer's bill. Measured:
+
+       A35 360x780, 8-line bill    zoom 1.02   the name is covered by 4px
+       A35 360x780, 60-line bill   zoom 0.60   covered by 26px — the whole name
+       desktop 1280x900, 60 lines  zoom 0.60   covered by 26px
+       desktop 1280x420, 8 lines   zoom 0.60   covered by 26px
+
+   and the 60-line case is not a corner: the owner's own Aangan bill is 178mm of paper, which is
+   what put the 0.6 floor in this file in the first place. The ledger row that checked this
+   (P03899, "on the A35 it does not cover the first line either") passed in sweep #6 because the
+   zoom layer did not exist yet — it landed 2026-08-19.
+
+   So the allowance is now MEASURED from the bar and divided by the zoom, which converts it into
+   the body's own coordinates. It is screen-only: the print rule
+   `@media print{body{...padding:2mm 0 !important}}` carries !important and beats an inline style,
+   so nothing here can reach the paper. The CSS `calc(2mm + 34px)` stays as the fallback for a
+   frame where scripts cannot run. */
++ "function zBarH(){ try{ var b = document.querySelector(\".bar\");\n"
++ "    return b ? b.getBoundingClientRect().height : 0; }catch(e){ return 0; } }\n"
 + "function zApply(z){ Zn = z; try{ document.body.style.zoom = z; }catch(e){}\n"
 + "  try{ var b = document.querySelector(\".bar\"); if (b) b.style.zoom = (1 / z).toFixed(3); }catch(e){}\n"
++ "  try{ var h = zBarH(); if (h > 0) document.body.style.paddingTop = ((h + 8) / z).toFixed(2) + \"px\"; }catch(e){}\n"
 + "  try{ var l = document.querySelector(\".zl\"); if (l) l.textContent = Math.round(z * 100) + \"%\"; }catch(e){} }\n"
 // WHAT "THE HEIGHT OF THE BILL" MEANS, measured twice before it was right:
 //   · body.scrollHeight  — too SHORT: it leaves out body's own margin:10px auto 30px (the white
@@ -885,12 +910,19 @@
 //     report less than the window. Every bill then fitted at ~99% and a SHORT one could never use
 //     the room it had. A min-height on the measured box turns a fit into a no-op.
 // So the content is measured as what it is: the sheet plus its own two margins.
+// The bar's height is subtracted from the WINDOW rather than added to the document, because it
+// does not scale: the height a bill needs on screen is content*z + barH, so the largest zoom that
+// fits is (window - barH) / content. Measured with the top allowance stripped back to the plain
+// 2mm, or the allowance zApply just wrote would be counted twice and each fit would shrink the
+// next one.
 + "function zRoom(){ /* what the document needs at 1x, and what the window has to give */\n"
-+ "  var b = document.body, was = b.style.zoom; b.style.zoom = 1;\n"
++ "  var b = document.body, was = b.style.zoom, wasPad = b.style.paddingTop;\n"
++ "  b.style.zoom = 1; b.style.paddingTop = \"2mm\";\n"
 + "  var cs = getComputedStyle(b), w = b.offsetWidth || 272;\n"
 + "  var h = b.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);\n"
-+ "  b.style.zoom = was; if (!(h > 0)) h = 740;\n"
-+ "  return { z: Math.min(((innerWidth || 380) - 14) / w, ((innerHeight || 680) - 10) / h) }; }\n"
++ "  b.style.zoom = was; b.style.paddingTop = wasPad; if (!(h > 0)) h = 740;\n"
++ "  var room = (innerHeight || 680) - zBarH() - 10;\n"
++ "  return { z: Math.min(((innerWidth || 380) - 14) / w, Math.max(1, room) / h) }; }\n"
 + "function zFit(remember){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round(zRoom().z * 100) / 100));\n"
 + "  zApply(z); if (remember) { try{ localStorage.setItem(ZKEY, \"fit\"); }catch(e){} } }\n"
 + "function zStep(d){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round((Zn + d * .15) * 100) / 100));\n"
