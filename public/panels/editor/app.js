@@ -4869,6 +4869,11 @@ async function khataParkFlow(t, orders) {
   if (!who) return; // cancelled
   try {
     const r = await api("POST", `/tables/${t}/khata`, who);
+    // A QUEUED PARK HAS NOT CLOSED THE TABLE (T5 sweep #7, 2026-08-22). This one never printed
+    // `undefined` — the name falls back to "their khata" — but it still announced a finished job
+    // and then cleared the open table, while the floor behind it still showed the party sitting
+    // there. Say what is true and leave the table where it is until the queue drains.
+    if (wasQueued(r)) { toast("Saved on this device ✓ — the bill will be parked on their khata the moment you're back online.", "ok"); return; }
     toast(`📒 Parked on ${r.customer && r.customer.name ? r.customer.name : "their khata"} — collect later from Bills → Khata`, "ok");
     state.selectedTable = null; // the table just closed
     await loadSessions();
@@ -13447,6 +13452,10 @@ function openMergePicker(t, sess) {
     try {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
       if (r && r.ok === false) { toast("Couldn't merge: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
+      // WHICH TABLE HOLDS THE BILL IS THE SERVER'S ANSWER (T5 sweep #7, 2026-08-22). With no
+      // signal `r.parent_table` is absent and this fell back to the guess made on screen, then
+      // announced the merge as done — over a floor where the two tables are still separate.
+      if (wasQueued(r)) { toast("Saved on this device ✓ — the tables will be joined onto one bill the moment you're back online.", "ok"); return; }
       toast(`Merged into ${tileFace((r && r.parent_table) || keeps)} — one bill`, "ok");
       // Fresh tiles + merges list first, then follow the table the SERVER kept (the lowest
       // number holds the bill — not always the one that was tapped). Same fix as the desktop
