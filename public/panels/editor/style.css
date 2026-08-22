@@ -2235,7 +2235,16 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .list { scrollbar-color: color-mix(in srgb, var(--gold) 55%, transparent) transparent; } /* Firefox */
 
   /* the editor's sticky title would collide with the sticky topbar — make it normal */
-  .ed-head { position: static; margin: 0 -16px 18px; padding: 16px; }
+  /* -14px, matching .editor's padding at these widths, NOT -16px (T26 sweep, 2026-08-22). The
+     header is meant to bleed to the container's edges; bleeding 16px out of a 14px pad put it 2px
+     wider than the screen at every width up to 760px — measured at 360 and 600, flush from 761 up
+     where the pair already matches (-28 against 28). Nothing was lost (the right 2px is the
+     header's own hairline), but it is the only thing standing between this panel and a clean
+     "nothing crosses an edge" at all four sizes, and the owner's rule is that there is no
+     sideways scroll anywhere. The safe-area inset is deliberately NOT added back here: .editor's
+     padding already carries it, and under-bleeding by an inset shows a sliver of page colour,
+     while over-bleeding would put the header off-screen on the first device that reports one. */
+  .ed-head { position: static; margin: 0 -14px 18px; padding: 16px; }
   .ed-head h2 { font-size: 21px; }
 
   /* --- forms & grids: stack to one column so fields aren't squashed --- */
