@@ -2732,7 +2732,10 @@ function renderSplitSettle(t) {
   const refreshSum = () => {
     const s = [...bodyEl.querySelectorAll(".ss-amt")].reduce((a, x) => a + (Number(x.value) || 0), 0);
     const diff = Math.round((s - due) * 100) / 100;
-    sumEl.textContent = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
+    // inrExact throughout: these are the figures the waiter has to MATCH, and rounding them to
+    // whole rupees reports a 40-paise gap as "₹0 short" — see the note on the pay-sheet split's
+    // own refusal. (T7, 2026-08-22.)
+    sumEl.textContent = diff === 0 ? `✓ Shares add up to ${inrExact(due)}` : `⚠️ Shares total ${inrExact(s)} — ${diff > 0 ? inrExact(diff) + " too much" : inrExact(-diff) + " short"}`;
   };
   const render = () => {
     p.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
@@ -2751,7 +2754,9 @@ function renderSplitSettle(t) {
   p.querySelector(".ss-go").onclick = () => {
     const splits = [...bodyEl.querySelectorAll(".ss-amt")].map((x) => ({ amount: Number(x.value) || 0, method: bodyEl.querySelector(`.ss-method[data-leg="${x.dataset.leg}"]`).value }));
     const s = splits.reduce((a, b2) => a + b2.amount, 0);
-    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inr(due), false); return; }
+    // inrExact: the check below is to the paise (0.011), so a rounded target is a target the waiter
+    // cannot type — "must add up to exactly ₹483" on a bill whose due is ₹483.33 refuses forever.
+    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inrExact(due), false); return; }
     if (splits.some((x) => !(x.amount > 0))) { toast("Every share needs an amount above zero.", false); return; }
     dropLayer();
     actGated("POST", `/tables/${t}/pay`, { splits }, {
@@ -3394,10 +3399,21 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const goBtn = ov.querySelector(".pay-split-go");
     // Stays ENABLED and says WHY it won't go — a disabled button that swallows the tap is
     // indistinguishable from a broken one (owner rule: never drop a tap in silence).
+    //
+    // inrExact, NOT inr, FOR THE FIGURE THE PERSON HAS TO MATCH (T7, 2026-08-22, measured).
+    // inr() rounds to whole rupees, so a 40-paise shortfall came out as "₹0 of the bill is still
+    // uncovered." — a refusal that names nothing, on a button that then refuses again, and again,
+    // with no way to tell from the screen what is wrong. The running line twelve pixels above it
+    // (refreshSplitSum) has always used inrExact and said "₹0.40 still to cover", so the two halves
+    // of the same sentence disagreed. Reachable the moment a waiter edits a box, which is the whole
+    // point of the panel ("the amounts fill in evenly and you can change any of them"), and by
+    // ＋ Add another part, which seeds the box with the exact remainder. Same rule as the note on
+    // inrExact itself: a figure someone must MATCH is never rounded, because the server recomputes
+    // the due to the paise.
     if (goBtn) goBtn.onclick = () => {
       const left = legLeft();
       if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one."); return; }
-      if (left !== 0) { toast(left > 0 ? `${inr(left)} of the bill is still uncovered.` : `The parts are ${inr(-left)} more than the bill.`); return; }
+      if (left !== 0) { toast(left > 0 ? `${inrExact(left)} of the bill is still uncovered.` : `The parts are ${inrExact(-left)} more than the bill.`); return; }
       if (legs.length < 2) { toast("A split needs at least two parts."); return; }
       // The three tab rules, said in words before the server has to refuse them.
       const later = legs.filter((l) => l.method === PAY_LATER);

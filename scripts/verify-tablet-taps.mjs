@@ -414,6 +414,42 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 9 · A FIGURE THE WAITER HAS TO MATCH IS NEVER ROUNDED (T7 sweep #7, 2026-08-22) ─────────
+// Measured on the running panel: a 40-paise shortfall in the split-payment panel came out of the
+// refusal as "₹0 of the bill is still uncovered." — a refusal that names nothing, on a button that
+// then refuses again, and again, with no way to tell from the screen what is wrong. The running
+// line twelve pixels above it already used inrExact and said "₹0.40 still to cover", so the two
+// halves of the same sentence disagreed about the same number.
+//
+// This panel declares BOTH helpers on purpose (see the note above inrExact): `inr` rounds to whole
+// rupees and is right for a heading, `inrExact` keeps the paise and is the only correct one for a
+// figure a person has to MATCH, because the server recomputes the due to the paise. So the rule is
+// narrow and checkable: inside the two split screens, every refusal that quotes a gap or a target
+// uses inrExact.
+{
+  const shortfall = [
+    ["the split panel's shortfall refusal", /of the bill is still uncovered/],
+    ["the split panel's over-collect refusal", /more than the bill/],
+    ["the KOT-menu split's must-add-up refusal", /shares must add up to exactly/],
+  ];
+  for (const [what, re] of shortfall) {
+    const at = src.search(re);
+    const line = at < 0 ? "" : src.slice(src.lastIndexOf("\n", at) + 1, src.indexOf("\n", at));
+    check(
+      `tablet: ${what} quotes the gap to the PAISE (inrExact, never inr)`,
+      at >= 0 && /inrExact\(/.test(line) && !/[^a-zA-Z]inr\(/.test(line),
+      `${TABLET}: ${at < 0 ? "the refusal is gone — if it moved, move this check with it." : `this line rounds a figure the waiter must match:\n    ${line.trim().slice(0, 160)}`}\n    ` +
+      `inr() turns a 40-paise gap into "₹0", which refuses forever and names nothing. Use inrExact.`,
+    );
+  }
+  check(
+    "tablet: the split panel's running total line still uses inrExact too",
+    /function refreshSplitSum\(\)[\s\S]{0,400}?inrExact\(left\)/.test(src),
+    `${TABLET}: refreshSplitSum is the line the refusal has to agree with. If it starts rounding,\n    ` +
+    `the two halves of the same sentence disagree again — which is the fault this pair guards.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
