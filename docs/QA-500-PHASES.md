@@ -1,5 +1,25 @@
 # The whole-app test suite
 
+> ## 📕 THIS FILE IS NOT THE MASTER RECORD — `.claude/sweep/LEDGER/` IS.
+>
+> There are **two** things called "the tests" in this project, and they answer different questions:
+>
+> | | what it is | where it lives | who runs it |
+> |---|---|---|---|
+> | **The suite** (this file) | one automated run, ~500 numbered phases, executed by `npm run verify:everything` against a chosen site | `scripts/verify-everything.mjs` | anyone, any time — and after every deploy |
+> | **The LEDGER** | the permanent record of **everything this product has ever been checked for** — 13,000 numbered, re-runnable checks written across 26 files by the 30-terminal sweep | `.claude/sweep/LEDGER/` — start at **`INDEX.md`** | the next whole-product sweep, which **re-runs every row before writing a single new one** |
+>
+> **If you are planning a sweep, an audit, or a "what has been tested?" answer, open
+> `.claude/sweep/LEDGER/INDEX.md` first.** It carries the 30 territories with their permanent ID
+> blocks, the coverage table (every page, API route, migration, library file and directory mapped to
+> an owner), the named gaps nobody has ever checked, the standing list of deliberate designs that
+> look like faults, and the next free phase ID.
+>
+> **The one rule that makes the ledger worth anything:** re-run the existing rows *before* inventing
+> new ones. Sweeps #1–#5 each wrote a different set of checks, so five runs sampled five different
+> slices and nothing ever converged. An ID means one specific check, forever — never reused, never
+> renumbered. (Sweep #6, terminal 30, 2026-08-22.)
+
 > **How many phases?** Ask the suite, never a document: `npm run verify:everything -- --list`.
 > Three places used to answer differently — this file's old title said 500, the code says 506,
 > and the project's shorthand is "the 501-phase suite". Phases get added; a number typed into a
@@ -125,3 +145,21 @@ phase 159 — "no rate-limit event was raised by THIS test run" — passed on th
 - **Judges by-design behaviour as by-design.** Several checks carry a comment naming the healthy
   case they used to report as a fault (an empty session has no bill number; a bill keeps the
   number of the day it opened; the 2-second poll is the realtime-down fallback).
+
+## The suite and the ledger, together
+
+They are not rivals and neither replaces the other.
+
+- **The suite is a gate.** It runs in minutes, it answers "is the deployed site healthy right now?",
+  and it is what you run after a deploy (`npm run verify:live -- --base <url>`).
+- **The ledger is a memory.** It answers "has anyone ever checked this?" — for one file, one rule,
+  one screen. It does not run itself; a sweep runs it.
+
+When a sweep finds something the suite should have caught, the fix has two halves: fix the product,
+**and** add the check to the suite so a gate catches it next time. That is §7 of the sweep rules
+("make the fix stick"). The ledger row then records which `verify:*` guard now owns it — so the next
+sweep re-runs the row, sees a named guard, and moves on instead of re-investigating from scratch.
+
+The reverse also holds: when a `verify:*` guard is retired or its subject moves, say so in the
+ledger row that cited it. A ledger row pointing at a dead guard is worse than no row — that is the
+`verify:cache` lesson, where the 3D no-re-fetch guard sat green and asserted nothing for a month.
