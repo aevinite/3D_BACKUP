@@ -340,6 +340,25 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── 9. `npm run dev` MUST HONOUR A PORT, OR A PARALLEL LANE TAKES HIS WINDOW ──────────────
+// Port 4000 is where the owner verifies — CLAUDE.md says so in as many words ("Verify where the
+// owner looks: localhost:4000"). Every parallel terminal is handed its OWN port and told never to
+// use 4000. But the script was `next dev -p 4000` with the port hard-coded, so `PORT=4128 npm run
+// dev` silently served on 4000 anyway. It happened during the sweep of 2026-08-22: a lane took his
+// window, and it was only noticed because the lane checked which port it had actually got. The next
+// time might not be noticed for an hour, and he would be looking at another branch's build while
+// being told his change was live.
+{
+  const pkg = read("package.json");
+  let dev = "";
+  try { dev = (JSON.parse(pkg || "{}").scripts || {}).dev || ""; } catch { /* the JSON check owns that */ }
+  check(
+    "`npm run dev` honours a PORT override, so a parallel lane cannot take port 4000 (the owner's window)",
+    !dev || /\$\{?PORT/.test(dev),
+    `package.json "dev" is ${JSON.stringify(dev)} — a hard-coded port means every lane lands on the same one.\n    Use: next dev -p \${PORT:-4000}`,
+  );
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

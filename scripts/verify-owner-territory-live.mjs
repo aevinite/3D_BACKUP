@@ -98,6 +98,17 @@ try {
   // ══ BAND C · the roster as it renders and behaves ═══════════════════════════════════════════
   console.log("Band C · the roster, driven");
   const page = await ctx.newPage();
+  // PATIENT, AND NEVER FATAL (2026-08-22). The "New password for …" card appears after a write, and on a
+  // cold `next dev` the first one waited past the 60s ceiling and threw — which stopped the WHOLE run.
+  // That is how four real failures on this screen stayed hidden for weeks: they sit after this point, so
+  // nobody ever saw them. A slow render is worth reporting; it is not worth throwing away every check
+  // behind it. 150s matches api()'s patient retry, and a miss returns false so the caller can fail its
+  // own check and carry on.
+  const reveal = async (why) => {
+    const seen = await page.waitForSelector(".ost-reveal", { timeout: 150000 }).then(() => true).catch(() => false);
+    if (!seen) bad(`${why} — the password card never appeared (150s). On a cold dev server this is the route still compiling; on a warm one it is real.`);
+    return seen;
+  };
   let mode = "dismiss"; const dlg = [];
   page.on("dialog", async (d) => { dlg.push(d.message()); mode === "accept" ? await d.accept() : await d.dismiss(); });
   const reqs = []; page.on("request", (q) => { if (q.url().includes("/api/owner/staff")) reqs.push({ m: q.method(), h: q.headers() }); });
@@ -186,6 +197,25 @@ try {
   (await page.locator(".ost-row").filter({ hasText: NAME }).count()) > 0 ? ok("P06328 the roster shows the value that really landed") : bad("P06328 the roster still shows the value that did not land");
   await dismiss();
 
+  // WARM THE WRITE ROUTE BEFORE THE BROWSER USES IT (2026-08-22). `api()` above got a patient retry
+  // for a cold `next dev` compile, but the checks below POST by CLICKING Add — the browser's own
+  // request, which no retry of ours wraps — and then wait 30 seconds for the banner. The first POST to
+  // /api/owner/staff on a fresh server can take longer than that to compile, so four checks failed
+  // together on a screen that was working: the refusal never arrived inside the window, `dismiss()`
+  // then had nothing to dismiss, and the double-click check ran against a stale error and created 0.
+  //
+  // One deliberately-invalid POST compiles the route and creates nothing — the handler refuses an
+  // empty body long before it writes. It goes through api(), which waits patiently and says so.
+  // EVERY WRITE VERB, not just POST. Next compiles a route module once, but this file is
+  // POST/PATCH/DELETE through withIdempotency, and the FIRST call of each still pays for the work
+  // behind it — the reset-password reveal (a PATCH) timed out at 60s on a cold server even after the
+  // POST had been warmed. Each of these is deliberately invalid, so the handler refuses it long
+  // before it writes anything; they go through api(), which waits patiently and says so.
+  for (const [m, body] of [["POST", {}], ["PATCH", {}], ["DELETE", null]]) {
+    const warm = await api(m, "/api/owner/staff" + (m === "DELETE" ? "?id=not-a-uuid" : ""), body);
+    if (warm.s >= 500) console.log(`  · warming ${m} /api/owner/staff answered ${warm.s} — noting it; the checks below will say if it matters`);
+  }
+
   // the waiter picker
   await go();
   const form = page.locator(".ost-add").first();
@@ -204,8 +234,7 @@ try {
   { const wn = `${TAG} W`;
     await form.locator("input[name=name]").fill(wn);
     await addBtn.click();
-    await page.waitForSelector(".ost-reveal", { timeout: 60000 });
-    await page.locator(".ost-reveal").getByText("Done").click();
+    if (await reveal("P06338 the first new person's password card")) await page.locator(".ost-reveal").getByText("Done").click();
     const w = (await api("GET", "/api/owner/staff")).j.staff.find((s) => disp(s) === wn);
     if (w) created.push(w.id);
     // GROUND TRUTH: the owner API never SELECTS assigned_tables, so read the database.
@@ -222,24 +251,37 @@ try {
   { const n2 = `${TAG} T`;
     await form.locator("input[name=name]").fill(n2);
     await addBtn.click();
-    await page.waitForSelector(".ost-reveal", { timeout: 60000 });
-    (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06338 an add reveals a one-time password") : bad("P06338 no password was revealed");
+    // The five checks below need the card. If it never comes they are each reported as failed and the
+    // run CARRIES ON — the two after them (the roster and the cleared form) do not need it, and used
+    // to be thrown away along with everything else in the file.
+    const shown = await reveal("P06338/P06339 the new person's password card");
     const t2 = (await api("GET", "/api/owner/staff")).j.staff.find((s) => disp(s) === n2); if (t2) created.push(t2.id);
-    const box = await page.locator(".ost-reveal").boundingBox();
-    box && box.y >= 0 && box.y + box.height <= 900 ? ok("P06339 the reveal card scrolls itself into view") : bad("P06339 the reveal card is off screen");
-    /ost-pw/.test(await page.evaluate(() => document.activeElement?.className || "")) ? ok("P06340 the password field is focused") : bad("P06340 the password field is not focused");
-    await page.locator(".ost-reveal").getByRole("button", { name: /Copy/ }).click(); await page.waitForTimeout(250);
-    /Copied/.test(await page.locator(".ost-reveal button.ost-btn").innerText()) ? ok("P06341 Copy confirms") : bad("P06341 Copy does not confirm");
-    await page.locator(".ost-reveal").getByText("Done").click();
-    (await page.locator(".ost-reveal").count()) === 0 ? ok("P06342 Done dismisses the card") : bad("P06342 Done did not dismiss");
+    if (shown) {
+      (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06338 an add reveals a one-time password") : bad("P06338 no password was revealed");
+      const box = await page.locator(".ost-reveal").boundingBox();
+      box && box.y >= 0 && box.y + box.height <= 900 ? ok("P06339 the reveal card scrolls itself into view") : bad("P06339 the reveal card is off screen");
+      /ost-pw/.test(await page.evaluate(() => document.activeElement?.className || "")) ? ok("P06340 the password field is focused") : bad("P06340 the password field is not focused");
+      await page.locator(".ost-reveal").getByRole("button", { name: /Copy/ }).click(); await page.waitForTimeout(250);
+      /Copied/.test(await page.locator(".ost-reveal button.ost-btn").innerText()) ? ok("P06341 Copy confirms") : bad("P06341 Copy does not confirm");
+      await page.locator(".ost-reveal").getByText("Done").click();
+      (await page.locator(".ost-reveal").count()) === 0 ? ok("P06342 Done dismisses the card") : bad("P06342 Done did not dismiss");
+    } else { for (const id of ["P06338", "P06340", "P06341", "P06342"]) bad(`${id} skipped — no password card to look at`); }
     (await until(async () => (await page.locator(".ost-row").filter({ hasText: n2 }).count()) > 0)) ? ok("P06343 the new person appears with no reload") : bad("P06343 the new person did not appear");
     (await form.locator("input").evaluateAll((e) => e.map((x) => x.value))).every((v) => v === "") ? ok("P06344 the Add form is cleared") : bad("P06344 the Add form kept values"); }
   await form.locator("input[name=name]").fill(disp(mgr));
   await addBtn.click();
-  await until(async () => /taken at this restaurant/i.test(await banner()));
-  /taken at this restaurant/i.test(await banner()) ? ok("P06346 a duplicate username is refused with the friendly sentence") : bad("P06346 a duplicate was not refused clearly");
+  // 45s, not the default 30: this is a browser-driven POST, and a first compile is the one thing that
+  // legitimately takes longer than a person would wait. If it still does not come, say what we saw —
+  // "a duplicate was not refused clearly" with no banner text is a sentence nobody can act on.
+  const sawDupe = await until(async () => /taken at this restaurant/i.test(await banner()), 45000);
+  sawDupe ? ok("P06346 a duplicate username is refused with the friendly sentence")
+          : bad(`P06346 a duplicate was not refused clearly — the banner said ${JSON.stringify((await banner()).replace(/\s+/g, " ").slice(0, 90)) || "nothing at all"}`);
   /didn't go through/i.test(await bHead()) ? ok("P06211d a SERVER refusal is headed the same way, not as a fault") : bad("P06211d a server refusal is headed as a fault");
-  await dismiss(); await form.locator("input[name=name]").fill("");
+  // A dismiss that did not dismiss leaves the next check reading the PREVIOUS error, which is how one
+  // slow route turned into four failures. Confirm it, and clear the field either way.
+  await dismiss();
+  if (!(await until(async () => (await banner()) === "", 8000))) console.log("  · the refusal banner would not dismiss — the next check may read it");
+  await form.locator("input[name=name]").fill("");
   { const n3 = `${TAG} D`;
     await form.locator("input[name=name]").fill(n3);
     await Promise.all([addBtn.click(), addBtn.click().catch(() => {})]);
@@ -272,10 +314,10 @@ try {
   reqs.length === 0 ? ok("P06353 the same role fires nothing") : bad("P06353 re-picking the same role fired a request");
   mode = "accept";
   await row(NAME).getByRole("button", { name: /Reset password/ }).click();
-  await page.waitForSelector(".ost-reveal", { timeout: 60000 });
-  (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06354 Reset password reveals a new one") : bad("P06354 no new password appeared");
+  const resetShown = await reveal("P06354 the reset password card");
+  resetShown && (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06354 Reset password reveals a new one") : bad("P06354 no new password appeared");
   /current login stops working/i.test(dlg.at(-1) || "") ? ok("P06069 …and the question says the current login stops working") : bad("P06069 the reset question is missing its consequence");
-  await page.locator(".ost-reveal").getByText("Done").click();
+  if (resetShown) await page.locator(".ost-reveal").getByText("Done").click();
   { let held; await page.route("**/api/owner/staff", async (q) => { if (q.request().method() === "PATCH") await new Promise((x) => { held = x; setTimeout(x, 4000); }); await q.continue(); });
     await row(NAME).getByRole("button", { name: /^Disable$/ }).click();
     await page.waitForTimeout(900);
