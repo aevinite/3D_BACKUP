@@ -131,6 +131,26 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const startedRef = useRef(false);   // has the reveal animation started yet?
   const requestRef = useRef<number>(0); // id of the running animation loop (so we can stop it)
   const modelSeenRef = useRef(false);  // has the model actually appeared on screen?
+  // IS THIS SCREEN STILL ON SCREEN? (sweep #7 T2, 2026-08-22 — item 1.)
+  //
+  // `requestRef` remembers only the LATEST animation-frame handle, so cancelling it stops one
+  // chain and one only. The connector-line loop below re-arms itself every frame, and it can be
+  // STARTED after this component has already gone: `handleLoad` schedules the reveal 800 ms later
+  // and that timer was never cleared, so a diner who glanced at the dish and tapped Back inside
+  // that window left a loop running on the page they went back to. Measured on the dish page,
+  // twenty seconds after leaving the 3D screen: SIX chains, 360 animation frames a second,
+  // forever — each frame reading three elements per hotspot out of a document that no longer has
+  // them. A phone that gets warm holding a menu.
+  //
+  // A ref, not state: it must be readable from a callback that outlives the render that made it.
+  // Set false only by the unmount effect below — never by the model effect's cleanup, which also
+  // runs on an ordinary small→optimized upgrade, where the loop must keep going.
+  // It is set TRUE in the effect body as well as at declaration: React's development Strict Mode
+  // mounts, unmounts and remounts every component once, so a flag that is only ever turned OFF by
+  // a cleanup is left off for the rest of the real mount — which would silently disable the
+  // connector lines instead of merely stopping them at the right time.
+  const aliveRef = useRef(true);
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
   const searchParams = useSearchParams();        // the address's "?..." part
   const fromSlug = searchParams.get("from") || ""; // which dish we came from
   // Which RESTAURANT this viewer belongs to (carried as ?r=<slug> from the dish
@@ -458,6 +478,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
     if (loading || error || !mvRef.current || !activeUrl) return;  // not ready yet
 
     const mv = mvRef.current;  // the <model-viewer> element
+    // EVERY TIMER THIS EFFECT STARTS IS CLEARED WHEN IT ENDS (sweep #7 T2, 2026-08-22 — item 1).
+    // The two below were fire-and-forget, so leaving the screen inside their window ran them
+    // against a component that no longer existed — and the 800 ms one starts the immortal
+    // connector-line loop. See the note on aliveRef.
+    const timers: ReturnType<typeof setTimeout>[] = [];
 
     // The model finished loading and is now visible.
     const handleLoad = () => {
@@ -465,14 +490,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
       modelWatchlist.unwatchByFolder(folder);  // no need to notify anymore
       setShowTryAgain(false);                  // hide any "taking longer" overlay
       setLoaderVisible(false);                 // hide the spinner
-      setTimeout(() => {
+      timers.push(setTimeout(() => {
         setBarVisible(true);                   // slide in the bottom info bar after 1s
-      }, 1000);
+      }, 1000));
       // keep the "triple-tap to replay" hint visible as a persistent cue
       // Play the reveal animation once, shortly after the model appears.
       if (!startedRef.current) {
         startedRef.current = true;
-        setTimeout(runFullSequence, 800);
+        timers.push(setTimeout(runFullSequence, 800));
       }
     };
 
@@ -507,6 +532,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       mv.removeEventListener("error", handleError);
       mv.removeEventListener("ar-status", handleARStatus);
       clearTimeout(startTimeout);
+      timers.forEach(clearTimeout);
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
       }
@@ -569,6 +595,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
 
   // A continuous loop that keeps every connector line updated, frame by frame.
   const _loop = () => {
+    // The screen has gone — stop, and do not schedule another frame. Without this the chain is
+    // immortal: nothing else holds its handle once the component that started it has unmounted.
+    if (!aliveRef.current) return;
     config?.tags?.forEach(ing => _updateLine(ing));
     requestRef.current = requestAnimationFrame(_loop);  // schedule the next frame
   };

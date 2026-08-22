@@ -287,6 +287,36 @@ check(
   "app/item/[slug]/not-found.tsx and app/r/[restaurant]/item/[slug]/not-found.tsx must stay identical."
 );
 
+// ── the animation loop must die with the screen (sweep #7 T2, item 1) ─────────────────────────
+// MEASURED on the dish page, twenty seconds after leaving the 3D screen: SIX connector-line loops
+// still running at 360 animation frames a second, forever. `requestRef` holds only the LATEST
+// frame handle, so cancelling it stops one chain; and `handleLoad` scheduled the reveal 800 ms
+// later on a timer nobody cleared, so leaving inside that window STARTED a loop after the screen
+// had already gone — a chain whose handle no live component holds, and which therefore never ends.
+// The window is an ordinary one: glance at the dish, tap Back.
+console.log("\n── the 3D screen's animation loop ends when the screen does ──────────────────");
+check(
+  "the connector-line loop refuses to re-arm once the 3D screen has gone",
+  /const aliveRef = useRef\(true\)/.test(src[VIEWER]) &&
+    /const _loop = \(\) => \{[\s\S]{0,400}?if \(!aliveRef\.current\) return;/.test(src[VIEWER]),
+  `${VIEWER} → _loop() re-arms itself with requestAnimationFrame every frame. It must return ` +
+    "early on !aliveRef.current, or a chain started near unmount runs for the life of the tab."
+);
+check(
+  "…and aliveRef is set true on mount as well, so Strict Mode's remount cannot disable the lines",
+  /useEffect\(\(\) => \{ aliveRef\.current = true; return \(\) => \{ aliveRef\.current = false; \}; \}, \[\]\)/.test(src[VIEWER]),
+  `${VIEWER} → React's development Strict Mode mounts, unmounts and remounts once. A flag only ` +
+    "ever turned off by a cleanup stays off for the real mount, which would kill the hotspot lines."
+);
+check(
+  "every timer handleLoad starts is cleared when the model effect is torn down",
+  /const timers: ReturnType<typeof setTimeout>\[\] = \[\]/.test(src[VIEWER]) &&
+    /timers\.push\(setTimeout\(runFullSequence, 800\)\)/.test(src[VIEWER]) &&
+    /timers\.forEach\(clearTimeout\)/.test(src[VIEWER]),
+  `${VIEWER} → handleLoad's 800 ms reveal timer and 1 s bar timer must be collected and cleared ` +
+    "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
+);
+
 // Every overlay on these screens registers with the back-button manager.
 check(
   "the dish page's photo lightbox and the 3D details sheet both register with the back manager",
