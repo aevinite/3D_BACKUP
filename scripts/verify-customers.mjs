@@ -52,10 +52,16 @@ const cleanupPhones = new Set();
 const undo = [];
 let undoing = false;
 async function restoreAll(why) {
+  // Re-entrant, and USABLE MORE THAN ONCE. The first version latched `undoing` true and never
+  // cleared it, so calling this mid-run (which section C does, to put the print switch back the
+  // moment it is finished with it) would have silently disarmed the SIGINT/crash handlers for the
+  // rest of the run. It has one flip today, so nothing was lost — but a second flip added later
+  // would have restored nothing, which is the exact fault this whole block exists to prevent.
   if (undoing) return; undoing = true;
-  if (undo.length) console.log(`\n↩︎ restoring ${undo.length} change(s)${why ? " (" + why + ")" : ""}…`);
-  for (const fn of undo.reverse()) { try { await fn(); } catch (e) { console.error("  restore FAILED:", e?.message || e); } }
-  undo.length = 0;
+  const batch = undo.splice(0, undo.length).reverse();
+  if (batch.length) console.log(`\n↩︎ restoring ${batch.length} change(s)${why ? " (" + why + ")" : ""}…`);
+  for (const fn of batch) { try { await fn(); } catch (e) { console.error("  restore FAILED:", e?.message || e); } }
+  undoing = false;
 }
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await restoreAll(sig); process.exit(130); });
 process.on("uncaughtException", async (e) => { console.error("\nunexpected failure:", e?.message || e); await restoreAll("crash"); process.exit(1); });
@@ -160,11 +166,26 @@ if (fr) {
       || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     if (!row) return { html: "", note: "no orders" };
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
-    let html = ""; const real = window.open;
+    // A COMPUTER MAY OWN THE PAPER, AND THEN NO WINDOW OPENS (mig 341 — T28 sweep, 2026-08-22).
+    // This capture stubs window.open and reads what printBill writes into it. That stopped working
+    // the moment a bill printer was routed to a helper: printBill posts the job to the basket and
+    // RETURNS — "no window opens here at all, which is the whole point" — so `html` stayed "" and
+    // every assertion below failed on an empty string, reporting a paper fault that did not exist.
+    // (Same shape as the ticket-in-an-iframe trap already recorded for the KOT test.)
+    // HOW TO REACH THE FALLBACK, AND THE SEAM THAT DOES NOT WORK: `printOwners` is a top-level
+    // `let` in the panel's classic script, so it is in that script's own lexical scope and NOT on
+    // globalThis — assigning it inside page.evaluate() creates a NEW global and leaves the panel's
+    // binding untouched. (Tried that first; the capture stayed empty.) `api` IS reachable: a
+    // top-level `function` declaration in a classic script becomes a window property. So stub the
+    // one call printBill makes to the basket — `POST /print/send` — and answer without `queued`,
+    // which is exactly the "noRoute" reply the function already handles by opening the window.
+    let html = ""; const real = window.open; const realApi = window.api;
+    window.api = (m, p, b, o) => (/\/print\/send/.test(String(p)) ? Promise.resolve({}) : realApi(m, p, b, o));
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
     try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
-    finally { window.open = real; }
-    return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone } };
+    finally { window.open = real; window.api = realApi; }
+    await new Promise((r) => setTimeout(r, 400)); // the basket call is fire-and-forget; let the fallback run
+    return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone }, routed: !!(realOwners && realOwners.bill && realOwners.bill.owned) };
   }, printTable);
   const h = printed.html || "";
   const css = h.slice(h.indexOf("<style"), h.indexOf("</style>"));
@@ -195,10 +216,12 @@ if (fr) {
     const row = (tbl ? orders.find((o) => String(o.table_number) === String(tbl)) : null)
       || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
-    let html = ""; const real = window.open;
+    let html = ""; const real = window.open; const realApi = window.api;
+    window.api = (m, p, b, o) => (/\/print\/send/.test(String(p)) ? Promise.resolve({}) : realApi(m, p, b, o));
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
     try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
-    finally { window.open = real; }
+    finally { window.open = real; window.api = realApi; }
+    await new Promise((r) => setTimeout(r, 400));
     return { html, printFlag: state.data.settings.bill_customer_print };
   }, printTable);
   ok("panel picked up print=OFF from the server", off.printFlag === false, String(off.printFlag));

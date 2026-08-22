@@ -27,6 +27,14 @@ import { chromium } from "playwright";
 // A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
 // 4000 belongs to the human, so a parallel session or CI could never run this at all. Accept a
 // target like every other guard here does. (2026-08-04 sweep.)
+// ⚠ EVERY URL IN THIS FILE WAS A DOUBLE-QUOTED "${BASE}/…" (T28 sweep, 2026-08-22).
+// A double-quoted string does not interpolate, so the literal characters ${BASE}/menu were handed
+// to page.goto() and Playwright answered "Cannot navigate to invalid URL" — before the first
+// assertion, on every run since the typo landed. This guard could not run AT ALL, and neither
+// could scripts/verify-session-ux.mjs, which had the same mistake in two places. A guard that never
+// runs is worse than no guard: it sits in the list looking like cover, and `npm run verify:…`
+// reports a failure that looks like the app rather than the script.
+// Nine URLs here; all now backticks. If you add another, use a backtick.
 const BASE = (() => {
   const i = process.argv.indexOf("--base");
   return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || "http://localhost:4000";
@@ -43,6 +51,12 @@ const SB = env.NEXT_PUBLIC_SUPABASE_URL, SRK = env.SUPABASE_SERVICE_ROLE_KEY, AN
 if (!SB || !SRK || !ANON) { console.error("missing supabase env"); process.exit(1); }
 
 const TABLE = "11"; // quiet test table, cleaned up at the end
+// THE ONE RESTAURANT THIS MAY WRITE TO (T28 sweep, 2026-08-22). `sessions.restaurant_id` and
+// `session_members.restaurant_id` are NOT NULL with no default, so every fixture insert below died
+// on `23502` — the third guard found with this exact fault, after verify-realtime.mjs and
+// verify-cancelled-tile-parity.mjs. The teardown was unscoped too, so it reached table 11 in every
+// restaurant. Both fixed.
+const RID = "00000000-0000-0000-0000-000000000001"; // French House — the writable fixture tenant
 let failures = 0;
 const check = (ok, label) => { console.log(`${ok ? "✓" : "✗ FAIL"} ${label}`); if (!ok) failures++; };
 
@@ -71,13 +85,13 @@ const cleanup = async () => {
   // never succeed and these scripts had been failing on a 23514 check violation before their first
   // assertion. Closing + soft-deleting clears the fixture off the floor exactly as the app would.
   // (2026-07-30)
-  await sb("PATCH", `sessions?table_number=eq.${TABLE}`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
-  await sb("DELETE", `requests?table_number=eq.${TABLE}`);
+  await sb("PATCH", `sessions?restaurant_id=eq.${RID}&table_number=eq.${TABLE}`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
+  await sb("DELETE", `requests?restaurant_id=eq.${RID}&table_number=eq.${TABLE}`);
 };
 await cleanup();
 
 const tok = (p) => p + Math.random().toString(36).slice(2) + Date.now().toString(36);
-const newSession = async () => (await sb("POST", "sessions", { table_number: TABLE, status: "open", auto_approve: false, opened_by: "waiter", opened_at: new Date().toISOString() }))[0];
+const newSession = async () => (await sb("POST", "sessions", { restaurant_id: RID, table_number: TABLE, status: "open", auto_approve: false, opened_by: "waiter", opened_at: new Date().toISOString() }))[0];
 const closeSession = (id) => sb("PATCH", `sessions?id=eq.${id}`, { status: "closed" }); // fires the close-cleanup trigger
 
 const browser = await chromium.launch();
@@ -104,19 +118,19 @@ try {
   {
     const w = await browser.newContext();
     const wp = await w.newPage();
-    await wp.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+    await wp.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
     await wp.waitForSelector(".cat-group-head", { timeout: 60000 });
     await w.close();
   }
 
   // ── 1. close the table while a partner is WAITING for approval ─────────────
   let sess = await newSession();
-  await sb("POST", "session_members", { session_id: sess.id, name: null, token: tok("eh_"), role: "owner", approved: true });
+  await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: null, token: tok("eh_"), role: "owner", approved: true });
   const gTok = tok("eg_");
-  const [g] = await sb("POST", "session_members", { session_id: sess.id, name: "Edge Partner", token: gTok, role: "guest", approved: false });
+  const [g] = await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: "Edge Partner", token: gTok, role: "guest", approved: false });
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await page.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "guest" }));
     localStorage.setItem("lfh_table", t);
@@ -134,10 +148,10 @@ try {
   // ── 2. close the table while an APPROVED member is connected ───────────────
   sess = await newSession();
   const hTok = tok("eh2_");
-  const [h] = await sb("POST", "session_members", { session_id: sess.id, name: "Solo Head", token: hTok, role: "owner", approved: true });
+  const [h] = await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: "Solo Head", token: hTok, role: "owner", approved: true });
   const ctx2 = await browser.newContext();
   const p2 = await ctx2.newPage();
-  await p2.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await p2.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await p2.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "owner" }));
     localStorage.setItem("lfh_table", t);
@@ -168,11 +182,11 @@ try {
   check(owners.length === 1, `exactly ONE head after a simultaneous double-join (got ${owners.length})`);
 
   // ── 4. transfer head on a CLOSED table must be refused ─────────────────────
-  const [pend] = await sb("POST", "session_members", { session_id: sess.id, name: "Late Joiner", token: tok("el_"), role: "guest", approved: false });
+  const [pend] = await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: "Late Joiner", token: tok("el_"), role: "guest", approved: false });
   await closeSession(sess.id);
   let cookie = "";
   if (env.EDITOR_PASSWORD) {
-    const r = await fetch("${BASE}/login", {
+    const r = await fetch(`${BASE}/login`, {
       method: "POST", redirect: "manual",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `password=${encodeURIComponent(env.EDITOR_PASSWORD)}`,
@@ -186,10 +200,10 @@ try {
 
   // ── 5. DOUBLE-TAP "Ask to join" must not create the same guest twice ───────
   sess = await newSession();
-  await sb("POST", "session_members", { session_id: sess.id, name: null, token: tok("dh_"), role: "owner", approved: true });
+  await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: null, token: tok("dh_"), role: "owner", approved: true });
   const ctx5 = await browser.newContext();
   const p5 = await ctx5.newPage();
-  await p5.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await p5.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await p5.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
   await fireGate(p5, TABLE);
   await p5.waitForSelector("text=already open", { timeout: 8000 }); // the "add your name" screen
@@ -209,7 +223,7 @@ try {
   sess = await newSession();
   const ctx6 = await browser.newContext();
   const p6 = await ctx6.newPage();
-  await p6.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await p6.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await p6.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
   // wait for the menu to render (React alive), then double-fire ONCE — the gate
   // closes itself quickly on this path, so we assert on the database below
@@ -227,12 +241,12 @@ try {
 
   // ── 7. TWO TABS on one phone must not join the same table twice ────────────
   sess = await newSession();
-  await sb("POST", "session_members", { session_id: sess.id, name: null, token: tok("th_"), role: "owner", approved: true });
+  await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: null, token: tok("th_"), role: "owner", approved: true });
   const ctx7 = await browser.newContext(); // one context = one phone (shared storage)
   const tabA = await ctx7.newPage();
   const tabB = await ctx7.newPage();
   for (const tab of [tabA, tabB]) {
-    await tab.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+    await tab.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
     await tab.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
     await fireGate(tab, TABLE);
     await tab.waitForSelector("text=already open", { timeout: 8000 });
@@ -254,8 +268,8 @@ try {
   const ctx8 = await browser.newContext();
   const pgA = await ctx8.newPage();
   const pgB = await ctx8.newPage();
-  await pgA.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
-  await pgB.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await pgA.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
+  await pgB.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await pgB.waitForTimeout(1200);
   await pgA.evaluate(() => {
     localStorage.setItem("lfh_cart", JSON.stringify([{ id: "espresso", title: "Espresso", price: 120, qty: 2 }]));
@@ -268,10 +282,10 @@ try {
   // ── 9. a NETWORK BLIP must never cost a guest their table membership ───────
   sess = await newSession();
   const nTok = tok("nb_");
-  const [nm] = await sb("POST", "session_members", { session_id: sess.id, name: "Blip Victim", token: nTok, role: "owner", approved: true });
+  const [nm] = await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: "Blip Victim", token: nTok, role: "owner", approved: true });
   const ctx9 = await browser.newContext();
   const p9 = await ctx9.newPage();
-  await p9.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await p9.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await p9.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "owner" }));
     localStorage.setItem("lfh_table", t);

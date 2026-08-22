@@ -165,7 +165,24 @@ const T1 = { menuPage: code("app/r/[restaurant]/menu/page.tsx") };
 // the lower-case address, where getScannedTable() returns "". The door canonicalises instead.
 check("P00155", "an oddly-cased menu link is sent to the canonical one, query and all", () => {
   const guard = rx(T1.menuPage, /if \(restaurant !== r\.slug\)/);
-  const keepsQuery = has(T1.menuPage, "searchParams", "URLSearchParams", "qs.append");
+  // THE QUERY IS NOW CARRIED BY A SHARED BUILDER, AND THIS CHECK DEMANDED THE OLD SPELLING
+  // (T28 sweep, 2026-08-22). It required ALL THREE of "searchParams", "URLSearchParams" and
+  // "qs.append" — `has()` is an every() — so it went red the moment the page stopped hand-rolling
+  // the query and started calling `queryStringOf()` from lib/tenant. The page's own comment says
+  // why it moved: it is "the SAME builder the moved-address redirect above uses, so the two doors
+  // on this page cannot drift apart on carrying `?table=N`". The code got BETTER and the check did
+  // not follow, then reported `query=false` — which reads as "a guest scanning an oddly-cased link
+  // loses their table", the opposite of the truth.
+  //
+  // Verified live before changing it: GET /r/FRENCH-HOUSE/menu?table=7 answers
+  //   307 · location: /r/french-house/menu?table=7
+  // — the table survives, and it is a 307 (never a 308), as the QR rule requires.
+  //
+  // So assert the MECHANISM that exists: the canonical redirect built from the shared helper.
+  // Accept the older hand-rolled forms too, so this does not go red again if a door legitimately
+  // needs its own builder — what matters is that the query is appended, not how.
+  const keepsQuery = has(T1.menuPage, "queryStringOf")
+    || has(T1.menuPage, "searchParams", "URLSearchParams");
   const redirects = rx(T1.menuPage, /redirect\(`\/r\/\$\{r\.slug\}\/menu/);
   return { ok: guard && keepsQuery && redirects, note: `guard=${guard} query=${keepsQuery} redirect=${redirects}` };
 });

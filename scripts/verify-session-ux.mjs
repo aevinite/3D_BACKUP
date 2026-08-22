@@ -8,6 +8,32 @@
 // Reads secrets from .env.local itself and prints ONLY pass/fail lines — no keys.
 // Usage: node scripts/verify-session-ux.mjs   (the unified app on :4000)
 //
+// ⚠️ WHAT THE T28 SWEEP FIXED AND WHAT IS STILL OWED (2026-08-22)
+//
+// FIXED, and each one was real:
+//   1. IT COULD NOT NAVIGATE AT ALL. Two `page.goto("${BASE}/menu")` calls used DOUBLE QUOTES, so
+//      the literal characters ${BASE}/menu went to Playwright and it answered "Cannot navigate to
+//      invalid URL" — before the first assertion, every run. The same typo was in
+//      verify-edge-cases.mjs, ten times. A guard that never runs is worse than no guard: it sits in
+//      the list looking like cover. Backticks now.
+//   2. IT WROTE TO EVERY RESTAURANT. The teardown matched `table_number=eq.9` with no tenant, so it
+//      closed and soft-deleted table 9's session in every restaurant on the platform — Aangan, the
+//      read-only control, included. Scoped to French House.
+//   3. ITS FIXTURE COULD NOT INSERT. `sessions.restaurant_id` and `session_members.restaurant_id`
+//      are NOT NULL with no default; all four inserts omitted them and died on 23502. Supplied.
+//   4. TWO ASSERTIONS DEFENDED DELETED DESIGN. The `.floor-side` cards were removed WITH the side
+//      panel by the owner on 2026-07-31, and `[data-quick-requests]` never fired at all — app.js
+//      says so where its handler was deleted: "NO tile emits these" (T3 sweep, 2026-08-06). Both
+//      retired, with the four joiner actions moved to where they now live (`.sx-mem` in the table
+//      panel), which is what they were really testing.
+//
+// STILL OWED, and deliberately not guessed at: the floor-interaction section drives the TOP-LEVEL
+// page, but the panel UI lives in an IFRAME (every other panel guard uses `frameLocator`). That
+// section needs rebuilding against the iframe, and the two transfer assertions ("old head was
+// kicked", "partner became the approved head") need checking one by one against the current
+// make-head endpoint. This is the same debt the 2026-07-30 note below recorded; it is smaller now,
+// and it is honest about what is left rather than crashing on the way there.
+//
 // ⚠️ PARTIALLY REPAIRED, STILL RED (2026-07-30). This script predates the 2026-06-13 merge of the
 // four panel servers into ONE app. Repaired here: the :4001 references now point at :4000, the
 // editor calls use the /api/editor/... prefix, auth uses the admin cookie, and the teardown
@@ -44,6 +70,14 @@ const SRK = env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SB || !SRK) { console.error("missing supabase env"); process.exit(1); }
 
 const TABLE = "9"; // a quiet table for the test; everything is cleaned up at the end
+// THE ONE RESTAURANT THIS MAY WRITE TO, AND IT WAS MISSING (T28 sweep, 2026-08-22).
+// Two faults in one: `sessions.restaurant_id` and `session_members.restaurant_id` are NOT NULL with
+// no default, so the fixture insert died on `23502` before the first assertion — the same fault
+// found in verify-realtime.mjs and verify-cancelled-tile-parity.mjs, from the change that stopped
+// every table guessing its restaurant. AND the teardown below matched `table_number=eq.9` with no
+// restaurant at all, so it closed and soft-deleted table 9's session in EVERY restaurant on the
+// platform, Aangan included — the read-only control. Both are scoped now.
+const RID = "00000000-0000-0000-0000-000000000001"; // French House — the writable fixture tenant
 let failures = 0;
 const check = (ok, label) => { console.log(`${ok ? "✓" : "✗ FAIL"} ${label}`); if (!ok) failures++; };
 
@@ -67,16 +101,16 @@ const cleanup = async () => {
   // never succeed and these scripts had been failing on a 23514 check violation before their first
   // assertion. Closing + soft-deleting clears the fixture off the floor exactly as the app would.
   // (2026-07-30)
-  await sb("PATCH", `sessions?table_number=eq.${TABLE}`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
-  await sb("DELETE", `requests?table_number=eq.${TABLE}`);
+  await sb("PATCH", `sessions?restaurant_id=eq.${RID}&table_number=eq.${TABLE}`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
+  await sb("DELETE", `requests?restaurant_id=eq.${RID}&table_number=eq.${TABLE}`);
 };
 await cleanup(); // clear any leftovers from an earlier crashed run
 
-const [sess] = await sb("POST", "sessions", { table_number: TABLE, status: "open", auto_approve: false, opened_by: "guest", opened_at: new Date().toISOString() });
+const [sess] = await sb("POST", "sessions", { restaurant_id: RID, table_number: TABLE, status: "open", auto_approve: false, opened_by: "guest", opened_at: new Date().toISOString() });
 const tok = (p) => p + Math.random().toString(36).slice(2) + Date.now().toString(36);
 const headTok = tok("vh_"), guestTok = tok("vg_");
-const [head] = await sb("POST", "session_members", { session_id: sess.id, name: null, token: headTok, role: "owner", approved: true });
-const [guest] = await sb("POST", "session_members", { session_id: sess.id, name: "Verify Partner", token: guestTok, role: "guest", approved: false });
+const [head] = await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: null, token: headTok, role: "owner", approved: true });
+const [guest] = await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: "Verify Partner", token: guestTok, role: "guest", approved: false });
 
 const browser = await chromium.launch();
 
@@ -98,7 +132,12 @@ try {
   {
     const w = await browser.newContext();
     const wp = await w.newPage();
-    await wp.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+    // BACKTICKS, NOT DOUBLE QUOTES (T28 sweep, 2026-08-22). This read ``${BASE}/menu``, so the
+    // literal five characters ${BAS…} were handed to goto() and Playwright answered "Cannot
+    // navigate to invalid URL" — before the first assertion, on every run. The guard could not
+    // run at all, and a guard that never runs is worse than no guard: it sits in the list looking
+    // like cover. Line 117 had the same typo; line 159 always had it right.
+    await wp.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
     await wp.waitForSelector(".cat-group-head", { timeout: 60000 });
     await w.close();
   }
@@ -106,7 +145,7 @@ try {
   // ── 1+2: the declined partner's screen ─────────────────────────────────────
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   // Plant the partner's session note + remembered table, exactly as a real join would.
   await page.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "guest" }));
@@ -165,38 +204,53 @@ try {
     await ectx.addCookies([{ name, value, url: BASE }]);
   }
   // A fresh UNAPPROVED joiner first, so the Requests card + tile Attend show up.
-  await sb("POST", "session_members", { session_id: sess.id, name: "Second Guest", token: tok("vg2_"), role: "guest", approved: false });
+  await sb("POST", "session_members", { restaurant_id: RID, session_id: sess.id, name: "Second Guest", token: tok("vg2_"), role: "guest", approved: false });
   const ep = await ectx.newPage();
-  await ep.goto("${BASE}/", { waitUntil: "domcontentloaded" });
+  await ep.goto(`${BASE}/`, { waitUntil: "domcontentloaded" });
   // Get to the Tables (floor) view — its tab mentions "Tables".
   const tab = ep.locator("button, .tab, [role=tab]").filter({ hasText: /tables/i }).first();
   if (await tab.count()) await tab.click();
-  // Wait for the REAL cards (the loading skeleton has .fc-card but no <h3>).
-  await ep.waitForSelector(".floor-side .fc-card h3", { timeout: 10000 });
-  const cardTitles = await ep.$$eval(".floor-side .fc-card h3", (hs) => hs.map((h) => h.textContent.trim()));
-  // Everyday cards on top, Features last — only when sessions are ON does the
-  // bulk card exist, so just demand that "Features" is the LAST card.
-  check(/Features/i.test(cardTitles[cardTitles.length - 1] || ""), `Features card is at the bottom (${cardTitles.join(" | ")})`);
-  // The pending joiner must appear in the Requests card with all four actions.
-  await ep.waitForSelector(".floor-side [data-mem-approve]", { timeout: 8000 });
-  const joinerActs = await ep.$eval(".floor-side .sx-req", (row) => ({
+  // ── THE SIDE PANEL IS GONE — THESE CHECKS MOVED ONTO THE TILE (T28 sweep, 2026-08-22) ────────
+  //
+  // Two checks here waited on `.floor-side`: the order of its cards ("Features last") and the
+  // joiner's four actions inside its Requests card. The owner DELETED that panel on 2026-07-31 —
+  // editor/app.js says so where the cards used to be built: "The floor's three right-hand cards —
+  // Requests, Needs and To accept — were deleted with the side panel itself. Nothing they told you
+  // was lost: each tile carries its own badges." Only leftover CSS and the admin's floor PREVIEW
+  // still mention `.floor-side`, so the wait could never resolve and this guard timed out here on
+  // every run — a guard defending a design the owner removed.
+  //
+  //  · The card-order check is RETIRED, not re-pointed: those cards do not exist to be ordered.
+  //  · The four joiner actions DO still exist — they moved into the table detail panel (`.sx-mem`),
+  //    which is where the modal check below already looks. So the check moves there with them,
+  //    keeping what it was really for: a waiting joiner can be approved, denied, banned or handed
+  //    the table, from one place.
+  //
+  // AND THE TILE'S "QUICK ATTEND" NEVER EXISTED EITHER. This waited on
+  // `[data-floor-table="N"] [data-quick-requests]`. editor/app.js is explicit about that hook, at
+  // the delegated click handler: "Eight more branches sat here and not one of them could ever fire:
+  // [data-quick-attend] / [data-quick-pay] / [data-quick-requests] — NO tile emits these" (T3
+  // sweep, 2026-08-06, which deleted the handlers). So the assertion is retired rather than
+  // re-pointed: there is no such control to find, and demanding one would ask for a feature back
+  // that was removed as dead code.
+  //
+  // The INTENT survives and is what the checks below cover: a manager can see a waiting joiner and
+  // act on them. The way in is the tile itself — "a free tile IS the button (tapping it opens the
+  // order builder)", and an occupied one opens the table panel.
+  await ep.click(`.ftile[data-floor-table="${TABLE}"]`);
+  await ep.waitForSelector(".tbl-modal", { timeout: 6000 });
+  await ep.waitForTimeout(800); // panel refreshes off the live board poll
+  await ep.waitForSelector(".tbl-modal .sx-mem [data-mem-approve]", { timeout: 8000 }).catch(() => {});
+  const joinerActs = await ep.$eval(".tbl-modal .sx-mem:has([data-mem-approve])", (row) => ({
     deny: !!row.querySelector("[data-mem-deny]"),
     ban: !!row.querySelector("[data-mem-ban]"),
     transfer: !!row.querySelector("[data-mem-head]"),
     ok: !!row.querySelector("[data-mem-approve]"),
     transferLabel: row.querySelector("[data-mem-head]")?.textContent.trim(),
-  }));
+  })).catch(() => ({}));
   check(joinerActs.deny && joinerActs.ban && joinerActs.transfer && joinerActs.ok,
-    "Requests card joiner row has ✕ / Ban / Transfer / OK");
+    `a waiting joiner's row offers Approve / ✕ / Ban / Transfer (${JSON.stringify(joinerActs)})`);
   check(joinerActs.transferLabel === "Transfer", "the transfer button reads exactly 'Transfer'");
-  // The table's TILE must offer a quick Attend while the joiner waits.
-  check(await ep.isVisible(`[data-floor-table="${TABLE}"] [data-quick-requests]`),
-    "tile shows a quick Attend while a partner waits to join");
-  await ep.screenshot({ path: "verify-floorside.png", fullPage: false });
-  // The tile's Attend opens the table panel, where the per-guest Transfer lives.
-  await ep.click(`[data-floor-table="${TABLE}"] [data-quick-requests]`);
-  await ep.waitForSelector(".tbl-modal", { timeout: 6000 });
-  await ep.waitForTimeout(800); // panel refreshes off the live board poll
   const hasHeadBtn = await ep.isVisible(".tbl-modal [data-mem-head]");
   check(hasHeadBtn, "table panel offers the Transfer button on a guest");
   await ep.screenshot({ path: "verify-tablepanel.png" });
