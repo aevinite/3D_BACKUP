@@ -243,6 +243,26 @@ const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? read
     check("kitchen: a take-back lets its card redraw",
       /for \(const id of touched\) forgetCardHtml\(id\);/.test(ur),
       "otherwise the dish is put back in the data and the screen keeps showing READY with no ✓.");
+    // ── A POST-WRITE REFRESH MUST NOT BECOME A ROW IN THE OWNER'S LOG ─────────────────────────
+    // load() and freshLoad() REJECT when the read fails (backoffPoll and LFH_RT.catchUp back off on
+    // exactly that), so every timer and listener in the panel writes `load().catch(() => {})`. Five
+    // post-write refreshes did not, and nothing awaited them — so a failed read became an unhandled
+    // rejection, and public/panels/errlog.js reports every one of those into the Everything Log.
+    // Watched with the board answering 503: `REJECTION: the database is very busy` in the log and
+    // nothing on screen. refreshQuietly() is freshLoad() with the file's own convention applied.
+    check("kitchen: there is one quiet post-write refresh helper",
+      /const refreshQuietly = \(\) => freshLoad\(\)\.catch\(\(\) => \{\}\);/.test(js),
+      "the five fire-and-forget refreshes go through it, so a failed read cannot reject into nothing.");
+    {
+      // `await freshLoad();` inside a try/catch is handled — only a fire-and-forget one is bare
+      const bare = (js.match(/(?<!await )(?<!return )(?<![.\w])freshLoad\(\);/g) || []).length;
+      check("kitchen: no post-write refresh is left bare",
+        bare === 0,
+        `found ${bare} bare freshLoad(); call(s) — each one is an unhandled rejection when the board read fails, and errlog.js files it in the owner's Everything Log. Use refreshQuietly().`);
+    }
+    check("kitchen: refreshQuietly swallows only the READ, never a write",
+      /toast\("Failed: " \+ e\.message\);\s*\n?\s*refreshQuietly\(\);/.test(js),
+      "every refused write still says so to the person before the quiet refresh.");
     check("kitchen: the take-back forgets the stamp BEFORE it repaints",
       ur.indexOf("forgetCardHtml") >= 0 && ur.indexOf("forgetCardHtml") < ur.indexOf("render()"),
       "render() is what reads the stamp — clearing it afterwards would be a paint too late.");

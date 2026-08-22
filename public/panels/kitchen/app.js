@@ -516,8 +516,8 @@ function platTicketHtml(p) {
 // Advance a platform order (accept/ready/handed_over), then refresh.
 function platAct(id, status) {
   api("POST", `/platform/${id}/status`, { status })
-    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } freshLoad(); })
-    .catch((e) => { toast("Failed: " + e.message); freshLoad(); });
+    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } refreshQuietly(); })
+    .catch((e) => { toast("Failed: " + e.message); refreshQuietly(); });
 }
 
 // INCREMENTAL tile patcher. Given a container and the DESIRED ordered list of tickets
@@ -798,7 +798,7 @@ function markItemReady(id, btn) {
     // says" and repaints it from the truth. Cheap, and it cannot make anything else stale.
     forgetCardHtml(o ? o.id : it.order_id);
     toast("Failed: " + e.message);
-    freshLoad();
+    refreshQuietly();
   });
 }
 
@@ -855,7 +855,7 @@ async function undoReady(snap, orderId) {
   } catch (e) {
     toast("Undo failed: " + e.message);
   }
-  freshLoad();   // a write just landed — do not accept a read that predates it
+  refreshQuietly();   // a write just landed — do not accept a read that predates it
 }
 // Move ONE fully-ready ticket into the Ready column without a whole-board rebuild:
 // re-render just that card (now shows "ready — waiter serving", no buttons), drop it
@@ -928,7 +928,7 @@ function markOrderReady(orderId) {
     pendingReadyOrders.delete(orderId);
     snap.forEach((s) => pendingReady.delete(s.id));
     toast("Failed: " + e.message);
-    freshLoad();
+    refreshQuietly();
   });
 }
 
@@ -1810,6 +1810,24 @@ let markFullRead = () => {};
 function freshLoad() {
   return loadInFlight ? loadInFlight.catch(() => {}).then(() => loadImpl()) : loadImpl();
 }
+// refreshQuietly(): freshLoad() for the five callers that fire one and walk away.
+//
+// load() and freshLoad() REJECT when the read fails — deliberately, because backoffPoll and
+// LFH_RT.catchUp back off on exactly that. Every timer and listener in this file therefore writes
+// `load().catch(() => {})`. Five post-write refreshes did not: platAct's two branches, the refused ✓,
+// the refused ALL READY, and the trailing read at the end of a take-back. Nothing awaited them, so a
+// read that failed became an UNHANDLED PROMISE REJECTION — and public/panels/errlog.js reports every
+// one of those into the owner's Everything Log.
+//
+// Watched happening (T6 sweep #7, 2026-08-22): with the board answering 503 "the database is very
+// busy", a cook tapping UNDO produced `REJECTION: the database is very busy` in the log and NOTHING
+// on screen. On a busy evening that is one unactionable row per take-back, in the log the owner reads
+// — which is the "don't cry wolf" rule and the rush rule pointing the same way. The person has
+// already been told what they need: the refusal toast fired, and the offline/busy bar owns "the
+// system is very busy". The read simply tries again on the next breadcrumb or the 60s backstop.
+//
+// It swallows the READ, never a write: every write on this screen still reports its own outcome.
+const refreshQuietly = () => freshLoad().catch(() => {});
 function load() {
   if (loadInFlight) { loadQueued = true; return loadInFlight; }
   const p = loadImpl();
