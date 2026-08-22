@@ -100,7 +100,7 @@ export default function LoginForm({ next, initialError }: { next: string; initia
         </div>
       ) : null}
       <button type="submit" disabled={busy}
-        style={{ marginTop: 12, width: "100%", padding: 12, borderRadius: 10, border: 0, background: busy ? "#2f5fb0" : "#3b82f6", color: "#fff", fontWeight: 700, fontSize: 15, cursor: busy ? "default" : "pointer" }}>
+        style={{ marginTop: 12, width: "100%", padding: 12, borderRadius: 10, border: 0, background: busy ? "#2f5fb0" : "#2563eb", color: "#fff", fontWeight: 700, fontSize: 15, cursor: busy ? "default" : "pointer" }}>
         {busy ? "Checking…" : "Enter"}
       </button>
       {/* The way out for someone who took the wrong door. It is a plain link, not a redirect:

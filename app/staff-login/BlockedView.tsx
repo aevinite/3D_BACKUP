@@ -100,7 +100,7 @@ export default function BlockedView() {
         style={{ width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#dbe7ff", fontSize: 14, resize: "vertical", opacity: outOfTries ? 0.5 : 1 }}
       />
       <button onClick={requestUnblock} disabled={busy === "request" || outOfTries}
-        style={{ marginTop: 10, width: "100%", padding: 12, borderRadius: 10, border: 0, background: outOfTries ? "#334155" : busy === "request" ? "#2f5fb0" : "#3b82f6", color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: busy || outOfTries ? "default" : "pointer" }}>
+        style={{ marginTop: 10, width: "100%", padding: 12, borderRadius: 10, border: 0, background: outOfTries ? "#334155" : busy === "request" ? "#2f5fb0" : "#2563eb", color: "#fff", fontWeight: 700, fontSize: 14.5, cursor: busy || outOfTries ? "default" : "pointer" }}>
         {busy === "request" ? "Sending…" : sent ? "Send another request" : "Request unblock"}
       </button>
 

@@ -171,6 +171,16 @@ for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/sty
   else ok(`${file} — every full-screen overlay dims with --scrim`);
 }
 
+// WHITE INK NEEDS A DARK ENOUGH FILL. The sign-in pages hold their primary button's colour in an
+// inline style, so no stylesheet check can see it: blue-500 with white on it read 3.68:1 at 15px/700
+// on /login and /staff-login, in both skins - the primary action on the page every staff member
+// starts at. Assert the fill by value, because that is where it lives.
+for (const file of ["app/login/LoginForm.tsx", "app/staff-login/LoginForm.tsx", "app/staff-login/BlockedView.tsx"]) {
+  let src; try { src = readFileSync(file, "utf8"); } catch { fail(`${file} — not found; this guard needs updating`); continue; }
+  if (/"#3b82f6"/.test(src)) fail(`${file} — the primary button is back on blue-500; white on it is 3.68:1 (needs 4.5). Blue-600 (#2563eb) reads 5.17:1.`);
+  else ok(`${file} — the primary button's fill is dark enough for white ink`);
+}
+
 // The first-paint skeleton must not carry a literal colour: it can only be right in one skin.
 for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/style.css"]) {
   const rule = readFileSync(file, "utf8").split("\n").find((l) => l.startsWith(".skel-line {"));
