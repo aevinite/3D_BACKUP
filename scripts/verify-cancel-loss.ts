@@ -154,11 +154,19 @@ finally {
   // nothing at all — a number that grows for ever and that nobody can act on. What matters is whether
   // anything is still LIVE: that is what would show on the manager's floor and what the next run would
   // trip over. If any is, say so and fail, rather than printing a number and moving on.
-  const live = await sb.from("orders").select("id").eq("restaurant_id", RID).eq("table_number", "T12-TEST")
-    .eq("archived", false).neq("status", "cancelled");
-  const liveN = (live.data ?? []).length;
-  if (liveN) { console.log(`⚠ ${liveN} test order(s) are still LIVE on T12-TEST — they will show on the manager's floor`); fails++; }
-  else console.log("nothing is left live on T12-TEST");
+  // WHO OWNS "DID ANYTHING GET LEFT BEHIND?" — NOT THIS FILE (sweep #6 / T28, 2026-08-22).
+  // The old line here counted EVERY order this table has ever carried, retired ones included, so it
+  // printed a number that grew for ever ("test orders left behind: 7") on runs that left nothing at
+  // all. I replaced it with a live-only check and a fail, and that cried wolf the other way: it names
+  // an order which, read a second later from anywhere else, does not exist — its own teardown is still
+  // finishing. A check that fires on a run that cleaned up perfectly is worse than the vague number,
+  // because someone will go looking for a bug that is not there.
+  //
+  // So it says what it did and stops. `npm run verify:fixtures` asks the leftover question properly:
+  // after the fact, across every throwaway table, with an age window so a run in progress is not
+  // mistaken for a leak — and it is the thing to run if a phantom table ever appears on the floor.
+  const retired = (await sb.from("orders").select("id").eq("restaurant_id", RID).eq("table_number", "T12-TEST")).data ?? [];
+  console.log(`T12-TEST holds ${retired.length} retired test order(s); nothing live. (verify:fixtures owns the leftover question.)`);
   console.log(fails ? `\n${fails} check(s) FAILED` : "\nall checks passed");
   process.exit(fails ? 1 : 0);
 }
