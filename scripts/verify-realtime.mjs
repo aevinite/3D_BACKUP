@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
+// Migration 352 took the "assume French House" default off these tables, so a fixture has to say
+// which restaurant it belongs to. It always meant restaurant #1; now it says so out loud.
+const R1 = "00000000-0000-0000-0000-000000000001";
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 function parseEnv(t) { const o = {}; for (const l of t.split(/\r?\n/)) { const m = l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i); if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, ""); } return o; }
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
@@ -66,7 +70,7 @@ const results = [];
 // 4) auto_approve toggle on a throwaway session → ops/session (THE FIX)
 { const tnum = "9931";
   await svc.from("sessions").delete().eq("table_number", tnum); // clean slate
-  const { data: s, error } = await svc.from("sessions").insert({ table_number: tnum, status: "open", auto_approve: true }).select("id").single();
+  const { data: s, error } = await svc.from("sessions").insert({ table_number: tnum, status: "open", auto_approve: true, restaurant_id: R1 }).select("id").single();
   if (error) { console.log("  (session insert failed: " + error.message + ")"); }
   results.push(await expectBreadcrumb("ops", "session", "auto_approve toggle",
     () => svc.from("sessions").update({ auto_approve: false }).eq("id", s.id)));
@@ -79,7 +83,7 @@ const results = [];
 // components/admin/shared.tsx subscribes to it — but this test was never updated, so it has been
 // failing on correct behaviour. A guard that is permanently red is a guard people learn to skip.
 { results.push(await expectBreadcrumb("audit", "action", "staff action (oplog)",
-    () => svc.from("staff_actions").insert({ panel: "admin", action: "rt_selftest", detail: "verify-realtime" })));
+    () => svc.from("staff_actions").insert({ panel: "admin", action: "rt_selftest", detail: "verify-realtime", restaurant_id: R1 })));
   await svc.from("staff_actions").delete().eq("action", "rt_selftest"); // cleanup
 }
 

@@ -8,6 +8,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
+// Migration 352 took the "assume French House" default off these tables, so a fixture has to say
+// which restaurant it belongs to. This test already targets restaurant #1 (see lfh_test_clear_table
+// below); now its inserts say so too.
+const R1 = "00000000-0000-0000-0000-000000000001";
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 function parseEnv(t) { const o = {}; for (const l of t.split(/\r?\n/)) { const m = l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i); if (m) o[m[1]] = m[2].replace(/^["']|["']$/g, ""); } return o; }
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
@@ -33,10 +38,10 @@ async function expect(kind, label, write) {
 }
 
 // ---- set up a throwaway party on table 9932 ----
-await svc.rpc("lfh_test_clear_table", { p_rid: "00000000-0000-0000-0000-000000000001", p_table: TN }); // issued-bill lock (mig 190): clears order_items+orders+sessions for this test table
-const sess = (await svc.from("sessions").insert({ table_number: TN, status: "open", auto_approve: true }).select("id").single()).data;
-const mem = (await svc.from("session_members").insert({ session_id: sess.id, name: "RT Selftest", role: "guest", approved: true, phone: "9990000000", token: "selftest-" + Date.now() }).select("id").single()).data;
-const ord = (await svc.from("orders").insert({ table_number: TN, session_id: sess.id, items: [{ id: "x", title: "T", price: 100, qty: 1 }], subtotal: 100, total: 100, status: "preparing" }).select("id,total").single()).data;
+await svc.rpc("lfh_test_clear_table", { p_rid: R1, p_table: TN }); // issued-bill lock (mig 190): clears order_items+orders+sessions for this test table
+const sess = (await svc.from("sessions").insert({ table_number: TN, status: "open", auto_approve: true, restaurant_id: R1 }).select("id").single()).data;
+const mem = (await svc.from("session_members").insert({ session_id: sess.id, name: "RT Selftest", role: "guest", approved: true, phone: "9990000000", token: "selftest-" + Date.now(), restaurant_id: R1 }).select("id").single()).data;
+const ord = (await svc.from("orders").insert({ table_number: TN, session_id: sess.id, items: [{ id: "x", title: "T", price: 100, qty: 1 }], subtotal: 100, total: 100, status: "preparing", restaurant_id: R1 }).select("id,total").single()).data;
 await sleep(400);
 
 // 1) auto-approve toggle
@@ -45,7 +50,7 @@ results.push(await expect("session", "auto-approve toggle", () => svc.from("sess
 results.push(await expect("order", "per-order discount", () => svc.from("orders").update({ discount: 20, discount_note: "selftest" }).eq("id", ord.id)));
 // 3) ban: blocklist insert (member_id+phone+reason) + customers upsert + member removed
 results.push(await expect("block", "ban → blocklist", async () => {
-  await svc.from("blocklist").insert({ member_id: mem.id, phone: "9990000000", reason: "banned from tablet" });
+  await svc.from("blocklist").insert({ member_id: mem.id, phone: "9990000000", reason: "banned from tablet", restaurant_id: R1 });
   await svc.from("customers").upsert({ phone: "9990000000", blocked: true }, { onConflict: "phone" });
 }));
 // 4) kick: member removed
@@ -59,7 +64,7 @@ results.push(await expect("order", "restart (archive round)", () => svc.from("or
 await svc.from("session_members").delete().eq("session_id", sess.id);
 await svc.from("blocklist").delete().eq("member_id", mem.id);
 await svc.from("customers").delete().eq("phone", "9990000000");
-await svc.rpc("lfh_test_clear_table", { p_rid: "00000000-0000-0000-0000-000000000001", p_table: TN });
+await svc.rpc("lfh_test_clear_table", { p_rid: R1, p_table: TN });
 await anon.removeAllChannels();
 
 const pass = results.every(Boolean);

@@ -1094,9 +1094,9 @@ function blank(tab) {
       category: (state.data.categories[0] || {}).slug || "",
       veg: false, is4d: false, open_price: false, model_folder: "",
       model_small_url: "", model_optimized_url: "",
-      description: "", long_description: "", rating: "", time: "", search_alias: "",
+      description: "", long_description: "", time: "", search_alias: "",
       nutrition: { calories: "", protein: "", carbs: "", sugar: "" },
-      ingredients: [], reviews: [], tags: [], allergens: [], options: [],
+      ingredients: [], tags: [], allergens: [], options: [],
       sort_order: nextSort(),
     };
   if (tab === "categories")
@@ -1287,17 +1287,13 @@ function ingredientRows(it) {
     </div>`).join("");
   return `<div class="rows">${rows}</div><button class="btn small" data-action="addIngredient" style="margin-top:10px">+ Ingredient</button>`;
 }
-// reviewRows: one editable row per customer review (name + star rating + text).
-function reviewRows(it) {
-  const rows = (it.reviews || [])
-    .map((rv, i) => `<div class="row-item">
-      <input data-path="reviews.${i}.name" value="${esc(rv.name || "")}" placeholder="Name" style="max-width:150px"/>
-      <input class="narrow" type="number" min="1" max="5" data-path="reviews.${i}.rating" value="${esc(rv.rating ?? 5)}"/>
-      <textarea data-path="reviews.${i}.text" placeholder="Review text">${esc(rv.text || "")}</textarea>
-      <button class="icon-btn" data-action="rmReview" data-arg="${i}"><i class="fas fa-trash"></i></button>
-    </div>`).join("");
-  return `<div class="rows">${rows}</div><button class="btn small" data-action="addReview" style="margin-top:10px">+ Review</button>`;
-}
+// REMOVED 2026-08-21 — the dish form had a "Rating" box and editable "Reviews" rows that reached
+// NOTHING. Every star a guest sees comes from real customer reviews: the `reviews` table, aggregated
+// by the `item_ratings` view (migrations 030 and 116). The old `menu_items.rating` and
+// `menu_items.reviews` columns were emptied by migration 030 and read by nobody afterwards — 0 of
+// 464 dishes carried a value — yet the boxes still saved into them, so a manager could type 4.8,
+// press save, and see nothing change anywhere. Migration 359 drops the two columns. Do NOT put these
+// fields back: a rating is something a guest gives, not something the restaurant types.
 
 // ---------- forms ----------
 // Customization options editor (Size, Milk, Extras… — each choice can add to price).
@@ -1439,7 +1435,6 @@ function formItems(it) {
 
   <div class="card"><h3>Details</h3>
     <div class="grid cols-2">
-      ${tf("Rating", "rating", it.rating, { ph: "4.8" })}
       ${tf("Prep time", "time", it.time, { ph: "25-30 min" })}
       ${ta("Short description", "description", it.description, { span: true })}
       ${ta("Long description", "long_description", it.long_description, { span: true })}
@@ -1457,7 +1452,7 @@ function formItems(it) {
   </div>
 
   <div class="card"><h3>Ingredients</h3>${ingredientRows(it)}</div>
-  <div class="card"><h3>Reviews</h3>${reviewRows(it)}</div>`;
+`;
 }
 
 // formCategories: the edit form for one category (icon, colour, sort order,
@@ -6540,8 +6535,6 @@ function handleAction(action, arg, node) {
   } else
   if (action === "addIngredient") (it.ingredients = it.ingredients || []).push({ emoji: "", name: "" });
   else if (action === "rmIngredient") it.ingredients.splice(Number(arg), 1);
-  else if (action === "addReview") (it.reviews = it.reviews || []).push({ name: "", rating: 5, text: "" });
-  else if (action === "rmReview") it.reviews.splice(Number(arg), 1);
   else if (action === "toggleTag") {
     it.tags = it.tags || [];
     const i = it.tags.indexOf(arg);

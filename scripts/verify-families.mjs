@@ -143,9 +143,15 @@ try {
   const f = settings.features || {};
   const backendOnly = ["verification", "payments", "aggregators", "gst_invoice"];
   check(backendOnly.every((k) => f[k] !== true), `all backend-only flags are off (${backendOnly.map((k) => k + "=" + (f[k] === true)).join(", ")})`);
-  // Their RPCs refuse to act while the flag is off (the system "isn't there").
+  // Their RPCs must not be able to act while the flag is off (the system "isn't there").
+  // This used to call lfh_request_verification and assert it answered {ok:false, reason:'disabled'}.
+  // Migration 360 RETIRED that function — it was the surviving half of the mig-037 stub, whose partner
+  // had been removed three times, and it was still reachable with the public menu key. So the check
+  // now asserts the stronger form of the same rule: the RPC is not reachable AT ALL. A feature that
+  // cannot be called is better evidence for "this system isn't there" than one that politely declines.
   const v = await rpc(ANON, "lfh_request_verification", { p_contact: "9876543210", p_channel: "sms" });
-  check(v.body && v.body.ok === false && v.body.reason === "disabled", "verification RPC answers 'disabled' while its flag is off");
+  const gone = v.status === 404 || (v.body && (v.body.code === "PGRST202" || /does not exist|could not find/i.test(JSON.stringify(v.body))));
+  check(gone, `the retired verification RPC is not reachable at all (mig 360) — got ${v.status}`);
   // A malformed features payload through the editor is sanitised to a clean
   // boolean map (arrays/strings/nested junk dropped) — can't poison gating.
   const poison = await editor("POST", "/settings", { features: { ratings: false, junk: "yes", nested: { a: 1 }, arr: [1, 2], model3d: true } });

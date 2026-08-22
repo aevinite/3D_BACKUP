@@ -81,15 +81,18 @@ async function actPlace(r) {
 }
 async function actCall(r) {
   // table-scoped waiter call (try restaurant-scoped 3-arg, fall back to 2-arg, then direct insert)
-  let e = (await sb.rpc("lfh_call_waiter_table", { p_table: pickTable(), p_note: rnd(REASONS), p_restaurant_id: r.id })).error;
-  if (e) e = (await sb.rpc("lfh_call_waiter_table", { p_table: pickTable(), p_note: rnd(REASONS) })).error;
+  const e = (await sb.rpc("lfh_call_waiter_table", { p_table: pickTable(), p_note: rnd(REASONS), p_restaurant_id: r.id })).error;
   bump("call", !e); if (e) logline(`ERR call ${r.slug}: ${e.message}`);
 }
 async function actJoin(r) {
   // partner joins a busy table (best-effort across signatures)
   const t = String(1 + ri(6));
-  let e = (await sb.rpc("lfh_join_session", { p_table: t, p_name: rnd(NAMES), p_location_ok: true })).error;
-  if (e) e = (await sb.rpc("lfh_join_session", { p_table: t, p_name: rnd(NAMES), p_lat: 23.0, p_lng: 72.0 })).error;
+  // ONE signature, and it names its restaurant. The old two-attempt shape tried a parameter that
+  // does not exist (`p_location_ok`, retired by migration 018) and then an unscoped overload that
+  // only worked through the "assume restaurant #1" default — so on a multi-restaurant run every
+  // join landed on French House whichever restaurant it was meant for, and the first attempt
+  // always errored. Live signature: (p_table, p_name, p_lat, p_lng, p_device, p_restaurant_id).
+  const e = (await sb.rpc("lfh_join_session", { p_table: t, p_name: rnd(NAMES), p_lat: 23.0, p_lng: 72.0, p_restaurant_id: r.id })).error;
   bump("join", !e); if (e) logline(`ERR join ${r.slug}: ${e.message}`);
 }
 async function advance(r, from, to, orderStatus) {

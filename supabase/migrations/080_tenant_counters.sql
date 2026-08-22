@@ -129,3 +129,11 @@ DROP FUNCTION IF EXISTS lfh_next_counter(text);
 DROP FUNCTION IF EXISTS lfh_next_seq(text);
 
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `lfh_assign_bill()` above is RETIRED — migration 267 dropped it as dead code. Its trigger
+-- (`trg_assign_bill`) had already gone in migration 040, which moved the bill number to a table's
+-- FIRST ORDER instead of the moment it is opened; this file only re-creates the function body, so
+-- running it alone leaves a dead function rather than changed behaviour. Removed anyway, so the
+-- state after a single run matches the state after a full re-seed. Idempotent.
+DROP FUNCTION IF EXISTS lfh_assign_bill();

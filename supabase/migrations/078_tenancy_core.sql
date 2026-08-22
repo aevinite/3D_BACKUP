@@ -82,3 +82,12 @@ END $$;
 
 -- PostgREST caches the schema; nudge it so the JS client sees the new column.
 NOTIFY pgrst, 'reload schema';
+
+-- ⚠️ RUN-ALONE GUARD (added by the 2026-08-21 migrations-001-118 sweep, T21).
+-- `public_read_restaurants` above is RETIRED. Migration 313 removed it; a guest resolves a
+-- restaurant from its slug through `lfh_guest_restaurant` (mig 282), which returns the guest-facing
+-- fields and withholds the permission block. As with `settings` in migration 003, a partial run of
+-- this file is inert today because anon's table-level SELECT grant on `restaurants` is revoked too
+-- — but the file should still end where 313 left it rather than lean on the other lock.
+-- A FULL re-seed already ends correctly (313 sorts after this file). Idempotent.
+DROP POLICY IF EXISTS "public_read_restaurants" ON restaurants;

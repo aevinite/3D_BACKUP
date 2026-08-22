@@ -71,7 +71,25 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { data, error } = await supabaseAdmin.rpc("lfh_floor_state");
+  // ── ONE restaurant's floor. `restaurant_id` is REQUIRED, and that is the whole point of this
+  // block. `lfh_floor_state` declares `p_restaurant_id uuid DEFAULT <restaurant #1>` — a leftover
+  // from the tenancy migration, when a default was how every existing caller kept working. Calling
+  // it with no argument therefore did not fail; it quietly answered with FRENCH HOUSE'S FLOOR, for
+  // whichever restaurant the admin thought they were looking at. Nothing reached this branch today
+  // (the console's only caller uses ?all=1), so nobody had been shown the wrong tables — but it was
+  // one new caller away, and a wrong floor is the kind of mistake that reads as real data.
+  //
+  // Now it names the restaurant, and refuses without one, exactly like every other per-restaurant
+  // admin read (see /api/admin/oplog, /api/admin/audit, /api/admin/repair). Guarded by
+  // scripts/verify-rpc-scoped.mjs, which fails if any call site omits an RPC's p_restaurant_id.
+  const rid = req.nextUrl.searchParams.get("restaurant_id");
+  if (!rid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rid)) {
+    return NextResponse.json(
+      { error: "restaurant_id is required — say which restaurant's floor you want, or use ?all=1 for every restaurant." },
+      { status: 400 },
+    );
+  }
+  const { data, error } = await supabaseAdmin.rpc("lfh_floor_state", { p_restaurant_id: rid });
   if (error) {
     return adminFail("the live floor", error, { action: "load" });
   }

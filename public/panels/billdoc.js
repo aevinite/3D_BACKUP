@@ -521,7 +521,19 @@
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
-+ (d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
+/* THE INTERNAL BILL NUMBER IS NOT THE CUSTOMER'S BUSINESS WHEN THERE IS A REAL INVOICE NUMBER
+   (owner, 2026-08-21). This app hands out THREE numbers where a POS normally has two: the KOT
+   number for the kitchen, the INVOICE number (the tax record — drawn only when an invoice is
+   actually generated, never reset, and a bill cancelled before that draws none at all), and
+   `bill_no`, an internal daily reference given out when a table's FIRST ORDER lands.
+   Only the last one can have visible holes: a table that ordered and then cancelled leaves its
+   number spent. Printing it beside the invoice number meant a customer — and an owner flicking
+   through the day's sheets — saw #12, #14, #15 and read it as sloppiness.
+   So the sheet now shows it ONLY when there is no invoice number to show instead. A restaurant
+   without GST invoicing still gets a number on its paper (that is the case bill_no exists for);
+   a restaurant that issues invoices shows the number that is meant to be quoted, and nothing
+   else. Nothing about how numbers are ASSIGNED changed — see docs/NUMBERING.md. */
++ (!d.invNo && d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
 + (d.parcel ? '<div class="kv"><span>Parcel</span><b></b></div>' : '<div class="kv"><span>Table</span><b>' + esc(d.tableDisp) + "</b></div>") + "\n"
 + '<div class="kv"><span>Date</span><b>' + esc(d.dateStr) + "</b></div>\n"
 + custBlock + "\n"
@@ -1270,6 +1282,13 @@
       // nothing.
       invNo: sess.invoice_no == null ? ""
         : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) + (voidedAll ? " — voided" : ""),
+      /* REJECTED (owner, 2026-08-16, re-confirmed 2026-08-22): a cancelled bill keeps its number.
+         Never free `bill_no` for reuse to tidy the series — CGST Rule 46(b), Rule 49 (a Bill of
+         Supply needs the same consecutive serial, and that is the document a composition-scheme
+         restaurant prints, so here `bill_no` IS the statutory number) and Rule 56 (keep the
+         cancelled document WITH its number). Two documents under one number reads as a deleted
+         sale. Gaps are correct and explainable. Recorded as R44 in docs/REJECTED-IDEAS.md; the
+         full legal note is in lib/billLedger.ts and docs/COMPLIANCE-GUARDRAILS.md. */
       billNo: sess.bill_no != null ? sess.bill_no : "",
       // REJECTED (owner, 2026-08-19): NO `reprint` field on bill data, deliberately. A `reprint`
       // flag existed here 2026-08-17 → 2026-08-19 and drew a band on the sheet; the owner removed
