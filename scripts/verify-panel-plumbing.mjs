@@ -164,6 +164,25 @@ has("guestbell.js", /var\(--sab, env\(safe-area-inset-bottom, 0px\)\)/,
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,
   "the inventory deadline is back inside the write-only branch — a read can hang on 'Loading inventory…' forever");
 
+// ── no tap in the Inventory tab ends in silence (T9 sweep #7, 2026-08-22) ─────────────────────
+// verify:taps covers the three panels' own app.js but not this file, and Discard swallowed every
+// refusal with `catch {}` and cleared the sheet regardless — so a refused discard closed the sheet,
+// said nothing, and then came back with every figure still in it on the next read. Every write in
+// here must either surface its refusal or be a deliberate best-effort read.
+{
+  const src = files["editor/inventory.js"];
+  if (src) {
+    // Each `catch {}` / `catch (e) {}` that sits on a POST is a swallowed refusal.
+    const swallowed = [];
+    const re = /(await inv\("(?:POST|PATCH|DELETE|PUT)"[^;]{0,200}?;)\s*\}\s*catch\s*(?:\([^)]*\))?\s*\{\s*\}/g;
+    let m;
+    while ((m = re.exec(src))) swallowed.push(m[1].slice(0, 60));
+    if (swallowed.length) {
+      fails.push(`editor/inventory.js: a write's refusal is thrown away with an empty catch, so the tap ends in silence — ${swallowed.join(" · ")}`);
+    }
+  }
+}
+
 // ── the queue says when a round STARTS, not only when it stops (T9 sweep #7, 2026-08-22) ──────
 // `syncing` is the one flag every surface reads to answer "is this actually moving?". The finally
 // block publishes when a round ends; nothing published when it began, so with exactly ONE change
