@@ -10,13 +10,21 @@
   --line: #38301f;      /* hairline borders */
   --text: #f3e9da;      /* warm cream text */
   --muted: #b6a48d;     /* secondary text */
-  --blue: #d8a657;      /* the accent (house gold; keeps the var name so all refs work) */
+  /* MATCHED TO THE OTHER TWO PANELS (owner, 2026-08-22). This board's dark values were each one
+     hue step off its siblings' - gold #d8a657 against #d4a574, green #5fae6e against #22c55e, red
+     #e2664f against #ef4444, amber #e6b450 against #fbbf24 - so a cook moving between the kitchen
+     board and the waiter tablet saw the same four meanings in eight colours. The LIGHT skin
+     already agreed exactly; only DARK moves. Re-measured on the board and on a ticket: green
+     8.31/7.60, amber 11.35/10.37, red 5.03/4.60, gold 8.51/7.78 - all clear, and green and amber
+     are brighter than before. The warm espresso SURFACES are untouched; that warmth was the
+     point of the 2026-06-20 redesign and it stays. */
+  --blue: #d4a574;      /* the accent (house gold; keeps the var name so all refs work) */
   /* The accent when it carries WORDS. In the dark skin the bright gold on a dark board already
      measured clean, so it is the accent itself; the light skin darkens it (see the light block). */
   --blue-ink: var(--blue);
-  --green: #5fae6e;     /* ready */
-  --amber: #e6b450;     /* new/attention */
-  --red: #e2664f;       /* allergies/sold-out */
+  --green: #22c55e;     /* ready */
+  --amber: #fbbf24;     /* new/attention */
+  --red: #ef4444;       /* allergies/sold-out */
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element. env() covers the
      iPhone notch/home bar when top-level; --safe-t/--safe-b are the real pixel insets the
      host PanelFrame injects (env() reads 0 inside an iframe, and Android's 3-button nav
@@ -47,6 +55,11 @@
   --panel-2: #2b2118;   /* a second surface, one step off --panel */
   --fg: var(--text);
   --accent: var(--blue);
+  /* ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22). The 86 drawer, the printer sheet,
+     the menu drawer and the Settings sheet each dimmed the board by their own amount (.6, .6, .6,
+     .66). One token now, matching the waiter tablet and the manager panel, so two overlays on one
+     screen dim the same. The blur behind each sheet is deliberately NOT unified. */
+  --scrim: rgba(3, 7, 16, 0.60);
   --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
 }
 * { box-sizing: border-box; }
@@ -254,7 +267,7 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 .big:active { transform: scale(0.98); }
 
 /* the 86 board drawer */
-.drawer-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.6); z-index: 20; }
+.drawer-overlay { position: fixed; inset: 0; background: var(--scrim); z-index: 20; }
 .drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(94vw, 420px); background: var(--bg); border-left: 1px solid var(--line); padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab)); display: flex; flex-direction: column; }
 /* STOP THE SWIPE AT THE DRAWER'S EDGE (T12 phone sweep, 2026-08-05). The lanes and the wall got
    overscroll-behavior in the tablet-sweep work above, but the 86-board drawer and the print sheet
@@ -462,7 +475,7 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 
 /* ── Printer-problem sheet (mig 269, owner 2026-08-04): one tap tells the manager.
    Same overlay discipline as the 86 drawer — fixed, dimmed, back-button registered. */
-.prsheet-ov { position: fixed; inset: 0; background: rgba(3,7,16,0.6); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.prsheet-ov { position: fixed; inset: 0; background: var(--scrim); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .prsheet { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; width: min(94vw, 380px); padding: 14px 14px calc(14px + var(--sab)); }
 .prsheet-head { display: flex; align-items: center; justify-content: space-between; }
 .prsheet-head h3 { margin: 0; font-size: 17px; }
@@ -494,7 +507,7 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 .hamburger { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 10px;
   min-width: 44px; height: 44px; font-size: 18px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
 .hamburger:hover { border-color: var(--accent, #8b5cf6); }
-.kds-dw-backdrop { position: fixed; inset: 0; background: rgba(3,7,16,.6); z-index: 40; }
+.kds-dw-backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 40; }
 .kds-dw { position: fixed; top: 0; left: 0; bottom: 0; width: min(86vw, 320px); z-index: 41; overflow-y: auto;
   background: var(--bg); border-right: 1px solid var(--line); color: var(--text);
   padding: calc(14px + var(--sat)) 14px calc(14px + var(--sab)) calc(14px + var(--sal)); display: flex; flex-direction: column; gap: 10px; }
@@ -509,7 +522,7 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 .kds-dw .dw-foot { margin-top: auto; color: var(--muted); font-size: 11.5px; }
 /* The Settings sheet itself — one column of plain sections, readable on a 360px phone and on a
    1080p kitchen display without changing shape. */
-.kset-ov { position: fixed; inset: 0; background: rgba(3,7,16,.66); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 14px; }
+.kset-ov { position: fixed; inset: 0; background: var(--scrim); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 14px; }
 .kset { width: min(94vw, 460px); max-height: 92vh; overflow-y: auto; background: var(--bg); color: var(--text);
   border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px calc(16px + var(--sab)); }
 .kset-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }

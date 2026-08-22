@@ -125,7 +125,8 @@ export default function LoginForm({
         <button
           type="submit"
           disabled={busy || !username || !password}
-          style={{ marginTop: 16, width: "100%", padding: 13, borderRadius: 12, border: 0, background: busy ? "#2747a0" : "#3b82f6", color: "#fff", fontWeight: 700, fontSize: 15, cursor: busy ? "default" : "pointer", opacity: busy || !username || !password ? 0.7 : 1 }}
+          /* #2563eb, not #3b82f6: WHITE sits on this fill, and on blue-500 that measured 3.68:1 at 15px/700 — the primary action on the page every staff member starts at, under the floor in BOTH skins. Blue-600 is the same hue one step deeper: 5.17:1. The busy/blocked fills beside it already read 6.2–10.4:1. (T26 round 2, 2026-08-22.) */
+          style={{ marginTop: 16, width: "100%", padding: 13, borderRadius: 12, border: 0, background: busy ? "#2747a0" : "#2563eb", color: "#fff", fontWeight: 700, fontSize: 15, cursor: busy ? "default" : "pointer", opacity: busy || !username || !password ? 0.7 : 1 }}
         >
           {busy ? "Signing in…" : "Sign in"}
         </button>

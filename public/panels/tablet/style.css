@@ -18,6 +18,13 @@
   --gold-ink: var(--gold);
   --skel-hi: #4a3f29;   /* the first-paint sheen: one step LIGHTER than --line in this skin */
   --merge-ink: #c084fc;   /* "served as one party" — the one non-gold hue on this panel, per skin */
+/* ── ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22) ────────────────────────────────
+   Every sheet, drawer and confirm box on this panel dims the page behind it, and each one had
+   picked its own value: rgba(3,7,16,.65), rgba(0,0,0,.5), rgba(4,8,18,.55), rgba(4,8,18,.66). Two overlays on the same
+   screen therefore dimmed by different amounts, which is the sort of thing that makes one
+   product feel like several. One token, used by all of them. The blur behind each sheet is
+   deliberately NOT unified - a heavier blur is how a stacked layer says it is on top. */
+  --scrim: rgba(3, 7, 16, 0.60);
   --green: #22c55e; --amber: #fbbf24; --red: #ef4444;
   /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element instead of a
      hand-rolled max(). env() covers the iPhone notch/home bar when this page is top-level;
@@ -47,7 +54,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .brand { font-size: 15.5px; font-weight: 800; white-space: nowrap; overflow: hidden; display: flex; align-items: center; min-width: 0; flex: 1; }
 .top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* ⚡ Quick order — the one always-there action on the bar (build first, table last). */
-.qo-top { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; border: 0; border-radius: 11px; padding: 10px 14px; font: inherit; font-weight: 800; font-size: 13.5px; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+/* 44px TALL, and only tall (owner said yes to the tablet's targets, 2026-08-22). This measured
+   44x39 at 360px and 130.8x42 above it - the one always-there action on the bar, tapped with a
+   thumb while walking. HEIGHT only, never width and never an invisible area reaching sideways:
+   the 8px gap to the Live pill beside it stays exactly 8px, so a bigger target cannot become a
+   nearer wrong one. That is the whole lesson of R40 - do not trade a harmless miss for a
+   harmful one - and of R41: widening is what makes a bar wrap. Nothing here wraps: the bar is
+   one row at every width before and after. */
+.qo-top { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; border: 0; border-radius: 11px; padding: 10px 14px; font: inherit; font-weight: 800; font-size: 13.5px; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
 .qo-top i { font-style: normal; }
 .qo-top:hover { filter: brightness(1.05); }
 .qo-top:active { transform: scale(.96); }
@@ -391,7 +405,7 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 .reqbtns { display: flex; gap: 6px; }
 /* floor filter nav (All / Needs / Open / Free) — quick way to see what matters */
 .floor-nav { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-.fnav { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.fnav { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .fnav em { font-style: normal; font-size: 11px; background: var(--bg); border-radius: 999px; padding: 1px 7px; }
 .fnav.on { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
 /* .12, not .20 (T26 sweep, 2026-08-22): the chip's own dark ink on a 20%-black wash of the gold
@@ -532,7 +546,7 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
    (e.g. the dish-edit modal at z-index 99990, the options overlay at 100000). At z-index 60
    it rendered behind the dish-edit modal, making "Send back to kitchen" (un-serve) and
    "Remove from all" un-tappable — the only un-serve path. Keep it topmost. */
-.confirm-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.65); display: grid; place-items: center; z-index: 100002; }
+.confirm-overlay { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 100002; }
 /* the [hidden] attribute must win over display:grid — else it blocks taps at rest */
 .confirm-overlay[hidden] { display: none; }
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }
@@ -707,7 +721,11 @@ html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb,
    ═══════════════════════════════════════════════════════════════════════ */
 .theme-toggle{
   -webkit-appearance:none; appearance:none; cursor:pointer;
-  width:38px; height:38px; flex:0 0 auto; padding:0; margin-left:4px;
+  /* 44px (owner, 2026-08-22). 38x38 - the flag, the bell and the sun/moon all wear this class,
+     and all three sat 6px under the finger target. The 12px gap between them is untouched, so
+     they get bigger without getting nearer each other. The kitchen board already uses 44x44
+     for the same control, so the two panels now match. */
+  width:44px; height:44px; flex:0 0 auto; padding:0; margin-left:4px;
   display:inline-flex; align-items:center; justify-content:center;
   font-size:17px; line-height:1; border-radius:10px;
   border:1px solid var(--line); background:var(--panel-2); color:var(--text);
@@ -776,11 +794,14 @@ html[data-theme="light"] .inm .alg-removed{ color:#b45309; }
 #tabletClose { display: none; }
 
 /* Slide-in settings/profile drawer (built in app.js) */
-.tbl-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 80; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+.tbl-drawer-backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 80; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
 .tbl-drawer-backdrop.open { opacity: 1; pointer-events: auto; }
 .tbl-drawer { position: fixed; top: 0; right: 0; height: 100dvh; width: min(86vw, 340px); background: var(--panel); border-left: 1px solid var(--line); z-index: 81; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; gap: 12px; padding: 16px 16px calc(16px + var(--sab)); overflow: auto; }
 .tbl-drawer.open { transform: translateX(0); }
-.tbl-drawer .dw-close { align-self: flex-end; width: 40px; height: 40px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 10px; font-size: 18px; cursor: pointer; }
+/* 44px (owner, 2026-08-22). This one is free of the usual worry: the nearest other control is
+   128px away, so there is no neighbour to crowd. It is NOT the panel-sheet close R22 settled -
+   that is .tbl-modal-close in the manager stylesheet, and it stays exactly as he left it. */
+.tbl-drawer .dw-close { align-self: flex-end; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 10px; font-size: 18px; cursor: pointer; }
 .tbl-drawer .dw-prof { font-size: 13px; color: var(--muted); }
 .tbl-drawer .dw-name { font-size: 19px; font-weight: 800; color: var(--text); }
 .tbl-drawer .dw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
@@ -917,7 +938,11 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
    42px, and so did every `.panel .btn`. A tablet is a touch device too — the same greasy thumb, the
    same 44px target — and nothing here was ever mouse-only, so there is no reason the bigger screen
    should get the smaller control. */
-.panel .btn, .floor-nav button { min-height: 42px; }
+/* ...and it says 44px twice above while setting 42 (owner said yes to the tablet's targets,
+   2026-08-22). Two pixels short, on the four floor filter chips AND every button inside a
+   table's detail panel - which is most of the sub-44px controls on this whole panel, from one
+   rule. HEIGHT only, so every gap between neighbouring controls is exactly what it was. */
+.panel .btn, .floor-nav button { min-height: 44px; }
 
 /* ── skeleton shimmer for the streaming table detail (stale-while-revalidate) ──
    Shown between the instant summary paint and the full slice landing: an order-
@@ -1135,7 +1160,7 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 .om-viewpill .vp-arrow { font-style: normal; font-weight: 900; }
 
 /* Item popup modal (quantity + allergy [+ size/extras]) — over the menu. */
-.opt-overlay { position: fixed; inset: 0; z-index: 100000; background: rgba(4,8,18,.55);
+.opt-overlay { position: fixed; inset: 0; z-index: 100000; background: var(--scrim);
   -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
   display: flex; align-items: center; justify-content: center; padding: 16px; }
 .opt-pop { width: min(94vw, 460px); max-height: 88vh; max-height: 88dvh; background: var(--panel, #fff); color: var(--text);
@@ -1251,7 +1276,7 @@ body:has(.detail-pop) #tabletClose { display: none; }
 .detail-pop .phead:has(.phead-step) { padding-right: 0; }
 
 /* ⚡ Quick order, step 2: "which table gets this order?" — picking sends. */
-.qdest-overlay { position: fixed; inset: 0; z-index: 100001; background: rgba(4,8,18,.66);
+.qdest-overlay { position: fixed; inset: 0; z-index: 100001; background: var(--scrim);
   -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; padding: 16px; }
 .qdest-box { width: min(94vw, 560px); max-height: 88dvh; overflow-y: auto; -webkit-overflow-scrolling: touch;

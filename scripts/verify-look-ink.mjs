@@ -155,6 +155,32 @@ for (const { file, dark, light, tokens } of PAIRS) {
   else ok("app/globals.css — backdrop-filter is unprefixed (the build adds the prefix itself)");
 }
 
+// EVERY full-screen overlay backdrop reads --scrim, never its own literal. Each one having its own
+// value is how two overlays on the same screen came to dim the page by different amounts.
+for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/style.css", "public/panels/editor/style.css"]) {
+  const src = readFileSync(file, "utf8");
+  if (!/--scrim\s*:/.test(src)) { fail(`${file} — no --scrim token declared; the overlay dim has gone back to per-rule literals`); continue; }
+  const bad = [];
+  src.split("\n").forEach((l, i) => {
+    if (!/position:\s*fixed/.test(l) || !/inset:\s*0/.test(l)) return;
+    const m = /background(?:-color)?:\s*(rgba?\([^)]*\))/.exec(l);
+    // a deliberate WARNING tint (the floor-wide red) is not a scrim and keeps its own colour
+    if (m && !/60\s*,\s*0\s*,\s*0/.test(m[1])) bad.push(`${file}:${i + 1}  ${m[1]}`);
+  });
+  if (bad.length) { fail(`${bad.length} full-screen overlay(s) still dim with their own literal instead of --scrim:`); bad.forEach((b) => console.error("    " + b)); }
+  else ok(`${file} — every full-screen overlay dims with --scrim`);
+}
+
+// WHITE INK NEEDS A DARK ENOUGH FILL. The sign-in pages hold their primary button's colour in an
+// inline style, so no stylesheet check can see it: blue-500 with white on it read 3.68:1 at 15px/700
+// on /login and /staff-login, in both skins - the primary action on the page every staff member
+// starts at. Assert the fill by value, because that is where it lives.
+for (const file of ["app/login/LoginForm.tsx", "app/staff-login/LoginForm.tsx", "app/staff-login/BlockedView.tsx"]) {
+  let src; try { src = readFileSync(file, "utf8"); } catch { fail(`${file} — not found; this guard needs updating`); continue; }
+  if (/"#3b82f6"/.test(src)) fail(`${file} — the primary button is back on blue-500; white on it is 3.68:1 (needs 4.5). Blue-600 (#2563eb) reads 5.17:1.`);
+  else ok(`${file} — the primary button's fill is dark enough for white ink`);
+}
+
 // The first-paint skeleton must not carry a literal colour: it can only be right in one skin.
 for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/style.css"]) {
   const rule = readFileSync(file, "utf8").split("\n").find((l) => l.startsWith(".skel-line {"));

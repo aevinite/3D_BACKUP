@@ -4225,11 +4225,14 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent: #3b82f6; --accent-dim: rgba(59,130,246,0.6);
   --accent-grad: linear-gradient(120deg, #0066ff 0%, #8b5cf6 50%, #ff5e7e 100%);
   --accent-glow: rgba(59,130,246,0.32);
-  /* On a DARK tint the bright accent already reads clean, so ink IS the accent here. DECLARED, never
-     inherited: the GUEST theme key declares --accent-ink too, and a console must never take its ink
-     from whichever skin the guest menu happens to be left on — leaving this out put a brown guest
-     value on the admin console's active nav label at 2.60:1. (T26 sweep, 2026-08-22.) */
-  --accent-ink: var(--accent);
+  /* THE ACCENT ONE STEP LIGHTER, for ink on a dark tint of itself (owner, 2026-08-22). "Ink IS the
+     accent" was nearly right and measurably short: the active nav label and the panel-letter chip
+     sit on a 14-16% blue tint of the accent over the sidebar, where #3b82f6 read 3.85-4.48:1. On a
+     DARK tint the fix is to LIGHTEN, not darken — blue-400 is the same hue one step up and reads
+     5.57-6.48:1. DECLARED, never inherited: the GUEST theme key declares --accent-ink too, and a
+     console must never take its ink from whichever skin the guest menu happens to be left on —
+     leaving this out put a brown guest value on this very label at 2.60:1 mid-edit. */
+  --accent-ink: #60a5fa;
   /* White text sits ON this fill (.adx .adm-btn.primary), and on #d97706 that measured
      3.19:1 — under the 4.5:1 a 12px label needs (T11 sweep, 2026-08-13: "New restaurant",
      "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
@@ -4256,7 +4259,13 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .adm.adx[data-skin="light"] {           /* LIGHT (kept for the toggle) */
   --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #e5e8ee; --border-c: #e5e8ee;
   --side: #ffffff;
-  --text: #111827; --muted: #6b7280; --muted2: rgba(17,24,39,0.08);
+  /* ONE STEP DEEPER (T26 round 2, owner said yes 2026-08-22). This is the grey every secondary
+     word on a console is written in - table column heads, the line under a page title, every
+     small note, the chart-type buttons. #6b7280 measured 4.12:1 on the table head's tint and
+     4.19:1 on the card, against the 4.5:1 that 11-13px text needs; it only cleared on plain
+     white. Same hue, one step down: 4.65 / 4.72 / 5.08 / 5.45 across the four surfaces it is
+     actually used on. Nothing else moves - this token is secondary text only. */
+  --text: #111827; --muted: #636a76; --muted2: rgba(17,24,39,0.08);
   /* Blue base (as before); spectrum kept for accents only (violet + a touch of light red). */
   --accent: #2563eb; --accent-dim: rgba(37,99,235,0.6);
   --accent-grad: linear-gradient(120deg, #2563eb 0%, #7c3aed 52%, #fb7185 100%);
@@ -4641,7 +4650,13 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .adm.owx[data-skin="light"] {           /* LIGHT (kept for the toggle) */
   --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #e5e8ee; --border-c: #e5e8ee;
   --side: #ffffff;
-  --text: #111827; --muted: #6b7280; --muted2: rgba(17,24,39,0.08);
+  /* ONE STEP DEEPER (T26 round 2, owner said yes 2026-08-22). This is the grey every secondary
+     word on a console is written in - table column heads, the line under a page title, every
+     small note, the chart-type buttons. #6b7280 measured 4.12:1 on the table head's tint and
+     4.19:1 on the card, against the 4.5:1 that 11-13px text needs; it only cleared on plain
+     white. Same hue, one step down: 4.65 / 4.72 / 5.08 / 5.45 across the four surfaces it is
+     actually used on. Nothing else moves - this token is secondary text only. */
+  --text: #111827; --muted: #636a76; --muted2: rgba(17,24,39,0.08);
   /* The owner cockpit's light accent is drawn as TEXT far more than as a fill — the active
      nav item, the range buttons, the restaurant picker, the "Coming soon"/"Soon" badges and
      the report eyebrow. On #059669 those measured 3.77:1 on white and 3.52:1 on --bg, under
