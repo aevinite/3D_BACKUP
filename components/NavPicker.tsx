@@ -73,7 +73,20 @@ export default function NavPicker({
       >
         {buttonContent}
       </button>
-      {/* Only show the list when `open` is true */}
+      {/* Only show the list when `open` is true.
+
+          THE OPTIONS ARE THE LIST'S OWN CHILDREN (guest sweep T1, sweep #7, 2026-08-22).
+          Each button carrying `role="option"` used to sit inside an <li>, and a `listbox` must OWN
+          its options directly — an element in between breaks that. Read out of Chrome's own
+          accessibility tree, this dropdown was `listbox "Language"` containing plain `button`s and
+          ZERO options: a screen reader announced a list box and then found nothing selectable in
+          it, no "3 of 6" position, and `aria-selected` — the only thing marking which language is
+          currently on — was never conveyed. Exactly the shape that was corrected in the search
+          suggestions, never looked for here.
+
+          Dropping the <li> is the whole change. `.nav-picker-list` is already `list-style: none`
+          and `.nav-picker-item` is already `width: 100%`, so the buttons render identically as
+          direct children — no CSS touched, nothing moves on screen. */}
       {open && (
         <ul
           role="listbox"
@@ -82,21 +95,20 @@ export default function NavPicker({
         >
           {/* Draw one row for each option passed in */}
           {options.map((opt) => (
-            <li key={opt.key}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={opt.active}
-                className={`nav-picker-item ${opt.active ? "active" : ""}`}
-                onClick={() => {
-                  // Run this option's action, then close the dropdown.
-                  opt.onSelect();
-                  setOpen(false);
-                }}
-              >
-                {opt.label}
-              </button>
-            </li>
+            <button
+              key={opt.key}
+              type="button"
+              role="option"
+              aria-selected={opt.active}
+              className={`nav-picker-item ${opt.active ? "active" : ""}`}
+              onClick={() => {
+                // Run this option's action, then close the dropdown.
+                opt.onSelect();
+                setOpen(false);
+              }}
+            >
+              {opt.label}
+            </button>
           ))}
         </ul>
       )}
