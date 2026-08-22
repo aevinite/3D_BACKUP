@@ -95,12 +95,18 @@ owner wants it gone", so a terminal may be doing exactly that right now with an 
 Re-creating it could fight that work. Whoever owns migration 296/297 should decide: restore it, or
 retire it in a migration so the intent is written down.
 
-**H4 · the shared dev database is ahead of `main`.**
-`lfh_block_issued_delete` in the database carries a comment citing **migration 361**, which exists
-in no branch this terminal can see. Another terminal has applied it to the shared dev stack. It is
-a good change — it tests `kot_no is not null` instead of looking up the session's `bill_no`, which
-is true from the moment an order exists and so protects earlier — but it means a check written
-against the folder can go red against the database through nobody's fault. Worth knowing at merge.
+**H4 · the shared dev database was ahead of `main` — EXPLAINED AND RESOLVED.**
+`lfh_block_issued_delete` in the database cited **migration 361**, which existed in no branch this
+terminal could see. It was terminal 21's, unmerged at the time; pull request #1078 has since landed
+it. It is a good change — it tests `kot_no is not null` instead of looking up the session's
+`bill_no`, which is true from the moment an order exists and so protects earlier. The same pull
+request also answers H3: its migration 360 retires `lfh_request_verification` deliberately, which is
+exactly why the function was missing from the database and why this terminal was right not to
+re-create it.
+
+**H5 · this terminal's 358/359 collided with terminal 21's and were renumbered to 362/363.**
+Terminal 21 used 358–361 although this terminal held the reserved block 355–359. #1078 merged first,
+so the later work moved rather than the earlier. Content unchanged.
 
 ---
 

@@ -53,17 +53,21 @@ this asks for it to live in the repo's own guards.
 
 # What was built, 2026-08-22
 
-* **I1 → migration `358_the_server_only_tables_lose_their_leftover_public_grant.sql`.** 23 REVOKEs,
+> **Renumbered 358/359 → 362/363** when terminal 21's pull request (#1078) merged first and took
+> 358–361. Same content, applied to the dev database before the rename; the folder is one
+> unambiguous sequence again.
+
+* **I1 → migration `362_the_server_only_tables_lose_their_leftover_public_grant.sql`.** 23 REVOKEs,
   derived from the database rather than typed, so the list is exactly the tables that still carried
   a public grant with RLS on and no policy. Checked first that every call site for all 23 lives in
   `app/api/**` or `lib/**` and goes through the service-role client — including the one outlier,
   `app/q/[code]/page.tsx` reading `table_qr_codes`, which uses `supabaseAdmin`. Applied; the list
   re-derived afterwards is empty. Nine database guards re-run green.
-* **I2 → migration `359_…` part A.** Two columns lacked the check, not one: `tablet_take_orders`
+* **I2 → migration `363_…` part A.** Two columns lacked the check, not one: `tablet_take_orders`
   (mig 178) and `tablet_parcel` (mig 197), against seven siblings that have it. Repair-then-
   constrain, so it cannot fail on existing data. Proved: a nonsense value is refused by the
   database, all three real values still accepted, the row restored.
-* **I3 → migration `359_…` part B.** The nightly prune now forgets rate-limit counters whose window
+* **I3 → migration `363_…` part B.** The nightly prune now forgets rate-limit counters whose window
   is provably closed — the window resolved the same way `lfh_rate_check` resolves it, plus a day.
   Events are untouched. Proved with a seeded 8-day-old counter and a live one: the dead one went,
   the live one stayed. 156 counters → 17 on the dev stack.

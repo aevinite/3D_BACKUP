@@ -1,4 +1,4 @@
--- 359_a_tablet_switch_holds_only_its_three_values_and_the_limiter_forgets_dead_counters.sql
+-- 363_a_tablet_switch_holds_only_its_three_values_and_the_limiter_forgets_dead_counters.sql
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- Two small pieces of housekeeping, both from sweep #6 terminal 22 and both approved by the owner
 -- on 2026-08-22 ("do all the things you told in the need decision"). They are in one file because
@@ -109,7 +109,7 @@ BEGIN
    WHERE status <> 'open'
      AND created_at < now() - interval '30 days';
 
-  -- (359) …and the rate limiter's dead counters.
+  -- (363) …and the rate limiter's dead counters.
   -- rate_limit_counters holds one row per (restaurant, key, SUBJECT) and nothing has ever removed
   -- them except a restaurant purge or an admin pressing "Allow" on one subject. The subject for
   -- 'join_session' is the guest's DEVICE, so a busy restaurant grows one permanently dead row per

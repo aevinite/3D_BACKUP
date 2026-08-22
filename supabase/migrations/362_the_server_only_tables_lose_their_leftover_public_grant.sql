@@ -1,4 +1,4 @@
--- 358_the_server_only_tables_lose_their_leftover_public_grant.sql
+-- 362_the_server_only_tables_lose_their_leftover_public_grant.sql
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- DEFENCE IN DEPTH, finishing a job migration 204 started in this same range.
 --
