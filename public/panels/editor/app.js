@@ -8033,6 +8033,16 @@ function bindAudit() {
       b.textContent = "Saving…";
       try {
         const r2 = await api("POST", "/audit/classify", { order_id: orderId, made });
+        // A QUEUED ANSWER IS NOT A RECORDED ANSWER (T5 sweep #7, 2026-08-22). With no signal the
+        // outbox resolves { ok:true, queued:true }, so this said "Recorded as a loss — the
+        // ingredients stay used" and then reloaded the record from the saved copy, where the row
+        // still reads "Not answered yet". The screen contradicted its own toast, and the sentence
+        // it chose was the one that claims an inventory consequence.
+        if (wasQueued(r2)) {
+          b.disabled = false; b.textContent = was;
+          toast("Saved on this device ✓ — the answer will be recorded the moment you're back online.", "ok");
+          return;
+        }
         toast(made
           ? "Recorded as a loss" + (r2 && r2.lossCost ? " of " + inr(r2.lossCost) : "") + " — the ingredients stay used"
           : "Recorded — the ingredients go back into stock", "ok");
