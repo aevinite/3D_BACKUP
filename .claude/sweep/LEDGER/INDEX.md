@@ -285,3 +285,65 @@ a writer that busts it; every breadcrumb reaches a screen. Waves 1 and 2 did rea
 
 The honest summary is that **the product is healthier than the scaffolding around it.** The next
 sweep should start with T26–T29 and the gap list above — not with a fresh idea.
+
+---
+
+## The guards' own health — audited 2026-08-22 (a first slice of T28's unrun territory)
+
+T28 (`P13501`–`P14000`) owns the question *"is each of this repo's guards alive, honest, and
+cleaning up after itself?"* — and its ledger was never filed. That is the most expensive gap on this
+page, because a permanently-red or silently-dead guard hides real regressions: `verify:cache`, the
+3D no-re-fetch check CLAUDE.md tells everyone to run, sat green and asserted **nothing** for a month
+because its subject had deliberately stopped doing the thing it waited for.
+
+T30 did the core of that audit. **This is not a substitute for running T28** — it covers the health
+of the guards, not the 500 phases T28 was scoped to write — but it answers the expensive question.
+
+### Can each guard fail at all?
+
+**138 `verify:*` / `test:*` entries. Every single one can fail.** Three looked dead and all three
+were **my own detector being wrong** — recorded here so nobody re-files them:
+
+| looked dead | actually |
+|---|---|
+| `test:units` | runs `node --test lib/*.test.mjs`: **17 real tests, all passing.** A glob has no single script file, which is all my check saw. |
+| `verify:clash-coverage` | counts `problems++` and ends `process.exit(problems … ? 1 : 0)`. My detector looked for `problems.push`. |
+| `verify:avlive-release` | counts `bad++` and ends `process.exit(bad === 0 ? 0 : 1)`. **Not executed here on purpose** — it reads the client stack's folder, which this terminal does not touch. Verified by reading it. |
+
+### Do they actually pass?
+
+**67 of the 138 need no key and no running app.** Two were excluded deliberately —
+`verify:everything` is pid-locked and belongs to the merge terminal, and `verify:avlive-release`
+reads the client stack. **The remaining 65 were run. 63 were green; 2 were genuinely red; both are
+now fixed** (T30, this branch):
+
+| guard | why it was red | fix |
+|---|---|---|
+| `verify:rejected` | `scripts/verify-t24-money-rules.mjs` says `REJECTED` in a comment that *explains why the guard strips comments* — it talks **about** the convention rather than making a claim. The guard flags any file saying REJECTED without pointing at `docs/REJECTED-IDEAS.md`. | Named the doc in that comment. One line. The guard was not weakened. |
+| `verify:admin-refusals` | Its `NOT_YET` allowance for `app/api/admin/restaurants/settings/route.ts` said **2** while the file had **3**. A third `return { error: … }` had been added inside the SAME already-exempt helper (`ensureCodes`, the scoped re-read for the efficiency playbook) and nobody bumped the number. | Checked the caller first — it is `adminFail("this restaurant's table QR codes", { message: codes.error }, …)`, so the database's words reach the log and never a toast. Allowance bumped to 3, with the reasoning written beside it. **The route was correct; the guard's count was stale.** |
+
+One more shows as non-zero and is **correct**: `verify:panel-plumbing-live` refuses with
+`--base <url> is required` and exit 2. It is a live guard; my classifier called it repo-only.
+
+### What is still unaudited, and what to watch for
+
+- **71 guards need a key or a running app** and were not executed here. Running them is T28's job,
+  and the two faults above suggest what it will find: not dead guards, but **stale allowances and
+  stale expectations** — a guard whose subject moved and whose number nobody bumped.
+- **16 guards write to the database and have no `delete().eq("id", …)`**, and **11 write with no
+  restore-on-kill** (`SIGINT`/`SIGTERM`/`finally`). Both lists are worth a real look: this sweep's
+  own scar is `verify:realtime`, which flipped a category off across seven restaurants and then
+  died two steps later. Not filed as faults here — several are certainly read-then-write patterns
+  that clean up another way, and judging 27 scripts properly is T28's work, not a grep's.
+
+### How to redo this audit
+
+```sh
+node -e "const p=require('./package.json');console.log(Object.keys(p.scripts).filter(k=>/^(verify|test):/.test(k)).length)"
+```
+Then, for each guard: resolve its script file(s), check the source can reach a non-zero exit
+(`process.exit(1)`, `problems++`, `bad++`, `fail(`, `check(`, `throw`), and **run the ones needing
+neither `.env.local` nor a server**. Never run `verify:everything` (pid-locked) or
+`verify:avlive-release` (it reads the client stack).
+
+**Judge a "dead guard" by reading it, never by a grep.** Three of my three static hits were false.

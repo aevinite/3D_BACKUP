@@ -194,7 +194,16 @@ const NOT_YET = new Map([
   ["app/api/admin/restaurants/export/route.ts", 2],
   // ensureCodes() is an internal helper that RETURNS the words to its caller; the caller wraps them
   // in adminFail, so the screen never sees them. Counted here so the number stays honest.
-  ["app/api/admin/restaurants/settings/route.ts", 2],
+  //
+  // WAS 2, NOW 3 (T30 sweep, 2026-08-22). A third `return { error: … }` was added inside the SAME
+  // helper — the "the other request created these" path, a scoped re-read of exactly the rows we
+  // lack (docs/SAAS-EFFICIENCY-PLAYBOOK.md) — and nobody bumped this number, so the guard went red
+  // on a route that is correct. Checked before changing it: all three sites are inside
+  // ensureCodes(), and its ONE caller is
+  //   `if ("error" in codes) return adminFail("this restaurant's table QR codes", { message: codes.error }, …)`
+  // so the database's words reach the log and the `detail`, never the console's red toast. The
+  // allowance is the honest count of an exemption that already existed — not a new one.
+  ["app/api/admin/restaurants/settings/route.ts", 3],
 ]);
 {
   const walk = (rel, out = []) => {
