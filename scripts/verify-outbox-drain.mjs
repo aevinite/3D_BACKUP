@@ -85,8 +85,16 @@ const server = http.createServer((req, res) => {
     res.end('{"ok":true}');
   });
 });
-await new Promise((r) => server.listen(4324, r));
-const BASE = "http://127.0.0.1:4324";
+// A PORT THE OS GIVES US, NOT ONE WE HOPE IS FREE (T9 sweep #7, 2026-08-22).
+//
+// This asked for 4324 by name. Ten sweep terminals share this machine, and when a second one ran
+// this guard the listen quietly lost the race and the run then drove the FIRST terminal's server —
+// which answers a different script, so the failure came back as a navigation timeout and read like
+// the queue was broken. Port 0 means "any free port", and the address is read back after binding,
+// so two runs can never stand on each other's table.
+await new Promise((r, j) => { server.once("error", j); server.listen(0, "127.0.0.1", r); });
+const PORT = server.address().port;
+const BASE = "http://127.0.0.1:" + PORT;
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
@@ -97,7 +105,19 @@ const fresh = async () => {
   await ctx.clearCookies();
   await page.goto(BASE + "/page", { waitUntil: "domcontentloaded" });
   await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
-  await page.reload({ waitUntil: "domcontentloaded" });
+  // ONE RETRY, BECAUSE THIS RELOAD RACES THE PAGE'S OWN NAVIGATION (T9 sweep #7, 2026-08-22).
+  //
+  // Scenario 5 leaves the panel going to /login (that is the point of it) and the queue can kick a
+  // flush at any moment, so a reload issued in that window comes back ERR_ADDRESS_INVALID. Seen
+  // once in five runs, and a guard that fails one run in five is a guard people learn to ignore —
+  // which is how this repo lost a month to a green check that asserted nothing. Settle, then retry
+  // once; a second failure is a real one and still throws.
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+  } catch (e) {
+    await page.waitForTimeout(300);
+    await page.goto(BASE + "/page", { waitUntil: "domcontentloaded" });
+  }
   await page.waitForFunction(() => !!window.LFH_OUTBOX, null, { timeout: 10000 });
 };
 const send = (label) => page.evaluate((l) => window.LFH_OUTBOX.send({
