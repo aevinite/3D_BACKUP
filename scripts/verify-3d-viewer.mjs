@@ -317,6 +317,19 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── every scoped read is keyed on the thing that scopes it (sweep #7 T2, item 3) ─────────────
+// Both reads in the dish page's main fetch are scoped by `restaurantId`, but it was missing from
+// the dependency list, so the fetch only re-ran on a slug change. `/r/<a>/item/x` → `/r/<b>/item/x`
+// is the same route pattern with the same slug, so React reconciles ItemClient in place instead of
+// remounting it — and it would keep restaurant A's dish, price and menu list under B's address.
+check(
+  "the dish page's main fetch re-runs when the RESTAURANT changes, not only the dish",
+  /\}, \[slug, restaurantId\]\)/.test(src[ITEM_CLIENT]),
+  `${ITEM_CLIENT} → the effect calling getMenuItem(slug, restaurantId) and ` +
+    "getMenuItems(restaurantId, CARD_COLUMNS) must depend on BOTH. The reviews effect and the " +
+    "Google-settings effect beside it already do."
+);
+
 // Every overlay on these screens registers with the back-button manager.
 check(
   "the dish page's photo lightbox and the 3D details sheet both register with the back manager",

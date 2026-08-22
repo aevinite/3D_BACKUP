@@ -349,7 +349,21 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [slug]);
+    // `restaurantId` belongs in here as well as `slug` (sweep #7 T2, 2026-08-22 — item 3).
+    //
+    // Both reads above are SCOPED BY IT — getMenuItem(slug, restaurantId) and
+    // getMenuItems(restaurantId, …) — but it was not a dependency, so the fetch only re-ran when
+    // the dish slug changed. `/r/<a>/item/x` → `/r/<b>/item/x` is the same route pattern with the
+    // same slug, so React reconciles ItemClient in place rather than remounting it: the component
+    // would keep restaurant A's dish, price and menu list under restaurant B's address. The two
+    // effects below already key on `restaurantId` (reviews, and the Google-review settings), so
+    // this one was the odd one out.
+    //
+    // No path inside the product reaches it today — nothing links from one restaurant's dish to
+    // another's, and a shared link opens a fresh document — which is why it has never been seen.
+    // It is still the wrong dependency list, and `restaurantId` is a stable string prop, so adding
+    // it costs no extra fetch on any journey that exists.
+  }, [slug, restaurantId]);
 
   // Real reviews, in their OWN effect keyed on the switch.
   //
