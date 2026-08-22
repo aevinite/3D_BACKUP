@@ -2,13 +2,13 @@
 
 Territory: `scripts/**`, `tests/**`, the `verify:*` entries in `package.json`.
 Branch `sweep6/t28-the-guards` · worktree `/Users/aevinite/Documents/Projects/sweep6/T28` · port 4128.
-All 23 items below are FIXED in this branch, one commit each, numbered to match.
+All 29 items below are FIXED in this branch, one commit each, numbered to match.
 
 Legend: `confirmed` = I watched it happen · `code-read` = reasoned from the source.
 
 ---
 
-## FIXED — 18 problems
+## FIXED — 23 problems
 
 ### 1 · The cancelled-tile guard printed a tick over ZERO dishes · confirmed · HIGH
 `scripts/verify-cancelled-tile-parity.mjs`. `order_items.restaurant_id` is NOT NULL since the pool
@@ -126,6 +126,38 @@ so the undefined id died six lines later as `invalid input syntax for type uuid:
 depended on whether the previous identical round was more than three seconds ago — which is why they
 looked like flakes. Once the rush could run to the end it reported SIXTEEN failures on a correct floor:
 a tile with dishes prints the served counter as text and carries the state phrase in the line's title.
+
+### 24 · A guard that could NEVER work from its own npm command · confirmed · HIGH
+`verify-cancel-made.ts` defaulted to `http://localhost:4112` and its npm entry passes no `--base`, so
+`npm run verify:cancel-made` always died with "THREW: fetch failed / 1 check(s) FAILED". It only ever
+passed when somebody handed it a base. Both cancel guards also hard-DELETEd their test order — refused
+by mig 190 — so the count each printed grew by one for ever ("test orders left behind: 7" on a run that
+left nothing live). One real leak found on the way: a "T12 test flour" ingredient row from a crashed run.
+
+### 25 · Three guards red on things that were not wrong · confirmed · HIGH
+`verify:tax-mode`'s best check counted bills taken AFTER the split rule, so any test that rings up an
+exempt item read as a money regression — measured, two sessions of 920 and 550 reported as "2 existing
+session totals changed". `verify:fixtures` asked "is anything left?" mid-suite. `verify:table-ownership`
+failed half its runs on a tile under the sticky header.
+
+### 26 · Two guards fought over table 28 and the loser blamed the product · confirmed · HIGH
+`verify-table-ownership` walks DOWN from the highest table number — straight into
+`verify-void-on-joined-party`'s 27/28. Which table belongs to which guard now lives in one list.
+
+### 27 · The waiter's floor guard demanded things a tidy floor cannot give · confirmed · MEDIUM
+`verify:tablet` took "the first tile that is not free" and then demanded the ops row (needs an OPEN
+session) and the ‹ › stepper (needs TWO busy tables). 102 checks pass now, up from 95 with 3 failing.
+
+### 28 · The void guard blamed the product for a stopwatch · confirmed · HIGH
+`verify:void-party` failed about every other run and each time on a different line — reading as a void
+that took a whole party's food with it. Three causes, all the guard's: place-order RPCs whose answer was
+thrown away, a fixed 6.5s wait for the floor to draw the party, and a solo fixture built while the panel
+was still acting on the previous board.
+
+### 29 · A guard that ended someone else's party to free a table · confirmed · HIGH
+`verify:offline` borrows a table by closing its bill when the floor is full. It took table 28 out from
+under `verify:void-party`, which then reported a party-destroying void that never happened. Closing a
+session cancels and archives every unpaid live order on it (mig 232).
 
 ---
 
