@@ -94,33 +94,43 @@ and `origin/sweep6/t22-db-migrations-b`. Read them from those branches until the
 
 ---
 
-## ⚠️ Three ID faults in the record — fix these before re-running
+## ✅ The ID faults — found, checked, and fixed (T30, 2026-08-22)
 
-The whole scheme rests on "one ID, one check, forever". Three files break it:
+The whole scheme rests on **one ID, one check, forever**. Three things were reported here; **one was
+real, two were my own detector being wrong.** Both outcomes are recorded, because a withdrawn
+finding is as useful as a confirmed one — it stops the next sweep re-filing it.
 
-| what | detail | what to do |
+| what was claimed | verdict | what happened |
 |---|---|---|
-| **T9 overran its block into T10's** | T9 wrote **518** rows, so `P04501`–`P04518` name a check in **T9.md** *and* a different check in **T10.md**. 18 IDs, two meanings each. | Renumber **T9's** overflow rows to **`P15001`–`P15018`**. T10's block is `P04501`–`P05000` and is correct as written. |
-| **T13 repeats 15 IDs inside itself** | 515 rows, 500 distinct. | Give the 15 repeats fresh IDs from **`P15019`–`P15033`**. |
-| **T6 repeats 3 IDs inside itself** | 503 rows, 500 distinct. | Give the 3 repeats fresh IDs from **`P15034`–`P15036`**. |
-| **73 rows across 15 files do not render** | A cell containing an unescaped `\|` — from a `grep -c 'a\|b'` or a `… \| wc -l` — splits the row into the wrong number of cells. T13 16, T1 14, T18 13, T15 5, T8 4, then T12/T17/T23/T6 3 each, T10/T2/T4 2 each, T11/T16/T3 1 each. | Escape the pipe inside the cell as `\|`. Mechanical; the guard below names every one. |
+| **T9 overran its block into T10's** | ✅ **REAL — now fixed** | T9 wrote **518** rows into a block of 500, so `P04501`–`P04518` were genuine phase rows in `T9.md` naming *different* checks from the ones T10 gave those ids. **Renumbered to `P15001`–`P15018`.** The checks are unchanged; only the numbers moved. `T9.md` carries a banner saying so, and T10's block was correct and untouched. |
+| **T13 repeats 15 IDs inside itself** | ❌ **WITHDRAWN** | Those 15 rows are back-references in T13's own recap table *"What this pass found that the first two did not"* — a three-column narrative table, not a second check. Legitimate and useful. **My detector was wrong**, not the ledger: it counted any line starting `\| P##### \|` as a phase row. |
+| **T6 repeats 3 IDs inside itself** | ❌ **WITHDRAWN** | Same shape — T6's *"Rows whose expectation CHANGED (not failures — the product moved)"* table. |
+| **73 rows do not render** | ✅ **55 real — now fixed** · 18 were the recap rows above | The real cause is almost always **JavaScript's `\|\|` inside a code snippet** in the `how to verify` column (`${slug \|\| DEFAULT}`), plus a few single stray pipes from a `grep -c 'a\|b'`. **55 repaired** across T1 (14), T18 (13), T15 (5), T8 (4), T12/T17/T23 (3 each), T10/T2/T4 (2 each), T11/T13/T16/T3 (1 each). |
 
-### A guard for all of this
+**A phase row is identified by its SHAPE — six pipes, five cells — never by its first column.** An
+id in the first column of any other table is a back-reference, and the guard below now checks that
+it resolves to a phase row somewhere rather than treating it as a duplicate.
 
-`.claude/sweep/T30-guard-verify-ledger-index.mjs.txt` is a complete, working
-`scripts/verify-ledger-index.mjs` — it fails when a ledger has no INDEX row, when two files claim
-one ID, when a row is malformed, when the next-free-ID has already been used, or when this file
-stops telling the next sweep to re-run before it re-invents. It was not installed by terminal 30:
-`scripts/**` belongs to T28 and the `verify:*` entry to T29. **Install it in the same change as the
-repairs above** — it reports all 51 of them today, and a guard that is red on arrival is a guard
-people learn to skip.
+**Always split on UNESCAPED pipes only** (`line.split(/(?<!\\)\|/)`). Cells legitimately contain
+`\|`, because the checks are full of `grep -c 'a\|b'`, `find … \| wc -l` and `a \|\| b`. Splitting
+naively both under-counts real rows and invents malformed ones — which is how the two withdrawn
+findings above came to be filed in the first place.
+
+### The guard that keeps this true
+
+**`npm run verify:ledger-index`** — `scripts/verify-ledger-index.mjs`, installed by T30. It fails
+when two phase rows share an id, when a ledger has no row in this file, when this file points at a
+ledger that does not exist without saying so, when a recap table references an id nothing carries,
+when a ledger has no phase rows at all, or when this file stops telling the next sweep to re-run
+before it re-invents. Reads only; no key, no database, well under a second. It is **green** as of
+this commit: 24 ledgers, 12,018 phase rows, 12,018 distinct ids, no collisions, 18 back-references
+all resolving.
 
 ### The ID repair block
 
-**`P15001`–`P15100` is reserved for exactly this repair and nothing else.** `P15001`–`P15036` are
-allocated above. A new sweep starts at **`P15101`**.
-
----
+**`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are now
+**allocated to T9**. `P15019`–`P15100` remain free for the next repair. **A new sweep starts at
+`P15101`.**
 
 ## Coverage — is every part of this product owned by some ID range?
 
