@@ -30,6 +30,31 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
+// A TILE UNDER THE STICKY HEADER IS NOT A BROKEN TILE (sweep #6 / T28, 2026-08-22). This guard failed
+// roughly half the times it ran inside a suite, always the same way:
+//
+//     locator.click: Timeout 30000ms exceeded … <nav class="tabs" id="mainTabs"> from
+//     <header class="topbar"> subtree intercepts pointer events — retrying click action
+//
+// Playwright scrolls the tile into view and then hit-tests the point it is about to click. The floor's
+// header is STICKY, so a tile scrolled to the very top of the scroller sits underneath it, the hit-test
+// keeps landing on the header, and the retry loop runs out — on a floor that is perfectly usable,
+// because a real person would simply scroll a little further. The board also redraws on every live
+// update, which moves the tile between the scroll and the click (the project's own
+// "a repainting board makes a real click miss").
+//
+// So: put the tile in the MIDDLE of the viewport first, then click. `force` is deliberately NOT used —
+// it would skip the hit-test entirely and hide a tile that really is covered, which is a thing worth
+// knowing about. This keeps the assertion honest and stops the false failures.
+const clickTile = async (frame, sel, timeout = 30000) => {
+  const el = frame.locator(sel).first();
+  await el.waitFor({ state: "visible", timeout });
+  await el.evaluate((n) => n.scrollIntoView({ block: "center", inline: "center" })).catch(() => {});
+  await new Promise((r) => setTimeout(r, 350));   // let one redraw settle before we aim
+  await el.click({ timeout });
+};
+
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
   Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
@@ -329,7 +354,7 @@ if (!BASE) {
     // checked where it now shows: the order builder must open on an EMPTY cart, with none of the
     // previous party's dishes carried into it. (The stronger data checks — the floor slice and the
     // records search — run below and are unchanged.)
-    await fr.locator(`.ftile[data-floor-table="${T}"]`).click();
+    await clickTile(fr, `.ftile[data-floor-table="${T}"]`);
     await fr.locator(".to-body").waitFor({ timeout: 30000 });
     await page.waitForTimeout(1500);
     const builder = await fr.locator(".to-body").innerText();
@@ -367,7 +392,7 @@ if (!BASE) {
     })));
     for (const { t, text } of tiles) {
       const tileFree = /Free/.test(text) && !/Preparing|Ready to serve|Served|due/.test(text);
-      await fr.locator(`.ftile[data-floor-table="${t}"]`).click();
+      await clickTile(fr, `.ftile[data-floor-table="${t}"]`);
       await page.waitForTimeout(1100);
       // What a tap opens depends on the tile (owner, 2026-07-31): an EMPTY table goes straight
       // into taking an order, a busy one opens its own popup. Either way the promise under test is
