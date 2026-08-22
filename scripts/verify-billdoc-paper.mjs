@@ -459,6 +459,57 @@ for (const [what, ts] of INSTANTS) {
   ok("the bill and the ticket refuse the same ten junk values");
 }
 
+// ── 3j. ONE WORD FOR THE TAX, ON EVERY SURFACE ────────────────────────────────────────────────
+// `tax_label` had TWO defaults inside this one file: billIdentity said "Tax", and three inline
+// reads said "GST". A restaurant that has never set the word — the default state — then got a
+// different one depending on which panel printed the bill, because the manager panel copies
+// billIdentity's answer into its own settings first and nothing else does. Manager: "MRP items
+// include Rs 2 Tax". Tablet, Access preview, admin preview: "...Rs 2 GST".
+{
+  const mrpNote = (settings) => BILLDOC.billData({ settings: { ...settings, mrp_tax_treatment: "inclusive" },
+    restaurant: {}, session: { bill_no: 1 }, autoPrint: false,
+    orders: [{ status: "served", subtotal: 442, taxable_base: 400, nontax_amount: 42, mrp_amount: 42,
+      discount: 0, tax_rate: 0.05, items: [{ title: "Dal", qty: 1, price: 400, tax_mode: "excl" },
+        { title: "Water", qty: 2, price: 21, is_mrp: true, tax_mode: "incl" }] }] }).mrpNote;
+  const bqWord = (settings) => {
+    const html = BILLDOC.banquetDocHtml({ settings, restaurant: {}, autoPrint: false,
+      bill: { bill_no: "B", subtotal: 1000, tax: 180, total: 1180, tax_lines: [] },
+      lines: [{ title: "A", qty: 1, price: 1000 }] });
+    return (html.match(/<span>([A-Za-z]+) 18%<\/span>/) || [])[1];
+  };
+  // the manager panel resolves the word FIRST and copies it in; every other surface passes the
+  // settings straight through. Both must land on the same word.
+  const cases = [
+    ["a restaurant that has never set the word", {}],
+    ["the manager panel, which copies billIdentity's answer in first", { tax_label: "Tax" }],
+    ["a whitespace label", { tax_label: "   " }],
+    ["a restaurant that set its own word", { tax_label: "VAT" }],
+  ];
+  const bads = [];
+  for (const [what, settings] of cases) {
+    const want = BILLDOC.billIdentity(settings, {}).taxLabel;
+    const note = mrpNote(settings), bq = bqWord(settings);
+    if (!note.endsWith(" " + want)) bads.push(`${what}: the MRP note says "${note}", not "${want}"`);
+    if (bq !== want) bads.push(`${what}: the banquet fallback says "${bq}", not "${want}"`);
+  }
+  bads.length === 0
+    ? ok("every surface prints ONE word for the tax — billIdentity's answer, whatever the settings say")
+    : bad(`the tax word differs by surface: ${bads.join(" · ")}`,
+      "read bi.taxLabel — an inline `s.tax_label || \"GST\"` gives the tablet a different word from the manager panel");
+  // and there is no second default left in the file
+  const { readFileSync: rf } = await import("node:fs");
+  // Scan the CODE, not the comments — the note explaining this fix quotes the old default, and a
+  // guard that reads its own explanation as evidence is the fault it is meant to catch.
+  const js = rf(join(ROOT, "public/panels/billdoc.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  const inline = [...js.matchAll(/s\.tax_label\s*\|\|\s*"([^"]*)"/g)].map((m) => m[1]);
+  const stray = inline.filter((w, i) => i > 0 || w !== "Tax");
+  stray.length === 0
+    ? ok("  …and only billIdentity carries the default")
+    : bad(`a second default for the tax word: ${stray.join(", ")}`,
+      "one setting, one default — resolve it in billIdentity and read bi.taxLabel everywhere else");
+}
+
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
 // The .d.ts is what the Next server and the admin React screens see. A field the document branches
 // its whole identity on, missing from the type, means a TypeScript caller cannot render that

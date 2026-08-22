@@ -1,7 +1,9 @@
-// verify-bill-preview.mjs — the BILL PREVIEW's geometry: the toolbar never covers the bill, the
-// whole sheet fits the window, and nothing on screen can reach the paper.
+// verify-bill-screens.mjs — everything about this product's printed documents and the sheet that
+// feeds them that ONLY A BROWSER CAN ANSWER: the toolbar never covers the bill, the whole sheet
+// fits the window, nothing on screen reaches the paper, and a refusal on the customer sheet is
+// never painted over by a late answer from the server.
 //
-//   node scripts/verify-bill-preview.mjs
+//   node scripts/verify-bill-screens.mjs
 //
 // WHY THIS EXISTS (T8 sweep #7, 2026-08-22). The preview grew a zoom layer on 2026-08-19 (owner:
 // "make sure the preview looks in a small screen … I could able to see the whole bill in preview")
@@ -20,6 +22,7 @@
 // that guard is static by design (no database, no login, no browser) and this one needs a browser.
 // It needs NO dev server and NO key — it renders the document straight into the page.
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,8 +145,55 @@ const browser = await chromium.launch({ headless: true });
       "the @media print rules carry !important so they beat an inline style — keep it that way");
 }
 
+// ── 4. A REFUSAL ON THE CUSTOMER SHEET IS NEVER PAINTED OVER ──────────────────────────────────
+// The status line has two jobs — the lookup's "New customer" / "Returning customer", and the
+// refusal that says WHICH box is missing — and the second was being wiped by the first about a
+// third of a second later, at EVERY latency, because the last keystroke always schedules a lookup
+// that lands after the tap. What replaced it was reassuring and green, so the sheet ended up
+// looking fine while the button still refused: the panel's "a tap must never vanish in silence"
+// rule, undone one beat after it was honoured.
+{
+  const CUST = readFileSync(join(ROOT, "public/panels/billcustomer.js"), "utf8");
+  const bads = [];
+  for (const lag of [0, 80, 250, 600]) {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.route("**/__billcust_probe*", (r) => r.fulfill({ status: 200,
+      contentType: "text/html; charset=utf-8", body: "<!doctype html><html><body></body></html>" }));
+    await page.goto("http://localhost/__billcust_probe", { waitUntil: "load" }).catch(() => {});
+    await page.addScriptTag({ content: CUST });
+    await page.evaluate((L) => {
+      window.__api = async () => { await new Promise((r) => setTimeout(r, L)); return { matches: [] }; };
+      window.__res = undefined;
+      window.LFH_BILLCUST.ask({ api: window.__api }).then((v) => { window.__res = v; });
+    }, lag);
+    await page.click(".bc-phone");
+    await page.keyboard.type("9825012345");
+    // the waiter taps Generate straight after the last digit, with no name
+    await page.evaluate(() => document.querySelector(".bc-go").click());
+    await page.waitForTimeout(lag + 450);
+    const held = await page.evaluate(() => ({ t: document.querySelector(".bc-status").textContent,
+      c: document.querySelector(".bc-status").style.color }));
+    await page.fill(".bc-name", "Meera");
+    await page.waitForTimeout(80);
+    const cleared = await page.evaluate(() => document.querySelector(".bc-status").textContent);
+    await page.evaluate(() => document.querySelector(".bc-go").click());
+    await page.waitForTimeout(80);
+    const res = await page.evaluate(() => window.__res);
+    await ctx.close();
+    if (!/Enter the customer's name/.test(held.t)) bads.push(`lag ${lag}ms: the refusal became "${held.t}"`);
+    else if (held.c !== "rgb(220, 38, 38)") bads.push(`lag ${lag}ms: the refusal is not red (${held.c})`);
+    else if (cleared !== "") bads.push(`lag ${lag}ms: the refusal survived being answered ("${cleared}")`);
+    else if (!res || res.name !== "Meera") bads.push(`lag ${lag}ms: the sheet did not go through afterwards`);
+  }
+  bads.length === 0
+    ? ok("a refusal on the customer sheet holds until it is answered, at every server latency")
+    : bad(`the sheet's refusal was painted over: ${bads.join(" · ")}`,
+      "a lookup answer must not overwrite the message that says WHICH box is missing — hold it until sync() sees the sheet satisfied");
+}
+
 await browser.close();
 console.log(fails
-  ? `\n${fails} check(s) FAILED — the bill preview does not show the whole bill, or the screen reached the paper.`
-  : "\nAll checks passed — the preview shows the whole bill, uncovered, and the paper is untouched.");
+  ? `\n${fails} check(s) FAILED — a bill screen does not show what it should, or the screen reached the paper.`
+  : "\nAll checks passed — the preview shows the whole bill uncovered, the paper is untouched, and a refusal holds.");
 process.exit(fails ? 1 : 0);

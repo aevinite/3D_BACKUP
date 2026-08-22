@@ -1380,7 +1380,7 @@
     var scaleComps = function (bucketPct) {
       var shape = shapeComps.length ? shapeComps : [{ label: "CGST", rate: 1 }, { label: "SGST", rate: 1 }];
       var sum = shape.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
-      if (!sum) return [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: bucketPct }];
+      if (!sum) return [{ label: bi.taxLabel, rate: bucketPct }];   // one word — see mrpNote below
       return shape.map(function (c) {
         return { label: c.label, rate: Math.round(((Number(c.rate) || 0) / sum) * bucketPct * 100) / 100 };
       });
@@ -1447,7 +1447,24 @@
       // declaration to say so — the document decides both from this one flag (T7 finding F9).
       composition: !!m.composition,
       nontax: mrpPart(m), mrpLabel: "MRP items",
-      mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + (((s.tax_label || "GST") + "").trim() || "GST") : "",
+      /* ONE WORD FOR THE TAX, DECIDED ONCE (T8 sweep #7, 2026-08-22). This and two other lines read
+         `s.tax_label || "GST"` inline, while billIdentity — thirty lines away, in the function whose
+         whole job is resolving exactly this kind of value — defaults it to "Tax". A restaurant that
+         has never set the word (the default state) then got a DIFFERENT one depending on which panel
+         printed the bill, because the manager panel copies billIdentity's answer into its own
+         settings first (editor/app.js) and nothing else does:
+
+             manager panel        MRP items include Rs 2 Tax
+             waiter tablet        MRP items include Rs 2 GST
+             Access preview       MRP items include Rs 2 GST
+             admin preview        MRP items include Rs 2 GST
+
+         Same restaurant, same bill, two words — the exact fault this whole file was created to end
+         (owner, 2026-08-02: "whatever the manager panel prints, that is the format ... both should
+         be sync"). All three now read billIdentity's one answer, so they converge on the word the
+         admin's own Settings screen already shows the owner as the default. A restaurant that HAS
+         set its own word was always consistent and is untouched. */
+      mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + bi.taxLabel : "",
       autoPrint: a.autoPrint !== false,
     };
   }
@@ -1638,7 +1655,7 @@ function banquetDocHtml(a) {
   const comps = cMatch ? tmB.components
     : (halvesMatch
       ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
-      : [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: Math.round(billRate * 10000) / 100 }]);
+      : [{ label: bi.taxLabel, rate: Math.round(billRate * 10000) / 100 }]);   // one word — see billData's mrpNote
   let taxRows;
   if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
     taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));

@@ -167,8 +167,7 @@
       let nameTouched = false;
       nameEl.addEventListener("input", () => {
         nameTouched = true;
-        if (statusEl.style.color === "rgb(220, 38, 38)" && nameEl.value.trim()) { statusEl.style.color = ""; statusEl.textContent = ""; }
-        sync();
+        sync();   // clears a standing refusal the moment the sheet is satisfiable (see `refusing`)
       });
 
       /* A TAP ON "GENERATE BILL" MUST NEVER DIE IN SILENCE (T8 sweep, 2026-08-17).
@@ -190,26 +189,59 @@
         goBtn.style.filter = ok ? "" : "grayscale(.4)";
         goBtn.style.boxShadow = ok ? "" : "none";
       }
+      /* ONCE THE SHEET HAS SAID WHICH BOX IS MISSING, A LOOKUP MAY NOT PAINT OVER IT
+         (T8 sweep #7, 2026-08-22). The status line has two jobs — the lookup's "New customer" /
+         "Returning customer", and the refusal that says WHICH box is missing — and the second was
+         being wiped by the first about a third of a second later. Every single time, at every
+         latency:
+
+           waiter types the 10th digit and taps Generate with no name
+           → "Enter the customer's name" in red          (the tap refused visibly, correctly)
+           → …and the lookup that the last keystroke scheduled lands
+           → "New customer" in GREEN                     (the reason is gone)
+
+         Measured at server lags of 0, 80, 250 and 600ms — it is not a race that sometimes bites,
+         because the last keystroke ALWAYS schedules a lookup that lands after the tap. And what
+         replaces the refusal is reassuring, so the sheet ends up looking fine while the button is
+         still refusing: the panel's "a tap must never vanish in silence" rule, undone one beat
+         after it was honoured.
+
+         So a refusal holds the line until the thing it named is actually supplied. sync() is where
+         that is decided, because it already knows whether the sheet is satisfiable — and it runs on
+         every keystroke AND after a lookup fills the name in, so the message clears from either. */
+      let refusing = false;
       function sync() {
         const p = norm(phoneEl.value);
         const ok = p.length === 10 && nameEl.value.trim().length > 0;
-        setReady(required ? ok : (p.length === 0 || p.length === 10));
+        const live = required ? ok : (p.length === 0 || p.length === 10);
+        if (refusing && live) { refusing = false; statusEl.style.color = ""; statusEl.textContent = ""; }
+        setReady(live);
       }
       sync();   // paint the not-ready look before the waiter's first keystroke
 
       function showKnown(hit, p) {
-        statusEl.style.color = "#16a34a";
-        const visits = hit.visits > 1 ? ` · ${hit.visits} visits` : "";
-        statusEl.innerHTML = `✓ Returning customer${esc(visits)}`;
+        // The NAME is still filled in while a refusal stands — that is how the refusal gets
+        // answered. Only the message is held back (see `refusing` above).
+        if (!refusing) {
+          statusEl.style.color = "#16a34a";
+          const visits = hit.visits > 1 ? ` · ${hit.visits} visits` : "";
+          statusEl.innerHTML = `✓ Returning customer${esc(visits)}`;
+        }
         if (!nameTouched && hit.name) nameEl.value = hit.name;
         sync();
       }
       function showNew() {
-        statusEl.style.color = "#16a34a";
-        statusEl.textContent = "New customer";
+        if (!refusing) {
+          statusEl.style.color = "#16a34a";
+          statusEl.textContent = "New customer";
+        }
         sync();
       }
-      function showTyping() { statusEl.style.color = ""; statusEl.textContent = ""; matchEl.style.display = "none"; sync(); }
+      function showTyping() {
+        if (!refusing) { statusEl.style.color = ""; statusEl.textContent = ""; }
+        matchEl.style.display = "none";
+        sync();
+      }
 
       // Suggestions for a PARTIAL number: tap one to fill it in. Keeps the waiter from
       // having to remember the whole number when the guest half-remembers it.
@@ -314,6 +346,7 @@
         const shortPhone = phone.length > 0 && phone.length !== 10;
         if (required ? (phone.length !== 10 || !name) : shortPhone) {
           const miss = phone.length !== 10 ? phoneEl : nameEl;
+          refusing = true;   // holds until sync() sees the sheet satisfied — see `refusing` above
           statusEl.style.color = "#dc2626";
           statusEl.textContent = phone.length !== 10 ? "Enter the full 10-digit mobile number" : "Enter the customer's name";
           miss.focus();
