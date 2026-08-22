@@ -36,6 +36,7 @@
 import { chromium } from "playwright";
 import { loginAs as loginOnce } from "./sweep/login.mjs";
 import { requireUp } from "./sweep/appUp.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 
 // Signing in occasionally times out on a busy dev server — a blip in the test rig, not in the
 // app (the same request answers in under a second by hand). One retry keeps a 54-check run
@@ -391,6 +392,14 @@ async function run() {
       return Number.isFinite(n) && n > 0 ? n : 30;
     })();
     keys = keys.filter((k) => { const n = Number(k); return Number.isFinite(n) && n >= 1 && n <= floorCount; });
+    // …AND NEVER A TABLE ANOTHER GUARD OWNS (sweep #6 / T28, 2026-08-22). The fallback below BORROWS a
+    // table by closing its bill, which on a shared dev database means ending another lane's party
+    // mid-run — and closing a session cancels and archives every unpaid live order on it (mig 232).
+    // Measured: this took table 28 out from under verify-void-on-joined-party, which then reported a
+    // void that had destroyed a whole party. It had not; this had. scripts/sweep/fixtureTables.mjs is
+    // the list of tables that are somebody's, so they are simply not candidates.
+    const owned = new Set(claimedTables());
+    keys = keys.filter((k) => !owned.has(String(k)));
     for (const k of keys) {
       const t = tiles[k];
       if (!t || t.state === "free") {
