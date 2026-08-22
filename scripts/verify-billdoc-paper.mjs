@@ -411,11 +411,38 @@ for (const [what, ts] of INSTANTS) {
   // The two newest rules the prose leans on must be in the index table too.
   for (const [needle, why] of [["261_", "one series for parcel, banquet and the platforms"],
     ["331_", "a cancelled sale takes no invoice number"],
-    ["332_", "every issued bill is signed and chained"]]) {
+    ["332_", "every issued bill is signed and chained"],
+    // The two rules that decide what the CUSTOMER's sheet shows, added 2026-08-22. This page is
+    // the one place that answers "which number is this?", and it did not mention either: that the
+    // sheet shows bill_no ONLY when there is no invoice number (owner, 2026-08-21), or that a
+    // reprint is recorded but never printed (owner, 2026-08-19).
+    ["333_", "a bill remembers it has been printed, so a button can say Reprint"],
+    ["339_", "…and the printed bill says nothing about it"]]) {
     doc.includes(needle)
       ? ok(`the doc names the rule: ${why}`)
       : bad(`docs/NUMBERING.md no longer names ${why}`, "this page is the one place that says which number is which");
   }
+}
+
+// ── 5b. THE PAGE STATES THE RULE THAT DECIDES WHAT THE CUSTOMER SEES ──────────────────────────
+// The printed sheet stopped showing bill_no whenever there is an invoice number (owner,
+// 2026-08-21) and this page — the one place that answers "which number is this?" — still said the
+// bill number is what "the customer's bill" shows. A doc that describes the old paper sends the
+// next person looking for a fault that is a decision.
+{
+  const { readFileSync } = await import("node:fs");
+  const doc = readFileSync(join(ROOT, "docs/NUMBERING.md"), "utf8");
+  const js = readFileSync(join(ROOT, "public/panels/billdoc.js"), "utf8");
+  // the code really does gate it…
+  const gated = /!d\.invNo && d\.billNo !== "" && d\.billNo != null/.test(js);
+  // …and the page really does say so
+  const said = /only when there is no invoice number/i.test(doc);
+  gated && said
+    ? ok("docs/NUMBERING.md states the rule the printed sheet actually follows for bill_no")
+    : bad(gated
+        ? "the sheet hides bill_no when there is an invoice number, and docs/NUMBERING.md does not say so"
+        : "docs/NUMBERING.md claims a bill_no rule the document no longer follows",
+      "this page is the one place that answers 'which number is this?' — it has to describe today's paper");
 }
 
 console.log(fails

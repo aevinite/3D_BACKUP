@@ -10,8 +10,19 @@
  * three layers and only the last one touches the network:
  *   1. an on-device map of every number this panel has already seen — instant, free;
  *   2. a per-prefix result cache, so backspacing/retyping never repeats a request;
- *   3. one small debounced request (>= 4 digits) that returns at most 6 rows of
- *      phone + name + visits, prefix-anchored on the (restaurant_id, phone) index.
+ *   3. one small debounced request (>= 4 digits) ASKING for 6 rows of phone + name + visits,
+ *      prefix-anchored on the (restaurant_id, phone) index.
+ *
+ * ⚠ THAT ROW CAP IS NOT ENFORCED TODAY, and this comment used to claim it was (T8 sweep #7,
+ * 2026-08-22). `lfh_customer_phone_search` (migration 227) ends `... LIMIT GREATEST(1, LEAST(
+ * COALESCE(p_limit, 6), 20))` AFTER a `json_agg`, and in SQL a LIMIT applies once the aggregate
+ * has already collapsed to one row — so it caps the one row and the array inside it is unbounded.
+ * Measured on the dev database: p_limit=1 came back with 3 rows. On a mature restaurant a
+ * four-digit prefix would download every matching customer, on the till's hot path, while a
+ * waiter types — and this sheet then renders only the first four of them (see showMatches).
+ * The fix is in the migration, not here, so it is written up as a handoff in
+ * .claude/sweep/T8-findings.md. Until it lands, read this layer as "one request per new prefix",
+ * not "one small request".
  * Requests are fired while typing and the stale ones are dropped by sequence number, so
  * the answer for the digits currently on screen is the only one that can land.
  *
