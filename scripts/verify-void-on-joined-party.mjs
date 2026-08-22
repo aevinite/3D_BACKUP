@@ -58,7 +58,18 @@ console.log(`\nVOID ON A JOINED PARTY — ${B}\n`);
 await wipe();
 const dish = (await q(`select id from menu_items where restaurant_id='${RID}' limit 1`))[0].id;
 // One ticket on each table, then join the child onto the parent.
-for (const t of [PARENT, CHILD]) await q(`select lfh_staff_place_order('${t}','[{"id":"${dish}","qty":2}]'::jsonb,'{}',null,'${RID}',true)`);
+//
+// CHECK THE FIXTURE WRITE (T28 sweep, 2026-08-22). This discarded what place_order returned. The RPC
+// answers HTTP 200 whatever it decides, so `q()` — which only throws on a non-200 — could not see a
+// refusal: `{ok:false, reason:…}` looked exactly like success. When it refused, the run carried on
+// with no ticket and the first real assertion blamed the void. Read the reply, and say the reason.
+const placed = [];
+for (const t of [PARENT, CHILD]) {
+  const r = (await q(`select lfh_staff_place_order('${t}','[{"id":"${dish}","qty":2}]'::jsonb,'{}',null,'${RID}',true) as result`))[0]?.result;
+  placed.push({ table: t, r });
+  check(`fixture: table ${t} took its ticket`, !!(r && r.ok && r.kot_no != null),
+    r ? `place_order replied ${JSON.stringify(r)}` : "place_order returned nothing at all");
+}
 const sid = async (t) => (await q(`select id from sessions where restaurant_id='${RID}' and table_number='${t}' and status='open' order by created_at desc limit 1`))[0]?.id;
 await q(`select lfh_staff_merge_tables('${await sid(CHILD)}','${PARENT}','${RID}')`);
 // Nothing served anywhere — that is what makes ✕ Cancel available on the parent's ticket.
@@ -118,6 +129,19 @@ const parentOrderIdRows = await q(`select id from orders where restaurant_id='${
 // and the whole run died mid-way — no summary, no failing check, just a stack trace that says
 // nothing about what went wrong. A guard must report; it must not crash.
 if (!parentOrderIdRows[0]) {
+  // WHAT IS ACTUALLY ON THE TWO TABLES? The fixture reported ok:true with a kot_no, so the ticket
+  // WAS created — and by the time we look for it, it is gone. Dump every row for both tables so the
+  // reason is in the output instead of needing another run to find out. (T28 sweep, 2026-08-22.)
+  const dump = await q(`select table_number, status, archived, session_id, created_at from orders
+    where restaurant_id='${RID}' and table_number in (${BOTH}) and created_at > now() - interval '5 minutes'
+    order by created_at`);
+  const sess = await q(`select id, table_number, status, deleted_at from sessions
+    where restaurant_id='${RID}' and table_number in (${BOTH}) and created_at > now() - interval '5 minutes'`);
+  const merges = await q(`select parent_table, child_table, session_id, ended_at from table_merges
+    where restaurant_id='${RID}' and (child_table in (${BOTH}) or parent_table in (${BOTH}))`);
+  console.log("    orders  :", JSON.stringify(dump));
+  console.log("    sessions:", JSON.stringify(sess));
+  console.log("    merges  :", JSON.stringify(merges));
   check(`fixture: table ${PARENT} has a live ticket to void`, false,
     "no un-archived, un-cancelled order on that table — the place_order above did not land, so "
     + "nothing below could run. Check its reply before reading this as a voiding fault.");
@@ -125,9 +149,18 @@ if (!parentOrderIdRows[0]) {
 }
 const parentOrderId = parentOrderIdRows[0].id;
 await fr.locator(`.ftile[data-floor-table="${PARENT}"]`).click({ force: true });
-await p.waitForTimeout(5000);
+// WAIT FOR THE BUTTON, NOT FOR FIVE SECONDS (T28 sweep, 2026-08-22). This slept a flat 5s after
+// opening the table and then counted the ✕ Cancel for a specific order id. About one run in six the
+// detail panel had not finished drawing the ticket list yet, so the count was 0, nothing was
+// clicked, and the NEXT assertion failed as
+//     FAIL the parent's ticket really was voided — {"27":"received","28":"received"}
+// which is exactly what voiding being broken on a joined party looks like. It was not: the button
+// had not appeared yet. Third instance of this same fault found today — the payment popup in
+// verify-merged-floor and the money tile in verify-admin-money were the other two.
 const cancelBtn = fr.locator(`[data-cancel-order="${parentOrderId}"]`).first();
-check("the parent's own ticket offers ✕ Cancel", (await cancelBtn.count()) > 0);
+await cancelBtn.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+check("the parent's own ticket offers ✕ Cancel", (await cancelBtn.count()) > 0,
+  "the table detail never drew this ticket's ✕ Cancel within 30s — nothing below could run");
 if ((await cancelBtn.count()) > 0) {
   await cancelBtn.click({ force: true });
   await p.waitForTimeout(1500);
@@ -195,9 +228,11 @@ await p.waitForTimeout(5000);
 try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6500);
 await fr.locator(`.ftile[data-floor-table="${PARENT}"]`).click({ force: true });
-await p.waitForTimeout(5000);
+// Same as the party half above: wait for the control, do not guess at it.
 const soloCancel = fr.locator(`[data-cancel-order="${soloOrderId}"]`).first();
-check("the solo ticket offers ✕ Cancel", (await soloCancel.count()) > 0);
+await soloCancel.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
+check("the solo ticket offers ✕ Cancel", (await soloCancel.count()) > 0,
+  "the table detail never drew this ticket's ✕ Cancel within 30s — nothing below could run");
 if ((await soloCancel.count()) > 0) {
   await soloCancel.click({ force: true });
   await p.waitForTimeout(1500);
