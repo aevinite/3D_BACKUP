@@ -120,6 +120,27 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // (every overlay must register with the back manager — audit fix 2026-07-06).
   useBackClose("viewer-info", showInfo, () => setShowInfo(false));
   const [hintVisible, setHintVisible] = useState(false); // is the hint pill showing?
+  // HOW TALL THE DISH BAR ACTUALLY IS (sweep #7 T2, 2026-08-22 — item 2).
+  //
+  // `.viewer-wrapper #dbl-hint` in app/globals.css pins the hint pill at a HARDCODED
+  // `bottom: 176px`, but `#bar` is `bottom: 0` and its height is content-driven — dish name,
+  // description, a four-stat row, a button row and the safe-area inset. Measured on the running
+  // viewer: the bar is 208 px tall on a 360×780 phone and the pill was pinned 176 px up, so 32 px
+  // of its 34 px sat INSIDE it, and `elementFromPoint` at the pill's own centre came back `#bar` (z-index 30 beats 25).
+  // The bar's background is a gradient that fades to transparent at the top, so the pill was not
+  // even cleanly hidden — its words were left crossing the dish title, which reads as a rendering
+  // fault. Same on 375×667 (32 px of 34) and on a 1280×800 desktop (20 px of 34).
+  //
+  // The sentence being swallowed is the one the owner asked for on 2026-08-12 — "Drag to turn it
+  // around", the only thing that teaches a diner the dish can be spun. It has therefore never
+  // been readable on a phone.
+  //
+  // So the pill is placed from the bar's REAL height instead of a guess. Measured with a
+  // ResizeObserver because the height genuinely moves: a long dish name wraps to two lines, and
+  // rotating a phone re-flows the whole bar. 0 means "not measured yet" — the stylesheet's 176 px
+  // stays in charge until then, so nothing flashes.
+  const [barHeight, setBarHeight] = useState(0);
+  const barRef = useRef<HTMLDivElement>(null);
   // I5 (owner, 2026-08-12): NOTHING told a diner the dish can be turned. The 3D dish is what makes
   // this product different and it relied on people fiddling to find out. The FIRST time the pill pops
   // it now says "Drag to turn it around"; every pop after that is the existing triple-tap reminder.
@@ -336,6 +357,19 @@ export default function ViewerClient({ folder }: { folder: string }) {
       clearInterval(loop);
     };
   }, [barVisible, loaderVisible]);
+
+  // Keep `barHeight` honest — see the note where it is declared. The observer watches the bar
+  // itself, so a name that wraps to a second line moves the pill with it. `translateY` does not
+  // affect the measured height, so this is right even before the bar has slid in.
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const read = () => setBarHeight(Math.round(el.getBoundingClientRect().height));
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [config, menuItem]);
 
   // Load this dish folder's config.json (the model URLs + hotspot tags).
   // Re-runs if the folder changes.
@@ -930,8 +964,16 @@ export default function ViewerClient({ folder }: { folder: string }) {
         </div>
       </div>
 
-      {/* The "triple-tap to replay" hint; the "show" class fades it in/out. */}
-      <div id="dbl-hint" className={hintVisible ? "show" : ""}>
+      {/* The "triple-tap to replay" hint; the "show" class fades it in/out.
+          `bottom` is set from the bar's measured height, not the stylesheet's hardcoded 176px —
+          see the note on barHeight. 12px of air between the two. Inline, because the stylesheet
+          is not this terminal's to edit; if that rule ever learns the bar's height at source,
+          this becomes redundant rather than wrong. */}
+      <div
+        id="dbl-hint"
+        className={hintVisible ? "show" : ""}
+        style={barHeight ? { bottom: barHeight + 12 } : undefined}
+      >
         {hintSpin ? <>🔄 {t.dragToSpin}</> : <>👆 {t.tripleTapReplay}</>}
       </div>
 
@@ -953,7 +995,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       {/* The bottom info bar (name, stats, price, Add to Order). It slides up
           once "on" is added. Values prefer the live menu item, falling back
           to the config. */}
-      <div id="bar" className={barVisible ? "on" : ""}>
+      <div id="bar" ref={barRef} className={barVisible ? "on" : ""}>
         <div className="dname" id="dish-title">
           {menuItem?.title || config?.title || ""}
         </div>

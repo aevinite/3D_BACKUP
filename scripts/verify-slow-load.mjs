@@ -194,6 +194,44 @@ try {
     log("  overlay cleared ✓");
   }
 
+  // ── the line that teaches the feature must be readable (sweep #7 T2, item 2) ────────────────
+  // `.viewer-wrapper #dbl-hint` is pinned at a HARDCODED `bottom: 176px` in app/globals.css,
+  // while `#bar` is `bottom: 0` with a content-driven height (208 px on this phone). So 32 of the
+  // pill's 34 px sat INSIDE the bar, `elementFromPoint` at the pill's own centre returned `#bar`,
+  // and the bar's gradient fades to transparent at the top — leaving the words crossing the dish
+  // title rather than cleanly hidden. The sentence being swallowed is "Drag to turn it around",
+  // the only thing that tells a diner the dish can be spun (owner, 2026-08-12).
+  log("\n=== Phase C2: the hint pill clears the dish bar ===");
+  const pillShown = await viewPage
+    .waitForFunction(() => document.getElementById("dbl-hint")?.classList.contains("show"), { timeout: 30000 })
+    .then(() => true).catch(() => false);
+  if (!pillShown) {
+    log("  the hint pill never popped in this window — nothing to measure, not a failure");
+  } else {
+    const pill = await viewPage.evaluate(() => {
+      const h = document.getElementById("dbl-hint"), bar = document.getElementById("bar");
+      if (!h || !bar) return null;
+      const hr = h.getBoundingClientRect(), br = bar.getBoundingClientRect();
+      const top = document.elementFromPoint(hr.left + hr.width / 2, hr.top + hr.height / 2);
+      return {
+        text: h.textContent.trim(),
+        overlap: Math.round(Math.max(0, Math.min(hr.bottom, br.bottom) - Math.max(hr.top, br.top))),
+        height: Math.round(hr.height),
+        coveredBy: top && top.id === "bar" ? "#bar" : (top ? (top.id ? "#" + top.id : top.tagName) : "null"),
+      };
+    });
+    log("  pill:", JSON.stringify(pill));
+    if (!pill) {
+      fail("The hint pill or the dish bar is missing from the 3D screen.");
+    } else if (pill.overlap > 0) {
+      fail(`The hint pill overlaps the dish bar by ${pill.overlap}px of its ${pill.height}px — the ` +
+        `line that teaches a diner the dish can be turned ("${pill.text}") is painted underneath ` +
+        "the bar. Place it from the bar's measured height, not a hardcoded bottom.");
+    } else if (pill.coveredBy === "#bar") {
+      fail("The dish bar owns the point at the hint pill's own centre, so the pill is covered.");
+    }
+  }
+
   // ── the ticket, from a page the guest has moved on to ───────────────────────────────────────
   log("\n=== Phase D: leaving before the model lands still earns a ticket, named correctly ===");
   await ctx.close(); ctx = null;
