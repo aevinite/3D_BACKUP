@@ -1186,7 +1186,15 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; the panel floats */
 #panel:has(.detail-pop) { position: fixed; inset: 0; z-index: 48; display: flex; align-items: center; justify-content: center;
   margin: 0; border: 0; border-radius: 0; min-height: 0; max-height: none; overflow: hidden; padding: 16px;
-  background: rgba(4,8,18,.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  /* var(--scrim), not a value of its own (T7, 2026-08-22). The token was added on 2026-08-22 so
+     "every full-screen overlay dims the page by the same amount", and this backdrop — the one a
+     waiter sees more than any other — was one of the two places it never reached. Measured on the
+     running panel: this read rgba(4,8,18,.5) while the ten sheets built in app.js read
+     rgba(4,8,18,.66) and the confirm read the token's rgba(3,7,16,.60), so opening a table and
+     then its Discount and then its confirm dimmed the floor by THREE different amounts in one
+     action. The blur stays its own value on purpose — a heavier blur is how a stacked layer says
+     it is on top. */
+  background: var(--scrim); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 /* THE ORDERS SCROLL, THE ACTIONS DO NOT (fixed 2026-08-04). The card used to scroll as ONE
    block, so on a 360px phone a busy table's ~1900px of dish rows pushed ＋ Take order, 💳 Mark
    bill paid and ✕ Close table about 1100px below the fold — and the automated suite never

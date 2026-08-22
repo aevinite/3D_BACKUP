@@ -450,6 +450,59 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 10 · ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22 — completed T7 sweep #7) ───
+// `--scrim` was added to this panel's stylesheet on 2026-08-22 so that "every full-screen overlay
+// dims the page by the same amount", because two overlays on one screen dimming differently is what
+// makes one product feel like several. It reached the four overlays written in CSS and none of the
+// ten built in app.js, nor the table-detail backdrop — so, measured on the running panel, opening a
+// table (rgba(4,8,18,.5)) then its Discount (rgba(4,8,18,.66)) then a confirm (the token's
+// rgba(3,7,16,.6)) dimmed the floor by THREE different amounts inside one action.
+//
+// Every overlay this panel builds by hand sets its dim in an inline style, so the check is exact:
+// no hardcoded rgba() may sit in a `background:` beside `position: "fixed"`. The BLUR is deliberately
+// NOT unified — a heavier blur is how a stacked layer says it is on top.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  check(
+    "tablet: the --scrim token is declared",
+    /--scrim:\s*rgba\([\d\s,.]+\)/.test(css),
+    `${CSS}: the one dim every overlay reads. Do not inline it back into each overlay.`,
+  );
+  const inline = [...src.matchAll(/position: "fixed"[^}]*?background: "(rgba\([^"]+\))"/g)].map((m) => m[1]);
+  check(
+    "tablet: no hand-built overlay hardcodes its own dim",
+    inline.length === 0,
+    `${TABLET}: ${inline.length} overlay(s) still set their own dim (${[...new Set(inline)].join(", ")}).\n    ` +
+    `Use background: "var(--scrim)" so a sheet opened over another sheet dims by the same amount.`,
+  );
+  // Read the whole declaration BLOCK, never a fixed character window: these rules carry long
+  // explanatory comments between the selector and the declaration, so a window is a guard that
+  // fails on a comment someone added rather than on the thing it is watching.
+  const ruleBlock = (sel) => {
+    const at = css.indexOf(sel + " {");
+    if (at < 0) return null;
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    return close < 0 ? null : css.slice(open + 1, close);
+  };
+  const backdrop = ruleBlock("#panel:has(.detail-pop)");
+  check(
+    "tablet: the table-detail backdrop reads the token, not a value of its own",
+    !!backdrop && /background:\s*var\(--scrim\)/.test(backdrop),
+    `${CSS}: #panel:has(.detail-pop) is the backdrop a waiter sees more than any other. It read\n    ` +
+    `rgba(4,8,18,.5) while the sheets above it read something else.` +
+    (backdrop === null ? "\n    (the rule itself was not found — if the selector moved, move this check with it.)" : ""),
+  );
+  const cssDims = [...css.matchAll(/^\.(confirm-overlay|opt-overlay|qdest-overlay|tbl-drawer-backdrop)[^{]*\{[^}]*background:\s*([^;]+);/gm)].map((m) => [m[1], m[2].trim()]);
+  const strays = cssDims.filter(([, v]) => v !== "var(--scrim)");
+  check(
+    "tablet: the four CSS overlays still read the token",
+    strays.length === 0,
+    `${CSS}: ${strays.map(([k, v]) => `.${k} = ${v}`).join(", ")} — these were the ones the token\n    ` +
+    `already covered; a regression here undoes the whole point of it.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
