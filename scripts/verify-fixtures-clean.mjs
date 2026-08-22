@@ -59,6 +59,7 @@ const FIXTURES = [
   ["T12-TEST", "verify-cancel-loss.ts"],
   ["T12-P2", "verify-cancel-made.ts"],
   ["9990", "verify-two-parties.mjs"],
+  ["9965", "verify-sweep-extras.mjs"],
 ];
 const names = FIXTURES.map(([n]) => n);
 const owner = new Map(FIXTURES);

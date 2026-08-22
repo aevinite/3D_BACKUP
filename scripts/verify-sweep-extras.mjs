@@ -17,6 +17,7 @@
 import { chromium } from "playwright";
 import { loginAs, adminCookie } from "./sweep/login.mjs";
 import { requireAppUp } from "./sweep/appUp.mjs";
+import { readFileSync } from "node:fs";
 const argv=process.argv.slice(2);
 const B = (argv.includes("--base")?argv[argv.indexOf("--base")+1]:null) || process.env.BASE || "http://localhost:4000";
 // Nothing answering at the base used to surface nine different ways across these guards — from a
@@ -27,6 +28,64 @@ await requireAppUp(["--base", B], "these sweep follow-up checks");
 const lum=(r,g,b)=>{const f=x=>{x/=255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4)};return .2126*f(r)+.7152*f(g)+.0722*f(b)};
 const P=s=>{const m=String(s).match(/-?[\d.]+/g);const k=/^color\(\s*srgb/i.test(String(s))?255:1;return [+m[0]*k,+m[1]*k,+m[2]*k]};
 const CR=(a,b)=>((Math.max(lum(...a),lum(...b))+.05)/(Math.min(lum(...a),lum(...b))+.05));
+// ── IT NEEDS A PARTY, SO IT SEATS ONE (sweep #6 / T28, 2026-08-22) ────────────────────────────────
+// Phase 5465 ("tablet KOT ▾ button exists") only has something to click when a table has a live
+// session — KOT ▾ lives in the table-detail popup. It used to look for whatever happened to be on the
+// floor and report ❌ "no table with a party on the floor right now — cannot exercise it" when there
+// was nothing. So it passed only when some OTHER guard had left litter behind, and went red the moment
+// the floor was clean. That is the worst of both: a check that depends on a mess, reported as a fault.
+// (Found the moment the leftover fixtures this sweep had been living on were finally cleared.)
+//
+// It seats its own party instead, through the waiter's own RPC, on an off-plan table nothing else uses
+// — and retires it the way a cancellation does, in a finally, so a crash cannot leave it on the floor.
+// The table is registered in scripts/verify-fixtures-clean.mjs so a leftover is caught there too.
+const FIXTURE_TABLE = "9965";
+const RID = "00000000-0000-0000-0000-000000000001";
+const sbEnv = (() => {
+  try {
+    const t = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+    const g = (k) => (t.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim().replace(/^["']|["']$/g, "");
+    return { url: g("NEXT_PUBLIC_SUPABASE_URL"), key: g("SUPABASE_SERVICE_ROLE_KEY") };
+  } catch { return {}; }
+})();
+const rest = async (path, method = "GET", body) => {
+  const r = await fetch(`${sbEnv.url}/rest/v1/${path}`, {
+    method, headers: { apikey: sbEnv.key, Authorization: `Bearer ${sbEnv.key}`, "Content-Type": "application/json", Prefer: "return=representation" },
+    body: body ? JSON.stringify(body) : undefined });
+  const txt = await r.text();
+  if (!r.ok) throw new Error(`${method} ${path} -> ${r.status} ${txt.slice(0, 160)}`);
+  return txt ? JSON.parse(txt) : null;
+};
+const retireFixture = async () => {
+  if (!sbEnv.url || !sbEnv.key) return;
+  const now = new Date().toISOString();
+  try {
+    await rest(`orders?restaurant_id=eq.${RID}&table_number=eq.${FIXTURE_TABLE}&archived=is.false`, "PATCH",
+      { status: "cancelled", archived: true, archived_at: now, cancelled_at: now });
+    await rest(`sessions?restaurant_id=eq.${RID}&table_number=eq.${FIXTURE_TABLE}&status=eq.open`, "PATCH",
+      { status: "closed", closed_at: now, deleted_at: now });
+    // …and the kitchen ticket it queued, or the manager's floor keeps a red "hasn't printed" banner.
+    const ours = new Set((await rest(`orders?restaurant_id=eq.${RID}&table_number=eq.${FIXTURE_TABLE}&select=id`) || []).map((o) => o.id));
+    for (const j of (await rest(`print_jobs?restaurant_id=eq.${RID}&status=eq.queued&select=id,order_id&limit=200`) || []).filter((j) => ours.has(j.order_id))) {
+      await rest(`print_jobs?restaurant_id=eq.${RID}&id=eq.${j.id}`, "PATCH",
+        { status: "dismissed", done_at: now, error: "the order was cancelled before this ticket printed" });
+    }
+  } catch (e) { console.log(`   fixture: table ${FIXTURE_TABLE} would not clear — ${String(e.message).slice(0, 140)}`); }
+};
+const seatFixture = async () => {
+  if (!sbEnv.url || !sbEnv.key) return null;
+  await retireFixture();                                    // a clean slate, whatever a crashed run left
+  const dish = (await rest(`menu_items?restaurant_id=eq.${RID}&select=id&limit=1`))[0];
+  if (!dish) return null;
+  const placed = await rest("rpc/lfh_staff_place_order", "POST", {
+    p_table: FIXTURE_TABLE, p_items: [{ id: dish.id, qty: 1 }], p_allergies: [], p_note: null,
+    p_restaurant_id: RID, p_confirm_duplicate: true });
+  return placed && placed.ok === true ? FIXTURE_TABLE : null;
+};
+for (const sig of ["uncaughtException", "unhandledRejection"]) {
+  process.on(sig, async (e) => { console.error(`\n${sig}:`, e && e.message ? e.message : e); await retireFixture(); process.exit(1); });
+}
+
 let pass=0, fail=0;
 const ok=(id,what,detail="")=>{pass++;console.log(`✅ ${id} ${what}${detail?" :: "+detail:""}`)};
 const no=(id,what,detail="")=>{fail++;console.log(`❌ ${id} ${what}${detail?" :: "+detail:""}`)};
@@ -88,6 +147,7 @@ async function ctx(role){
 
 // ── 5465-5468 · TABLET · the KOT ▾ menu and the ☰ profile drawer ─────────────
 {
+  const seated = await seatFixture();
   const c = await ctx("tablet"); const p = await c.newPage();
   await p.goto(B+"/tablet",{waitUntil:"domcontentloaded",timeout:90000}); await p.waitForTimeout(11000);
   const fr = await panelFrame(p, "#kotMenuBtn, #hamburger");
@@ -102,7 +162,9 @@ async function ctx(role){
   });
   await p.waitForTimeout(2200);
   const btn = fr.locator("#kotMenuBtn, .kot-menu-btn, [id*=kotMenu]").first();
-  if (!opened) no("5465","tablet KOT \u25be button exists","no table with a party on the floor right now — cannot exercise it");
+  if (!opened) no("5465","tablet KOT \u25be button exists",
+    seated ? `seated a party on table ${seated} but no tile on the floor shows it — the waiter's floor is not drawing a live table`
+           : "could not seat a fixture party (no .env.local keys?), so there was nothing to click");
   else if (!(await btn.count())) no("5465","tablet KOT \u25be button exists",`opened "${opened}" but no #kotMenuBtn (KOT ops off?)`);
   else {
     ok("5465","tablet KOT \u25be button exists");
@@ -285,5 +347,6 @@ async function ctx(role){
   }
 }
 await br.close();
+await retireFixture();
 console.log(`\nSKIPPED-PHASE RUN: ${pass} pass · ${fail} fail`);
 process.exit(fail?1:0);
