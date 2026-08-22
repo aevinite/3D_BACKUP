@@ -2,13 +2,13 @@
 
 Territory: `scripts/**`, `tests/**`, the `verify:*` entries in `package.json`.
 Branch `sweep6/t28-the-guards` · worktree `/Users/aevinite/Documents/Projects/sweep6/T28` · port 4128.
-All 17 items below are FIXED in this branch, one commit each, numbered to match.
+All 23 items below are FIXED in this branch, one commit each, numbered to match.
 
 Legend: `confirmed` = I watched it happen · `code-read` = reasoned from the source.
 
 ---
 
-## FIXED — 13 problems
+## FIXED — 18 problems
 
 ### 1 · The cancelled-tile guard printed a tick over ZERO dishes · confirmed · HIGH
 `scripts/verify-cancelled-tile-parity.mjs`. `order_items.restaurant_id` is NOT NULL since the pool
@@ -90,9 +90,46 @@ nothing else holds are rewritten against today's app.
 from its own worktree, so a guard reaching back into the shared folder asserts against whatever stack
 THAT copy points at — and reports green about a database nobody asked it to look at.
 
+### 19 · A guard that printed "Cleaned up test order." and cleaned up nothing · confirmed · HIGH
+`scripts/verify-allergy-isolation.mjs` hard-DELETEd its order. Every order carries a KOT number from
+the moment it exists (mig 036) and the database refuses to delete one (mig 190) — unread. So table
+ALGTEST sat on the manager's floor with a new order on it, an open session blocking the
+one-open-session-per-table index, and a queued ticket whose red "hasn't printed" banner stayed on the
+floor. It also read `.env.local` relative to the current directory and left its restaurant to the
+RPC's default.
+
+### 21 · A teardown that closed EVERY open table in the restaurant · confirmed · HIGH
+`scripts/verify-manager-live-rush.mjs` read every non-closed session in each crew's restaurant and
+closed the lot — while printing "closed the tables they opened". The rush picks FREE tables at the
+start, so any party that arrived while it ran was ended at the end, and closing a session fires mig
+232's trigger, which cancels and archives every unpaid live order on it.
+**Who is worse off:** every party in the house, on a real restaurant. On the dev stack it was deleting
+other sweep lanes' fixtures mid-run, which explains flakes seen elsewhere in this sweep.
+
+### 22 · Seven live tables left on the floor after every run · confirmed · HIGH
+`scripts/verify-merged-floor.mjs` cleared the slate BEFORE building its fixture and then simply
+exited — no teardown. My Little French House's header read `7/30 OCCUPIED · 1 TO PAY · 3 NEEDS YOU` on
+a restaurant nobody was eating in, with five "hasn't printed" banners above the floor. Screenshotted
+at 1280×800 and 360×780 dpr3, before and after.
+
+### 23 · Four checks that only ran when another guard left a mess · confirmed · MEDIUM
+`scripts/verify-sweep-extras.mjs` phase 5465 needs a table with a live party (KOT ▾ only exists in the
+detail popup). It looked for whatever happened to be on the floor and reported ❌ when there was
+nothing — so it passed only while another guard's litter was still there, and went red the moment the
+floor was clean. 5466–5468 hang off it, so all four had never run. It seats its own party now: 18
+pass, 0 fail, up from 14 pass and 1 fail.
+
+### 18 · Three floor guards tripped the app's own double-tap protection · confirmed · MEDIUM
+`verify-table-lifecycle`, `verify-two-parties`, `verify-manager-live-rush`. `lfh_staff_place_order`
+refuses a second identical round for the same table within three seconds. None of the three read `ok`,
+so the undefined id died six lines later as `invalid input syntax for type uuid: "undefined"`. Passing
+depended on whether the previous identical round was more than three seconds ago — which is why they
+looked like flakes. Once the rush could run to the end it reported SIXTEEN failures on a correct floor:
+a tile with dishes prints the served counter as text and carries the state phrase in the line's title.
+
 ---
 
-## BUILT — 4 improvements
+## BUILT — 6 improvements
 
 ### 14 · A stopped dev server no longer reads as "this guard is broken"
 17 guards answered "nothing running" with a raw ECONNREFUSED stack. They now say one plain sentence
@@ -107,6 +144,12 @@ guard is reachable; everything parses; every browser-driving guard does the app-
 ### 16 · NEW GUARD `verify:fixtures` — did our own tests leave a table on the floor?
 Nine off-plan throwaway table names, checked with the same filter the floor's own summary uses.
 `--clean` retires what it finds, by id, the product's own way.
+
+### 20 · The fixtures guard also clears the kitchen tickets our tests queue
+Every order queues a print job (mig 335); lib/printQueue dismisses a dead one, but only when something
+READS the queue, and on a stack with no kitchen screen open nothing does. Five red banners were stacked
+above the floor. One shared helper (`scripts/sweep/tickets.mjs`), always by order id, using the app's
+own wording — plus a check for any queued ticket whose order is already cancelled or archived.
 
 ### 17 · NEW CHECK in `verify:test-safety` — a test write must name its restaurant
 Reads the ARGUMENT of every insert/update/delete on a tenant table. Catches both the refused insert

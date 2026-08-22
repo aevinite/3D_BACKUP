@@ -14,10 +14,27 @@
 3. **`verify:fixtures`** — no test may leave a table on a manager's floor. (item 16)
 4. **A test write must name its restaurant** — added to `verify:test-safety`, which already runs as a
    hook on any `scripts/` or `tests/` edit. (item 17)
+5. **The kitchen tickets our tests queue get dismissed** — one shared helper, always by order id,
+   using lib/printQueue's own wording; plus a check for any queued ticket whose order is already
+   cancelled or archived, whatever table it was on. (item 20)
+6. **A guard that needs a party seats one** — `verify:sweep-extras` no longer depends on another
+   guard's litter to have anything to click. (item 23)
 
 ---
 
 ## 🟡 NEEDS A DECISION FROM HIM (or lives in another terminal's territory)
+
+### I8 · Should `verify:manager-live-rush` write to Aangan at all? — 🟡 · his call
+**Where:** backend only, nothing on screen — but it places and cancels real orders on Aangan Garden.
+**What it is:** the rush deliberately drives BOTH restaurants, because "does one restaurant's rush
+bleed onto another" is half of what it proves. The standing rule says Aangan is the read-only control
+at factory defaults. It touches no switches and now cleans up only its own tables, so I have left the
+design alone — but the rule and the guard disagree on paper and only he can say which wins.
+**If yes (scope it to French House):** the rule holds without an exception anyone has to remember.
+**If no:** the guard keeps its second restaurant, and the rule needs a sentence saying it means
+switches, not orders.
+**Effort:** 20 minutes either way.
+**Risk:** low, but it removes half of what the guard proves, so it is not mine to decide.
 
 ### I1 · Shared fixture setup + teardown for the guards that place real orders — 🟡
 **Where:** backend only, nothing on screen (but a mistake here shows up as a phantom table on the
