@@ -164,6 +164,17 @@ has("guestbell.js", /var\(--sab, env\(safe-area-inset-bottom, 0px\)\)/,
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,
   "the inventory deadline is back inside the write-only branch — a read can hang on 'Loading inventory…' forever");
 
+// ── the queue says when a round STARTS, not only when it stops (T9 sweep #7, 2026-08-22) ──────
+// `syncing` is the one flag every surface reads to answer "is this actually moving?". The finally
+// block publishes when a round ends; nothing published when it began, so with exactly ONE change
+// queued — the everyday case — the connection panel read "Waiting to send · next try in 5s", in the
+// red not-moving colour, while that change was being sent. Both halves are guarded: the notify at
+// the top of the round, and the two snapshot shapes agreeing.
+has("outbox.js", /flushing = true;[\s\S]{0,900}?\n\s*notify\(\);/,
+  "flush() no longer says a round has started, so the connection panel calls an in-flight change 'waiting'");
+has("outbox.js", /getSnapshot: \(\) => \(\{[^}]*syncing: flushing[^}]*unsafeStore: unsafeStore/,
+  "getSnapshot() dropped syncing/unsafeStore again — a listener's first snapshot has a different shape from every later one");
+
 // ── leaving the panel moves the WHOLE window, not the frame (T9 sweep #7, 2026-08-22) ─────────
 // /manager, /kitchen and /tablet render the panel inside an iframe, so a bare `location.href` from
 // panel code loads the sign-in page INSIDE the panel and leaves the page around it signed in. The

@@ -510,6 +510,17 @@
     // from then on nothing sent, however good the connection became.
     if (navigator.onLine === false) { scheduleRetry(false); return; }
     flushing = true;
+    // SAY THE ROUND HAS STARTED (T9 sweep #7, 2026-08-22).
+    //
+    // `syncing` exists so no surface has to guess whether work is moving, and the `finally` below
+    // publishes the moment it STOPS — but nothing published the moment it starts. With more than one
+    // change queued the first delivery's own notify() covered it; with exactly ONE change, which is
+    // the everyday case, listeners still held `syncing:false` for the whole round. Measured: with a
+    // single write in flight the connection panel read "Waiting to send · next try in 5s", in the red
+    // "not moving" colour, while that very change was being sent — and the countdown it offered was
+    // for a timer the running round had already cleared. That is the same cry-wolf fault this pair of
+    // files was fixed for in the other direction on 2026-08-17.
+    notify();
     let progressed = false; // did anything actually get through this round?
     try {
       // WALK THE QUEUE, DON'T STOP AT THE FIRST OBSTACLE (improvements #2 + #6).
@@ -806,7 +817,11 @@
       });
       return out;
     },
-    getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length }),
+    // ONE SNAPSHOT SHAPE. onChange() answers this immediately to a new listener and notify()
+    // publishes its own object afterwards, so the two must carry the same keys — they did not, and a
+    // listener's FIRST snapshot silently had `syncing` and `unsafeStore` undefined. Reading a missing
+    // key as "no" happens to be the safe direction here, which is exactly why it went unnoticed.
+    getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length, syncing: flushing, unsafeStore: unsafeStore }),
     pendingCount: () => queued.length,
     failedCount: () => failed.length,
     // WHEN the oldest thing still waiting was done (ms since epoch, 0 = nothing waiting).
