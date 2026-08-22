@@ -49,6 +49,17 @@ const read = (p) => fs.readFileSync(R(p), "utf8");
 // file that was 21,889 on disk: under by 254. Small today, but it grows with every emoji added, and the
 // whole point of the comment above is that this number must not need interpreting. Buffer.byteLength
 // is the actual answer, so measure with it and stop guessing.
+// REJECTED (owner, 2026-08-22): offered "move a section's remaining narrative out of CLAUDE.md into
+// docs/CLAUDE-DETAIL.md to make headroom, because the file is 56 bytes under this budget and the next
+// rule anyone adds turns the checks red" — he said **no**. Do not re-offer it, and do not offer it
+// again the day this check actually trips. Full row: docs/REJECTED-IDEAS.md R45.
+//
+// SO WHAT HAPPENS WHEN IT TRIPS. Two answers exist and only one of them is his: DON'T MOVE A SECTION
+// (his decision) and DON'T QUIETLY RAISE THIS NUMBER either — the comment below records that raising
+// it is exactly how the last budget stopped working. That leaves: whoever is adding a rule makes room
+// inside their own edit — tighten the wording of the line they are touching, or fold their rule into
+// an existing bullet instead of adding a new one. Say so, and let him decide; never edit this number
+// as a way around the decision.
 const BYTE_BUDGET = 24_000;
 const byteLen = (s) => Buffer.byteLength(s, "utf8");
 

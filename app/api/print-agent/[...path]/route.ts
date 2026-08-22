@@ -79,6 +79,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       .eq("id", seg[1]).eq("restaurant_id", agent.restaurant_id).maybeSingle()).data as
       { id: string; kind: string; agent_id: string | null; status: string; printer: string | null } | null;
     if (!job) return err("No such print job.", 404);
+    // REJECTED (owner, 2026-08-22): offered "make this match the document fetch below and refuse a job
+    // NO computer has claimed (drop the `job.agent_id &&` guard), so an unclaimed job can never be
+    // marked printed with no paper" — he said **no**. Full row: docs/REJECTED-IDEAS.md R46. It is a
+    // consistency tidy-up with no reachable path behind it: a helper only ever learns a job id BY
+    // claiming it, and claiming sets agent_id. `ON DELETE SET NULL` (mig 341) can null it when the
+    // admin removes that computer — but removing it also invalidates its token, so it can no longer
+    // report anything. Leave the `job.agent_id &&` exactly as it is; do not re-suggest tightening it.
+    //
     // Only the machine that claimed it may close it. Otherwise a second helper could mark a ticket
     // printed that never came out of ITS printer, and the queue's whole promise — a ticket stays
     // pending until paper exists — would be a lie.
