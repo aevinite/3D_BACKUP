@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { dismissTicketsFor } from "./sweep/tickets.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -263,6 +264,7 @@ try {
   await sb.from("customer_visits").delete().in("session_id", made.sessions);
   await sb.from("customer_devices").delete().eq("restaurant_id", RID).eq("phone", TEST_PHONE);
   await sb.from("customers").delete().eq("restaurant_id", RID).eq("phone", TEST_PHONE);
+  await dismissTicketsFor(sb, RID, made.orders);
   console.log(`\n· cleaned up ${made.orders.length} test orders, ${made.sessions.length} sessions and the test customer`);
 }
 

@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { dismissTicketsFor } from "./sweep/tickets.mjs";
 import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -115,7 +116,7 @@ async function waitForTile(crew, t, re, label) {
   return false;
 }
 
-const created = { orders: [], sessions: [] };
+const created = { orders: [], sessions: [], tables: new Set() };   // "<rid>|<table>" for every table this run touched
 async function placeOrder(rid, table, dish, qty = 1) {
   // TWO ROUNDS OF THE SAME DISH WITHIN THREE SECONDS ARE ONE ORDER TO THIS APP (sweep #6 / T28,
   // 2026-08-22). lfh_staff_place_order carries a double-tap guard: a non-cancelled order for the same
@@ -137,6 +138,7 @@ async function placeOrder(rid, table, dish, qty = 1) {
   if (!r.data || r.data.ok !== true) throw new Error(`place order on ${table} was refused: ${JSON.stringify(r.data)}`);
   const id = r.data?.order_id;
   if (id) created.orders.push(id);
+  created.tables.add(`${rid}|${String(table)}`);
   return r.data;
 }
 
@@ -289,13 +291,24 @@ try {
   if (created.orders.length) {
     await sb.from("orders").update({ archived: true, archived_at: new Date().toISOString(), deleted_at: new Date().toISOString() }).in("id", created.orders);
   }
-  for (const c of CREWS) {
-    const u = must(await sb.from("staff_users").select("restaurant_id").eq("username", c.creds.username).limit(1))[0];
-    if (!u) continue;
-    const open = must(await sb.from("sessions").select("id").eq("restaurant_id", u.restaurant_id).neq("status", "closed"));
-    for (const s of open) await sb.from("sessions").update({ status: "closed" }).eq("id", s.id);
+  // ONLY THE TABLES THIS RUN TOUCHED (sweep #6 / T28, 2026-08-22). This used to read EVERY non-closed
+  // session in each crew's restaurant and close the lot — while printing "closed the tables they
+  // opened", which is not what it did. The rush picks FREE tables at the start, so any party that
+  // arrived while it ran (another sweep lane, a real phone, the owner's own tab) was ended at the end;
+  // and closing a session fires migration 232's trigger, which cancels and archives every unpaid live
+  // order on it. On a real restaurant that ends every meal in the house. It also explains flakes seen
+  // during this sweep: it was deleting other lanes' fixtures mid-run.
+  const byRid = new Map();
+  for (const key of created.tables) { const [rid, t] = key.split("|"); if (!byRid.has(rid)) byRid.set(rid, []); byRid.get(rid).push(t); }
+  let closed = 0;
+  for (const [rid, tables] of byRid) {
+    const open = must(await sb.from("sessions").select("id").eq("restaurant_id", rid).in("table_number", tables).neq("status", "closed"));
+    for (const s of open) { await sb.from("sessions").update({ status: "closed" }).eq("restaurant_id", rid).eq("id", s.id); closed++; }
+    // …and the kitchen tickets those orders queued, or the manager's floor keeps a red "hasn't printed
+    // — is the kitchen screen open?" banner for each one. By order id, never by restaurant.
+    await dismissTicketsFor(sb, rid, created.orders, info);
   }
-  console.log(`\n· cleaned up ${created.orders.length} test orders and closed the tables they opened`);
+  console.log(`\n· cleaned up ${created.orders.length} test orders and closed the ${closed} table(s) they opened`);
 }
 console.log(failed ? `\n✗ ${failed} check(s) failed — the manager's live Table view is not trustworthy yet` : "\n✓ the manager's Table view kept up with the rush, on both restaurants");
 process.exit(failed ? 1 : 0);

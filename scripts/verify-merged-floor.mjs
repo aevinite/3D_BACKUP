@@ -14,6 +14,7 @@
 // that second half is the "don't break other things" test.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { dismissTicketsForSql } from "./sweep/tickets.mjs";
 import fs from "node:fs";
 import { requireUp } from "./sweep/appUp.mjs";
 // --base <url> so the same simulation can be pointed at a DEPLOYED site, not just the dev server
@@ -49,11 +50,34 @@ const snap = async () => {
   const by = {}; o.forEach((r) => { by[r.table_number] = `${r.status}/${r.payment_status || "pending"}`; });
   return { by, merges: m.map((x) => x.child_table), open: s.map((x) => x.table_number) };
 };
+// ── IT NEVER CLEANED UP AFTER ITSELF (sweep #6 / T28, 2026-08-22) ────────────────────────────────
+// This file cleared the slate BEFORE building its fixture and then simply exited. Its last step leaves
+// table 21 preparing and 22/23 received, and the party on 11-14 served-and-paid but still seated — so
+// SEVEN live tables sat on My Little French House's Tables floor after every run, plus a red "KOT #192
+// · T11) hasn't printed in the kitchen — is the kitchen screen open?" banner for each ticket the rush
+// queued. Measured and screenshotted at 1280x800 and 360x780 dpr3: the header read "7/30 OCCUPIED · 1
+// TO PAY · 3 NEEDS YOU" on a restaurant nobody was eating in, with five complaint banners above it.
+//
+// The SAME three statements now run at the end as well, and on a crash — a fixture that only gets
+// cleared on the way IN is one that is always left behind on the way out.
+const wipe = async (why) => {
+  try {
+    await q(`delete from table_merges where restaurant_id='${RID}' and child_table in (${list([...PARTY, ...SOLO])})`);
+    await q(`update orders set status='cancelled',archived=true,archived_at=now(),cancelled_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and not archived`);
+    await q(`update sessions set status='closed',closed_at=now(),deleted_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and status='open'`);
+    await dismissTicketsForSql(q, RID, [...PARTY, ...SOLO]);
+    const left = await q(`select count(*)::int n from orders where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and not archived and status<>'cancelled'`);
+    console.log(`· ${why}: tables ${[...PARTY, ...SOLO].join("/")} cleared — ${left[0].n} live order(s) left`);
+  } catch (e) { console.log(`· ${why}: could not clear the fixture — ${String(e.message).slice(0, 160)}`); }
+};
+// Whatever happens, the floor goes back to how we found it.
+for (const sig of ["uncaughtException", "unhandledRejection"]) {
+  process.on(sig, async (e) => { console.error(`\n${sig}:`, e && e.message ? e.message : e); await wipe("crash cleanup"); process.exit(1); });
+}
+
 // ── fixture
 const dish = (await q(`select id from menu_items where restaurant_id='${RID}' limit 1`))[0].id;
-await q(`delete from table_merges where restaurant_id='${RID}' and child_table in (${list([...PARTY, ...SOLO])})`);
-await q(`update orders set status='cancelled',archived=true,archived_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and not archived`);
-await q(`update sessions set status='closed',closed_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and status='open'`);
+await wipe("fresh slate");
 for (const t of [...PARTY, ...SOLO]) await q(`select lfh_staff_place_order('${t}','[{"id":"${dish}","qty":2}]'::jsonb,'{}',null,'${RID}',true)`);
 const sid = async (t) => (await q(`select id from sessions where restaurant_id='${RID}' and table_number='${t}' and status='open' order by created_at desc limit 1`))[0]?.id;
 for (const t of ["12", "13", "14"]) await q(`select lfh_staff_merge_tables('${await sid(t)}','11','${RID}')`);
@@ -149,6 +173,7 @@ await a2.click({ force: true }); await p.waitForTimeout(7000);
 st = await snap();
 check("separate table accepted alone", st.by["21"] === "preparing/pending" && st.by["22"] === "received/pending" && st.by["23"] === "received/pending", SOLO.map((t) => t + ":" + st.by[t]).join(" "));
 console.log("\npage errors:", errs.length ? errs : "none");
-console.log(fails === 0 && errs.length === 0 ? "\n✅ ALL CHECKS PASSED" : `\n❌ ${fails} check(s) failed, ${errs.length} console error(s)`);
 await b.close();
+await wipe("teardown");
+console.log(fails === 0 && errs.length === 0 ? "\n✅ ALL CHECKS PASSED" : `\n❌ ${fails} check(s) failed, ${errs.length} console error(s)`);
 process.exit(fails === 0 && errs.length === 0 ? 0 : 1);

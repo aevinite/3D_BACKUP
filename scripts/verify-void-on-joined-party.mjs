@@ -19,6 +19,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import { loginAs } from "./sweep/login.mjs";
+import { dismissTicketsForSql } from "./sweep/tickets.mjs";
 import { requireUp } from "./sweep/appUp.mjs";
 
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
@@ -75,6 +76,10 @@ const wipe = async () => {
            where restaurant_id='${RID}' and table_number in (${BOTH}) and not archived`);
   await q(`update sessions set status='closed', closed_at=now()
            where restaurant_id='${RID}' and table_number in (${BOTH}) and status='open'`);
+  // …and the kitchen tickets those orders queued. Nothing polls the print basket on a stack with no
+  // kitchen screen open, so lib/printQueue's own "cancelled before this ticket printed" dismissal never
+  // runs and the manager's floor keeps a red "hasn't printed" banner for each. (T28, 2026-08-22)
+  await dismissTicketsForSql(q, RID, [PARENT, CHILD]);
 };
 const snap = async () => {
   const o = await q(`select table_number, status, archived, payment_status from orders

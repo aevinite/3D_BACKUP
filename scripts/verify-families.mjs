@@ -107,6 +107,20 @@ const cleanup = async () => {
   await sb("PATCH", `sessions?restaurant_id=eq.${RID}&table_number=in.(${TA},${TB})&status=eq.open`,
     { status: "closed", closed_at: now, deleted_at: now });
   await sb("DELETE", `requests?restaurant_id=eq.${RID}&table_number=in.(${TA},${TB})`);
+  // …and the kitchen tickets those rounds queued. Nothing polls the print basket on a stack with no
+  // kitchen screen open, so lib/printQueue's own dismissal never runs and the manager's floor keeps a
+  // red "hasn't printed — is the kitchen screen open?" banner for each. Same wording as the app's.
+  try {
+    // Read the queued basket for this restaurant and match client-side: a PostgREST `in.(…)` of a
+    // dozen uuids makes a URL long enough to be refused, and the refusal reads as "could not clear".
+    const ours = new Set((await sb("GET", `orders?restaurant_id=eq.${RID}&table_number=in.(${TA},${TB})&select=id`) || []).map((o) => o.id));
+    const jobs = (await sb("GET", `print_jobs?restaurant_id=eq.${RID}&status=eq.queued&select=id,order_id&limit=200`) || []).filter((j) => ours.has(j.order_id));
+    for (const j of jobs) {
+      await sb("PATCH", `print_jobs?restaurant_id=eq.${RID}&id=eq.${j.id}`,
+        { status: "dismissed", done_at: now, error: "the order was cancelled before this ticket printed" });
+    }
+    if (jobs.length) console.log(`   tickets: dismissed ${jobs.length} queued kitchen ticket(s) this run had queued`);
+  } catch (e) { console.log("   tickets: could not clear the print basket — " + String(e.message).slice(0, 140)); }
 };
 
 try {

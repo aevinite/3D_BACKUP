@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { dismissTicketsFor } from "./sweep/tickets.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -322,6 +323,9 @@ try {
     await sb.from("table_tags").delete().eq("restaurant_id", RID).eq("table_number", t);
     await sb.from("waiter_calls").update({ resolved: true }).eq("restaurant_id", RID).eq("table_number", t).eq("resolved", false);
   }
+  // …and the kitchen tickets they queued, by order id, or the manager's floor keeps a red "hasn't
+  // printed — is the kitchen screen open?" banner for each. (T28, 2026-08-22)
+  await dismissTicketsFor(sb, RID, made.orders);
   console.log(`\n· cleaned up ${made.orders.length} test orders on T${TA}/T${TB}`);
 }
 console.log(failed ? `\n✗ ${failed} check(s) failed — a table can still hand something to the next party` : "\n✓ every way a table changes hands: the next party starts clean, the record survives");

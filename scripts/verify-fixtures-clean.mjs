@@ -115,9 +115,28 @@ if (!jobs.error && (jobs.data || []).length) {
   const mine = new Set(((owners.data) || []).map((o) => o.id));
   for (const j of jobs.data) if (mine.has(j.order_id)) stray.push(j);
 }
+// AND A TICKET WHOSE ORDER IS ALREADY GONE, whatever table it was on. lib/printQueue.ts calls exactly
+// this "dead" — a job whose order is deleted or cancelled — and dismisses it the moment anything reads
+// the queue. So a queued ticket for an archived or cancelled order is dead by the product's own
+// definition, and clearing it is only doing what the app would do itself. That makes it safe to include
+// ON-PLAN tables too, which the list above deliberately leaves out: a ticket waiting for a printer that
+// is about to come back has a LIVE order behind it and is never touched here.
+const deadJobs = [];
+if (!jobs.error && (jobs.data || []).length) {
+  const ids = (jobs.data || []).map((j) => j.order_id).filter(Boolean);
+  const live = ids.length
+    ? await svc.from("orders").select("id").eq("restaurant_id", RID).in("id", ids)
+        .eq("archived", false).neq("status", "cancelled").is("deleted_at", null).limit(200)
+    : { data: [] };
+  const alive = new Set(((live.data) || []).map((o) => o.id));
+  for (const j of jobs.data) if (j.order_id && !alive.has(j.order_id) && !stray.includes(j)) deadJobs.push(j);
+}
 say(stray.length === 0, stray.length
   ? `${stray.length} kitchen ticket(s) from a test table are still queued — the manager's floor keeps a red "hasn't printed" banner for each: ${stray.map((j) => j.kind).join(", ")}`
   : "no test ticket is left queued in the print basket");
+say(deadJobs.length === 0, deadJobs.length
+  ? `${deadJobs.length} queued ticket(s) belong to an order that is already cancelled or archived — dead by the app's own definition, and still complaining on the floor`
+  : "no queued ticket is waiting on an order that no longer exists");
 
 // ── --clean: retire what is left, the way the product does ───────────────────────────────────────
 // NEVER a hard delete. An order carrying a KOT number and a session carrying a bill number are both
@@ -136,7 +155,7 @@ if (CLEAN && bad) {
       .eq("restaurant_id", RID).eq("id", s.id);
     console.log(`    session ${s.id} on "${s.table_number}" → ${r.error ? "REFUSED: " + r.error.message : "closed"}`);
   }
-  for (const j of stray) {
+  for (const j of [...stray, ...deadJobs]) {
     // The SAME sentence lib/printQueue.ts writes, so the row reads exactly like one the app retired.
     const r = await svc.from("print_jobs")
       .update({ status: "dismissed", done_at: now, error: "the order was cancelled before this ticket printed" })
@@ -149,7 +168,7 @@ if (CLEAN && bad) {
   const stillOpen = await svc.from("sessions").select("id").eq("restaurant_id", RID).in("table_number", names)
     .eq("status", "open").limit(50);
   const stillQueued = await svc.from("print_jobs").select("id").eq("restaurant_id", RID).eq("status", "queued")
-    .in("id", stray.map((j) => j.id).length ? stray.map((j) => j.id) : ["00000000-0000-0000-0000-000000000000"]).limit(50);
+    .in("id", [...stray, ...deadJobs].length ? [...stray, ...deadJobs].map((j) => j.id) : ["00000000-0000-0000-0000-000000000000"]).limit(50);
   const left = (again.data || []).length + (stillOpen.data || []).length + ((stillQueued.data) || []).length;
   console.log(left ? `\n❌ ${left} row(s) would not go — read the refusals above` : "\n✅ every test table is clear again");
   process.exit(left ? 1 : 0);
