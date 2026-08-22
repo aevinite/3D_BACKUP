@@ -53,6 +53,7 @@ const F = {
   viewer: code("app/view/[folder]/ViewerClient.tsx"), item: code("app/item/[slug]/ItemClient.tsx"),
   legacy: code("app/item/[slug]/page.tsx"), q: code("app/q/[code]/page.tsx"),
   sgate: code("components/SessionGate.tsx"), menuLib: code("lib/menu.ts"),
+  navp: code("components/NavPicker.tsx"),
   css: read("app/globals.css"), offHtml: read("public/offline.html"), sw: read("public/sw.js"),
 };
 
@@ -205,8 +206,30 @@ check("R29", "the call-waiter bell is never hidden, faded or made untappable", (
 check("P00488", "the guest menu describes its own widgets honestly", () => {
   const chips = has(F.menuView, 'role="group"') && !rx(F.menuView, /role="tablist"/);
   const sugg = !rx(F.menuView, /className="search-dropdown"\s+role="listbox"/) &&
-               rx(F.menuView, /className="search-dropdown"[\s\S]{0,120}?role="list"/);
+               rx(F.menuView, /className="search-dropdown"[\s\S]{0,140}?role="group"/);
   return { ok: chips && sugg, note: `chips=${chips} suggestions=${sugg}` };
+});
+
+// AN EXPLICIT ROLE REPLACES THE ELEMENT'S OWN ONE (guest sweep T1, sweep #7, 2026-08-22).
+// Fixing the suggestions panel in 2026-08-17 put `role="listitem"` on each <Link>, which took the
+// LINK role away from every row: read out of Chrome's accessibility tree, the panel held eight
+// listitems and not one link, while 58 other links on the page listed normally. A blind diner
+// skimming by links could not reach the search results at all. The panel is a labelled GROUP of
+// links now — the same pattern the category chip row uses — so the count is still spoken and the
+// rows are links again (measured: 8 of 8, page links 58 → 66).
+check("P15514", "every search suggestion is still a link", () =>
+  !rx(F.menuView, /className="search-result"\s*\n?\s*role=/) &&
+  rx(F.menuView, /className="search-dropdown"[\s\S]{0,140}?aria-label=\{`\$\{searchResults\.length\} matching/));
+
+// …AND A LISTBOX MUST OWN ITS OPTIONS DIRECTLY. Same shape, never looked for in NavPicker: each
+// `role="option"` button sat inside an <li>, so Chrome computed `listbox "Language"` containing
+// plain BUTTONS and zero options — no selectable items, no "3 of 6" position, and `aria-selected`
+// (the only thing marking the language you are on) never conveyed. Dropping the <li> is the whole
+// change; the CSS already made the buttons full-width, so nothing moved on screen.
+check("P15517", "the language and currency lists really do contain options", () => {
+  const noLi = !rx(F.navp, /<li key=\{opt\.key\}>/) && !rx(F.navp, /<li[\s>]/);
+  const owns = has(F.navp, 'role="listbox"', 'role="option"', "aria-selected={opt.active}");
+  return { ok: noLi && owns, note: `options are direct children=${noLi} roles present=${owns}` };
 });
 check("P00143", "the sold-out pill no longer swallows the card's own link", () =>
   !rx(F.food, /sold-out-pill"\s*\n?\s*onClick/) &&

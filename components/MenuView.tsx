@@ -1258,13 +1258,27 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                 there was not one `option` anywhere inside, so a blind diner was told "list box"
                 and then handed nothing selectable. Arrow keys do nothing here either — the rows
                 are links, and tapping one OPENS THAT DISH.
-                A labelled list of links is what it really is, and `aria-label` carries the count so
-                the number of matches is spoken rather than left to be discovered by swiping. The
-                class names, the styling and the scroll cue are all untouched. */}
+
+                …AND THE FIRST GO AT THAT TOOK THE LINKS AWAY (guest sweep T1, sweep #7,
+                2026-08-22). It became `role="list"` with `role="listitem"` on each <Link>. But an
+                explicit role REPLACES an element's own one, so every suggestion stopped being a
+                link: read out of Chrome's own accessibility tree, the panel contained eight
+                `listitem`s and NOT ONE `link`, while 58 other links on the page were listed
+                normally. A blind diner skimming by links — the ordinary way to skim a page — could
+                not reach the search results at all, and no row said it could be opened.
+
+                A labelled GROUP of links is what this really is, and it is the pattern the
+                category chip row above already uses (`role="group"` + a label). The `aria-label`
+                still carries the count, so the number of matches is spoken rather than discovered
+                by swiping, and each row is a link again. `list` would need `listitem` children,
+                which means a wrapper element around each anchor — and `.search-result:last-child`
+                draws the row divider, so wrapping would give every row a bottom border. Same
+                information, no DOM change, no CSS risk. Class names, styling and the scroll cue
+                are all untouched. */}
             {searchResults.length > 0 && (
               <div
                 className="search-dropdown"
-                role="list"
+                role="group"
                 aria-label={`${searchResults.length} matching ${searchResults.length === 1 ? "dish" : "dishes"}`}
               >
                 {searchResults.map((r) => (
@@ -1272,7 +1286,6 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     key={r.id}
                     href={`${itemBase}/item/${r.slug}`}
                     className="search-result"
-                    role="listitem"
                     onClick={() => setSearchQuery("")}
                   >
                     <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
