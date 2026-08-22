@@ -317,6 +317,30 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── the dish page's two error cards are centred by INLINE STYLE, not by a utility class ──────
+// (sweep #7 T2, item 7.) Measured on the running page: with `flex flex-col items-center
+// justify-center min-h-genscreen p-4` on the container, `#detail-page` still computed to
+// `padding: 70px 0 0`, `align-items: normal`, `justify-content: normal`, and the heading sat at
+// x=0 — hard against the side of a 360px phone. `#detail-page` is an ID selector in
+// app/globals.css and Tailwind 4 puts its utilities in a layer those author rules outrank, so the
+// classes are inert here. An inline style cannot lose.
+{
+  const code = src[ITEM_CLIENT];
+  check(
+    "the dish page's error cards are laid out inline, so the cascade cannot flatten them",
+    /const ERROR_CARD_LAYOUT: React\.CSSProperties/.test(code) &&
+      (code.match(/style=\{ERROR_CARD_LAYOUT\}/g) || []).length === 2,
+    ITEM_CLIENT + " \u2192 both the timed-out card and the not-found card must use " +
+      "ERROR_CARD_LAYOUT. Tailwind's centring utilities are outranked by #detail-page in " +
+      "app/globals.css, so a card that relies on them renders flush-left with no padding."
+  );
+  check(
+    "…and neither of them has gone back to relying on those utilities",
+    !/item-detail-page flex flex-col items-center justify-center min-h-screen p-4/.test(code),
+    ITEM_CLIENT + " \u2192 that class string looks like it centres the card and does not."
+  );
+}
+
 // ── a screen must never spin forever (sweep #7 T2, item 6) ───────────────────────────────────
 // Measured with the dish page's data reads held open: "PLATING YOUR DISH" at 2s, 5s, 10s, 20s and
 // 35s — a spinner with no dish, no honest word and no way out. Every read on this screen now has a

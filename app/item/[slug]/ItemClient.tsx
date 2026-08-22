@@ -64,6 +64,26 @@ const PINNED_BAR_MAX_WIDTH = 1024;
 // — and if the reply lands later it still wins.
 const DISH_READ_DEADLINE_MS = 8000;
 
+// THE TWO "SOMETHING WENT WRONG" CARDS HAVE TO BE CENTRED BY INLINE STYLE (sweep #7 T2 — item 7).
+//
+// Both cards carry `flex flex-col items-center justify-center min-h-screen p-4`, and NONE of it
+// applies. Measured on the running page: `#detail-page` computes to `padding: 70px 0 0`,
+// `align-items: normal`, `justify-content: normal`, and the heading's left edge is at x=0 — hard
+// against the side of a 360px phone, with the Try again button running edge to edge.
+//
+// The cause is the cascade, not the markup. `#detail-page` is an ID selector in app/globals.css
+// and it sets `padding-top` and `flex-direction` as plain author rules; Tailwind 4 puts its
+// utilities in a layer that those rules outrank. So the utility classes are inert here and have
+// been since the "Dish not found" card was written — this was found by building a sibling of it.
+//
+// An inline style outranks any stylesheet rule short of `!important`, so this cannot lose. Kept as
+// one shared object precisely so the two cards can never drift apart. `paddingTop` is left to the
+// stylesheet's 70px, which is the room the fixed header needs.
+const ERROR_CARD_LAYOUT: React.CSSProperties = {
+  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+  textAlign: "center", gap: 12, minHeight: "60vh", paddingLeft: 24, paddingRight: 24,
+};
+
 // This describes the "shape" of one dish — every field a dish object can have.
 // It's a TypeScript guide so the editor can catch typos; it doesn't run.
 
@@ -692,19 +712,20 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // own unavailable card beside it (R23 — the guest translation set is parked).
   if (!item && readTimedOut) {
     return (
-      <div id="detail-page" className="page active item-detail-page flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-4xl mb-4">📶</div>
-        <h2 className="text-xl font-bold text-[var(--text)] mb-2">We couldn&apos;t load this dish</h2>
-        <p className="text-[var(--muted)] mb-4 text-center">
+      <div id="detail-page" className="page active item-detail-page" style={ERROR_CARD_LAYOUT}>
+        <div style={{ fontSize: 40 }} aria-hidden="true">📶</div>
+        <h2 className="text-xl font-bold text-[var(--text)]">We couldn&apos;t load this dish</h2>
+        <p className="text-[var(--muted)]" style={{ maxWidth: 320 }}>
           Your phone can&apos;t reach the menu right now. Check your connection, or ask a member of staff.
         </p>
         <button
           className="btn btn-gold"
+          style={{ marginTop: 4 }}
           onClick={() => { setReadTimedOut(false); setLoading(true); setRetryNonce((v) => v + 1); }}
         >
           <i className="fas fa-rotate-right" aria-hidden="true"></i> Try again
         </button>
-        <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline mt-4">
+        <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline">
           ← {t.backToMenu}
         </Link>
       </div>
@@ -715,10 +736,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // "not found" message with a link back to the menu.
   if (!item) {
     return (
-      <div id="detail-page" className="page active item-detail-page flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-4xl mb-4">⚠️</div>
-        <h2 className="text-xl font-bold text-[var(--text)] mb-2">{t.itemNotFound}</h2>
-        <p className="text-[var(--muted)] mb-4">{t.itemNotFoundDesc}</p>
+      <div id="detail-page" className="page active item-detail-page" style={ERROR_CARD_LAYOUT}>
+        <div style={{ fontSize: 40 }} aria-hidden="true">⚠️</div>
+        <h2 className="text-xl font-bold text-[var(--text)]">{t.itemNotFound}</h2>
+        <p className="text-[var(--muted)]" style={{ maxWidth: 320 }}>{t.itemNotFoundDesc}</p>
         <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline">
           ← {t.backToMenu}
         </Link>
