@@ -120,6 +120,26 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     maintOn = turnOn;
   }
 
+  // LEAVING THE PANEL MOVES THE WHOLE WINDOW, NOT THE FRAME (T9 sweep #7, 2026-08-22).
+  //
+  // /manager, /kitchen and /tablet render the panel inside an IFRAME (components/PanelFrame.tsx),
+  // so a bare `location.href` from in here navigates the FRAME: the sign-in page loads INSIDE the
+  // panel, with the panel's own top bar still around it, and the page's own URL never changes. It
+  // looks almost right, which is why it survived — but the outer page is still on /manager, and
+  // signing in again nests a panel inside a panel. Measured headless: the frame went to /login and
+  // the page around it stayed exactly where it was.
+  //
+  // The kitchen and tablet panels each fixed this for their OWN Sign out on 2026-08-19 (their logout
+  // forms carry target="_top"). This file is the SHARED drawer that every panel loads, and it was
+  // missed — the twin-panel drift shape, a fix that landed in two copies and not in the one place
+  // that serves all of them. `window.top` is same-origin here (our own page frames our own panel),
+  // so it is readable; the catch is for the day it is not.
+  const leaveTo = (url) => {
+    try { if (window.top && window.top !== window.self) { window.top.location.href = url; return; } }
+    catch (e) { /* not readable — fall through to this frame, which is still better than nothing */ }
+    window.location.href = url;
+  };
+
   // SIGN OUT — a POST, then go to /login (T9 improvement 13, 2026-08-06).
   //
   // /api/panel-logout is POST-only now: as a GET it ended a session from anything that merely
@@ -132,12 +152,12 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   // are buttons built by el() inside a drawer, and one of them sits behind a confirm().
   async function signOut() {
     // A hard ceiling so a hung request cannot leave the person staring at a button that did nothing.
-    const stop = setTimeout(() => { location.href = "/login"; }, 4000);
+    const stop = setTimeout(() => { leaveTo("/login"); }, 4000);
     try {
       await fetch("/api/panel-logout", { method: "POST", cache: "no-store", redirect: "manual" });
     } catch { /* offline / refused — we go to /login regardless */ }
     clearTimeout(stop);
-    location.href = "/login";
+    leaveTo("/login");
   }
 
   // ── small DOM helpers ──────────────────────────────────────────────────────
@@ -339,7 +359,8 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
             const j = await r.json().catch(() => ({}));
             if (!r.ok) { setMsg(pwMsg, j.error || "Could not change.", false); return; }
             setMsg(pwMsg, "Password changed — signing you out…", true);
-            setTimeout(() => { location.href = "/login"; }, 900);
+            // The WHOLE window, not this frame — see leaveTo().
+            setTimeout(() => { leaveTo("/login"); }, 900);
           } catch { setMsg(pwMsg, "Network error.", false); }
           finally { savePw.disabled = false; }
         } }, ["Change password"]);

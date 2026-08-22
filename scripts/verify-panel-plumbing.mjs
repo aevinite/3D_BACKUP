@@ -164,6 +164,18 @@ has("guestbell.js", /var\(--sab, env\(safe-area-inset-bottom, 0px\)\)/,
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,
   "the inventory deadline is back inside the write-only branch — a read can hang on 'Loading inventory…' forever");
 
+// ── leaving the panel moves the WHOLE window, not the frame (T9 sweep #7, 2026-08-22) ─────────
+// /manager, /kitchen and /tablet render the panel inside an iframe, so a bare `location.href` from
+// panel code loads the sign-in page INSIDE the panel and leaves the page around it signed in. The
+// kitchen and tablet fixed their own logout forms with target="_top" on 2026-08-19; these two
+// shared files were still doing it. A guard, because it looks almost right on screen.
+for (const f of ["maint.js", "outbox.js"]) {
+  has(f, /window\.top && window\.top !== window\.self/,
+    "goes to /login without moving the whole window — the sign-in page loads inside the panel frame");
+  hasNot(f, /(?<!window\.)\blocation\.href = "\/login"/,
+    "has a bare location.href = \"/login\" again, which navigates only the panel's iframe");
+}
+
 // ── the standing rules these files must keep ──────────────────────────────────────────────────
 // Nobody may hand-roll history: backstack.js is the one manager.
 for (const f of ["connbadge.js", "guestbell.js", "myprofile.js", "maint.js", "issue-raise.js", "undobar.js", "editor/inventory.js"]) {

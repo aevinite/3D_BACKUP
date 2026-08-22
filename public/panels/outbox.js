@@ -162,6 +162,15 @@
   function reasonText(code) { return (code && REASONS[code]) || ""; }
 
   // ── helpers ─────────────────────────────────────────────────────────────────
+  // GOING TO /login MEANS THE WHOLE WINDOW. The staff panels are rendered inside an iframe
+  // (components/PanelFrame.tsx), and a bare location.href navigates only the frame — see the note
+  // at the 401 branch of send(). Same helper as maint.js's leaveTo().
+  function leaveTo(url) {
+    try { if (window.top && window.top !== window.self) { window.top.location.href = url; return; } }
+    catch (e) { /* not readable — fall through to this frame */ }
+    window.location.href = url;
+  }
+
   const uuid = () => (self.crypto && self.crypto.randomUUID)
     ? self.crypto.randomUUID()
     : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
@@ -466,7 +475,12 @@
     // branch in flush(), which says so in as many words). IndexedDB outlives the navigation, so
     // this replays itself the moment they sign back in, which is what that branch already
     // promises. The throw is unchanged, so callers behave exactly as before.
-    if (res.status === 401) { await enqueue(item, "signedout"); location.href = "/login"; throw new Error("login"); }
+    // …and the trip to the sign-in page moves the WHOLE WINDOW, not this frame (T9 sweep #7,
+    // 2026-08-22). The panels run inside an iframe, so a bare `location.href` loaded /login INSIDE
+    // the panel: the person saw a sign-in form wearing the panel's top bar, the page's own URL never
+    // changed, and signing in there nested a panel inside a panel. The kitchen and tablet fixed this
+    // for their own Sign out buttons on 2026-08-19; the queue's own 401 path was still doing it.
+    if (res.status === 401) { await enqueue(item, "signedout"); leaveTo("/login"); throw new Error("login"); }
     // THE SERVER IS UP BUT CAN'T TAKE IT (5xx) → this is not a rejection, so don't hand the
     // person an error and drop their work. Save it and let the replay loop deliver it, which is
     // exactly what that loop already does for the SAME statuses once an action is queued
