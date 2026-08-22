@@ -3219,7 +3219,17 @@ function ordersPreviousHtml(today, previous) {
       // So the STATE words below are matched with word boundaries (see billMatches), while names,
       // dishes and numbers stay substring — which is what makes "biry" find a biryani and "042"
       // find invoice 1042, while "paid" and "unpaid" stay two different questions.
-      b.paid ? "paid settled" : "unpaid outstanding due",
+      // ── A CANCELLED BILL IS NEITHER PAID NOR UNPAID (T5 sweep #7, 2026-08-22) ────────────
+      // `paid` is false for a cancelled bill by construction — recOfGroup needs at least one
+      // live order to call a bill paid, and a cancelled bill has none — so this line used to
+      // stamp "unpaid outstanding due" onto every void in the record. Measured on the manager's
+      // own Previous-bills screen: typing `unpaid` returned 313 bills of which 310 were
+      // CANCELLED, while the heading right above the list said "3 bills · ₹1,449 still owed".
+      // The list and its own total disagreed, and the one question a manager asks this box at
+      // closing time — "what is still unpaid?" — was the one it answered worst.
+      // A cancelled bill owes nothing, so it claims neither state; it is still findable by
+      // "cancelled" / "void" from the line above.
+      b.cancelled ? "" : b.paid ? "paid settled" : "unpaid outstanding due",
       b.partPaid ? "partpaid partly" : "",
       b.invVoided ? "reopened voided retired" : "",
       (b.kots || []).map((k) => "kot " + k).join(" "),
