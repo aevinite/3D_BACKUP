@@ -199,7 +199,12 @@ body.nav-compact .tab {
 .tab-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; margin-left: 7px; padding: 0 5px;
-  border-radius: 999px; background: var(--red, #e5484d); color: #fff;
+  /* A FIXED deeper red, because WHITE sits on it: the dark skin's --red is #ef4444, and white on
+     that measured 3.76:1 at 11px/800 - this is the count that says how many bills or tables are
+     waiting. #dc2626 is the red the LIGHT skin already uses here, so the light skin does not
+     move and the dark one comes up to 4.83:1. Same fix as --adm-cta in globals.css, same
+     reason. (T26 sweep, 2026-08-22.) */
+  border-radius: 999px; background: #dc2626; color: #fff;
   font-size: 11px; font-weight: 800; vertical-align: middle;
   animation: badgePulse 1.4s ease-in-out infinite;
 }
@@ -1598,6 +1603,13 @@ html[data-theme="light"] .lgcap { opacity: 1; }   /* .75 of a pale ink was half 
 /* The tile's live line ("0/6 served", "Free"): keep the state hue, but let the dark text carry it. */
 html[data-theme="light"] .ft-linenum,
 html[data-theme="light"] .ft-line-plain .ft-linenum { color: color-mix(in srgb, var(--c) 42%, var(--text)); }
+/* AND THE TABLE NUMBER ITSELF, for the same reason and by the same method (T26 sweep,
+   2026-08-22). It is 78% of the state colour, which on a DENSE tile lands at 12.5px and measured
+   3.13:1 on an amber table and 3.34:1 on a green one against the white tile - the one field on
+   the floor a manager must not misread, and the palest thing on its own tile. 45%, so it still
+   carries more of the state hue than the served line under it: 6.02:1 amber, 6.44:1 green, and
+   the states that were already fine only get clearer. The dark skin is untouched. */
+html[data-theme="light"] .ft-num { color: color-mix(in srgb, var(--c) 45%, var(--text)); }
 /* ＋ Take order: gold ink on a gold button is the one combination that cannot work on cream. */
 html[data-theme="light"] .ft-take { color: color-mix(in srgb, var(--gold) 26%, var(--text)); }
 html[data-theme="light"] .ft-take:hover { color: var(--text); }
@@ -4033,7 +4045,10 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
   border-radius: clamp(6px, 6.5cqw, 10px);
   background: color-mix(in srgb, #a855f7 22%, transparent);
   border: 1px solid color-mix(in srgb, #a855f7 55%, transparent);
-  line-height: 1.1; color: color-mix(in srgb, #a855f7 78%, var(--text));
+  /* 60%, not 78%: on the DARK board this label measured 4.46:1 against its own tint at 8px on a
+     dense tile - the smallest text anywhere on the floor. Leaning further on --text keeps the
+     purple unmistakable and clears the floor. (T26 sweep, 2026-08-22.) */
+  line-height: 1.1; color: color-mix(in srgb, #a855f7 60%, var(--text));
   min-width: 0; overflow: hidden; }
 /* On the PARENT it is a slim chip under the progress line — the line is still the main reading. */
 .ft-merge-parent { margin-top: clamp(2px, 2.5cqw, 5px); flex-direction: row; align-items: center;
@@ -4041,6 +4056,10 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 64px) { .ft-merge-parent { font-size: 8px; padding: 0 3px; } }
 html[data-theme="light"] .ft-merge { background: color-mix(in srgb, #a855f7 20%, #fff); }
+/* ...and its INK, which was 4.18:1 on that tint at 8px on a dense tile - the smallest text on
+   the floor. #7e22ce is the same purple the waiter tablet already uses for the same label on
+   the light skin, so both floors say "one party" in one colour: 5.45:1. (T26, 2026-08-22.) */
+html[data-theme="light"] .ft-merge, html[data-theme="light"] .ft-merge-parent { color: #7e22ce; }
 
 /* The merged-party card in a table's detail (mig 249). Purple, because purple means merged on the
    floor too, and one row per table so three, four or five joined tables all read the same. */

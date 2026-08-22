@@ -235,6 +235,7 @@ const PROBES = [
     html: `<button class="btn primary">Save</button><button class="chip on">Coffee</button>
            <span class="dqty">2</span><span class="dadd">+</span><span class="dedit">e</span>
            <h3 class="om-sec-h">COFFEE</h3><span class="tmerge">one party T11 T12</span>
+           <button class="fnav on">All <em>30</em></button>
            <div class="tile"><span class="t-line-plain"><span class="t-linenum">0/6 served</span></span><span class="tseats">4</span></div>`,
     checks: [[".btn.primary", 4.5, "the primary button's label (was white on gold: 2.81 light / 2.23 dark)"],
              [".chip.on", 4.5, "the chosen category chip (same)"],
@@ -244,18 +245,25 @@ const PROBES = [
              [".om-sec-h", 4.5, "the Take-order category heading (was 3.13)"],
              [".tmerge", 4.5, "the one-party label in an open table's header (was an orange at 1.89)"],
              [".t-linenum", 4.5, "the tile's x/y-served line — the manager floor's twin reads 6.43"],
-             [".tseats", 4.5, "the tile's seat count — the manager floor's twin reads 6.40"]] },
+             [".tseats", 4.5, "the tile's seat count — the manager floor's twin reads 6.40"],
+             [".fnav.on em", 4.5, "the count inside the chosen filter chip (was 3.89 on a 20% black wash)"]] },
   { name: "manager panel", role: "manager", url: "/manager", frame: "/panels/editor/",
     html: `<div class="ftile"><span class="ft-ico ft-ico-go">Y</span></div>
            <span class="brand"><span class="brand-rest">little French house</span></span>
            <div class="fstat warn"><div class="fstat-n">7</div></div>
            <div class="rr-made"><div class="rr-made-q">Was the food made?</div></div>
-           <button class="ord-btn pay">Pay</button>`,
+           <button class="ord-btn pay">Pay</button>
+           <div class="ftile"><span class="ft-num ft-num-sm">22</span>
+             <div class="ft-merge ft-merge-parent">one party T12 T13</div></div>
+           <span class="tab-badge">3</span>`,
     checks: [[".ft-ico-go", 3, "the tile's accept-this-order tick (was 1.10 on the light skin — invisible)"],
              [".brand-rest", 4.5, "the restaurant's own name in the top bar (was 2.81 on the light skin)"],
              [".fstat-n", 4.5, "the to-pay count in the floor header (was 3.71)"],
              [".rr-made-q", 4.5, "the was-the-food-made question (was pinned to one skin's red)"],
-             [".ord-btn.pay", 4.5, "the Pay button's label on its gold fill"]] },
+             [".ord-btn.pay", 4.5, "the Pay button's label on its gold fill"],
+             [".ft-num", 4.5, "the TABLE NUMBER on a dense tile (was 3.13 on an amber table, light skin)"],
+             [".ft-merge-parent", 4.5, "the one-party chip on a tile (was 4.18 light / 4.46 dark at 8px)"],
+             [".tab-badge", 4.5, "the tab's waiting count, white on red (was 3.76 on the dark skin)"]] },
   { name: "kitchen board", role: "kitchen", url: "/kitchen", frame: "/panels/kitchen/",
     html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>`,
     checks: [["#col-cooking h2", 4.5, "the Cooking lane heading"]] },

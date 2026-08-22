@@ -394,7 +394,10 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 .fnav { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .fnav em { font-style: normal; font-size: 11px; background: var(--bg); border-radius: 999px; padding: 1px 7px; }
 .fnav.on { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
-.fnav.on em { background: rgba(0,0,0,.2); }
+/* .12, not .20 (T26 sweep, 2026-08-22): the chip's own dark ink on a 20%-black wash of the gold
+   measured 3.89:1 on the light skin - the COUNT is the only number in this strip, and it was the
+   one thing on it under the floor. Same inset look, a lighter wash: 4.61:1 light, 5.75:1 dark. */
+.fnav.on em { background: rgba(0,0,0,.12); }
 /* The floor-nav chips are the ONE filter strip at every width now — the top-bar count
    chips were removed with the minimal top bar (owner, 2026-08-03: no live counters up top). */
 /* Waiter sections (mig 222) — the "Your tables · 1-6" strip above the floor. Shown only
