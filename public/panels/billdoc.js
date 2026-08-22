@@ -1486,7 +1486,34 @@ function banquetDocHtml(a) {
     var P = bqPaper(s);
   const isA4 = P.size === "a4";
   const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
-  const when = new Date(b.issued_at || Date.now());
+  /* NO DOCUMENT IN THIS FILE PRINTS "Invalid Date" — INCLUDING THIS ONE (T8 sweep #7, 2026-08-22).
+     The kitchen ticket has refused since it was written (`kotWhen` returns "" on an unparseable
+     value) and the thermal bill since 2026-08-05 (`stampAt`'s isNaN fallback). The banquet sheet —
+     the product's largest-value document — guarded none of its THREE date fields, so it printed:
+
+         Dated                Invalid Date        ← the field that decides the GST period
+         Function: Reception · Invalid Date
+         UPI PAY DT.Invalid Date — 500/-
+
+     REACHABLE, and not only through the admin's hand-built preview. `banquet_bills.advances` is
+     JSONB and migrations 237/239 store the date with NO cast — `'date', COALESCE(NULLIF(
+     v_a->>'date',''), to_char(v_now,'YYYY-MM-DD'))` — so any non-empty text the client sends is
+     kept verbatim and comes straight out here. (`fn_date` IS a real `date` column and `issued_at`
+     a timestamptz, so those two are protected by the database; the document is still the last
+     thing between a bad value and a customer's hands, which is the same reasoning that put the
+     guard on the other two documents.)
+
+     bqDay(v) → the IST day as dd/mm/yyyy, or "" when there is nothing real to print. A missing
+     date prints NOTHING rather than a lie; the money on an advance row is never dropped. */
+  const bqDay = (v) => {
+    if (v == null || v === "") return "";
+    const d = new Date(v);
+    const ms = d.getTime();
+    if (!isFinite(ms)) return "";
+    return d.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" });
+  };
+  const issuedMs = new Date(b.issued_at || Date.now()).getTime();
+  const when = new Date(isFinite(issuedMs) ? issuedMs : Date.now());
   // PINNED TO IST, NOT THE PRINTING DEVICE (2026-08-06). These read the device's own time zone —
   // and `[]` left it the 12h/24h choice too — so the SAME banquet invoice printed two different
   // dates: issued_at 2026-08-05T19:30:00Z came out "06-08-2026 01:00AM" on an India-set device and
@@ -1669,7 +1696,7 @@ function banquetDocHtml(a) {
   const terms = [];
   for (const a of (b.advances || [])) {
     if (Number(a.amt) > 0) {
-      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }) : "";
+      const d = bqDay(a.date);
       terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
     }
   }
@@ -1679,7 +1706,7 @@ function banquetDocHtml(a) {
   // IST here too — see the `dstr`/`tstr` note above. A bare date like "2026-08-01" is parsed as
   // midnight UTC, so on a device set behind UTC it printed as 31/07/2026: an advance receipt and a
   // function date both a day out on the same sheet as the invoice date they are meant to support.
-  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }) + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
+  if (b.fn_date && bqDay(b.fn_date)) fnBits.push(bqDay(b.fn_date) + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
   if (b.pax) fnBits.push(b.pax + (b.func || b.fn_date ? " pax" : " plates"));
   const fnLead = fnBits.length && (b.func || b.fn_date) ? "Function: " : "";
   const toBits = [];

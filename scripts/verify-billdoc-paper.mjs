@@ -363,6 +363,51 @@ for (const [what, ts] of INSTANTS) {
     : bad("setPhone() is gone or no longer repaints", "one door, so a new call site cannot forget");
 }
 
+// ── 3h. NO DOCUMENT PRINTS "Invalid Date" ─────────────────────────────────────────────────────
+// The ticket has refused since it was written and the thermal bill since 2026-08-05. The banquet
+// sheet guarded none of its THREE date fields, so it printed `Dated  Invalid Date` — the field
+// that decides which GST period a sale falls in — plus the same on its function line and on every
+// advance receipt. Reachable through the data, not only the preview: `banquet_bills.advances` is
+// JSONB and migrations 237/239 store the date with NO cast, so any text the client sends is kept.
+{
+  const base = { bill_no: "BQ/2026/014", subtotal: 1000, tax: 180, total: 1180 };
+  const JUNK = ["garbage", {}, "", "2026-13-45", null, 0, NaN, undefined, [], "n/a"];
+  let bad_ = 0, lost = 0;
+  for (const j of JUNK) {
+    const sheets = [
+      ["issued_at", { ...base, issued_at: j }],
+      ["fn_date", { ...base, issued_at: "2026-08-16T16:01:00Z", fn_date: j, func: "Reception" }],
+      ["an advance's date", { ...base, issued_at: "2026-08-16T16:01:00Z", advances: [{ amt: 500, mode: "upi", date: j }] }],
+    ];
+    for (const [field, bill] of sheets) {
+      const html = BILLDOC.banquetDocHtml({ bill, lines: [{ title: "A", qty: 1, price: 1000 }],
+        settings: {}, restaurant: {}, autoPrint: false });
+      if (/Invalid Date|NaN/.test(html)) { bad_++; if (bad_ === 1) bad(`the banquet sheet printed Invalid Date for ${field} = ${JSON.stringify(j)}`, "guard every date read, as the bill and the ticket already do — a missing date prints NOTHING, never a lie"); }
+      // and a missing date must never take the MONEY with it
+      if (field === "an advance's date" && !/500\/-/.test(html)) { lost++; if (lost === 1) bad(`an advance's amount vanished with its date (${JSON.stringify(j)})`, "drop the date, never the rupees"); }
+    }
+  }
+  if (!bad_ && !lost) ok(`all ${JUNK.length * 3} junk-date cases print no "Invalid Date", and every advance keeps its money`);
+  // …and a good sheet is untouched
+  const good = BILLDOC.banquetDocHtml({ bill: { ...base, issued_at: "2026-08-16T16:01:00Z",
+    fn_date: "2026-09-14", func: "Reception", fn_from: "7pm", advances: [{ amt: 500, mode: "upi", date: "2026-08-01" }] },
+    lines: [{ title: "A", qty: 1, price: 1000 }], settings: {}, restaurant: {}, autoPrint: false });
+  (/Dated<\/div><div class="v">16-08-2026/.test(good) && /UPI PAY DT\.01\/08\/2026/.test(good)
+    && /Function: Reception · 14\/09\/2026 7pm/.test(good))
+    ? ok("  …and a sheet with real dates prints all three of them exactly as before")
+    : bad("a good banquet sheet's dates changed", "the guard must only bite on an unparseable value");
+  // the thermal bill and the ticket, same question, so all three stay together
+  for (const j of JUNK) {
+    if (BILLDOC.kotWhen(j) !== "" && /Invalid|NaN/.test(BILLDOC.kotWhen(j))) {
+      bad(`kotWhen(${JSON.stringify(j)}) printed "${BILLDOC.kotWhen(j)}"`, "a ticket never prints Invalid Date"); break; }
+    const d = BILLDOC.billData({ settings: {}, restaurant: {}, session: { invoice_at: j, invoice_no: 1 },
+      orders: [{ status: "served", subtotal: 1, taxable_base: 1, tax_rate: 0.05, items: [{ title: "A", qty: 1, price: 1 }] }] });
+    if (/Invalid|NaN/.test(d.dateStr + d.invNo)) {
+      bad(`the bill printed "${d.dateStr}" / "${d.invNo}" for ${JSON.stringify(j)}`, "the bill never prints Invalid Date either"); break; }
+  }
+  ok("the bill and the ticket refuse the same ten junk values");
+}
+
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
 // The .d.ts is what the Next server and the admin React screens see. A field the document branches
 // its whole identity on, missing from the type, means a TypeScript caller cannot render that
