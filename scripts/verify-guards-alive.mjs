@@ -201,7 +201,13 @@ function quotedStrings(src) {
   for (const f of scriptFiles) {
     if (!/^scripts\/verify-/.test(f)) continue;
     const src = read(f);
-    if (!/\.goto\(|frameLocator\(|newContext\(/.test(src)) continue;          // does not drive a browser
+    // A guard "drives the app" if it opens a browser OR fetches the app's own base — the second half
+    // was missing, and that is how verify:cancel-made ran for weeks answering only "THREW: fetch
+    // failed / 1 check(s) FAILED": it defaulted to a port nothing serves and its npm entry passed no
+    // --base, so the plain command could never work and never said why. (sweep #6 / T28)
+    const drivesBrowser = /\.goto\(|frameLocator\(|newContext\(/.test(src);
+    const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}/.test(src);
+    if (!drivesBrowser && !fetchesBase) continue;
     if (/requireAppUp|requireUp/.test(src)) continue;                          // has the preflight
     if (/SKIPPED \(pass --base|skipped the live checks|static only/i.test(src)) continue; // optional live half
     // verify-everything.mjs is the RUNNER, not a guard: it prints the base it resolved and WHERE it
@@ -216,7 +222,7 @@ function quotedStrings(src) {
     if (/^const BASE = arg\("--base"\);$/m.test(src)) continue;
     bad.push(f);
   }
-  check("every guard that drives a browser does the app-up preflight (exit 2 + a plain sentence, never a stack trace)",
+  check("every guard that drives the app — a browser OR a fetch of its base — does the app-up preflight (exit 2 + a plain sentence, never a stack trace)",
     bad.length === 0,
     bad.join("\n      ") + "\n      Add:  import { requireUp } from \"./sweep/appUp.mjs\";  then  await requireUp(BASE, \"what it drives\");");
 }

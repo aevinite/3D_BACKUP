@@ -13,6 +13,7 @@
 // Every row it creates is deleted by id in a finally block, including the trigger-written movement it
 // never held an id for.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const RID = "00000000-0000-0000-0000-000000000001";   // French House — diagm1's restaurant
 // `--base <url>` or `--base=<url>`; anything else falls back to the sweep's own port. The naive
@@ -21,10 +22,17 @@ const RID = "00000000-0000-0000-0000-000000000001";   // French House — diagm1
 const argv = process.argv.slice(2);
 const eq = argv.find((a) => a.startsWith("--base="));
 const flag = argv.indexOf("--base");
-const BASE = eq ? eq.slice(7) : (flag >= 0 && argv[flag + 1] ? argv[flag + 1] : "http://localhost:4112");
+// DEFAULTS TO THE PORT THE APP ACTUALLY RUNS ON (sweep #6 / T28, 2026-08-22). It defaulted to :4112 —
+// a sweep lane's port, not the app's — and `npm run verify:cancel-made` passes no --base. So the plain
+// command ALWAYS died with "THREW: fetch failed", which names neither the port nor the reason, and the
+// only visible symptom was "1 check(s) FAILED". It only ever passed when someone happened to hand it a
+// base. Same default as every other guard here, plus the shared preflight so nothing-running says so.
+const BASE = eq ? eq.slice(7) : (flag >= 0 && argv[flag + 1] ? argv[flag + 1] : "http://localhost:4000");
 const cleanup: (() => Promise<void>)[] = [];
 let fails = 0;
 const ok = (l: string, pass: boolean, extra = "") => { console.log(`${pass ? "PASS" : "FAIL"}  ${l}${extra ? ` — ${extra}` : ""}`); if (!pass) fails++; };
+
+await requireUp(BASE, "the cancel-classification walk (it PATCHes the real /api/editor endpoint)");
 
 async function managerCookies(): Promise<string> {
   const r = await fetch(`${BASE}/api/panel-login`, {
@@ -81,7 +89,17 @@ async function run() {
   }).select("id").single();
   if (o.error) throw new Error("order: " + o.error.message);
   const orderId = o.data.id as string;
-  cleanup.push(async () => { await sb.from("orders").delete().eq("id", orderId); });
+  // RETIRED, NOT DELETED (sweep #6 / T28, 2026-08-22). A hard delete is refused for any order carrying a
+  // KOT number, which is every order from the moment it exists (mig 036 / mig 190) — so this line did
+  // nothing and the count this file prints at the end grew by one on every run, forever. Nobody was
+  // ever going to act on "test orders left behind: 6". Cancel + archive is what the app itself does.
+  cleanup.push(async () => {
+    const now = new Date().toISOString();
+    const r = await sb.from("orders")
+      .update({ status: "cancelled", archived: true, archived_at: now, cancelled_at: now, deleted_at: now })
+      .eq("restaurant_id", RID).eq("id", orderId);
+    if (r.error) console.log("   the test order would not retire:", r.error.message);
+  });
   await new Promise((r) => setTimeout(r, 900));
   const cons = await sb.from("inv_movements").select("id, qty_base, unit_cost")
     .eq("ref_id", orderId).eq("kind", "consumption");
@@ -151,9 +169,16 @@ finally {
   for (const f of cleanup.reverse()) {
     try { await f(); n++; } catch (e) { console.log("   cleanup step failed:", e instanceof Error ? e.message : String(e)); }
   }
-  const left = await sb.from("orders").select("id").eq("restaurant_id", RID).eq("table_number", "T12-P2");
+  // A COUNT THAT MEANS SOMETHING (sweep #6 / T28, 2026-08-22). "orders left: 6" counted every order this
+  // table has ever carried, retired ones included — a number that grows for ever on runs that leave
+  // nothing. Only a LIVE order matters: it shows on the manager's floor and the next run trips over it.
+  // The ingredient count was real, though: one T12 test flour row had survived a crashed run.
+  const live = await sb.from("orders").select("id").eq("restaurant_id", RID).eq("table_number", "T12-P2")
+    .eq("archived", false).neq("status", "cancelled");
   const leftItems = await sb.from("inv_items").select("id").eq("restaurant_id", RID).like("name", "T12 test flour%");
-  console.log(`\ncleaned up ${n} row(s) by id · orders left: ${(left.data ?? []).length} · test items left: ${(leftItems.data ?? []).length}`);
+  const liveN = (live.data ?? []).length, itemN = (leftItems.data ?? []).length;
+  console.log(`\ncleaned up ${n} row(s) by id · live orders left on T12-P2: ${liveN} · test ingredients left: ${itemN}`);
+  if (liveN || itemN) { console.log("⚠ that is a leak — the next run inherits it, and a live order shows on the floor"); fails++; }
   console.log(fails ? `\n${fails} check(s) FAILED` : "\nall checks passed");
   process.exit(fails ? 1 : 0);
 }
