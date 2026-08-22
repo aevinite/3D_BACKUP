@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **97** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **134** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 96 names in their head, so in practice a person runs none of them, or reaches for
+can hold 134 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -81,8 +81,10 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | a permission gate in the panel | `verify:manager-gates`, `verify:manager-hidden` | `.env.local` | no |
 | the "Edit the menu" sub-switches | `verify:menu-parts`, then `verify:menu-parts-live` | nothing / app running | no |
 | Bills, a bill's money, a discount | `verify:audit`, `verify:one-number`, `verify:tax-mode` | nothing / `.env.local` | no |
+| **splitting one bill between people** — the amounts, the ways to pay, or a part put on a tab | `verify:split-payment` ← the parts must add to the bill the SERVER recomputed (never the browser's figure), one rounding feeds both the check and the stored row, and a Pay-later part owes only its own slice on the khata (migration 352). Manager panel and waiter tablet → a table → Mark paid → Split payment; then owner → Pay Later. | nothing | no |
+| **any of the money or safety libraries** — `lib/tax*.ts`, `lib/paySplit.ts`, `lib/clash*.ts`, `lib/idempotency*.ts`, `lib/logTrail.ts`, `lib/userAuth.ts`, `lib/rateLimit.ts` | `verify:t24-money-rules` ← the permanent regression guard for every phase of the T24 sweep that a script can answer. It calls the REAL functions through a `@/` resolver rather than re-implementing the rule, because a guard that re-implements what it checks proves nothing about the code that ships. | nothing | no |
 | the tax on a real bill, end to end (incl. an MRP bottle) | `verify:tax-mode-e2e`, `test:totals` (client maths vs the server's, to the cent) | `.env.local` | `verify:tax-mode-e2e` **YES** |
-| **cancelling an order** — the "was the food made?" answer, the loss it records, or migration 355 | `verify:cancel-loss` ← the answer is read off the row where answers live (not the `order_cancelled` row, which is how a correction stopped being marked as one), and a record-only loss is never summed twice by the Audit screens. Makes its own order, stock and audit rows and deletes each BY ID. | `.env.local` | **YES** |
+| **cancelling an order** — the "was the food made?" answer, the loss it records, or migration 340 (`340_was_the_food_actually_made.sql`, renumbered from 337) | `verify:cancel-loss` ← the answer is read off the row where answers live (not the `order_cancelled` row, which is how a correction stopped being marked as one), and a record-only loss is never summed twice by the Audit screens. Makes its own order, stock and audit rows and deletes each BY ID. | `.env.local` | **YES** |
 | ↳ the same answer driven through the REAL endpoint (`PATCH /api/editor/orders/<id>`), not the RPC | `verify:cancel-made` ← asserts the EFFECTS — a real expense row, a real stock reversal — because the first wiring called the classifier before the row was cancelled, so the RPC refused, returned `{ok:false}`, and nothing failed and nothing was logged. | app running + `.env.local` | **YES** |
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
 | ↳ a bill printed a second time | `verify:bill-reprint` ← a reprint is a PRINT, not a new bill: same numbers, same totals, and it says DUPLICATE on the paper (added by another session, 2026-08-19; row added here so the map stays complete) | nothing | no |
@@ -148,7 +150,7 @@ Code: `app/owner/*`, `components/owner/*`, `app/api/owner/*`, `lib/ownerCache.ts
 | staff, profiles or pay | `verify:staff-accounts` | `.env.local` | **YES** |
 | **deleting a person who has been PAID** — or anything about the pay ledger and the recycle route | `verify:pay-history-delete` ← a salary or an advance is part of the books (docs/COMPLIANCE-GUARDRAILS.md), so a login delete must never take one with it. This was a written MANUAL check for three sweep passes and therefore never run: proving it needs real money rows. It now makes its OWN throwaway person, records one ₹1 entry through the product's endpoint, asserts the 409 AND that the owner is told on screen with the "Mark as left" way forward, then removes the payment row and the person BY ID and fails if it left anything behind. | app running + `.env.local` | **YES** |
 
-## 7 · Admin console — `/aevinite/…` (22 pages)
+## 7 · Admin console — `/aevinite/…` (23 pages)
 
 Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.ts`
 
@@ -224,6 +226,8 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | a file's line endings | `verify:ui` (check 14) | nothing | no |
 | `package.json` dependencies, or `package-lock.json` | `verify:deps` ← fails only on a **new** high/critical advisory; the parked ones are acknowledged by name inside the script | **the npm registry** (skips, never fails, when offline) | no |
 | **the owner says "check the securities" / "check security"** — or you touched a login, a permission, or anything about one restaurant seeing another's data | **`docs/SECURITY-CHECKLIST.md`** ← his own 20-point list (kept 2026-08-16) **plus** the 8 points this app needs that the list never mentions. Read its wording warning FIRST. | mixed, per row | no |
+| **a COUNT written into a rulebook** — how many page routes / admin API routes / admin-console pages there are, which Next or React is installed, how many guards exist — or a NEW `app/api/<family>` route | `node .github/scripts/verify-doc-counts.mjs` ← 20 counts across `CLAUDE.md`, `README.md`, `docs/CLAUDE-DETAIL.md`, this map and `docs/SECURITY-CHECKLIST.md`, plus: every admin route really carries the gate, and every API family is named in the Security-gate section (three were not, and all three were fine — a list that says it is COMPLETE sends the next audit at a correct route when it is not). Repo-only, no key, runs in CI on every push. | nothing | no |
+| **a panel page that exists at BOTH addresses** — `app/manager/page.tsx` and `app/r/[restaurant]/manager/page.tsx`, and the kitchen and tablet pairs | `node .github/scripts/verify-twin-route-parity.mjs` ← each panel must name its browser tab, its twin must agree, and none may fall back to the root layout's generic name. The T15 sweep named the tab on one side only, so the three tabs a restaurant's own staff switch between during a rush were all identical. Repo-only, no key. Companion to `verify:twins`, which covers the panels' behaviour rather than their route files. | nothing | no |
 | this map, or a new `verify:*` alias | `verify:pointers` — it fails if a guard has no row here | nothing | no |
 
 ---

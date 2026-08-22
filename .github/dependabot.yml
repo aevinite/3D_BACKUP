@@ -9,7 +9,7 @@
 #   · at most 5 open PRs at a time;
 #   · minor + patch updates are GROUPED into one PR per ecosystem, so a normal week is one PR
 #     to read, not eleven;
-#   · MAJOR updates are left to a human. next 16.2.6 → 16.3.1 is exactly the kind of bump that
+#   · MAJOR updates are left to a human. next 16.3.0 → 17.x is exactly the kind of bump that
 #     needs the panels driven in a real browser first, not an auto-merge.
 #
 # Every PR still goes through .github/workflows/checks.yml (typecheck, lint, unit tests, the

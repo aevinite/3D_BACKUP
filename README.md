@@ -33,7 +33,7 @@ It is **one app on one port**. Every "panel" is a route, not a separate server.
 | Kitchen panel | `/kitchen` | the cooks | `public/panels/kitchen/*` |
 | Tablet panel | `/tablet` | the waiter, walking the floor | `public/panels/tablet/*` |
 | Owner panel | `/owner/…` (16 pages) | the owner: reports, staff, settings | `app/owner/*`, `components/owner/*` |
-| Admin console | `/aevinite/…` (22 pages) | us: every restaurant, every switch | `app/aevinite/*` |
+| Admin console | `/aevinite/…` (23 pages) | us: every restaurant, every switch | `app/aevinite/*` |
 | Printed paper | — | the bill and the kitchen ticket | `public/panels/billdoc.js` — one file for both |
 
 **Three of those panels are plain HTML+JS in `public/panels/`, not React.** That surprises people.
@@ -46,7 +46,7 @@ admin's at `app/api/admin/*`.
 
 ## There is no `middleware.ts`, and that is deliberate
 
-The login check moved to each route: the admin console's layout and all 48 `/api/admin/*` handlers
+The login check moved to each route: the admin console's layout and all 50 `/api/admin/*` handlers
 check `tokenIsValid`, the panel APIs use `requireRole()`, the owner's use `ownerScope()`. Looking
 for a middleware file finds nothing and makes it look like the gate is missing — it isn't.
 The complete list of the few deliberately login-free routes is in `docs/CLAUDE-DETAIL.md`
@@ -70,11 +70,20 @@ including what does and does not count as permission, is the first thing in `CLA
 npm run verify:push
 ```
 
-That runs exactly what CI runs: type-check, lint, the unit tests, the static guards and the access
-model — about 90 seconds, no database, no login. CI (`.github/workflows/checks.yml`) runs the same
-set on every push, so a green run locally means a green run there.
+That runs type-check, lint, the unit tests, the static guards and the access model — about 90
+seconds, no database, no login. CI (`.github/workflows/checks.yml`) runs all of those **plus two
+more**, so a green run here is necessary but not sufficient:
 
-There are ~120 more `verify:*` scripts, one per bug that once reached somebody's screen.
+- `npm run verify:deps` — the only check that needs the network (it asks npm for the current
+  advisory list), which is why it is not in the offline `verify:static` set. It fails only on a
+  **new** high or critical advisory.
+- `node .github/scripts/verify-doc-counts.mjs` — the counts in `CLAUDE.md`, `README.md`,
+  `docs/CLAUDE-DETAIL.md`, `docs/GUARD-MAP.md` and `docs/SECURITY-CHECKLIST.md` must match the code
+  they describe.
+
+Run those two as well before you push and the local answer really is the CI answer.
+
+There are 130 `verify:*` scripts in all, one per bug that once reached somebody's screen.
 **`docs/GUARD-MAP.md` tells you which ones your change needs** — look up the file you touched.
 
 Do **not** run `npm run verify:everything` casually: it is the 500-phase suite, it writes to the

@@ -18,7 +18,7 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 | document | what it is for |
 |---|---|
 | **`CLAUDE-DETAIL.md`** | the full text of every rule in `CLAUDE.md`, under the same heading. The one to open before acting. |
-| **`GUARD-MAP.md`** | "I changed this file — which of the 95 checks covers it?" Start here before running anything. |
+| **`GUARD-MAP.md`** | "I changed this file — which of the 136 checks covers it?" Start here before running anything. |
 | **`REJECTED-IDEAS.md`** | what the owner has already said NO to. **Read before suggesting any improvement.** |
 | `ACCESS-MODEL.md` | how permissions actually work now (the live model — replaces the retired ladder). |
 | `ACCESS-REDESIGN-SPEC.md` | the access work still owed. A live working list, not history. |
@@ -53,10 +53,11 @@ Each of these already carries its own banner at the top. Listed so nobody has to
 | `SAAS-ARCHITECTURE-PLAN.html` | the multi-tenant plan as approved 2026-06-25. Open in a browser. |
 | `TABLET-ORDER-REDESIGN.html` | a tablet-ordering exploration. |
 | `mockups/` | design mockups. Not served by the app. |
-| `competitor-dashboards/` | competitor research screenshots. |
 | `history/` | dated session records. |
 | `superpowers/` | plans and specs written by the superpowers workflow, mostly 2026-06. Historical. |
 | `runtime-support/` | notes on runtime/hosting support. |
+
+*Not here any more:* the competitor-research screenshots (`All_compitior_POs_INFO/`, 185 files / 26 MB) live on the owner's Mac only — they are gitignored, so a clone and a worktree never carry them. Nothing in the repo points at them.
 
 ## Where the other paperwork lives
 

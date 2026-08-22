@@ -418,7 +418,7 @@ reinvent (dataviz skill agrees: "a single value is a stat tile, not a one-bar ch
 
 ## Stack & app map
 
-- Next 16.2.6, App Router, async `params`. React 19.2.4. TS strict.
+- Next 16.3.0, App Router, async `params`. React 19.2.8. TS strict.
 - Tailwind 4 (postcss). GSAP (npm-only, imported in `HeroTitle.tsx` + `IntroSplash.tsx` — the old "npm + CDN duplication" bug is gone; there is no GSAP CDN tag).
 - `<model-viewer>` web component loaded via `<Script>` from CDN inside `components/PublicModelViewer.tsx` (NOT in `app/layout.tsx`).
 - GLB models on Supabase Storage; two tiers per dish (small ~2 MB, optimized ~9 MB).
@@ -461,7 +461,7 @@ Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat
 The panels are routes inside it:
 
 - **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.
-- **/aevinite** — the admin console (`app/aevinite/`), 22 pages: Access & permissions,
+- **/aevinite** — the admin console (`app/aevinite/`), 23 pages: Access & permissions,
   restaurants, owners, revenue, floor, bill-audit, rate limits, recycle bin, health, logs…
   It reads the `lfh_floor_state` brain for the live floor. **This is the password-gated
   console** (see Security gate). There is **no `/admin` route** — it was never renamed in
@@ -492,12 +492,21 @@ env vars are reliable in the Node runtime, which edge middleware could not promi
 actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 - **`/aevinite` (the admin console)** — `app/aevinite/layout.tsx` checks `tokenIsValid` server-side.
-- **`/api/admin/**`** — every one of the 48 route files checks `tokenIsValid` (usually via a local
+- **`/api/admin/**`** — every one of the 50 route files checks `tokenIsValid` (usually via a local
   `admin(req)` / `requireAdmin(req)` helper), and in every handler the gate call precedes any
   database call. `/api/staff-login` stores the hashed `ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`).
 - **`/api/{editor,kitchen,tablet,inventory}/**`** — `requireRole()` (`lib/userAuth.ts`), which ALSO
   re-checks the per-restaurant panel entitlement and the recycle bin on **every request** (30s
   cache), so switching a panel off cuts an already-open tab instead of only blocking new logins.
+- **`/api/maintenance`** — the same `requireRole("manager")`, which a logged-in manager OR the admin
+  super-user passes, then `panelRestaurantId` for the acting restaurant. It is NOT one of the panel
+  `[...path]` families, so a family-shaped list walks straight past it.
+- **`/api/issue-media`** — the staff cookie first, then the admin cookie; the restaurant comes from
+  the session, never the body. Its own route because the body is multipart.
+- **`/api/print-agent/**`** — an `X-LFH-Agent` token, minted per machine and stored only as a
+  sha-256 hash (mig 341). Not a cookie and not a login: a printing machine that must survive a power
+  cut cannot depend on somebody signing in afterwards. It is scoped to ONE restaurant and to three
+  verbs, so it is a printing-only credential — see `docs/PRINT-HELPER.md`.
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
@@ -515,6 +524,13 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
     have a gate") then points the next audit at a route that is entirely correct, and the list stops
     being trustworthy for the routes that genuinely ARE missing one. A new public route goes on this
     list in the same commit that creates it.
+  - **`/api/maintenance`, `/api/issue-media` and `/api/print-agent` were all missing from the
+    section above until the T29 sweep, 2026-08-22.** All three are correctly gated; the fault was
+    the list, and it is the same fault as `/api/guest/call-waiter` above. Two of them are gated by a
+    familiar helper but sit OUTSIDE the four `[...path]` panel families the list named by shape, and
+    the third is gated by a per-machine printing token rather than any cookie — so a reader checking
+    "is this route in the list?" found nothing for a route that is fine. A new API route joins one of
+    these lists in the same commit that creates it, whatever gates it.
   - `/api/health/deep` was built on 2026-08-12 and REMOVED the next day at the owner's word — see
     `docs/REJECTED-IDEAS.md` R18. Do not re-add it, and do not add "which part is broken?" checks to
     `/api/health` either.
@@ -696,7 +712,7 @@ silence. And never use a shorthand he cannot place: "history file" is banned; wr
 | Kitchen panel | `/kitchen` | `public/panels/kitchen/*` | `app/api/kitchen/*` → `lib/liveBoard.ts` (`liveOrdersAndItems`). NOT `lfh_kitchen_tickets` — that function is unused (checked 2026-08-14); the panel picks dish rows vs the items JSON itself, in `rowsOf()` |
 | Tablet panel | `/tablet` | `public/panels/tablet/*` | `app/api/tablet/*` |
 | Owner panel | `/owner/*` (16 pages) | `app/owner/*`, `components/owner/*` | `app/api/owner/*`, `lfh_owner_*`, `lib/ownerCache.ts` |
-| Admin console | `/aevinite/*` (22 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |
+| Admin console | `/aevinite/*` (23 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |
 | Printed paper | — | `public/panels/billdoc.js` | the one print document (bill + KOT) |
 
 ## Operational rules — one line each; open the detail/doc BEFORE working in that area
@@ -773,7 +789,7 @@ sections below rather than one long list, because each was written the day its b
 
 ## Routes
 
-There are **55** `page.tsx` routes, not four — count them with
+There are **56** `page.tsx` routes, not four — count them with
 `find app -name page.tsx | wc -l` rather than trusting a list in a document. The ones worth
 knowing by heart:
 
@@ -1216,9 +1232,22 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
 - **Light mode — which surfaces have it, and what persists.** Three separate answers, so check
   before writing a "both skins" test:
-  - **Guest menu** — toggle in the brand bar, stored as `lfh_theme`. A tenant menu
-    (`/r/<slug>/menu`, `/q/<code>`) defaults to **DARK** when nothing is saved; the root layout
-    otherwise defaults light.
+  - **Guest menu** — toggle in the brand bar, stored as `lfh_theme`. The root layout
+    (`app/layout.tsx`) stamps `data-theme="light"` when nothing is saved, because it cannot know
+    WHICH restaurant is opening. A tenant door (`/r/<slug>/menu`, `/q/<code>`) then re-stamps
+    **dark** — but only when that restaurant's own **Access → Menu → Format → Default** is set to
+    dark (`settings.menuDefaultMode === "dark"`). **It is a per-restaurant ADMIN setting, not an
+    unconditional dark default** — the older wording here said tenants default dark full stop, and a
+    "both skins" test written from that line expects dark and gets light. Checked 2026-08-22 (T29):
+    neither restaurant on the dev database has it set, so both tenant doors open LIGHT today.
+    ⚠️ **AND THE DISH PAGE DOES NOT REPEAT IT.** `app/r/[restaurant]/item/[slug]/page.tsx` renders
+    outside `AppShell`, which is why the maintenance switch, the menu switch and the accent each had
+    to be repeated there. The tenant default-skin boot script is a FOURTH thing of exactly that
+    shape and it is missing: for a dark-default restaurant, a **full page load** of a dish URL (a
+    shared link, a refresh, a QR pointing at a dish) renders in the LIGHT skin while the menu is
+    dark. A client-side tap through from the menu is fine — `data-theme` survives the navigation —
+    so this only shows on a cold load. Reported by the T29 sweep; the file belongs to another
+    terminal's territory, so the code fix was handed off rather than made there.
   - **Manager / kitchen / tablet panels** — their own toggle (`#themeToggle`, wired by
     `public/panels/theme.js`), stored as `lfh_panel_theme`, default **LIGHT** (owner 2026-06-26).
     **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back

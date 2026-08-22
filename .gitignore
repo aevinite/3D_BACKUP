@@ -38,11 +38,13 @@ yarn-error.log*
 # Everything under .claude/ stays out (settings.local.json holds this machine's command
 # approvals, .vercel2.token is a secret, worktrees/ is 17 GB, sweep/ is scratch).
 #
-# BUT the four "cannot be forgotten" guards — verify:ui, verify:taps, verify:test-safety,
-# verify:audit — are wired to an edit ONLY by .claude/settings.json, and that file being
-# ignored meant the enforcement existed on exactly one laptop: no clone, no CI, and none of
-# the 28 git worktrees had it. Nothing printed a warning; an unguarded session looked
-# identical to a guarded one. So the hook config and the hook it runs are versioned.
+# BUT the "cannot be forgotten" guards are wired to an edit ONLY by .claude/settings.json, and
+# that file being ignored meant the enforcement existed on exactly one laptop: no clone, no CI,
+# and none of the 28 git worktrees had it. Nothing printed a warning; an unguarded session
+# looked identical to a guarded one. So the hook config and the hook it runs are versioned.
+# It was FOUR when this was written (verify:ui, verify:taps, verify:test-safety, verify:audit);
+# it is NINE now — read the PostToolUse command in .claude/settings.json for the live list
+# rather than trusting a count here, which is exactly how this comment went stale.
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
@@ -59,8 +61,13 @@ yarn-error.log*
 
 # local launcher scripts (machine-specific — never commit)
 *.bat
-# …EXCEPT the print-station launcher, which is a shipped deliverable: a restaurant's Windows counter
-# PC double-clicks it to open the kiosk print window (docs/KITCHEN-PRINT-SETUP.md).
+# The exception below is KEPT but is currently DEAD, and that is the honest state: there is no
+# public/print-station/ folder and nothing ships a .bat any more. We tried it and it failed —
+# macOS Gatekeeper and Windows SmartScreen flag a script because it ARRIVED FROM THE WEB, so the
+# owner met "could not verify it is free of malware" with only Done or Move to Bin. Since
+# 2026-08-19 /print-setup.html TEACHES the reader to type the file themselves, one menu per OS
+# (docs/KITCHEN-PRINT-SETUP.md §9; guarded by `npm run verify:print-helper`, which fails if
+# anything is offered as a download again). Do not re-add a ⬇ button on the strength of this line.
 !public/print-station/*.bat
 
 # typescript
