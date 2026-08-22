@@ -65,7 +65,12 @@ const server = http.createServer((req, res) => {
     if (mode === "well") { res.writeHead(200, { "content-type": "application/json" }); return res.end('{"ok":true}'); }
     res.writeHead(503); return res.end("busy");
   }
-  res.writeHead(404); res.end("x");
+  // ANY OTHER PATH GETS THE LAST-RESORT PAGE, which is exactly what the service worker does:
+  // event.respondWith() answers the original navigation without changing the address, so the page
+  // runs with location.pathname still set to the screen the person asked for. That is the only
+  // thing its "way out" logic has to go on, so it is the only way to check that logic honestly.
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(readFileSync(join(ROOT, "public/offline.html"), "utf8"));
 });
 
 // Shrink the page's own clock so a check that is designed to run over minutes runs in seconds.
@@ -247,6 +252,78 @@ async function run() {
       /already saved on this device is safe/.test(sw)
         ? ok("…and the same honest reassurance")
         : bad("the worker's inline page no longer matches the honest reassurance wording");
+    }
+
+    // ══ 7 · THE WAY OUT HAS TO SUIT WHO IS LOOKING ════════════════════════════════════════
+    // "/" is the PLATFORM door — app/page.tsx redirects it to /login, the staff username and
+    // password screen. Right for a waiter; for a DINER it is the dead end components/
+    // GuestNotFound.tsx was written to remove, and offline it is worse than useless because "/"
+    // is very unlikely to be saved either, so it bounces straight back to this page.
+    //
+    // Sweep #6 gave the page this logic and sweep #7 found it had missed a door: /view/<folder>,
+    // the 3D DISH VIEWER — the product's differentiator, reached by "View in 3D" from any dish —
+    // has no /r/<slug> in its path, so it fell through to "/". Measured on a production build,
+    // not read: the button said "Go to the home screen" and went to "/". A reload of the 3D view
+    // with no signal is exactly the "tab wakes, reloads, no signal" moment this layer exists for.
+    //
+    // So every guest door is asked, by driving the REAL page at that address and clicking.
+    {
+      const doors = [
+        { path: "/r/french-house/menu/never-opened", to: "/r/french-house/menu", label: "Go to the menu", who: "a diner at a tenant restaurant" },
+        { path: "/menu/never-opened", to: "/menu", label: "Go to the menu", who: "a diner on the legacy menu" },
+        { path: "/item/some-dish", to: "/menu", label: "Go to the menu", who: "a diner on a legacy dish page" },
+        { path: "/view/some-model", to: "/menu", label: "Go to the menu", who: "a diner in the 3D dish viewer" },
+        { path: "/view/some-model?r=french-house", to: "/r/french-house/menu", label: "Go to the menu", who: "a diner in the 3D viewer whose link names the restaurant" },
+        { path: "/q/SOMECODE", to: "/q/SOMECODE", label: "Go to the menu", who: "a diner on a printed table QR with nothing pinned" },
+        { path: "/manager/tables", to: "/", label: "Go to the home screen", who: "a member of staff" },
+      ];
+      mode = "dead"; // offline, which is when this page is seen
+      for (const d of doors) {
+        const p = await browser.newPage();
+        try {
+          await p.addInitScript(COMPRESS);
+          await p.goto(base + d.path, { waitUntil: "domcontentloaded" });
+          await p.waitForSelector("#home", { timeout: 5000 });
+          const label = (await p.locator("#home").textContent()).trim();
+          await p.locator("#home").click();
+          await p.waitForTimeout(300);
+          const landed = new URL(p.url()).pathname;
+          landed === d.to && label === d.label
+            ? ok(`${d.who}: "${label}" → ${landed}`)
+            : bad(`${d.who} is sent to the wrong place from ${d.path}`,
+              `expected "${d.label}" → ${d.to}, got "${label}" → ${landed}`
+              + (d.to !== "/" && landed === "/" ? "\n       \"/\" is the STAFF sign-in. A diner must never be handed it." : ""));
+        } catch (e) {
+          bad(`${d.who}: the way out could not be read from ${d.path}`, e.message);
+        } finally { await p.close().catch(() => {}); }
+      }
+      // …and the worker's inline copy must know the SAME doors, or a device that fell all the way
+      // back to it gets the old dead end on the one screen that is hardest to notice.
+      const sw2 = readFileSync(join(ROOT, "public/sw.js"), "utf8");
+      const html = readFileSync(join(ROOT, "public/offline.html"), "utf8");
+      // Literal needles, not regexes. The inline copy lives inside a JS string inside sw.js, so
+      // its slashes are DOUBLE-escaped ("\\/view\\/") while offline.html's are single ("\/view\/").
+      // A first attempt compared them with one pattern and reported a disagreement that was purely
+      // its own escaping — so each side names the exact text to look for.
+      const doorPairs = [
+        { name: "/r/<slug>", html: "/^\\/r\\/([^/]+)\\//", sw: "/^\\\\/r\\\\/([^/]+)\\\\//" },
+        { name: "/menu and /item", html: "/^\\/(menu|item)(\\/|$)/", sw: "/^\\\\/(menu|item)(\\\\/|$)/" },
+        { name: "/q/<code>", html: "/^\\/q\\/[^/]+/", sw: "/^\\\\/q\\\\/[^/]+/" },
+        { name: "/view/<folder> (the 3D dish viewer)", html: "/^\\/view\\/[^/]+/", sw: "/^\\\\/view\\\\/[^/]+/" },
+      ];
+      for (const d of doorPairs) {
+        const inHtml = html.includes(d.html), inSw = sw2.includes(d.sw);
+        inSw && inHtml
+          ? ok(`both copies of the last-resort page know the ${d.name} door`)
+          : bad(`the two copies of the last-resort page disagree about the ${d.name} door`,
+            `offline.html: ${inHtml ? "yes" : "NO"} · sw.js inline copy: ${inSw ? "yes" : "NO"}`
+            + "\n       A device that fell back to the worker's inline copy would get the old dead end.");
+      }
+      // /offline.html is PRECACHED, so a device keeps the old copy until the cache names move.
+      // Changing the page without bumping VERSION ships a fix nobody receives.
+      /BUMP THIS whenever \/offline\.html changes/.test(sw2)
+        ? ok("the worker still records that changing the offline page needs a VERSION bump")
+        : bad("the bump rule has gone from sw.js", "a change to /offline.html would never reach a device that already has one");
     }
 
   } catch (e) {

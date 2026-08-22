@@ -111,6 +111,20 @@
     //   /q/<code>             -> the tab's pinned restaurant when we have one (the /q/ page stores
     //                            it before hydration); otherwise leave it as a reload, because the
     //                            printed code is the only thing that knows their table
+    //   /view/<folder>        -> the 3D DISH VIEWER, and it was missing from this list until
+    //                            2026-08-22 (sweep #7 / T4). It is a guest surface — the product's
+    //                            differentiator — reached by "View in 3D" from a dish, and it has
+    //                            no /r/<slug> in its path, so it fell through to "/" and dropped a
+    //                            DINER on the staff sign-in. Measured, not read: offline on
+    //                            /view/<never-opened>, the button said "Go to the home screen" and
+    //                            went to "/". A reload of the 3D view with no signal is exactly the
+    //                            "tab wakes, reloads" moment this whole layer exists for.
+    //                            The tab's pinned restaurant is the best answer and it is already
+    //                            there: app/view/[folder]/page.tsx stamps lfh_tab_tenant before
+    //                            hydration, from the DATABASE's own slug. Failing that, ?r= carries
+    //                            it — validated to [a-z0-9-] here exactly as that page validates it
+    //                            — and failing both, a /view with no restaurant resolves to #1
+    //                            anyway, so /menu is the consistent answer rather than a guess.
     //   anything else         -> "/" exactly as before, for staff
     var homeHref = "/";
     var homeLabel = "Go to the home screen";
@@ -119,11 +133,28 @@
       var m = p.match(/^\/r\/([^/]+)\//);
       if (m) { homeHref = "/r/" + m[1].toLowerCase() + "/menu"; homeLabel = "Go to the menu"; return; }
       if (/^\/(menu|item)(\/|$)/.test(p)) { homeHref = "/menu"; homeLabel = "Go to the menu"; return; }
+      var pinnedSlug = function () {
+        var t = "";
+        try { t = sessionStorage.getItem("lfh_tab_tenant") || ""; } catch (e) {}
+        return /^[a-z0-9-]+$/.test(t.toLowerCase()) ? t.toLowerCase() : "";
+      };
       if (/^\/q\/[^/]+/.test(p)) {
-        var pinned = "";
-        try { pinned = sessionStorage.getItem("lfh_tab_tenant") || ""; } catch (e) {}
-        if (pinned) { homeHref = "/r/" + pinned.toLowerCase() + "/menu"; homeLabel = "Go to the menu"; }
+        var pinned = pinnedSlug();
+        if (pinned) { homeHref = "/r/" + pinned + "/menu"; homeLabel = "Go to the menu"; }
         else { homeHref = p; homeLabel = "Go to the menu"; }
+        return;
+      }
+      if (/^\/view\/[^/]+/.test(p)) {
+        var slug = pinnedSlug();
+        if (!slug) {
+          // ?r= is whatever a stranger put in a link, so it is validated the same way
+          // app/view/[folder]/page.tsx validates it before trusting it.
+          var q = (location.search.match(/[?&]r=([^&]*)/) || [])[1] || "";
+          try { q = decodeURIComponent(q); } catch (e) { q = ""; }
+          if (/^[a-z0-9-]+$/.test(q.toLowerCase())) slug = q.toLowerCase();
+        }
+        homeHref = slug ? "/r/" + slug + "/menu" : "/menu";
+        homeLabel = "Go to the menu";
       }
     })();
     $("home").textContent = homeLabel;
