@@ -142,14 +142,17 @@ export default function SessionGate() {
   const [reqAutoSend, setReqAutoSend] = useState(true);
 
   // Working values that shouldn't trigger a re-draw when they change:
-  // The cached settings, KEYED BY RESTAURANT (sweep 6 T3). This was a bare
-  // `useRef<Settings | null>` filled once with `settingsRef.current || await getSettings(...)`,
-  // which is only correct while a mounted gate never sees a second restaurant — and it does see
-  // one: this component lives in the root layout, so it survives a move between restaurants, and
-  // `ridRef.current` is still restaurant #1's placeholder for the few hundred milliseconds it
-  // takes the slug to resolve. Whatever restaurant was cached in that window then decided the
-  // geofence, the table-count range check and whether a location check was needed, for the whole
-  // life of the page. Keyed, it simply cannot answer for the wrong restaurant.
+  // The LAST-KNOWN settings, keyed by restaurant. Two rules live here, from two sweeps:
+  //   * KEYED (sweep 6 T3) — this was a bare useRef<Settings | null>, and this component lives in
+  //     the root layout, so it survives a move between restaurants while ridRef.current is still
+  //     restaurant #1's placeholder for the few hundred ms the slug takes to resolve. Whatever
+  //     restaurant landed in that window then decided the geofence, the table-count range check
+  //     and whether a location check was needed, for the whole life of the page.
+  //   * A FALLBACK, NOT A CACHE (sweep 7 T3) — reading it in preference to ASKING meant a
+  //     restaurant could never change its own rules under a guest who already had the page open.
+  //     The load in the handler below always asks getSettings(); this map is only what we fall
+  //     back to when that read fails, so a blip does not dead-end a diner who was fine a moment
+  //     before.
   const settingsByRid = useRef<Map<string, Settings>>(new Map());
   const settingsRef = useRef<Settings | null>(null); // the settings for the restaurant we are acting on NOW
   const pending = useRef<Pending | null>(null); // the action we're trying to complete
@@ -604,24 +607,39 @@ export default function SessionGate() {
       pending.current = detail;
       settled.current = false;
       coords.current = { lat: null, lng: null };
-      // Load settings once and reuse them after. OFFLINE GUARD: this fetch THROWS
-      // with no internet, which used to kill the whole flow before any screen
-      // opened — tapping Add-to-cart while offline just did nothing, silently.
-      // Now the guest gets the connection-trouble screen with a working Retry.
+      // OFFLINE GUARD: this fetch THROWS with no internet, which used to kill the whole flow before
+      // any screen opened — tapping Add-to-cart while offline just did nothing, silently. Now the
+      // guest gets the connection-trouble screen with a working Retry.
+      //
+      // ALWAYS ASK; KEEP THE LAST ANSWER ONLY AS A FALLBACK (sweep 7 T3).
+      //
+      // This used to serve the map whenever it had an entry, so the FIRST time a guest opened the
+      // gate decided the geofence, whether a location check was needed and the table-number range
+      // for the whole life of the page. A restaurant that added tables, moved its geofence or
+      // switched the location check on while a guest had the menu open kept being held to the OLD
+      // rules: at 40 tables, a diner at table 35 was still refused with "This place has tables
+      // 1-30".
+      //
+      // getSettings() is the right owner of that decision and already does all of it: it dedups
+      // simultaneous callers into ONE request, holds a short TTL, and — the part a private Map can
+      // never have — it is DROPPED by invalidateSettings() when a realtime breadcrumb says the row
+      // changed. A cache in front of a breadcrumb is the known way these updates die.
       try {
         // THIS restaurant's settings, not "the first restaurant this tab ever asked about".
         const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
-        const cached = settingsByRid.current.get(rid);
-        if (cached) settingsRef.current = cached;
-        else {
-          const s = await getSettings(rid);
-          settingsByRid.current.set(rid, s);
-          settingsRef.current = s;
-        }
+        const s = await getSettings(rid);
+        settingsByRid.current.set(rid, s);
+        settingsRef.current = s;
       } catch {
-        setNote("We can't reach the restaurant's system right now — check your internet and retry.");
-        setOpen(true); setStep("net_error");
-        return;
+        // …and if that read fails but we knew this restaurant a moment ago, carry on with what we
+        // knew rather than dead-ending a diner who was fine a moment before.
+        const known = settingsByRid.current.get(ridRef.current || DEFAULT_RESTAURANT_ID);
+        if (known) settingsRef.current = known;
+        else {
+          setNote("We can't reach the restaurant's system right now — check your internet and retry.");
+          setOpen(true); setStep("net_error");
+          return;
+        }
       }
       if (detail.action === "connect") {
         // SILENT FAST-PATH: already in an open session AND approved → finish without
