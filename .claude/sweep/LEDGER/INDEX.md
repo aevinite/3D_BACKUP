@@ -39,27 +39,28 @@ again. Read those before reporting anything.
 
 ## Where the sweep got to
 
-*Recounted 2026-08-22, after T21, T22, T25, T26 and T29 merged.*
+*Recounted 2026-08-22, after the last two territories were filed.*
 
 | | |
 |---|---|
 | Terminals planned | **30** |
 | ID space allocated | **P00001 – P15000** (30 blocks of 500) |
-| Ledgers **filed** | **27** — T1–T25, T29, T30 |
-| Ledgers **never filed** | **3** — T26, T27, T28 |
-| Phase rows on record | **13,518** |
-| Rows passing | **12,893** |
-| Rows recording a problem | **281** — most already fixed in that terminal's own PR |
-| Rows reserved, each with a written reason | **343** |
+| Ledgers **filed** | **30 of 30 — the sweep is complete** |
+| Phase rows on record | **15,018** |
+| Rows passing | **14,173** |
+| Rows recording a problem | **288** — most already fixed in the terminal's own PR |
+| Rows reserved, each with a written reason | **556** |
 
-**T26 filed its ledger but it is not in this folder yet** — it lives on
-`origin/sweep6/t26-the-look` (the LOOK: 577 rows). Read it from there until the merge terminal lands
-it. **T27 (every word on every screen, `P13001`–`P13500`) and T28 (the repo's own guards,
-`P13501`–`P14000`) have never been filed at all** — 1,000 checks never executed once.
+**T27 (every word on every screen) and T28 (the repo's own guards) were never filed by their own
+terminals — they were swept by T30 on 2026-08-22**, after the owner asked for the remaining work.
+Both are marked as such in the table below and in their own headers, so nobody mistakes them for
+first-hand territory reports: they are one terminal's pass over someone else's ground.
 
-T28's absence is the expensive one, so T30 audited the guards' own health as a stand-in. That
-section is at the bottom of this file. It found the guards are alive — but two were red, and both
-were **stale allowances**, not dead checks.
+**T28 was the expensive one to have left undone, and it proved it.** Four real faults, all fixed:
+a guard that had been failing every run and calling it a "test setup issue"; a guard that flipped a
+live setting and restored an assumed value; a new duplicate migration number; and three guards that
+cannot be pointed at anything but port 4000. **None of them was a dead guard** — every one was a
+guard whose ground moved underneath it while its own write result went unread.
 
 ## The 30 territories and their permanent ID blocks
 
@@ -93,8 +94,8 @@ were **stale allowances**, not dead checks.
 | 24 | P11501–P12000 | **The money and safety libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,logTrail,userAuth,rateLimit}.ts`, `docs/COMPLIANCE-GUARDRAILS.md`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md` | ✅ | 500 | 499 | 0 | 1 |
 | 25 | P12001–P12500 | **Every other shared library file** — the ~108 files in `lib/` no other terminal owns | ✅ | 500 | 500 | 0 | 0 |
 | 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ⚠️ filed on `origin/sweep6/t26-the-look`, not yet merged | 577 | — | — | — |
-| 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ❌ **NEVER FILED** | 0 | — | — | — |
-| 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the 130 `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ❌ **NEVER FILED** | 0 | — | — | — |
+| 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ✅ *(swept by T30)* | 500 | 441 | 0 | 59 |
+| 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the 141 `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ✅ *(swept by T30)* | 500 | 340 | 7 | 153 |
 | 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ✅ | 500 | — | — | — |
 | 30 | P14501–P15000 | **Cross-panel truth, and this ledger** — `LEDGER/INDEX.md`, `docs/QA-500-PHASES.md`, `.claude/skills/terminal-test-improve/**` | ✅ | 500 | 342 | 59 | 99 |
 
@@ -214,16 +215,16 @@ broken.**
 5. **The two orphan API routes** — `app/api/admin/rate-limits/route.ts` and
    `app/api/print-agent/[...path]/route.ts`. Both verified clean above; both still unassigned.
 
-### And the territories that never ran at all
+### Every territory has now run
 
-`P13001`–`P14000` — **1,000 checks that have never been executed once.** The WORDING (T27) and
-**the repo's own 142 `verify:*` guards (T28)**. The LOOK (T26) and the docs + remainder (T29) have
-both since filed.
+`P00001`–`P15000` are all executed. The last two — T27 (every word on every screen) and T28 (the
+repo's own guards) — were swept by T30 on 2026-08-22 rather than by their own terminals, and both
+say so in their headers.
 
-T28 is the most expensive of the four to leave undone: a permanently-red or silently-dead guard
-hides real regressions, and this project has already lost a month to exactly that (`verify:cache`
-waited for something `MenuView` had deliberately stopped doing, and nobody noticed). Terminal 30
-found a live example of the same shape — see the four `verify:realtime` handoffs in `T30.md`.
+**What that does NOT mean.** A territory swept by a neighbour is thinner than one swept by its
+owner: T30 read T27's strings in place and ran its guards, but photographed no screen in a non-Latin
+script; and it ran 91 of T28's 141 guards, leaving 43 that need a running app. Both gaps are
+recorded as `⏭` rows with the exact command, not counted as passes.
 
 ---
 
