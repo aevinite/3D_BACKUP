@@ -22,8 +22,14 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   // 404s in both cases; without this the link's own preview card still showed the dish, its photo
   // and its price to whoever it was forwarded to. Both reads are the cached ones the page already
   // makes, so this costs nothing.
+  //
+  // SERVICE (MAINTENANCE) MODE COUNTS AS CLOSED HERE TOO (sweep #7 T2, 2026-08-22 — item 4).
+  // The page below already returns this restaurant's own maintenance screen for it; this half
+  // checked only the master switch, so a restaurant closed for the evening previewed its dish,
+  // its photo and its price to whoever the link was forwarded to. Two switches, one meaning — the
+  // 3D screen has treated them as one since 2026-08-04 (`if (!s.menuEnabled || s.serviceMode)`).
   const settings = await getSettings(r.id);
-  if (!r.active || !settings.menuEnabled) {
+  if (!r.active || !settings.menuEnabled || settings.serviceMode) {
     return { title: "Menu", description: "This menu isn’t available right now." };
   }
   const dish = await getMenuItem(slug, r.id).catch(() => null);

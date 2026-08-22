@@ -317,6 +317,26 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── a maintenance restaurant does not preview its dish either (sweep #7 T2, item 4) ──────────
+// Both doors already RETURN the maintenance screen for Service mode. Both doors' generateMetadata
+// checked only the Menu master switch — so the page said "we'll be right back" while the same link
+// pasted into WhatsApp still previewed the dish, its photo and its price. The 3D screen beside them
+// has treated the two switches as one meaning since 2026-08-04.
+for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R]]) {
+  // STRIP THE COMMENTS FIRST. Both of these files EXPLAIN this rule in prose right above the
+  // line that enforces it, so a naive /serviceMode/ match passes on the explanation alone — the
+  // guard would stay green with the fix torn out. Assert the enforcement, never the comment.
+  const meta = (src[file].split("export async function generateMetadata")[1]?.split("export default")[0] || "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  check(
+    label + " door does not preview a shared dish link while the restaurant is in Service mode",
+    /settings\.serviceMode/.test(meta),
+    file + " \u2192 generateMetadata must refuse on settings.serviceMode as well as !menuEnabled. " +
+      "The page body already does; the share card is the half that was left open."
+  );
+}
+
 // ── every scoped read is keyed on the thing that scopes it (sweep #7 T2, item 3) ─────────────
 // Both reads in the dish page's main fetch are scoped by `restaurantId`, but it was missing from
 // the dependency list, so the fetch only re-ran on a slug change. `/r/<a>/item/x` → `/r/<b>/item/x`

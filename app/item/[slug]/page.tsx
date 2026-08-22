@@ -13,7 +13,16 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // A closed menu must not preview a shared dish link as though it were open — same rule, and the
   // same cached read, as the tenant twin. Without it the page 404s but the link forwarded to a
   // friend still showed the dish, its photo and its price. (sweep #6 T2, 2026-08-17)
-  if (!(await getSettings()).menuEnabled) {
+  //
+  // SERVICE (MAINTENANCE) MODE COUNTS AS CLOSED HERE TOO (sweep #7 T2, 2026-08-22 — item 4).
+  // The gate below the fold already returns the maintenance screen for it; this one checked only
+  // the master switch. So a restaurant that had switched itself off for the evening served the
+  // branded "we'll be right back" screen to anyone who OPENED a dish link, while the same link
+  // pasted into WhatsApp still previewed the dish, its photo and its price. Two switches, one
+  // meaning — the 3D screen beside these two doors has treated them as one since 2026-08-04
+  // (`if (!s.menuEnabled || s.serviceMode)`), and now so do both dish doors, on both halves.
+  const settings = await getSettings();
+  if (!settings.menuEnabled || settings.serviceMode) {
     return { title: "Menu", description: "This menu isn’t available right now." };
   }
   const dish = await getMenuItem(slug).catch(() => null);
