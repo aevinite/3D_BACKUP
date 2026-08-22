@@ -808,16 +808,31 @@ function markItemReady(id, btn) {
 // load() at the end (instead of surgical patching) is fine and keeps state honest.
 async function undoReady(snap, orderId) {
   if (orderId != null) pendingReadyOrders.delete(orderId);
+  // Every ticket this take-back touches, so its card can be told to forget what it thinks it says.
+  const touched = new Set(orderId != null ? [orderId] : []);
   snap.forEach((s) => {
     pendingReady.delete(s.id);
     const it = (state.items || []).find((x) => x.id === s.id);
-    if (it && it.status !== "served") it.status = s.prev;
+    if (it && it.status !== "served") { it.status = s.prev; if (it.order_id != null) touched.add(it.order_id); }
   });
-  // (The take-back does NOT need forgetCardHtml. It looks like it should — the tap patched the card
-  // in place, so the stamp is stale here too — but it was measured both ways, tapping UNDO the
-  // instant the bar appears, and the board behaves identically: the freshLoad() at the end of this
-  // function is what puts the ✓ back, in about the same moment either way. Adding the call changed
-  // nothing a cook could see, so it is not here. T6 re-check, 2026-08-19.)
+  // THE TAKE-BACK NEEDS forgetCardHtml TOO — and the note that used to sit here said the opposite.
+  //
+  // It said the call changed nothing a cook could see, "measured both ways, 2026-08-19". That
+  // measurement can only have been taken on a SINGLE-dish ticket, where finishing the dish moves the
+  // card to the Ready lane and moveCardToReady() rebuilds it (re-stamping __kdsHtml) on the way over
+  // and again on the way back. On a ticket with MORE THAN ONE cooking dish the card never changes
+  // lane, so nothing rebuilds it — and then this is the exact fault the refused ✓ above was fixed
+  // for: the ✓ tap edited one line in place (btn.outerHTML), which does not touch __kdsHtml, so once
+  // the status is restored the desired html matches that stale stamp exactly, reconcileList concludes
+  // "unchanged, reuse the node", and the node it reuses is the one with no ✓ on it.
+  //
+  // Watched happening on the running board (T6 sweep #7, 2026-08-22), two-dish ticket, UNDO tapped
+  // 450ms after the bar appeared: the write landed and the server read `preparing` within a second,
+  // and the screen still said "1× Pink Pineapple Smoothie READY" with no ✓ ten seconds later and
+  // after a forced whole-board read. A cook is told the dish was put back and cannot re-send it; the
+  // waiter's tablet and the manager's floor show the truth, so the two screens disagree. It only
+  // heals when something ELSE changes that ticket's html — the age text, once an hour on an old one.
+  for (const id of touched) forgetCardHtml(id);
   render();
   try {
     // ONE REQUEST FOR THE WHOLE TICKET (owner-picked improvement, 2026-08-07). This used to be

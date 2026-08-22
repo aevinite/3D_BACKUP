@@ -229,6 +229,23 @@ const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? read
     check("kitchen: a refused ✓ lets its card redraw",
       /\.catch\(\([^)]*\)\s*=>\s*\{[\s\S]{0,2600}?forgetCardHtml\(/.test(mi),
       "otherwise the dish is restored in the data and the ✓ never comes back on screen.");
+    // …AND SO DOES A TAKE-BACK (T6 sweep #7, 2026-08-22). Same fault, different door: the ✓ tap
+    // edits one line in place, so once undoReady() restores the status the desired html matches the
+    // card's stale __kdsHtml stamp and reconcileList reuses the node that has no ✓ on it. Watched on
+    // a TWO-dish ticket: the write landed, the server read `preparing` inside a second, and the
+    // screen still said READY with no ✓ ten seconds later and after a forced whole-board read. A
+    // single-dish ticket hides it, because finishing it moves the card to Ready and that rebuild
+    // re-stamps — which is why the old note in that function claimed the call was unnecessary.
+    const ur = (js.match(/async function undoReady\([\s\S]*?\n\}/) || [])[0] || "";
+    check("kitchen: undoReady() collects every ticket the take-back touches",
+      /const touched = new Set\(/.test(ur) && /touched\.add\(it\.order_id\)/.test(ur),
+      "a per-dish take-back carries no order id, so the ticket has to be found from the dish's own row.");
+    check("kitchen: a take-back lets its card redraw",
+      /for \(const id of touched\) forgetCardHtml\(id\);/.test(ur),
+      "otherwise the dish is put back in the data and the screen keeps showing READY with no ✓.");
+    check("kitchen: the take-back forgets the stamp BEFORE it repaints",
+      ur.indexOf("forgetCardHtml") >= 0 && ur.indexOf("forgetCardHtml") < ur.indexOf("render()"),
+      "render() is what reads the stamp — clearing it afterwards would be a paint too late.");
     // the marks, as the panel actually ships them
     const m = js.match(/TAG_BADGE = \{ vip: \["[^"]*", "(#[0-9a-f]{6})"\], family: \["[^"]*", "(#[0-9a-f]{6})"\], guest: \["[^"]*", "(#[0-9a-f]{6})"\] \}/i);
     check("kitchen: the three table marks are still declared where this guard can read them", !!m);
