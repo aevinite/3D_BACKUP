@@ -13,6 +13,36 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+## 2026-08-22 — the two sweep items he picked (owner: *"can do the B one can do D also"*)
+
+The T29 sweep left four things as decisions rather than building them. He chose two. Both built,
+both verified, both LIVE ON BACKUP (PR #1097, production deploy `d4d894c9`, state success).
+
+- [x] **B — stop uploading the 371 migration files on every deploy.** `.vercelignore` now excludes
+  `/supabase`. It is the source of truth for both stacks' schema but nothing reads it at build or
+  run time, and this stack exhausts its ~100-deploy daily cap. Held back for a whole sweep because
+  an unanchored `/editor` line in that same file once 404'd the entire manager panel, so it was
+  proven the only way that counts: the folder was moved OUT of the tree, `npm run build` ran to
+  completion (BUILD_ID + routes-manifest written, every route listed), and all 371 files came back
+  byte-identical. `docs/GUARD-MAP.md` now says a `.vercelignore` change is verified by that build,
+  never by reading.
+- [x] **D — "Visit their panel" now works at a restaurant's OWN address.** Admin console → a
+  person's profile → **Visit their panel**, and the ribbon's *see the actual panel* toggle, both did
+  nothing when the panel was opened at `/r/<slug>/manager|kitchen|tablet`: that route built the
+  iframe URL by hand and carried only the restaurant, silently dropping `view=real` and
+  `as=<staff id>`. Both addresses now share `panelIframeSrc()`. **It widens nobody's access** — the
+  builder returns the bare URL when there is no admin, and a real staff session is `admin: false`.
+  Verified on the LIVE backup: as the admin all three pins are carried on all three panels and a
+  malformed one is dropped; as real staff, asking for both pins explicitly, the URL comes back bare.
+  Guarded by `node .github/scripts/verify-twin-route-parity.mjs`, which fails if either address
+  builds that URL by hand again. This was the SECOND drift of that pair — the browser-tab names
+  were the first.
+- [ ] **Not picked, still open (his call, from the same list):** move a section out of `CLAUDE.md`
+  before its 24,000-byte guard trips — it is at 23,944, so the next rule anyone adds turns the
+  checks red · make the print helper's done-report require a claim the way the document fetch does
+  (no reachable path found, so no working code was touched).
+
+
 ## 📴 OFFLINE — "without internet my app should not break" (owner, 2026-07-30)
 
 Owner's words: the live/connection state must show, changes made with no internet must be
