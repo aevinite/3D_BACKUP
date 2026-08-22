@@ -15103,7 +15103,22 @@ async function generateInvoice(sid) {
   // Returns TRUE only when a number was actually issued — printIssuingInvoice relies on it, so a
   // failed issue can never be followed by a printed bill carrying no invoice number.
   try {
-    await api("POST", `/sessions/${sid}/invoice`, body);
+    const r = await api("POST", `/sessions/${sid}/invoice`, body);
+    // ── A QUEUED WRITE HAS NOT ISSUED A NUMBER (T5 sweep #7, 2026-08-22) ────────────────────
+    // The comment above says this returns true "only when a number was actually issued", and
+    // with no signal it did the opposite: api() hands a non-GET to the outbox, which resolves
+    // { ok:true, queued:true } instead of throwing, so nothing here saw a failure. The toast
+    // said "Invoice generated", this returned TRUE, and printIssuingInvoice() went straight on
+    // to print — from loadOrders()' saved copy, where invoice_no is still null. A printed bill
+    // carrying no invoice number is the exact thing invoice-first exists to stop.
+    // An invoice number can only be minted by the server (it is a gapless per-year series), so
+    // there is nothing honest to print until the queue drains. The write still goes — it is in
+    // the queue under its own action id and lands at-most-once on reconnect — so this says what
+    // is true and refuses to print, rather than cancelling the person's work.
+    if (wasQueued(r)) {
+      toast("No internet — the invoice number is given by the server, so nothing is printed yet. It will be issued the moment you're back online.", "err");
+      return false;
+    }
     await loadOrders();
     toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok");
     return true;
@@ -16472,6 +16487,18 @@ function bindBanquet() {
       };
       const payload = lines.map((l) => ({ id: l.id, qty: l.qty, disc: l.disc, price: l.open ? l.price : undefined }));
       const r = await api("POST", "/banquet/bill", { table: t, lines: payload, meta });
+      // ── SAME RULE AS THE INVOICE (T5 sweep #7, 2026-08-22) ─────────────────────────────────
+      // With no signal the outbox resolves { ok:true, queued:true } and every field below is
+      // undefined, so the toast read "Bill undefined created — ₹0." and the print call two
+      // lines down produced a banquet SHEET numbered `undefined` with ₹0 in every column —
+      // handed to a customer. The line under it already says to print from the server's frozen
+      // figures and never from the screen's copy; when the write is still on this device there
+      // are no server figures at all.
+      if (wasQueued(r)) {
+        toast("Saved on this device ✓ — no internet, so the bill has no number yet and nothing is printed. It will be created the moment you're back online.", "err");
+        issue.disabled = false;   // the button comes back, or the tap has vanished in silence
+        return;
+      }
       toast(`Bill ${r.bill_no} created — ${inr(r.total)}.`, "ok");
       // print from the SERVER's frozen figures, never from the screen's copy
       printBanquetBill({
