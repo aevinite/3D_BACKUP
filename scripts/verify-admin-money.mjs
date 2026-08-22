@@ -284,7 +284,24 @@ try {
         replies.push({ q, body: res.json().catch(() => null) });
       });
       await p.goto(`${BASE}/aevinite/analytics?range=${r}`, { waitUntil: "domcontentloaded" });
-      await p.waitForTimeout(8500);
+      // WAIT FOR THE REPLY AND FOR THE TILE TO STOP SAYING "…" (T28 sweep, 2026-08-22).
+      // This was a flat waitForTimeout(8500). On a dev server the route compiles on first hit and
+      // this query counts every order across every restaurant, so 8.5s ran out while the tile still
+      // held its loading placeholder — and because the reply had not landed either, `mine` matched
+      // nothing and `want` came out null. The check then reported
+      //     tile "…", its own reply said null
+      // as "a figure that was not its own reply's", which reads as the stale-number fault this
+      // section exists to catch. Nothing was stale; nothing had arrived yet. (Verified by hand:
+      // /api/admin/analytics answers totals.totalOrders for BOTH ranges — 5371 and 465.)
+      // So wait for the event, not the clock: the reply for THIS range, then the tile losing its
+      // placeholder. Still bounded, so a genuinely missing figure fails rather than hanging.
+      await p.waitForResponse((res) => res.url().includes("/api/admin/analytics")
+        && (new URL(res.url()).searchParams.get("range") || "7d") === r, { timeout: 45000 }).catch(() => {});
+      await p.waitForFunction(() => {
+        const el = document.querySelector(".adm-stat .v");
+        const s = el && el.textContent && el.textContent.trim();
+        return !!s && s !== "…" && s !== "-" && s !== "—";
+      }, { timeout: 30000 }).catch(() => {});
       const v = await p.evaluate(() => document.querySelector(".adm-stat .v")?.textContent);
       const label = await p.evaluate(() => document.querySelector(".adm-stat")?.textContent || "");
       // The LAST reply for the range that was asked for — the one whose figure must be on screen.
