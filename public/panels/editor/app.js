@@ -14772,7 +14772,24 @@ const PLAT_META = {
   other:    { label: "Other",    cls: "o" },
 };
 const platMoney = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
-function platAge(iso) { const m = Math.floor(Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000)); return m < 1 ? "just now" : m + "m"; }
+// HOW OLD IS THIS PLATFORM ORDER? Minutes, then hours, then days — the same steps the kitchen
+// wall uses (public/panels/kitchen/app.js, T4 sweep 2026-08-11) and the same reason.
+// THE UNIT USED TO NEVER CHANGE (T5 sweep #7, 2026-08-23). This returned bare minutes forever, so
+// a parcel left from the day before read "2709m" on the Platform board — measured on the running
+// panel. At a glance "2709m" reads as roughly forty-five minutes; it is forty-five HOURS, which is
+// the opposite of the truth, on the one board where age is the whole point (a delivery order
+// nobody has picked up). Minutes are dropped past a day: nobody needs them at that range and the
+// chip is a tight space. Under an hour nothing changes at all.
+function platAge(iso) {
+  const t = new Date(iso).getTime();
+  if (!isFinite(t)) return "";                    // say nothing rather than nonsense
+  const m = Math.floor(Math.max(0, (Date.now() - t) / 60000));
+  if (m < 1) return "just now";
+  if (m < 60) return m + "m";
+  const h = Math.floor(m / 60);
+  if (h >= 24) return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  return h + "h " + (m % 60) + "m";
+}
 function platColOf(st) {
   if (st === "new") return "new";
   if (st === "accepted" || st === "preparing") return "prep";
