@@ -65,6 +65,9 @@ await cool("the end-to-end order block");
 results.push(["block 3b — the whole journey, end to end", run("BLOCK 3b — the whole journey, end to end", join(here, "order-end-to-end.mjs"))]);
 // Block 4 only browses and screenshots — no order, so it needs no cooldown and doubles as one.
 results.push(["block 4 — the captures + the bottom-corner hit-test", run("BLOCK 4 — the captures + the hit-test", join(here, "screens.mjs"))]);
+// Sweep 7's own live rows, P16401..P16460. Placed here for the same reason block 4 is: it only
+// browses, goes offline, and reads — it places no order, so it needs no cooldown.
+results.push(["sweep 7 block B — the 62 live rows", run("SWEEP 7 BLOCK B — the live rows (P16401-P16460)", join(here, "s7-live.mjs"))]);
 await cool("the cross-panel block — two phones joining and another order, the heaviest of the five", LONG_COOLDOWN_MS);
 results.push(["block 5 — tracing a change across panels", run("BLOCK 5 — tracing a change across panels", join(here, "across-panels.mjs"))]);
 
@@ -75,7 +78,11 @@ console.log(bad
   ? `\n❌ ${bad} block(s) failed — read the rows above, then the ledger row with the same id.`
   : "\n✅ every block green. Block 6 is judgment — read it in .claude/sweep/LEDGER/T3.md.");
 console.log("Screenshots must still be OPENED AND LOOKED AT — a green run is not evidence the screen is right.");
-if (!results[4][1]) {
+// BY NAME, NOT BY POSITION. This was `results[4][1]`, which meant "block 5" only for as long as
+// nobody inserted a block before it — and sweep 7 inserted two, which silently pointed this note at
+// block 4 instead. A positional index into a list other people append to is a bug waiting to happen.
+const block5 = results.find(([name]) => name.startsWith("block 5"));
+if (block5 && !block5[1]) {
   console.log("\nNOTE ON BLOCK 5: it drives TWO phones, two joins, an order, a table rename and a table");
   console.log("close on a restaurant up to ten other terminals are also driving — whose tables carry");
   console.log("sessions left open since early August. It has failed three times on that contention and");
