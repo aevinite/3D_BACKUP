@@ -212,6 +212,19 @@ check("P00143", "the sold-out pill no longer swallows the card's own link", () =
   !rx(F.food, /sold-out-pill"\s*\n?\s*onClick/) &&
   !rx(F.food, /className="sold-out-pill"[^>]*onClick/));
 
+// BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
+// This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
+// 0 over the saved position before the restore could read it, so every Back landed at the top of
+// the menu. Both halves matter — the static one names the two moving parts so nobody removes them
+// by accident, and the LIVE one is the only thing that could have caught it in the first place.
+check("P15332", "the saved scroll position is not written over before it is restored", () => {
+  const gated = rx(F.menuView, /if \(restoreSettled\.current\) \{\s*try \{ sessionStorage\.setItem\(sk\("lfh_menu_scroll"\)/);
+  const reaims = has(F.menuView, "const aim = ()", "scrollHeight", 'behavior: "instant"') &&
+                 rx(F.menuView, /restoreSettled\.current = true/);
+  const bounded = has(F.menuView, "stalls >= 3", "2500");
+  return { ok: gated && reaims && bounded, note: `gated=${gated} re-aims=${reaims} bounded=${bounded}` };
+});
+
 // ── LIVE half ────────────────────────────────────────────────────────────────────────────
 async function live(base) {
   let chromium;
@@ -265,6 +278,32 @@ async function live(base) {
         check(485, `LIVE: ${slug} shows no "Little French House"`, () => !/little french house/i.test(r.txt));
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
+      await c.close(); }
+    // BACK RETURNS THE DINER TO THE SAME DISH — the check the source assertions could not make.
+    // Scroll well down, open a dish that is ALREADY on screen (tapping an off-screen one would make
+    // the test itself scroll the page, which is how this was nearly mis-diagnosed), come back, and
+    // assert the same dish is under the header. Asserts the DISH, not a pixel: the page can settle a
+    // few px either way and the diner would never know, but landing on a different dish is the bug.
+    for (const slug of ["french-house", "aangan-garden-restaurant"]) {
+      const { c, pg } = await open(`/r/${slug}/menu`, 6000);
+      const topDish = () => pg.evaluate(() => [...document.querySelectorAll(".item-card")]
+        .find((x) => x.getBoundingClientRect().top > 150)?.querySelector(".dish-name")?.textContent.trim() || "");
+      await pg.evaluate(() => document.getElementById("main-scroll").scrollTo({ top: 1500, behavior: "instant" }));
+      await pg.waitForTimeout(1600);
+      const before = await topDish();
+      const y0 = await pg.evaluate(() => document.getElementById("main-scroll").scrollTop);
+      const link = await pg.evaluateHandle(() => [...document.querySelectorAll(".item-card-link")]
+        .find((a) => { const r = a.getBoundingClientRect(); return r.top > 150 && r.bottom < 700; }) || null);
+      const el = link.asElement();
+      if (!el || !y0) { check("P15332", `LIVE: ${slug} Back returns to the same dish`, () => ({ ok: false, note: "no on-screen card to tap" })); await c.close(); continue; }
+      await el.click({ force: true });
+      await pg.waitForLoadState("networkidle").catch(() => {});
+      await pg.waitForTimeout(2500);
+      await pg.goBack({ waitUntil: "networkidle" }).catch(() => {});
+      await pg.waitForTimeout(4500);
+      const after = await topDish();
+      check("P15332", `LIVE: ${slug} Back returns to the same dish`, () =>
+        ({ ok: !!before && before === after, note: `left at "${before}", came back to "${after}"` }));
       await c.close(); }
   } finally { await b.close(); }
 }

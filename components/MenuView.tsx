@@ -516,6 +516,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Remember how far down the list the guest scrolled, so Back returns them to
   // the same spot instead of the top. The scroll lives on <main id="main-scroll">.
   const scrollRestored = useRef(false);  // have we already jumped back? (do it once)
+  // …and has that jump SETTLED? Saving the scroll position must not start until it has, or the
+  // mount-time onScroll() below writes a 0 straight over the place we are about to return to.
+  // (Guest sweep T1, sweep #7, 2026-08-22 — see both notes below.)
+  const restoreSettled = useRef(false);
   // This effect attaches a "listen for scrolling" handler when the page loads.
   useEffect(() => {
     const el = document.getElementById("main-scroll");  // the scrolling area
@@ -700,7 +704,30 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
-        try { sessionStorage.setItem(sk("lfh_menu_scroll"), String(el.scrollTop)); } catch {}
+        //
+        // NOT UNTIL THE RESTORE HAS HAD ITS TURN (guest sweep T1, sweep #7, 2026-08-22).
+        //
+        // This effect ends with a bare `onScroll()` — "run once on mount so the shrink starts at the
+        // right value if we restored a scrolled position". But that mount call happens while the
+        // list is still EMPTY, so `el.scrollTop` is 0, and this line wrote that 0 over the position
+        // we were about to jump back to. The restore effect below runs later (it waits for
+        // `menuData`), read the 0, and its `if (y > 0)` guard then did nothing at all. So "Back
+        // returns you to the same spot" — a feature this file carries four comments about — had
+        // quietly stopped working: every Back from a dish put the diner at the very top of the menu
+        // and left them to find their place again, on a 199-dish menu.
+        //
+        // Measured, not reasoned about: with the key pre-seeded to 1438, a fresh load produced
+        // EXACTLY ONE write to it, value "0", 136ms in, and the page stayed at 0. Reproduced on a
+        // PRODUCTION build too, so it was not a dev-only double-mount artefact.
+        //
+        // `restoreSettled` is the restore's own ref, set once its jump has landed (or once there was
+        // nothing to jump to). Before that: save nothing — the list is empty and there is nothing
+        // real to save. After it: save every scroll exactly as before. A menu with no dishes never
+        // sets it and has nothing to scroll either. The shrink and frost maths below still run on
+        // mount, which is what that mount call was actually for.
+        if (restoreSettled.current) {
+          try { sessionStorage.setItem(sk("lfh_menu_scroll"), String(el.scrollTop)); } catch {}
+        }
         // SCROLL-LINKED SHRINK. The brand bar (.nav) is LOCKED at the top. As the
         // category bar pins right under it and you keep scrolling, the cards
         // shrink SMOOTHLY from big+icons to small text-only — driven frame by
@@ -793,12 +820,45 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     scrollRestored.current = true;  // mark done so we never jump twice
     try {
       const y = parseInt(sessionStorage.getItem(sk("lfh_menu_scroll")) || "0", 10);
-      if (y > 0) {
-        const el = document.getElementById("main-scroll");
-        // Two frames: let the cards lay out before we jump.
-        requestAnimationFrame(() => requestAnimationFrame(() => { if (el) el.scrollTop = y; }));
+      const el = document.getElementById("main-scroll");
+      if (y > 0 && el) {
+        // TWO FRAMES IS NOT ENOUGH — THE PAGE IS STILL GROWING (guest sweep T1, sweep #7).
+        //
+        // Two frames gets the CARDS into the DOM, but not the page to its full height: every dish
+        // photo is `loading="lazy"` with no reserved box, so at that moment the list is a fraction
+        // of its final length and the browser silently CLAMPS scrollTop to whatever the maximum is
+        // right then. Measured: asking for 1438 landed the diner at 447 and nothing ever re-aimed
+        // once the photos arrived.
+        //
+        // So re-aim, bounded — the same shape as the shrink-correction loop in the scroll effect
+        // above. Watching `scrollHeight` is the honest stopping test: while it is still growing
+        // there is more page coming, and once it settles and we still cannot reach the saved place,
+        // that place genuinely no longer exists (a filter now shows fewer dishes) and retrying
+        // would be pointless. Four cheap ways out: we get there · the guest scrolls themselves and
+        // we get out of their way · the page stops growing three ticks running · a 2.5s deadline.
+        //
+        // INSTANT, never smooth: `#main-scroll` carries `scroll-behavior: smooth` (globals.css) for
+        // the category tap, so a plain `el.scrollTop = y` ANIMATES — the diner would watch the menu
+        // scroll past on the way back, and the re-aim could not tell that motion from their own.
+        let lastSet = -1, lastHeight = -1, stalls = 0;
+        const started = Date.now();
+        const aim = () => {
+          if (lastSet >= 0 && Math.abs(el.scrollTop - lastSet) > 2) { restoreSettled.current = true; return; }
+          if (el.scrollTop >= y - 2) { restoreSettled.current = true; return; }
+          const h = el.scrollHeight;
+          stalls = h === lastHeight ? stalls + 1 : 0;
+          lastHeight = h;
+          if (stalls >= 3 || Date.now() - started > 2500) { restoreSettled.current = true; return; }
+          el.scrollTo({ top: y, behavior: "instant" as ScrollBehavior });
+          lastSet = el.scrollTop;
+          setTimeout(aim, 100);
+        };
+        requestAnimationFrame(() => requestAnimationFrame(aim));
+        return;
       }
     } catch {}
+    // Nothing to restore (a first visit, or storage refused): saving may start immediately.
+    restoreSettled.current = true;
   }, [menuData]);
 
   // Remember the active category so navigating away and Back returns you here.
