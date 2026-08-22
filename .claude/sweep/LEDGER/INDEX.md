@@ -169,32 +169,44 @@ filed, so an orphan is unchecked ground in practice.**
 | `reference/` | **nobody** |
 | `test-results/` | **nobody** — and it needs no phases; it is regenerated Playwright output |
 
-### 🔴 THE GAP LIST — the next sweep's first assignment
+### THE GAP LIST — checked on 2026-08-22, and here is what was actually behind it
 
-Close these **before** inventing a single new phase. They are ordered by what a real restaurant
-loses if they stay unchecked.
+The four holes below were named because **no terminal's bullet listed them**, so nobody was *told*
+to check them. T30 then went and checked them anyway. **All four came back clean** — which is worth
+knowing, because "unowned" and "broken" are not the same thing, and a gap list that cries wolf is
+one nobody reads.
 
-1. **`components/PanelFrame.tsx` and `components/RealtimeProvider.tsx`** — every panel route
-   renders through `PanelFrame`; every live update flows through the realtime layer. Both are
-   cross-panel by nature and neither is named by any of the 30 territories. **This is the
-   thinnest-checked load-bearing code in the product.**
-2. **The four per-restaurant panel doors** — `app/r/[restaurant]/{manager,kitchen,tablet,login}/page.tsx`.
-   Named by nobody, and three of the four already carry a real divergence from their
-   `/manager`, `/kitchen`, `/tablet` twins (see `T30.md`, the tab-title handoff). Unowned ground is
-   where drift lives.
-3. **The print helper's two halves** — `app/aevinite/printing/page.tsx` and
-   `app/api/print-agent/[...path]/route.ts`. A computer owns the paper (mig 341, `docs/PRINT-HELPER.md`,
-   `verify:print-helper`); neither the screen nor its endpoint is named by any territory.
-4. **`app/api/admin/rate-limits/route.ts`** — T19 took `head -25` and T20 took `tail -24` of
-   **fifty** admin routes, so the 26th belongs to neither. (Its sign-in check is present — verified.
-   The gap is that nobody was told to look.)
-5. **The remaining 6 unowned components** — `AutoFitNumbers.tsx`, `BackQuitDialog.tsx`,
-   `FitNumber.tsx`, `PointerCaptureGuard.tsx`, `ToastHost.tsx`, `VegIcon.tsx`.
-6. **`access-designs/`, `LEARN-MY-APP/`, `reference/`** — name an owner or state explicitly that
-   they are out of scope. Right now they are neither.
-7. **The 17-file tail of `supabase/migrations/`** — T23's ledger says it covered "115 files,
-   numbered 231 or higher", but positions 231→end of the sorted list hold **132** files. The
-   difference is the tail that landed while T23 was running, including migrations **350–354**.
+| the gap | what was behind it | verdict |
+|---|---|---|
+| **`components/PanelFrame.tsx`** — every panel route renders through it | It solves two real phone bugs (a `100vh` iframe hanging below the URL bar; `env()` not resolving inside a nested iframe) and its own rule is *"every panel host must render this, never a raw `<iframe>`"*. Checked every file that embeds a panel: the six fixed full-screen hosts all use `PanelFrame`; the owner console's inline embeds all use the shared `useEmbedFrame` hook, which attaches the **same** `lib/safeAreaBridge` — so the insets reach both. The one remaining raw `<iframe>`, in `components/admin/RemovalDetail.tsx`, is a **sandboxed bill document** (`srcDoc`, no `allow-scripts`, auto-grown height), not a panel, so the rule does not apply to it. | ✅ **clean** |
+| **`components/RealtimeProvider.tsx`** — every guest live update flows through it | Scopes the socket per restaurant server-side via `topic_rid` (mig 145), keeps a JavaScript restaurant check as a safety net for the async window before `rid` resolves, drops its channel after 120s hidden, force-rebuilds on wake because a backgrounded socket dies silently, throttles the 2–3 wake signals into one rebuild, refuses to reopen a socket on `online` while hidden, debounces a burst into one refetch, and tears everything down cleanly. Every realtime rule this sweep tests for holds. | ✅ **clean** |
+| **The print helper's two halves** — `app/aevinite/printing/page.tsx` and `app/api/print-agent/[...path]/route.ts` | The endpoint identifies its caller by the helper's own token (`agentByToken`) and takes `restaurant_id` **from the agent row, never from the request** — so a caller cannot name a restaurant. Every one of its ~15 queries carries `.eq("restaurant_id", agent.restaurant_id)`. And it is **not actually unwatched**: `npm run verify:print-helper` covers it (48 checks, all passing), including that every verb checks the token. | ✅ **clean** — and guarded, despite no ledger naming it |
+| **`app/api/admin/rate-limits/route.ts`** — position 26 of **50**, between T19's `head -25` and T20's `tail -24` | Read it: `const admin = (req) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)`, used by GET, PATCH **and** POST. All 50 admin routes carry the check, so CLAUDE.md's own invariant holds. | ✅ **clean** |
+
+**The lesson for the next sweep, and the reason this table replaced the alarm:** the arithmetic hole
+was real — `head -25` + `tail -24` over fifty files genuinely leaves the 26th to nobody, and four
+directories genuinely have no owner. But *unchecked* turned out not to mean *wrong*. **Assign these
+files to a territory so they are checked on purpose rather than by luck; do not assume they are
+broken.**
+
+### Still genuinely unassigned — give these an owner next time
+
+1. **The six remaining unowned components** — `AutoFitNumbers.tsx`, `BackQuitDialog.tsx`,
+   `FitNumber.tsx`, `PointerCaptureGuard.tsx`, `ToastHost.tsx`, `VegIcon.tsx`. Smaller than
+   `PanelFrame`, and still rendered across more than one panel.
+2. **`access-designs/`, `LEARN-MY-APP/`, `reference/`** — name an owner, or state in one line that
+   they are out of scope. Right now they are neither, so every sweep rediscovers them and none
+   checks them. (`test-results/` genuinely needs no phases — it is regenerated Playwright output.)
+3. **The 17-file tail of `supabase/migrations/`** — T23's ledger says it covered "115 files,
+   numbered 231 or higher", but positions 231→end of the sorted list hold **132**. The difference is
+   the tail that landed while T23 was running, including migrations **350–354**.
+4. **The five orphan page routes** — `app/aevinite/printing/page.tsx` and the four
+   `app/r/[restaurant]/{manager,kitchen,tablet,login}/page.tsx`. The tab-title fault that lived in
+   three of them **has since been fixed** (T29, 2026-08-22, with
+   `.github/scripts/verify-twin-route-parity.mjs` to keep it fixed) — but the files still belong to
+   nobody's bullet.
+5. **The two orphan API routes** — `app/api/admin/rate-limits/route.ts` and
+   `app/api/print-agent/[...path]/route.ts`. Both verified clean above; both still unassigned.
 
 ### And the four territories that never ran at all
 
