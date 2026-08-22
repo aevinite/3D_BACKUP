@@ -56,6 +56,13 @@ const INSTANTS = [
   ["an evening service", "2026-08-16T16:01:00Z"],   // 21:31 IST
   ["past midnight", "2026-08-16T20:20:00Z"],        // 01:50 IST the next day, same business day
   ["across the UTC date line", "2026-08-16T19:00:00Z"], // 00:30 IST the next day
+  // THE FINANCIAL-YEAR BOUNDARY, both sides of it (T8 sweep #7, 2026-08-22). The three instants
+  // above are all mid-August, so they could never see the one part of this document that was
+  // still on device time: the FY inside the invoice number. 31 March / 1 April is the single most
+  // consequential date in Indian accounting, and IST runs +05:30, so every device behind India
+  // reads the PREVIOUS financial year for the first five and a half hours of the new one.
+  ["the last hour of the financial year", "2026-03-31T17:30:00Z"], // 23:00 IST, 31 March
+  ["the first hour of the financial year", "2026-03-31T19:30:00Z"], // 01:00 IST, 1 April
 ];
 for (const [what, ts] of INSTANTS) {
   const seen = new Map();
@@ -76,6 +83,33 @@ for (const [what, ts] of INSTANTS) {
       [...seen].map(([tz, v]) => `${tz} → ${v}`).join("\n         ")
       + "\n         pin every date/time to en-IN + Asia/Kolkata, as billData's dateStr already is");
   }
+}
+
+// ── 1b. THE FINANCIAL YEAR IS INDIA'S ────────────────────────────────────────────────────────
+// `financialYear` decides the FY inside every invoice number. It read the DEVICE's calendar until
+// 2026-08-22, so one sale issued at 01:00 IST on 1 April printed INV/2026-27/… in India and
+// INV/2025-26/… on every device behind it — two numbers for one tax document, on a sheet whose
+// date row already said 01/04/2026. Asserted here by name so a failure says which rule broke.
+{
+  const cases = [
+    ["23:00 IST on 31 March", "2026-03-31T17:30:00Z", "2025-26"],
+    ["01:00 IST on 1 April", "2026-03-31T19:30:00Z", "2026-27"],
+    ["a bare date, 31 March", "2026-03-31", "2025-26"],
+    ["a bare date, 1 April", "2026-04-01", "2026-27"],
+    ["mid-year", "2026-08-16T16:01:00Z", "2026-27"],
+  ];
+  for (const [what, ts, want] of cases) {
+    const got = BILLDOC.financialYear(ts);
+    got === want
+      ? ok(`the financial year of ${what} is ${want}, in India's calendar`)
+      : bad(`the financial year of ${what} came out ${got}, not ${want}`,
+        "derive it in Asia/Kolkata — the FY is part of the number that identifies the tax document");
+  }
+  // and the number it builds carries that year
+  BILLDOC.invFmt(41, "2026-03-31T19:30:00Z", "INV") === "INV/2026-27/000041"
+    ? ok("the invoice number carries India's financial year across the boundary")
+    : bad(`invFmt at 01:00 IST on 1 April read ${BILLDOC.invFmt(41, "2026-03-31T19:30:00Z", "INV")}`,
+      "one sale may not have two invoice numbers depending on which tablet printed it");
 }
 
 // ── 2. THE KITCHEN TICKET USES THE RESTAURANT'S DAY, NOT THE CALENDAR'S ───────────────────────

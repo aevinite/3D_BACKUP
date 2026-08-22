@@ -936,11 +936,38 @@
   /* financialYear / invFmt: the FY of the INVOICE'S OWN date, never "today" — reprinting a March
      invoice after 1 April must keep its issued year, or one sale ends up with two identities and
      the reprint collides with the real invoice of that number. */
+  /* THE FINANCIAL YEAR IS INDIA'S, NOT THE PRINTING DEVICE'S (T8 sweep #7, 2026-08-22).
+     This read `getFullYear()`/`getMonth()` — the machine's own time zone — so the FY inside the
+     invoice number was the last thing on this document still decided by whichever tablet held the
+     paper. Measured on one invoice issued at 2026-04-01 01:00 IST, the first hour of the new
+     Indian financial year:
+
+         India tablet   INV/2026-27/000041      dated 01/04/2026
+         London / UTC   INV/2025-26/000041      dated 01/04/2026
+         New York       INV/2025-26/000041      dated 01/04/2026
+
+     — the same sale, two different invoice numbers, and on the non-India devices a sheet DATED
+     1 April 2026 carrying financial year 2025-26, because the date row was pinned to IST on
+     2026-08-05 and this was not. It is the same fault class as the bill's date (fixed 2026-08-05),
+     the banquet sheet's (2026-08-06) and the kitchen ticket's (2026-08-17); this is the fourth and
+     last place, and it is the worst of them, because the FY is part of the number that IDENTIFIES
+     the tax document. Two devices in one restaurant quoting two numbers for one sale is precisely
+     what `financialYear` was written to prevent when it chose the invoice's own date over "today".
+
+     31 March / 1 April is the single most consequential date in Indian accounting and IST runs
+     +05:30, so every device behind India — the whole of Europe and the Americas — reads the
+     previous FY for the first five and a half hours of it.
+
+     Pinned the same way `kotWhen` derives its business day: shift by +05:30 and read the UTC
+     parts, which is India's calendar date with no imports (this file is loaded by the panels, the
+     Next server and React alike). `verify:print-paper` pins it at the boundary in both directions. */
   function financialYear(when) {
     var d = when ? new Date(when) : new Date();
-    var base = isNaN(d.getTime()) ? new Date() : d;
-    var y = base.getFullYear();
-    var start = base.getMonth() >= 3 ? y : y - 1;
+    var t = d.getTime();
+    var base = isFinite(t) ? t : Date.now();
+    var ist = new Date(base + 330 * 60000);
+    var y = ist.getUTCFullYear();
+    var start = ist.getUTCMonth() >= 3 ? y : y - 1;
     return start + "-" + String(start + 1).slice(2);
   }
   function invFmt(no, when, prefix) {
