@@ -177,6 +177,21 @@ has("guestbell.js", /var seenSet = null;/,
   "the seen list is being re-read from storage once per row again");
 has("guestbell.js", /var\(--sab, env\(safe-area-inset-bottom, 0px\)\)/,
   "the bell sheet reads only the injected inset, so its last row hides under a phone's home bar");
+// The bell borrows `.theme-toggle` for its SHAPE, and the waiter tablet hides
+// `.top-actions .theme-toggle` below 760px — a rule written for the sun/moon before this bell
+// existed. So on a phone the bell vanished with it, and it is not in that panel's ☰ drawer either.
+// It re-states its own `display` so borrowing the shape can never mean borrowing the hiding
+// (T9 sweep #7, 2026-08-22).
+has("guestbell.js", /\.top-actions \.lfh-bell[^"]*\{display:inline-flex\}/,
+  "the bell no longer re-states its own display — a panel hiding .theme-toggle on a phone hides the bell with it, and there is no drawer row to reach it by");
+{
+  // …and if a panel ever DOES give it a drawer row, this note is how the next person finds out why
+  // the rule above exists. Belt and braces: the tablet must not be hiding it by id either.
+  const tabCss = (() => { try { return fs.readFileSync(path.join(ROOT, "public/panels/tablet/style.css"), "utf8"); } catch { return ""; } })();
+  if (/#lfhBellBtn[^{]*\{[^}]*display\s*:\s*none/.test(tabCss)) {
+    fails.push("public/panels/tablet/style.css hides #lfhBellBtn outright — the owner asked for the bell on this panel specifically");
+  }
+}
 
 // ── editor/inventory.js — a read gets a ceiling too ────────────────────────────────────────────
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,

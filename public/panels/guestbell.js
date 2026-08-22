@@ -125,6 +125,22 @@
       // The button borrows the panel's own top-bar button shape (.theme-toggle exists in both
       // panels' stylesheets) so it can never look like a bolted-on third-party thing.
       ".lfh-bell{position:relative}",
+      // …BUT BORROWING THE CLASS MUST NOT MEAN BORROWING ITS HIDING (T9 sweep #7, 2026-08-22).
+      //
+      // The waiter tablet hides `.top-actions .theme-toggle` below 760px — a rule written for the
+      // sun/moon in August, before this bell existed. The bell wears that class for its shape, so on
+      // a phone it vanished with it: measured at 390px, the tablet's top bar had the connection pill
+      // and Quick order and nothing else, and the 🔔 the owner asked for on this panel specifically
+      // ("manager [and] tablet panel, both") could not be reached at all — it is not in the ☰ drawer
+      // either. The 🚩 had exactly this fault and was fixed on 2026-08-06 by giving it a drawer row;
+      // the bell arrived a week later and nobody joined the two up.
+      //
+      // A count is not a preference. The theme toggle is fine in a drawer because it is a setting you
+      // change once; a notification badge is only any use where a waiter can see it without opening
+      // anything. So it keeps its place on the bar. Same specificity as the panel's rule, injected
+      // after the stylesheet, so it wins on document order without an !important — and it re-states
+      // only `display`, so every other borrowed property still comes from the panel.
+      ".top-actions .lfh-bell,.topbar .lfh-bell{display:inline-flex}",
       ".lfh-bell-n{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;",
       "  border-radius:999px;background:#dc2626;color:#fff;font:800 10.5px/17px system-ui,sans-serif;",
       "  text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);pointer-events:none}",
