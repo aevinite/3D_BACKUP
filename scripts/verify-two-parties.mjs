@@ -15,6 +15,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { dismissTicketsFor } from "./sweep/tickets.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -56,6 +58,7 @@ const made = { orders: [], sessions: [] };
 // A free table with nothing on it at all.
 const count = must(await sb.from("settings").select("table_count").eq("restaurant_id", RID).limit(1))[0]?.table_count || 10;
 const busy = new Set([
+  ...claimedTables(),   // the tables other guards own — see scripts/sweep/fixtureTables.mjs
   ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", RID).neq("status", "closed")).map((s) => String(s.table_number)),
   ...must(await sb.from("orders").select("table_number").eq("restaurant_id", RID).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
 ]);
@@ -82,8 +85,21 @@ const openTable = async () => {
   return r.data.id;
 };
 const order = async (d, qty) => {
-  const r = await sb.rpc("lfh_staff_place_order", { p_table: T, p_items: [{ id: d.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: RID });
+  // TWO ROUNDS OF THE SAME DISH WITHIN THREE SECONDS ARE ONE ORDER TO THIS APP (sweep #6 / T28,
+  // 2026-08-22). lfh_staff_place_order carries a double-tap guard: a non-cancelled order for the same
+  // table with the same item signature in the last 3 seconds comes back
+  // `{ ok:false, duplicateWarning:true }` and NO order_id. A guard that walks a table through several
+  // rounds trips it constantly — and because nothing here read `ok`, the undefined id travelled six
+  // lines and died as `invalid input syntax for type uuid: "undefined"`, which names neither the cause
+  // nor the file. That made this guard fail intermittently: whether it passed depended on whether the
+  // previous identical round happened to be more than three seconds ago.
+  //
+  // p_confirm_duplicate is the product's own way to say "yes, another round" — it is what the waiter's
+  // own "send anyway" sends — so it is the honest thing for a script that means exactly that. The
+  // double-tap guard itself is held by verify:order-retry and verify:guest-recovery.
+  const r = await sb.rpc("lfh_staff_place_order", { p_table: T, p_items: [{ id: d.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: RID, p_confirm_duplicate: true });
   if (r.error) throw new Error(r.error.message);
+  if (!r.data || r.data.ok !== true) throw new Error(`place order on ${T} was refused: ${JSON.stringify(r.data)}`);
   made.orders.push(r.data.order_id);
   return r.data.order_id;
 };
@@ -250,6 +266,7 @@ try {
   await sb.from("customer_visits").delete().in("session_id", made.sessions);
   await sb.from("customer_devices").delete().eq("restaurant_id", RID).eq("phone", TEST_PHONE);
   await sb.from("customers").delete().eq("restaurant_id", RID).eq("phone", TEST_PHONE);
+  await dismissTicketsFor(sb, RID, made.orders);
   console.log(`\n· cleaned up ${made.orders.length} test orders, ${made.sessions.length} sessions and the test customer`);
 }
 

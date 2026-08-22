@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **142** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **144** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 142 names in their head, so in practice a person runs none of them, or reaches for
+can hold 144 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -226,6 +226,8 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | **`.vercelignore`** — adding or removing an exclusion | `npm run build` **with the folder moved out of the tree**, then move it back. Nothing else proves it: an unanchored `/editor` line once 404'd the whole manager panel on every deploy, and a grep finding no reader is not the same as a build succeeding. `/supabase` (371 files) was added this way on 2026-08-22. | nothing | no |
 | `.claude/settings.json` or a permission rule | `verify:no-ask` | reads `~/.claude/CLAUDE.md` | no |
 | anything under `scripts/` or `tests/` | `verify:test-safety` ← our own tests must not trip the app's rate limits | nothing | no |
+| anything under `scripts/` or `tests/` | `verify:guards-alive` ← **can every guard still RUN?** A dead guard looks exactly like a guard nobody ran, and neither looks like a red: no `${…}` handed to something that must resolve it (a double-quoted template is just a string — this is what killed `verify:edge-cases` for weeks), no retired panel port (:4001–:4003), every repo path a script names still exists (the `verify:cache` fault), every `verify:*` entry points at a real file, every guard is reachable, everything parses, and every app-driving guard does the app-up preflight | nothing | no |
+| a guard that places a real order, or a phantom table appeared on the manager's floor | `verify:fixtures` ← no test may leave a table on anybody's floor. Checks the 12 throwaway table names for a live order, an open session, or a stuck kitchen ticket, with an age window so a run in progress is never mistaken for a leak. `--clean` retires what it finds the way a real cancellation does (mig 190 refuses a hard delete) | `.env.local` (dev DB) | **only with `--clean`, and only these test tables** |
 | a file's line endings | `verify:ui` (check 14) | nothing | no |
 | `package.json` dependencies, or `package-lock.json` | `verify:deps` ← fails only on a **new** high/critical advisory; the parked ones are acknowledged by name inside the script | **the npm registry** (skips, never fails, when offline) | no |
 | **the owner says "check the securities" / "check security"** — or you touched a login, a permission, or anything about one restaurant seeing another's data | **`docs/SECURITY-CHECKLIST.md`** ← his own 20-point list (kept 2026-08-16) **plus** the 8 points this app needs that the list never mentions. Read its wording warning FIRST. | mixed, per row | no |

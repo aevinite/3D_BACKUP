@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const argv = process.argv.slice(2);
 const baseArg = argv.includes("--base") ? argv[argv.indexOf("--base") + 1] : null;
@@ -26,6 +27,9 @@ if (!baseArg) {
   process.exit(2);
 }
 const BASE = baseArg.replace(/\/+$/, "");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the deployed-plumbing comparison");
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "..");
 

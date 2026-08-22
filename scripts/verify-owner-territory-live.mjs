@@ -19,10 +19,14 @@
 //      run, every row deleted BY ID, and entitlements restored and compared byte-for-byte.
 //   4. ONE SIGN-IN — through the shared cached helper, so a full run can never trip a login limit.
 import { readFileSync } from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
 const RID = arg("--rid") || "00000000-0000-0000-0000-000000000001";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the owner-screens walk");
 const SHOTS = arg("--shots");
 const TAG = "zzlive" + Date.now().toString().slice(-5);
 
@@ -52,7 +56,25 @@ const created = []; let dishId = null;
 const br = await chromium.launch();
 const mk = async (o) => { const c = await br.newContext(o); c.setDefaultNavigationTimeout(150000); c.setDefaultTimeout(60000); await loginAs(c, "owner", BASE); return c; };
 const ctx = await mk({ viewport: { width: 1280, height: 900 } });
-const api = async (m, p, b) => { const r = await ctx.request.fetch(BASE + p, { method: m, headers: { "Content-Type": "application/json" }, ...(b ? { data: b } : {}) }); return { s: r.status(), j: await r.json().catch(() => null) }; };
+// ONE RETRY FOR THE FIRST HIT OF A ROUTE (sweep #6 / T28, 2026-08-22). `next dev` compiles a route the
+// first time anybody asks for it, and on a busy machine that can take longer than the 60s ceiling set
+// just above — so this guard reported "❌ the run stopped: Timeout 60000ms exceeded" 35 checks in, on
+// GET /api/owner/staff, with nothing wrong anywhere. That reads as a broken owner panel and is a
+// compiler. A cold compile happens ONCE per route per server, so one patient retry is enough, and it
+// says which route it waited for rather than leaving a Playwright stack to be interpreted.
+const api = async (m, p, b) => {
+  const send = (timeout) => ctx.request.fetch(BASE + p, {
+    method: m, headers: { "Content-Type": "application/json" }, timeout, ...(b ? { data: b } : {}),
+  });
+  let r;
+  try { r = await send(60000); }
+  catch (e) {
+    if (!/Timeout/i.test(String(e && e.message))) throw e;
+    console.log(`  · ${m} ${p} did not answer in 60s — almost certainly this dev server compiling the route for the first time. Waiting once more.`);
+    r = await send(150000);
+  }
+  return { s: r.status(), j: await r.json().catch(() => null) };
+};
 const until = async (f, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await f()) return true; } catch { /* settling */ } await new Promise((r) => setTimeout(r, 250)); } return false; };
 const disp = (s) => s.name || s.username;
 

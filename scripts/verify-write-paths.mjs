@@ -21,7 +21,12 @@
 //   node scripts/verify-write-paths.mjs
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-const env = Object.fromEntries(readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8").split("\n").filter(l => l.includes("=") && !l.trim().startsWith("#")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
+// THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
+// /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
+// sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
+// folder asserts against whatever stack THAT copy is pointed at, which may be the other backup stack
+// entirely. A check that tests something other than what you asked for is worse than no check.
+const env = Object.fromEntries(readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n").filter(l => l.includes("=") && !l.trim().startsWith("#")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
 if (new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0] !== "wnsfcizclkbobwzcxqsf") { console.error("REFUSING: not the backup DB"); process.exit(1); }
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 let ok = true; const chk = (n, p, d = "") => { console.log((p ? "  ✅ " : "  ❌ ") + n + (d ? " — " + d : "")); if (!p) ok = false; };

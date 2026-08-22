@@ -35,6 +35,8 @@
 
 import { chromium } from "playwright";
 import { loginAs as loginOnce } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 
 // Signing in occasionally times out on a busy dev server — a blip in the test rig, not in the
 // app (the same request answers in under a second by hand). One retry keeps a 54-check run
@@ -51,6 +53,9 @@ async function loginAs(ctx, role, base, creds) {
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the offline walk");
 const KEEP = args.includes("--keep");
 // Optional: the origin of scripts/slow-proxy.mjs, to also test a HANGING connection.
 const SLOW = args.includes("--slow-proxy") ? args[args.indexOf("--slow-proxy") + 1] : "";
@@ -322,7 +327,10 @@ async function refuseUnlessCacheableBuild(base) {
     "     npm run verify:offline -- --base http://localhost:4938",
     "",
   ].join("\n"));
-  process.exit(1);
+  // EXIT 2, NOT 1 — "could not run" is not "ran and found a fault" (sweep #6 / T28, 2026-08-22).
+  // This file's own words are that "nothing below was run"; answering 1 puts it in the same bucket as
+  // a real offline regression, which is exactly the confusion scripts/sweep/appUp.mjs exists to end.
+  process.exit(2);
 }
 
 async function run() {
@@ -384,6 +392,14 @@ async function run() {
       return Number.isFinite(n) && n > 0 ? n : 30;
     })();
     keys = keys.filter((k) => { const n = Number(k); return Number.isFinite(n) && n >= 1 && n <= floorCount; });
+    // …AND NEVER A TABLE ANOTHER GUARD OWNS (sweep #6 / T28, 2026-08-22). The fallback below BORROWS a
+    // table by closing its bill, which on a shared dev database means ending another lane's party
+    // mid-run — and closing a session cancels and archives every unpaid live order on it (mig 232).
+    // Measured: this took table 28 out from under verify-void-on-joined-party, which then reported a
+    // void that had destroyed a whole party. It had not; this had. scripts/sweep/fixtureTables.mjs is
+    // the list of tables that are somebody's, so they are simply not candidates.
+    const owned = new Set(claimedTables());
+    keys = keys.filter((k) => !owned.has(String(k)));
     for (const k of keys) {
       const t = tiles[k];
       if (!t || t.state === "free") {

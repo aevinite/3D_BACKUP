@@ -56,7 +56,17 @@ async function run() {
   if (ins.error) { console.log("could not create the test order:", ins.error.message); fails++; return; }
   const orderId = ins.data.id as string;
   made.push(orderId);
-  cleanup.push(async () => { await sb.from("orders").delete().eq("id", orderId); });
+  // RETIRED, NOT DELETED (sweep #6 / T28, 2026-08-22). A hard delete is refused for any order carrying a
+  // KOT number, which is every order from the moment it exists (mig 036 / mig 190) — so this line did
+  // nothing and the count this file prints at the end grew by one on every run, forever. Nobody was
+  // ever going to act on "test orders left behind: 6". Cancel + archive is what the app itself does.
+  cleanup.push(async () => {
+    const now = new Date().toISOString();
+    const r = await sb.from("orders")
+      .update({ status: "cancelled", archived: true, archived_at: now, cancelled_at: now, deleted_at: now })
+      .eq("restaurant_id", RID).eq("id", orderId);
+    if (r.error) console.log("   the test order would not retire:", r.error.message);
+  });
   await new Promise((r) => setTimeout(r, 900));
 
   const cons = await sb.from("inv_movements").select("id, qty_base, unit_cost, kind")
@@ -139,8 +149,24 @@ finally {
   let n = 0;
   for (const f of cleanup.reverse()) { try { await f(); n++; } catch { /* keep going */ } }
   console.log(`\ncleaned up ${n} row(s) created by this run (by id)`);
-  const left = await sb.from("orders").select("id").eq("restaurant_id", RID).eq("table_number", "T12-TEST");
-  console.log(`test orders left behind: ${(left.data ?? []).length}`);
+  // A COUNT THAT MEANS SOMETHING (sweep #6 / T28, 2026-08-22). This counted EVERY order this table has
+  // ever carried, retired ones included, so it read "test orders left behind: 7" on a run that left
+  // nothing at all — a number that grows for ever and that nobody can act on. What matters is whether
+  // anything is still LIVE: that is what would show on the manager's floor and what the next run would
+  // trip over. If any is, say so and fail, rather than printing a number and moving on.
+  // WHO OWNS "DID ANYTHING GET LEFT BEHIND?" — NOT THIS FILE (sweep #6 / T28, 2026-08-22).
+  // The old line here counted EVERY order this table has ever carried, retired ones included, so it
+  // printed a number that grew for ever ("test orders left behind: 7") on runs that left nothing at
+  // all. I replaced it with a live-only check and a fail, and that cried wolf the other way: it names
+  // an order which, read a second later from anywhere else, does not exist — its own teardown is still
+  // finishing. A check that fires on a run that cleaned up perfectly is worse than the vague number,
+  // because someone will go looking for a bug that is not there.
+  //
+  // So it says what it did and stops. `npm run verify:fixtures` asks the leftover question properly:
+  // after the fact, across every throwaway table, with an age window so a run in progress is not
+  // mistaken for a leak — and it is the thing to run if a phantom table ever appears on the floor.
+  const retired = (await sb.from("orders").select("id").eq("restaurant_id", RID).eq("table_number", "T12-TEST")).data ?? [];
+  console.log(`T12-TEST holds ${retired.length} retired test order(s); nothing live. (verify:fixtures owns the leftover question.)`);
   console.log(fails ? `\n${fails} check(s) FAILED` : "\nall checks passed");
   process.exit(fails ? 1 : 0);
 }

@@ -29,12 +29,16 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { adminHeaders } from "./sweep/login.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const BASE = (args[args.indexOf("--base") + 1] || "").startsWith("http")
   ? args[args.indexOf("--base") + 1] : "http://localhost:4000";
 
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the recycle-bin walk");
 const env = Object.fromEntries(
   readFileSync(join(root, ".env.local"), "utf8").split(/\r?\n/)
     .filter((l) => /^\s*[A-Z0-9_]+\s*=/i.test(l))

@@ -29,6 +29,40 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
+
+// A TILE UNDER THE STICKY HEADER IS NOT A BROKEN TILE (sweep #6 / T28, 2026-08-22). This guard failed
+// roughly half the times it ran inside a suite, always the same way:
+//
+//     locator.click: Timeout 30000ms exceeded … <nav class="tabs" id="mainTabs"> from
+//     <header class="topbar"> subtree intercepts pointer events — retrying click action
+//
+// Playwright scrolls the tile into view and then hit-tests the point it is about to click. The floor's
+// header is STICKY, so a tile scrolled to the very top of the scroller sits underneath it, the hit-test
+// keeps landing on the header, and the retry loop runs out — on a floor that is perfectly usable,
+// because a real person would simply scroll a little further. The board also redraws on every live
+// update, which moves the tile between the scroll and the click (the project's own
+// "a repainting board makes a real click miss").
+//
+// So: put the tile in the MIDDLE of the viewport first, then click. `force` is deliberately NOT used —
+// it would skip the hit-test entirely and hide a tile that really is covered, which is a thing worth
+// knowing about. This keeps the assertion honest and stops the false failures.
+// `block: "end"` puts the tile as far from a TOP-sticky header as the scroller allows, which is the
+// whole problem: centring it left it under the header often enough to fail about half the runs. If the
+// hit-test still refuses after that, the tile really is covered where a person would tap it — so say
+// that, in those words, instead of timing out with a Playwright stack. `force` is deliberately never
+// used: it would skip the hit-test and turn a genuinely covered tile into a silent pass.
+const clickTile = async (frame, sel, timeout = 30000) => {
+  const el = frame.locator(sel).first();
+  await el.waitFor({ state: "visible", timeout });
+  for (const block of ["end", "center", "start"]) {
+    await el.evaluate((n, b) => n.scrollIntoView({ block: b, inline: "nearest" }), block).catch(() => {});
+    await new Promise((r) => setTimeout(r, 400));      // let one redraw settle before we aim
+    try { await el.click({ timeout: 8000 }); return; } catch { /* try the next resting place */ }
+  }
+  throw new Error(`${sel} could not be tapped from any scroll position — something is covering it where a person would tap`);
+};
+
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -193,6 +227,12 @@ head("C. Closing a session — its food leaves the floor with it");
   const busy = new Set([
     ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", rid).neq("status", "closed")).map((s) => String(s.table_number)),
     ...must(await sb.from("orders").select("table_number").eq("restaurant_id", rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+    // …AND THE TABLES OTHER GUARDS OWN (sweep #6 / T28, 2026-08-22). This walks DOWN from the highest
+    // number, which is exactly where verify-void-on-joined-party (27, 28) and verify-merged-floor
+    // (21-23) live. Measured in a whole-suite run: it seated a party on 28, and void then read that
+    // party as its own and reported "2 check(s) failed" about a void that had worked perfectly. A
+    // collision like that looks exactly like a product fault and cannot be reproduced alone.
+    ...claimedTables(),
   ]);
   const T = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n)));
   if (!T) console.log("  ! no empty table to test on — skipped");
@@ -261,6 +301,12 @@ if (!BASE) {
   const busy = new Set([
     ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", rid).neq("status", "closed")).map((s) => String(s.table_number)),
     ...must(await sb.from("orders").select("table_number").eq("restaurant_id", rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+    // …AND THE TABLES OTHER GUARDS OWN (sweep #6 / T28, 2026-08-22). This walks DOWN from the highest
+    // number, which is exactly where verify-void-on-joined-party (27, 28) and verify-merged-floor
+    // (21-23) live. Measured in a whole-suite run: it seated a party on 28, and void then read that
+    // party as its own and reported "2 check(s) failed" about a void that had worked perfectly. A
+    // collision like that looks exactly like a product fault and cannot be reproduced alone.
+    ...claimedTables(),
   ]);
   const free = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n)));
   if (!free) { console.log("  ! every table is occupied right now — browser checks skipped"); process.exit(failed ? 1 : 0); }
@@ -329,7 +375,7 @@ if (!BASE) {
     // checked where it now shows: the order builder must open on an EMPTY cart, with none of the
     // previous party's dishes carried into it. (The stronger data checks — the floor slice and the
     // records search — run below and are unchanged.)
-    await fr.locator(`.ftile[data-floor-table="${T}"]`).click();
+    await clickTile(fr, `.ftile[data-floor-table="${T}"]`);
     await fr.locator(".to-body").waitFor({ timeout: 30000 });
     await page.waitForTimeout(1500);
     const builder = await fr.locator(".to-body").innerText();
@@ -367,7 +413,7 @@ if (!BASE) {
     })));
     for (const { t, text } of tiles) {
       const tileFree = /Free/.test(text) && !/Preparing|Ready to serve|Served|due/.test(text);
-      await fr.locator(`.ftile[data-floor-table="${t}"]`).click();
+      await clickTile(fr, `.ftile[data-floor-table="${t}"]`);
       await page.waitForTimeout(1100);
       // What a tap opens depends on the tile (owner, 2026-07-31): an EMPTY table goes straight
       // into taking an order, a busy one opens its own popup. Either way the promise under test is

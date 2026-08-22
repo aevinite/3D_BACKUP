@@ -34,6 +34,8 @@
     "verify:cancel-loss": "npx esbuild scripts/verify-cancel-loss.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-cancel-loss.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-cancel-loss.mjs",
     "verify:cancel-made": "npx esbuild scripts/verify-cancel-made.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-cancel-made.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-cancel-made.mjs",
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
+    "verify:guards-alive": "node scripts/verify-guards-alive.mjs",
+    "verify:fixtures": "node scripts/verify-fixtures-clean.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
     "verify:server-only": "node scripts/verify-server-only-imports.mjs",
     "verify:abort-guard": "node scripts/verify-abort-guard.mjs",

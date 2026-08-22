@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -26,6 +27,9 @@ const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 const argBase = (() => { const i = process.argv.indexOf("--base"); return i > -1 ? process.argv[i + 1] : null; })();
 const BASE = argBase || process.env.LFH_BASE || "http://localhost:4000";
 const ADMIN = env.ADMIN_PASSWORD;
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the staff-accounts walk");
 if (!ADMIN) throw new Error("ADMIN_PASSWORD missing from .env.local");
 // The admin gate stores sha256hex(password) in the lfh_staff_auth cookie — compute
 // it directly so we never have to round-trip (or print) the password.

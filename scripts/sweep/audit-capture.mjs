@@ -66,7 +66,12 @@ try {
     // Admin (/aevinite) uses /api/staff-login (form data, ADMIN_PASSWORD), NOT
     // panel-login — so it dodges the per-username panel-login throttle. Read the
     // secret from .env.local and POST it; never print it.
-    const env = fs.readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8");
+// THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
+// /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
+// sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
+// folder asserts against whatever stack THAT copy is pointed at, which may be the other backup stack
+// entirely. A check that tests something other than what you asked for is worse than no check.
+    const env = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
     const pw = (env.match(/^ADMIN_PASSWORD=(.+)$/m) || [])[1]?.trim();
     if (pw) await ctx.request.post(BASE + "/api/staff-login", { form: { password: pw } });
   } else if (A.role && A.user) await loginAs(ctx, A.role, BASE, { username: A.user, password: A.pass, route: A.loginroute || A.route });

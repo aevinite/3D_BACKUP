@@ -38,6 +38,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -47,6 +48,9 @@ const parseEnv = (t) =>
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 const BASE = process.env.VERIFY_BASE || "http://localhost:4000";
 const MGR = { user: process.env.VERIFY_MGR || "diagm1", pass: process.env.VERIFY_MGR_PW || "diag-mgr-2026" };
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the manager-hidden walk");
 // Width to test at: the owner checks on a phone too (VERIFY_WIDTH=390), desktop by default.
 const VIEW = { width: Number(process.env.VERIFY_WIDTH || 1280), height: Number(process.env.VERIFY_HEIGHT || 900) };
 if (!env.ADMIN_PASSWORD) throw new Error("ADMIN_PASSWORD missing from .env.local");
