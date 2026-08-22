@@ -115,8 +115,13 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404); res.end("no");
 });
-await new Promise((r) => server.listen(4327, r));
-const BASE = "http://127.0.0.1:4327";
+// PORT 0, NOT A FIXED ONE (T28 sweep, 2026-08-22). This stub used to bind 4327. Its sibling
+// scripts/verify-offline-retry.mjs already does it the right way — `listen(0, "127.0.0.1")` and read
+// the port back — and the difference matters the moment two people, or two worktrees, run this at
+// once: the second gets EADDRINUSE and the guard fails for a reason that has nothing to do with the
+// product. Nothing outside this file knows the number, so there is no reason for it to be fixed.
+await new Promise((r) => server.listen(0, "127.0.0.1", r));
+const BASE = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
