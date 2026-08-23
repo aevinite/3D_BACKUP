@@ -33,7 +33,14 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P15101`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P15601`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+
+> **Sweep #7 allocates from `P15101` in blocks of 500, one per terminal, in terminal order** —
+> T1 `P15101`–`P15600`, T2 `P15601`–`P16100`, and so on to T40 `P34601`–`P35100`. **T1's block is
+> filed** (500 rows, all executed, in `T1.md`). Each terminal moves this line forward past its OWN
+> block as it lands, so the number above is the next free id *after the blocks already filed* — if
+> two terminals bump it in the same window, the merge terminal takes the HIGHER value, never the
+> average and never the first one merged.
 
 ---
 
