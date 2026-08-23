@@ -42,6 +42,7 @@ again. Read those before reporting anything.
 >
 > | terminal | block | filed |
 > |---|---|---|
+> | T1 · the guest menu core | `P15101`–`P15600` | ✅ 500 written, 500 executed, 500 ✅ — plus all 502 of `P00001`–`P00500` re-run (499 ✅ · 3 ⏭ · **no regression**, and one long-standing `⏭` closed) |
 > | T5 · the manager panel | `P17101`–`P17600` | ✅ 500 written, 500 executed, 500 ✅ — plus all 500 of `P02001`–`P02500` re-run (499 ✅ · 1 ⏭ · **no regression**) |
 > | T5 · the owner's own follow-up run | `P35101`–`P35200` | ✅ 100 new rows for the thirteen things he asked for 2026-08-23→26, all green, plus P17101–P17600 re-run (399 ✅ · 1 expectation moved · **no regression**). Taken from the next-free mark, past every sweep-#7 block. |
 >
