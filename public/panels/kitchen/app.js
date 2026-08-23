@@ -177,7 +177,15 @@ const tname = (t) => (((state.tableNames || {})[String(t)]) || "").trim();
 // if the owner renamed table 1 to "A1", the ticket and the printed KOT must say "A1",
 // because that is what is written on the table (owner 2026-07-29). No name → the plain
 // number. Display only — every id/bill still uses the number.
-const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket header)
+// GUARDED THE SAME WAY tlong IS (T6 sweep #7, 2026-08-22). This was `tname(t) || \`T${t}\``, so an
+// order with no table — a banquet bill with the table left blank, which `orders` allows and the
+// live-board query does not exclude — put the literal **"Tnull"** in the ticket header a cook reads.
+// "Tundefined" and a bare "T" were reachable the same way. tlong() was hardened for exactly this
+// case and says "T?"; tshort() was not, so the SCREEN and the PAPER disagreed about the same ticket
+// — and the title attribute on that very span is already guarded against it, so half this line was
+// fixed and half was missed. A raw `null` on a staff screen is on verify:live's own leaked-value
+// list. Same answer as tlong now: "T?".
+const tshort = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`));   // tight spots (ticket header)
 // T7, never "Table 7" (owner, 2026-08-05: "it should always be T7"). A table with a NAME set
 // shows the name instead. One short form everywhere — panels, tickets and the printed bill.
 const tlong = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`)); // prints, toasts

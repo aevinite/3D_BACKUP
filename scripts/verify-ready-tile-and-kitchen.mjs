@@ -266,6 +266,32 @@ const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? read
     check("kitchen: the take-back forgets the stamp BEFORE it repaints",
       ur.indexOf("forgetCardHtml") >= 0 && ur.indexOf("forgetCardHtml") < ur.indexOf("render()"),
       "render() is what reads the stamp — clearing it afterwards would be a paint too late.");
+    // ── THE SCREEN AND THE PAPER MUST AGREE ABOUT A TICKET WITH NO TABLE ──────────────────────
+    // `orders.table_number` may be null (a banquet bill with the table left blank) and the
+    // live-board query does not exclude it. tlong() has always answered "T?" for that; tshort(),
+    // which is what the TICKET HEADER a cook reads goes through, used to answer the literal
+    // "Tnull" — and "Tundefined", and a bare "T". The title attribute on that same span was
+    // already guarded, so half the line was fixed and half was missed. Run both helpers, don't
+    // read them: a raw null on a staff screen is on verify:live's own leaked-value list.
+    {
+      // stop at the semicolon even when a trailing // comment follows it — otherwise the lazy
+      // match runs on and swallows the NEXT declaration, which is a syntax error, not a failure
+      const pick = (n) => { const m = js.match(new RegExp("^const " + n + " = [\\s\\S]*?;(?=[ \\t]*(?://[^\\n]*)?$)", "m")); return m ? m[0] : null; };
+      const parts = ["tname", "tshort", "tlong"].map(pick);
+      check("kitchen: the three table-label helpers are still where this guard can run them", parts.every(Boolean));
+      if (parts.every(Boolean)) {
+        // eslint-disable-next-line no-new-func
+        const { tshort, tlong } = new Function("state", parts.join("\n") + "\nreturn { tshort, tlong };")({ tableNames: {} });
+        for (const [label, v] of [["null", null], ["an empty string", ""], ["undefined", undefined]]) {
+          check(`kitchen: a ticket whose table is ${label} shows "T?" on SCREEN, never a raw value`,
+            tshort(v) === "T?", `tshort(${label}) answered "${tshort(v)}" — that goes straight into the ticket header.`);
+          check(`kitchen: …and the PAPER says the same thing for ${label}`,
+            tlong(v) === "T?", `tlong(${label}) answered "${tlong(v)}".`);
+        }
+        check("kitchen: a real table number is still shown as T<n>", tshort(7) === "T7" && tlong(7) === "T7");
+        check("kitchen: table 0 is still shown, not swallowed by a falsy test", tshort(0) === "T0" && tlong(0) === "T0");
+      }
+    }
     // the marks, as the panel actually ships them
     const m = js.match(/TAG_BADGE = \{ vip: \["[^"]*", "(#[0-9a-f]{6})"\], family: \["[^"]*", "(#[0-9a-f]{6})"\], guest: \["[^"]*", "(#[0-9a-f]{6})"\] \}/i);
     check("kitchen: the three table marks are still declared where this guard can read them", !!m);
