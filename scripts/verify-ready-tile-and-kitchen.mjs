@@ -280,7 +280,6 @@ const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? read
       const parts = ["tname", "tshort", "tlong"].map(pick);
       check("kitchen: the three table-label helpers are still where this guard can run them", parts.every(Boolean));
       if (parts.every(Boolean)) {
-        // eslint-disable-next-line no-new-func
         const { tshort, tlong } = new Function("state", parts.join("\n") + "\nreturn { tshort, tlong };")({ tableNames: {} });
         for (const [label, v] of [["null", null], ["an empty string", ""], ["undefined", undefined]]) {
           check(`kitchen: a ticket whose table is ${label} shows "T?" on SCREEN, never a raw value`,
