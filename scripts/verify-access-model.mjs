@@ -969,14 +969,22 @@ else ok("the read/write route derives every allow-list from the model");
     const generated = ALL_NODES.filter((n) => n.bind.t === "none" && n.children?.length
       && tree.includes(`id: "${n.id}"`) && new RegExp(`id: "${n.id}"[\\s\\S]{0,900}?\\.\\.\\.[A-Z_]+\\.map\\(`).test(tree));
     if (!generated.length) fail("check 51 could not find the folder built from ACTIONS — if it moved, update this guard");
+    // THE **FIRST SENTENCE**, not the whole paragraph. rowText() in AccessTree.tsx shows only the
+    // first sentence of a description over 45 words and puts the rest behind "more", so a row
+    // named only in the tail is a row the screen never mentions. The first draft of this fix put
+    // a tidy lead-in at the front and the row went from naming two of its three children to
+    // naming none — caught by opening the actual screen, not by this guard, which is why the
+    // guard now asks the same question the screen does.
     const misses = [];
     for (const f of generated) {
-      const text = (f.what || "").toLowerCase();
+      const whole = (f.what || "").trim();
+      const shown = whole.split(/\s+/).length > 45 ? (whole.split(/(?<=[.!?])\s+/)[0] || whole) : whole;
+      const text = shown.toLowerCase();
       for (const kid of f.children) {
         if (kid.leftToBuild) continue;
         const ws = sig(kid.name);
         if (ws.length && !ws.some((w) => text.includes(w.replace(/s$/, ""))))
-          misses.push(`"${f.name}" never mentions its own row "${kid.name}"`);
+          misses.push(`"${f.name}" never mentions its own row "${kid.name}" in the sentence the ROW shows`);
       }
     }
     if (misses.length) fail(`a folder whose rows are generated has a stale description: ${misses.join("; ")}`);

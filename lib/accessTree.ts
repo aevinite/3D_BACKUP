@@ -881,8 +881,13 @@ export const SECTIONS: Section[] = [
         // reading the folder was told the wrong thing about the row underneath it. Add the row's
         // words here in the same commit that adds the row; `verify:access` check 51 refuses a
         // child this sentence never mentions.
+        //
+        // AND IT HAS TO BE THE **FIRST** SENTENCE. rowText() in components/admin/AccessTree.tsx
+        // shows only the first sentence of any description over 45 words, with the rest behind
+        // "more" — so a tidy lead-in ("What every manager starts with.") is all the ROW itself
+        // would say, and the row would be less use than before. One sentence, all three rows.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
-        what: "What every manager in this restaurant starts with. The money actions — reopen a bill (and for how long), and discount a bill (and up to how much) — plus whether their screen may be the one that prints this restaurant’s paper. There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
+        what: "What every manager in this restaurant starts with: the money actions — reopen a bill (and for how long), and discount a bill (and up to how much) — plus whether their screen may be the one that prints the paper. There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
         children: [
           ...ACTIONS.map(mgrAction),
           {
