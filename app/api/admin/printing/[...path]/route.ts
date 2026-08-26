@@ -12,8 +12,9 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
   agentsView, createAgent, readRoutes, writeRoutes, waitingCount, mintAgentToken,
-  PRINT_KINDS, isPrintKind, HELPER_STALE_MS,
+  PRINT_KINDS, isPrintKind, HELPER_STALE_MS, ROUTE_PANELS,
 } from "@/lib/printHelpers";
+import { managerGrantValue } from "@/lib/accessTree";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
 
@@ -66,8 +67,40 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     const recent = ((await sb.from("print_jobs")
       .select("id, kind, status, printer, printed_by, attempts, error, created_at, done_at")
       .eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(12)).data || []);
+    // ── WHO can be picked as the printing SCREEN, and WHICH PC ────────────────────────────────
+    // The owner asked to choose the panel, the person and the machine ("which particular manager…
+    // which owner panel… which PC will be open"). All three lists are read from real rows, so the
+    // pickers can only ever offer people and machines that exist:
+    //   · people — this restaurant's staff, with the roles that can stand at each panel, and for a
+    //     manager ONLY if their own "May be the printer" permission is on (accessTree "print_here").
+    //     A person switched off is not offered, which is what makes that permission mean something.
+    //   · devices — the screens that have actually been the printer before (print_stations), so "that
+    //     same PC" is a thing he recognises rather than a hex id he has to guess at.
+    const staff = ((await sb.from("staff_users").select("id, name, username, role, active")
+      .eq("restaurant_id", rid).order("role")).data || []) as
+      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null }[];
+    // The manager side of that permission, read the way every other route reads one: the stored value
+    // if the admin set it, else what the Access screen shows as the default (managerGrantValue).
+    const perms = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as
+      { manager_permissions?: Record<string, unknown> | null } | null;
+    const mgrPerm = managerGrantValue("print_here", (perms?.manager_permissions || {})["print_here"]);
+    const people = staff.filter((u) => u.active !== false).map((u) => {
+      const role = String(u.role || "");
+      const panels = role === "kitchen" ? ["kitchen"]
+        : role === "manager" ? (mgrPerm ? ["manager"] : [])
+        : role === "owner" ? ["owner", "manager"]
+        : role === "tablet" || role === "waiter" ? ["tablet"] : [];
+      return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
+    }).filter((u) => u.panels.length);
+    const devices = ((await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
+      .eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(12)).data || []);
+
     return NextResponse.json({
       agents, routes, waiting, recent, kinds: PRINT_KINDS, staleMs: HELPER_STALE_MS,
+      panels: ROUTE_PANELS, people, devices,
+      // Stated so the screen can say it rather than implying it: a manager whose permission is off is
+      // missing from `people` on purpose, and this is the link that explains where to switch it on.
+      managerMayPrint: mgrPerm,
       printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true, target: s.kot_print_target || "kitchen" },
     });
   }

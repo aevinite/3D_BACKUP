@@ -85,9 +85,33 @@ check(/withPaper/.test(docs) && /@page\{size:/.test(docs) && /already declares/.
 check(/helperFor/.test(kroute) && /screenPrints/.test(kroute) && /autoPrintKot: autoOn && screenPrints/.test(kroute),
   "the kitchen board stands down when a helper owns the tickets",
   "the kitchen screen prints again alongside a helper: the same ticket then comes out in two rooms, and the screen's copy is the one in the wrong one");
-check(/refused: "helper"/.test(kroute),
+// ASSERT THE RULE, NOT THE WORDING (this file's own header, and the third time it has bitten). The
+// refusal used to be the literal `refused: "helper"`; since the who-prints resolver landed it is
+// computed from screenMayPrint's reason. What matters is that the CLAIM asks the resolver at all — a
+// gate that lives only in the board read is a gate a stale tab walks straight through.
+check(/screenMayPrint\(/.test((code(kroute).split('"print-jobs" && b === "claim"')[1] || ""))
+  && /refused/.test((code(kroute).split('"print-jobs" && b === "claim"')[1] || "")),
   "…and a tab opened BEFORE the route was set is refused at the claim too",
-  "the claim no longer refuses a helper-owned ticket — a stale tab walks straight through a gate that lives only in the board read");
+  "the kitchen claim no longer asks who may print — a stale tab walks straight through a gate that lives only in the board read");
+
+// ── WHO PRINTS IS THE OWNER'S CHOICE, down to the person and the PC (2026-08-26) ──────────────
+// "If I want to print from kitchen panel or maybe from manager panel and which particular manager…
+// which owner panel… which PC will be open and from that same PC — all will be decided by me."
+check(/via\?: RouteVia/.test(lib) && /panel\?: RoutePanel/.test(lib) && /person\?: string/.test(lib) && /device\?: string/.test(lib),
+  "a route can name a computer OR a screen — and if a screen, which panel, which person, which PC",
+  "the route can only name a computer again: the owner's choice of panel/person/device is gone");
+check(/export function screenMayPrint/.test(lib) && /other_person/.test(lib) && /other_device/.test(lib),
+  "…and ONE function answers 'may this screen print', so two screens cannot disagree",
+  "the who-prints answer has been inlined somewhere — two copies of that question is how two screens print one ticket");
+check(/screenMayPrint\(/.test(code(kroute)) && /screenMayPrint\(/.test(code(read("app/api/editor/[...path]/route.ts"))),
+  "…and both the kitchen and the manager routes obey it",
+  "a panel decides for itself again whether it may print");
+check(/print_here/.test(read("lib/accessTree.ts")) && /managerCan\(g, rid, "print_here"\)/.test(code(read("app/api/editor/[...path]/route.ts"))),
+  "…a person's own 'May be the printer' permission exists AND is enforced server-side",
+  "'May be the printer' is a row that reads nowhere — exactly what mark_paid and print_invoice did");
+check(/panel: "printing"/.test(read("lib/accessTree.ts")) && /what === "printing"/.test(read("components/admin/AccessTree.tsx")) && /aevinite\/access/.test(read("app/aevinite/printing/page.tsx")),
+  "…and the two boards point at each other (Access ↔ Printing), so neither reads as the whole answer",
+  "Access & permissions and the Printing menu no longer refer to each other — the owner asked for these two boards to be in sync");
 check(/helper\.owned\) return \{ mayPrint: false/.test(eroute) || /if \(helper\.owned\) return \{ mayPrint: false/.test(eroute),
   "the manager screen stands down as well, backup path included",
   "the counter screen can still print a helper-owned ticket");

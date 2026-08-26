@@ -30,7 +30,7 @@ import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, statio
 // printer the address book names; a screen prints on whatever that machine's default printer is. Both
 // printing means the same ticket in two places — and the screen's copy is the one that comes out in
 // the wrong room.
-import { helperFor } from "@/lib/printHelpers";
+import { helperFor, targetFor, screenMayPrint } from "@/lib/printHelpers";
 
 export const dynamic = "force-dynamic";
 
@@ -272,12 +272,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // A MANUAL REPRINT IS DIFFERENT and always reaches the kitchen: the manager pressing "Reprint
       // in kitchen" is naming this printer on purpose, whatever the automatic routing says.
       const kotTarget = String((must(settings) || {} as { kot_print_target?: string }).kot_print_target || "kitchen");
-      const kitchenMayAuto = kotTarget === "kitchen" || kotTarget === "both";
+      let kitchenMayAuto = kotTarget === "kitchen" || kotTarget === "both";
       // …AND WHETHER A COMPUTER HAS THE JOB AT ALL. With a helper named for kitchen slips, this
       // screen goes back to being an ordinary display: it stops being offered tickets, stops
       // healing, and says on its own printer sheet where the paper is coming out instead.
       const helper = await helperFor(rid, "kot");
-      const screenPrints = kitchenMayAuto && !helper.owned;
+      // WHO PRINTS, decided in ONE place (lib/printHelpers.screenMayPrint) — and now it can be narrowed
+      // to a panel, a person and a device, because the owner asked to decide exactly that: "if I want
+      // to print from kitchen panel or maybe from manager panel and which particular manager… which PC
+      // will be open and from that same PC the print is going to happen".
+      const target = await targetFor(rid, "kot");
+      // The same precedence as the manager route: a route that NAMES a panel is the decision, and the
+      // old coarse kitchen|counter|both target only speaks when no route does. Without this a route
+      // saying "the kitchen screen prints" was still vetoed by an admin who had set "counter" months
+      // ago — two settings, opposite answers, and the newer one losing (printing sweep, 2026-08-26).
+      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
+      const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
+      const screenPrints = kitchenMayAuto && mayI.ok;
       const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
       // WHICH ORDERS THE QUEUE HAS IN HAND — the panel's self-healing net (see lib/printQueue.ts →
       // ordersAlreadyQueued). Only asked when auto-print is on AND the panel is new enough to use
@@ -311,6 +322,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Who really prints, so the sheet can say "Kitchen slips print at: Shop's computer →
         // Printer_POS_80" instead of leaving a cook to guess why this screen is quiet.
         helper,
+        // …and, when a SCREEN is the chosen printer, WHICH screen — so a kitchen tablet that is not
+        // the named one says "printing happens on Rishi's manager screen" rather than going silent.
+        printTarget: target, printRefused: mayI.ok ? null : mayI.why,
         // { "1": "A1", … } — display names only; every id/bill still uses the number.
         tableNames: ((must(settings) || {}) as { table_names?: Record<string, string> }).table_names || {},
         // { "6": "vip", … } — which tables are marked, so a cook can see a priority ticket.
@@ -616,9 +630,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // board read, because a panel that was open BEFORE the route was set still holds tickets it
       // believes are its to print: a gate that lives only in the board read is a gate a stale tab
       // walks straight through. The reason travels back so the sheet can say where it prints now.
-      const own = await helperFor(rid, "kot");
-      if (own.owned) {
-        return ok({ won: [], refused: "helper", helper: own, station: await stationView(rid, dev) });
+      // The claim is checked against the same resolver, with the person and device taken from the
+      // REQUEST — never from the panel's word for itself. A tab opened before the setting changed
+      // walks into this, which is the whole reason the check lives here as well as on the board read.
+      const tgt = await targetFor(rid, "kot");
+      const may = screenMayPrint(tgt, { panel: "kitchen", personId: g.user?.id || null, deviceId: dev });
+      if (!may.ok) {
+        return ok({ won: [], refused: may.why === "computer" ? "helper" : may.why, printTarget: tgt,
+                    helper: await helperFor(rid, "kot"), station: await stationView(rid, dev) });
       }
       const gate = await mayClaim(rid, {
         deviceId: dev, panel: "kitchen", label: "Kitchen screen",

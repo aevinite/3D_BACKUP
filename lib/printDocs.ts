@@ -166,8 +166,49 @@ export function testHtml(o: { restaurant: string; printer: string; agent: string
 export function withPaper(html: string, paper: { wMm: number; hMm: number } | null): string {
   if (!paper) return html;
   if (/@page\s*\{[^}]*\bsize\s*:/.test(html)) return html;
-  const rule = `<style>@page{size:${paper.wMm}mm ${paper.hMm}mm;margin:0}</style>`;
-  return html.includes("</head>") ? html.replace("</head>", rule + "</head>") : rule + html;
+  // ── AND THE INK MUST FIT THE ROLL (found by the printing sweep, 2026-08-26) ─────────────────
+  // The document's column is 66mm, which is right for the 80mm roll it was designed on. On a 58mm
+  // roll the sweep measured ink reaching 52.9mm against about 52mm of printable width — so the
+  // right-hand edge of every bill would have been shaved off at any restaurant using narrow rolls,
+  // and nothing on screen would have shown it.
+  //
+  // So a narrow roll narrows the column: the paper minus ~8mm for the two unprintable edges, and
+  // never WIDER than the 66mm the layout was drawn for (a 3-inch roll keeps today's paper exactly).
+  // Big paper is untouched — a banquet sheet declares its own size and returns above.
+  // The head cannot reach the paper's edges. The ZJ-80's own driver file says how far: an 79.7mm sheet
+  // has an imageable area of 4.9–74.8mm, i.e. ~4.9mm unreachable on EACH side. So the widest ink a roll
+  // can take is its width minus 9.8mm — 48mm on a 58mm roll — and 66mm stays 66mm on an 80mm roll,
+  // which is the paper he already approved. Measured, not guessed: with `- 8` instead the sweep still
+  // put ink 1.4mm past where the head stops.
+  const EDGE = 4.9;
+  const ink = Math.min(66, Math.max(30, Math.round((paper.wMm - EDGE * 2) * 10) / 10));
+  const narrow = ink < 66
+    // CENTRED, and measured rather than reasoned. The head's imageable area starts ~4.9mm in from the
+    // paper edge and is `ink` wide, so a column centred in the page lands exactly on it: 4.9–52.9mm of
+    // a 57.8mm roll. Anchoring it LEFT instead (which I tried first, reasoning that the chain crops
+    // from the left) pushed 4.9mm of every line off the head — the sweep measured 43.0mm of ink where
+    // the document laid out 48mm. Centred, all 48mm arrives.
+    ? `html body{width:${ink}mm !important;margin:0 auto !important}` +
+      // A table laid out for a wider column will otherwise push its last figure out of view.
+      `table{width:100% !important}` +
+      // 12.5px in a 50mm column is about 26 characters a line; a dish name wraps rather than clips.
+      `body,td,.t,.kv,.sub{word-break:break-word}` +
+      // …but a COLUMN HEADING must never wrap: on a 58mm roll "AMT" broke into "AM / T" over two lines
+      // (seen on the virtual printer's paper). A heading is three or four letters — it is allowed to be
+      // a point smaller and it is not allowed to break.
+      `thead td,thead th{font-size:10px !important;white-space:nowrap !important;letter-spacing:0 !important}`
+    : "";
+  const rule = `<style>@page{size:${paper.wMm}mm ${paper.hMm}mm;margin:0}` +
+    (narrow ? `@media print{${narrow}}` : "") + `</style>`;
+  // ── IT MUST GO LAST, NOT FIRST ────────────────────────────────────────────────────────────────
+  // billdoc's documents have NO `</head>` — the old line fell through to `rule + html`, which put this
+  // BEFORE the document's own `body{width:66mm !important}`. Equal specificity, both !important, so the
+  // later one wins: the 66mm column won, and a 58mm roll printed a bill laid out for 80mm and CHOPPED
+  // — "LITTLE FRENCH HOUS", the amounts column gone. The virtual printer's picture is what showed it;
+  // the ink measurement alone said "fits", because clipped ink always fits.
+  // So it is appended at the very END, after every stylesheet the document carries.
+  if (html.includes("</body>")) return html.replace("</body>", rule + "</body>");
+  return html + rule;
 }
 
 /**
