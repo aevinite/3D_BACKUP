@@ -516,6 +516,21 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     + "something that does not happen");
 }
 
+// ── 14 · A HEADING WITH NOBODY UNDER IT SAYS SOMETHING ───────────────────────────────────────
+// Search for a DISABLED person and every match lands in the group below, so the card read
+// "Team", blank, "Disabled · 1 — cannot sign in". The person was found; the first thing the
+// owner's eye met was an empty heading under their own search.
+{
+  const src = read(ROSTER);
+  if (src) {
+    const bare = code(src);
+    if (/team\.length > 0 && working\.length === 0/.test(bare))
+      ok("a search that matched only disabled people says so, instead of leaving the Team heading empty");
+    else bad("the Team heading can render with no rows and no sentence under it — a found person reads "
+      + "as 'not found' until the owner scrolls past the empty heading");
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) console.log("\n❌ FAIL — the owner's cockpit is telling him something that did not happen.");
 else console.log("\n✅ PASS — Menu, Team and Settings each say what actually happened");

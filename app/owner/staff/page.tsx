@@ -573,11 +573,25 @@ export default function OwnerStaffPage() {
 
             {/* ── TEAM tab: the roster ───────────────────────────────────────────── */}
             {tab === "team" && <>
+            {/* A HEADING WITH NOTHING UNDER IT SAYS NOTHING (T13 sweep, 2026-08-27 — read the
+                screenshot). Search for someone who is DISABLED and every match lands in the group
+                below, so this read: "Team", then blank, then "Disabled · 1 — cannot sign in". The
+                person WAS found and the header said "1 of 2 shown", but the first thing the owner's
+                eye meets is their own search under a heading with no one beneath it, which reads as
+                "not found" until they carry on down the card. So when a search has matched only
+                people who cannot sign in, say that in the gap instead of leaving it empty. */}
             <div className="ost-section-t" style={{ marginTop: 16 }}>Team</div>
             <div className="ost-team">
               {team.length === 0 && (
                 <div className="adm-empty" style={{ padding: "10px 0" }}>
                   {needle ? `Nobody here matches “${q.trim()}”.` : "No staff yet — add the first below."}
+                </div>
+              )}
+              {team.length > 0 && working.length === 0 && (
+                <div className="adm-empty" style={{ padding: "10px 0" }}>
+                  {needle
+                    ? `Nobody working matches “${q.trim()}” — the ${disabled.length === 1 ? "match" : "matches"} below cannot sign in.`
+                    : "Nobody here can sign in right now — everyone is disabled, below."}
                 </div>
               )}
               {working.map(personRow)}
