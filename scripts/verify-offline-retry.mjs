@@ -177,7 +177,9 @@ async function run() {
       await sleep(800);
       const title = (await page.locator("#title").textContent().catch(() => "")) || "";
       const why = (await page.locator("#why").textContent().catch(() => "")) || "";
-      /This device is offline|can't reach the internet/i.test(`${title} ${why}`)
+      // Any wording that names THE DEVICE. Shortened on 2026-08-26 when the owner said the screen
+      // had too much text; the rule being asserted — blame the right side — is unchanged.
+      /This device is offline|can't reach the internet|Not connected to Wi-Fi|No internet right now/i.test(`${title} ${why}`)
         ? ok(`with the device offline it blames the device: "${title.trim()}"`)
         : bad("with the device offline it did not name the device", JSON.stringify(`${title} ${why}`.slice(0, 120)));
       !/this one is on us/i.test(`${title} ${why}`)
@@ -212,7 +214,7 @@ async function run() {
       verdict
         ? ok(`with our server reachable but unhealthy it says it is on us: "${verdict.trim().slice(0, 70)}"`)
         : bad("it never reached the 'the app isn't answering' verdict", "it may still be blaming the internet");
-      !/This device is offline/i.test(verdict)
+      !/This device is offline|Not connected to Wi-Fi|No internet right now/i.test(verdict)
         ? ok("and it does not blame the person's internet")
         : bad("it blamed the internet while our own server was answering");
       await ctx.close();
@@ -220,10 +222,18 @@ async function run() {
 
     // ══ 5 · IT NEVER STATES A CAUSE BEFORE IT HAS TESTED ONE ══════════════════════════════
     {
+      // ASSERT THE SLOT IS EMPTY, not that one particular holding phrase is present. It used to
+      // look for "Checking what's wrong...", which was cut in the 2026-08-26 trim — and a shorter
+      // screen then read as "names a cause it has not tested". The rule is stronger this way: the
+      // cause element ships EMPTY, so there is nothing there to be wrong, and the signal label
+      // carries a neutral holding word until something has actually been measured.
       const html = readFileSync(join(ROOT, "public/offline.html"), "utf8");
-      /Checking what's wrong/.test(html)
-        ? ok("the page starts as \"Checking what's wrong...\", not with a guess")
-        : bad("the page's initial state names a cause it has not tested");
+      const causeEmpty = /<p class="why-line" id="why">\s*<\/p>/.test(html);
+      const holding = /id="m-label">Checking/.test(html);
+      causeEmpty && holding
+        ? ok("the page ships with an EMPTY cause and a neutral \"Checking…\", not with a guess")
+        : bad("the page's initial state names a cause it has not tested",
+          `cause element empty: ${causeEmpty}, neutral holding label: ${holding}`);
       // Nothing off-origin can be fetched by definition, so nothing may be referenced.
       const foreign = [...html.matchAll(/(?:src|href)\s*=\s*["'](https?:)?\/\//g)];
       foreign.length === 0
@@ -233,7 +243,7 @@ async function run() {
       const webkitBlur = /-webkit-backdrop-filter/.test(html);
       !webkitBlur ? ok("the frosted card uses one unprefixed backdrop-filter") : bad("a -webkit-backdrop-filter was added — the build drops the whole declaration");
       // The reassurance must stay the honest form.
-      /already saved on this device is safe/i.test(html)
+      /already saved[^.]*is safe/i.test(html)
         ? ok("the reassurance promises only what is actually guaranteed")
         : bad("the honest reassurance wording is gone");
       !/Nothing you did is lost/i.test(html)
@@ -249,7 +259,7 @@ async function run() {
       const sw = readFileSync(join(ROOT, "public/sw.js"), "utf8");
       /id="home"/.test(sw) ? ok("the worker's inline last-resort page carries #home") : bad("the worker's inline page lost its way out (#home)");
       /id="retry"/.test(sw) ? ok("…and #retry") : bad("the worker's inline page lost #retry");
-      /already saved on this device is safe/.test(sw)
+      /already saved[^.]*is safe/.test(sw)
         ? ok("…and the same honest reassurance")
         : bad("the worker's inline page no longer matches the honest reassurance wording");
     }
