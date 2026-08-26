@@ -66,3 +66,64 @@ offer no "Go to that panel" button.
 - The panels grid's sideways scroll and the Operations table's — T7's deliberate call (you read
   down those columns). Only the two-column key -> value lists were changed.
 - R18: no second/deep health check was added, and `/api/health` was not touched.
+
+---
+
+# SWEEP #7 — the same territory, re-run and re-planned (2026-08-27)
+
+Branch `sweep7/t17-admin-health` · dev server 4217 · nothing written to any database.
+
+## The re-run of sweep #6's 500 rows
+
+**495 ✅ · 4 ⏭ · 1 ❌ — and ONE REGRESSION.**
+
+**REGRESSION · `P08095`** — *"Marking resolved flips the whole repeat-group locally the same way
+the server does."* Green in sweep #6, red now. `/api/admin/resolve-error` moved to the shared
+`errorSig()` group (it folds away order ids, row counts and the browser's own
+`Uncaught ReferenceError:` prefix); `app/aevinite/logs/page.tsx` was left comparing `detail`
+character for character. Measured on the live error feed: of 42 groups, 3 hold rows whose text
+differs — the worst being **nine rows of one fault written two ways**. So one press of "Mark
+resolved" cleared nine rows on the server and struck through only the exact matches. Fixed as
+**item 2**, and the guard now asserts the shared function *by name* rather than the client's own
+shape — which is exactly why it did not catch this.
+
+**Newly red · `P08201`** — `app/api/admin/custlog/route.ts:33` reads
+`sb.from("blocklist").select("*")`: ten columns for the six the Customers tab renders, one of them
+a banned guest's `unban_phone`. Bounded at 200 rows, so the cost is small. **Not fixed here** —
+that file belongs to the admin-API terminals. Carried into the chat report as a decision item.
+
+**11 expectations moved** — System health was rebuilt on 2026-08-20 (R42), so the pill strip those
+rows were written against is gone. The rules they protect all still hold, on the check rows that
+replaced it; each row says so and keeps its id.
+
+**Two handoffs from sweep #6 are now BUILT** — H1 (System health and Usage & cost disagreeing
+about the staff count: the health route now filters to live restaurants) and H2 (one fault sitting
+on the board as two tiles: `errorSignature.ts` now strips the browser's prefix). **H3 is still
+open** — errors recorded with a null `restaurant_id`, so those tiles cannot be narrowed by the
+picker and offer no "Go to that panel".
+
+## The 500 new rows · `P23101`–`P23600`
+
+**499 ✅ · 1 ❌** (that one is `P23269`, the same `select("*")` as `P08201`).
+
+Six problems found, all fixed, one commit each:
+
+| # | severity | who is worse off | confirmed? | fixed in |
+|---|---|---|---|---|
+| 1 | **high** | the admin — "0 open complaints" over a list the page could not read, and "…" for ever beside it | **watched happen** (both routes made to fail) | `repair/page.tsx` |
+| 2 | **high** | the admin — presses Resolve, watches half the group stay red, cannot tell if it worked | **proved on the live feed** (9 rows / 2 texts) | `logs/page.tsx` |
+| 3 | medium | the admin — 8 reports he set to come back tomorrow look exactly like live crashes | **watched happen** (8 of 200 rows) | `logs/page.tsx` |
+| 4 | low | the admin — "8 reports" under a banner saying one restaurant; 7 were hers | **watched happen** (8 vs 7) | `repair/page.tsx` |
+| 5 | low | the admin — a list, a count and a button that mean three different sets | code-read (no fix records on this stack) | `repair/page.tsx` |
+| 6 | low | everyone — 28 panel cells in the alarm colour for a state the page calls normal | **measured**, both skins | `health/page.tsx` |
+
+Guard: `npm run verify:admin-health` now holds **21** fixes. Each item's assertions are inside
+that item's own commit, so vetoing an item takes its guard with it.
+
+## Two traps recorded so nobody re-derives them
+
+1. **A dev-server page fires every request twice** — Next 16 defaults `reactStrictMode` on. Judge
+   the shape of the calls, never the count.
+2. **Route interception is defeated by the service worker** — a `page.route` handler does not see
+   a request the app's own service worker answers. Five fault-injection checks in this run were
+   falsely green until the context was opened with `serviceWorkers: "block"`.
