@@ -2106,7 +2106,31 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    ========================================================================== */
 
 /* a soft warm glow behind the whole app instead of a flat fill */
-body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--bg) 58%) fixed; }
+/* ── THE BLACK BAND AT THE BOTTOM OF A SCROLLED PHONE (owner, 2026-08-26, with a photo) ──────
+   He scrolled the floor on his phone and a dark strip appeared under the last row of tiles, above
+   the Android nav bar. Measured on an A35 (360x780, dpr3): the panel's own `body` computed to
+   `background-color: rgba(0,0,0,0)` — TRANSPARENT — while the page hosting the frame is
+   `rgb(10,12,16)`. So the near-black host was showing THROUGH the panel.
+   The cause is this very line, and it is the classic shorthand trap: `background: <gradient>`
+   resets `background-color` to transparent and sets only an IMAGE. With `fixed`, that image is
+   sized to the viewport — so anywhere the image does not reach (past the fold on a long scroll,
+   and the safe-area inset region under an edge-to-edge nav bar) nothing is painted at all.
+   TWO belts, on purpose:
+     · the colour is now the last LAYER of the shorthand, so the shorthand can never leave the
+       body without one again;
+     · and `html` carries it too, because the canvas takes its colour from `html` first — that is
+       what covers the inset strip the body box never reaches.
+   Do not collapse these back into one bare gradient. */
+html { background: var(--bg); }
+/* Written as three LONGHANDS, not the shorthand. `background: <gradient>` is what silently blanked
+   the colour in the first place, and a `var()` colour tucked into the last layer of a shorthand
+   measured as transparent when this fix was checked — so the colour gets its own declaration where
+   nothing can reset it, and the glow gets its own. */
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--bg) 58%);
+  background-attachment: fixed;
+}
 
 /* topbar: gentle gradient + lift it off the page with a shadow */
 .topbar {
@@ -3653,7 +3677,15 @@ html[data-theme="light"]{
   --shadow-md:0 16px 36px rgba(60,45,20,.13);
 }
 /* Hardcoded dark surfaces → light equivalents. */
-html[data-theme="light"] body{ background:radial-gradient(1100px 560px at 78% -12%, #fdfaf4 0%, var(--bg) 58%) fixed; }
+/* LONGHANDS HERE TOO — and this is the rule that was actually biting, because LIGHT is the
+   panels' default skin. It restated the shorthand and so re-blanked the colour the dark rule
+   above had just been given. Same trap, one screen further down the file. */
+html[data-theme="light"] { background: var(--bg); }
+html[data-theme="light"] body {
+  background-color: var(--bg);
+  background-image: radial-gradient(1100px 560px at 78% -12%, #fdfaf4 0%, var(--bg) 58%);
+  background-attachment: fixed;
+}
 html[data-theme="light"] .topbar{ background:linear-gradient(180deg,#ffffff,var(--panel-2)); box-shadow:0 1px 0 rgba(0,0,0,.02), 0 6px 18px rgba(60,45,20,.08); }
 html[data-theme="light"] .tbox.tot .tbox-ico{ background:var(--panel-2); }
 html[data-theme="light"] .tbl-free{ border-color:var(--line); }
