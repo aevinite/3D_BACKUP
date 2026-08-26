@@ -670,6 +670,9 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   const [showResolved, setShowResolved] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState(false);
+  // A refusal on ONE ticket — separate from `err`, which means the whole list failed to load and
+  // takes the card over. See setStatus below.
+  const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setErr(false);
@@ -680,15 +683,28 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   }, [restaurantId]);
   useEffect(() => { load(); }, [load]);
 
+  // ── A REFUSED CHANGE HAS TO SAY SO (T16 sweep #7, 2026-08-27) ────────────────────────────────
+  // This flipped the chip optimistically and, on a refusal, called load() — which quietly put the
+  // chip back. From the admin's side that is a tap that appeared to work and then undid itself
+  // with no reason given, which is the shape the tap rule exists to stop ("no silent return on a
+  // user action — hold it, or refuse visibly"). The row still reverts, because the server is the
+  // truth; what is added is the sentence saying why, in the card the admin is already looking at.
   const setStatus = async (id: string, status: "resolved" | "open") => {
-    setBusy(id);
+    setBusy(id); setNote(null);
     setTickets((prev) => (prev || []).map((t) => (t.id === id ? { ...t, status } : t))); // optimistic
+    const refused = (why: string) => {
+      setNote(`Couldn't mark that ticket ${status === "resolved" ? "resolved" : "open again"} — ${why} It has been put back.`);
+      load();
+    };
     try {
       const r = await fetch("/api/owner/issues?scope=all", {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }),
       });
-      if (!r.ok) load();
-    } catch { load(); }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        refused(d.error || `the server answered ${r.status}.`);
+      }
+    } catch { refused("there was no answer from the server."); }
     finally { setBusy(null); }
   };
 
@@ -699,14 +715,28 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   // COMPACT when there's nothing to act on: no big empty "no tickets 🎉" box — just a slim
   // all-clear line (owner 2026-07-24: "why is the empty box there"). The full card only
   // appears when there ARE open tickets, or when the admin expands the resolved history.
+  // A refusal, said in the card the admin is already looking at. role="alert" so it is announced
+  // even though the chip has quietly gone back to where it was.
+  const refusalNote = note ? (
+    <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 10, padding: "8px 11px", borderRadius: 9, fontSize: 12.5, lineHeight: 1.5,
+      color: "var(--adm-danger)", border: "1px solid color-mix(in srgb, var(--adm-danger) 45%, transparent)", background: "color-mix(in srgb, var(--adm-danger) 10%, transparent)" }}>
+      <i className="fas fa-circle-exclamation" style={{ marginTop: 2 }} aria-hidden="true" />
+      <span style={{ flex: 1 }}>{note}</span>
+      <button className="adm-btn" style={{ padding: "2px 9px", fontSize: 11.5 }} onClick={() => setNote(null)}>Got it</button>
+    </div>
+  ) : null;
+
   if (tickets !== null && !err && open.length === 0 && !showResolved) {
     return (
-      <div className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, padding: "12px 16px" }}>
-        <i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #16a34a)" }} aria-hidden="true" />
-        <span style={{ fontSize: 13.5, fontWeight: 600 }}>No open issues</span>
-        {resolved.length > 0
-          ? <button className="adm-btn" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setShowResolved(true)}>Show resolved ({resolved.length})</button>
-          : <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>staff reported nothing</span>}
+      <div className="adm-card" style={{ marginBottom: 14, padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #16a34a)" }} aria-hidden="true" />
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>No open issues</span>
+          {resolved.length > 0
+            ? <button className="adm-btn" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setShowResolved(true)}>Show resolved ({resolved.length})</button>
+            : <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>staff reported nothing</span>}
+        </div>
+        {refusalNote}
       </div>
     );
   }
@@ -725,6 +755,7 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
         )}
       </div>
       <p className="hint">Problems this restaurant&apos;s staff reported from the manager, kitchen or waiter tablet.</p>
+      {refusalNote}
       {tickets === null ? (
         <div className="adm-empty">Loading tickets…</div>
       ) : err ? (
