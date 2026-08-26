@@ -248,6 +248,14 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// BACK CLOSES WHAT IS OPEN BEFORE IT OFFERS TO LEAVE (owner, 2026-08-26).
+// With a search running, one press of Back left the search untouched and put the Stay-or-Leave
+// dialog over it — the gesture every phone user reaches for to dismiss something offered to throw
+// the diner off the menu instead. The search is a back layer now, like the two nav pickers.
+check("P15602", "an open search is a back-step, so back does not offer to leave the site", () =>
+  rx(F.menuView, /useBackClose\("menu-search", !!q, \(\) => setSearchQuery\(""\)\)/) &&
+  has(F.menuView, 'from "@/lib/backStack"'));
+
 // BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
 // This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
 // 0 over the saved position before the restore could read it, so every Back landed at the top of
@@ -315,6 +323,30 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: back closes the search first, and only then offers to leave. Three steps, because the
+    // failure was subtle — the search stayed open UNDER the dialog, so only looking at both at once
+    // catches it — and because a back layer that is not released would break leaving altogether.
+    { const { c, pg } = await open("/r/french-house/menu", 6000);
+      await pg.fill("#search-input", "coffee"); await pg.waitForTimeout(1000);
+      await pg.goBack().catch(() => {}); await pg.waitForTimeout(1600);
+      const a = await pg.evaluate(() => ({ q: document.querySelector("#search-input")?.value ?? null,
+        rows: document.querySelectorAll(".search-result").length,
+        exit: /Stay|Leave/.test(document.body.innerText),
+        cards: document.querySelectorAll(".item-card").length }));
+      check("P15602", "LIVE: back with a search open clears it and stays on the menu", () =>
+        ({ ok: a.q === "" && a.rows === 0 && !a.exit && a.cards > 0, note: JSON.stringify(a) }));
+      await pg.goBack().catch(() => {}); await pg.waitForTimeout(1600);
+      const b2 = await pg.evaluate(() => /Stay|Leave/.test(document.body.innerText));
+      check("P15602", "LIVE: …and back again, with nothing open, still offers to leave", () =>
+        ({ ok: b2, note: `exit dialog shown = ${b2}` }));
+      await pg.fill("#search-input", "tea"); await pg.waitForTimeout(700);
+      await pg.fill("#search-input", ""); await pg.waitForTimeout(900);
+      await pg.goBack().catch(() => {}); await pg.waitForTimeout(1500);
+      const c3 = await pg.evaluate(() => /Stay|Leave/.test(document.body.innerText));
+      check("P15602", "LIVE: a search cleared BY HAND leaves no stale back-step behind", () =>
+        ({ ok: c3, note: `exit dialog shown = ${c3}` }));
+      await c.close(); }
+
     // BACK RETURNS THE DINER TO THE SAME DISH — the check the source assertions could not make.
     // Scroll well down, open a dish that is ALREADY on screen (tapping an off-screen one would make
     // the test itself scroll the page, which is how this was nearly mis-diagnosed), come back, and

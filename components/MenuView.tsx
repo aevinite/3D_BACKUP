@@ -43,6 +43,9 @@ import { useFeatures, refreshFeatures, getFeatures } from "@/lib/features";
 import { useRealtime } from "@/lib/useRealtime";
 // The default restaurant id, to keep restaurant #1's chrome byte-for-byte identical.
 import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
+// The phone's BACK button. A search is something the diner OPENED, so back must close it before
+// the app ever offers to leave the site — see the note at the call below.
+import { useBackClose } from "@/lib/backStack";
 
 // The card list works with the CARD shape — the full dish row minus the five detail-only fields the
 // grid never reads (long description, nutrition, ingredients, reviews, related slugs). The cached
@@ -950,6 +953,23 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   // q = the search text, tidied up (trimmed, lowercased, accent-folded).
   const q = fold(searchQuery.trim());
+
+  // BACK CLOSES THE SEARCH — IT DOES NOT OFFER TO LEAVE THE SITE (owner, 2026-08-26).
+  //
+  // *"when you click back button on serch it doesn't stop serch it ask to exit website make that
+  // also back button backable"*. Measured before the fix: with "coffee" typed, one press of Back
+  // left the search running — the box still said "coffee" and all six suggestions were still on
+  // screen — and put the Stay-or-Leave dialog over the top of it. So the one gesture every phone
+  // user reaches for to dismiss something offered to throw the diner off the restaurant's menu
+  // instead, mid-order.
+  //
+  // The exit dialog itself is fine and stays exactly as it is (checked: Stay stays, Leave leaves).
+  // The fault was that nothing told the back manager a search is an OPEN THING. Every other overlay
+  // on the guest side already writes this one line — the language and currency pickers do — and the
+  // manager keeps its own history entries in step, so back walks: close the search, then (nothing
+  // left open) ask about leaving. Clearing the box is exactly what the ✕ inside it does, so a diner
+  // gets the same result from the gesture they already know.
+  useBackClose("menu-search", !!q, () => setSearchQuery(""));
   // Get a category's display name (in the current language), accent-folded.
   const catNameOf = (slug: string) =>
     fold(localized(dbCategories.find((c) => c.slug === slug)?.name, lang));
