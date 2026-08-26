@@ -724,6 +724,40 @@ console.log("\nT11-D · printing, and the phone");
   );
 }
 
+console.log("\nT11-G · with no internet, the saved figures can still be found");
+{
+  // The scope comes from /api/owner/overview. Offline that read answers `{ error: "offline" }`
+  // (public/sw.js returns 503 rather than throwing), so the restaurant list is empty and `rid`
+  // stays "" — while every cache key on this page carries the rid. Measured on a PRODUCTION build,
+  // offline: the hub printed ₹0 / 0 bills / ₹0 avg / ₹0 GST and the chart said "Not enough data
+  // yet", over a device whose own sessionStorage held ₹13,42,142 under `money|<rid>|30d`.
+  check(
+    "the page remembers the scope the device last saw",
+    /savedRid = useRef/.test(reportsPage) && /savedRid\.current = s\.rid/.test(reportsPage),
+    "app/owner/reports/page.tsx — the instant-paint snapshot already stores the rid; keep it so the " +
+      "figures the device is holding can be found when the server cannot name the scope.",
+  );
+  check(
+    "…and falls back to it ONLY when the restaurant list could not be read",
+    /!list\.length && !scopePin && savedRid\.current/.test(reportsPage) &&
+    /catch\(\(\) => \{[\s\S]{0,160}savedRid\.current/.test(reportsPage),
+    "app/owner/reports/page.tsx — restoring it unconditionally would break the owner's rule that " +
+      "Reports always OPENS on All restaurants (2026-07-26). It is a failure fallback, not a memory.",
+  );
+  check(
+    "…and the saved sheet is headed with the restaurant's own name",
+    /restName: rid \? rests\.find/.test(reportsPage) && /savedName\.current \|\| "This restaurant"/.test(reportsPage),
+    "app/owner/reports/page.tsx — without the name the offline sheet reads \"This restaurant\" while " +
+      "showing that restaurant's own figures.",
+  );
+  check(
+    "…and the page adds no SECOND offline warning bar",
+    !/Couldn't reach the server, so these are the figures saved/.test(reportsPage),
+    "app/owner/reports/page.tsx — components/OfflineNotice.tsx is already on screen saying \"showing " +
+      "saved figures\". Two bars saying one thing is how a real warning stops being read.",
+  );
+}
+
 console.log("\nT11-F · the downloaded file is the same report as the screen");
 {
   // ── MERGE BY CANONICAL METHOD, DON'T JUST RELABEL (T11 sweep #7, 2026-08-27) ──────────────
