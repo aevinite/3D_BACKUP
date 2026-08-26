@@ -837,13 +837,24 @@ export default function OwnerDashboard() {
   // Module checklist point 6: render nothing when the flag is off. So the refusal gets its own
   // state and the whole card is left out.
   const [actsOff, setActsOff] = useState(false);
+  // ── …AND NEITHER IS A FAILED READ (T12 sweep, 2026-08-27) ────────────────────────────────────
+  // The 2026-08-17 fix above taught this card the difference between "switched off" and "still
+  // loading". It left the third case alone: a read that simply FAILS — the server 500s, the phone
+  // drops the connection — also lands on `setActs(null)`, and `null` is what the card renders as
+  // "Loading…". Measured by aborting /api/owner/oplog: the card on the home screen an owner opens
+  // every day sat on "Loading…" with no end and no way to retry. It is the identical fault the
+  // 403 branch was fixed for, one branch over.
+  const [actsErr, setActsErr] = useState(false);
   const fetchActs = useCallback(async (rid: string) => {
     try {
       const j = await fetch(`/api/owner/oplog?limit=6&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((r) => r.json());
-      if (j.disabled) { setActsOff(true); setActs([]); return; }
+      if (j.disabled) { setActsOff(true); setActs([]); setActsErr(false); return; }
       setActsOff(false);
-      setActs(Array.isArray(j.actions) ? j.actions : null);
-    } catch { setActs(null); }
+      // An answer that is not a list is a failure, not an empty log — the same distinction
+      // `actsOff` draws for a refusal.
+      if (Array.isArray(j.actions)) { setActs(j.actions); setActsErr(false); }
+      else { setActs(null); setActsErr(true); }
+    } catch { setActs(null); setActsErr(true); }
   }, [scopePin]);
 
   // The distinct (scope, range) keys the CURRENT view's cards need. That is the MAIN range and
@@ -877,7 +888,7 @@ export default function OwnerDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ov, scopeKey, neededRanges, globalRange]);
 
-  useEffect(() => { if (activeRid) { setActs(null); fetchActs(activeRid); } }, [activeRid, fetchActs]);
+  useEffect(() => { if (activeRid) { setActs(null); setActsErr(false); fetchActs(activeRid); } }, [activeRid, fetchActs]);
 
   // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
   // are compute-on-view cached server-side (mig 196), so this stays cheap.
@@ -1952,7 +1963,10 @@ export default function OwnerDashboard() {
                     offered a link into a page that refuses him (T12 sweep, 2026-08-17). */}
                 <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>
               </div>
-              {!acts ? <div className="adm-empty">Loading…</div>
+              {!acts ? (actsErr
+                  ? <div className="adm-empty">Couldn&rsquo;t load this just now — it tries again by itself every minute.{" "}
+                      <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => activeRid && fetchActs(activeRid)}>Try again</button></div>
+                  : <div className="adm-empty">Loading…</div>)
                 : acts.length === 0 ? <div className="adm-empty">Nothing yet — your team&rsquo;s work shows up here as it happens.</div>
                 : (
                   <div className="ow2-acts">
