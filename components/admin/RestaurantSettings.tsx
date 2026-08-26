@@ -173,8 +173,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     // restaurant's settings" with a Retry button — on the screen an admin opens seconds after
     // creating a restaurant. Retrying once, quietly, is what the situation actually needs: the
     // codes exist by then. If the second attempt fails too the card still locks and still says so,
-    // so a real outage is not hidden. The route's insert should become an upsert as well — that is
-    // a one-line change in app/api/admin/restaurants/settings/route.ts and is HANDOFF H3.
+    // so a real outage is not hidden. The route's own half of this SHIPPED (checked 2026-08-27):
+    // app/api/admin/restaurants/settings/route.ts now upserts the missing rows with
+    // `ignoreDuplicates: true` on (restaurant_id, table_number), so the loser of the race is no
+    // longer a 500 at all — handoff H3 is closed. This retry stays as the belt to that braces.
     const fetchOnce = async () => (await fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
     try {
       let j = await fetchOnce();
@@ -558,9 +560,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       const QR = (await import("qrcode")).default;
       const count = savedCount;
       const cells: string[] = [];
+      // A TABLE WITH NO CODE MUST NOT VANISH FROM THE SHEET IN SILENCE (T16 sweep #7, 2026-08-27).
+      // The loop skipped it and printed a sheet one QR short, which is only noticed at the table
+      // when a diner cannot scan. Codes are minted on load, so this is rare — but "rare and silent"
+      // is exactly the shape that costs a service. Named below.
+      const missing: number[] = [];
       for (let t = 1; t <= count; t++) {
         const code = codes[String(t)];
-        if (!code) continue;
+        if (!code) { missing.push(t); continue; }
         const dataUrl = await QR.toDataURL(qrUrl(code), { width: 480, margin: 2 });
         cells.push(`<div class="cell"><img src="${dataUrl}" alt=""><div class="lbl">${tableLabel(t).replace(/</g, "&lt;")}</div><div class="code">/q/${code}</div></div>`);
       }
@@ -575,6 +582,9 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         @media print{.cell{border-color:#ddd}}</style></head>
         <body onload="setTimeout(function(){window.print()},150)"><div class="grid">${cells.join("")}</div></body></html>`);
       w.document.close();
+      if (missing.length) {
+        setErr(`${missing.length} table${missing.length === 1 ? "" : "s"} had no code yet and ${missing.length === 1 ? "is" : "are"} not on the sheet: ${missing.map((t) => tableLabel(t)).join(", ")}. Reopen this card to mint them, then print again.`);
+      }
     } catch { setErr("Couldn't build the print sheet."); }
     finally { setQrBusy(null); }
   };
