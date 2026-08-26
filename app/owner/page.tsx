@@ -2008,7 +2008,7 @@ export default function OwnerDashboard() {
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
               <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => viewTo({ level: "restaurant", rid: view.rid })}>
-                <i className="fas fa-arrow-left" aria-hidden="true" /> Back to restaurant
+                <i className="fas fa-arrow-left" style={{ marginRight: 6 }} aria-hidden="true" /> Back to restaurant
               </button>
             </div>
           ) : (<>

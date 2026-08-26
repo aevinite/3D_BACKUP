@@ -445,7 +445,11 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
             {AUDITSORT.SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
         </label>
-        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+        {/* marginRight, not the space in the markup: .owx .adm-btn is display:inline-flex, and a flex
+            container COLLAPSES the leading whitespace of a text run — so the glyph sat hard against
+            the word while the dashboard's own Refresh, which carries this margin, read correctly.
+            Measured: 0px here against 6px there (T12 sweep, 2026-08-27). */}
+        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" style={{ marginRight: 6 }} aria-hidden="true" /> Refresh</button>
       </div>
 
       {/* What is on screen, in one line — so picking "Deleted bills" answers "how much?" too.
@@ -630,7 +634,7 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
           aria-label="Search the activity log"
           style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
         />
-        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" style={{ marginRight: 6 }} aria-hidden="true" /> Refresh</button>
       </div>
 
       {/* WHAT KIND OF THING HAPPENED — one chip per group, with its count. Only groups that have
