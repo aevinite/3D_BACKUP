@@ -396,7 +396,11 @@ async function run() {
             : bad("a restaurant name appeared on a staff path", await p.locator("#brand").textContent());
         } finally { await p.close().catch(() => {}); }
       }
-      // the writer and the reader must agree on the key, or the name silently never appears
+      // The writer and the reader must agree on the key — but that is the WEAK half of the check,
+      // and on its own it shipped a broken feature. This static agreement passed while nothing was
+      // ever written on restaurant #1, because MenuView deliberately hands AppShell
+      // `logoText={undefined}` for the flagship. Keep it (a renamed key is worth catching cheaply)
+      // and let the LIVE check below be the real one.
       {
         const appshell = readFileSync(join(ROOT, "components/AppShell.tsx"), "utf8");
         const html2 = readFileSync(join(ROOT, "public/offline.html"), "utf8");
@@ -404,6 +408,16 @@ async function run() {
           ? ok("the guest menu writes the same storage key the last-resort page reads")
           : bad("the brand-name key does not match between writer and reader",
             `AppShell.tsx: ${appshell.includes('"lfh_brand"')}, offline.html: ${html2.includes('"lfh_brand"')}`);
+        // AND THE FLAGSHIP MUST NOT BE THE EXCEPTION. The name is passed for every restaurant,
+        // including #1 — that is the whole point of `brandName` not being gated on `isDefault`.
+        const menuview = readFileSync(join(ROOT, "components/MenuView.tsx"), "utf8");
+        /brandName=\{restaurantName \|\| logoText \|\| undefined\}/.test(menuview)
+          ? ok("the name is handed to the shell for EVERY restaurant, the flagship included")
+          : bad("the brand name is gated behind isDefault again",
+            "restaurant #1 is the busiest one there is, and it would silently get the anonymous card");
+        /brandSlug=\{restaurantSlug \|\| ""\}/.test(menuview)
+          ? ok("the slug is handed in, so the writer and the reader cannot derive it differently")
+          : bad("the slug is no longer handed in", "deriving it in two places is how the two drift apart");
       }
 
       // /offline.html is PRECACHED, so a device keeps the old copy until the cache names move.
