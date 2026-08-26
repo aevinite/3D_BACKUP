@@ -33,6 +33,7 @@ import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
+import { actorLabel, actorTitle } from "@/lib/ownerActor";
 import { useBackClose } from "@/lib/backStack";
 import { type ReportData } from "@/components/owner/ownerReportDoc";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
@@ -1931,7 +1932,12 @@ export default function OwnerDashboard() {
                       <div key={a.id} className="ow2-act">
                         <span className={`pn pn-${a.panel}`}>{panelLabel(a.panel)}</span>
                         <span className="tx">{actLabel(a.action)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
-                        <span className="who">{a.actor || "—"}</span>
+                        {/* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES (T12 sweep, 2026-08-27).
+                            Two owner-panel writers log the owner's uuid as the actor, and this cell
+                            printed it verbatim — measured on the home screen:
+                            "Handled a rating · c0af7b5b-…-f475e48bab53". lib/ownerActor.ts carries
+                            the whole story and the two routes that need the real fix. */}
+                        <span className="who" title={actorTitle(a.actor)}>{actorLabel(a.actor)}</span>
                         <span className="when">{timeAgo(a.created_at)}</span>
                       </div>
                     ))}

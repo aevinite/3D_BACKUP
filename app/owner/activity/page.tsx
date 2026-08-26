@@ -23,6 +23,7 @@ import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
 import { trailOf } from "@/lib/logTrail";
+import { actorIsRawId, actorLabel, actorTitle } from "@/lib/ownerActor";
 // The sort orders, the type chips and the search, shared with the manager panel and the admin
 // console (see the file's header for why it lives in /panels).
 import AUDITSORT from "@/public/panels/auditsort.js";
@@ -550,7 +551,8 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontSize: 13 }}>{reason}</span>
-                  <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }}>{r.actor || "—"}{r.actor_role ? ` · ${r.actor_role}` : ""}</span>
+                  {/* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES — lib/ownerActor.ts. */}
+                  <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }} title={actorTitle(r.actor)}>{actorLabel(r.actor)}{r.actor_role ? ` · ${r.actor_role}` : ""}</span>
                 </div>
                 <div className="adm-when">{timeAgo(r.at)}</div>
               </div>
@@ -725,8 +727,11 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
                   {isPin
                     ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}
                         style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", ["--hue" as string]: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>
-                    : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
-                  {a.table_number && (isPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
+                    /* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES — lib/ownerActor.ts. An id
+                       tells the owner nothing and reads as the screen being broken, so the row
+                       simply carries no name, the way a row with no actor already does. */
+                    : a.actor && !actorIsRawId(a.actor) ? <span className="adm-muted"> · {a.actor}</span> : ""}
+                  {a.table_number && (isPin || !a.actor || actorIsRawId(a.actor)) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
                   {det ? <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span> : null}
                   {/* ── THE TRAIL, ON THE ROW ITSELF (owner, 2026-08-12) ──────────────────────
                       "in short it will show, but when you go in detail it will actually show the
