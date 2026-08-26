@@ -404,7 +404,7 @@ console.log("\n11. Owners: one delete must not disable every button on the next 
   // `busy` is the PAGE's state, shared by the roster and the detail pane. doDelete() released it
   // only in its catch, so a delete that WORKED left it true for good: the admin picked the next
   // owner and Rename, Reset password, Suspend, Assign restaurant, Make primary and Remove were all
-  // greyed out, with nothing saying why. Only a reload cleared it. (T16 sweep #7 item 1.)
+  // greyed out, with nothing saying why. Only a reload cleared it. (item 1.)
   const del = (OWN.match(/async function doDelete\(\)[\s\S]*?\n  \}/) || [""])[0];
   const inFinally = /finally \{ setBusy\(false\); \}/.test(del);
   const outsideCatch = /setBusy\(false\)/.test(del.replace(/catch\s*\([^)]*\)\s*\{[^}]*\}/g, ""));
@@ -547,6 +547,18 @@ console.log("\n22. Suspend is described by what it actually stops");
     "…which is still true of the sign-in path: it refuses a BINNED restaurant, and reads no `active` flag");
   want(/staff can&apos;t log in/.test(REST) || /staff can't log in/.test(REST),
     "…and the DELETE paragraph, where that sentence IS true, still carries it");
+}
+
+
+console.log("\n23. The reused-address notice says what really happened to the previous occupant");
+{
+  // It said "until it went to the recycle bin on <date>". A previous occupant may have been
+  // REMOVED FOR GOOD since, and that sentence then sent the admin looking for it in a bin it is
+  // not in. The date the server sends is when it left, which is true either way. (item 13.)
+  want(!/until it went to the\s*\n?\s*recycle bin on/.test(REST),
+    "the notice no longer says the previous occupant is sitting in the recycle bin");
+  want(/removed on \{new Date\(done\.reusedAddress\.binnedOn\)/.test(REST),
+    "…it says it was removed on that date, which holds whether it was binned or removed for good");
 }
 
 console.log(failed

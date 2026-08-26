@@ -528,8 +528,12 @@ function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; taken
               <b>This web address has been used before.</b>{" "}
               <span className="adm-muted">
                 <b style={{ color: "var(--text)" }}>{done.reusedAddress.name}</b> held{" "}
-                <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span> until it went to the
-                recycle bin on {new Date(done.reusedAddress.binnedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span> until it was
+                {/* "removed", not "went to the recycle bin" (T16 sweep #7, 2026-08-27): the previous
+                    occupant may have been REMOVED FOR GOOD since, and this line then told the admin
+                    it was sitting in the bin — somewhere he could go and look at it. The date the
+                    server sends is when it left, which is true either way. */}
+                {" "}removed on {new Date(done.reusedAddress.binnedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.
                 Any QR codes or printed menus still carrying that address now open <b style={{ color: "var(--text)" }}>this</b> restaurant&rsquo;s menu.
                 If that isn&rsquo;t what you want, rename this one now — before its codes are printed.
               </span>
