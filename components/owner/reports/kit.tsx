@@ -485,6 +485,28 @@ export function ReportsStyles() {
         /* The hub's Report button and the Export menu are the shared .adm-btn, which the whole
            admin console uses — so raise it only INSIDE the Reports actions, never globally. */
         .rs-actions .adm-btn, .rs-actions button { min-height: 44px; }
+
+        /* ── …AND THE CONTROLS THAT FIX MISSED (T11 sweep #7, 2026-08-27) ───────────────────
+           The block above raised the control STRIP and stopped there, so on the same A35
+           screen the row of buttons at the top was 44px while everything used to MOVE
+           between views was still small. Re-measured, every screen, both skins:
+             · "← All reports"      23px — the only way back to the hub on the page
+             · the sub-tab strip    34px — Revenue / Average bill / How many orders,
+                                           Items / Categories / Which dishes earn,
+                                           By hour / Times of day / Day of week, Pay / Performance
+             · "Full report →"      22px — the day sheet's Settlement drill
+             · the overlay ✕        32px — closes the Discounts / Cancellations sheet
+           Nothing was BROKEN here either (the taps land — measured 2026-08-18), so this is
+           consistency, not a repair: one screen should not offer two sizes of the same
+           gesture. Navigation only. The in-chart Bar/Line pill and the Items By revenue /
+           By quantity pill are deliberately NOT raised — they sit inside a panel header, and
+           making them 44px would add ~26px to every chart card on a 780px-tall phone. That is
+           a look decision, so it goes to the owner rather than into this block.
+           min-height again, never padding, so nothing re-flows sideways; >640px untouched. */
+        .rs-back { min-height: 44px; padding: 4px 2px; }
+        .rs-subtab { min-height: 44px; }
+        .rs-drill { min-height: 44px; padding: 3px 12px; }
+        .rs-ovl-x { width: 44px; height: 44px; }
       }
 
       /* The masthead and closing note are invisible on screen; they only paint in @media print. */
