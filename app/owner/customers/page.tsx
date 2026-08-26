@@ -22,6 +22,9 @@ import { useBackClose } from "@/lib/backStack";
 // Client-safe by design (lib/partialRead has zero imports) — see the header of that file for why it
 // is not lib/ownerScope. Pay Later has shown this note since August; this screen never did.
 import { partialNote } from "@/lib/partialRead";
+// Client-safe: lib/searchText has zero imports and no server-only code. It is the SAME cleaner the
+// route runs on `?q=`, so this screen can say what was really searched for. See `searched` below.
+import { safeSearch } from "@/lib/searchText";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -258,13 +261,19 @@ export default function OwnerCustomers() {
     : seg === "new" ? Math.max(0, summary.total - summary.returning)
     : summary.total;
   const segNoun = seg === "regulars" ? " regulars" : seg === "blocked" ? " blocked" : seg === "new" ? " first-timers" : "";
+  // ── AND IT HAS TO QUOTE WHAT WAS ACTUALLY SEARCHED FOR (sweep 7 · T14) ──────────────────────────
+  // The route strips the characters that would change what an `ilike` MEANS (`%`, `*`, `,`, `(`,
+  // `)`, `\` — lib/searchText.ts), and sends no `q=` at all when nothing usable is left. The screen
+  // branched on the RAW box instead, so typing `*` fetched the whole list and then labelled it
+  // "26 matches for “*”", and typing two spaces produced "26 matches for “”". One cleaner, both ends.
+  const searched = safeSearch(search);
   // One footer, rendered by both the phone list and the desktop table, so the two cannot drift.
   // A plain function, not a component: a component declared inside render is a new type on every
   // render (React remounts it, and `react-hooks/static-components` fails the lint on it).
   const listFoot = (gap: number) => {
-    if (search.trim()) return (
+    if (searched) return (
       <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
-        {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
+        {rows.length} match{rows.length === 1 ? "" : "es"} for “{searched}”.
       </div>
     );
     // Nothing is hidden unless the read actually HIT the cap — and the tiles ride a 5-minute

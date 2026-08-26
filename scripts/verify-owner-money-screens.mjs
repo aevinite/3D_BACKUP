@@ -277,6 +277,19 @@ const RULES = [
     ],
   },
   {
+    item: 20, file: CUSTOMERS,
+    say: "a search says what was actually searched for, and a box of wildcards is not a search",
+    must: [
+      /import \{ safeSearch \} from "@\/lib\/searchText"/,
+      /const searched = safeSearch\(search\);/,
+      /if \(searched\) return \(/,
+      /match\{rows\.length === 1 \? "" : "es"\} for “\{searched\}”/,
+    ],
+    mustNot: [
+      /for “\{search\.trim\(\)\}”/,   // the raw box is not what the server looked for
+    ],
+  },
+  {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
     must: [/className="adm-page-h">Manager mode/],
