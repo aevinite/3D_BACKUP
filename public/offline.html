@@ -62,12 +62,25 @@
     button.ghost { margin-top: 10px; background: transparent; color: #cfe0f7;
                    border: 1px solid rgba(148, 163, 184, .38); font-weight: 700; }
     .hint { margin-top: 14px; font-size: 12.5px; color: #8fa1bf; }
+    /* The restaurant's own name, when this device has it. Quiet — it identifies the screen,
+       it is not the headline. `[hidden]` needs the explicit `display: none` because the rule
+       above it sets a display: an author `display` beats the bare `hidden` attribute. */
+    .brand { font-size: 12.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+             color: #7dd3fc; margin: 0 0 10px; }
+    .brand[hidden] { display: none; }
     @media (prefers-reduced-motion: reduce) { .dot span { animation: none; } }
   </style>
 </head>
 <body>
   <main class="card">
     <div class="dot warn" id="dot"><span></span></div>
+    <!-- WHOSE SCREEN IS THIS? Empty until we know, and it is NEVER a guess: the name is only
+         shown when this device has stored it for the SAME restaurant this path resolves to
+         (see brandName() below). A white-label product must not print restaurant A's name on
+         restaurant B's screen, and a de-slugged guess ("french-house" -> "French House") can be
+         plainly wrong — the real name here is "Little French House". So: the stored name, or
+         nothing at all. -->
+    <div class="brand" id="brand" hidden></div>
     <h1 id="title">Can't open this screen</h1>
     <p id="sub">This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
     <div class="why" id="why"><b>Checking what's wrong...</b><span>One moment.</span></div>
@@ -128,37 +141,81 @@
     //   anything else         -> "/" exactly as before, for staff
     var homeHref = "/";
     var homeLabel = "Go to the home screen";
+    var restSlug = "";                 // the restaurant this path belongs to, "" for staff / unknown
+    var isGuest = false;               // is the person a diner rather than a member of staff?
     (function () {
       var p = location.pathname || "";
-      var m = p.match(/^\/r\/([^/]+)\//);
-      if (m) { homeHref = "/r/" + m[1].toLowerCase() + "/menu"; homeLabel = "Go to the menu"; return; }
-      if (/^\/(menu|item)(\/|$)/.test(p)) { homeHref = "/menu"; homeLabel = "Go to the menu"; return; }
       var pinnedSlug = function () {
         var t = "";
         try { t = sessionStorage.getItem("lfh_tab_tenant") || ""; } catch (e) {}
-        return /^[a-z0-9-]+$/.test(t.toLowerCase()) ? t.toLowerCase() : "";
+        t = t.toLowerCase();
+        return /^[a-z0-9-]+$/.test(t) ? t : "";
       };
+      var m = p.match(/^\/r\/([^/]+)\//);
+      if (m) { restSlug = m[1].toLowerCase(); isGuest = true; homeHref = "/r/" + restSlug + "/menu"; homeLabel = "Go to the menu"; return; }
+      if (/^\/(menu|item)(\/|$)/.test(p)) { isGuest = true; homeHref = "/menu"; homeLabel = "Go to the menu"; return; }
       if (/^\/q\/[^/]+/.test(p)) {
-        var pinned = pinnedSlug();
-        if (pinned) { homeHref = "/r/" + pinned + "/menu"; homeLabel = "Go to the menu"; }
-        else { homeHref = p; homeLabel = "Go to the menu"; }
+        isGuest = true;
+        restSlug = pinnedSlug();
+        if (restSlug) { homeHref = "/r/" + restSlug + "/menu"; }
+        else { homeHref = p; }          // the printed code is the only thing that knows their table
+        homeLabel = "Go to the menu";
         return;
       }
       if (/^\/view\/[^/]+/.test(p)) {
-        var slug = pinnedSlug();
-        if (!slug) {
+        isGuest = true;
+        restSlug = pinnedSlug();
+        if (!restSlug) {
           // ?r= is whatever a stranger put in a link, so it is validated the same way
           // app/view/[folder]/page.tsx validates it before trusting it.
           var q = (location.search.match(/[?&]r=([^&]*)/) || [])[1] || "";
           try { q = decodeURIComponent(q); } catch (e) { q = ""; }
-          if (/^[a-z0-9-]+$/.test(q.toLowerCase())) slug = q.toLowerCase();
+          q = q.toLowerCase();
+          if (/^[a-z0-9-]+$/.test(q)) restSlug = q;
         }
-        homeHref = slug ? "/r/" + slug + "/menu" : "/menu";
+        homeHref = restSlug ? "/r/" + restSlug + "/menu" : "/menu";
         homeLabel = "Go to the menu";
       }
     })();
     $("home").textContent = homeLabel;
     $("home").addEventListener("click", function () { location.href = homeHref; });
+
+    // ONE BUTTON WHEN THERE IS ONLY ONE ACTION.
+    //
+    // On /q/<code> with no restaurant pinned in this tab we genuinely cannot send anyone
+    // anywhere else — the printed code is the only thing that knows their table, and /menu would
+    // be the WRONG restaurant on a multi-restaurant install. So homeHref is the current path, and
+    // "Go to the menu" then did exactly what "Try again" does: reload. Two buttons, one action,
+    // and the second one implies it goes somewhere. A guest taps it, gets the same screen back,
+    // and concludes the app is broken rather than the wifi. (owner said yes, 2026-08-26.)
+    //
+    // The button stays in the DOM — every guard, and this page's own contract, keys on #home
+    // existing — it is simply not shown while it would only repeat the button above it.
+    if (homeHref === location.pathname) $("home").hidden = true;
+
+    // THE RESTAURANT'S OWN NAME, when this device has stored it.
+    //
+    // This is the one screen a guest sees when things have gone wrong, and it was completely
+    // anonymous: our wording, our dark card, no clue whose restaurant it belongs to. The name is
+    // already on the device — the guest menu stores it (components/AppShell.tsx) — so showing it
+    // costs no request and no data at all.
+    //
+    // NEVER A GUESS, and never the wrong restaurant: it is printed only when the stored record is
+    // for the SAME slug this path resolved to. De-slugging was the obvious shortcut and it is
+    // wrong — "french-house" would print "French House" for a restaurant actually called
+    // "Little French House". Staff screens get nothing; the platform door is not a restaurant.
+    (function () {
+      if (!isGuest) return;
+      var stored = null;
+      try { stored = JSON.parse(localStorage.getItem("lfh_brand") || "null"); } catch (e) { stored = null; }
+      if (!stored || typeof stored.name !== "string" || !stored.name.trim()) return;
+      // "" is the legacy restaurant-#1 scope, which /menu and /item ARE — so an empty slug on
+      // both sides is a match, exactly as lib/tenantStorage treats it.
+      if (String(stored.slug || "").toLowerCase() !== restSlug) return;
+      var el = $("brand");
+      el.textContent = stored.name.slice(0, 60);   // textContent: this page can never print markup
+      el.hidden = false;
+    })();
 
     // A check that ONLY proves "we reached our own server". It must be a path the service
     // worker leaves alone and that touches NO database: an unmatched /api/ path answers 404

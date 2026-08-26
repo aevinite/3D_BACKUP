@@ -274,7 +274,9 @@ async function run() {
         { path: "/item/some-dish", to: "/menu", label: "Go to the menu", who: "a diner on a legacy dish page" },
         { path: "/view/some-model", to: "/menu", label: "Go to the menu", who: "a diner in the 3D dish viewer" },
         { path: "/view/some-model?r=french-house", to: "/r/french-house/menu", label: "Go to the menu", who: "a diner in the 3D viewer whose link names the restaurant" },
-        { path: "/q/SOMECODE", to: "/q/SOMECODE", label: "Go to the menu", who: "a diner on a printed table QR with nothing pinned" },
+        // The printed-QR-with-nothing-pinned case is deliberately absent from this walk: since
+        // 2026-08-26 its way out is HIDDEN, because it would only repeat "Try again". It gets its
+        // own dedicated check below, which asserts the hiding AND that the element still exists.
         { path: "/manager/tables", to: "/", label: "Go to the home screen", who: "a member of staff" },
       ];
       mode = "dead"; // offline, which is when this page is seen
@@ -319,6 +321,91 @@ async function run() {
             `offline.html: ${inHtml ? "yes" : "NO"} · sw.js inline copy: ${inSw ? "yes" : "NO"}`
             + "\n       A device that fell back to the worker's inline copy would get the old dead end.");
       }
+      // ── ONE BUTTON WHEN THERE IS ONLY ONE ACTION ──────────────────────────────────────────
+      // On /q/<code> with nothing pinned we cannot send anyone anywhere: the printed code is the
+      // only thing that knows their table, and /menu would be the wrong restaurant. So the way
+      // out reloads — which is what "Try again" already does. Two buttons, one action, and the
+      // second implies it goes somewhere. (owner said yes, 2026-08-26.)
+      {
+        const p = await browser.newPage();
+        try {
+          await p.addInitScript(COMPRESS);
+          await p.goto(base + "/q/SOMECODE", { waitUntil: "domcontentloaded" });
+          await p.waitForSelector("#retry", { timeout: 5000 });
+          const homeShown = await p.locator("#home").isVisible();
+          const retryShown = await p.locator("#retry").isVisible();
+          !homeShown && retryShown
+            ? ok("a printed QR with nothing pinned offers ONE action, not two that do the same thing")
+            : bad("the last-resort page offers two buttons that both just reload",
+              `#home visible=${homeShown}, #retry visible=${retryShown}. On this path homeHref IS the current path.`);
+          // …and the element must still EXIST, because this page's contract and every guard key on it
+          (await p.locator("#home").count()) === 1
+            ? ok("…and #home is still in the page, just not shown")
+            : bad("#home was removed from the page rather than hidden", "the dead-end check keys on it existing");
+        } finally { await p.close().catch(() => {}); }
+      }
+      // …but a door that really goes somewhere else must still SHOW its button.
+      {
+        const p = await browser.newPage();
+        try {
+          await p.addInitScript(COMPRESS);
+          await p.goto(base + "/r/french-house/menu/never-opened", { waitUntil: "domcontentloaded" });
+          await p.waitForSelector("#home", { timeout: 5000 });
+          (await p.locator("#home").isVisible())
+            ? ok("a door that leads somewhere else still shows its way out")
+            : bad("the way out was hidden on a path where it really navigates", "only the reload-only case may hide it");
+        } finally { await p.close().catch(() => {}); }
+      }
+
+      // ── WHOSE SCREEN IS THIS ──────────────────────────────────────────────────────────────
+      // The name is printed ONLY when this device stored it for the SAME restaurant the path
+      // resolves to. A white-label product must never print restaurant A's name on B's screen,
+      // and a de-slugged guess is plainly wrong ("french-house" is "Little French House").
+      {
+        const p = await browser.newPage();
+        try {
+          await p.addInitScript(COMPRESS);
+          await p.goto(base + "/r/french-house/menu/never-opened", { waitUntil: "domcontentloaded" });
+          const blank = await p.locator("#brand").isVisible();
+          !blank ? ok("with no stored name the card shows no restaurant name at all — never a guess")
+                 : bad("a restaurant name appeared with nothing stored", await p.locator("#brand").textContent());
+
+          // now store the RIGHT restaurant and reload
+          await p.evaluate(() => localStorage.setItem("lfh_brand", JSON.stringify({ slug: "french-house", name: "Little French House" })));
+          await p.reload({ waitUntil: "domcontentloaded" });
+          await p.waitForTimeout(200);
+          const shown = (await p.locator("#brand").textContent().catch(() => "")) || "";
+          shown.trim() === "Little French House"
+            ? ok(`the card names the restaurant when the device has it: "${shown.trim()}"`)
+            : bad("the stored restaurant name was not shown", JSON.stringify(shown));
+
+          // and the WRONG restaurant's stored name must never appear
+          await p.evaluate(() => localStorage.setItem("lfh_brand", JSON.stringify({ slug: "aangan", name: "Aangan" })));
+          await p.reload({ waitUntil: "domcontentloaded" });
+          await p.waitForTimeout(200);
+          !(await p.locator("#brand").isVisible())
+            ? ok("a name stored for a DIFFERENT restaurant is never printed on this one's screen")
+            : bad("another restaurant's name appeared", await p.locator("#brand").textContent());
+
+          // a staff path is not a restaurant, so it gets no name either
+          await p.evaluate(() => localStorage.setItem("lfh_brand", JSON.stringify({ slug: "", name: "Little French House" })));
+          await p.goto(base + "/manager/tables", { waitUntil: "domcontentloaded" });
+          await p.waitForTimeout(200);
+          !(await p.locator("#brand").isVisible())
+            ? ok("a staff screen shows no restaurant name — the platform door is not a restaurant")
+            : bad("a restaurant name appeared on a staff path", await p.locator("#brand").textContent());
+        } finally { await p.close().catch(() => {}); }
+      }
+      // the writer and the reader must agree on the key, or the name silently never appears
+      {
+        const appshell = readFileSync(join(ROOT, "components/AppShell.tsx"), "utf8");
+        const html2 = readFileSync(join(ROOT, "public/offline.html"), "utf8");
+        appshell.includes('"lfh_brand"') && html2.includes('"lfh_brand"')
+          ? ok("the guest menu writes the same storage key the last-resort page reads")
+          : bad("the brand-name key does not match between writer and reader",
+            `AppShell.tsx: ${appshell.includes('"lfh_brand"')}, offline.html: ${html2.includes('"lfh_brand"')}`);
+      }
+
       // /offline.html is PRECACHED, so a device keeps the old copy until the cache names move.
       // Changing the page without bumping VERSION ships a fix nobody receives.
       /BUMP THIS whenever \/offline\.html changes/.test(sw2)

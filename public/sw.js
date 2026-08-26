@@ -37,7 +37,7 @@
 // re-saves the page under the new key. It rides along with whatever the current VERSION is: v9 below
 // wipes the caches anyway for its own reasons, which for this change is strictly the nicer outcome
 // (every device re-saves under the new key immediately instead of missing once).
-const VERSION = "v11"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered. v9: a STAFF PANEL's first visit saves its reads too (it saved none), and the last-resort page no longer promises work it can't know was saved. v10: the offline page's way OUT suits who is looking — a diner is sent back to their restaurant's menu instead of the staff sign-in (the bump is required: /offline.html is precached, so devices keep the old copy until the cache names change). v11: v10 missed the 3D DISH VIEWER — /view/<folder> has no /r/<slug> in its path, so a diner who lost signal in the 3D view was still handed the staff sign-in. Same bump reason as v10: /offline.html changed.
+const VERSION = "v12"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered. v9: a STAFF PANEL's first visit saves its reads too (it saved none), and the last-resort page no longer promises work it can't know was saved. v10: the offline page's way OUT suits who is looking — a diner is sent back to their restaurant's menu instead of the staff sign-in (the bump is required: /offline.html is precached, so devices keep the old copy until the cache names change). v11: v10 missed the 3D DISH VIEWER — /view/<folder> has no /r/<slug> in its path, so a diner who lost signal in the 3D view was still handed the staff sign-in. Same bump reason as v10: /offline.html changed. v12: the branded page names the restaurant when the device has it, and stops offering a second button that only repeats the first (/offline.html changed, so the bump is required).
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -452,8 +452,11 @@ async function offlinePage() {
     'return /^[a-z0-9-]+$/.test(t)?t:""};' +
     'if(m){h.href="/r/"+m[1].toLowerCase()+"/menu";h.textContent="Go to the menu";return}' +
     'if(/^\\/(menu|item)(\\/|$)/.test(p)){h.href="/menu";h.textContent="Go to the menu";return}' +
+    // One button when there is only one action: on /q/ with nothing pinned the way out IS a
+    // reload, so it would repeat "Try again". Same rule as /offline.html.
     'if(/^\\/q\\/[^/]+/.test(p)){var t=pin();' +
-    'h.href=t?"/r/"+t+"/menu":p;h.textContent="Go to the menu";return}' +
+    'h.href=t?"/r/"+t+"/menu":p;h.textContent="Go to the menu";' +
+    'if(h.href===location.origin+location.pathname)h.hidden=true;return}' +
     'if(/^\\/view\\/[^/]+/.test(p)){var s=pin();' +
     'if(!s){var q=(location.search.match(/[?&]r=([^&]*)/)||[])[1]||"";try{q=decodeURIComponent(q).toLowerCase()}catch(e){q=""}' +
     'if(/^[a-z0-9-]+$/.test(q))s=q}' +

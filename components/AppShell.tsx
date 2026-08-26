@@ -117,6 +117,34 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
     };
   }, [restaurantId]);
 
+  // REMEMBER WHOSE MENU THIS IS, for the one screen that cannot ask.
+  //
+  // public/offline.html is the branded page a phone lands on with no connection and nothing
+  // saved. It was completely anonymous — our wording on our dark card, no clue whose restaurant
+  // it belonged to — because it is a static file that cannot fetch anything, by definition.
+  //
+  // The name is right here, though, on every guest page. So store it, and that page reads it with
+  // no request and no data use at all. Kept deliberately dumb: ONE key, the CURRENT restaurant,
+  // written only on a guest page (this component only ever wraps those). The offline page prints
+  // it ONLY when the stored slug matches the slug its own path resolves to, so it can never show
+  // restaurant A's name on restaurant B's screen. (owner said yes, 2026-08-26.)
+  useEffect(() => {
+    // The slug the way the offline page derives it: from /r/<slug>/…, else the tab's pin, else ""
+    // for the legacy restaurant-#1 paths (/menu, /item) — the same rule as lib/tenantStorage.
+    const name = (logoText || "").trim();
+    if (!name) return;
+    try {
+      const p = location.pathname;
+      let slug = (p.match(/^\/r\/([^/]+)\//) || [])[1]?.toLowerCase() || "";
+      if (!slug && !/^\/(menu|item)(\/|$)/.test(p)) slug = (sessionStorage.getItem("lfh_tab_tenant") || "").toLowerCase();
+      if (slug && !/^[a-z0-9-]+$/.test(slug)) return;
+      localStorage.setItem("lfh_brand", JSON.stringify({ slug, name }));
+    } catch {
+      /* a device that refuses storage simply gets the anonymous card — never a crash. The
+         guest menu going down over a nicety would be far worse than the nicety. */
+    }
+  }, [logoText]);
+
   // Per-restaurant FULL palette (Phase 2). When a restaurant has theme overrides, we
   // emit mode-scoped CSS (inline styles can't switch on the [data-theme] toggle). The
   // block targets #app.brand-themed so the vars cascade to EVERYTHING in the guest app
