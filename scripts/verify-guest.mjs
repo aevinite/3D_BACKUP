@@ -54,7 +54,7 @@ const F = {
   legacy: code("app/item/[slug]/page.tsx"), q: code("app/q/[code]/page.tsx"),
   sgate: code("components/SessionGate.tsx"), menuLib: code("lib/menu.ts"),
   navp: code("components/NavPicker.tsx"),
-  accent: code("lib/accent.ts"), fit: code("lib/useFitText.ts"), header: code("components/Header.tsx"), editorJs: read("public/panels/editor/app.js"),
+  accent: code("lib/accent.ts"), nf: code("app/not-found.tsx"), fit: code("lib/useFitText.ts"), header: code("components/Header.tsx"), editorJs: read("public/panels/editor/app.js"),
   css: read("app/globals.css"), offHtml: read("public/offline.html"), sw: read("public/sw.js"),
 };
 
@@ -249,6 +249,18 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// A DINER ON THE WRONG-TURN PAGE IS SENT TO THE MENU, NOT TO A PASSWORD SCREEN (owner, 2026-08-26:
+// *"yes for this guest should be redirected to menu … and if written login or aevinite then only
+// locate to there"*). Dropping the "/r/" from a menu address landed a guest on the software
+// company's 404 whose only button led to the staff sign-in.
+check("P15609", "the wrong-turn page resolves a guest address to its menu", () =>
+  has(F.nf, '"use client"', 'method: "HEAD"', "router.replace(`/r/${slug}/menu`)") &&
+  rx(F.nf, /const STAFF_WORDS = /) &&
+  // HEAD, not GET: the menu is ~24KB and only the yes/no is wanted.
+  !rx(F.nf, /fetch\([^)]*menu-data[^)]*\)\s*\.then/));
+check("P15610", "…and the staff sign-in is offered ONLY when the address says staff", () =>
+  rx(F.nf, /\{kind === "staff" && \(/) && !rx(F.nf, /href="\/"/));
+
 // THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8"). The list layout is mobile-first;
 // on a laptop the same row is 1100px and the name and price sat squeezed at the left with the
 // button at the far right and nothing in between. The price now sits at the RIGHT-hand end, beside
@@ -373,6 +385,33 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: every shape of wrong turn. The five guest ones must reach a real menu; the switched-off
+    // restaurant must NOT (its menu is closed, and a redirect would be a lie about that); the staff
+    // ones keep their sign-in button and the rest never see one.
+    for (const [url, want, label] of [
+      ["/french-house/menu", "menu", "a menu address missing the /r/"],
+      ["/french-house", "menu", "just the restaurant name"],
+      ["/FRENCH-HOUSE/menu", "menu", "capitalised"],
+      ["/french-house/item/cappuccino", "menu", "a dish address missing the /r/"],
+      ["/og-s-cafe/menu", "guest", "a switched-off restaurant"],
+      ["/signup", "guest", "a stray address"],
+      ["/login/oops", "staff", "a staff address"],
+      ["/aevinite/nope", "staff", "an admin address"],
+    ]) {
+      const { c, pg } = await open(url, 1200);
+      await pg.waitForTimeout(3800);
+      const r = await pg.evaluate(() => ({ path: location.pathname,
+        cards: document.querySelectorAll(".item-card").length,
+        signin: [...document.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/login"),
+        guestWords: /scan the QR code/i.test(document.body.innerText) }));
+      const ok = want === "menu" ? (/^\/r\/[^/]+\/menu$/.test(r.path) && r.cards > 0)
+        : want === "staff" ? r.signin
+        : (r.guestWords && !r.signin);
+      check("P15609", `LIVE: ${label} (${url})`, () =>
+        ({ ok, note: `landed on ${r.path}, ${r.cards} dishes, sign-in offered=${r.signin}, guest advice=${r.guestWords}` }));
+      await c.close();
+    }
+
     // LIVE: the wide list row is laid out and nothing in it overlaps — and the PHONE is untouched.
     // The veg mark centred beside the button was the first attempt and the two landed on top of
     // each other, so every pair is measured rather than eyeballed.
