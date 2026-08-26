@@ -465,6 +465,33 @@ async function offlinePage() {
   );
 }
 
+// WHICH OFFLINE LAYER IS THIS DEVICE RUNNING? (owner asked, 2026-08-26.)
+//
+// A device that has not picked up a new copy of this file keeps the old one, and nothing anywhere
+// could see that — so a tablet quietly a version behind only came to light when somebody noticed
+// it behaving differently from the one beside it.
+//
+// This is the cheapest honest way to answer it: we are already intercepting this request, and we
+// already know our own VERSION, so we say so on the reads that are happening anyway. NO extra
+// request, NO extra egress, and it cannot lie — the header comes from the worker that is actually
+// running, not from a page reporting on its behalf.
+//
+// Only same-origin GETs, and only the read families we handle anyway. A new Request is built
+// rather than mutating (fetch headers are immutable); if anything about that fails we return the
+// ORIGINAL request, because reporting a version must never cost anybody their read.
+function withVersion(req) {
+  try {
+    const h = new Headers(req.headers);
+    h.set("X-LFH-SW", VERSION);
+    // Everything else is copied deliberately: credentials must survive or the read is signed out,
+    // and mode/redirect must survive or a navigation-ish request changes behaviour.
+    return new Request(req.url, {
+      method: req.method, headers: h, credentials: req.credentials, mode: req.mode,
+      redirect: req.redirect, referrer: req.referrer, cache: req.cache,
+    });
+  } catch { return req; }
+}
+
 // React client-side navigation fetches the SAME url with an RSC header; it must not
 // share a cache key with the HTML document, so give it its own suffix.
 const rscKey = (url) => url + (url.includes("?") ? "&" : "?") + "__lfh_rsc=1";
@@ -560,7 +587,8 @@ self.addEventListener("fetch", (event) => {
     // any slowness: mark a bill paid, the next read gets a 503, and the device answers with the
     // board from BEFORE the payment — the tile flicks back to unpaid and the change looks lost.
     // Same rule as ever: just after a write, wait for the truth.
-    return event.respondWith(networkFirst(req, DATA, req.url, timeout, { clientId: event.clientId, justWrote }));
+    // The cache KEY stays `req.url` — the header changes what we send, never what we store under.
+    return event.respondWith(networkFirst(withVersion(req), DATA, req.url, timeout, { clientId: event.clientId, justWrote }));
   }
   // Everything else same-origin static: /panels/*, /brand/*, fonts, images, /vendor/*.
   return event.respondWith(networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS));

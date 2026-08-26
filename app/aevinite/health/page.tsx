@@ -41,6 +41,7 @@ type Health = {
   staffOnlineNow: number;
   staffTotal: number;
   staffError?: string | null;
+  offlineLayer?: { shipped: string | null; current: number; behind: number; unknown: number; windowMins: number } | null;
   realtime: { configuredHost: string | null };
   openIssues: number | null;
   issuesFeedWired: boolean;
@@ -211,6 +212,42 @@ export default function AdminHealth() {
         : "Nobody in the last 3 minutes — normal when the restaurants are closed.",
       go: { href: "/aevinite/staff-online", label: "Who's online" },
     });
+    // WHICH OFFLINE LAYER ARE THE DEVICES ON? (owner asked for it, 2026-08-26.)
+    //
+    // Every phone and tablet keeps its own saved copy of the app so staff can work with no
+    // internet. A device that has not picked up a new copy keeps the old one, and nothing could
+    // see that — so a tablet quietly a version behind only surfaced when somebody noticed it
+    // behaving differently from the one beside it.
+    //
+    // PLAIN, NOT AMBER, when everything is current, and plain when it is simply unknown. Amber is
+    // reserved for a device that really IS behind, which is a thing a person can act on (reload
+    // that panel). This page has already learned twice that a light which is on most days is a
+    // light nobody reads — see the complaints note below and the quiet-panels note above.
+    {
+      const ol = h.offlineLayer;
+      if (!ol || !ol.shipped) {
+        checks.push({
+          key: "sw", label: "Offline layer", value: "unknown", tone: "unknown",
+          means: "Couldn't read which version is shipped, so this is unknown — not that anything is behind.",
+        });
+      } else if (ol.current + ol.behind + ol.unknown === 0) {
+        checks.push({
+          key: "sw", label: "Offline layer", value: ol.shipped, tone: "plain",
+          means: `No device has been used in the last ${ol.windowMins >= 24 ? "day" : ol.windowMins + " minutes"}, so there is nothing to compare.`,
+        });
+      } else {
+        checks.push({
+          key: "sw", label: "Offline layer",
+          value: ol.behind > 0 ? `${ol.behind} behind` : `all on ${ol.shipped}`,
+          tone: ol.behind > 0 ? "warn" : "good",
+          means: ol.behind > 0
+            ? `${ol.behind} device${ol.behind === 1 ? "" : "s"} still on an older saved copy of the app (${ol.current} on the current one${ol.unknown ? `, ${ol.unknown} haven't said` : ""}). Reloading that panel picks up the new one.`
+            : `Every device used in the last day is on the current saved copy${ol.unknown ? `, except ${ol.unknown} that haven't said` : ""}.`,
+          needsYou: ol.behind > 0,
+          go: { href: "/aevinite/staff-online", label: "Who's online" },
+        });
+      }
+    }
     checks.push(!h.issuesFeedWired ? {
       key: "issues", label: "Complaints", value: "unknown", tone: "unknown",
       means: "Couldn't reach the complaints list, so this is unknown — not clear.", needsYou: true,

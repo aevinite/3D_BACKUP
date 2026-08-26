@@ -319,7 +319,15 @@ export function roleSatisfies(have: Role, need: Role): boolean {
 // who explicitly signed in must always act as THAT person; the admin fallback is
 // only for admin-only sessions (its ?rid / act-as flow is unchanged).
 export async function requireRole(
-  req: { cookies: { get(name: string): { value: string } | undefined }; nextUrl?: { searchParams?: URLSearchParams } },
+  // `headers` is OPTIONAL on purpose. This signature is deliberately structural rather than
+  // NextRequest so tests and internal callers can hand in a stub, and several already do — making
+  // it required would break them. The offline-layer version (mig 366) is read through it when a
+  // real request has one, and simply not recorded when it does not.
+  req: {
+    cookies: { get(name: string): { value: string } | undefined };
+    nextUrl?: { searchParams?: URLSearchParams };
+    headers?: { get(name: string): string | null };
+  },
   role: Role,
 ): Promise<{ ok: true; user: StaffUser | null } | { ok: false; transient?: boolean }> {
   // PER-TAB ADMIN PIN — checked even before the staff cookie (owner, 2026-07-28). A
@@ -363,9 +371,24 @@ export async function requireRole(
     }
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
     // see who's working / which panel is open. Fire-and-forget; never blocks the call.
+    //
+    // …AND WHICH OFFLINE LAYER THIS DEVICE IS RUNNING (mig 366, owner asked 2026-08-26). The
+    // service worker stamps X-LFH-SW on reads it is already making, so this costs no request and
+    // rides on a write that was happening anyway. Validated to the shape sw.js actually declares
+    // ("v" + digits) — a header is whatever arrives, so it is never written through unchecked.
+    const rawSw = req.headers?.get("x-lfh-sw") ?? null;
+    const swVersion = rawSw && /^v\d{1,4}$/.test(rawSw) ? rawSw : null;
     const seen = (u as { last_seen_at?: string | null }).last_seen_at;
-    if (!seen || Date.now() - new Date(seen).getTime() > 45_000) {
-      sb.from("staff_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(() => {}, () => {});
+    const storedSw = (u as { sw_version?: string | null }).sw_version ?? null;
+    const stale = !seen || Date.now() - new Date(seen).getTime() > 45_000;
+    // A device that has just UPDATED should stop reading as behind straight away, so a changed
+    // version is written even inside the throttle window. Unchanged, it waits for the next beat.
+    const swChanged = swVersion !== null && swVersion !== storedSw;
+    if (stale || swChanged) {
+      const patch: { last_seen_at?: string; sw_version?: string } = {};
+      if (stale) patch.last_seen_at = new Date().toISOString();
+      if (swChanged) patch.sw_version = swVersion;
+      sb.from("staff_users").update(patch).eq("id", u.id).then(() => {}, () => {});
     }
     return { ok: true, user: u };
   }
