@@ -91,11 +91,37 @@ export default function OwnerSettings() {
       setPrinting(j && j.allowed ? j : null);
     } catch { /* leave whatever we had; this card never blocks the page */ }
   }, [scp]);
+  useEffect(() => { loadPrinting(); }, [loadPrinting]);
+  // IT KEPT ASKING WITH THE TAB HIDDEN, AND WITH NOTHING ON SCREEN TO ASK FOR (T13 sweep,
+  // 2026-08-27 — measured: 4 requests in 40s with the tab in front, and 2 more in the next 35s
+  // after the tab was hidden).
+  //
+  // Two separate costs, both avoidable:
+  //   • NOTHING TO REFRESH. The interval was unconditional, but this whole card only renders when
+  //     `data.printing` has a row — a restaurant whose printing is switched off shows nothing at all
+  //     (R36), and still paid four requests a minute for it, for as long as the page was open.
+  //   • A BACKGROUND TAB. Every other page in this console — Customers, Pay Later, Feedback &
+  //     complaints — polls on 60s, skips the tick while `document.hidden`, and stops and restarts on
+  //     visibilitychange. Settings was the one that did not, so an owner who opened it once and left
+  //     the tab behind kept a poll running all night. `/api/owner/printing` is five reads a call
+  //     (the scope, `settings`, then agents + routes + the waiting count), so that is ~1,200 reads
+  //     an hour for a card nobody is looking at. "This product's cost is egress, not effort."
+  //
+  // 15s is KEPT while the card is on screen and the tab is in front, deliberately: the admin's own
+  // Printing screen refreshes on the same cadence for the same reason — "is that computer awake" has
+  // a 30s truth window (HELPER_STALE_MS), so a slower tick would let this card say "ready" about a
+  // computer that had already gone to sleep. The fix is not a slower clock, it is not running the
+  // clock when there is no card and no one watching.
+  const showsPrinting = !!printing;
   useEffect(() => {
-    loadPrinting();
-    const t = setInterval(loadPrinting, 15000);
-    return () => clearInterval(t);
-  }, [loadPrinting]);
+    if (!showsPrinting) return;
+    let t: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!t) t = setInterval(() => { if (!document.hidden) loadPrinting(); }, 15000); };
+    const stop = () => { if (t) { clearInterval(t); t = null; } };
+    const onVis = () => { if (document.hidden) stop(); else { loadPrinting(); start(); } };
+    start(); document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, [showsPrinting, loadPrinting]);
 
   // ── Appearance (mirrors OwnerShell.toggleSkin) ──
   const [skin, setSkin] = useState<"light" | "dark">("dark");

@@ -516,6 +516,36 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     + "something that does not happen");
 }
 
+// ── 13 · KITCHEN PRINTING ON /owner/settings — the card sweep #6 never saw ───────────────────
+// This card did not exist when the 500 phases were written (mig 336/338/341, +134 lines on this
+// page since). Everything below was found by reading it and driving it on 2026-08-27.
+{
+  const src = read(SETTINGS);
+  if (!src) bad("app/owner/settings/page.tsx not found (if it moved, update this guard)");
+  else {
+    const bare = code(src);
+
+    // ── it must not ask when there is no card, and must stop in a background tab ──
+    // MEASURED before the fix: 4 requests to /api/owner/printing in 40s with the tab in front, and
+    // 2 MORE in the next 35s after it was hidden — from an unconditional `setInterval`. The card
+    // only renders when `data.printing` has a row, and each request is five reads on the server, so
+    // an owner who left this tab open paid ~1,200 reads an hour for a card that may not be there.
+    // Every other page in this console (Customers, Pay Later, Feedback & complaints) does this
+    // right; Settings was the one that did not.
+    const poll = bare.slice(bare.indexOf("const showsPrinting"), bare.indexOf("const showsPrinting") + 900);
+    if (/const showsPrinting/.test(bare) && /if \(!showsPrinting\) return;/.test(poll))
+      ok("printing: nothing on screen → nothing is asked for");
+    else bad("the printing poll runs whether or not the card is rendered — a restaurant with printing "
+      + "switched off pays for a card R36 says it must never see");
+    if (/if \(!document\.hidden\)/.test(poll)) ok("printing: a hidden tab does not tick");
+    else bad("the printing poll keeps asking while the tab is hidden — the one page in this console that does");
+    if (/addEventListener\("visibilitychange"/.test(poll) && /removeEventListener\("visibilitychange"/.test(poll))
+      ok("printing: it stops and restarts on visibilitychange, and unhooks itself");
+    else bad("the printing poll does not stop/restart on visibilitychange (or leaks its listener)");
+
+  }
+}
+
 // ── 14 · A HEADING WITH NOBODY UNDER IT SAYS SOMETHING ───────────────────────────────────────
 // Search for a DISABLED person and every match lands in the group below, so the card read
 // "Team", blank, "Disabled · 1 — cannot sign in". The person was found; the first thing the
