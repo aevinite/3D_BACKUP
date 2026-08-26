@@ -213,6 +213,12 @@ export default function OwnerSettings() {
             belongs to the computer the printer is attached to. */}
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
           {data.printing.map((p) => {
+            // ── ONE ANSWER, ONE RESTAURANT ─────────────────────────────────────────────────────
+            // T13 (sweep #7) found this independently on 2026-08-27 and fixed it the only way its
+            // own territory allowed — by using the answer only when the list held exactly one row.
+            // T20 had already fixed it PROPERLY the same week, by making the route say which
+            // restaurant it answered for, which is the version kept here: it is right for two
+            // restaurants as well as one, and T13's workaround is superseded, not discarded.
             // ── ONLY FOR THE RESTAURANT THIS ANSWER IS ACTUALLY ABOUT (T20 round 2, 2026-08-31) ────
             // /api/owner/printing answers for ONE restaurant, and this is a LIST — so looking the
             // answer up once and using it for every row named one restaurant's printer and computer

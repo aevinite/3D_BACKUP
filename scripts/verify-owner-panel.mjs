@@ -543,6 +543,15 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
       ok("printing: it stops and restarts on visibilitychange, and unhooks itself");
     else bad("the printing poll does not stop/restart on visibilitychange (or leaks its listener)");
 
+    // ── one answer must not be put against every restaurant's row ──
+    // /api/owner/printing answers for ONE restaurant and does not say which, so an owner with
+    // printing on at two restaurants would have read the first one's computer and printer on the
+    // second one's row.
+    if (/data\.printing!?\.length === 1 && printing/.test(bare))
+      ok("printing: the single-restaurant answer is only used where it provably belongs");
+    else bad("the /api/owner/printing answer is applied to every restaurant row — it answers for ONE "
+      + "restaurant and does not say which, so a second restaurant would be told the wrong printer");
+
     // ── the icon must not touch its label ──
     // `.owx .adm-btn` is `display: inline-flex` with no gap, and a flex container trims the leading
     // space of a text run: `<i/> Open the…` measured 0px between the glyph and the O.
@@ -551,6 +560,12 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     else bad("the printer-guide button's icon touches its first letter — the console's button is a "
       + "flex box with no gap, so the space in the markup is trimmed away");
 
+    // ── R36 still holds for this whole card ──
+    if (!/switched off for|not enabled|isn.t enabled/i.test(bare.slice(bare.indexOf("Kitchen printing"), bare.indexOf("Kitchen printing") + 4000))
+        || /Automatic printing is switched off at the moment/.test(bare))
+      ok("printing: the card says nothing about a restaurant that does not have it (R36)");
+    else bad("the printing card has grown wording about printing being unavailable — R36: the owner "
+      + "never sees what is withheld");
   }
 }
 
