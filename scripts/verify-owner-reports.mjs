@@ -545,6 +545,26 @@ console.log("\nT11-A · the Reports Studio page");
     "app/owner/reports/page.tsx — write `order${n === 1 ? \"\" : \"s\"}`, the way the day sheet, the volume " +
       "report, the tips line and the staff-pay line in this same file already do. Found " + bareOrders + " place(s).",
   );
+
+  // ── 3b · …AND THE GUARD ITSELF WATCHED ONLY ONE WORD (T11 sweep #7, 2026-08-27) ────────────
+  // The check above was written for the word "orders" and nobody widened it, so the SAME fault
+  // survived two sweeps in the Payment settlement report's own tiles: "1 bills settled" under
+  // TOTAL COLLECTED, and "· 1 bills" under TOP METHOD — on any period a single bill settled,
+  // while the day sheet's settlement rows one click away read "1 bill" correctly. Every plural
+  // this file counts is watched now, not just the one that was found first.
+  const COUNTED = ["orders", "bills", "days", "people", "payments", "items", "dishes", "months", "hours"];
+  const bareAny = [];
+  for (const w of COUNTED) {
+    const n = [...reportsPage.matchAll(new RegExp(`\\)\\}\\s*${w}[\`\\s]`, "g"))].length
+      + [...reportsPage.matchAll(new RegExp(`\\}\\s+${w}[\`\\s]`, "g"))].length;
+    if (n > 0) bareAny.push(`${w}×${n}`);
+  }
+  check(
+    "no count on the Reports page is followed by ANY bare plural",
+    bareAny.length === 0,
+    "app/owner/reports/page.tsx — a count of one must read \"1 bill\", \"1 day\", \"1 person\". Write " +
+      "`bill${n === 1 ? \"\" : \"s\"}`. Found: " + bareAny.join(", "),
+  );
 }
 
 console.log("\nT11-B · the chart kit");
@@ -648,6 +668,26 @@ console.log("\nT11-D · printing, and the phone");
     "…including the period dropdown",
     /@media \(max-width: 640px\)[\s\S]{0,300}?\.owr-btn\.main\s*\{[^}]*min-height:\s*44px/.test(reportsPage),
     "app/owner/reports/page.tsx — the period control measured 31px on an A35.",
+  );
+  // ── …AND THE CONTROLS THAT FIX MISSED (T11 sweep #7, 2026-08-27) ──────────────────────────
+  // The 2026-08-18 pass raised the control STRIP and stopped there. Re-measured on an A35, the
+  // same screen still offered two sizes of the same gesture: "← All reports" 23px (the only way
+  // back to the hub), the sub-tab strip 34px, the day sheet's "Full report →" drill 22px and the
+  // overlay ✕ 32px, under a row of 44px buttons.
+  const phoneNav = [
+    [".rs-back", /\.rs-back\s*\{[^}]*min-height:\s*44px/],
+    [".rs-subtab", /\.rs-subtab\s*\{[^}]*min-height:\s*44px/],
+    [".rs-drill", /\.rs-drill\s*\{[^}]*min-height:\s*44px/],
+    [".rs-ovl-x", /\.rs-ovl-x\s*\{[^}]*height:\s*44px/],
+  ];
+  // Only the phone blocks — a desktop rule matching these would be a false pass.
+  const phoneCss = kit.split("@media (max-width: 640px)").slice(1).join("\n@media\n");
+  const missed = phoneNav.filter(([, re]) => !re.test(phoneCss)).map(([c]) => c);
+  check(
+    "…and so are the controls you MOVE with — back, sub-tabs, the drill link, the overlay close",
+    missed.length === 0,
+    "components/owner/reports/kit.tsx — under 640px these must reach 44px too, or one screen offers two " +
+      "sizes of the same gesture. Still small: " + missed.join(", "),
   );
 }
 
