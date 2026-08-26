@@ -2022,8 +2022,12 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bills settled`} />
-          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
+          {/* `bill` / `bills`, like every other count in this file. The 2026-08-17 pass fixed the
+              Busy-times and Times-of-day tiles and stopped at the word "orders" — so these two
+              still read "1 bills settled" and "· 1 bills" on any period settled by a single bill,
+              while the day sheet's settlement rows one click away said "1 bill" correctly. */}
+          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bill${bills === 1 ? "" : "s"} settled`} />
+          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bill${(top?.orders || 0) === 1 ? "" : "s"}`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} sub="collected ÷ bills settled" />
           {/* Discounts + cancellations fold in here as drill-boxes → open a detail overlay
               (owner 2026-07-26: a box on top that opens the full detail, not a sub-report). */}
