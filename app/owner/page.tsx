@@ -1448,8 +1448,19 @@ export default function OwnerDashboard() {
         sub={offNote ? offSub : kMain ? `${inr(kMain.avg)} per paid order` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Today so far" onOpen={() => setTileOpen("today")} v={todayRev} money compact loading={!ov} pill="● live"
-        sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
+      {/* ── AND THAT INCLUDES TODAY (T12 sweep, 2026-08-27) ───────────────────────────────────
+          This tile reads the OVERVIEW payload, not analytics, so `offNote` did not reach it and it
+          stayed a live figure while its four neighbours printed an em dash. But /api/owner/overview
+          ZEROES revenueToday and ordersToday for a restaurant whose Reports the admin has taken
+          away (its own route says so, and the estate table renders that same zero as "figures
+          hidden"). So the one tile still printing a number printed a FALSE one: measured by
+          replaying both of the server's own answers, the row read
+          "— · — · ₹0, 0 orders today · — · —". A confident zero beside four honest dashes reads as
+          "you took nothing today", which is the opposite of what is true. It says what the others
+          say, and the "live" pill goes with it — there is nothing live to point at. */}
+      <Kpi k="Today so far" onOpen={offNote ? undefined : () => setTileOpen("today")} v={offNote ? "—" : todayRev} money compact
+        loading={!offNote && !ov} pill={offNote ? undefined : "● live"}
+        sub={offNote ? offSub : `${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
       <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub
           : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"
