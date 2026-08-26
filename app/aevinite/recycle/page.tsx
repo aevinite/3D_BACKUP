@@ -31,16 +31,21 @@ import { createPortal } from "react-dom";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { openRestaurantPanel } from "@/components/admin/shared";
 
+// `canPurge` used to be here and is GONE (T16 sweep #7, 2026-08-27). The route still answers it,
+// always `true`, because migration 342 removed the 90-day lock — so it was a field that could only
+// ever say yes, read by nothing, sitting on the type that describes a permanent delete. A dead
+// permission flag beside a destructive action is the kind of thing a later reader wires back up.
+// `daysHeld` stays: it is a FACT ("in the bin 12 days"), not a permission.
 type Trashed = {
   id: string; slug: string; name: string;
   deletedAt: string; deletedBy: string | null; reason: string | null;
-  daysHeld: number; canPurge: boolean;
+  daysHeld: number;
 };
 
 type OwnerTrashed = {
   id: string; username: string; name: string; restaurants: number;
   deletedAt: string; deletedBy: string | null; reason: string | null;
-  daysHeld: number; canPurge: boolean;
+  daysHeld: number;
 };
 
 const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch { return iso; } };
