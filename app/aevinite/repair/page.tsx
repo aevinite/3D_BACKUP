@@ -553,6 +553,16 @@ export default function AdminRepair() {
     return [...list].sort((a, b) =>
       a.status === b.status ? +new Date(b.created_at) - +new Date(a.created_at) : a.status === "open" ? -1 : 1);
   }, [scopedIssues, ticketFilter]);
+  // ── AND THE "ALREADY FIXED" LIST TOO (T17 sweep #7, 2026-08-27) ─────────────────────────────
+  // This list was the last thing on the page the picker did not reach. With one restaurant chosen
+  // it still showed every restaurant's records, its heading counted all of them and said they were
+  // "for <that restaurant>", and "Forget all" — which sends the restaurant id — then forgot only
+  // that restaurant's and reported a smaller number than the line above it claimed. The DELETE
+  // route's own note says the button "can never clear more than the list it sits under shows";
+  // this is what makes that true. Same set as the server's scope: this restaurant's records plus
+  // the platform-wide ones that also cover it. A client filter over rows already in hand — no
+  // extra request, so choosing a restaurant still fires nothing.
+  const scopedMemories = rid ? memories.filter((m) => m.restaurant_id === rid || m.restaurant_id === null) : memories;
   const atRisk = (att?.atRisk || []).filter((r) => !rid || r.id === rid);
   const onboarding = (att?.onboarding || []).filter((r) => !rid || r.id === rid);
   const attCount = atRisk.length + onboarding.length;
@@ -866,11 +876,11 @@ export default function AdminRepair() {
           NOTHING: if any of these happens again it appears in "Problems right now" above like
           any other error. Its only effect is that pressing Fix now on an OLD report of one
           answers "already fixed on <date>" instead of sending Claude to redo the work. */}
-      {memories.length ? (
+      {scopedMemories.length ? (
         <div style={{ marginBottom: 14 }}>
           <button className="rp-link" onClick={() => setShowMemories((v) => !v)} style={{ fontSize: 12.5 }}>
             <i className={`fas fa-chevron-${showMemories ? "down" : "right"}`} aria-hidden="true" style={{ marginRight: 6, fontSize: 10 }} />
-            Already fixed ({memories.length}) — for reference; nothing here is hidden from the board
+            Already fixed ({scopedMemories.length}) — for reference; nothing here is hidden from the board
           </button>
           {showMemories ? (
             <div style={{ marginTop: 8 }}>
@@ -879,11 +889,11 @@ export default function AdminRepair() {
               <div className="rp-bulk" style={{ marginBottom: 10 }}>
                 <i className="fas fa-eraser" aria-hidden="true" style={{ opacity: 0.65 }} />
                 <span className="rp-bulk-lead">
-                  All {memories.length} record{memories.length === 1 ? "" : "s"}{scopedName ? <> for <b>{scopedName}</b></> : ""} at once:
+                  All {scopedMemories.length} record{scopedMemories.length === 1 ? "" : "s"}{scopedName ? <> for <b>{scopedName}</b></> : ""} at once:
                 </span>
                 {confirmBulk === "memories" ? (
                   <span className="rp-bulk-ask">
-                    <span>Forget all {memories.length}?</span>
+                    <span>Forget all {scopedMemories.length}?</span>
                     <button className="adm-btn primary" onClick={forgetAllMemories}>Yes, forget them</button>
                     <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
                   </span>
@@ -905,7 +915,7 @@ export default function AdminRepair() {
                   that says an earlier fix didn&rsquo;t hold.
                 </p>
               )}
-              {memories.map((m) => (
+              {scopedMemories.map((m) => (
                 <div key={m.id} className="rp-err" style={{ opacity: 0.85 }}>
                   <span className="rp-err-bar" style={{ background: "var(--adm-ok, #4caf82)" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>

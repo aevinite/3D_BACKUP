@@ -238,6 +238,17 @@ ok(/const showRed = isErr && !isResolved && !waitingUntil/.test(LOGS), "P23144",
 ok(/scopedName \? " across all restaurants" : ""/.test(REPAIR), "P23151",
   "repair: the waiting-reports line no longer says the count is platform-wide while one restaurant is chosen");
 
+// ── 20 · the "Already fixed" list obeys the picker its own button obeys ───────────────────────
+// The list showed every restaurant's records under "Showing X only", counted all of them as X's,
+// and "Forget all" — which sends the restaurant id — then forgot fewer and said so.
+ok(/const scopedMemories = rid \?/.test(REPAIR), "P23161",
+  "repair: the already-fixed list ignores the restaurant picker again, while its Forget-all button obeys it");
+ok(/m\.restaurant_id === rid \|\| m\.restaurant_id === null/.test(REPAIR), "P23162",
+  "repair: the already-fixed filter no longer matches the DELETE route's scope (this restaurant + the platform-wide ones)");
+ok(!/All \{memories\.length\} record/.test(REPAIR), "P23163",
+  "repair: the already-fixed heading counts every restaurant's records again");
+ok(/\{scopedMemories\.map\(/.test(REPAIR), "P23164", "repair: the already-fixed list renders the unscoped array again");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
