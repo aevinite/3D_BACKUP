@@ -63,7 +63,9 @@ const run = async () => {
       p.on("pageerror", (e) => errs.push(String(e).slice(0, 90)));
       try {
         await p.goto(BASE + path, { waitUntil: "domcontentloaded" });
-        await p.waitForTimeout(600);
+        // Wait for a screen to actually EXIST rather than for a fixed number of milliseconds.
+        await p.waitForFunction(() => !!document.querySelector(".nf-g, .nf-s"), null, { timeout: 20000 })
+          .catch(() => { /* leave it to the assertions below to report what is there */ });
         const s = await p.evaluate(() => {
           const g = document.querySelector(".nf-g"), st = document.querySelector(".nf-s");
           const h = document.getElementById("nf-home");
@@ -109,7 +111,10 @@ const run = async () => {
       const p = await ctx.newPage();
       try {
         await p.goto(BASE + path, { waitUntil: "domcontentloaded" });
-        await p.waitForTimeout(500);
+        // The dish screen asks whether the menu is live before it offers a button, so the link
+        // appears LATER than the page does. Wait for the answer, not for a guess at how long it takes.
+        await p.waitForFunction(() => !!document.querySelector("a.btn, a[href*='/menu']"), null, { timeout: 20000 })
+          .catch(() => { /* reported below */ });
         const s = await p.evaluate(() => {
           const hrefs = [...document.querySelectorAll("a")].map((a) => a.getAttribute("href") || "");
           const h = document.querySelector("h1, h2");
@@ -166,11 +171,11 @@ const run = async () => {
     {
       const g = await ctx.newPage();
       await g.goto(BASE + "/menu/no-such-page", { waitUntil: "domcontentloaded" });
-      await g.waitForTimeout(500);
+      await g.waitForFunction(() => !!document.querySelector(".nf-g, .nf-s"), null, { timeout: 20000 }).catch(() => {});
       const gt = await g.evaluate(() => (document.querySelector(".nf h1") || {}).textContent || "");
       const s = await ctx.newPage();
       await s.goto(BASE + "/manager/no-such-page", { waitUntil: "domcontentloaded" });
-      await s.waitForTimeout(500);
+      await s.waitForFunction(() => !!document.querySelector(".nf-g, .nf-s"), null, { timeout: 20000 }).catch(() => {});
       const st = await s.evaluate(() => (document.querySelector(".nf h1") || {}).textContent || "");
       gt.trim() && st.trim() && gt.trim() !== st.trim()
         ? ok(`the two screens really are different ("${gt.trim()}" vs "${st.trim()}")`)
