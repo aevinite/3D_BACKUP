@@ -4102,6 +4102,47 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-toggle.on .pill { background: var(--adm-ok); }
 .adm-toggle.on .pill::after { transform: translateX(20px); }
 .adm-toggle.off .pill { background: var(--muted2, rgba(120,120,120,0.32)); }
+
+/* ── ONE PATTERN FOR "WHO HAS SWITCHED THIS ON" (owner, 2026-08-26: "why this ui looks very shit
+   … make both the option looks on the both mode are clearly visible and easy to access").
+   The printing card showed TWO identical switches for one feature — Aevidine's grant and the
+   restaurant's own — and they can legitimately disagree, so the screen read as one switch
+   contradicting itself. A fact is not a switch: the two facts are shown as a STATE PAIR, with the
+   single action that resolves a mismatch beside them.
+   Everything below is built from the console's own tokens (--card/--text/--muted/--border/--adm-ok),
+   so both skins get their own colours instead of one skin's colours leaking into the other. */
+.adm-state { display: grid; gap: 8px; margin: 0 0 12px; }
+.adm-state-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: var(--border);
+  border-radius: 11px; background: var(--card); font-size: 13.5px; }
+.adm-state-row .who { color: var(--muted); min-width: 0; flex: 1; }
+.adm-state-row .who b { color: var(--text); font-weight: 650; }
+/* The dot carries a SHAPE as well as a colour — colour alone is not an answer for anyone who cannot
+   see the difference between green and grey (WCAG 1.4.1). Yes is filled, no is a ring. */
+.adm-state-dot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
+.adm-state-row.yes .adm-state-dot { background: var(--adm-ok, #30a46c); }
+.adm-state-row.no  .adm-state-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
+.adm-state-val { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
+.adm-state-row.yes .adm-state-val { color: var(--adm-ok, #30a46c); }
+.adm-state-row.no  .adm-state-val { color: var(--muted); }
+
+/* A quiet block for "what this means", collapsed by default. The printing card had six lines of
+   technical prose above the controls; the detail is kept, just not in the way. */
+.adm-more { margin: 2px 0 0; }
+.adm-more > summary { cursor: pointer; font-size: 12.5px; color: var(--accent); list-style: none; padding: 2px 0; }
+.adm-more > summary::-webkit-details-marker { display: none; }
+.adm-more > summary::before { content: "＋ "; font-weight: 700; }
+.adm-more[open] > summary::before { content: "－ "; }
+.adm-more > div { font-size: 12.5px; line-height: 1.6; color: var(--muted); padding: 6px 0 2px; }
+
+/* "This is decided somewhere else" — the same shape on both boards, so a person learns it once. */
+.adm-elsewhere { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 11px 13px;
+  border: var(--border); border-radius: 11px; background: color-mix(in srgb, var(--accent) 7%, var(--card));
+  font-size: 13px; }
+.adm-elsewhere .lbl { color: var(--muted); }
+.adm-elsewhere b { color: var(--text); }
+.adm-elsewhere a { margin-left: auto; color: var(--accent); font-weight: 650; text-decoration: none; white-space: nowrap; }
+.adm-elsewhere a:hover { text-decoration: underline; }
+@media (max-width: 640px) { .adm-elsewhere a { margin-left: 0; } }
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── New-restaurant create card (owner 2026-07-24): sectioned form + access setup ── */
 .nr-card { max-width: 760px; }
