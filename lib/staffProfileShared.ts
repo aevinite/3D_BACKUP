@@ -126,9 +126,16 @@ const str = (v: unknown, max = 200): string | null => {
   const s = String(v).trim();
   return s ? s.slice(0, max) : null;
 };
+// THE **LAST** n DIGITS, NOT THE FIRST (sweep #7 T15, 2026-08-27). This kept `slice(0, n)`, so a
+// person typing or pasting a whole Aadhaar / PAN / account number into a field labelled
+// "Last 4 digits" had the FIRST four stored, silently, and the record then identified the wrong
+// document with no sign on screen that anything was wrong. Every caller of this helper is a
+// "last four" field (id_last4, bank_last4), and typing exactly four is unaffected — 4 digits
+// sliced from either end are the same 4 — so this can only ever turn a wrong answer into a right
+// one. Locked by lib/staffProfileShared.test.mjs.
 const digits = (v: unknown, n: number): string | null => {
   const s = String(v ?? "").replace(/\D/g, "");
-  return s ? s.slice(0, n) : null;
+  return s ? s.slice(-n) : null;
 };
 const isoDate = (v: unknown): string | null => {
   const s = String(v ?? "").trim();
