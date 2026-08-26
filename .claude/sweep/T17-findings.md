@@ -96,11 +96,12 @@ that file belongs to the admin-API terminals. Carried into the chat report as a 
 rows were written against is gone. The rules they protect all still hold, on the check rows that
 replaced it; each row says so and keeps its id.
 
-**Two handoffs from sweep #6 are now BUILT** — H1 (System health and Usage & cost disagreeing
-about the staff count: the health route now filters to live restaurants) and H2 (one fault sitting
-on the board as two tiles: `errorSignature.ts` now strips the browser's prefix). **H3 is still
-open** — errors recorded with a null `restaurant_id`, so those tiles cannot be narrowed by the
-picker and offer no "Go to that panel".
+**All three handoffs from sweep #6 are now BUILT.** H1 — System health and Usage & cost disagreed
+about the staff count; the health route now filters staff to live restaurants. H2 — one fault sat
+on the board as two tiles; `errorSignature.ts` now strips the browser's own `Uncaught
+ReferenceError:` prefix. H3 — five tiles named no restaurant; `app/api/log/client-error` now
+derives the restaurant from the guest URL's own slug, and its header comment cites those exact
+five. **Measured on today's board: 0 of 6 tiles carry a null restaurant.**
 
 ## The 500 new rows · `P23101`–`P23600`
 
