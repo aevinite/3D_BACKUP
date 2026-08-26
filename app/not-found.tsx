@@ -31,6 +31,9 @@
 // /q/<code>, and /view/<folder> (the 3D dish viewer — a guest surface with no slug in its path,
 // which is exactly how it came to be missed once already).
 import { useLayoutEffect, useState } from "react";
+// Used only in the <noscript> fallback below, for the one link whose href is the literal "/".
+// next/link renders a plain <a> into the HTML, so it still works with JavaScript switched off.
+import Link from "next/link";
 
 type Aud = "guest" | "staff";
 
@@ -231,7 +234,7 @@ export default function NotFound() {
               {/* Both doors, because with no JavaScript we cannot tell which one this person needs.
                   The menu first: a diner is the one who would be stranded by the wrong choice. */}
               <a className="nf-btn nf-home" href="/menu">Go to the menu</a>
-              <a className="nf-btn nf-again" href="/">Go to the home screen</a>
+              <Link className="nf-btn nf-again" href="/">Go to the home screen</Link>
             </div>
           </div>
         </noscript>
