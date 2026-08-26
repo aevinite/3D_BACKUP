@@ -1,135 +1,228 @@
 # T1 — GUEST MENU CORE · problems found and fixed
 
+Sweep #7, 2026-08-22/23. Branch `sweep7/t1-guest-menu-core`, worktree `~/Documents/Projects/wt-s7-t1`,
+port 4201, against `origin/main` **b64951ad**.
+
 Territory: the three guest doors (`/menu`, `/r/<slug>/menu`, `/q/<code>`), `MenuView`, `FoodCard`,
 `NavPicker`, `Header`, `HeroTitle`, `GuestChrome`, `GuestNotFound`, `IntroSplash`, `ComingSoon`,
 `app/page.tsx`, `app/not-found.tsx`.
 
-500 phases run twice. **3 problems found; 2 fixed, 1 ruled a deliberate design by the owner and
-reverted (R29).** Every fix carries a static guard in `scripts/verify-guest.mjs` proved to fail on
-the pre-fix code.
+**502 existing ledger rows re-run — 0 regressions. 500 new rows written and executed. 4 problems
+found, all 4 fixed here, each with a guard proved to fail on the pre-fix code.**
+
+> Sweep #6's findings for this territory (F1 the mis-cased link, F2 the bell → **R29**, F3 the
+> not-serving preview) were all re-checked this run and all still hold. They are not repeated below.
 
 ---
 
-## F1 · A differently-cased menu link loses the diner's table — HIGH · confirmed
+## The headline: two of the four were invisible to every check that already existed
 
-**Who is worse off:** a diner, and the waiter serving them.
-**Where:** guest menu → any door reached with a slug whose casing differs from the stored one
-(`/r/French-House/menu?table=4`). On screen the menu looks perfect; what breaks is invisible.
+Both **item 1** and **item 3** had passing ledger rows sitting on top of them the whole time.
 
-**What happens.** `getRestaurantBySlug` folds case, so the odd casing resolves and renders. MenuView
-is handed `r.slug`, so the browse state it owns is scoped correctly. But the **cart, the scanned
-table, the favourites and the dining session** do not go through MenuView — they go through
-`lib/tenantStorage`, whose `tenantSlug()` reads the slug straight out of `window.location.pathname`
-without folding it. One diner on one phone therefore had two scopes at once:
+- **P00013, P00014, P00015 and P00494** all assert that the menu saves and restores the diner's
+  scroll position. All four passed on every pass of every sweep. The feature had stopped working.
+  They assert the SHAPE OF THE CODE; nobody had ever come back from a dish and looked.
+- **P00488** asserts the search suggestions "describe themselves honestly to a screen reader". It
+  passed. The fix it was written for had taken the LINK role off every suggestion row.
 
-```
-lfh_menu_layout:french-house      ← MenuView, resolved slug
-lfh_table:French-House            ← tenantStorage, as typed      (measured, /menu?table=4)
-```
-
-The table is what costs someone something. The menu builds its own dish links from `r.slug`, so the
-**first dish the diner taps** moves them to the lower-case address, where `getScannedTable()` returns
-`""`. They are asked to join a table again, at a table the app had already been told about.
-
-**Reachable when:** any link whose casing differs — typed by hand, shared through an app that
-capitalises, or a QR generated with different casing. Measured on this dev stack at 360×780.
-
-**Fixed by:** canonicalising at the door. `app/r/[restaurant]/menu/page.tsx` now redirects to
-`/r/<canonical-slug>/menu` when the address differs, carrying the query verbatim so `?table=N`
-survives. Every later page in that tab inherits the corrected path, so cart, favourites and session
-agree with the browse state without any of them knowing about casing. When the casing already
-matches (the normal case) nothing happens.
-
-**Guard:** `verify:guest` → `P00155`.
-**Confirmed after the fix:** `/r/French-House/menu?table=4` → `/r/french-house/menu?table=4` with
-`lfh_table:french-house = 4`; `/r/FRENCH-HOUSE/menu?t=9&x=1` keeps both parameters.
-
-### ✅ ROOT CAUSE ALSO FIXED — `lib/tenantStorage.ts` (owner granted permission, 2026-08-17)
-
-`tenantSlug()` now folds the path segment it reads, and `tgetFor`/`tsetFor` fold the slug they are
-handed. That is the root cause: it protects a guest who lands *directly* on `/r/<Slug>/item/...`
-from a shared dish link, without ever passing through the menu page. Safe because a slug is
-lower-case by construction wherever it is created, so folding can only correct a mis-cased address —
-it can never point at a different restaurant.
+The two guards added for them are behavioural for exactly that reason: one drives a real Back, the
+other reads the browser's own accessibility tree.
 
 ---
 
-## F2 · The waiter bell parks on a control — REPORTED, FIX REVERTED ON THE OWNER'S WORD
+## 1 · Back from a dish put the diner at the top of the menu again — HIGH · confirmed, fixed
 
-**Status: NOT a fault any more. It is R29.** The measurements below stand and are reproducible; the
-owner has weighed them and ruled that the bell stays exactly where it is.
+**Who is worse off:** every diner who opens a dish and comes back, on every restaurant.
+**Where:** guest menu → the dish grid → tap any dish, then press Back. What he'd SEE: the menu
+scrolled all the way back to "BONJOUR" and the first category, instead of the dish he was looking at.
+`components/MenuView.tsx`.
 
-Measured on both restaurants at 360x780. `settleBell()` scans upward for a resting place covering no
-control; when it finds none within 260px it returns the bell to its corner. Two ordinary states have
-no clean spot:
+**What happens.** The scroll effect ends with a bare `onScroll()` — *"run once on mount so the shrink
+starts at the right value if we restored a scrolled position"*. That mount call runs while the list
+is still EMPTY, so `el.scrollTop` is 0, and it wrote that 0 straight over the saved position. The
+restore effect runs later (it waits for the dishes), read the 0, and its `if (y > 0)` guard did
+nothing at all.
 
-| state | landed on | overlap | finger at the control's own centre |
-|---|---|---|---|
-| search suggestions open | a dish's `+` (y 734–776, x 291–333) | 22px | `chef-call` |
-| every category folded | a `.cat-group-head` | 48px | the bell owns the overlap band |
+**Measured, not reasoned about.** With the key pre-seeded to 1438, one fresh load produced EXACTLY
+ONE write to it — value `"0"`, 136 ms in — and the page stayed at 0. Reproduced on a **production
+build**, so it is not a dev-only double-mount artefact.
 
-A stand-down fix was built and confirmed working, then **reverted in full** (owner, 2026-08-17):
-*"i want like previous bell of call waiter should be stuck at his place we can scrool and click the
-thing make sure don't change that again."* `components/MenuView.tsx` is byte-identical to `main` in
-`settleBell()`.
+A second cause sat behind it: two frames is enough for the CARDS to exist but not for the page to
+reach its height, because every dish photo is `loading="lazy"` with no reserved box. The browser
+silently CLAMPS `scrollTop` — asking for 1438 landed at 447, and nothing re-aimed once the photos
+arrived.
 
-Recorded as **R29** in `docs/REJECTED-IDEAS.md` with its comment on the fallback line, and guarded
-by a new `verify:guest` check that fails if anyone hides, fades or yields the bell again. Do not
-re-report this.
+**Fixed by** gating the save on the restore having settled, and re-aiming the jump until the page
+stops growing — instantly rather than through the container's `scroll-behavior: smooth`, and bounded
+four ways (reached it · the guest scrolled and we get out of their way · the height stalled three
+ticks running · a 2.5 s deadline).
 
-## F3 · A menu that isn't serving still previews as an open one — MEDIUM · confirmed
+**Confirmed in a browser**, both restaurants: left at "Mint Melon Juice", came back to "Mint Melon
+Juice"; left at "Green Apple Mojito", came back to "Green Apple Mojito". Before the fix the same two
+journeys came back to "Espresso" and "Virgin Mojito".
 
-**Who is worse off:** a diner following a shared or saved link, and the restaurant whose closed menu
-looks open.
-**Where:** guest menu → the link preview in a chat app or a browser tab title, for
-`/r/<slug>/menu` when the restaurant is switched off or its Menu feature is off.
+**Guard:** `verify:guest` → **P15332**, both halves. The live half drives the whole journey and
+asserts the DISH, not a pixel. Proved to fail on the pre-fix code with exactly that message.
 
-**What happens.** `/q/<code>` has always answered a dead code with a neutral title and no platform
-blurb. The tenant door did not: `generateMetadata` returned the restaurant's name, tagline and logo
-whatever the state was, and only the page body checked `active` / `menuEnabled`. So the link
-previewed as an open menu — name, "view the menu and order at …", logo — and then landed on
-"This menu isn't available right now".
-
-**Reachable when:** the restaurant is deactivated or its Menu master switch is off, and any link to
-it is shared or already in someone's history.
-
-**Fixed by:** the same guard, the same wording, as the QR door. Folded in from the preserved branch
-`origin/fix/guest-experience-t1` after judging it on its merits — it is correct, and both reads it
-uses (`getRestaurantBySlug`, `getSettings`) are the cached ones the page already makes, so it costs
-no extra database read.
-
-**Guard:** `verify:guest` → `P00165`.
-**Confirmed after the fix:** a serving menu's metadata is byte-identical to before
-(`"AANGAN GARDEN RESTAURANT — Menu"`, its own tagline, its own image).
+**One thing I got wrong on the way, recorded so nobody repeats it:** I first measured a *second*
+corruption — the saved value being overwritten with a clamped number during the hop to the dish page
+— and built three more mechanisms to defend against it. It was **my test scrolling the page**:
+Playwright's `.click()` scrolls an off-screen element into view first, and I was tapping the 4th
+card while at 1438. All three mechanisms were removed again. Tap a card that is ALREADY on screen.
 
 ---
 
-## ✅ ALSO DONE — three rejections recorded in `docs/REJECTED-IDEAS.md`
+## 2 · At 99, the dish card said "added" with a green tick, and nothing was added — MEDIUM · fixed
 
-**R28** (no cap on the 3D preload, 2026-08-16) is now in the doc with its comment on the preload
-queue. Added alongside it: **R29** (the bell stays put) and **R30** (the hero fallback stays English
-— *"i want english only for all"*, extending R15 and R23). All three carry a comment on the exact
-line someone would otherwise change, and `verify:rejected` passes.
+**Who is worse off:** a diner or waiter adding a large round to one line.
+**Where:** guest menu → any dish card whose count is already 99 → tap "+". What he'd SEE: a green ✓
+and "<dish> added", with the number still reading 99. `components/FoodCard.tsx`.
 
-**Noted, not touched:** R26 and R27 are filed BELOW the `## Reversed` heading in that doc although
-both record a NO, not a reversal. The guard only enforces code comments for rows above that heading,
-so R27 ("never give the restaurant a delete-a-bill permission") is currently unenforced and has no
-code comment. Moving it up would fail the guard until that comment is written — someone else's file
-and someone else's half-finished work, so I left it and am flagging it instead.
+**What happens.** *"A limit is not a success"* (owner, 2026-08-18) was applied to the Maximum-99
+message — `variant: "info"`, a neutral • instead of the default ✓ — but the `"<dish> added"` toast
+at the foot of the same function still fired on ANY `delta > 0`. It arrived second and won. The
+photo's success bounce ran too, first thing in the function, before anything knew whether the add
+would land.
+
+**Measured on the real card** (Aangan, Virgin Mojito at 99): the toast read `✓ | Virgin Mojito added`
+with "TAP TO VIEW YOUR BILL" under it, and the quantity stayed at 99.
+
+`CartPanel`'s "+" has always had this right: at the ceiling it raises the same message and RETURNS.
+Those two strings exist precisely so the bill and the dish card explain one limit the same way, so
+the behaviour around them has to match too.
+
+**Fixed by** one `refused` test gating both the success toast and the bounce. The removal path and
+every ordinary add are untouched.
+
+**Confirmed in a browser:** a normal add still shows `✓ Virgin Mojito added`; at 99 the tap now shows
+`• Maximum 99 per dish` and nothing else; "−" from 99 still goes to 98.
+
+**Guard:** `verify:guest` → **P15366**, proved to fail on the pre-fix code.
 
 ---
 
-## Considered and NOT reported
+## 3 · A blind diner could not reach the search suggestions at all — MEDIUM · confirmed, fixed
 
-- **English hero fallback** (`"Welcome"` / `"Our Menu"` for a tenant with no custom hero) and the
-  English `aria-label`s on the card buttons — covered by **R15** and **R23**. The owner has ruled
-  twice that the guest menu's remaining English is not to be raised as work.
-- **Dark by default on a tenant menu** — the intended design, per the pre-empt list.
-- **The guest menu refusing to be embedded**, and **CSP being report-only** — both deliberate.
-- **Aangan's cards rendering empty at 8.5s** — a cold dev-server compile only. Warm, the same page
-  is complete at 2.0s with all 199 cards, real names and prices, no skeletons.
-- **The third filter chip sliced by the layout switch at 360px** — known, and the owner-accepted fix
-  (the measured `data-can-scroll` fade) is present and stamping correctly.
-- **React's dev-only "script tag while rendering" advisory** on the dark-default inline script — it
-  would only matter on a soft client navigation between two restaurants' menus, and no in-app link
-  does that. No restaurant on this stack currently uses the dark default at all.
+**Who is worse off:** a diner using a screen reader.
+**Where:** guest menu → type in "Search dishes…" → the drop-down of matching dishes. Nothing to SEE:
+the panel looks and behaves identically. `components/MenuView.tsx`.
+
+**What happens.** The 2026-08-17 accessibility fix put `role="listitem"` on each suggestion `<Link>`.
+An explicit role REPLACES an element's own one, so every row stopped being a link.
+
+**Read out of Chrome's own accessibility tree:** the panel contained eight `listitem`s and **NOT ONE
+`link`**, while 58 other links on the same page were listed normally. Skimming by links is the
+ordinary way a screen-reader user reads a page, and the search results were invisible to it — and no
+row announced that it could be opened.
+
+**Fixed by** making the panel a labelled GROUP of links, which is what it actually is and the pattern
+the category chip row above already uses. The `aria-label` still carries the count. `role="list"`
+was the alternative and needs `listitem` children, i.e. a wrapper around each anchor — and
+`.search-result:last-child` draws the row divider, so wrapping would have put a border under every
+row.
+
+**Confirmed in a browser:** the tree now reads `group "8 matching dishes"` → `link "Pasta Salad ₹199
+Salads"`; 8 of 8 rows keep their link role and the page's link count went 58 → 66. No DOM change, no
+CSS change, nothing moved on screen.
+
+**Guard:** `verify:guest` → **P15514**, and **P00488** tightened to assert the group rather than the
+list. Both proved to fail on the pre-fix code.
+
+---
+
+## 4 · The language and currency lists said "list box" and then had nothing in them — MEDIUM · fixed
+
+**Who is worse off:** a diner using a screen reader, on every restaurant that offers more than one
+language or currency.
+**Where:** guest menu → the "EN" button in the top bar (and the ₹/$ button beside it) → the drop-down.
+Nothing to SEE. `components/NavPicker.tsx`.
+
+**What happens.** Each `role="option"` button sat inside an `<li>`. A listbox must OWN its options
+directly; an element in between breaks that relationship.
+
+**Read out of Chrome's own accessibility tree:** `listbox "Language"` containing plain `button`s and
+**ZERO options** — no selectable items, no "1 of 3" position, and `aria-selected`, the only thing
+marking WHICH language is currently on, never conveyed. A blind diner could not tell which language
+they were already using.
+
+Same shape as item 3, in a component nobody had looked at. **This is the third time this exact
+mistake has been made in this territory** (the category chips were a `tablist` with no tabpanel, the
+suggestions were a `listbox` with no options, and now this) — which is why the guards for it are
+written against the browser's computed tree rather than the markup.
+
+**Fixed by** dropping the `<li>`. `.nav-picker-list` is already `list-style: none` and
+`.nav-picker-item` is already `width: 100%`, so the buttons render identically as direct children.
+
+**Confirmed in a browser:** the tree now reads `listbox "Language"` → `option "🇬🇧 English"`,
+`option "🇫🇷 Français"`, `option "🇮🇳 हिन्दी"`. Screenshot compared before and after: identical — same
+160×137 box, same 146×41 rows, English still highlighted as the active one. No CSS touched.
+
+**Guard:** `verify:guest` → **P15517**, proved to fail on the pre-fix code.
+
+---
+
+## Measured, reported, and deliberately NOT changed
+
+### The category chip's ink is the weaker of the two on 11 of 21 real colours
+
+`inkOn()` in `MenuView.tsx` picks black or white from a luminance THRESHOLD (0.42). Across every
+distinct category colour actually in the database, **eleven land on the weaker ink**:
+
+| colour | category | ink today | contrast | the other ink |
+|---|---|---|---|---|
+| `#22c55e` | salads | white | **2.3:1** | 8.3:1 |
+| `#06b6d4` | drinks | white | **2.4:1** | 7.7:1 |
+| `#c79a3e` | soups | white | **2.6:1** | 7.3:1 |
+| `#0ea5e9` | beverages | white | 2.8:1 | 6.8:1 |
+| `#f97316` | sandwiches | white | 2.8:1 | 6.7:1 |
+| `#ca8a04` | tacos | white | 2.9:1 | 6.4:1 |
+| `#e8772e` | starters | white | 3.0:1 | 6.4:1 |
+| `#d97706` | biryani | white | 3.2:1 | 5.9:1 |
+| `#16a34a` | salads | white | 3.3:1 | 5.7:1 |
+| `#ec4899` | desserts | white | 3.5:1 | 5.3:1 |
+| `#ef4444` | pizza | white | 3.8:1 | 5.0:1 |
+
+Picking whichever ink has the better contrast, instead of testing a threshold, is a two-line change
+and is better at **every** colour, not just these.
+
+**Not made here on purpose.** It flips the SELECTED chip from white text to dark text on eleven
+colours across every restaurant, and that is a visible design decision — the owner's standing rule is
+*"Design work → load the UI/UX skill, compare approaches — never restyle by eye."* I looked at the
+worst one on screen ("Salads", bold white on mid-green) and it is legible, just below the standard.
+Raised as improvement **#12** with these numbers so it is a one-line decision. Recorded at
+**P15465** so the next sweep does not re-derive it.
+
+### The brand wordmark ellipsises at 320px
+
+`little French …` on a 320-wide screen: 98 px available, 120 px needed. Deliberate CSS
+(`text-overflow: ellipsis` + `nowrap`), and it is clean at 360, 390, 412 and 768 — the owner's own
+test widths are 360 and 390. An honest "…" is the designed behaviour. Shrinking it to fit, the way
+dish names already do, is improvement **#11**. Recorded at P15550/P15554.
+
+### Considered and NOT reported
+
+- **The waiter bell overlapping a card** — **R29**, ruled by the owner on 2026-08-17. Re-measured
+  this run at five widths and both skins: visible, opacity 1, pointer-events auto, and **0
+  overlapping controls** at every one. Not a fault and not re-reported.
+- **The very first visit fetching the menu twice** — measured on a production build: 2 on a
+  brand-new profile while the offline layer fills itself, **1 on every load after that**. The fault
+  sweep #6 fixed (two identical page fetches, 39.6 KB each) is genuinely gone. Raised as improvement
+  **#10**, not filed as a fault.
+- **Two `lfh_guest_settings` calls per minute per open tab** — that is the documented 60-second
+  settings backstop, inside the rule.
+- **React's dev-only "script tag while rendering" advisory** — unchanged from sweep #6's note.
+- **A mistyped address without `/r/` showing the Aevidine 404** — correct per P00404 (an unmatched
+  path is not a guest route). Raised as improvement **#9**.
+
+---
+
+## What this run leaves open
+
+| | |
+|---|---|
+| `⏭` rows still not exercisable | **3** — P00289 (`verify:everything` belongs to the merge terminal), P00372 (no restaurant on this stack uses the dark default), P00419 (no dish-less ACTIVE restaurant) |
+| `⏭` closed this run | **1** — P00365, driven against the real printed code `/q/W5QRFWZU` |
+| Reported, awaiting the owner's decision | **2** — the chip ink (#12) and the 320px wordmark (#11) |
+
+Improvement ideas are **not** in this file, by the owner's instruction for sweep #7 — they are
+printed in the terminal window.

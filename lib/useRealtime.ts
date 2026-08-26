@@ -182,7 +182,20 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     // bfcache restore, which is why this was only ever a narrow gap — but iOS Safari does not fire
     // it reliably on a gesture-restore, and that is exactly the case the panel twin added it for.
     // `wake` is throttled to one socket rebuild per 1.5s, so the extra signal costs a refetch at most.
-    window.addEventListener("pageshow", wake);
+    // ONLY A REAL BACK-FORWARD RESTORE (guest sweep, 2026-08-26).
+    //
+    // `pageshow` fires on EVERY page load, not only on a bfcache restore — and on an ordinary load
+    // it arrives AFTER this effect has already done its initial fetch. So every fresh load woke the
+    // screen for no reason: a second full refetch, and a needless socket teardown-and-rebuild.
+    // Measured on a production build of the guest menu, first ever visit:
+    //     261ms  fetch /menu-data      (the real one)
+    //     460ms  pageshow persisted=false
+    //     762ms  fetch /menu-data      (this listener)
+    // `persisted` is the flag that tells the two apart, and it is true for exactly the case this
+    // listener was added for — a phone returning from another app, or an iOS gesture-back, where
+    // visibilitychange is not reliable.
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) wake(); };
+    window.addEventListener("pageshow", onPageShow);
     window.addEventListener("online", wake);
     const poll = setInterval(() => { if (!document.hidden) fireAll(); }, 60000); // safety net — paused while hidden
 
@@ -195,7 +208,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
       Object.values(timers).forEach((t) => t && clearTimeout(t));
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", wake);
-      window.removeEventListener("pageshow", wake);
+      window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("online", wake);
       getClient().then((sb) => channels.forEach((c) => sb.removeChannel(c))).catch(() => {});
     };

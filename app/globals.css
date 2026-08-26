@@ -31,6 +31,12 @@
   /* Default ink for text on an accent FILL. Overridden per console where the accent is light
      enough that white stops being readable on it — see --accent-on in the owner block. */
   --accent-on: #fff;
+  /* The ink on a SELECTED CATEGORY CHIP, whose fill is --accent-grad. Restaurant #1 keeps its
+     hand-tuned gold from this file and never goes through lib/accent.ts, so its value is written
+     here; every other restaurant gets one computed from its own accent (inkOnAccent). Measured:
+     the dark gold #e3c06f gives 10.8:1 against near-black and 1.7:1 against white, and the light
+     gold #d4a574 gives 8.4:1 against 2.2:1 — so near-black, in both skins. (Owner, 2026-08-26.) */
+  --cat-on: #1a0f0a;
   /* In the DARK skin the bright accent on a dark page already measured clean
      (0 text elements under 3:1 across the whole guest menu), so accent-text is
      the accent itself. The light skin darkens it — see [data-theme="light"]. */
@@ -165,6 +171,16 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
   .brand-title { letter-spacing: 0.5px; font-size: clamp(13px, 3.6vw, 18px); }
   .nav-actions { gap: 4px; }
   .nav { padding-left: calc(10px + env(safe-area-inset-left)); padding-right: calc(10px + env(safe-area-inset-right)); }
+}
+/* …and on the NARROWEST phones (owner, 2026-08-26: a name must never be cut), spend the decorative
+   tracking before the font size. At 320px the wordmark had 98px and wanted 120px; letter-spacing
+   alone was ~24px of that — 19 characters at 1.28px alone. Dropping it to a hairline buys the room
+   back without making the restaurant's own name smaller than the rest of the bar. useFitText in
+   components/Header.tsx handles whatever is still too long after this, so an unusually long name
+   shrinks a step instead of ending in "…". */
+@media (max-width: 360px) {
+  .brand-title { letter-spacing: 0.2px; }
+  .nav-actions { gap: 3px; }
 }
 .nav-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .nav-btn {
@@ -796,13 +812,11 @@ body.menu-scrolling .chef-call {
    icon FADES + COLLAPSES its height as the bar shrinks, reclaiming the space so
    the small state is text-only (like the old pills). Scroll-linked, no snap. */
 .cat-card .cat-icon {
-  /* --cat-color is the colour the owner picked for THIS category in the editor's colour
-     picker; it falls back to the restaurant's accent when none was chosen, which is what
-     every category looked like before. The picker had been saving to the database since it
-     was built and NOTHING read the value: MenuView set --cat-color inline and no rule ever
-     used it, so an owner could set eight category colours and see none of them.
-     (T1 improvement 6, 2026-08-07.) */
-  color: var(--cat-color, var(--accent));
+  /* The restaurant's own theme colour, for every category (owner, 2026-08-26: *"do the theme colour
+     one only it look professional like it was previous no random colours"*). --cat-color is gone —
+     MenuView no longer emits it and the editor's per-category colour picker was removed with it, so
+     nothing is left that quietly does nothing. */
+  color: var(--accent);
   max-height: calc(24px * (1 - var(--shrink, 0)));
   opacity: calc(1 - var(--shrink, 0));
   margin-bottom: calc(6px * (1 - var(--shrink, 0)));
@@ -810,10 +824,9 @@ body.menu-scrolling .chef-call {
   transition: color 0.25s var(--ease), transform 0.25s var(--ease), filter 0.25s var(--ease);
 }
 .cat-card.active {
-  /* Same idea for the selected chip's fill. No category colour set -> the accent gradient,
-     exactly as before; a colour set -> a gradient built from it, so the bar reads as the
-     owner arranged it. */
-  background: var(--cat-grad, var(--accent-grad));
+  /* The selected chip fills with the restaurant's accent gradient — one colour per restaurant,
+     not one per category (owner, 2026-08-26). --cat-grad is gone with the picker. */
+  background: var(--accent-grad);
   border-color: transparent;
   transform: translateY(-2px);
   /* No shadow — it cast a murky halo that made the neighbouring borders show. */
@@ -823,19 +836,19 @@ body.menu-scrolling .chef-call {
   box-shadow: none;
 }
 .cat-card.active .cat-icon {
-  /* --cat-on is white or near-black, chosen in MenuView from the CATEGORY colour's own
-     brightness, because that colour is now whatever the owner picked and a fixed ink cannot
-     be readable on both a pale yellow and a dark brown. Absent (no category colour) -> the
-     hardcoded value this rule always had, so nothing changes for a restaurant that never set
-     colours. (T1 improvement 6.) */
-  color: var(--cat-on, #ffffff);
+  /* ONE INK FOR THE WHOLE CHIP (owner, 2026-08-26). --cat-on is white or near-black, decided ONCE
+     from the restaurant's accent in lib/accent.ts (inkOnAccent) — not per category any more, and
+     not from a brightness threshold.
+     There used to be FOUR rules here and they contradicted each other: light gave the icon #ffffff
+     and the label #1a0f0a, dark gave the icon #1a0f0a and the label #ffffff. That was invisible
+     while every chip carried its own --cat-on, and the moment the bar went back to the theme
+     colour it showed as a white cup above a near-black "Coffee" on the same gold fill. An icon and
+     its own label share one chip, so they share one ink. */
+  color: var(--cat-on, #1a0f0a);
   filter: none;
   transform: scale(1.08);
 }
-.cat-card.active .cat-name { color: var(--cat-on, #ffffff); font-weight: 800; }
-/* dark mode: black icon, white text on gold active card */
-[data-theme="dark"] .cat-card.active .cat-icon { color: var(--cat-on, #1a0f0a); }
-[data-theme="dark"] .cat-card.active .cat-name { color: var(--cat-on, #ffffff); }
+.cat-card.active .cat-name { color: var(--cat-on, #1a0f0a); font-weight: 800; }
 .cat-card:hover:not(.active) {
   transform: translateY(-2px);
   /* THEME-TRIAL: hover border follows the accent instead of a hardcoded gold */
@@ -854,7 +867,6 @@ body.menu-scrolling .chef-call {
 .cat-name {
   font-size: 10px; color: var(--muted); font-weight: 600; transition: all 0.3s;
 }
-.cat-card.active .cat-name { color: var(--cat-on, #1a0f0a); font-weight: 800; }
 .cat-card:hover .cat-name { color: var(--text); }
 
 /* --- SEARCH & FILTERS --- */
@@ -933,7 +945,26 @@ body.menu-frost .nav {
 .search-result:last-child { border-bottom: none; }
 .search-result:hover, .search-result:active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .search-result-img { width: 42px; height: 42px; border-radius: 9px; object-fit: cover; flex: none; background: rgba(212,165,116,0.08); }
-.search-result-name { flex: 1; min-width: 0; color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* THE WHOLE DISH NAME, NOT "Paneer Stuffed L…" (owner, 2026-08-26).
+   This was ONE nowrap line, so the right-hand price column — which is deliberately fixed-width so
+   the price never gets pushed off a 360px screen — cut every longer name. Measured: 70 of the 464
+   dish names on this stack are over 24 characters, and the longest is 55 ("Chocolate churros with
+   chocolate & salted caramel sauce"). A guest comparing prices could not tell two similar paneer
+   dishes apart.
+   THREE LINES, AND THEY COST NOTHING. The row's height is already set by its 42px photo plus
+   padding — 63px — and three lines of 14px text come to about 54px, so they fit INSIDE the height
+   the row already had. Measured after: every row is still 62–63px tall, exactly as before, and the
+   55-character name is whole. Two lines was the first attempt and left that one still clipped.
+   `line-clamp` is the standard property with the `-webkit-` pair every browser still needs; the
+   row's own `align-items: center` keeps the photo, the name and the price lined up however many
+   lines the name takes. `overflow-wrap: anywhere` is there so one very long unbroken word breaks
+   instead of pushing the price off the screen. */
+.search-result-name {
+  flex: 1; min-width: 0; color: var(--text); font-size: 14px; font-weight: 600;
+  white-space: normal; overflow: hidden; line-height: 1.28;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
+  overflow-wrap: anywhere;
+}
 .search-result-cat { color: var(--muted); font-size: 12px; flex: none; text-transform: capitalize; }
 /* The suggestion row's right-hand column: price on top, category under it (T1 improvement 5).
    Right-aligned and flex:none so the dish NAME keeps every remaining pixel and still ellipsises
@@ -1163,6 +1194,48 @@ body.menu-frost .nav {
    columns automatically on tablet/desktop. */
 .items-container.gallery-mode {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px;
+}
+
+/* ── THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8") ─────────────────────────────
+   The list layout was designed for a phone, where a row is 330px wide and everything is naturally
+   close together. On a laptop the same row is 1100px: the name and price sat squeezed against the
+   left edge, the add button sat at the far right, and the whole middle was empty — a long, sparse
+   journey for the eye and a layout that looks unfinished on the big screen the product gets shown
+   on.
+   So on a wide screen ONLY, and in the list view only, the price moves to the right-hand end of the
+   row, beside the button, and the button centres itself vertically against it. The name and the
+   rating/prep line keep their own stacked column on the left. Nothing about the phone changes: the
+   whole block is inside a min-width query that starts above the 700px the rest of this file already
+   treats as "not a phone", and the gallery view is untouched at every width. */
+@media (min-width: 701px) {
+  .items-container:not(.gallery-mode) .dish-info {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "name price" "meta price";
+    align-items: center;
+    column-gap: 28px;
+    /* Clear the absolutely-positioned add button (36px) and the veg badge above it. */
+    padding-right: 60px;
+  }
+  .items-container:not(.gallery-mode) .dish-name { grid-area: name; margin-bottom: 2px; padding-right: 0; }
+  .items-container:not(.gallery-mode) .dish-meta { grid-area: meta; margin-bottom: 0; }
+  .items-container:not(.gallery-mode) .dish-price {
+    grid-area: price; text-align: right; font-size: 17px; white-space: nowrap;
+    /* The phone rule scales the price from its LEFT edge on hover; at the right-hand end of a wide
+       row that would push it outward, into the button. */
+    transform-origin: right center;
+  }
+  /* The button belongs beside the price, not below it. `bottom: auto` releases the phone rule.
+     The hover rule further down this file sets `transform: scale(1.12)`, which would drop the
+     centring — so both states spell the translate out. */
+  .items-container:not(.gallery-mode) .cart-add-btn,
+  .items-container:not(.gallery-mode) .cart-qty-row {
+    top: 50%; bottom: auto; transform: translateY(-50%);
+  }
+  .items-container:not(.gallery-mode) .cart-add-btn:hover { transform: translateY(-50%) scale(1.12); }
+  /* The veg mark STAYS in its top-right corner. Centring it beside the button was the first
+     attempt and put the two on top of each other — measured, they overlapped at 1440px and at
+     900px. In the corner it clears the centred button by 6px on a 120px-tall row. */
 }
 
 /* --- "ALL" VIEW: collapsible category dropdowns --- */
@@ -1566,11 +1639,10 @@ body.menu-frost .nav {
   background: rgba(250, 243, 232, 0.7);
 }
 [data-theme="light"] .cat-card.active {
-  /* Same fallback chain as the base rule above, or this LIGHT-skin override (which is more
-     specific) would win and the selected chip would ignore the category colour in light mode
-     only. That is exactly what happened on the first attempt: --cat-grad was set correctly on
-     the element and the chip still painted accent gold. (T1 improvement 6.) */
-  background: var(--cat-grad, var(--accent-grad));
+  /* The light skin needs its own copy or the `:not(.active)` rule above — which is equally
+     specific and comes first — leaves the selected chip looking unselected. Same accent gradient
+     as the base rule (owner, 2026-08-26: one theme colour, no per-category colours). */
+  background: var(--accent-grad);
 }
 [data-theme="light"] .item-card { 
   background: rgba(250, 243, 232, 0.7);

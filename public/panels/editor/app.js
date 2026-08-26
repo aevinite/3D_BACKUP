@@ -1466,11 +1466,16 @@ function formCategories(c) {
       ${tf("Slug (permanent)", "slug", c.slug, { disabled: !state.isNew, ph: state.isNew ? "made from the name" : "", hint: state.isNew ? "Fills in from the English name below as you type. Used on dishes — can't change later." : "Used on dishes. Can't change later." })}
       ${tf("Sort order", "sort_order", c.sort_order, { type: "number" })}
       ${tf("Icon (FontAwesome class)", "icon", c.icon, { ph: "fa-burger" })}
-      <div class="field"><label>Colour</label>
-        <input type="color" data-path="color" value="${esc(c.color || "#d4a574")}" style="height:40px;padding:4px"/></div>
     </div>
+    <!-- THE PER-CATEGORY COLOUR PICKER WAS REMOVED (owner, 2026-08-26): *"do the theme colour one
+         only it look professional like it was previous no random colours"*. The guest menu's
+         category bar now draws every chip in the restaurant's own theme colour, so this control had
+         nothing left to change — and a switch on this panel that quietly does nothing is exactly
+         what "each Edit-menu sub-option must reach code" exists to prevent. The stored values are
+         left in the database untouched: nothing reads them, and deleting them would be a data
+         rewrite for no gain. Put this back only alongside whatever would read it. -->
     <div style="display:flex;gap:18px;align-items:center;margin-top:16px">
-      <div id="iconPreview" class="icon-preview" style="color:${esc(c.color || "#d4a574")}"><i class="fas ${esc(c.icon || "fa-tag")}"></i></div>
+      <div id="iconPreview" class="icon-preview"><i class="fas ${esc(c.icon || "fa-tag")}"></i></div>
       ${toggle("Show on menu", "active", c.active !== false)}
     </div>
     <span class="hint">Icon names: fontawesome.com (free solid). Type just the class, e.g. fa-pizza-slice.</span>
@@ -6687,7 +6692,9 @@ function updatePreviews() {
   if (img) { img.src = it.image || ""; img.style.opacity = it.image ? 1 : 0.2; }
   const ip = document.getElementById("iconPreview");
   if (ip) {
-    if (state.tab === "categories") { ip.style.color = it.color || "#d4a574"; ip.innerHTML = `<i class="fas ${esc(it.icon || "fa-tag")}"></i>`; }
+    // The preview follows the panel's own ink now that a category has no colour of its own
+    // (owner, 2026-08-26) — it used to be tinted with the picked colour, and the picker is gone.
+    if (state.tab === "categories") { ip.style.removeProperty("color"); ip.innerHTML = `<i class="fas ${esc(it.icon || "fa-tag")}"></i>`; }
     else if (state.tab === "filters") { ip.textContent = it.icon || "🏷️"; }
   }
 }
@@ -17548,13 +17555,18 @@ function renderXrayRibbon(higher, zones) {
   const sig = `${who}|${sim ? "sim" : "full"}|${asName}|${restName}|${zones.map((z) => z.label).join(",")}`;
   if (rb.dataset.sig === sig) return;
   rb.dataset.sig = sig;
-  // The ADMIN came here from the console → show the PATH (Restaurants › name ›
-  // Manager panel), the same breadcrumb the owner panel's admin bar uses (owner,
-  // 2026-07-06). An OWNER looking into their own manager panel has no console to
-  // crumb back to, so they keep the plain restaurant-name label.
+  // The ADMIN came here from the console → show the PATH (Dashboard › name › Manager panel),
+  // the same breadcrumb the owner panel's admin bar uses. An OWNER looking into their own
+  // manager panel has no console to crumb back to, so they keep the plain name label.
+  //
+  // IT STARTS AT THE DASHBOARD, NOT AT "RESTAURANTS" (owner, 2026-08-26): *"if i go from
+  // dashboard to the manager panel view of some restaurant then what i see path like restaurant
+  // then restaurant name and then manager panel — it should be like dashboard and restaurant name
+  // and manager panel … you want to go back to dashboard"*. He arrives from the dashboard, so the
+  // trail has to lead back to it in one tap; "Restaurants" was a step he never took.
   const crumbs = who === "Admin"
-    ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-      `<i class="fas fa-chevron-right rb-sep"></i><span>${esc(restName) || "…"}</span>` +
+    ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Dashboard</a>` +
+      `<i class="fas fa-chevron-right rb-sep"></i><a id="xrayRestLink">${esc(restName) || "…"}</a>` +
       `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
     : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
   // WHOSE panel is being measured. A person pin now shows the FULL panel with their gaps
@@ -17577,10 +17589,18 @@ function renderXrayRibbon(higher, zones) {
     `<button class="rb-exit" id="xrayExit"><i class="fas fa-arrow-rotate-left"></i> Exit view</button>`;
   const xrayFullBtn = document.getElementById("xrayFullBtn");
   if (xrayFullBtn) xrayFullBtn.onclick = () => xraySetViewReal(false);
-  const xrayHome = document.getElementById("xrayHome");
-  if (xrayHome) xrayHome.onclick = () => {
-    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  // GO BACK TO THE ADMIN CONSOLE, AND STOP ACTING AS THIS RESTAURANT ON THE WAY OUT.
+  // The crumb used to be a plain jump: the admin left the panel but the act-as cookie stayed
+  // set for six hours, so re-opening a panel silently re-entered this restaurant. The owner
+  // panel's bar was fixed for exactly that on 2026-07-06 and these three were not.
+  const goConsole = async (href) => {
+    try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+    try { window.top.location.href = href; } catch { window.location.href = href; }
   };
+  const xrayHome = document.getElementById("xrayHome");
+  if (xrayHome) xrayHome.onclick = () => goConsole("/aevinite");
+  const xrayRestLink = document.getElementById("xrayRestLink");
+  if (xrayRestLink) xrayRestLink.onclick = () => goConsole("/aevinite/restaurants");
   document.getElementById("xrayExit").onclick = async () => {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }

@@ -53,6 +53,9 @@ const F = {
   viewer: code("app/view/[folder]/ViewerClient.tsx"), item: code("app/item/[slug]/ItemClient.tsx"),
   legacy: code("app/item/[slug]/page.tsx"), q: code("app/q/[code]/page.tsx"),
   sgate: code("components/SessionGate.tsx"), menuLib: code("lib/menu.ts"),
+  navp: code("components/NavPicker.tsx"),
+  accent: code("lib/accent.ts"), rt: code("lib/useRealtime.ts"),
+  rtp: code("components/RealtimeProvider.tsx"), rtPanel: code("public/panels/realtime.js"), nf: code("app/not-found.tsx"), fit: code("lib/useFitText.ts"), header: code("components/Header.tsx"), editorJs: read("public/panels/editor/app.js"),
   css: read("app/globals.css"), offHtml: read("public/offline.html"), sw: read("public/sw.js"),
 };
 
@@ -205,12 +208,158 @@ check("R29", "the call-waiter bell is never hidden, faded or made untappable", (
 check("P00488", "the guest menu describes its own widgets honestly", () => {
   const chips = has(F.menuView, 'role="group"') && !rx(F.menuView, /role="tablist"/);
   const sugg = !rx(F.menuView, /className="search-dropdown"\s+role="listbox"/) &&
-               rx(F.menuView, /className="search-dropdown"[\s\S]{0,120}?role="list"/);
+               rx(F.menuView, /className="search-dropdown"[\s\S]{0,140}?role="group"/);
   return { ok: chips && sugg, note: `chips=${chips} suggestions=${sugg}` };
+});
+
+// AN EXPLICIT ROLE REPLACES THE ELEMENT'S OWN ONE (guest sweep T1, sweep #7, 2026-08-22).
+// Fixing the suggestions panel in 2026-08-17 put `role="listitem"` on each <Link>, which took the
+// LINK role away from every row: read out of Chrome's accessibility tree, the panel held eight
+// listitems and not one link, while 58 other links on the page listed normally. A blind diner
+// skimming by links could not reach the search results at all. The panel is a labelled GROUP of
+// links now — the same pattern the category chip row uses — so the count is still spoken and the
+// rows are links again (measured: 8 of 8, page links 58 → 66).
+check("P15514", "every search suggestion is still a link", () =>
+  !rx(F.menuView, /className="search-result"\s*\n?\s*role=/) &&
+  rx(F.menuView, /className="search-dropdown"[\s\S]{0,140}?aria-label=\{`\$\{searchResults\.length\} matching/));
+
+// …AND A LISTBOX MUST OWN ITS OPTIONS DIRECTLY. Same shape, never looked for in NavPicker: each
+// `role="option"` button sat inside an <li>, so Chrome computed `listbox "Language"` containing
+// plain BUTTONS and zero options — no selectable items, no "3 of 6" position, and `aria-selected`
+// (the only thing marking the language you are on) never conveyed. Dropping the <li> is the whole
+// change; the CSS already made the buttons full-width, so nothing moved on screen.
+check("P15517", "the language and currency lists really do contain options", () => {
+  const noLi = !rx(F.navp, /<li key=\{opt\.key\}>/) && !rx(F.navp, /<li[\s>]/);
+  const owns = has(F.navp, 'role="listbox"', 'role="option"', "aria-selected={opt.active}");
+  return { ok: noLi && owns, note: `options are direct children=${noLi} roles present=${owns}` };
 });
 check("P00143", "the sold-out pill no longer swallows the card's own link", () =>
   !rx(F.food, /sold-out-pill"\s*\n?\s*onClick/) &&
   !rx(F.food, /className="sold-out-pill"[^>]*onClick/));
+
+// A REFUSED ADD MUST NOT WEAR A SUCCESS TICK (guest sweep T1, sweep #7, 2026-08-22).
+// "A limit is not a success" (owner, 2026-08-18) was applied to the Maximum-99 message, but the
+// "<dish> added" toast still fired on ANY delta > 0, arrived second and won: at 99, tapping "+"
+// showed a green ✓ and "Virgin Mojito added" while nothing was added. CartPanel's "+" has always
+// returned at the ceiling; these two must behave the same, not just say the same words.
+check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
+  const gated = has(F.food, "const refused = delta > 0 && rawQty > 99", "if (delta > 0 && !refused) {");
+  const noBounce = rx(F.food, /if \(delta > 0 && !refused\) popThumb\(\);/) &&
+                   !rx(F.food, /const applyQty = \(delta: number\) => \{\s*if \(delta > 0\) popThumb\(\);/);
+  const stillSays = has(F.food, "Maximum 99 per dish", 'variant: "info"');
+  return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
+});
+
+// EVERY FRESH PAGE LOAD FETCHED THE MENU TWICE (owner, 2026-08-26: "can do the 10").
+// `pageshow` fires on EVERY load, not only on a back-forward restore, and on an ordinary load it
+// arrives AFTER the initial fetch — so it woke the screen for no reason: a second full refetch AND a
+// needless websocket teardown-and-rebuild. Measured on a production build, first ever visit:
+// 261ms fetch · 460ms pageshow persisted=false · 762ms fetch. `persisted` tells the two apart, and
+// it is true for exactly the case the listener was added for. All THREE copies of this wake logic
+// had it — the guest menu, the guest realtime provider and the shared panel one.
+check("P15612", "a wake only happens on a REAL back-forward restore, in all three copies", () => {
+  const one = (src) => rx(src, /if \(e\.persisted\)/) && rx(src, /addEventListener\("pageshow", onPageShow\)/);
+  const menu = one(F.rt), provider = one(F.rtp), panels = one(F.rtPanel);
+  return { ok: menu && provider && panels, note: `useRealtime=${menu} RealtimeProvider=${provider} panels/realtime.js=${panels}` };
+});
+
+// A DINER ON THE WRONG-TURN PAGE IS SENT TO THE MENU, NOT TO A PASSWORD SCREEN (owner, 2026-08-26:
+// *"yes for this guest should be redirected to menu … and if written login or aevinite then only
+// locate to there"*). Dropping the "/r/" from a menu address landed a guest on the software
+// company's 404 whose only button led to the staff sign-in.
+check("P15609", "the wrong-turn page resolves a guest address to its menu", () =>
+  has(F.nf, '"use client"', 'method: "HEAD"', "router.replace(`/r/${slug}/menu`)") &&
+  rx(F.nf, /const STAFF_WORDS = /) &&
+  // HEAD, not GET: the menu is ~24KB and only the yes/no is wanted.
+  !rx(F.nf, /fetch\([^)]*menu-data[^)]*\)\s*\.then/));
+check("P15610", "…and the staff sign-in is offered ONLY when the address says staff", () =>
+  rx(F.nf, /\{kind === "staff" && \(/) && !rx(F.nf, /href="\/"/));
+
+// THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8"). The list layout is mobile-first;
+// on a laptop the same row is 1100px and the name and price sat squeezed at the left with the
+// button at the far right and nothing in between. The price now sits at the RIGHT-hand end, beside
+// the button. Phones must be untouched, which is why the rules live in a min-width query.
+check("P15608", "on a wide screen the list row puts the price at the right-hand end", () =>
+  rx(F.css, /@media \(min-width: 701px\) \{[\s\S]{0,1800}?\.items-container:not\(\.gallery-mode\) \.dish-info \{[\s\S]{0,200}?grid-template-areas: "name price" "meta price"/) &&
+  rx(F.css, /\.items-container:not\(\.gallery-mode\) \.cart-add-btn:hover \{ transform: translateY\(-50%\) scale\(1\.12\); \}/));
+
+// A SEARCH SUGGESTION SHOWS THE WHOLE DISH NAME (owner, 2026-08-26: "can do 7 but you have keep ui
+// good make sure"). It was one `nowrap` line beside a fixed-width price column, so 70 of the 464
+// dish names on this stack were cut — "Paneer Stuffed L…". Up to three lines now, which fit inside
+// the height the row already had (its 42px photo sets 63px), so the UI does not change for a short
+// name and the row does not grow for most long ones either.
+check("P15607", "a search suggestion may use more than one line, so a long name is whole", () =>
+  rx(F.css, /\.search-result-name \{[\s\S]{0,400}?line-clamp: 3/) &&
+  !rx(F.css, /\.search-result-name \{[^}]*white-space: nowrap/) &&
+  rx(F.css, /\.search-result-name \{[\s\S]{0,400}?overflow-wrap: anywhere/));
+
+// A RESTAURANT'S OWN NAME IS NEVER CUT (owner, 2026-08-26). The wordmark ran out of room next to
+// the top bar's fixed buttons and ended in "little French hou…" on a 320px phone. It uses the same
+// shrink-to-fit helper the dish names have used since 2026-08-05 — which only ever asked whether
+// text was too TALL, so a one-line `nowrap` name was invisible to it.
+check("P15605", "the wordmark shrinks to fit instead of being cut", () =>
+  has(F.header, 'from "@/lib/useFitText"', "useFitText<HTMLHeadingElement>") &&
+  (F.header.match(/ref=\{brandRef\}/g) || []).length === 2);
+check("P15606", "the fit helper notices a name that is too WIDE, with no slack", () =>
+  rx(F.fit, /el\.scrollWidth > el\.clientWidth;/) && !rx(F.fit, /el\.scrollWidth > el\.clientWidth \+ 1/));
+
+// ONE THEME COLOUR ON THE CATEGORY BAR, NOT ONE PER CATEGORY (owner, 2026-08-26):
+// *"do the theme colour one only it look professional like it was previous no random colours"*.
+// The chip must emit no per-category colour at all — that absence is what makes the stylesheet
+// fall back to the restaurant's accent — and the editor's picker went with it, so no control is
+// left that quietly does nothing. The ink on a selected chip is decided ONCE from the accent, by
+// comparing both candidates rather than testing a brightness threshold: the old threshold picked
+// the weaker ink on 11 of the 21 category colours in the database (white on #22c55e = 2.3:1).
+check("P15603", "the category bar draws in the restaurant's own theme colour only", () => {
+  const noInline = !rx(F.menuView, /--cat-color/) && !rx(F.menuView, /--cat-grad/) && !rx(F.menuView, /inkOn\(/);
+  const cssAccent = rx(F.css, /\.cat-card \.cat-icon \{[\s\S]{0,400}?color: var\(--accent\);/) &&
+                    !rx(F.css, /var\(--cat-grad/);
+  const oneInk = (F.css.match(/\.cat-card\.active \.cat-(icon|name)[\s\S]{0,600}?var\(--cat-on, #1a0f0a\)/g) || []).length >= 1 &&
+                 !rx(F.css, /var\(--cat-on, #ffffff\)/);
+  const noPicker = !rx(F.editorJs, /type="color"/);
+  return { ok: noInline && cssAccent && oneInk && noPicker,
+    note: `chip emits no colour=${noInline} css uses the accent=${cssAccent} one ink=${oneInk} picker gone=${noPicker}` };
+});
+check("P15604", "the ink on an accent fill is the BETTER of black and white, not a threshold", () =>
+  has(F.accent, "export function inkOnAccent", "--cat-on:${inkOnAccent(accentColor)}") &&
+  rx(F.accent, /contrast\(acc, lum\("ffffff"\)\) >= contrast\(acc, lum\("1a0f0a"\)\)/));
+
+// BACK CLOSES WHAT IS OPEN BEFORE IT OFFERS TO LEAVE (owner, 2026-08-26).
+// With a search running, one press of Back left the search untouched and put the Stay-or-Leave
+// dialog over it — the gesture every phone user reaches for to dismiss something offered to throw
+// the diner off the menu instead. The search is a back layer now, like the two nav pickers.
+check("P15602", "an open search is a back-step, so back does not offer to leave the site", () =>
+  rx(F.menuView, /useBackClose\("menu-search", !!q, \(\) => setSearchQuery\(""\)\)/) &&
+  has(F.menuView, 'from "@/lib/backStack"'));
+
+// BACK MUST RETURN THE DINER TO THE SAME PLACE (guest sweep T1, sweep #7, 2026-08-22).
+// This one had FOUR passing source assertions and did not work: the mount-time onScroll() wrote a
+// 0 over the saved position before the restore could read it, so every Back landed at the top of
+// the menu. Both halves matter — the static one names the two moving parts so nobody removes them
+// by accident, and the LIVE one is the only thing that could have caught it in the first place.
+// …AND IT REMEMBERS THE DISH, NOT JUST THE PIXEL (owner, 2026-08-26: "can do the 10 and 11").
+// A pixel is a fact about a page that has not finished growing; the dish under the header is a fact
+// about the menu. The id is what the restore aims at, re-read every tick so it follows the dish as
+// the lazy photos above it arrive; the pixel stays as the fallback for when that dish is no longer
+// there. A bare number written by an older build is still read correctly.
+check("P15611", "the menu remembers WHICH DISH the diner was at, not only how far down", () => {
+  const saves = rx(F.menuView, /JSON\.stringify\(\{ y: Math\.round\(el\.scrollTop\), id \}\)/);
+  const reads = has(F.menuView, "let y = 0, wantId = \"\";") && rx(F.menuView, /y = parseInt\(raw, 10\) \|\| 0;/);
+  const aims = has(F.menuView, "const targetTop = () => {", "CSS.escape(wantId)") &&
+               rx(F.menuView, /const want = targetTop\(\);/);
+  const grace = rx(F.menuView, /Date\.now\(\) - started > 700 && lastSet >= 0/);
+  return { ok: saves && reads && aims && grace, note: `saves=${saves} reads both shapes=${reads} aims at the dish=${aims} grace period=${grace}` };
+});
+
+check("P15332", "the saved scroll position is not written over before it is restored", () => {
+  // The SAVE is still gated on the restore having settled — that is the fault this row exists for.
+  // (The value it writes became `{ y, id }` on 2026-08-26; see P15611.)
+  const gated = rx(F.menuView, /if \(restoreSettled\.current\) \{[\s\S]{0,1600}?sessionStorage\.setItem\(sk\("lfh_menu_scroll"\)/);
+  const reaims = has(F.menuView, "const aim = ()", "scrollHeight", 'behavior: "instant"') &&
+                 rx(F.menuView, /restoreSettled\.current = true/);
+  const bounded = has(F.menuView, "stalls >= 3", "4000");
+  return { ok: gated && reaims && bounded, note: `gated=${gated} re-aims=${reaims} bounded=${bounded}` };
+});
 
 // ── LIVE half ────────────────────────────────────────────────────────────────────────────
 async function live(base) {
@@ -266,6 +415,245 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: the menu is fetched ONCE per load, and a real back-forward restore still wakes it.
+    // Both halves matter: the fix is a one-word guard, and getting it backwards would either bring
+    // the double fetch back or leave a phone showing a stale menu after coming out of another app.
+    { const cc = await b.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+      const pg2 = await cc.newPage();
+      const hits = [];
+      pg2.on("request", (r) => { if (/menu-data/.test(r.url())) hits.push(1); });
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(6000);
+      const onLoad = hits.length;
+      await pg2.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false })));
+      await pg2.waitForTimeout(3000);
+      const afterPlain = hits.length;
+      await pg2.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+      await pg2.waitForTimeout(3000);
+      const afterRestore = hits.length;
+      check("P15612", "LIVE: one menu read per page load", () =>
+        ({ ok: onLoad === 1, note: `${onLoad} menu-data request(s) — this is 2 on a dev server, which double-mounts every effect` }));
+      check("P15612", "LIVE: an ordinary pageshow does not refetch", () =>
+        ({ ok: afterPlain === onLoad, note: `${onLoad} → ${afterPlain}` }));
+      check("P15612", "LIVE: a real back-forward restore still wakes the screen", () =>
+        ({ ok: afterRestore > afterPlain, note: `${afterPlain} → ${afterRestore}` }));
+      await cc.close(); }
+
+    // LIVE: every shape of wrong turn. The five guest ones must reach a real menu; the switched-off
+    // restaurant must NOT (its menu is closed, and a redirect would be a lie about that); the staff
+    // ones keep their sign-in button and the rest never see one.
+    for (const [url, want, label] of [
+      ["/french-house/menu", "menu", "a menu address missing the /r/"],
+      ["/french-house", "menu", "just the restaurant name"],
+      ["/FRENCH-HOUSE/menu", "menu", "capitalised"],
+      ["/french-house/item/cappuccino", "menu", "a dish address missing the /r/"],
+      ["/og-s-cafe/menu", "guest", "a switched-off restaurant"],
+      ["/signup", "guest", "a stray address"],
+      ["/login/oops", "staff", "a staff address"],
+      ["/aevinite/nope", "staff", "an admin address"],
+    ]) {
+      const { c, pg } = await open(url, 1200);
+      await pg.waitForTimeout(3800);
+      const r = await pg.evaluate(() => ({ path: location.pathname,
+        cards: document.querySelectorAll(".item-card").length,
+        signin: [...document.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/login"),
+        guestWords: /scan the QR code/i.test(document.body.innerText) }));
+      const ok = want === "menu" ? (/^\/r\/[^/]+\/menu$/.test(r.path) && r.cards > 0)
+        : want === "staff" ? r.signin
+        : (r.guestWords && !r.signin);
+      check("P15609", `LIVE: ${label} (${url})`, () =>
+        ({ ok, note: `landed on ${r.path}, ${r.cards} dishes, sign-in offered=${r.signin}, guest advice=${r.guestWords}` }));
+      await c.close();
+    }
+
+    // LIVE: the wide list row is laid out and nothing in it overlaps — and the PHONE is untouched.
+    // The veg mark centred beside the button was the first attempt and the two landed on top of
+    // each other, so every pair is measured rather than eyeballed.
+    for (const wdt of [1440, 900, 360]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 900 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(1800);
+      await pg2.locator('.switch-opt[aria-label="List view"]').click().catch(() => {});
+      await pg2.waitForTimeout(1400);
+      const r = await pg2.evaluate(() => {
+        const card = document.querySelector(".items-container:not(.gallery-mode) .item-card");
+        if (!card) return null;
+        const g = (e) => { const x = e?.getBoundingClientRect(); return x ? { l: x.left, r: x.right, t: x.top, b: x.bottom } : null; };
+        const box = g(card), price = g(card.querySelector(".dish-price")), btn = g(card.querySelector(".cart-add-btn")),
+              veg = g(card.querySelector(".diet-badge")), name = g(card.querySelector(".dish-name"));
+        const over = (a, c2) => !!(a && c2 && a.l < c2.r && c2.l < a.r && a.t < c2.b && c2.t < a.b);
+        // Measure where the price STARTS, not where it ends. On a phone it is a full-width block, so
+        // its right edge is near the card's right edge even though it is left-aligned under the name —
+        // which is exactly how the first version of this check fooled itself.
+        return { box, price, btn, veg, name, priceVsBtn: over(price, btn), vegVsBtn: over(veg, btn),
+          priceAtRight: !!(price && name) && (price.l - name.l) > 200 };
+      });
+      if (wdt >= 701) {
+        check("P15608", `LIVE: ${wdt}px list row — the price sits at the right-hand end`, () =>
+          ({ ok: !!r && r.priceAtRight, note: r ? `the price starts ${Math.round(r.price.l - r.name.l)}px right of the name` : "no list row" }));
+        check("P15608", `LIVE: ${wdt}px list row — nothing overlaps`, () =>
+          ({ ok: !!r && !r.priceVsBtn && !r.vegVsBtn, note: r ? `price/button=${r.priceVsBtn} veg/button=${r.vegVsBtn}` : "no list row" }));
+      } else {
+        check("P15608", "LIVE: 360px list row — the phone layout is untouched", () =>
+          ({ ok: !!r && !r.priceAtRight, note: r ? `the price still starts ${Math.round(r.price.l - r.name.l)}px from the name, i.e. stacked under it as before` : "no list row" }));
+      }
+      await cc.close();
+    }
+
+    // LIVE: no suggestion name is cut, on the restaurant that HAS the long ones, at phone and
+    // desktop width — and the rows stay the height they always were.
+    for (const [slug, qq, wdt] of [["demo-bistro", "cho", 360], ["aangan-garden-restaurant", "pa", 360], ["demo-bistro", "cho", 1280]]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 820 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector("#search-input", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(2000);
+      await pg2.fill("#search-input", qq);
+      await pg2.waitForSelector(".search-result", { timeout: 20000 }).catch(() => {});
+      await pg2.waitForTimeout(1200);
+      const r = await pg2.evaluate(() => [...document.querySelectorAll(".search-result")].map((x) => {
+        const n = x.querySelector(".search-result-name");
+        return { cut: n.scrollHeight > n.clientHeight + 1, h: Math.round(x.getBoundingClientRect().height), name: n.textContent.trim() };
+      }));
+      check("P15607", `LIVE: ${slug} "${qq}" @${wdt}px — every suggestion name is whole`, () =>
+        ({ ok: r.length > 0 && r.every((x) => !x.cut),
+           note: `${r.filter((x) => x.cut).length} cut of ${r.length}; tallest row ${Math.max(0, ...r.map((x) => x.h))}px` }));
+      await cc.close();
+    }
+
+    // LIVE: the wordmark is whole at every width a diner might hold, on a long name and a short
+    // one. 320px is the one that used to cut it; the rest are here so a future "fix" cannot buy
+    // the narrow case by shrinking the name on phones that never needed it.
+    for (const wdt of [320, 360, 390, 768]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 780 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".brand-title", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForFunction(() => document.fonts?.status === "loaded", null, { timeout: 15000 }).catch(() => {});
+      await pg2.waitForTimeout(1200);
+      const r = await pg2.evaluate(() => { const e = document.querySelector(".brand-title");
+        return e ? { cut: e.scrollWidth > e.clientWidth, size: getComputedStyle(e).fontSize, text: e.innerText.replace(/\s+/g, " ") } : null; });
+      check("P15605", `LIVE: the wordmark is whole at ${wdt}px`, () =>
+        ({ ok: !!r && !r.cut, note: r ? `"${r.text}" at ${r.size}` : "no wordmark" }));
+      await cc.close();
+    }
+    // …and the dish names the helper was built for are still whole, at both shapes of screen.
+    for (const [slug, wdt] of [["aangan-garden-restaurant", 360], ["french-house", 1280]]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 800 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".dish-name", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForFunction(() => document.fonts?.status === "loaded", null, { timeout: 15000 }).catch(() => {});
+      await pg2.waitForTimeout(1500);
+      const r = await pg2.evaluate(() => { const n = [...document.querySelectorAll(".dish-name")];
+        return { total: n.length, cut: n.filter((e) => e.scrollHeight > e.clientHeight + 1 || e.scrollWidth > e.clientWidth).length }; });
+      check("P15605", `LIVE: ${slug} dish names still whole at ${wdt}px`, () =>
+        ({ ok: r.total > 0 && r.cut === 0, note: `${r.cut} cut of ${r.total}` }));
+      await cc.close();
+    }
+
+    // LIVE: the selected chip's icon and its own label share ONE ink, on every restaurant and both
+    // skins. They did not: light gave a white icon above a near-black label on the same gold fill,
+    // and dark did the reverse. Invisible while every chip carried its own ink, obvious the moment
+    // the bar went back to the theme colour — so this is measured, not assumed.
+    for (const slug of ["french-house", "aangan-garden-restaurant"]) {
+      for (const theme of ["light", "dark"]) {
+        const { c, pg } = await open(`/r/${slug}/menu`, 3000);
+        await pg.evaluate((t) => { localStorage.setItem("lfh_theme", t); }, theme);
+        await pg.reload({ waitUntil: "domcontentloaded" });
+        // WAIT FOR THE CHIP, do not sleep and hope. The scroll-spy marks one only after the dishes
+        // have painted, and on a dev server under load that is well past any fixed timeout — which
+        // made this read "no active chip" perhaps one run in three.
+        await pg.waitForSelector(".cat-card.active", { timeout: 30000 }).catch(() => {});
+        await pg.waitForTimeout(600);
+        const r = await pg.evaluate(() => {
+          const on = document.querySelector(".cat-card.active"); if (!on) return null;
+          const ic = on.querySelector(".cat-icon"), nm = on.querySelector(".cat-name");
+          const off = [...document.querySelectorAll(".cat-card:not(.active) .cat-icon")].map((e) => getComputedStyle(e).color);
+          return { icon: getComputedStyle(ic).color, label: getComputedStyle(nm).color, offIcons: [...new Set(off)] };
+        });
+        check("P15603", `LIVE: ${slug}/${theme} the selected chip has one ink`, () =>
+          ({ ok: !!r && r.icon === r.label, note: r ? `icon ${r.icon} vs label ${r.label}` : "no active chip" }));
+        check("P15603", `LIVE: ${slug}/${theme} every unselected icon is the SAME colour`, () =>
+          ({ ok: !!r && r.offIcons.length === 1, note: r ? `${r.offIcons.length} distinct: ${JSON.stringify(r.offIcons)}` : "none" }));
+        await c.close();
+      }
+    }
+
+    // LIVE: back closes the search first, and only then offers to leave. Three steps, because the
+    // failure was subtle — the search stayed open UNDER the dialog, so only looking at both at once
+    // catches it — and because a back layer that is not released would break leaving altogether.
+    { const { c, pg } = await open("/r/french-house/menu", 6000);
+      await pg.fill("#search-input", "coffee"); await pg.waitForTimeout(1000);
+      await pg.goBack().catch(() => {}); await pg.waitForTimeout(1600);
+      const a = await pg.evaluate(() => ({ q: document.querySelector("#search-input")?.value ?? null,
+        rows: document.querySelectorAll(".search-result").length,
+        exit: /Stay|Leave/.test(document.body.innerText),
+        cards: document.querySelectorAll(".item-card").length }));
+      check("P15602", "LIVE: back with a search open clears it and stays on the menu", () =>
+        ({ ok: a.q === "" && a.rows === 0 && !a.exit && a.cards > 0, note: JSON.stringify(a) }));
+      await pg.goBack().catch(() => {}); await pg.waitForTimeout(1600);
+      const b2 = await pg.evaluate(() => /Stay|Leave/.test(document.body.innerText));
+      check("P15602", "LIVE: …and back again, with nothing open, still offers to leave", () =>
+        ({ ok: b2, note: `exit dialog shown = ${b2}` }));
+      await pg.fill("#search-input", "tea"); await pg.waitForTimeout(700);
+      await pg.fill("#search-input", ""); await pg.waitForTimeout(900);
+      await pg.goBack().catch(() => {}); await pg.waitForTimeout(1500);
+      const c3 = await pg.evaluate(() => /Stay|Leave/.test(document.body.innerText));
+      check("P15602", "LIVE: a search cleared BY HAND leaves no stale back-step behind", () =>
+        ({ ok: c3, note: `exit dialog shown = ${c3}` }));
+      await c.close(); }
+
+    // BACK RETURNS THE DINER TO THE SAME DISH — the check the source assertions could not make.
+    // Scroll well down, open a dish that is ALREADY on screen (tapping an off-screen one would make
+    // the test itself scroll the page, which is how this was nearly mis-diagnosed), come back, and
+    // assert the same dish is under the header. Asserts the DISH, not a pixel: the page can settle a
+    // few px either way and the diner would never know, but landing on a different dish is the bug.
+    for (const slug of ["french-house", "aangan-garden-restaurant"]) {
+      const { c, pg } = await open(`/r/${slug}/menu`, 1500);
+      await pg.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg.waitForTimeout(2500);
+      const topDish = () => pg.evaluate(() => [...document.querySelectorAll(".item-card")]
+        .find((x) => x.getBoundingClientRect().top > 150)?.querySelector(".dish-name")?.textContent.trim() || "");
+      await pg.evaluate(() => document.getElementById("main-scroll").scrollTo({ top: 1500, behavior: "instant" }));
+      await pg.waitForTimeout(1600);
+      const before = await topDish();
+      const y0 = await pg.evaluate(() => document.getElementById("main-scroll").scrollTop);
+      const link = await pg.evaluateHandle(() => [...document.querySelectorAll(".item-card-link")]
+        .find((a) => { const r = a.getBoundingClientRect(); return r.top > 150 && r.bottom < 700; }) || null);
+      const el = link.asElement();
+      if (!el || !y0) { check("P15332", `LIVE: ${slug} Back returns to the same dish`, () => ({ ok: false, note: "no on-screen card to tap" })); await c.close(); continue; }
+      await el.click({ force: true });
+      await pg.waitForLoadState("networkidle").catch(() => {});
+      await pg.waitForTimeout(2500);
+      await pg.goBack({ waitUntil: "networkidle" }).catch(() => {});
+      await pg.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg.waitForTimeout(4500);
+      const after = await topDish();
+      check("P15332", `LIVE: ${slug} Back returns to the same dish`, () =>
+        ({ ok: !!before && before === after, note: `left at "${before}", came back to "${after}"` }));
+      await c.close(); }
+    // LIVE: the memory's fallbacks. A dish that has gone, and a value written by an older build,
+    // must both still land the diner in the right place — and a corrupt one must not break the menu.
+    for (const [seed, label, wantY] of [
+      ['"1438"', "a bare number from an older build", 1438],
+      ['JSON.stringify({ y: 1438, id: "/r/french-house/item/zz-gone?cat=x" })', "a dish that is no longer on the menu", 1438],
+    ]) {
+      const cc = await b.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+      const pg2 = await cc.newPage();
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.evaluate((v) => sessionStorage.setItem("lfh_menu_scroll:french-house", eval(v)), seed);
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(5000);
+      const y = await pg2.evaluate(() => Math.round(document.getElementById("main-scroll").scrollTop));
+      check("P15611", `LIVE: ${label} still restores`, () =>
+        ({ ok: Math.abs(y - wantY) < 120, note: `landed at ${y}, wanted about ${wantY}` }));
+      await cc.close();
+    }
   } finally { await b.close(); }
 }
 

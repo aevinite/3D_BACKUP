@@ -19,6 +19,32 @@ export function hexToRgbTriplet(hex: string): string | null {
   return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
 }
 
+// WHICH INK READS ON THE ACCENT ITSELF — black or white, whichever genuinely has more contrast.
+//
+// Not a brightness THRESHOLD. That is what the category chips used to do (a cut-off at 0.42
+// relative luminance) and it picked the weaker ink on 11 of the 21 category colours in the
+// database — white on #22c55e measured 2.3:1 where the standard is 4.5:1 and near-black would have
+// been 8.3:1. Comparing the two candidates is the same amount of code and cannot be wrong: at
+// worst the two are equal and either will do. (Owner, 2026-08-26 — the category bar now draws in
+// the restaurant's own theme colour, so this one decision replaces twenty-one.)
+//
+// WCAG relative luminance, the same maths the rest of the app's contrast checks use.
+export function inkOnAccent(accentColor: string): string {
+  const h = accentColor.trim().replace(/^#/, "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return "#ffffff";
+  const lum = (hex: string) => {
+    const ch = (i: number) => {
+      const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
+  };
+  const contrast = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const acc = lum(full);
+  return contrast(acc, lum("ffffff")) >= contrast(acc, lum("1a0f0a")) ? "#ffffff" : "#1a0f0a";
+}
+
 // The colour VARIABLES only (no page background) — safe to set on :root so the
 // whole document, including body-level widgets, follows the restaurant colour.
 export function accentPaletteCss(accentColor: string): string {
@@ -30,6 +56,10 @@ export function accentPaletteCss(accentColor: string): string {
     `--accent-grad:${grad}`,
     `--gold-grad:${grad}`,
     `--brand-highlight:${accentColor}`,
+    // The ink for text and icons sitting ON an accent fill — today the selected category chip.
+    // One value per restaurant, decided from its own colour, so a pale brand and a dark brand are
+    // both readable without anyone configuring anything.
+    `--cat-on:${inkOnAccent(accentColor)}`,
   ];
   if (rgb) {
     lines.push(`--accent-dim:rgba(${rgb}, 0.6)`);

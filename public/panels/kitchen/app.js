@@ -2189,12 +2189,13 @@ function backoffPoll(baseMs) {
     if (!w || (!w.higherView && !sim)) return;
     const rb = document.createElement("div"); rb.id = "xrayRibbon";
     const who = sim || w.actor === "admin" ? "Admin" : w.actor.charAt(0).toUpperCase() + w.actor.slice(1);
-    // ADMIN came from the console → show the PATH (Restaurants › name › Kitchen
-    // panel), the owner panel's breadcrumb language (owner, 2026-07-06). Any other
-    // higher role keeps the plain name — no console to crumb back to.
+    // ADMIN came from the console → show the PATH (Dashboard › name › Kitchen panel), the owner
+    // panel's breadcrumb language. Any other higher role keeps the plain name — no console to
+    // crumb back to. It starts at the DASHBOARD because that is where the admin came from
+    // (owner, 2026-08-26); "Restaurants" was a step he never took.
     const body = who === "Admin"
-      ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-        `<span class="rb-sep">›</span><span id="xrayRest"></span>` +
+      ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Dashboard</a>` +
+        `<span class="rb-sep">›</span><a id="xrayRest"></a>` +
         `<span class="rb-sep">›</span><span>Kitchen panel</span></nav>`
       : `<span class="rb-rest" id="xrayRest"></span>`;
     // The kitchen has no gated controls, so the "actual view" only drops the admin extras;
@@ -2221,10 +2222,18 @@ function backoffPoll(baseMs) {
     document.body.insertBefore(rb, document.body.firstChild);
     const simB = document.getElementById("xraySimBtn");
     if (simB) simB.onclick = () => setViewReal(!sim);
-    const home = document.getElementById("xrayHome");
-    if (home) home.onclick = () => {
-      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    // GO BACK TO THE ADMIN CONSOLE, AND STOP ACTING AS THIS RESTAURANT ON THE WAY OUT.
+    // The crumb used to be a plain jump: the admin left the panel but the act-as cookie stayed
+    // set for six hours, so re-opening a panel silently re-entered this restaurant. The owner
+    // panel's bar was fixed for exactly that on 2026-07-06 and these three were not.
+    const goConsole = async (href) => {
+      try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+      try { window.top.location.href = href; } catch { window.location.href = href; }
     };
+    const home = document.getElementById("xrayHome");
+    if (home) home.onclick = () => goConsole("/aevinite");
+    const restLink = document.getElementById("xrayRest");
+    if (restLink && restLink.tagName === "A") restLink.onclick = () => goConsole("/aevinite/restaurants");
     // The restaurant name lands with the first /board load — mirror it when it does.
     const restEl = document.getElementById("restName");
     if (restEl) {

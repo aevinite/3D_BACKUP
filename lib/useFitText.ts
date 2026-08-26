@@ -31,9 +31,17 @@ import { useEffect, useRef } from "react";
 // It also degrades safely: no ResizeObserver, no layout, or a zero-height box (still painting) and
 // it simply leaves the CSS size alone rather than guessing.
 
-/** Steps `ref`'s font size down (never up past the CSS size) until its text stops overflowing. */
-export function useFitText(text: string, minPx = 11) {
-  const ref = useRef<HTMLDivElement | null>(null);
+/** Steps `ref`'s font size down (never up past the CSS size) until its text stops overflowing.
+ *
+ * BOTH AXES (2026-08-26). This only ever asked whether the text was too TALL, which is the right
+ * question for the guest menu's two-line dish-name box. The restaurant's own wordmark in the top
+ * bar is the opposite shape — one `nowrap` line that runs out of WIDTH — so the helper saw nothing
+ * to do and the name was cut to "little French …" on a 320px phone. Asking both questions makes
+ * the same promise ("a name is never cut") true for a name of either shape, and it can only help
+ * the dish names: a single word wider than its card used to be clipped and now shrinks instead.
+ */
+export function useFitText<T extends HTMLElement = HTMLDivElement>(text: string, minPx = 11) {
+  const ref = useRef<T | null>(null);
 
   useEffect(() => {
     const el = ref.current;
@@ -48,8 +56,13 @@ export function useFitText(text: string, minPx = 11) {
       if (!Number.isFinite(full) || full <= 0) return;
 
       // Nothing to do for the common case — one layout read and out.
-      const overflows = () => el.scrollHeight > el.clientHeight + 1;
-      if (el.clientHeight === 0 || !overflows()) return;
+      // The HEIGHT test keeps its 1px slack (a wrapped box is measured in whole lines, so a stray
+      // pixel means nothing). The WIDTH test must NOT: both numbers are rounded to whole pixels, so
+      // a single pixel over is a real overflow — and on a `nowrap` line one pixel is all it takes
+      // for the browser to draw the "…". Measured: the wordmark stopped at 99 against 98 and still
+      // read "little French hou…". No slack here.
+      const overflows = () => el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth;
+      if ((el.clientHeight === 0 && el.clientWidth === 0) || !overflows()) return;
 
       // Binary search between the floor and the full size for the largest size that fits.
       let lo = minPx;
