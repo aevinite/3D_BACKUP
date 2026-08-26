@@ -295,6 +295,19 @@ const RULES = [
     must: [/detail\.rows\.length > 1 && \([\s\S]{0,320}detail\.rows\.find\(\(r\) => r\.restaurant_id === b\.restaurant_id\)\?\.restaurantName/],
   },
   {
+    item: 22, file: ISSUES,
+    say: "a tab the admin switched off can never be the tab you are left sitting on",
+    must: [
+      /if \(tab === "ratings" && ratingsOff && !issuesOff\) setTab\("issues"\);/,
+      /else if \(tab === "issues" && issuesOff && !ratingsOff\) setTab\("ratings"\);/,
+    ],
+    mustNot: [
+      // the latch that made the fallback unreachable: it was set on the first render, before
+      // either request had answered, so it never got to move the tab.
+      /decided\.current = true/,
+    ],
+  },
+  {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
     must: [/className="adm-page-h">Manager mode/],

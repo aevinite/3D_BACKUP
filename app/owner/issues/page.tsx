@@ -88,7 +88,7 @@ export default function OwnerFeedback() {
   const [err, setErr] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteVal, setNoteVal] = useState("");
-  const decided = useRef(false); // pick the first available tab only once
+  // (a `decided` ref used to live here — see the tab effect below for why it could never work)
 
   const loadRatings = useCallback(async () => {
     try {
@@ -120,12 +120,23 @@ export default function OwnerFeedback() {
   const loadAll = useCallback(async () => { await Promise.all([loadRatings(), loadIssues()]); }, [loadRatings, loadIssues]);
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Default to the first available tab once we know what's enabled.
+  // ── A TAB THAT IS SWITCHED OFF MUST NOT BE THE ONE YOU ARE ON (sweep 7 · T14, 2026-08-27) ───────
+  // This was a `decided` ref: "pick the first available tab, once". It ran on the FIRST render,
+  // when `ratingsOff`/`issuesOff` are still their initial `false` — so `else if (!ratingsOff)` was
+  // always true and `decided` was latched before either request had answered. When ratings then
+  // came back switched off, the effect returned early and `tab` stayed on "ratings".
+  // What that looks like, watched on 2026-08-27 with Guest ratings off and Complaints on: the page
+  // renders the heading, then a card holding ONLY a "Complaints · 1" button and Refresh — and
+  // nothing at all underneath. The ratings block is hidden because that section is off; the
+  // complaints block is hidden because the open tab is still "ratings". A restaurant with an open
+  // complaint was shown an empty screen. Broken since PR #199 and never seen, because the check
+  // that covered it READ this effect instead of driving it.
+  // No latch now: if the tab you are on is off and the other one is on, move. It can never fight a
+  // real click, because a switched-off tab has no button to click.
   useEffect(() => {
-    if (decided.current) return;
-    if (ratingsOff && !issuesOff) { setTab("issues"); decided.current = true; }
-    else if (!ratingsOff) { decided.current = true; }
-  }, [ratingsOff, issuesOff]);
+    if (tab === "ratings" && ratingsOff && !issuesOff) setTab("issues");
+    else if (tab === "issues" && issuesOff && !ratingsOff) setTab("ratings");
+  }, [tab, ratingsOff, issuesOff]);
 
   // 60s backstop refresh, paused while the tab is hidden (egress-safe).
   useEffect(() => {
