@@ -737,6 +737,20 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const seats = (draft.table_seats || {}) as Record<string, number | string>;
   const names = (draft.table_names || {}) as Record<string, string>;
   const setSeat = (t: number, v: string) => set("table_seats", { ...seats, [String(t)]: v });
+  // ── AN EMPTY SEATS BOX MEANS "USE THE DEFAULT", NOT "ONE SEAT" (T16 sweep #7, 2026-08-27) ─────
+  // The card promises "how many people can sit there (nothing set = 4)". Clearing the box left an
+  // empty STRING in table_seats, and the save route does `Math.round(Number(v))` → Number("") is
+  // 0 → clamped into 1..30 → the table was stored with ONE seat. The floor and the tablet then
+  // drew "1" beside the chair, on a table the admin had just tried to reset. Dropping the key on
+  // blur is what makes the promise true: no key ⇒ the readers fall back to their own default.
+  // On blur, not on change, so the box can be emptied and retyped without it refilling under the
+  // cursor — the same rule the number fields above follow.
+  const settleSeat = (t: number, v: string) => {
+    if (v.trim() !== "") return;
+    const next = { ...seats };
+    delete next[String(t)];
+    set("table_seats", next);
+  };
   const setName = (t: number, v: string) => set("table_names", { ...names, [String(t)]: v });
 
   if (loadErr) {
@@ -1271,8 +1285,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
                 title='A display name for this table (e.g. "Banquet") — it prints on the bill and the kitchen ticket; the QR code keeps the number'
                 onChange={(e) => setName(t, e.target.value)}
                 style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "5px 8px" }} />
-              <input type="number" min={1} max={30} value={String(seats[String(t)] ?? 4)} title="Seats" disabled={!loadOk || busy}
+              <input type="number" min={1} max={30} value={String(seats[String(t)] ?? 4)}
+                title="Seats — clear it to go back to the default of 4" disabled={!loadOk || busy}
                 onChange={(e) => setSeat(t, e.target.value)}
+                onBlur={(e) => settleSeat(t, e.target.value)}
                 style={{ ...inputStyle, width: 58, padding: "5px 6px" }} />
             </div>
           ))}
