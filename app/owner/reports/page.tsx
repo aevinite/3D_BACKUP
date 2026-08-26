@@ -512,19 +512,43 @@ export default function OwnerReports() {
   // states), and `started` is untouched, so every hydrated entry still refetches. Cleared
   // on login (lib/ownerSnap.ts).
   const snapKey = `reports${scopePin ? `:${scopePin}` : ""}`;
+  // ── WITH NO INTERNET, THIS PAGE HAD FORGOTTEN WHOSE FIGURES IT WAS HOLDING (T11 sweep #7) ──
+  // The scope is decided by /api/owner/overview. With no connection that read comes back
+  // `{ error: "offline" }` (public/sw.js answers 503 rather than throwing), so `rests` stayed
+  // empty and `rid` stayed "" — and every cache key this page builds carries the rid. The saved
+  // 30-day answer was sitting in this tab's own sessionStorage under `money|<rid>|30d` and the
+  // page looked for `money||30d`, found nothing, and printed five confident zeroes with the
+  // chart explaining "Not enough data yet — come back once there's a bit more". Measured on a
+  // production build, offline: headline ₹0 · Net sales ₹0 · Paid bills 0 · Avg bill ₹0 · GST ₹0,
+  // over a device holding ₹13,42,142.
+  //   The scope the device last SAW is the only honest answer when the server cannot give one,
+  // so it is used ONLY on that failure. On a good connection nothing changes: the overview
+  // answers, and the owner's "Reports always opens on All restaurants" rule stands untouched.
+  //   NO SECOND WARNING BAR. The first draft of this fix added one, and the app's own offline
+  // notice was already on screen saying "Connection is struggling — showing saved figures from a
+  // moment ago" — two bars saying one thing is how a real warning stops being read (his rule
+  // about crying wolf). The saved figures now carry the restaurant's own NAME instead of the
+  // generic "This restaurant", which is what makes the existing bar's sentence true.
+  const savedRid = useRef<string>("");
+  const savedName = useRef<string>("");
   useEffect(() => {
-    const s = readSnap<{ rid?: string; entries?: Record<string, Entry> }>(snapKey);
+    const s = readSnap<{ rid?: string; restName?: string; entries?: Record<string, Entry> }>(snapKey);
     if (!s) return;
     if (s.entries) setStore((cur) => ({ ...s.entries, ...cur }));
     // Deliberately NOT restoring the last-picked restaurant: the owner's rule (2026-07-26)
     // is that Reports always OPENS on "All restaurants" (a multi-restaurant estate) — a
     // restaurant is a per-visit choice, not a sticky one. (A single-restaurant owner still
     // gets pinned by the overview effect; admin act-as still pins from ?rid.)
+    // …but REMEMBER it, unused, for the one case where the rule cannot apply: see savedRid.
+    // The NAME rides along, or the offline sheet is headed "This restaurant" — the fallback for
+    // a scope we cannot name — while it is showing that restaurant's own figures.
+    if (s.rid) savedRid.current = s.rid;
+    if (s.restName) savedName.current = s.restName;
   }, [snapKey, scopePin]);
   useEffect(() => {
     const settled = Object.fromEntries(Object.entries(store).filter(([, e]) => e.data));
-    if (Object.keys(settled).length) writeSnap(snapKey, { rid, entries: settled });
-  }, [snapKey, store, rid]);
+    if (Object.keys(settled).length) writeSnap(snapKey, { rid, restName: rid ? rests.find((r) => r.id === rid)?.name : "", entries: settled });
+  }, [snapKey, store, rid, rests]);
 
   // Does this owner have the Staff-profiles-&-pay module anywhere? Off ⇒ the Team & pay
   // report card isn't rendered at all (mig 220).
@@ -552,8 +576,14 @@ export default function OwnerReports() {
       // rid is already pinned from the URL for admin act-as; a single-restaurant owner
       // (no ?rid) gets pinned here once we know there's exactly one.
       if (!scopePin && list.length === 1) setRid(list[0].id);
+      // Nothing came back (no internet, or the read failed): fall back to the scope this device
+      // last saw, so the figures it already holds can be found and shown — and say so on screen.
+      if (!list.length && !scopePin && savedRid.current) setRid(savedRid.current);
       setReady(true);
-    }).catch(() => setReady(true));
+    }).catch(() => {
+      if (!scopePin && savedRid.current) setRid(savedRid.current);
+      setReady(true);
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The effective backend window for the ACTIVE report: a day-kind report is always a
@@ -631,7 +661,10 @@ export default function OwnerReports() {
   const moneyEntry = store[cacheKey("money", rid, range)];
   const dishesDay = store[dayKeyFor("dishes")]?.data;
   const hourlyDay = store[dayKeyFor("hourly")]?.data;
-  const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? "This restaurant") : "All restaurants";
+  // …and when the restaurant list could not be read at all, the name this device last saw beats
+  // the generic fallback — the sheet is showing that restaurant's own saved figures, so it should
+  // say whose they are.
+  const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? (savedName.current || "This restaurant")) : "All restaurants";
   // Charts follow the owner-panel THEME (green), not each restaurant's brand colour —
   // a brown/orange/red chart inside the green owner console read as a bug (owner 2026-07-25).
   const accent = "var(--accent)";
