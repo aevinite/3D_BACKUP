@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **148** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **149** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 148 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
