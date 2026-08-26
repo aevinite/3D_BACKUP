@@ -1201,6 +1201,12 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // A blocked new tab, remembered as WHICH door was being opened — see openPanel below.
+  const [blocked, setBlocked] = useState<{ path: string; label: string } | null>(null);
+  // The same door WITHOUT a pop-up: an ordinary navigation through the act-as redirect, which is
+  // what the platform floor's blocked-tab card already offers. No blocker can stop this one.
+  const hereHref = (path: string) =>
+    `/api/admin/act-as/go?rid=${encodeURIComponent(restaurant.id)}&to=${encodeURIComponent(path)}`;
 
   // Only show the Enter buttons for panels this restaurant HAS. Until the panels load
   // (null) show all, so the buttons never flicker missing. (mig 106)
@@ -1211,19 +1217,27 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
     ["/tablet", "Waiter tablet", "fa-mobile-screen-button", "tablet"],
   ];
 
-  const openPanel = async (path: string) => {
-    setBusy(true); setMsg(null);
+  // ── A BLOCKED TAB IS NOT A LOCKED DOOR (T16 sweep #7, 2026-08-27) ───────────────────────────
+  // This used to answer "Couldn't open the panel tab — allow pop-ups for this site, then try
+  // again." The owner ruled on that exact sentence for the platform floor on 2026-08-20 — "admin
+  // has access to everything, so it shouldn't be 'you can't access the restaurant' — it should
+  // take you to the restaurant" — and the floor was rewritten to offer a way IN. This card, which
+  // is the main door into a restaurant, was still turning him away with a browser-settings
+  // instruction. Same answer as the floor's: the panel opens in THIS tab through the act-as
+  // redirect, which is an ordinary navigation and needs no pop-up at all.
+  const openPanel = async (path: string, label: string) => {
+    setBusy(true); setMsg(null); setBlocked(null);
     try {
       // Shared act-as helper (components/admin/shared.tsx) — also used by the
       // Command page's quick-open buttons. Sets the act-as cookie, then opens the
       // panel in a new tab pinned to this restaurant via ?rid=.
       const w = await openRestaurantPanel(restaurant.id, path);
       if (w) setViewing(true);
-      else setMsg("Couldn't open the panel tab — allow pop-ups for this site, then try again.");
+      else setBlocked({ path, label });
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setBlocked(null);
     try {
       await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) });
       setViewing(false); setMsg("Stopped — reopen a panel from here when you need it again.");
@@ -1249,12 +1263,12 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
           </button>
         )}
         {panelOn("owner") && (
-          <button className="adm-btn" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
+          <button className="adm-btn" disabled={busy} onClick={() => openPanel("/owner", "Owner dashboard")} title={`Open ${restaurant.name}'s owner dashboard`}>
             <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
           </button>
         )}
         {PANELS.filter(([, , , k]) => panelOn(k)).map(([path, label, icon]) => (
-          <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path)} title={`Open ${label} as ${restaurant.name}`}>
+          <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path, label)} title={`Open ${label} as ${restaurant.name}`}>
             <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}
           </button>
         ))}
@@ -1278,6 +1292,20 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
           <button className="adm-btn" disabled={busy} onClick={stop} title="Return to your normal admin view (already-open panel tabs stay pinned)">
             <i className="fas fa-arrow-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Stop viewing as this restaurant
           </button>
+        </div>
+      )}
+      {/* The blocked-tab answer: a way IN, not a browser-settings instruction. */}
+      {blocked && (
+        <div role="status" style={{ marginTop: 12, padding: "11px 13px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.55,
+          border: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)", background: "color-mix(in srgb, var(--accent) 9%, transparent)" }}>
+          <b>Your browser blocked the new tab.</b> Nothing else is in the way — you can open
+          {" "}<b>{blocked.label}</b> right here instead.
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
+            <a className="adm-btn primary" href={hereHref(blocked.path)}>
+              <i className="fas fa-arrow-right-to-bracket" style={{ marginRight: 7 }} aria-hidden="true" />Open {blocked.label} here
+            </a>
+            <button className="adm-btn" onClick={() => setBlocked(null)}>Not now</button>
+          </div>
         </div>
       )}
       {msg && <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>{msg}</div>}
