@@ -221,6 +221,17 @@ ok(/errorSig\(x\.detail\) === wantSig/.test(LOGS), "P23132",
 ok(!/\(x\.detail \?\? null\) === \(a\.detail \?\? null\)/.test(LOGS), "P23132",
   "logs: the old character-for-character detail comparison is back in markResolved");
 
+// ── 18 · a report set to "come back later" is MARKED on the one screen that shows everything ──
+// /api/admin/oplog ships `snoozed_until` for exactly this; nothing read it, so eight reports the
+// admin had told to come back tomorrow sat in the same full red as a live unhandled crash.
+ok(/snoozed_until/.test(LOGS), "P23141",
+  "logs: `snoozed_until` is unread again — a waiting report looks identical to a live unhandled one");
+ok(/Waiting · back/.test(LOGS), "P23142", "logs: the 'Waiting · back …' chip on a snoozed error row is gone");
+ok(/function backIn\(/.test(LOGS), "P23143",
+  "logs: backIn() is gone — timeAgo() only looks backwards and prints 'just now' for a future date");
+ok(/const showRed = isErr && !isResolved && !waitingUntil/.test(LOGS), "P23144",
+  "logs: a waiting report is drawn in full red again, which is what made it indistinguishable from a live one");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
