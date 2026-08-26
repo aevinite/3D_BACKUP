@@ -638,6 +638,19 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
 
   // Delete → moves the owner to the RECYCLE BIN (the server soft-deletes now, mig
   // 208). The modal's type-to-confirm gate already guards it, so this just runs it.
+  //
+  // ── `busy` HAS TO COME BACK, AND ON THE HAPPY PATH TOO (T16 sweep #7, 2026-08-27) ──────────
+  // `busy` is the PAGE's state, not this pane's — AdminOwners owns it and hands it down, so it
+  // gates Rename, Reset password, Suspend/Restore, Assign restaurant, Make primary and Remove on
+  // WHOEVER is open. This handler set it true and then released it only in the catch. So a
+  // delete that WORKED left it true for good: the pane emptied, the admin picked the next owner,
+  // and every button on that person was greyed out with nothing on screen saying why. Only a
+  // page reload brought them back. Measured on a temp owner: all four action buttons came back
+  // `disabled` on a different owner straight after the delete.
+  //
+  // `finally`, not a line after onDeleted(): onDeleted() re-loads the roster and clears the
+  // selection, so anything after it is easy to lose in a later edit — and the failure path wants
+  // exactly the same release.
   async function doDelete() {
     setShowDelete(false);
     setMErr(""); setBusy(true);
@@ -646,7 +659,8 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "Delete failed.");
       onDeleted();
-    } catch (e: any) { setMErr(e.message || "Delete failed."); setBusy(false); }
+    } catch (e: any) { setMErr(e.message || "Delete failed."); }
+    finally { setBusy(false); }
   }
 
   const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
