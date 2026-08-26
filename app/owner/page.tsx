@@ -1228,7 +1228,9 @@ export default function OwnerDashboard() {
       if (money && money !== "err" && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
     }
     return out.slice(0, 4);
-  }, [pl, globalRange, globalRange, moneyCache, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    // `globalRange` was listed twice here — harmless, but a duplicated dependency is the shape of a
+    // half-finished edit and it invites the next reader to guess (T12 sweep, 2026-08-27).
+  }, [pl, globalRange, moneyCache, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dishView = useMemo(() => {
     if (view.level !== "dish") return null;

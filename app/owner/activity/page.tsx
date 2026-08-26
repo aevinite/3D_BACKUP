@@ -354,8 +354,12 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
   // Chips are built from the WHOLE feed, not the filtered slice — a chip's count must not change
   // when you tap it, and a type must stay reachable once you have narrowed to another one.
   const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KIND_LABEL, KIND_ICON);
-  // A type that vanished from the feed (a stale chip after Refresh) must not leave the list empty
-  // with no way back — fall back to All.
+  // NO CLIENT-SIDE FALLBACK HERE, AND THAT IS RIGHT — the comment that used to sit on this line
+  // described one that does not exist, which is worse than none (T12 sweep, 2026-08-27). The
+  // Activity half below really does need its fallback, because its chips are counted from the page
+  // in hand. This half's chips come from `kindCounts`, which /api/owner/audit computes over the
+  // WHOLE record and deliberately does NOT narrow by the chosen kind — so "All" is always offered
+  // and a kind that ran out still has the empty state's "Show all" button. Checked in the route.
   const activeKind = kind;
   // The SERVER already narrowed to `kind` — passing it again here would be harmless but it would also
   // hide a mismatch between the two, so the client only searches and sorts.
@@ -519,9 +523,14 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                   {/* ── THE TAGS (owner, 2026-08-18: "make tags for all kind of audit and stuff") ──
                       From the SAME module the manager panel and the admin console read, so one row
                       wears one set of words everywhere. For a cancellation the last tag is the answer
-                      to "was the food made?" — and READ-ONLY here: /api/owner/audit is GET-only and
-                      always answers canRestore:false (owner rule, 2026-08-04), so the owner SEES
-                      whether food was lost and changes nothing. A manager settles it in their panel. */}
+                      to "was the food made?" — and the owner may SETTLE that one question himself
+                      (owner, 2026-08-19: "can be change by owner or manager"), which is what the two
+                      buttons below the tags are. That is the single write this screen has, and it is
+                      a narrow one: it undoes no removal and edits no row, it records a fact only
+                      someone who was there can know. Everything else stays read-only — no restore,
+                      no delete, and /api/owner/audit still answers canRestore:false (owner rule,
+                      2026-08-04). This comment used to say the owner "changes nothing", two lines
+                      above the buttons that let him (T12 sweep, 2026-08-27). */}
                   {(() => {
                     const madeVal = r.made === true || r.made === "true" ? true
                       : r.made === false || r.made === "false" ? false : null;
