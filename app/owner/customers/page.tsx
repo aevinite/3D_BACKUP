@@ -514,8 +514,19 @@ export default function OwnerCustomers() {
                     ) : (
                       <div style={{ display: "grid", gap: 6 }}>
                         {detail.bills.map((b) => (
-                          <div key={b.session_id} style={{ display: "flex", alignItems: "baseline", gap: 9, borderBottom: "1px solid var(--border-c,#e5e7eb)", padding: "7px 2px" }}>
+                          <div key={b.session_id} style={{ display: "flex", alignItems: "baseline", gap: 9, borderBottom: "1px solid var(--border-c,#e5e7eb)", padding: "7px 2px", flexWrap: "wrap" }}>
                             <span style={{ fontWeight: 700, fontSize: 13 }}>{b.bill_no != null ? `#${b.bill_no}` : "—"}</span>
+                            {/* WHOSE #41? (sweep 7 · T14). Bill numbers are a per-restaurant daily series
+                                (docs/NUMBERING.md), so two of an owner's restaurants can both issue #41 on
+                                the same day. This list mixes every restaurant the guest has eaten at — the
+                                line above literally says "this number has eaten at 2 of your restaurants" —
+                                and then named none of them. Only shown when there IS more than one, so a
+                                single-restaurant owner sees exactly what they saw before. */}
+                            {detail.rows.length > 1 && (
+                              <span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>
+                                {detail.rows.find((r) => r.restaurant_id === b.restaurant_id)?.restaurantName || "—"}
+                              </span>
+                            )}
                             <span className="adm-muted" style={{ fontSize: 12 }}>{b.table_number ? `Table ${b.table_number}` : ""}</span>
                             <span className="adm-muted" style={{ fontSize: 12, marginLeft: "auto" }}>{fmt(b.at)}</span>
                             <b style={{ fontVariantNumeric: "tabular-nums", minWidth: 66, textAlign: "right" }}>₹{nfmt(Math.round(b.total))}</b>

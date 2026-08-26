@@ -290,6 +290,11 @@ const RULES = [
     ],
   },
   {
+    item: 21, file: CUSTOMERS,
+    say: "a guest record that spans two restaurants says which one each bill is from",
+    must: [/detail\.rows\.length > 1 && \([\s\S]{0,320}detail\.rows\.find\(\(r\) => r\.restaurant_id === b\.restaurant_id\)\?\.restaurantName/],
+  },
+  {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
     must: [/className="adm-page-h">Manager mode/],
