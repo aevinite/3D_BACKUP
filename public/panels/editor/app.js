@@ -1065,9 +1065,11 @@ async function bulkDeleteDishes() {
   state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn();
   await loadAll(); renderList(); renderEditor();
   const undoDelete = async () => {
-    let r = 0;
-    for (const s of snaps) { try { const p = { ...s }; delete p.created_at; delete p.updated_at; p.__create = true; await api("POST", "/items", p); r++; } catch (e) {} }
-    toast(`Restored ${r}`, "ok");
+    // A LOOP OF WRITES ASKS THE QUEUE ONCE (owner, 2026-08-26). With no signal every one of these
+    // is saved rather than sent, and "Restored 5" would be a count of things that have not happened.
+    let r = 0, anyQueued = false;
+    for (const s of snaps) { try { const p = { ...s }; delete p.created_at; delete p.updated_at; p.__create = true; anyQueued = wasQueued(await api("POST", "/items", p)) || anyQueued; r++; } catch (e) {} }
+    okToast(anyQueued ? { queued: true } : null, `Restored ${r}`);
     await loadAll(); renderList(); renderEditor();
   };
   // A REFUSED DELETE IS NEWS (T5, 2026-08-17) — the loop above used to swallow every failure, so
@@ -4090,7 +4092,8 @@ async function freeTable(t, opts = {}) {
   }
   if (!opts.silent && !(await confirmDialog(`Free ${tableLabel(t)}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
   try {
-    for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
+    let anyQueued = false;
+    for (const id of ids) anyQueued = wasQueued(await api("PATCH", "/orders/" + id, { archived: true })) || anyQueued;
     (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) o.archived = true; });
     // force: the orders left here are cancelled/settled (the guard above proved it), so the
     // server's "still owes money / still cooking" rule has nothing to protect — without force it
@@ -4098,7 +4101,7 @@ async function freeTable(t, opts = {}) {
     // forever.
     if (sess) { try { await api("POST", "/sessions/" + sess.id + "/close", { force: true }); } catch (e) { /* orders are already off the floor; the tile reads free */ } }
     await loadSessions();
-    toast(`${tableLabel(t)} is free`, "ok");
+    okToast(anyQueued ? { queued: true } : null, `${tableLabel(t)} is free`);
   } catch (e) { toast("Couldn't free: " + errText(e), "err"); }
 }
 
@@ -4134,10 +4137,10 @@ async function restoreTable(id) {
     const patch = { archived: false };
     if (o.status === "cancelled") patch.status = "received";
     try {
-      await api("PATCH", "/orders/" + id, patch);
+      const _wq = await api("PATCH", "/orders/" + id, patch);
       o.archived = false; if (patch.status) o.status = patch.status;
       renderEditor();
-      toast("Restored to the live floor", "ok");
+      okToast(_wq, "Restored to the live floor");
     } catch (e) {
       toast("Restore failed: " + e.message, "err");
     }
@@ -4180,7 +4183,7 @@ async function restoreBill(orders) {
     }
     if (!Object.keys(patch).length) continue;
     try {
-      await api("PATCH", "/orders/" + o.id, patch);
+      const _wq = await api("PATCH", "/orders/" + o.id, patch);
       if (patch.archived === false) o.archived = false;
       if (patch.status) o.status = patch.status;
       if (patch.payment_status) o.payment_status = patch.payment_status;
@@ -4191,7 +4194,7 @@ async function restoreBill(orders) {
   }
   renderEditor();
   if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
-  else toast("Bill restored to the live floor", "ok");
+  else okToast(_wq, "Bill restored to the live floor");
 }
 
 // setOrderStatus: move one order to a new status (e.g. Accept → preparing).
@@ -4213,8 +4216,8 @@ async function setOrderStatus(id, status, reason) {
     // stock and the cost. Sent only when it was actually asked — an absent answer stays UNANSWERED on
     // the server rather than being guessed at as "never made", which would silently put ingredients
     // back that a cook had really used.
-    await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}), ...(reason && typeof reason.made === "boolean" ? { made: reason.made } : {}) }); // sync in the background
-    toast("Order updated → " + status, "ok");
+    const _wq = await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}), ...(reason && typeof reason.made === "boolean" ? { made: reason.made } : {}) }); // sync in the background
+    okToast(_wq, "Order updated → " + status);
   } catch (e) {
     if (o && prev !== null) o.status = prev;         // server said no -> undo
     renderEditor();
@@ -4356,7 +4359,7 @@ async function setOrderPayment(id, paid, opts = {}) {
   renderEditor();
   renderTablePanel();
   try {
-    await api("PATCH", "/orders/" + id, {
+    const _wq = await api("PATCH", "/orders/" + id, {
       payment_status: paid ? "paid" : "pending",
       ...(revertReason ? { revert_reason: revertReason } : {}),
       ...(paid && opts.method ? { payment_method: opts.method, payment_note: opts.note || "" } : {}),
@@ -4370,7 +4373,7 @@ async function setOrderPayment(id, paid, opts = {}) {
       // bill the bar offered to take back is no longer on the floor to take back. Correcting a
       // settled bill is now one named, permissioned, audited thing — Access → Manager → Manager
       // menu → Bill → Reopen a bill — instead of a toast that quietly did the same job.
-      if (paid) toast("Marked paid 💳", "ok");
+      if (paid) okToast(_wq, "Marked paid 💳");
       else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
     }
     return true;
@@ -4767,7 +4770,7 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
       // device links must land on THIS party even if the table gets re-seated a moment later
       // (mig 233 — resolving by table number booked them onto the next party).
       const sid = payable[0] && payable[0].session_id;
-      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), session: sid || null, phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) toast(`📇 Saved ${picked.cust.name || "customer"}`, "ok"); }
+      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), session: sid || null, phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) okToast(rc, `📇 Saved ${picked.cust.name || "customer"}`); }
     } catch { /* best-effort; bill already paid */ }
   }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
@@ -4998,8 +5001,8 @@ function openTagModal(t) {
     const prev = tile ? tile.tag : undefined;
     if (tile) { tile.tag = tag || ""; renderEditor(); }
     try {
-      await api("POST", `/tables/${t}/tag`, { tag });
-      toast(tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed", "ok");
+      const _wq = await api("POST", `/tables/${t}/tag`, { tag });
+      okToast(_wq, tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed");
       await pollTables([String(t)]);
     } catch (e) {
       if (tile) { tile.tag = prev || ""; renderEditor(); }
@@ -5015,8 +5018,8 @@ async function resolveCall(id) {
   state.data.calls = before.filter((c) => c.id !== id); // vanish NOW
   renderEditor();
   try {
-    await api("PATCH", "/calls/" + id, { resolved: true });
-    toast("Marked attended", "ok");
+    const _wq = await api("PATCH", "/calls/" + id, { resolved: true });
+    okToast(_wq, "Marked attended");
   } catch (e) {
     state.data.calls = before; // bring it back — the server didn't get it
     renderEditor();
@@ -6121,7 +6124,7 @@ function openParcelTile(id) {
     // which has always passed both.
     try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: pcDisc, discount_note: pcDiscNote || null }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
-    try { await api("POST", `/platform/${o.id}/printed`, {}); toast("Bill printed ✓", "ok"); closeP(); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${o.id}/printed`, {}); okToast(_wq, "Bill printed ✓"); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
   };
   wrap.querySelector("#pcPay").onclick = async (e) => {
@@ -6135,7 +6138,7 @@ function openParcelTile(id) {
     // the counter already captured the name when the parcel was punched.
     const picked = await openPaymentMethodModal(Number(o.total) || 0, `Collect parcel ${o.parcel_no ?? ""}`.trim(), { methodOnly: true, crm: false });
     if (!picked || picked.special) { b.disabled = false; return; }   // cancelled — the tile stays
-    try { await api("POST", `/platform/${o.id}/pay`, { method: picked.method }); toast(`Collected via ${picked.method} ✓`, "ok"); closeP(); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${o.id}/pay`, { method: picked.method }); okToast(_wq, `Collected via ${picked.method} ✓`); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Couldn't collect: " + ((err && err.message) || err), "err"); }
   };
 }
@@ -6571,8 +6574,8 @@ function renderEditor() {
           const payload = { method: picked.method, note: picked.note };
           if (btn.dataset.khataSession) payload.session_id = btn.dataset.khataSession;
           else payload.order_id = btn.dataset.khataOrder;
-          await api("POST", "/khata/pay", payload);
-          toast(`Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+          const _wq = await api("POST", "/khata/pay", payload);
+          okToast(_wq, `Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`);
           state.khataLoadedAt = 0; // force a fresh book
           await loadKhataBook();
           loadSessions(); // the paid orders re-enter the normal records
@@ -6596,14 +6599,17 @@ function renderEditor() {
         // A manager reading that either takes the money twice or writes off money they took.
         // Each bill now stands on its own and the book is reloaded either way, exactly as
         // payOrdersWithMethod has always done for a table.
-        let okN = 0, failN = 0, got = 0, lastErr = "";
+        // MONEY OFF A KHATA, ONE BILL AT A TIME — and the queue is asked once for the lot
+        // (owner, 2026-08-26): with no signal none of these has reached the server, and
+        // "Collected ₹2,400" would be a figure nobody has taken.
+        let okN = 0, failN = 0, got = 0, lastErr = "", anyQueued = false;
         for (const bl of cst.bills) {
           const payload = { method: picked.method, note: picked.note };
           if (bl.session_id) payload.session_id = bl.session_id; else payload.order_id = bl.key;
-          try { await api("POST", "/khata/pay", payload); okN++; got += Number(bl.amount) || 0; }
+          try { anyQueued = wasQueued(await api("POST", "/khata/pay", payload)) || anyQueued; okN++; got += Number(bl.amount) || 0; }
           catch (e) { failN++; lastErr = (e && e.message) || String(e); }
         }
-        if (okN && !failN) toast(`Collected ${inr(got)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+        if (okN && !failN) okToast(anyQueued ? { queued: true } : null, `Collected ${inr(got)} from ${btn.dataset.khataName} 📒→💳`);
         else if (okN) toast(`Collected ${inr(got)} — ${failN} bill${failN === 1 ? "" : "s"} could NOT be collected (${lastErr}). The rest is still owed.`, "err");
         else toast("Couldn't collect: " + lastErr, "err");
         state.khataLoadedAt = 0;
@@ -7038,8 +7044,8 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
     // Send ONLY id + tags, not the whole dish snapshot — posting the full (possibly stale)
     // row here reverted a price/name someone else had just edited on this dish. The server
     // upsert updates only the columns we send (onConflict=id), so this touches tags alone.
-    await api("POST", "/items", { id: dish.id, tags: dish.tags });
-    toast(`${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`, "ok");
+    const _wq = await api("POST", "/items", { id: dish.id, tags: dish.tags });
+    okToast(_wq, `${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`);
   } catch (e) {
     // revert on failure
     if (adding) dish.tags.splice(dish.tags.indexOf(filterSlug), 1);
@@ -7198,7 +7204,7 @@ async function save() {
     // coverage guard reads call sites textually, and shorthand is invisible to it — a protection
     // its own guard can't see is one the next person can delete without anything going red.
     const saved = await api("POST", "/" + kind, payload, expect ? { expect: expect } : undefined);
-    toast("Saved ✓", "ok");
+    okToast(saved, "Saved ✓");
     await loadAll();
     if (state.tab === "general") {
       state.sel = clone(state.data.settings || it);
@@ -7236,7 +7242,7 @@ async function removeRecord() {
   const kind = state.tab; // the deleted record's kind (items/categories/filters)
   const restored = { ...it }; // snapshot for Undo
   try {
-    await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
+    const _wq = await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
     // If we just deleted the category the Dishes list is filtered by, clear the filter —
     // otherwise the Dishes tab filters to a category that no longer exists (looks empty).
     if (state.tab === "categories" && state.catFilter === recKey(it)) state.catFilter = "";
@@ -7249,7 +7255,7 @@ async function removeRecord() {
       try {
         const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
         await api("POST", "/" + kind, payload);
-        toast("Restored ✓", "ok");
+        okToast(_wq, "Restored ✓");
         if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
       } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
     };
@@ -7552,10 +7558,10 @@ async function saveRetention(which, val) {
   try {
     // No id here — the server keys settings by restaurant_id and fills the row's real id
     // itself. (Sending the legacy id:"site" used to collide with #1's PK on other tenants.)
-    await api("POST", "/settings", { [which]: days });
+    const _wq = await api("POST", "/settings", { [which]: days });
     state.data.settings = { ...(state.data.settings || {}), [which]: days };
     const lbl = (RETENTION_OPTS.find((o) => o.d === days) || {}).label || days + " days";
-    toast("Saved — old logs auto-delete after " + lbl, "ok");
+    okToast(_wq, "Saved — old logs auto-delete after " + lbl);
   } catch (e) {
     // BRANCH ON THE SERVER'S CODE, NOT ITS PROSE. A refusal here is a real answer ("Aevidine
     // locked it" / "owner only"), not a failure to reach the server, so it must not read like one.
@@ -8559,13 +8565,13 @@ async function closeFinishedTable(t) {
   // (it moves to Bills), nothing is deleted, and a table closed by mistake comes back through
   // "Restore to floor". The two guards above still refuse VISIBLY if the tile was stale.
   try {
-    await api("POST", `/sessions/${sess.id}/close`);
+    const _wq = await api("POST", `/sessions/${sess.id}/close`);
     state.selectedTable = null;
     state.openSess = null;
     document.querySelector(".tbl-modal-overlay")?.remove();          // the detail popup, if this came from there
     state.floatingTables = (state.floatingTables || []).filter((f) => !partyTablesOf(t).some((x) => String(x) === String(f.table)));
     await loadSessions();
-    toast(`${tableLabel(t)} closed — the bill is saved in Bills`, "ok");
+    okToast(_wq, `${tableLabel(t)} closed — the bill is saved in Bills`);
   } catch (e) {
     // errText(), not e.message: a busy server or a dropped connection must read as itself here
     // (this panel already has that translator) — never "TimeoutError: The operation was aborted".
@@ -8574,7 +8580,7 @@ async function closeFinishedTable(t) {
 }
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
 async function setSessAutoApprove(id, value) {
-  try { await api("POST", "/sessions/" + id + "/auto-approve", { value: !!value }); await loadSessions(); toast(value ? "Auto-approve on" : "Auto-approve off", "ok"); }
+  try { const _wq = await api("POST", "/sessions/" + id + "/auto-approve", { value: !!value }); await loadSessions(); okToast(_wq, value ? "Auto-approve on" : "Auto-approve off"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // memberAction: approve a waiting guest, or remove one from the table.
@@ -8587,9 +8593,9 @@ async function memberAction(id, kind) {
   const prev = m ? { approved: m.approved, removed: m.removed } : null;
   if (m) { if (kind === "approve") m.approved = true; else m.removed = true; refreshTableDetail(); }
   try {
-    await api("POST", "/members/" + id + "/" + (kind === "approve" ? "approve" : "remove"));
+    const _wq = await api("POST", "/members/" + id + "/" + (kind === "approve" ? "approve" : "remove"));
     await loadSessions();
-    toast(kind === "approve" ? "Approved" : "Removed", "ok");
+    okToast(_wq, kind === "approve" ? "Approved" : "Removed");
   } catch (e) {
     if (m && prev) { m.approved = prev.approved; m.removed = prev.removed; refreshTableDetail(); } // revert on failure
     toast("Failed: " + e.message, "err");
@@ -8599,7 +8605,7 @@ async function memberAction(id, kind) {
 // add to the blocklist (by member id, and phone if we have one).
 async function kickMember(id) {
   if (!(await confirmDialog("Kick this guest from the table? Their access ends now — the table stays open.", "Kick"))) return;
-  try { await api("POST", "/members/" + id + "/remove"); await loadSessions(); toast("Guest removed", "ok"); }
+  try { const _wq = await api("POST", "/members/" + id + "/remove"); await loadSessions(); okToast(_wq, "Guest removed"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // Transfer the table: this guest becomes the HEAD (owns the tab, approves
@@ -8607,14 +8613,14 @@ async function kickMember(id) {
 // the café or never answers join requests. Confirmed first: it's a hand-over.
 async function makeHead(id) {
   if (!(await confirmDialog("Make this guest the table's head? The current head is kicked out and this guest takes over approvals.", "Transfer"))) return;
-  try { await api("POST", "/members/" + id + "/make-head"); await loadSessions(); toast("Head transferred", "ok"); }
+  try { const _wq = await api("POST", "/members/" + id + "/make-head"); await loadSessions(); okToast(_wq, "Head transferred"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 async function banMember(id, phone) {
   if (!(await confirmDialog("Ban this guest? They're kicked now and added to the blocklist.", "Ban"))) return;
   try {
-    await api("POST", "/blocklist", { member_id: id, phone: phone || undefined }); // server also kicks them from their seat in the same call now (B23)
-    await loadSessions(); toast("Banned", "ok");
+    const _wq = await api("POST", "/blocklist", { member_id: id, phone: phone || undefined }); // server also kicks them from their seat in the same call now (B23)
+    await loadSessions(); okToast(_wq, "Banned");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // itemStatus: move one session item forward (received → preparing → served).
@@ -8654,17 +8660,17 @@ async function resolveRequest(id, status) {
   state.summary = Object.assign({}, state.summary, { requests: before.filter((r) => r.id !== id) });
   floorOpsInFlight++;
   loadSessions(true);
-  try { await api("POST", "/requests/" + id + "/resolve", { status }); floorOpsInFlight--; await loadSessions(); toast(status === "approved" ? "Approved" : "Dismissed", "ok"); }
+  try { const _wq = await api("POST", "/requests/" + id + "/resolve", { status }); floorOpsInFlight--; await loadSessions(); okToast(_wq, status === "approved" ? "Approved" : "Dismissed"); }
   catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { requests: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
 // block: add a phone/table to the blocklist (opts says which).
 async function block(opts) {
-  try { await api("POST", "/blocklist", opts); await loadSessions(); toast("Blocked", "ok"); }
+  try { const _wq = await api("POST", "/blocklist", opts); await loadSessions(); okToast(_wq, "Blocked"); }
   catch (e) { toast("Couldn't block: " + e.message, "err"); }
 }
 // unblock: remove an entry from the blocklist.
 async function unblock(id) {
-  try { await api("DELETE", "/blocklist/" + id); await loadSessions(); toast("Unblocked", "ok"); }
+  try { const _wq = await api("DELETE", "/blocklist/" + id); await loadSessions(); okToast(_wq, "Unblocked"); }
   catch (e) { toast("Couldn't unblock: " + e.message, "err"); }
 }
 // attendCall: mark a waiter call as handled.
@@ -8678,7 +8684,7 @@ async function attendCall(id) {
   floorOpsInFlight++;
   loadSessions(true);
   try {
-    await api("PATCH", "/calls/" + id, { resolved: true });
+    const _wq = await api("PATCH", "/calls/" + id, { resolved: true });
     floorOpsInFlight--;
     if (target && target.table_number) await pollTables([String(target.table_number)]); else await loadSessions();
     // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
@@ -8688,7 +8694,7 @@ async function attendCall(id) {
       icon: "🔔",
       onUndo: async () => { try { await api("PATCH", "/calls/" + id, { resolved: false }); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
     });
-    else toast("Marked attended", "ok");
+    else okToast(_wq, "Marked attended");
   }
   catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { calls: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
@@ -10093,8 +10099,8 @@ function bindFloor() {
     b.disabled = true;
     const i = b.dataset.prok.indexOf(":"), kind = b.dataset.prok.slice(0, i), id = b.dataset.prok.slice(i + 1);
     try {
-      await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
-      toast("Marked resolved ✓", "ok");
+      const _wq = await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
+      okToast(_wq, "Marked resolved ✓");
       await pollOrders();
     } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
   }));
@@ -10492,7 +10498,7 @@ function openDishEditModal(itemId, rerender) {
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one person's "more spicy" silently wiping another's "less spicy".
       if (note !== String(item.note || "").trim()) {
-        await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
+        const _wq = await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
       }
       if (!same(newItemRemoved, itemRemoved)) {
         await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
@@ -10502,7 +10508,7 @@ function openDishEditModal(itemId, rerender) {
       }
       close();
       await loadSessions(); if (rerender) rerender();
-      toast("Dish updated", "ok");
+      okToast(_wq, "Dish updated");
     } catch (e) {
       // SOMEONE ELSE GOT THERE FIRST. Close, refresh, and hold the message on screen long
       // enough to be read — this person's edit did NOT save and they need to know why.
@@ -11030,7 +11036,7 @@ function openAddDishModal(orderId, rerender) {
       if (d && d.open_price) { price = await pricePrompt(d.title); if (price == null) return; }
       const r = await api("POST", `/orders/${orderId}/add-item`, { dishId: b.dataset.add, qty: 1, ...(price != null ? { price } : {}) });
       if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), "err"); return; }
-      toast("Dish added — bill updated", "ok");
+      okToast(r, "Dish added — bill updated");
       await loadSessions(); if (rerender) rerender();
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
@@ -12155,7 +12161,7 @@ function openShiftPicker(t, sess) {
     try {
       const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
       if (!r.ok) { toast("Couldn't shift: " + (KOT_REASON_TEXT[r.reason] || r.reason || ""), "err"); return; }
-      toast(`Shifted to ${tileFace(to)}`, "ok");
+      okToast(r, `Shifted to ${tileFace(to)}`);
       followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
@@ -13029,8 +13035,8 @@ async function printJobHere(id, btn) {
       allergies: Array.isArray(o.allergies) ? o.allergies : [],
       reprint: r.job ? r.job.reprint !== false : true,
     }));
-    await api("POST", `/print-jobs/${id}/dismiss`, {});
-    toast("Printed here ✓ — the kitchen job is closed.", "ok");
+    const _wq = await api("POST", `/print-jobs/${id}/dismiss`, {});
+    okToast(_wq, "Printed here ✓ — the kitchen job is closed.");
     await pollOrders();
   } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
 }
@@ -13152,7 +13158,7 @@ function bindPrintStationStrip(root) {
       const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
       if (r && r.station && printTargetSays) printTargetSays.station = r.station;
       if (take) lsSet(PRINT_HERE_KEY, "on");     // taking it IS the answer to "should this screen print?"
-      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.", "ok");
+      okToast(r, take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
       if (state.tab === "tables") renderEditor(); else if (state.tab === "general") renderEditor();
       if (take) managerPrintPass();              // anything already waiting prints straight away
     } catch (e) {
@@ -13490,7 +13496,7 @@ function openMoveItemPicker(t) {
       try {
         const r = await api("POST", `/order-items/${itemId}/move`, { to });
         if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-        toast(`Dish moved to ${tileFace(to)} (new KOT)`, "ok");
+        okToast(r, `Dish moved to ${tileFace(to)} (new KOT)`);
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
   }));
@@ -13590,7 +13596,7 @@ function openMoveKotPicker(t) {
       try {
         const r = await api("POST", `/orders/${orderId}/move`, { to });
         if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-        toast(`KOT moved to ${tileFace(to)}`, "ok");
+        okToast(r, `KOT moved to ${tileFace(to)}`);
         // Both tables repaint via the RPC's breadcrumbs (targeted refetch) — no manual reload.
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
@@ -13881,9 +13887,9 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
     // "applied" would be a lie until the order is actually placed.
     if (pending) { pending.onApply(Math.max(0, Math.min(amount, maxDisc)), amount > 0 ? note : ""); return; }
     try {
-      await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
+      const _wq = await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
       await loadSessions(); if (rerender) rerender();
-      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed", "ok");
+      okToast(_wq, amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed");
     } catch (e) {
       // SOMEONE ELSE DISCOUNTED THIS BILL FIRST — say so in words (T3 sweep, 2026-08-06). This
       // write sends `expect`, so the server refuses rather than overwriting, and it sends back a
@@ -14006,7 +14012,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
       const r = await api("POST", `/items/${b.dataset.itemDel}/delete`, { reason_code: reason.code, reason_note: reason.note });
       await loadSessions();
       if (rerender) rerender();
-      toast(r && r.order_cancelled ? "Dish removed — order now empty, cancelled" : "Dish removed — bill updated", "ok");
+      okToast(r, r && r.order_cancelled ? "Dish removed — order now empty, cancelled" : "Dish removed — bill updated");
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
   // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
@@ -14254,6 +14260,25 @@ async function serveAllOrder(orderId) {
 // bottom of this file) — and until then the table carries the ⏳ mark that says so.
 const wasQueued = (r) => !!(r && r.queued === true);
 
+// ── ONE SENTENCE FOR EVERY WRITE THAT HAS NOT LEFT THIS DEVICE (owner, 2026-08-26) ────────────
+//
+// "on bad wifi every message tells the truth, so a manager can trust what he reads."
+//
+// api() hands every non-GET to the offline outbox, and the outbox resolves { ok:true, queued:true }
+// instead of throwing — so a handler with only a try/catch sees a SUCCESS and says so. Eight sites
+// that announce money or mint a numbered document were fixed one at a time (items 2-5); this is the
+// rest of the panel, and it is deliberately ONE helper rather than fifty rewordings:
+//
+//   · a manager learns the sentence ONCE and then recognises it anywhere;
+//   · fifty hand-written variations is how two screens end up disagreeing about the same state;
+//   · and a new write site gets the behaviour by using okToast() instead of remembering a rule.
+//
+// It is not a warning and not an error: the work IS saved, it IS going, and the queue drawer and
+// the offline bar already say how much is waiting. It only stops the panel claiming a thing has
+// happened when it has not.
+const QUEUED_LINE = "Saved on this device ✓ — it'll send by itself the moment you're back online.";
+const okToast = (r, msg, ms) => toast(wasQueued(r) ? QUEUED_LINE : msg, "ok", undefined, ms);
+
 // ── WHERE SERVER TRUTH MEETS THIS DEVICE'S OWN WORK ──────────────────────────────────────────
 //
 // A tile the person has just changed must not be put back by a read that predates the change.
@@ -14450,7 +14475,8 @@ async function attendTableCalls(t) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; } };
   try {
-    for (const c of cs) await api("PATCH", "/calls/" + c.id, { resolved: true });
+    let anyQueued = false;
+    for (const c of cs) anyQueued = wasQueued(await api("PATCH", "/calls/" + c.id, { resolved: true })) || anyQueued;
     release(); await pollTables([String(t)]); // clears the tile's call emoji from the summary
     const callIds = [...ids];
     if (window.LFH_UNDO) LFH_UNDO.show({
@@ -14459,7 +14485,7 @@ async function attendTableCalls(t) {
       icon: "🔔",
       onUndo: async () => { try { await Promise.all(callIds.map((cid) => api("PATCH", "/calls/" + cid, { resolved: false }))); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
     });
-    else toast("Attended", "ok");
+    else okToast(anyQueued ? { queued: true } : null, "Attended");
   }
   catch (e) { release(); state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + errText(e), "err"); }
   finally { release(); }
@@ -14489,10 +14515,10 @@ async function restartTable(t) {
     // ONE atomic server call: archive the round + release members + CLEAR the table's live signals
     // (so no ghost waiter-call bell lingers on the emptied table) + reopen if sessions are on.
     // (B12 — was a client PATCH loop that never cleared the signals.)
-    await api("POST", "/tables/" + t + "/restart", {});
+    const _wq = await api("POST", "/tables/" + t + "/restart", {});
     release();
     await pollTables([String(t)]); // refresh this tile's summary (cheap, single-table)
-    toast(`${tableLabel(t)} restarted — still open`, "ok");
+    okToast(_wq, `${tableLabel(t)} restarted — still open`);
   } catch (e) { release(); toast("Couldn't restart: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
@@ -14815,14 +14841,14 @@ function showCustDetail(id) {
 // exitUser: remove a guest from their table (from the Log tab).
 async function exitUser(memberId) {
   if (!(await confirmDialog("Remove this guest from the table? They can't order or call until they rejoin.", "Remove"))) return;
-  try { await api("POST", "/members/" + memberId + "/remove"); await loadUsers(); toast("Guest removed", "ok"); }
+  try { const _wq = await api("POST", "/members/" + memberId + "/remove"); await loadUsers(); okToast(_wq, "Guest removed"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // blockUser: block a guest by phone (preferred) or table, so they hit a blocked screen.
 async function blockUser(phone, table) {
   const by = phone ? `phone ${phone}` : `table ${table}`;
   if (!(await confirmDialog(`Block this guest (by ${by})? They'll see a blocked screen and can't order or call.`, "Block"))) return;
-  try { await api("POST", "/blocklist", phone ? { phone } : { table }); await loadUsers(); toast("Blocked", "ok"); }
+  try { const _wq = await api("POST", "/blocklist", phone ? { phone } : { table }); await loadUsers(); okToast(_wq, "Blocked"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // blockDevice: block a staff DEVICE (a tablet / kitchen screen) by its device id.
@@ -14830,13 +14856,13 @@ async function blockUser(phone, table) {
 async function blockDevice(deviceId) {
   if (!deviceId) return;
   if (!(await confirmDialog("Block this device? The tablet/kitchen screen using it won't be able to take orders or act until you unblock it.", "Block device"))) return;
-  try { await api("POST", "/blocklist", { device_id: deviceId, reason: "device" }); await loadUsers(); toast("Device blocked", "ok"); }
+  try { const _wq = await api("POST", "/blocklist", { device_id: deviceId, reason: "device" }); await loadUsers(); okToast(_wq, "Device blocked"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // unblockLog: remove someone from the blocklist (a guest OR a device). After it,
 // loadUsers refreshes the blocklist so the operation-log buttons flip back too.
 async function unblockLog(id) {
-  try { await api("DELETE", "/blocklist/" + id); await loadUsers(); toast("Unblocked", "ok"); }
+  try { const _wq = await api("DELETE", "/blocklist/" + id); await loadUsers(); okToast(_wq, "Unblocked"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 
@@ -14977,7 +15003,7 @@ function bindPlatform() {
     document.addEventListener("click", () => { simMenu.hidden = true; }, { once: true });
     simMenu.querySelectorAll("[data-plat-sim]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation(); simMenu.hidden = true; b.disabled = true;
-      try { await api("POST", "/platform/test", { channel: b.dataset.platSim }); toast("Demo order added ✓", "ok"); await loadPlatform(); }
+      try { const _wq = await api("POST", "/platform/test", { channel: b.dataset.platSim }); okToast(_wq, "Demo order added ✓"); await loadPlatform(); }
       catch (err) { toast("Failed: " + err.message, "err"); }
     });
   }
@@ -14999,7 +15025,7 @@ function bindPlatform() {
     // without it charges the customer more than the record says they paid.
     try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: o.discount ?? (o.payload || {}).discount, discount_note: o.discount_note ?? (o.payload || {}).discount_note ?? null }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
-    try { await api("POST", `/platform/${id}/printed`, {}); toast("Bill printed ✓", "ok"); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${id}/printed`, {}); okToast(_wq, "Bill printed ✓"); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
   });
   document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
@@ -15024,7 +15050,7 @@ function bindPlatform() {
     b.disabled = true;
     const picked = await openPaymentMethodModal(Number(o.total) || 0, `Collect ${o.source === "parcel" ? "parcel" : "order"}`, { methodOnly: true, crm: false });
     if (!picked || picked.special) { b.disabled = false; return; }   // cancelled — the card stays
-    try { await api("POST", `/platform/${id}/pay`, { method: picked.method }); toast(`Collected via ${picked.method} ✓`, "ok"); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${id}/pay`, { method: picked.method }); okToast(_wq, `Collected via ${picked.method} ✓`); await loadPlatform(); }
     catch (e) { toast("Failed: " + e.message, "err"); b.disabled = false; }
   });
 }
@@ -15277,9 +15303,9 @@ async function voidInvoice(sid) {
   const label = (REOPEN_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, "");
   const reason = [label, rr.note].filter(Boolean).join(" — ");
   try {
-    await api("POST", `/sessions/${sid}/void-invoice`, { reason, reason_code: rr.code, reason_note: rr.note || null });
+    const _wq = await api("POST", `/sessions/${sid}/void-invoice`, { reason, reason_code: rr.code, reason_note: rr.note || null });
     await loadOrders();
-    toast("Bill reopened — add or change items, then Print again for a new invoice", "ok");
+    okToast(_wq, "Bill reopened — add or change items, then Print again for a new invoice");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // PUT A FINISHED TABLE BACK ON THE FLOOR (owner, 2026-08-26; mig 365).
@@ -16503,10 +16529,10 @@ function bindBanquet() {
     row.querySelector("[data-bq-del]").onclick = async () => {
       if (!(await confirmDialog(`Delete "${item.title}" from the banquet packages?`, "Delete"))) return;
       try {
-        await api("POST", "/banquet/item-delete", { id });
+        const _wq = await api("POST", "/banquet/item-delete", { id });
         bq.items = bq.items.filter((i) => i.id !== id);
         renderEditor();
-        toast("Deleted", "ok");
+        okToast(_wq, "Deleted");
       } catch (e) { toast("Couldn't delete: " + e.message, "err"); }
     };
   });
@@ -16519,7 +16545,7 @@ function bindBanquet() {
       const row = await api("POST", "/banquet/item-save", { title, price, unit: "per plate", active: true, sort_order: bq.items.length + 1 });
       bq.items.push(row);
       renderEditor();
-      toast("Added", "ok");
+      okToast(row, "Added");
     } catch (e) { toast("Couldn't add: " + e.message, "err"); }
   };
 

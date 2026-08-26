@@ -185,5 +185,33 @@ console.log("\nE. reopen puts the TABLE back, not the bill (owner, 2026-08-26; m
     : bad("the paid-order cancel refusal is gone", "a reopened bill would become editable, which is not what was asked for");
 }
 
+console.log("\nF. NO write in this panel still claims success for something that has not sent");
+// THE WHOLE-PANEL SWEEP (owner, 2026-08-26: "on bad wifi every message tells the truth").
+// Sections B-E name the eight sites that print paper or state a figure. This one is the other
+// ~49: every remaining non-GET whose happy path shows an "ok" toast must route it through
+// okToast(), which is the ONE place the "saved on this device" sentence lives.
+// Driven when it was built: online the same action still said "Order updated → preparing";
+// offline it said "Saved on this device ✓ — it'll send by itself the moment you're back online."
+{
+  if (!/const okToast = \(r, msg, ms\) =>/.test(src)) bad("okToast() is gone", "the one place the queued sentence lives");
+  else ok("okToast() is the one place the 'saved on this device' sentence lives");
+  if (!/const QUEUED_LINE = /.test(src)) bad("QUEUED_LINE is gone", "fifty hand-written variations is how two screens disagree");
+  else ok("…and the sentence itself is written once");
+
+  const lines = src.split("\n");
+  const offenders = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/await api\("(?:POST|PATCH|PUT|DELETE)"/.test(lines[i])) continue;
+    if (/okToast/.test(lines[i])) continue;
+    const win = lines.slice(i, i + 16).join("\n");
+    if (/wasQueued|\.queued|okToast/.test(win)) continue;
+    if (!/toast\([^\n]{0,110}?,\s*"ok"\)/.test(win)) continue;   // no success message → nothing to lie about
+    offenders.push(`${PANEL}:${i + 1}`);
+  }
+  if (!offenders.length) ok("every write with a success message asks the queue first", "swept the whole file, not a list");
+  else bad(`${offenders.length} write(s) still say "done" without asking the queue`, offenders.slice(0, 12).join(", ")
+    + "\n      Route the success message through okToast(<the api result>, \"…\") — that is all it takes.");
+}
+
 console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
