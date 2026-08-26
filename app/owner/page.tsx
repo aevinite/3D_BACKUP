@@ -89,12 +89,15 @@ type Prev = { revenue: number; orders: number } | null;
 // The "we couldn't read part of this" strip a chart card shows when the group total is incomplete.
 // Deliberately INSIDE the affected card rather than a page-level banner: the owner needs to know
 // WHICH chart is short, not merely that something somewhere failed.
-function PartialStrip({ keys }: { keys?: string[] }) {
+function PartialStrip({ keys, msg }: { keys?: string[]; msg?: string }) {
   if (!keys || !keys.length) return null;
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "0 0 8px", fontSize: 12.5, color: "var(--adm-warn)" }}>
       <i className="fas fa-triangle-exclamation" aria-hidden="true" />
-      <span>Some restaurants didn&rsquo;t answer, so this total is incomplete. Tap Refresh to try again.</span>
+      {/* `msg` because not every partial read is about several restaurants: the all-time records
+          read is one restaurant's, so the group wording would have been simply untrue there
+          (T12 sweep, 2026-08-27). Everything else keeps the original sentence. */}
+      <span>{msg ?? "Some restaurants didn\u2019t answer, so this total is incomplete. Tap Refresh to try again."}</span>
     </div>
   );
 }
@@ -580,6 +583,8 @@ export default function OwnerDashboard() {
   const [cache, setCache] = useState<Record<string, Payload>>({});
   const [moneyCache, setMoneyCache] = useState<Record<string, MoneyTotals | "err">>({});
   const [recs, setRecs] = useState<Record<string, Records>>({});
+  /** Per restaurant: the server told us it could not read the all-time records. See fetchPayload. */
+  const [recsUnread, setRecsUnread] = useState<Record<string, boolean>>({});
   const [acts, setActs] = useState<Act[] | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   // WHEN each payload was computed, per cache key. The single page-level "updated X ago" was set
@@ -748,7 +753,18 @@ export default function OwnerDashboard() {
       setCache((c) => ({ ...c, [key]: a }));
       setLanded(true);
       if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
-      if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
+      // ── AND REMEMBER WHEN IT COULD NOT BE READ (T12 sweep, 2026-08-27) ────────────────────────
+      // /api/owner/analytics already sends `partial: ["records"]` when the all-time records RPC
+      // fails — its own comment calls that improvement I5, "A TILE THAT VANISHES SAYS SO". Only the
+      // server half was ever built: nothing on this page read the key, so the "Your records" card
+      // simply disappeared and the screen said nothing at all. Measured by replaying the server's
+      // own answer. Held per RESTAURANT rather than read off the current payload, because
+      // `records=1` rides on ONE request per restaurant, so the flag would otherwise come and go
+      // with the range dropdown. A later successful read clears it.
+      if (rid) {
+        if (a.records) { setRecs((m) => ({ ...m, [rid]: a.records })); setRecsUnread((m) => (m[rid] ? { ...m, [rid]: false } : m)); }
+        else if (Array.isArray(a.partial) && a.partial.includes("records")) setRecsUnread((m) => ({ ...m, [rid]: true }));
+      }
       setErr(null);
       reportRealtime("online");
     } catch (e) {
@@ -1338,6 +1354,7 @@ export default function OwnerDashboard() {
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
   const records = activeRid ? recs[activeRid] : null;
+  const recordsUnread = !!(activeRid && recsUnread[activeRid]);
 
   // Highlights live at the BOTTOM of the page now (owner round-3: "we don't require
   // this information at the top"). Callouts only exist for 4+ restaurants.
@@ -1849,10 +1866,13 @@ export default function OwnerDashboard() {
           </div>
 
           {/* Records strip — the numbers worth bragging about */}
-          {records && (records.bestDay || records.starDish) && (
+          {(recordsUnread || (records && (records.bestDay || records.starDish))) && (
             <div className="adm-card" style={{ marginTop: 12 }}>
               <div className="ow2-ct"><span>Your records <span className="mut">· the numbers worth bragging about</span></span></div>
-              <div className="rv-recs">
+              {/* A CARD THAT VANISHES SAYS SO — the client half of the route's improvement I5. */}
+              <PartialStrip keys={recordsUnread ? ["records"] : undefined}
+                msg="We couldn&rsquo;t read your all-time records just now, so this card is short. Tap Refresh to try again." />
+              {records && <div className="rv-recs">
                 {records.bestDay && (
                   <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={records.bestDay.revenue} money /></b>
                     <i>{new Date(records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
@@ -1879,7 +1899,7 @@ export default function OwnerDashboard() {
                   <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · LAST 30 DAYS (ROLLING)</small><b><AnimatedNumber value={records.regulars ?? 0} /> returning guests</b>
                     <i>same name, 2+ visits</i></span></div>
                 )}
-              </div>
+              </div>}
             </div>
           )}
 
