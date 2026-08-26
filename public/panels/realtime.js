@@ -319,7 +319,20 @@
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", wake);
-    window.addEventListener("pageshow", wake);   // fires on bfcache restore (phone wake)
+    // ONLY A REAL BACK-FORWARD RESTORE (guest sweep, 2026-08-26).
+    //
+    // `pageshow` fires on EVERY page load, not only on a bfcache restore — and on an ordinary load
+    // it arrives AFTER this effect has already done its initial fetch. So every fresh load woke the
+    // screen for no reason: a second full refetch, and a needless socket teardown-and-rebuild.
+    // Measured on a production build of the guest menu, first ever visit:
+    //     261ms  fetch /menu-data      (the real one)
+    //     460ms  pageshow persisted=false
+    //     762ms  fetch /menu-data      (this listener)
+    // `persisted` is the flag that tells the two apart, and it is true for exactly the case this
+    // listener was added for — a phone returning from another app, or an iOS gesture-back, where
+    // visibilitychange is not reliable.
+    const onPageShow = (e) => { if (e.persisted) wake(); };   // a real bfcache restore only
+    window.addEventListener("pageshow", onPageShow);
     window.addEventListener("online", () => { metrics.reconnects++; wake(); });
 
     fireAll(); // initial load

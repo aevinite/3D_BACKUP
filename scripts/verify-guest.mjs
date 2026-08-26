@@ -54,7 +54,8 @@ const F = {
   legacy: code("app/item/[slug]/page.tsx"), q: code("app/q/[code]/page.tsx"),
   sgate: code("components/SessionGate.tsx"), menuLib: code("lib/menu.ts"),
   navp: code("components/NavPicker.tsx"),
-  accent: code("lib/accent.ts"), nf: code("app/not-found.tsx"), fit: code("lib/useFitText.ts"), header: code("components/Header.tsx"), editorJs: read("public/panels/editor/app.js"),
+  accent: code("lib/accent.ts"), rt: code("lib/useRealtime.ts"),
+  rtp: code("components/RealtimeProvider.tsx"), rtPanel: code("public/panels/realtime.js"), nf: code("app/not-found.tsx"), fit: code("lib/useFitText.ts"), header: code("components/Header.tsx"), editorJs: read("public/panels/editor/app.js"),
   css: read("app/globals.css"), offHtml: read("public/offline.html"), sw: read("public/sw.js"),
 };
 
@@ -249,6 +250,19 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// EVERY FRESH PAGE LOAD FETCHED THE MENU TWICE (owner, 2026-08-26: "can do the 10").
+// `pageshow` fires on EVERY load, not only on a back-forward restore, and on an ordinary load it
+// arrives AFTER the initial fetch — so it woke the screen for no reason: a second full refetch AND a
+// needless websocket teardown-and-rebuild. Measured on a production build, first ever visit:
+// 261ms fetch · 460ms pageshow persisted=false · 762ms fetch. `persisted` tells the two apart, and
+// it is true for exactly the case the listener was added for. All THREE copies of this wake logic
+// had it — the guest menu, the guest realtime provider and the shared panel one.
+check("P15612", "a wake only happens on a REAL back-forward restore, in all three copies", () => {
+  const one = (src) => rx(src, /if \(e\.persisted\)/) && rx(src, /addEventListener\("pageshow", onPageShow\)/);
+  const menu = one(F.rt), provider = one(F.rtp), panels = one(F.rtPanel);
+  return { ok: menu && provider && panels, note: `useRealtime=${menu} RealtimeProvider=${provider} panels/realtime.js=${panels}` };
+});
+
 // A DINER ON THE WRONG-TURN PAGE IS SENT TO THE MENU, NOT TO A PASSWORD SCREEN (owner, 2026-08-26:
 // *"yes for this guest should be redirected to menu … and if written login or aevinite then only
 // locate to there"*). Dropping the "/r/" from a menu address landed a guest on the software
@@ -401,6 +415,31 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: the menu is fetched ONCE per load, and a real back-forward restore still wakes it.
+    // Both halves matter: the fix is a one-word guard, and getting it backwards would either bring
+    // the double fetch back or leave a phone showing a stale menu after coming out of another app.
+    { const cc = await b.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+      const pg2 = await cc.newPage();
+      const hits = [];
+      pg2.on("request", (r) => { if (/menu-data/.test(r.url())) hits.push(1); });
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(6000);
+      const onLoad = hits.length;
+      await pg2.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false })));
+      await pg2.waitForTimeout(3000);
+      const afterPlain = hits.length;
+      await pg2.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+      await pg2.waitForTimeout(3000);
+      const afterRestore = hits.length;
+      check("P15612", "LIVE: one menu read per page load", () =>
+        ({ ok: onLoad === 1, note: `${onLoad} menu-data request(s) — this is 2 on a dev server, which double-mounts every effect` }));
+      check("P15612", "LIVE: an ordinary pageshow does not refetch", () =>
+        ({ ok: afterPlain === onLoad, note: `${onLoad} → ${afterPlain}` }));
+      check("P15612", "LIVE: a real back-forward restore still wakes the screen", () =>
+        ({ ok: afterRestore > afterPlain, note: `${afterPlain} → ${afterRestore}` }));
+      await cc.close(); }
+
     // LIVE: every shape of wrong turn. The five guest ones must reach a real menu; the switched-off
     // restaurant must NOT (its menu is closed, and a redirect would be a lie about that); the staff
     // ones keep their sign-in button and the rest never see one.
