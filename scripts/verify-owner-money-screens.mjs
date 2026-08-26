@@ -308,6 +308,23 @@ const RULES = [
     ],
   },
   {
+    // T12's sweep (2026-08-29) landed the real repair while this branch was open: the owner routes
+    // record the login NAME now, and `lib/ownerActor.ts` renders a legacy uuid row as an em dash
+    // with the reference in the hover text. T14's own local `handledBy()` was DELETED rather than
+    // left beside it. This rule follows the surviving way.
+    item: 23, file: ISSUES,
+    say: "a rating card never prints a database id where a person's name belongs",
+    must: [
+      /import \{ actorLabel, actorTitle \} from "@\/lib\/ownerActor"/,
+      /handled by \{actorLabel\(r\.acknowledged_by\)\}/,
+      /title=\{actorTitle\(r\.acknowledged_by\)\}/,
+    ],
+    mustNot: [
+      /handled by \$\{r\.acknowledged_by\}/,   // the raw column value
+      /const handledBy = /,                       // …and T14's superseded local copy
+    ],
+  },
+  {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
     must: [/className="adm-page-h">Manager mode/],

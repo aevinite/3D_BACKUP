@@ -41,6 +41,12 @@ type Rating = {
 type Summary = { total: number; avg: number; dist: number[]; unhandled: number };
 
 const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-word" };
+// ── A DATABASE ID NEVER REACHES THIS SCREEN — and the fix is now the SHARED one ────────────────
+// Sweep 7 · T14 (2026-08-27) found `handled by c0af7b5b-…` on a rating card and added a local
+// `handledBy()` here. T12's sweep (2026-08-29) had already done it properly: the five owner routes
+// now record the login NAME (`lib/ownerScope` → `ownerActorName`), and `lib/ownerActor.ts` turns a
+// legacy uuid row into the same em dash a nameless row already uses, keeping the reference in the
+// hover text. So the local copy is DELETED rather than left beside it — one way, not two.
 const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
 const Stars = ({ n }: { n: number }) => (
   <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
