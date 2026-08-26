@@ -124,6 +124,43 @@ const run = async () => {
       } finally { await p.close().catch(() => {}); }
     }
 
+    // ── ONE APOSTROPHE ACROSS THE GUEST SCREENS ─────────────────────────────────────────────
+    // This exact fault has now been made three times in one day: the French dictionary mixed the
+    // typographic ’ with the typewriter ', then the rewritten offline page did, then these two
+    // guest screens did. Nobody can name it when they see it and everybody registers it. So it is
+    // a check rather than a thing to remember.
+    {
+      const files = ["app/not-found.tsx", "components/GuestNotFound.tsx", "public/offline.html"];
+      const { readFileSync } = await import("node:fs");
+      const { join, dirname } = await import("node:path");
+      const { fileURLToPath } = await import("node:url");
+      const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+      const mixed = [];
+      for (const f of files) {
+        const src = readFileSync(join(ROOT, f), "utf8");
+        // Only the words a person READS: quoted strings and JSX text, not code or comments.
+        // Strip block comments, whole-line comments AND trailing comments. The first version of
+        // this check only dropped whole-line ones and then flagged the file over the word "don't"
+        // in a trailing code comment — a guard that invents a failure protects nothing. Only the
+        // words a person actually READS are in scope.
+        const text = src
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/<!--[\s\S]*?-->/g, "")
+          .split("\n")
+          .filter((l) => !/^\s*\/\//.test(l))
+          .map((l) => l.replace(/\s\/\/.*$/, ""))
+          .join("\n");
+        const curly = /[\u2019]|&rsquo;/.test(text);
+        // a typewriter apostrophe INSIDE a word ("isn't", "doesn't") — not a JS string delimiter
+        const straight = /[a-z]'[a-z]/i.test(text);
+        if (curly && straight) mixed.push(f);
+      }
+      mixed.length === 0
+        ? ok(`the guest screens use one apostrophe style each (${files.length} files checked)`)
+        : bad(`a screen mixes the typographic ’ with the typewriter ': ${mixed.join(", ")}`,
+          "two apostrophes on one screen reads as cheap on the screen a restaurant is paying us for");
+    }
+
     // The two screens must stay DIFFERENT. A future tidy-up that makes them share one look would
     // quietly undo the whole point of the decision.
     {
