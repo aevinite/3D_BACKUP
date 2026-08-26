@@ -724,6 +724,42 @@ console.log("\nT11-D · printing, and the phone");
   );
 }
 
+console.log("\nT11-F · the downloaded file is the same report as the screen");
+{
+  // ── MERGE BY CANONICAL METHOD, DON'T JUST RELABEL (T11 sweep #7, 2026-08-27) ──────────────
+  // French House really stores both "Cash" and "cash". The day sheet, the Payments table and
+  // the donut all MERGE them; the export ran the raw rows through canonPayMethod for the LABEL
+  // only, so the downloaded CSV listed "Cash,274,316864" and "Cash,2,525" where the screen shows
+  // one row of Rs 3,17,389. The totals reconciled, which is why it survived — but anyone
+  // pivoting the file by method got two Cash groups.
+  const exp = read("components/owner/reports/sectionExport.tsx");
+  check(
+    "the export merges payment methods, the way the screen does",
+    /const mergePays\b/.test(exp),
+    "components/owner/reports/sectionExport.tsx — canonPayMethod() gives a method its canonical NAME; it " +
+      "does not add the two rows together. Merge first, then filter and sort, or a method split across two " +
+      "casings can be dropped in halves.",
+  );
+  const payBranch = exp.slice(exp.indexOf('if (meta.kind === "payments")'), exp.indexOf('if (meta.kind === "hourly")'));
+  check(
+    "…in the Payments report's own file",
+    /mergePays\(/.test(payBranch),
+    "components/owner/reports/sectionExport.tsx — the payments branch still maps the raw rows one for one.",
+  );
+  const dayBranch = exp.slice(exp.indexOf("data.payments?.length"), exp.indexOf("money out and money held"));
+  check(
+    "…and in the day sheet's settlement block",
+    /mergePays\(/.test(dayBranch),
+    "components/owner/reports/sectionExport.tsx — the day-sheet settlement block still maps the raw rows.",
+  );
+  check(
+    "…and the Payments file carries a Total row, like the screen's table foot",
+    /\["Total", bills/.test(payBranch),
+    "components/owner/reports/sectionExport.tsx — the screen's per-method table has a tfoot; a file without " +
+      "one makes the reader add the column up by hand and get a different answer from the tile.",
+  );
+}
+
 console.log("\nT11-E · saying so when a read failed");
 {
   const dayBlock = reportsPage.slice(
