@@ -30,6 +30,26 @@
 //   10. Tapping the sidebar's "Dashboard" while a dish was open did nothing, because Next does not
 //       remount the route you are already on.
 //
+// The T12 sweep of 2026-08-27 added six more, all of the same shape — code that ran perfectly and
+// did not say what was true:
+//
+//   11. The Activity log's search and severity chips are SERVER-side, so narrowing to nothing made
+//       the server answer with zero rows — and the branch that fired was worded for an empty
+//       record: "No staff activity yet — it appears here as your team works.", over 8,829 entries.
+//   12. "Today so far" reads the overview rather than analytics, so the switched-off state never
+//       reached it. /api/owner/overview zeroes that restaurant's day on purpose, so the row read
+//       "— · — · ₹0, 0 orders today · — · —" — one confident false zero beside four honest dashes.
+//   13. Two owner-panel writers log the owner's uuid as the actor, and both of these screens
+//       printed it verbatim in the person column: "Handled a rating · c0af7b5b-…-f475e48bab53".
+//   14. /api/owner/analytics has sent partial: ["records"] since 2026-08-12 and nothing on the
+//       dashboard ever read it, so a failed all-time-records read still left the card silently
+//       absent — the exact fault that key was added to end.
+//   15. A food-loss read that FAILED (null, never a zero, by the route's own rule) printed as a
+//       flat "− ₹0" in the On hand popup under a headline "Money on hand", and the Expenses tile
+//       face said nothing either.
+//   16. A Recent-activity read that failed also landed on null, which the card renders as
+//       "Loading…" — the same fault the 403 branch was fixed for, one branch over.
+//
 // Static + instant: no server, no database, no browser.
 // Run: node scripts/verify-owner-screen.mjs   (or npm run verify:owner-screen)
 import { readFileSync } from "node:fs";
@@ -51,7 +71,8 @@ const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, 
 const homeC = code(home), auditC = code(audit), shellC = code(shell);
 
 const fails = [];
-const check = (name, ok, hint) => { if (!ok) fails.push(`${name}\n     → ${hint}`); };
+let total = 0;
+const check = (name, ok, hint) => { total++; if (!ok) fails.push(`${name}\n     → ${hint}`); };
 
 if (!home || !audit || !shell) {
   console.error("✗ could not read the owner home / audit / shell files — has the territory moved?");
@@ -371,6 +392,77 @@ check("the food loss comes from the analytics payload, not the bill value",
     "app/owner/activity/page.tsx: a refused answer is silent again. A switched-off section or an order\n       that is no longer cancelled are both real answers the screen owes him.");
 }
 
+// ══ T12 sweep, 2026-08-27 ══════════════════════════════════════════════════════════════════════
+
+// 11 — an empty ANSWER is not an empty RECORD (Audit & logs → Activity log)
+check("a search that matches nothing is not called 'no staff activity yet'",
+  /rows\.length === 0 \?[\s\S]{0,900}?q\.trim\(\)[\s\S]{0,200}?Nothing matches that/.test(auditC),
+  "app/owner/activity/page.tsx: the zero-rows branch of ActivityView stopped checking `q`. The search\n       is server-side, so an unmatched search lands HERE — and telling the owner his team has done\n       nothing, over a log of thousands of entries, is simply false.");
+check("…and a severity chip that matches nothing says so too, with a way back",
+  /rows\.length === 0 \?[\s\S]{0,900}?:\s*level\s*\?[\s\S]{0,260}?setLevel\(""\)/.test(auditC),
+  "app/owner/activity/page.tsx: filtering to Notable/Info with no such rows reads as an empty log\n       again, and offers no way back to All.");
+check("the search's empty state offers a way to clear it",
+  /setQ\(""\)[\s\S]{0,60}Clear the search/.test(auditC),
+  "app/owner/activity/page.tsx: the 'nothing matches' state is a dead end again — the removals half\n       beside it has always offered the way out.");
+
+// 12 — the switched-off state reaches EVERY tile, today included
+check("\"Today so far\" goes quiet when Reports are switched off",
+  /k="Today so far"[\s\S]{0,400}?offNote \? undefined : \(\) => setTileOpen\("today"\)[\s\S]{0,400}?offNote \? "—" : todayRev/.test(homeC),
+  "app/owner/page.tsx: the Today tile prints the overview's figure again. That route ZEROES the day for\n       a restaurant whose Reports the admin took away, so the tile prints ₹0 as fact beside four tiles\n       that honestly say '—'. It reads as 'you took nothing today'.");
+check("…and its \"live\" pill goes with it",
+  /k="Today so far"[\s\S]{0,600}?pill=\{offNote \? undefined : "● live"\}/.test(homeC),
+  "app/owner/page.tsx: a '● live' pill is back over an em dash. There is nothing live to point at when\n       the figures are not shown.");
+
+// 13 — never a database id where a person's name goes
+check("the owner's log has a guard against printing a raw database id as a person",
+  /export function actorLabel/.test(read("lib/ownerActor.ts")) && /export function actorIsRawId/.test(read("lib/ownerActor.ts")),
+  "lib/ownerActor.ts has gone. Two owner-panel writers log the owner's uuid as the actor, so both of\n       these screens would print it in the person column again.");
+check("the dashboard's mini feed renders the actor through that guard",
+  /actorLabel\(a\.actor\)/.test(homeC) && !/\{a\.actor \|\| "—"\}/.test(homeC),
+  "app/owner/page.tsx: the Recent-activity card is printing `a.actor` raw again.");
+check("both halves of Audit & logs render the actor through it too",
+  /actorLabel\(r\.actor\)/.test(auditC) && /!actorIsRawId\(a\.actor\)/.test(auditC),
+  "app/owner/activity/page.tsx: a removals row or an activity row is printing its actor raw again.");
+check("…and the reference stays traceable in the tooltip",
+  /actorTitle\(/.test(homeC) && /actorTitle\(/.test(auditC),
+  "the id is now simply thrown away. Keep it in the cell's title so support can still trace a row.");
+
+// 14 — a card that vanishes says so (the client half of the route's improvement I5)
+check("the dashboard reads the server's partial:[\"records\"] answer",
+  /a\.partial\.includes\("records"\)/.test(homeC) && /setRecsUnread/.test(homeC),
+  "app/owner/page.tsx: nothing reads the `records` partial key again, so a failed all-time-records read\n       leaves the card silently absent — the exact fault /api/owner/analytics added that key to end.");
+check("…and the Your-records card appears to say it",
+  /recordsUnread \|\| \(records && \(records\.bestDay \|\| records\.starDish\)\)/.test(homeC),
+  "app/owner/page.tsx: the Your-records card is gated on data alone again, so when the read fails there\n       is one fewer block on the page and nothing explains it.");
+check("…in wording written for ONE restaurant, not several",
+  /msg="We couldn&rsquo;t read your all-time records/.test(homeC) && /msg\?: string/.test(homeC),
+  "app/owner/page.tsx: the records strip is back on the group wording ('Some restaurants didn't\n       answer'), which is not true of a single restaurant's own records.");
+
+// 15 — an unread cost never prints as a settled zero
+check("the On hand popup admits an unread food figure",
+  /const foodUnread = !!kMain && kMain\.foodLoss == null/.test(homeC)
+    && /foodUnread \? "we couldn[^"]*read this[^"]*missing from the sum below"/.test(homeC),
+  "app/owner/page.tsx: the On hand popup prints a flat '− ₹0' for a food-loss read that FAILED, and then\n       headlines 'Money on hand' as if it were settled. null means unread, never zero — the route says so.");
+check("…and its total says it may be too high",
+  /\["Money on hand", inr\(onHand\), foodUnread \?/.test(homeC),
+  "app/owner/page.tsx: the 'Money on hand' line stopped carrying the caveat, so an answer built on a\n       missing cost reads as final.");
+check("the Expenses tile face admits it too",
+  /kMain && kMain\.foodLoss == null \? "staff pay only/.test(homeC),
+  "app/owner/page.tsx: the Expenses tile falls through to the staff-pay wording again when the food\n       figure could not be read, so a total that is too low looks complete.");
+
+// 16 — a failed read is not 'still loading'
+check("the Recent-activity card tells a failed read apart from loading",
+  /const \[actsErr, setActsErr\] = useState\(false\)/.test(homeC) && /catch \{ setActs\(null\); setActsErr\(true\); \}/.test(homeC),
+  "app/owner/page.tsx: a failed /api/owner/oplog read folds back into the null the card renders as\n       'Loading…' — the identical fault the 403 branch was fixed for, one branch over.");
+check("…and says so on screen, with one tap to try now",
+  /actsErr[\s\S]{0,200}Couldn&rsquo;t load this just now[\s\S]{0,320}Try again/.test(homeC),
+  "app/owner/page.tsx: the failed state is invisible again — the card spins with no end and no retry.");
+
+// 17 — the icon does not touch the word (a flex row eats the leading space)
+check("the Refresh buttons on Audit & logs keep their icon gap",
+  (auditC.match(/fas fa-rotate" style=\{\{ marginRight: 6 \}\}/g) || []).length === 2,
+  "app/owner/activity/page.tsx: a Refresh button lost its icon margin. .owx .adm-btn is a flex row, and a\n       flex container collapses the leading space of a text run — so the glyph sits hard against the word.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -381,4 +473,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 61 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log(`✓ all ${total} checks passed — the owner home screen and Audit & logs hold their 2026-08-17 and 2026-08-27 fixes`);
