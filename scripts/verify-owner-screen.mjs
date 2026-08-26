@@ -485,6 +485,10 @@ check("the skin's three writes sit outside setSkin's updater",
   /const toggleSkin = \(\) => \{\s*const next = skin === "dark"/.test(shellC) && !/setSkin\(\(cur\) => \{/.test(shellC),
   "components/owner/OwnerShell.tsx: the localStorage write, the cookie write and the lfh:owner-skin\n       broadcast are back inside setSkin's updater. React requires an updater to be pure and calls it\n       twice in development to catch this — measured: one tap fired the broadcast twice. This is the\n       one event that drives the EMBEDDED panel's skin, and its rule is one writer.");
 
+check("the guest-erasure REASON has words, and any future code has a floor",
+  /data_erasure_request: "Data erasure request"/.test(auditC)
+    && /REMOVAL_REASON\[r\.reason_code\] \|\| humanKind\(r\.reason_code\)/.test(auditC),
+  "app/owner/activity/page.tsx: the reason column prints a raw code again. app/api/owner/customers\n       writes reason_code: \"data_erasure_request\" and the six manager reasons do not include it, so the\n       row read 'data_erasure_request — Guest asked for their personal data to be erased'.");
 check("…and the CHIP strip, the search and the money line read from that same map",
   /function labelsWith/.test(auditC) && /kindCountsFrom\(removals \|\| \[\], counts, KINDS, KIND_ICON\)/.test(auditC)
     && /kindLabel: KINDS/.test(auditC) && /KINDS\[activeKind\]/.test(auditC),

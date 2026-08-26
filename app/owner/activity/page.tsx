@@ -84,6 +84,14 @@ const REMOVAL_REASON: Record<string, string> = {
   sold_out: "Not available / sold out",
   kitchen_error: "Kitchen error",
   other: "Other reason",
+  // NOT one of the manager panel's six — this one is written by the OWNER console itself, when a
+  // guest asks for their personal data to be erased (app/api/owner/customers/route.ts). It was
+  // missing here, so the reason column printed the column value: seen on a light-skin screenshot,
+  //     data_erasure_request — Guest asked for their personal data to be erased
+  // with the plain-English half sitting right beside the raw half (T12 sweep, 2026-08-27). Kept
+  // SHORT on purpose, so the line reads the way every other reason row does — a label, an em dash,
+  // then the note the person actually wrote.
+  data_erasure_request: "Data erasure request",
 };
 
 export default function OwnerAuditLogs() {
@@ -536,7 +544,9 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
               r.item_title ? `${r.item_title}${(r.qty || 0) > 1 ? ` ×${r.qty}` : ""}` : "",
               r.amount != null ? inr(parseFloat(String(r.amount)) || 0) : "",
             ].filter(Boolean).join(" · ");
-            const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || r.reason_code : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
+            // …and a FLOOR under any reason code nobody has named yet, for the same reason the kinds
+            // have one: whatever arrives, this column says something a person can read.
+            const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || humanKind(r.reason_code) : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
             return (
               <div
                 key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols, cursor: "pointer" }}
