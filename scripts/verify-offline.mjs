@@ -856,7 +856,7 @@ async function run() {
     await own.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     await sleep(5000);
     const oText = (await own.locator("body").textContent().catch(() => "")) || "";
-    !/This screen hasn't been opened on this device/i.test(oText)
+    !/This screen hasn['\u2019]t been opened on this device/i.test(oText)
       ? ok("the owner panel still opens offline")
       : bad("the owner panel fell through to the last-resort page");
     // Same reason as the guest menu below: the owner dashboard's offline bar appears only after
@@ -920,7 +920,7 @@ async function run() {
     // Match the last-resort page by the ONE line only it says. Its headline is decided at
     // runtime now (it names the real reason), so keying this check on a headline would make
     // it pass for the wrong reason the moment that wording changes.
-    !/This screen hasn't been opened on this device/i.test(body)
+    !/This screen hasn['\u2019]t been opened on this device/i.test(body)
       ? ok("the guest menu opens from the device (not the last-resort page)")
       : bad("the guest menu fell through to the last-resort offline page");
     // 45s, not 25s. Against the DEPLOYED site a cold guest menu can take past 30 seconds to
@@ -1075,8 +1075,8 @@ async function run() {
     for (let i = 0; i < 20 && !(await fresh.evaluate(() => navigator.onLine === false).catch(() => false)); i++) await sleep(250);
     // A URL that certainly has no saved copy on this device.
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
-    const lastResort = await bodyWhenSettled(fresh, /This screen hasn't been opened on this device/i);
-    /This screen hasn't been opened on this device/i.test(lastResort)
+    const lastResort = await bodyWhenSettled(fresh, /This screen hasn['\u2019]t been opened on this device/i);
+    /This screen hasn['\u2019]t been opened on this device/i.test(lastResort)
       ? ok("it shows our own page, not the browser's error page")
       : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
     // The reassurance has to be TRUE as well as present. It used to promise that "any orders or

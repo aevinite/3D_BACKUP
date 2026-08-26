@@ -2,7 +2,7 @@
 
 There are **149** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 148 names in their head, so in practice a person runs none of them, or reaches for
+can hold 149 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -189,6 +189,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | behaviour with no internet | `verify:offline`, `verify:outbox`, `verify:warm-shell` | mixed | no |
 | `public/offline.html` — the last-resort screen | `verify:offline-retry` ← it must keep ONE backing-off retry loop however many times the device says it is back, and must never blame the wrong side | starts its own local stub | no |
 | `public/sw.js` VERSION, `lib/userAuth.ts` heartbeat, or the admin System health screen | `verify:sw-version` ← can we still see which offline layer a staff device is running (mig 366)? Drives the whole four-link chain: the worker stamps `X-LFH-SW` on reads it already makes, the throttled heartbeat records it, the admin health read counts current vs behind, and the screen says it in words. A break in link 1 reads as *every device is up to date*, which is why this is proved at the SERVER and not by sniffing the browser | app running + `.env.local` | **only the fixture manager's own heartbeat row, which every normal request already updates** |
+| `app/not-found.tsx` — the 404 screens | `verify:notfound` ← a DINER and a WAITER must not get the same 404. The owner picked two on purpose (2026-08-26): the order docket for guests, whose way out is the MENU, and burnt toast for staff, whose way out stays "/". Getting it backwards drops a diner on the staff password screen. Driven, not read: the first implementation used an inline script and CSS and worked on two routes out of ten, because React 19 hoists those | app running | no |
 | a read about EVERY restaurant in an owner's estate (or the admin's whole platform) | `verify:id-chunks` ← 800 uuids is 29.6 KB of URL and PostgREST answers "Bad Request"; a select with no `.limit()` is silently capped at 1,000 rows. Either way the estate comes back SHORT with no error — a restaurant missing from the owner's own sidebar, a module reading as OFF, activity hidden that they may see. Route it through `lib/inChunks.ts` (measured limits are in its header) | nothing | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
 | anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
