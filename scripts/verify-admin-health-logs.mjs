@@ -232,6 +232,12 @@ ok(/function backIn\(/.test(LOGS), "P23143",
 ok(/const showRed = isErr && !isResolved && !waitingUntil/.test(LOGS), "P23144",
   "logs: a waiting report is drawn in full red again, which is what made it indistinguishable from a live one");
 
+// ── 19 · the waiting COUNT on the Repair hub says whose it is ─────────────────────────────────
+// The board asks for its problems unscoped, so the server's waiting count is always platform-wide.
+// It printed 8 under a banner reading "Showing My Little French House only." — 7 were hers.
+ok(/scopedName \? " across all restaurants" : ""/.test(REPAIR), "P23151",
+  "repair: the waiting-reports line no longer says the count is platform-wide while one restaurant is chosen");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

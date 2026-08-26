@@ -727,8 +727,14 @@ export default function AdminRepair() {
       {!errLoading && !problemsErr && !!waiting && (
         <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
           <i className="fas fa-clock" aria-hidden="true" style={{ opacity: 0.7 }} />
+          {/* THE PICKER HAS TO MEAN THIS SENTENCE TOO (T17 sweep #7, 2026-08-27). The board asks for
+              its problems unscoped and narrows them here, so the server's waiting COUNT is always
+              platform-wide — and this line printed it verbatim under the banner reading "Showing My
+              Little French House only.". Measured: 8 shown, 7 actually French House's. Scoping the
+              request would cost an extra round-trip on every pick, which this page deliberately
+              does not do, so the number stays honest by saying whose it is. */}
           <span>
-            <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? " is" : "s are"} set to come back later — still open, not fixed, and
+            <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? "" : "s"}{scopedName ? " across all restaurants" : ""}{waiting === 1 ? " is" : " are"} set to come back later — still open, not fixed, and
             listed in <Link href="/aevinite/logs" style={{ color: "var(--accent)" }}>Audit &amp; logs</Link> the whole time.
           </span>
         </p>
