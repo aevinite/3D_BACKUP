@@ -872,8 +872,17 @@ export const SECTIONS: Section[] = [
         // group that decides a manager's money powers was telling the admin that bill DELETION is
         // a permission they can hand over, when cancel is the only route out of a bill for anyone
         // at the restaurant and no such row will ever exist again. Do not put it back.
+        //
+        // THIS SENTENCE HAS TO NAME EVERY ROW INSIDE THE FOLDER (sweep #7 T15, 2026-08-27). The
+        // children are `ACTIONS.map(mgrAction)`, so a row added to ACTIONS appears on screen with
+        // nothing here changing — which is exactly what happened on 2026-08-26 when "May be the
+        // printer" joined the list and this line still said "The money actions … reopen a bill …
+        // and discount a bill", naming two of three. Printing is not a money action, so an admin
+        // reading the folder was told the wrong thing about the row underneath it. Add the row's
+        // words here in the same commit that adds the row; `verify:access` check 51 refuses a
+        // child this sentence never mentions.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
-        what: "The money actions, for every manager in this restaurant: reopen a bill (and for how long), and discount a bill (and up to how much). There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
+        what: "What every manager in this restaurant starts with. The money actions — reopen a bill (and for how long), and discount a bill (and up to how much) — plus whether their screen may be the one that prints this restaurant’s paper. There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
         children: [
           ...ACTIONS.map(mgrAction),
           {

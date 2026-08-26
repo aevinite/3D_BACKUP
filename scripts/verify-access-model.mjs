@@ -922,6 +922,48 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("the activity line says a waiter's PIN state in words, the same way both of its branches do");
 }
 
+// ── 51 · A FOLDER BUILT FROM A GENERATED LIST MUST STILL DESCRIBE ITSELF ───
+// "Permission for manager" takes its rows from `...ACTIONS.map(mgrAction)`, so adding a row to
+// ACTIONS puts it on the screen with the folder's own description unchanged and nobody reminded.
+// That is exactly what happened on 2026-08-26: "May be the printer" joined ACTIONS while the
+// folder still told the admin it held "The money actions … reopen a bill … and discount a bill" —
+// two of three, and the third is not a money action at all. The ⓘ of a folder is the only thing
+// that explains a group before you open it, so a stale one describes a restaurant's permissions
+// wrongly on the one screen that decides them. (sweep #7 T15, 2026-08-27)
+//
+// PINNED TO THE GENERATED FOLDERS ONLY, and that is deliberate. Two earlier drafts of this check
+// tried to judge every folder's prose and both cried wolf on good writing — "Design and styling"
+// says "its theme, logo and wording", which happens to contain three of its rows' words while
+// enumerating nothing, and "What a waiter can do on the floor" mentions khata and parcel only to
+// say a module can hide them. Prose is not a list and a guard cannot tell them apart. A folder
+// whose children are SPREAD IN FROM AN ARRAY is the one shape where the screen can grow a row
+// with no human editing the sentence beside it, so that is the only shape checked here.
+{
+  const spread = [...tree.matchAll(/\.\.\.([A-Z_]+)\.map\(/g)].map((m) => m[1]);
+  if (!spread.length) fail("no folder is built from a generated list any more — if that is right, delete check 51");
+  else {
+    const STOP = new Set(["a","an","the","and","or","of","for","to","on","off","in","at","be","is","it","its",
+      "their","they","them","this","that","own","may","can","with","how","what","which","who","only","new"]);
+    const sig = (str) => str.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3 && !STOP.has(w));
+    // Which folders those arrays feed: the ones whose children are exactly the array's rows.
+    const generated = ALL_NODES.filter((n) => n.bind.t === "none" && n.children?.length
+      && tree.includes(`id: "${n.id}"`) && new RegExp(`id: "${n.id}"[\\s\\S]{0,900}?\\.\\.\\.[A-Z_]+\\.map\\(`).test(tree));
+    if (!generated.length) fail("check 51 could not find the folder built from ACTIONS — if it moved, update this guard");
+    const misses = [];
+    for (const f of generated) {
+      const text = (f.what || "").toLowerCase();
+      for (const kid of f.children) {
+        if (kid.leftToBuild) continue;
+        const ws = sig(kid.name);
+        if (ws.length && !ws.some((w) => text.includes(w.replace(/s$/, ""))))
+          misses.push(`"${f.name}" never mentions its own row "${kid.name}"`);
+      }
+    }
+    if (misses.length) fail(`a folder whose rows are generated has a stale description: ${misses.join("; ")}`);
+    else ok(`the ${generated.length} folder(s) built from a generated list still name every row inside them`);
+  }
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
