@@ -223,7 +223,20 @@ has("outbox.js", /window\.LFH_OUTBOX = \{/, "the queue no longer publishes itsel
 }
 
 // undobar / guestbell: the owner's own decisions
-has("undobar.js", /var DEFAULT_SECONDS = 4/, "the take-back window is no longer the 4 seconds the owner asked for");
+// ── THE WINDOW MOVED, SO THIS ASSERTION MOVED WITH IT (2026-08-26) ────────────────────────────
+// It pinned 4 seconds, which is what he asked for on 2026-08-17. On 2026-08-26 he asked for two
+// things at once — a CEILING ("keep undo button for 5 sec like not more") and, of the one bar that
+// survived the cull, a shorter window ("decrese time for it"). So the numbers are 3 and 5, and
+// they are asserted separately because they mean different things: the default is a preference and
+// may move again; the ceiling is a rule and a caller must not be able to exceed it.
+// (This guard went red the moment the default changed — which is the guard working. What would be
+// wrong is "fixing" the code back to satisfy a rule the owner has retired.)
+has("undobar.js", /var DEFAULT_SECONDS = 3;/, "the take-back window is no longer the 3 seconds the owner asked for on 2026-08-26");
+has("undobar.js", /var MAX_SECONDS = 5;/, "the 5-second ceiling is gone — a caller could ask for a longer window again");
+has("undobar.js", /Math\.min\(opts\.seconds != null \? opts\.seconds : DEFAULT_SECONDS, MAX_SECONDS\)/,
+  "the ceiling is no longer APPLIED — declaring it is not enforcing it");
+has("undobar.js", /lfh-undo-x/, "the ✕ that closes the undo card early is gone (owner, 2026-08-26)");
+has("undobar.js", /function attachSwipe\(\)/, "you can no longer flick the undo card away (owner, 2026-08-26)");
 has("guestbell.js", /if \(!menuOn\) \{ unmount\(\); return; \}/, "the bell survives the guest menu being switched off (he stressed this half)");
 hasNot("guestbell.js", /fetch\(/, "the guest bell has grown a request of its own — it must cost nothing to run");
 

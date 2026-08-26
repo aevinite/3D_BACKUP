@@ -140,5 +140,50 @@ console.log("\nD. no success message states a server figure it cannot have");
   else bad(`${offenders.length} ok-toast(s) quote the server's reply with no queue check`, offenders.join(", ") + " — offline these print the word `undefined`");
 }
 
+console.log("\nE. reopen puts the TABLE back, not the bill (owner, 2026-08-26; mig 365)");
+// The four rules he gave, each asserted where it actually lives. Driven end to end when it was
+// built — a settled bill was refused while another party sat at the table, then accepted once the
+// table was free, keeping its retired invoice number and its reason.
+{
+  const MIG = "supabase/migrations/365_reopen_puts_the_table_back_not_the_bill.sql";
+  const migRaw = existsSync(join(ROOT, MIG)) ? readFileSync(join(ROOT, MIG), "utf8") : "";
+  // ⚠️ SQL COMMENTS OUT, same as section C. That migration's header EXPLAINS the rule ("every order
+  // on the bill is payment_status = 'paid', which is what makes it add-only") — and the first cut
+  // of the check below read that sentence as the code touching payment_status, and failed correct
+  // code. Third time in this file's life; hence the rule: assert on code, never on prose.
+  const mig = migRaw.replace(/--[^\n]*/g, "");
+  const route = existsSync(join(ROOT, "app/api/editor/[...path]/route.ts"))
+    ? readFileSync(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8") : "";
+  if (!migRaw) bad("migration 365 is gone", "the whole rule lives in it");
+  else {
+    /^\s*if v_busy is not null then/m.test(mig)
+      ? ok("only onto a FREE table", "another open session on that table refuses with LFH03")
+      : bad("the free-table check is gone from mig 365", "two parties on one table number is how one party's food lands on another's bill");
+    /LFH04/.test(mig)
+      ? ok("a bill whose every KOT was cancelled cannot be reopened", "there is no sale to come back to")
+      : bad("the nothing-to-reopen check is gone from mig 365");
+    /invoice_voided = true/.test(mig) && /insert into invoice_events/.test(mig)
+      ? ok("the invoice number is RETIRED, with its reason, into the append-only trail", "never reused — CGST Rule 46(b)")
+      : bad("mig 365 stopped retiring the invoice number", "a reused number is the suppression pattern an audit reads");
+    !/payment_status/.test(mig)
+      ? ok("nothing is un-paid by a reopen", "money collected stays collected")
+      : bad("mig 365 touches payment_status", "a reopen must never un-pay anything");
+    /revoke all on function lfh_reopen_table/.test(migRaw)
+      ? ok("the function is staff-only", "the mig-038 rule: a replaced function is public-executable again by default")
+      : bad("lfh_reopen_table has no REVOKE", "npm run verify:grants will fail too");
+  }
+  /if \(a === "sessions" && c === "reopen-table"\)/.test(route)
+    ? ok("the route exists and is the one door the panel uses")
+    : bad("the reopen-table route is gone");
+  /reopen-table[\s\S]{0,900}?managerCan\(g, rid, "void_bills"\)/.test(route)
+    ? ok("…and it is gated by the same money power as reopening a live bill")
+    : bad("the reopen-table route lost its permission check");
+  // ADD-ONLY afterwards needs no new rule — it rests on the route refusing to cancel a PAID order.
+  // If that line ever goes, a reopened bill silently becomes editable, so it is asserted here too.
+  /Can't cancel a paid order/.test(route)
+    ? ok("a reopened bill is add-only", "the paid-order refusal is what makes it so — nothing on it can be cancelled")
+    : bad("the paid-order cancel refusal is gone", "a reopened bill would become editable, which is not what was asked for");
+}
+
 console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

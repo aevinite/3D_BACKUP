@@ -149,6 +149,7 @@ export const ACT_LABEL: Record<string, string> = {
   errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
+  table_reopened: "Reopened the table (paid bill back on the floor)",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",

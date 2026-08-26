@@ -3290,6 +3290,9 @@ function ordersPreviousHtml(today, previous) {
       kind: "dinein", g, key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
       billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at,
       invVoided: !!o0.invoice_voided,
+      // "open" while the party is still at the table; anything else means the table has been
+      // closed and this bill is finished. Enriched by the bills read (see its note there).
+      sessionClosed: !!o0.session_status && o0.session_status !== "open",
       customer: o0.customer_name || "", total: m.total, paid,
       ts: new Date(o0.created_at || 0).getTime(),
       cancelled: g.every((o) => o.status === "cancelled"),
@@ -3622,7 +3625,15 @@ function billReceiptActions(b, st) {
   else if (st === "settled" || st === "onhouse") {
     btns.push(`<button class="ord-btn" data-print-group="${esc(key)}">${printLbl}</button>`);
     if (b.invNo != null && !b.invVoided && b.g[0].session_id) {
-      btns.push(`<button class="ord-btn ghost" data-void-invoice="${esc(b.g[0].session_id)}">\u21a9 Reopen</button>`);
+      // ── TWO DOORS, ONE BUTTON (owner, 2026-08-26) ──────────────────────────────────────────
+      // A bill whose table is STILL OPEN is reopened for edits — void the invoice, change it,
+      // print again. A bill whose table has CLOSED is the other case entirely: the party paid and
+      // left, and they are back for one more coffee. That one puts the TABLE back on the floor
+      // (mig 365) and is refused unless the table is free. Same word on the button, because from
+      // the manager's side it is the same intent; different endpoint, because it is not the same act.
+      btns.push(b.sessionClosed
+        ? `<button class="ord-btn ghost" data-reopen-table="${esc(b.g[0].session_id)}" title="Put this table back on the floor so this party can order again. The invoice number is retired and a new one is drawn when you print.">\u21a9 Reopen</button>`
+        : `<button class="ord-btn ghost" data-void-invoice="${esc(b.g[0].session_id)}">\u21a9 Reopen</button>`);
       btns.push(`<button class="ord-btn ghost" data-credit-note="${esc(b.g[0].session_id)}">\u{1F9FE}\u2212 Credit note</button>`);
     }
   } else {
@@ -6509,6 +6520,7 @@ function renderEditor() {
       btn.onclick = () => printIssuingInvoice(btn.dataset.printIssue, btn.dataset.printGroup || null);
     });
     ed.querySelectorAll("[data-void-invoice]").forEach((btn) => { btn.onclick = () => voidInvoice(btn.dataset.voidInvoice); });
+    ed.querySelectorAll("[data-reopen-table]").forEach((btn) => { btn.onclick = () => reopenTable(btn.dataset.reopenTable); });
     ed.querySelectorAll("[data-credit-note]").forEach((btn) => { btn.onclick = () => creditNote(btn.dataset.creditNote); });
     ed.querySelectorAll("[data-print-group]").forEach((btn) => {
       btn.onclick = () => {
@@ -7427,6 +7439,7 @@ const OP_ACTION_LABELS = {
   errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
+  table_reopened: "Reopened the table (paid bill back on the floor)",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
@@ -15269,6 +15282,37 @@ async function voidInvoice(sid) {
     toast("Bill reopened — add or change items, then Print again for a new invoice", "ok");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
+// PUT A FINISHED TABLE BACK ON THE FLOOR (owner, 2026-08-26; mig 365).
+//
+// "You should reopen table not the bill … if the table has already taken the order, it shouldn't
+//  be able to reopen. If the table is free, then only it should be able to reopen, and after
+//  reopen you can add the order to that particular bill, you can't delete."
+//
+// The party paid, left, and came back. voidInvoice() above is the OTHER case — a bill still live
+// on the floor being corrected before it is settled — and it refuses a closed one, correctly.
+//
+// What this does NOT do, and must never be made to do: un-pay anything. The money collected stays
+// collected, the retired invoice number stays retired and on record, and every KOT already on the
+// bill stays put — the route has always refused to cancel a PAID order, which is what makes the
+// reopened bill add-only without needing a new rule for it.
+async function reopenTable(sid) {
+  const ss = (state.board.sessions || []).find((x) => x.id === sid) || {};
+  const where = ss.table_number != null ? tableLabel(ss.table_number) : "this table";
+  // The same reason picker a reopen has always used — this IS the confirmation, so there is no
+  // second yes/no on top of it (owner, 2026-08-05).
+  const rr = await askReopenReason(`${where}${ss.invoice_no != null ? ` · invoice #${ss.invoice_no}` : ""} — the table comes back so this party can order again`);
+  if (!rr) return; // cancelled — a reason is required
+  const label = (REOPEN_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, "");
+  const reason = [label, rr.note].filter(Boolean).join(" — ");
+  try {
+    const r = await api("POST", `/sessions/${sid}/reopen-table`, { reason, reason_code: rr.code, reason_note: rr.note || null });
+    // A queued write has not reopened anything — the floor behind this is unchanged (item 5's rule).
+    if (wasQueued(r)) { toast("Saved on this device ✓ — the table will come back the moment you're back online.", "ok"); return; }
+    await loadSessions(); await loadOrders();
+    toast(`${where} is back on the floor — add the order, then Print for a new invoice`, "ok");
+  } catch (e) { toast(errText(e), "err", undefined, 9000); }
+}
+
 // Issue a CREDIT NOTE — the legal way to refund/correct a bill WITHOUT changing it (used
 // once a bill is settled and can't be edited). Records a new, numbered credit document.
 async function creditNote(sid) {
@@ -16780,6 +16824,9 @@ const XRAY_CONTROLS = [
   { selector: "[data-qop]", flag: "take_orders|parcel", label: "Take orders / Parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  // Reopening a finished TABLE is the same money power as reopening a live bill — the route checks
+  // void_bills for both — so it wears the same marker and disappears for the same people.
+  { selector: "[data-reopen-table]", flag: "void_bills", label: "Void / reopen bills" },
   // Credit note is the SAME money power as reopen (the server refuses it via void_bills —
   // "Money action → void_bills" at the credit-note endpoint), but this row was missing, so a
   // manager without the power saw a fully clickable button that only failed after they had

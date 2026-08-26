@@ -1356,7 +1356,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
         // the paper or in the Audit — it changes one word on one button, nothing else.
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
-          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
@@ -1408,6 +1408,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const s = map[o.session_id];
           if (s) {
             o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no;
+            // IS THE TABLE STILL ON THE FLOOR? (owner, 2026-08-26.) The Bills tab has to tell a
+            // LIVE bill being corrected before payment from a FINISHED one whose party has left —
+            // they take two different doors (void-invoice vs reopen-table, mig 365) and the button
+            // has to pick the right one. It cannot ask state.board.sessions: that holds only the
+            // SELECTED table's slice, so in the Bills tab it is empty and every bill would look
+            // open. Found by driving it — the button rendered, and rendered the wrong door.
+            o.session_status = s.status;
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
@@ -3811,6 +3818,48 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       return ok(Array.isArray(data) ? data[0] : data);
     }
+    // sessions/:id/reopen-table — PUT THE TABLE BACK, not the bill (owner, 2026-08-26).
+    //
+    // "You should reopen table not the bill … if the table has already taken the order, it
+    //  shouldn't be able to reopen. If the table is free, then only it should be able to reopen,
+    //  and after reopen you can add the order to that particular bill, you can't delete."
+    //
+    // The sibling above (void-invoice) reopens a bill that is still LIVE, for edits before it is
+    // paid. This one is the other case: a party that paid, left, and came back. The bill is closed
+    // and settled; the table is free; they want one more coffee. Until now the app's only answer
+    // was a credit note, which is a refund document, not a way to sell them a coffee.
+    //
+    // Every rule lives in the RPC (mig 365) so all three doors obey it — the table must be free,
+    // there must be a real sale to come back to, the invoice number is retired rather than reused,
+    // and nothing is un-paid. The route's job is the permission, the tenant boundary, the reason,
+    // and turning the RPC's codes into sentences a person can act on.
+    if (a === "sessions" && c === "reopen-table") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("reopen a bill");
+      const ownsRe = must(await sb.from("sessions").select("id,status,invoice_no,invoice_voided,table_number,bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; status?: string | null; invoice_no?: string | null; invoice_voided?: boolean | null; table_number?: string | null; bill_no?: number | null } | null;
+      if (!ownsRe) return err("That table isn't for this restaurant.", 404);
+      if (ownsRe.status === "open") return err("This bill is already open — the table is live right now.", 409);
+      const reReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      if (!reReason) return err("A reason is required to reopen a table.", 400);
+      const { data: reData, error: reErr } = await sb.rpc("lfh_reopen_table", { p_session: b, p_reason: reReason, p_actor: actorName });
+      if (reErr) {
+        if (reErr.code === "LFH03" || /another party is sitting/i.test(reErr.message))
+          return err(`Someone else is sitting at ${ownsRe.table_number ? "T" + ownsRe.table_number : "that table"} right now. The table has to be free before this bill can come back to it.`, 409);
+        if (reErr.code === "LFH04" || /nothing to reopen/i.test(reErr.message))
+          return err("Every KOT on this bill was cancelled, so there is no sale to reopen.", 409);
+        throw pgError(reErr);
+      }
+      // The table + bill, never the session uuid — the same rule the sibling handlers follow, so a
+      // person reading the Audit sees what they saw on the floor.
+      await log("editor", "table_reopened", {
+        restaurant_id: rid, table_number: ownsRe.table_number ?? null,
+        detail: `Bill #${ownsRe.bill_no ?? "?"}` + (ownsRe.invoice_no ? ` · Invoice ${ownsRe.invoice_no} retired` : "") + ` · ${reReason}`,
+        device_id: dev,
+      });
+      invalidateFloor(rid);
+      return ok(reData);
+    }
+
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
     // A reason is REQUIRED (owner: every reopen must say why). Refused once settled (mig 189).
     if (a === "sessions" && c === "void-invoice") {
