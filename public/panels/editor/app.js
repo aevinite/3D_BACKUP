@@ -1466,11 +1466,16 @@ function formCategories(c) {
       ${tf("Slug (permanent)", "slug", c.slug, { disabled: !state.isNew, ph: state.isNew ? "made from the name" : "", hint: state.isNew ? "Fills in from the English name below as you type. Used on dishes — can't change later." : "Used on dishes. Can't change later." })}
       ${tf("Sort order", "sort_order", c.sort_order, { type: "number" })}
       ${tf("Icon (FontAwesome class)", "icon", c.icon, { ph: "fa-burger" })}
-      <div class="field"><label>Colour</label>
-        <input type="color" data-path="color" value="${esc(c.color || "#d4a574")}" style="height:40px;padding:4px"/></div>
     </div>
+    <!-- THE PER-CATEGORY COLOUR PICKER WAS REMOVED (owner, 2026-08-26): *"do the theme colour one
+         only it look professional like it was previous no random colours"*. The guest menu's
+         category bar now draws every chip in the restaurant's own theme colour, so this control had
+         nothing left to change — and a switch on this panel that quietly does nothing is exactly
+         what "each Edit-menu sub-option must reach code" exists to prevent. The stored values are
+         left in the database untouched: nothing reads them, and deleting them would be a data
+         rewrite for no gain. Put this back only alongside whatever would read it. -->
     <div style="display:flex;gap:18px;align-items:center;margin-top:16px">
-      <div id="iconPreview" class="icon-preview" style="color:${esc(c.color || "#d4a574")}"><i class="fas ${esc(c.icon || "fa-tag")}"></i></div>
+      <div id="iconPreview" class="icon-preview"><i class="fas ${esc(c.icon || "fa-tag")}"></i></div>
       ${toggle("Show on menu", "active", c.active !== false)}
     </div>
     <span class="hint">Icon names: fontawesome.com (free solid). Type just the class, e.g. fa-pizza-slice.</span>
@@ -6687,7 +6692,9 @@ function updatePreviews() {
   if (img) { img.src = it.image || ""; img.style.opacity = it.image ? 1 : 0.2; }
   const ip = document.getElementById("iconPreview");
   if (ip) {
-    if (state.tab === "categories") { ip.style.color = it.color || "#d4a574"; ip.innerHTML = `<i class="fas ${esc(it.icon || "fa-tag")}"></i>`; }
+    // The preview follows the panel's own ink now that a category has no colour of its own
+    // (owner, 2026-08-26) — it used to be tinted with the picked colour, and the picker is gone.
+    if (state.tab === "categories") { ip.style.removeProperty("color"); ip.innerHTML = `<i class="fas ${esc(it.icon || "fa-tag")}"></i>`; }
     else if (state.tab === "filters") { ip.textContent = it.icon || "🏷️"; }
   }
 }

@@ -31,6 +31,12 @@
   /* Default ink for text on an accent FILL. Overridden per console where the accent is light
      enough that white stops being readable on it — see --accent-on in the owner block. */
   --accent-on: #fff;
+  /* The ink on a SELECTED CATEGORY CHIP, whose fill is --accent-grad. Restaurant #1 keeps its
+     hand-tuned gold from this file and never goes through lib/accent.ts, so its value is written
+     here; every other restaurant gets one computed from its own accent (inkOnAccent). Measured:
+     the dark gold #e3c06f gives 10.8:1 against near-black and 1.7:1 against white, and the light
+     gold #d4a574 gives 8.4:1 against 2.2:1 — so near-black, in both skins. (Owner, 2026-08-26.) */
+  --cat-on: #1a0f0a;
   /* In the DARK skin the bright accent on a dark page already measured clean
      (0 text elements under 3:1 across the whole guest menu), so accent-text is
      the accent itself. The light skin darkens it — see [data-theme="light"]. */
@@ -796,13 +802,11 @@ body.menu-scrolling .chef-call {
    icon FADES + COLLAPSES its height as the bar shrinks, reclaiming the space so
    the small state is text-only (like the old pills). Scroll-linked, no snap. */
 .cat-card .cat-icon {
-  /* --cat-color is the colour the owner picked for THIS category in the editor's colour
-     picker; it falls back to the restaurant's accent when none was chosen, which is what
-     every category looked like before. The picker had been saving to the database since it
-     was built and NOTHING read the value: MenuView set --cat-color inline and no rule ever
-     used it, so an owner could set eight category colours and see none of them.
-     (T1 improvement 6, 2026-08-07.) */
-  color: var(--cat-color, var(--accent));
+  /* The restaurant's own theme colour, for every category (owner, 2026-08-26: *"do the theme colour
+     one only it look professional like it was previous no random colours"*). --cat-color is gone —
+     MenuView no longer emits it and the editor's per-category colour picker was removed with it, so
+     nothing is left that quietly does nothing. */
+  color: var(--accent);
   max-height: calc(24px * (1 - var(--shrink, 0)));
   opacity: calc(1 - var(--shrink, 0));
   margin-bottom: calc(6px * (1 - var(--shrink, 0)));
@@ -810,10 +814,9 @@ body.menu-scrolling .chef-call {
   transition: color 0.25s var(--ease), transform 0.25s var(--ease), filter 0.25s var(--ease);
 }
 .cat-card.active {
-  /* Same idea for the selected chip's fill. No category colour set -> the accent gradient,
-     exactly as before; a colour set -> a gradient built from it, so the bar reads as the
-     owner arranged it. */
-  background: var(--cat-grad, var(--accent-grad));
+  /* The selected chip fills with the restaurant's accent gradient — one colour per restaurant,
+     not one per category (owner, 2026-08-26). --cat-grad is gone with the picker. */
+  background: var(--accent-grad);
   border-color: transparent;
   transform: translateY(-2px);
   /* No shadow — it cast a murky halo that made the neighbouring borders show. */
@@ -823,19 +826,19 @@ body.menu-scrolling .chef-call {
   box-shadow: none;
 }
 .cat-card.active .cat-icon {
-  /* --cat-on is white or near-black, chosen in MenuView from the CATEGORY colour's own
-     brightness, because that colour is now whatever the owner picked and a fixed ink cannot
-     be readable on both a pale yellow and a dark brown. Absent (no category colour) -> the
-     hardcoded value this rule always had, so nothing changes for a restaurant that never set
-     colours. (T1 improvement 6.) */
-  color: var(--cat-on, #ffffff);
+  /* ONE INK FOR THE WHOLE CHIP (owner, 2026-08-26). --cat-on is white or near-black, decided ONCE
+     from the restaurant's accent in lib/accent.ts (inkOnAccent) — not per category any more, and
+     not from a brightness threshold.
+     There used to be FOUR rules here and they contradicted each other: light gave the icon #ffffff
+     and the label #1a0f0a, dark gave the icon #1a0f0a and the label #ffffff. That was invisible
+     while every chip carried its own --cat-on, and the moment the bar went back to the theme
+     colour it showed as a white cup above a near-black "Coffee" on the same gold fill. An icon and
+     its own label share one chip, so they share one ink. */
+  color: var(--cat-on, #1a0f0a);
   filter: none;
   transform: scale(1.08);
 }
-.cat-card.active .cat-name { color: var(--cat-on, #ffffff); font-weight: 800; }
-/* dark mode: black icon, white text on gold active card */
-[data-theme="dark"] .cat-card.active .cat-icon { color: var(--cat-on, #1a0f0a); }
-[data-theme="dark"] .cat-card.active .cat-name { color: var(--cat-on, #ffffff); }
+.cat-card.active .cat-name { color: var(--cat-on, #1a0f0a); font-weight: 800; }
 .cat-card:hover:not(.active) {
   transform: translateY(-2px);
   /* THEME-TRIAL: hover border follows the accent instead of a hardcoded gold */
@@ -854,7 +857,6 @@ body.menu-scrolling .chef-call {
 .cat-name {
   font-size: 10px; color: var(--muted); font-weight: 600; transition: all 0.3s;
 }
-.cat-card.active .cat-name { color: var(--cat-on, #1a0f0a); font-weight: 800; }
 .cat-card:hover .cat-name { color: var(--text); }
 
 /* --- SEARCH & FILTERS --- */
@@ -1566,11 +1568,10 @@ body.menu-frost .nav {
   background: rgba(250, 243, 232, 0.7);
 }
 [data-theme="light"] .cat-card.active {
-  /* Same fallback chain as the base rule above, or this LIGHT-skin override (which is more
-     specific) would win and the selected chip would ignore the category colour in light mode
-     only. That is exactly what happened on the first attempt: --cat-grad was set correctly on
-     the element and the chip still painted accent gold. (T1 improvement 6.) */
-  background: var(--cat-grad, var(--accent-grad));
+  /* The light skin needs its own copy or the `:not(.active)` rule above — which is equally
+     specific and comes first — leaves the selected chip looking unselected. Same accent gradient
+     as the base rule (owner, 2026-08-26: one theme colour, no per-category colours). */
+  background: var(--accent-grad);
 }
 [data-theme="light"] .item-card { 
   background: rgba(250, 243, 232, 0.7);

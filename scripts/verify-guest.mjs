@@ -54,6 +54,7 @@ const F = {
   legacy: code("app/item/[slug]/page.tsx"), q: code("app/q/[code]/page.tsx"),
   sgate: code("components/SessionGate.tsx"), menuLib: code("lib/menu.ts"),
   navp: code("components/NavPicker.tsx"),
+  accent: code("lib/accent.ts"), editorJs: read("public/panels/editor/app.js"),
   css: read("app/globals.css"), offHtml: read("public/offline.html"), sw: read("public/sw.js"),
 };
 
@@ -248,6 +249,27 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// ONE THEME COLOUR ON THE CATEGORY BAR, NOT ONE PER CATEGORY (owner, 2026-08-26):
+// *"do the theme colour one only it look professional like it was previous no random colours"*.
+// The chip must emit no per-category colour at all — that absence is what makes the stylesheet
+// fall back to the restaurant's accent — and the editor's picker went with it, so no control is
+// left that quietly does nothing. The ink on a selected chip is decided ONCE from the accent, by
+// comparing both candidates rather than testing a brightness threshold: the old threshold picked
+// the weaker ink on 11 of the 21 category colours in the database (white on #22c55e = 2.3:1).
+check("P15603", "the category bar draws in the restaurant's own theme colour only", () => {
+  const noInline = !rx(F.menuView, /--cat-color/) && !rx(F.menuView, /--cat-grad/) && !rx(F.menuView, /inkOn\(/);
+  const cssAccent = rx(F.css, /\.cat-card \.cat-icon \{[\s\S]{0,400}?color: var\(--accent\);/) &&
+                    !rx(F.css, /var\(--cat-grad/);
+  const oneInk = (F.css.match(/\.cat-card\.active \.cat-(icon|name)[\s\S]{0,600}?var\(--cat-on, #1a0f0a\)/g) || []).length >= 1 &&
+                 !rx(F.css, /var\(--cat-on, #ffffff\)/);
+  const noPicker = !rx(F.editorJs, /type="color"/);
+  return { ok: noInline && cssAccent && oneInk && noPicker,
+    note: `chip emits no colour=${noInline} css uses the accent=${cssAccent} one ink=${oneInk} picker gone=${noPicker}` };
+});
+check("P15604", "the ink on an accent fill is the BETTER of black and white, not a threshold", () =>
+  has(F.accent, "export function inkOnAccent", "--cat-on:${inkOnAccent(accentColor)}") &&
+  rx(F.accent, /contrast\(acc, lum\("ffffff"\)\) >= contrast\(acc, lum\("1a0f0a"\)\)/));
+
 // BACK CLOSES WHAT IS OPEN BEFORE IT OFFERS TO LEAVE (owner, 2026-08-26).
 // With a search running, one press of Back left the search untouched and put the Stay-or-Leave
 // dialog over it — the gesture every phone user reaches for to dismiss something offered to throw
@@ -323,6 +345,29 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: the selected chip's icon and its own label share ONE ink, on every restaurant and both
+    // skins. They did not: light gave a white icon above a near-black label on the same gold fill,
+    // and dark did the reverse. Invisible while every chip carried its own ink, obvious the moment
+    // the bar went back to the theme colour — so this is measured, not assumed.
+    for (const slug of ["french-house", "aangan-garden-restaurant"]) {
+      for (const theme of ["light", "dark"]) {
+        const { c, pg } = await open(`/r/${slug}/menu`, 3000);
+        await pg.evaluate((t) => { localStorage.setItem("lfh_theme", t); }, theme);
+        await pg.reload({ waitUntil: "domcontentloaded" }); await pg.waitForTimeout(3500);
+        const r = await pg.evaluate(() => {
+          const on = document.querySelector(".cat-card.active"); if (!on) return null;
+          const ic = on.querySelector(".cat-icon"), nm = on.querySelector(".cat-name");
+          const off = [...document.querySelectorAll(".cat-card:not(.active) .cat-icon")].map((e) => getComputedStyle(e).color);
+          return { icon: getComputedStyle(ic).color, label: getComputedStyle(nm).color, offIcons: [...new Set(off)] };
+        });
+        check("P15603", `LIVE: ${slug}/${theme} the selected chip has one ink`, () =>
+          ({ ok: !!r && r.icon === r.label, note: r ? `icon ${r.icon} vs label ${r.label}` : "no active chip" }));
+        check("P15603", `LIVE: ${slug}/${theme} every unselected icon is the SAME colour`, () =>
+          ({ ok: !!r && r.offIcons.length === 1, note: r ? `${r.offIcons.length} distinct: ${JSON.stringify(r.offIcons)}` : "none" }));
+        await c.close();
+      }
+    }
+
     // LIVE: back closes the search first, and only then offers to leave. Three steps, because the
     // failure was subtle — the search stayed open UNDER the dialog, so only looking at both at once
     // catches it — and because a back layer that is not released would break leaving altogether.

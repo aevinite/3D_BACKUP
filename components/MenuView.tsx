@@ -6,7 +6,7 @@
 // React's built-in tools: useState (remember a value), useEffect (run code at
 // certain times, like after the page appears), useRef (a value that survives
 // re-draws without causing one).
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { warmDataCache } from "@/lib/warmData";
 // Link = Next's fast, no-full-reload navigation between pages.
 import Link from "next/link";
@@ -70,21 +70,9 @@ const DIETS = [
 // Small helper: turn a dish's rating (stored as text) into a number so we can
 // sort by it. If it's missing/garbled, treat it as 0.
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
-// WHICH INK READS ON A CATEGORY'S OWN COLOUR. The selected chip fills with the colour the owner
-// picked, and that can be anything from pale yellow to dark brown — so the icon and label can't use
-// one fixed ink. WCAG relative luminance, the same maths the rest of the app's contrast checks use:
-// a light fill gets near-black, a dark fill gets white. (T1 improvement 6, 2026-08-07.)
-function inkOn(hex: string): string {
-  const h = hex.trim().replace(/^#/, "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return "#ffffff"; // unparseable → today's default
-  const ch = (i: number) => {
-    const v = parseInt(full.slice(i, i + 2), 16) / 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-  };
-  const lum = 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
-  return lum > 0.42 ? "#1a0f0a" : "#ffffff";
-}
+// (The per-category ink helper that used to live here was removed on 2026-08-26 — see the note on
+// the category chip below. With every chip on the restaurant's own theme colour there is exactly
+// one ink to choose, and the stylesheet has always chosen it.)
 
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
@@ -179,13 +167,6 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     slug: c.slug,
     name: localized(c.name, lang),
     icon: c.icon || "fa-utensils",
-    // NULL when the owner never picked one, so the CSS fallback (`var(--cat-color, var(--accent))`)
-    // does the deciding. It used to default to the literal `"#d4a574"` — restaurant #1's gold — on
-    // every tenant, and it was written into a variable NO rule read, so the editor's per-category
-    // colour picker had never actually done anything. Now: colour set → that colour; nothing set →
-    // this restaurant's own accent, which is what the bar has always looked like.
-    // (T1 improvement 6, 2026-08-07.)
-    color: c.color || null,
   }));
 
   // Tapping a category NEVER narrows the menu — it always keeps the full grouped
@@ -1208,17 +1189,24 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   // scroll-spy) — there's no "selected" category anymore.
                   aria-current={spyCat === cat.slug ? "true" : undefined}
                   className={`cat-card ${spyCat === cat.slug ? "active" : ""}`}
-                  // Only emitted when this category HAS a colour — an absent variable is what lets
-                  // the stylesheet fall back to the restaurant's accent. `--cat-grad` is the same
-                  // colour as a gradient for the selected chip's fill, built the way lib/accent.ts
-                  // builds the accent one so the two look like siblings.
-                  style={cat.color
-                    ? ({
-                        ["--cat-color" as string]: cat.color,
-                        ["--cat-grad" as string]: `linear-gradient(135deg, ${cat.color} 0%, color-mix(in srgb, ${cat.color} 82%, #000) 100%)`,
-                        ["--cat-on" as string]: inkOn(cat.color),
-                      } as CSSProperties)
-                    : undefined}
+                  // ONE THEME COLOUR, NOT TWENTY-ONE (owner, 2026-08-26): *"do the theme colour one
+                  // only it look professional like it was previous no random colours"*.
+                  //
+                  // The chip used to emit --cat-color / --cat-grad / --cat-on from a colour picked
+                  // per category, so a menu could show a blue chip beside an orange one beside a
+                  // pink one. Emitting nothing is what makes the stylesheet fall back to
+                  // `var(--accent)` and `var(--accent-grad)` — the restaurant's own theme colour —
+                  // which is EXACTLY how the bar looked before 2026-08-07, because until then those
+                  // variables were set here and no rule ever read them. So this is a return to the
+                  // look he is describing, not a new one.
+                  //
+                  // It settles a measured readability problem for free. Across the 21 distinct
+                  // category colours in the database, 11 gave the chip's label the weaker of the two
+                  // inks — white on #22c55e is 2.3:1 where 4.5:1 is the standard. The accent has one
+                  // known ink, and the stylesheet has always had it right.
+                  //
+                  // The editor's per-category colour picker is removed in the same commit, so no
+                  // control is left that quietly does nothing.
                   // Tapping a category just smooth-scrolls to its section — always
                   // the full grouped menu, never narrowing to one category.
                   onClick={() => scrollToCategory(cat.slug)}
