@@ -19,7 +19,13 @@
 // carries ZERO egress on its own: showing/hiding is pure DOM; the only network call is
 // the caller's onUndo(), and only if the staff taps it.
 (function () {
-  var DEFAULT_SECONDS = 4;  // the takeback window the owner asked for ("maybe 3 or 4 sec")
+  // ── HOW LONG THE WINDOW IS (owner, twice) ─────────────────────────────────────────────────
+  // 2026-08-17: "maybe 3 or 4 sec" → 4.
+  // 2026-08-26: "keep undo button for 5 sec like not more" (the ceiling) and, of the bar that is
+  // kept, "decrese time for it" → 3. A shorter window is the point: the card is in the way of the
+  // floor, and three seconds is long enough to catch the tap you regret the instant you make it.
+  var DEFAULT_SECONDS = 3;
+  var MAX_SECONDS = 5;      // …and never longer (owner, 2026-08-26). Enforced in show().
   var RING_LEN = 113;       // circumference of r=18 (2·π·18 ≈ 113.1) — the dash length
 
   var el = null;     // the singleton card element (reused, never re-created)
@@ -28,6 +34,7 @@
   var btnEl = null;  // the UNDO button
   var ringEl = null; // the draining gold circle (SVG <circle>)
   var iconEl = null; // the dish glyph inside the ring
+  var closeEl = null;// the ✕ that closes the window early (owner, 2026-08-26)
   var timer = null;  // the auto-dismiss timer
   var busy = false;  // true once UNDO has been tapped (blocks a double-tap)
 
@@ -70,6 +77,16 @@
       "transition:background .12s ease,transform .08s ease;}",
       "#lfh-undobar .lfh-undo-btn:hover{background:rgba(212,165,116,.14);}",
       "#lfh-undobar .lfh-undo-btn:active{transform:scale(.96);}",
+      // ── the ✕ that closes the window early (owner, 2026-08-26) ────────────
+      // Deliberately QUIET next to the gold UNDO: dismissing is the ordinary outcome, undoing is
+      // the rare one, and the loud control must stay the rare one. Still a full 40px tap target.
+      "#lfh-undobar .lfh-undo-x{flex:none;appearance:none;cursor:pointer;border:0;background:transparent;",
+      "color:var(--muted,#9aa4b2);font:600 17px/1 system-ui,sans-serif;min-width:40px;min-height:40px;",
+      "border-radius:10px;margin-left:-4px;transition:color .12s ease,background .12s ease;}",
+      "#lfh-undobar .lfh-undo-x:hover{color:var(--text,#e7eefc);background:rgba(127,127,127,.14);}",
+      // The card follows the finger while it is being dragged, so a swipe reads as a drag rather
+      // than a failed tap. `touch-action` stops the browser scrolling the page underneath instead.
+      "#lfh-undobar{touch-action:none;}",
       "@media (prefers-reduced-motion:reduce){#lfh-undobar{transition:opacity .2s ease;",
       "transform:translateX(-50%) translateY(0);}}",
       // ── THE UNDO CARD IS THE ONE ON TOP, AND THE MESSAGE STILL GETS READ ──────────────
@@ -128,10 +145,61 @@
     btnEl.className = "lfh-undo-btn";
     btnEl.type = "button";
 
+    // ── GET RID OF IT WITHOUT WAITING (owner, 2026-08-26: "you can drag and easy remove that
+    // bar like you don't have to wait 5 full sec") ─────────────────────────────────────────────
+    // Two ways out, because a thumb and a mouse want different ones:
+    //   · a ✕ — always there, always hittable, and the only one a desktop mouse will find;
+    //   · a SWIPE — drag the card left, right or down and it goes at 60px, following the finger
+    //     so it is obvious it is being dragged rather than tapped.
+    // Neither is an UNDO: dismissing means "yes, I meant it" and simply closes the window early,
+    // which is exactly what waiting five seconds would have done. The undo button is untouched.
+    closeEl = document.createElement("button");
+    closeEl.className = "lfh-undo-x";
+    closeEl.type = "button";
+    closeEl.setAttribute("aria-label", "Dismiss");
+    closeEl.textContent = "✕";
+    closeEl.onclick = function (e) { e.stopPropagation(); hide(); };
+
     el.appendChild(ringWrap);
     el.appendChild(txt);
     el.appendChild(btnEl);
+    el.appendChild(closeEl);
     document.body.appendChild(el);
+    attachSwipe();
+  }
+
+  // Drag the card away. Pointer events cover touch, pen and mouse in one path; the UNDO button and
+  // the ✕ are excluded so a drag can never start on the control you were aiming at.
+  function attachSwipe() {
+    var x0 = 0, y0 = 0, dragging = false, moved = false;
+    el.addEventListener("pointerdown", function (e) {
+      if (e.target.closest(".lfh-undo-btn, .lfh-undo-x")) return;
+      dragging = true; moved = false; x0 = e.clientX; y0 = e.clientY;
+      el.style.transition = "none";
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    el.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var dx = e.clientX - x0, dy = Math.max(0, e.clientY - y0);
+      if (Math.abs(dx) > 4 || dy > 4) moved = true;
+      el.style.transform = "translate(" + dx + "px, " + dy + "px)";
+      // fade as it goes, so it reads as "leaving" rather than "stuck to my finger"
+      el.style.opacity = String(Math.max(0.25, 1 - Math.max(Math.abs(dx), dy) / 160));
+    });
+    var end = function () {
+      if (!dragging) return;
+      dragging = false;
+      var m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(el.style.transform || "");
+      var dx = m ? parseFloat(m[1]) : 0, dy = m ? parseFloat(m[2]) : 0;
+      el.style.transition = "";
+      el.style.transform = "";
+      el.style.opacity = "";
+      // 60px in any direction is a deliberate flick, not a wobble while reading.
+      if (moved && (Math.abs(dx) > 60 || dy > 60)) hide();
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("pointerleave", end);
   }
 
   function clearTimer() {
@@ -185,7 +253,12 @@
     opts = opts || {};
     build();
     busy = false;
-    var seconds = opts.seconds != null ? opts.seconds : DEFAULT_SECONDS;
+      // ── FIVE SECONDS, AND NOT MORE (owner, 2026-08-26: "keep undo button for 5 sec like not
+    // more") ────────────────────────────────────────────────────────────────────────────────
+    // Capped HERE rather than at each call site, so a caller can ask for less but never for more
+    // and nobody has to remember the rule. The two 6-second callers in the manager panel are
+    // clamped by this line alone.
+    var seconds = Math.min(opts.seconds != null ? opts.seconds : DEFAULT_SECONDS, MAX_SECONDS);
     titleEl.textContent = opts.message || "Done";
     subEl.textContent = opts.sub || "Tap undo to put it back";
     btnEl.textContent = opts.undoLabel || "Undo";

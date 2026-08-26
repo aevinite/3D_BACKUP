@@ -1065,16 +1065,18 @@ async function bulkDeleteDishes() {
   state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn();
   await loadAll(); renderList(); renderEditor();
   const undoDelete = async () => {
-    let r = 0;
-    for (const s of snaps) { try { const p = { ...s }; delete p.created_at; delete p.updated_at; p.__create = true; await api("POST", "/items", p); r++; } catch (e) {} }
-    toast(`Restored ${r}`, "ok");
+    // A LOOP OF WRITES ASKS THE QUEUE ONCE (owner, 2026-08-26). With no signal every one of these
+    // is saved rather than sent, and "Restored 5" would be a count of things that have not happened.
+    let r = 0, anyQueued = false;
+    for (const s of snaps) { try { const p = { ...s }; delete p.created_at; delete p.updated_at; p.__create = true; anyQueued = wasQueued(await api("POST", "/items", p)) || anyQueued; r++; } catch (e) {} }
+    okToast(anyQueued ? { queued: true } : null, `Restored ${r}`);
     await loadAll(); renderList(); renderEditor();
   };
   // A REFUSED DELETE IS NEWS (T5, 2026-08-17) — the loop above used to swallow every failure, so
   // "Deleted 5 dishes" could appear over 5 dishes that are all still on the menu. The undo bar is
   // still offered for whatever DID go, because that part is real.
   if (failed) toast(`Deleted ${done} — ${failed} could NOT be deleted. They are still on the menu.`, "err", undefined, 9000);
-  if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 6, onUndo: undoDelete });
+  if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 5, onUndo: undoDelete });
   else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
 
@@ -3219,7 +3221,17 @@ function ordersPreviousHtml(today, previous) {
       // So the STATE words below are matched with word boundaries (see billMatches), while names,
       // dishes and numbers stay substring — which is what makes "biry" find a biryani and "042"
       // find invoice 1042, while "paid" and "unpaid" stay two different questions.
-      b.paid ? "paid settled" : "unpaid outstanding due",
+      // ── A CANCELLED BILL IS NEITHER PAID NOR UNPAID (T5 sweep #7, 2026-08-22) ────────────
+      // `paid` is false for a cancelled bill by construction — recOfGroup needs at least one
+      // live order to call a bill paid, and a cancelled bill has none — so this line used to
+      // stamp "unpaid outstanding due" onto every void in the record. Measured on the manager's
+      // own Previous-bills screen: typing `unpaid` returned 313 bills of which 310 were
+      // CANCELLED, while the heading right above the list said "3 bills · ₹1,449 still owed".
+      // The list and its own total disagreed, and the one question a manager asks this box at
+      // closing time — "what is still unpaid?" — was the one it answered worst.
+      // A cancelled bill owes nothing, so it claims neither state; it is still findable by
+      // "cancelled" / "void" from the line above.
+      b.cancelled ? "" : b.paid ? "paid settled" : "unpaid outstanding due",
       b.partPaid ? "partpaid partly" : "",
       b.invVoided ? "reopened voided retired" : "",
       (b.kots || []).map((k) => "kot " + k).join(" "),
@@ -3280,6 +3292,9 @@ function ordersPreviousHtml(today, previous) {
       kind: "dinein", g, key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
       billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at,
       invVoided: !!o0.invoice_voided,
+      // "open" while the party is still at the table; anything else means the table has been
+      // closed and this bill is finished. Enriched by the bills read (see its note there).
+      sessionClosed: !!o0.session_status && o0.session_status !== "open",
       customer: o0.customer_name || "", total: m.total, paid,
       ts: new Date(o0.created_at || 0).getTime(),
       cancelled: g.every((o) => o.status === "cancelled"),
@@ -3354,7 +3369,8 @@ function ordersPreviousHtml(today, previous) {
       <div class="bill-search bill-search-one">
         <i class="fas fa-magnifying-glass"></i>
         <input type="text" data-bill-q value="${esc(state.billSearch || "")}"
-          placeholder="Search anything — name, phone, bill or invoice no. (even the last digits), table, dish, ₹" autocomplete="off"/>
+          placeholder="Search a name, phone, bill no., table, dish or ₹" autocomplete="off"
+          title="One box, every field at once: the guest's name or phone, a bill or invoice number (even just its last digits), the table, a dish on it, the ₹ total, or a word like paid / unpaid / cancelled / khata."/>
         ${q ? `<button type="button" class="bill-qx" data-bill-qx title="Clear the search">✕</button>` : ""}
       </div>
       <select class="bill-sort" data-bill-sort>
@@ -3454,6 +3470,15 @@ function billLineHtml(b) {
 // Every screen below reads this, so the pill, the receipt heading and the search word can never
 // disagree. The order matters and mirrors lib/billLedger.ts's deriveBillState on the server:
 // cancelled wins, then pay-later, then on-the-house, then part-paid, then paid, then running.
+// REJECTED (owner, 2026-08-26) — docs/REJECTED-IDEAS.md R47: a bill is never cancelled as an ACT.
+// There is no "✕ Cancel this bill" button and there must never be one. A bill BECOMES cancelled
+// when every KOT on it is cancelled, which is exactly what the first line below derives. Offered
+// the alternative — one bill-level cancel with one reason and one clean audit row — together with
+// the compliance research behind it, he chose the KOT trail instead: "if there is a bill there is
+// 1 KOT and it has been cancelled. It can go in the cancel bill. I agree to you like that, so
+// there will not be bill cancellation. Only there will be only KOT cancellation and which will be
+// going on audit section. Let's keep it like that."
+// Do not add a bill-level cancel, a bill-level cancel reason, or a session `cancelled_at`.
 function billState(b) {
   if (b.cancelled) return "cancelled";
   if (b.khata) return "khata";
@@ -3602,7 +3627,15 @@ function billReceiptActions(b, st) {
   else if (st === "settled" || st === "onhouse") {
     btns.push(`<button class="ord-btn" data-print-group="${esc(key)}">${printLbl}</button>`);
     if (b.invNo != null && !b.invVoided && b.g[0].session_id) {
-      btns.push(`<button class="ord-btn ghost" data-void-invoice="${esc(b.g[0].session_id)}">\u21a9 Reopen</button>`);
+      // ── TWO DOORS, ONE BUTTON (owner, 2026-08-26) ──────────────────────────────────────────
+      // A bill whose table is STILL OPEN is reopened for edits — void the invoice, change it,
+      // print again. A bill whose table has CLOSED is the other case entirely: the party paid and
+      // left, and they are back for one more coffee. That one puts the TABLE back on the floor
+      // (mig 365) and is refused unless the table is free. Same word on the button, because from
+      // the manager's side it is the same intent; different endpoint, because it is not the same act.
+      btns.push(b.sessionClosed
+        ? `<button class="ord-btn ghost" data-reopen-table="${esc(b.g[0].session_id)}" title="Put this table back on the floor so this party can order again. The invoice number is retired and a new one is drawn when you print.">\u21a9 Reopen</button>`
+        : `<button class="ord-btn ghost" data-void-invoice="${esc(b.g[0].session_id)}">\u21a9 Reopen</button>`);
       btns.push(`<button class="ord-btn ghost" data-credit-note="${esc(b.g[0].session_id)}">\u{1F9FE}\u2212 Credit note</button>`);
     }
   } else {
@@ -4059,7 +4092,8 @@ async function freeTable(t, opts = {}) {
   }
   if (!opts.silent && !(await confirmDialog(`Free ${tableLabel(t)}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
   try {
-    for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
+    let anyQueued = false;
+    for (const id of ids) anyQueued = wasQueued(await api("PATCH", "/orders/" + id, { archived: true })) || anyQueued;
     (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) o.archived = true; });
     // force: the orders left here are cancelled/settled (the guard above proved it), so the
     // server's "still owes money / still cooking" rule has nothing to protect — without force it
@@ -4067,7 +4101,7 @@ async function freeTable(t, opts = {}) {
     // forever.
     if (sess) { try { await api("POST", "/sessions/" + sess.id + "/close", { force: true }); } catch (e) { /* orders are already off the floor; the tile reads free */ } }
     await loadSessions();
-    toast(`${tableLabel(t)} is free`, "ok");
+    okToast(anyQueued ? { queued: true } : null, `${tableLabel(t)} is free`);
   } catch (e) { toast("Couldn't free: " + errText(e), "err"); }
 }
 
@@ -4103,10 +4137,10 @@ async function restoreTable(id) {
     const patch = { archived: false };
     if (o.status === "cancelled") patch.status = "received";
     try {
-      await api("PATCH", "/orders/" + id, patch);
+      const _wq = await api("PATCH", "/orders/" + id, patch);
       o.archived = false; if (patch.status) o.status = patch.status;
       renderEditor();
-      toast("Restored to the live floor", "ok");
+      okToast(_wq, "Restored to the live floor");
     } catch (e) {
       toast("Restore failed: " + e.message, "err");
     }
@@ -4149,7 +4183,7 @@ async function restoreBill(orders) {
     }
     if (!Object.keys(patch).length) continue;
     try {
-      await api("PATCH", "/orders/" + o.id, patch);
+      const _wq = await api("PATCH", "/orders/" + o.id, patch);
       if (patch.archived === false) o.archived = false;
       if (patch.status) o.status = patch.status;
       if (patch.payment_status) o.payment_status = patch.payment_status;
@@ -4160,7 +4194,7 @@ async function restoreBill(orders) {
   }
   renderEditor();
   if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
-  else toast("Bill restored to the live floor", "ok");
+  else okToast(_wq, "Bill restored to the live floor");
 }
 
 // setOrderStatus: move one order to a new status (e.g. Accept → preparing).
@@ -4182,8 +4216,8 @@ async function setOrderStatus(id, status, reason) {
     // stock and the cost. Sent only when it was actually asked — an absent answer stays UNANSWERED on
     // the server rather than being guessed at as "never made", which would silently put ingredients
     // back that a cook had really used.
-    await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}), ...(reason && typeof reason.made === "boolean" ? { made: reason.made } : {}) }); // sync in the background
-    toast("Order updated → " + status, "ok");
+    const _wq = await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}), ...(reason && typeof reason.made === "boolean" ? { made: reason.made } : {}) }); // sync in the background
+    okToast(_wq, "Order updated → " + status);
   } catch (e) {
     if (o && prev !== null) o.status = prev;         // server said no -> undo
     renderEditor();
@@ -4325,7 +4359,7 @@ async function setOrderPayment(id, paid, opts = {}) {
   renderEditor();
   renderTablePanel();
   try {
-    await api("PATCH", "/orders/" + id, {
+    const _wq = await api("PATCH", "/orders/" + id, {
       payment_status: paid ? "paid" : "pending",
       ...(revertReason ? { revert_reason: revertReason } : {}),
       ...(paid && opts.method ? { payment_method: opts.method, payment_note: opts.note || "" } : {}),
@@ -4339,7 +4373,7 @@ async function setOrderPayment(id, paid, opts = {}) {
       // bill the bar offered to take back is no longer on the floor to take back. Correcting a
       // settled bill is now one named, permissioned, audited thing — Access → Manager → Manager
       // menu → Bill → Reopen a bill — instead of a toast that quietly did the same job.
-      if (paid) toast("Marked paid 💳", "ok");
+      if (paid) okToast(_wq, "Marked paid 💳");
       else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
     }
     return true;
@@ -4736,7 +4770,7 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
       // device links must land on THIS party even if the table gets re-seated a moment later
       // (mig 233 — resolving by table number booked them onto the next party).
       const sid = payable[0] && payable[0].session_id;
-      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), session: sid || null, phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) toast(`📇 Saved ${picked.cust.name || "customer"}`, "ok"); }
+      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), session: sid || null, phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) okToast(rc, `📇 Saved ${picked.cust.name || "customer"}`); }
     } catch { /* best-effort; bill already paid */ }
   }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
@@ -4827,6 +4861,10 @@ async function onHouseSettle(t) {
       seconds: 5,
       onUndo: () => editorUndoOnHouse(ids),
     });
+    // A QUEUED WRITE HAS NO COUNT (T5 sweep #7, 2026-08-22): with no signal the outbox resolves
+    // { ok:true, queued:true }, so this read "On the house 🏠 — undefined orders settled at no
+    // charge" — the word `undefined` in a message about money given away.
+    else if (wasQueued(r)) toast("Saved on this device ✓ — the bill will be settled at no charge the moment you're back online.", "ok");
     else toast(`On the house 🏠 — ${r.count} order${r.count === 1 ? "" : "s"} settled at no charge`, "ok");
   } catch (e) { toast("Couldn't settle on the house: " + e.message, "err"); }
 }
@@ -4855,6 +4893,11 @@ async function khataParkFlow(t, orders) {
   if (!who) return; // cancelled
   try {
     const r = await api("POST", `/tables/${t}/khata`, who);
+    // A QUEUED PARK HAS NOT CLOSED THE TABLE (T5 sweep #7, 2026-08-22). This one never printed
+    // `undefined` — the name falls back to "their khata" — but it still announced a finished job
+    // and then cleared the open table, while the floor behind it still showed the party sitting
+    // there. Say what is true and leave the table where it is until the queue drains.
+    if (wasQueued(r)) { toast("Saved on this device ✓ — the bill will be parked on their khata the moment you're back online.", "ok"); return; }
     toast(`📒 Parked on ${r.customer && r.customer.name ? r.customer.name : "their khata"} — collect later from Bills → Khata`, "ok");
     state.selectedTable = null; // the table just closed
     await loadSessions();
@@ -4958,8 +5001,8 @@ function openTagModal(t) {
     const prev = tile ? tile.tag : undefined;
     if (tile) { tile.tag = tag || ""; renderEditor(); }
     try {
-      await api("POST", `/tables/${t}/tag`, { tag });
-      toast(tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed", "ok");
+      const _wq = await api("POST", `/tables/${t}/tag`, { tag });
+      okToast(_wq, tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed");
       await pollTables([String(t)]);
     } catch (e) {
       if (tile) { tile.tag = prev || ""; renderEditor(); }
@@ -4975,8 +5018,8 @@ async function resolveCall(id) {
   state.data.calls = before.filter((c) => c.id !== id); // vanish NOW
   renderEditor();
   try {
-    await api("PATCH", "/calls/" + id, { resolved: true });
-    toast("Marked attended", "ok");
+    const _wq = await api("PATCH", "/calls/" + id, { resolved: true });
+    okToast(_wq, "Marked attended");
   } catch (e) {
     state.data.calls = before; // bring it back — the server didn't get it
     renderEditor();
@@ -6081,7 +6124,7 @@ function openParcelTile(id) {
     // which has always passed both.
     try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: pcDisc, discount_note: pcDiscNote || null }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
-    try { await api("POST", `/platform/${o.id}/printed`, {}); toast("Bill printed ✓", "ok"); closeP(); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${o.id}/printed`, {}); okToast(_wq, "Bill printed ✓"); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
   };
   wrap.querySelector("#pcPay").onclick = async (e) => {
@@ -6095,7 +6138,7 @@ function openParcelTile(id) {
     // the counter already captured the name when the parcel was punched.
     const picked = await openPaymentMethodModal(Number(o.total) || 0, `Collect parcel ${o.parcel_no ?? ""}`.trim(), { methodOnly: true, crm: false });
     if (!picked || picked.special) { b.disabled = false; return; }   // cancelled — the tile stays
-    try { await api("POST", `/platform/${o.id}/pay`, { method: picked.method }); toast(`Collected via ${picked.method} ✓`, "ok"); closeP(); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${o.id}/pay`, { method: picked.method }); okToast(_wq, `Collected via ${picked.method} ✓`); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Couldn't collect: " + ((err && err.message) || err), "err"); }
   };
 }
@@ -6480,6 +6523,7 @@ function renderEditor() {
       btn.onclick = () => printIssuingInvoice(btn.dataset.printIssue, btn.dataset.printGroup || null);
     });
     ed.querySelectorAll("[data-void-invoice]").forEach((btn) => { btn.onclick = () => voidInvoice(btn.dataset.voidInvoice); });
+    ed.querySelectorAll("[data-reopen-table]").forEach((btn) => { btn.onclick = () => reopenTable(btn.dataset.reopenTable); });
     ed.querySelectorAll("[data-credit-note]").forEach((btn) => { btn.onclick = () => creditNote(btn.dataset.creditNote); });
     ed.querySelectorAll("[data-print-group]").forEach((btn) => {
       btn.onclick = () => {
@@ -6530,8 +6574,8 @@ function renderEditor() {
           const payload = { method: picked.method, note: picked.note };
           if (btn.dataset.khataSession) payload.session_id = btn.dataset.khataSession;
           else payload.order_id = btn.dataset.khataOrder;
-          await api("POST", "/khata/pay", payload);
-          toast(`Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+          const _wq = await api("POST", "/khata/pay", payload);
+          okToast(_wq, `Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`);
           state.khataLoadedAt = 0; // force a fresh book
           await loadKhataBook();
           loadSessions(); // the paid orders re-enter the normal records
@@ -6555,14 +6599,17 @@ function renderEditor() {
         // A manager reading that either takes the money twice or writes off money they took.
         // Each bill now stands on its own and the book is reloaded either way, exactly as
         // payOrdersWithMethod has always done for a table.
-        let okN = 0, failN = 0, got = 0, lastErr = "";
+        // MONEY OFF A KHATA, ONE BILL AT A TIME — and the queue is asked once for the lot
+        // (owner, 2026-08-26): with no signal none of these has reached the server, and
+        // "Collected ₹2,400" would be a figure nobody has taken.
+        let okN = 0, failN = 0, got = 0, lastErr = "", anyQueued = false;
         for (const bl of cst.bills) {
           const payload = { method: picked.method, note: picked.note };
           if (bl.session_id) payload.session_id = bl.session_id; else payload.order_id = bl.key;
-          try { await api("POST", "/khata/pay", payload); okN++; got += Number(bl.amount) || 0; }
+          try { anyQueued = wasQueued(await api("POST", "/khata/pay", payload)) || anyQueued; okN++; got += Number(bl.amount) || 0; }
           catch (e) { failN++; lastErr = (e && e.message) || String(e); }
         }
-        if (okN && !failN) toast(`Collected ${inr(got)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+        if (okN && !failN) okToast(anyQueued ? { queued: true } : null, `Collected ${inr(got)} from ${btn.dataset.khataName} 📒→💳`);
         else if (okN) toast(`Collected ${inr(got)} — ${failN} bill${failN === 1 ? "" : "s"} could NOT be collected (${lastErr}). The rest is still owed.`, "err");
         else toast("Couldn't collect: " + lastErr, "err");
         state.khataLoadedAt = 0;
@@ -6997,8 +7044,8 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
     // Send ONLY id + tags, not the whole dish snapshot — posting the full (possibly stale)
     // row here reverted a price/name someone else had just edited on this dish. The server
     // upsert updates only the columns we send (onConflict=id), so this touches tags alone.
-    await api("POST", "/items", { id: dish.id, tags: dish.tags });
-    toast(`${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`, "ok");
+    const _wq = await api("POST", "/items", { id: dish.id, tags: dish.tags });
+    okToast(_wq, `${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`);
   } catch (e) {
     // revert on failure
     if (adding) dish.tags.splice(dish.tags.indexOf(filterSlug), 1);
@@ -7157,7 +7204,7 @@ async function save() {
     // coverage guard reads call sites textually, and shorthand is invisible to it — a protection
     // its own guard can't see is one the next person can delete without anything going red.
     const saved = await api("POST", "/" + kind, payload, expect ? { expect: expect } : undefined);
-    toast("Saved ✓", "ok");
+    okToast(saved, "Saved ✓");
     await loadAll();
     if (state.tab === "general") {
       state.sel = clone(state.data.settings || it);
@@ -7195,7 +7242,7 @@ async function removeRecord() {
   const kind = state.tab; // the deleted record's kind (items/categories/filters)
   const restored = { ...it }; // snapshot for Undo
   try {
-    await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
+    const _wq = await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
     // If we just deleted the category the Dishes list is filtered by, clear the filter —
     // otherwise the Dishes tab filters to a category that no longer exists (looks empty).
     if (state.tab === "categories" && state.catFilter === recKey(it)) state.catFilter = "";
@@ -7208,11 +7255,11 @@ async function removeRecord() {
       try {
         const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
         await api("POST", "/" + kind, payload);
-        toast("Restored ✓", "ok");
+        okToast(_wq, "Restored ✓");
         if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
       } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
     };
-    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 6, onUndo: undoRec });
+    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 5, onUndo: undoRec });
     else toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: undoRec }, 6000);
   } catch (e) {
     toast("Delete failed: " + e.message, "err");
@@ -7398,6 +7445,7 @@ const OP_ACTION_LABELS = {
   errors_snoozed_all: "Set every problem to come back later", rate_limit_dismiss_all: "Cleared every limit-reached alert",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
+  table_reopened: "Reopened the table (paid bill back on the floor)",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
@@ -7510,10 +7558,10 @@ async function saveRetention(which, val) {
   try {
     // No id here — the server keys settings by restaurant_id and fills the row's real id
     // itself. (Sending the legacy id:"site" used to collide with #1's PK on other tenants.)
-    await api("POST", "/settings", { [which]: days });
+    const _wq = await api("POST", "/settings", { [which]: days });
     state.data.settings = { ...(state.data.settings || {}), [which]: days };
     const lbl = (RETENTION_OPTS.find((o) => o.d === days) || {}).label || days + " days";
-    toast("Saved — old logs auto-delete after " + lbl, "ok");
+    okToast(_wq, "Saved — old logs auto-delete after " + lbl);
   } catch (e) {
     // BRANCH ON THE SERVER'S CODE, NOT ITS PROSE. A refusal here is a real answer ("Aevidine
     // locked it" / "owner only"), not a failure to reach the server, so it must not read like one.
@@ -7946,8 +7994,16 @@ function auditHtml() {
     ${list.length ? `<p class="au-count">${list.length} ${list.length === 1 ? "record" : "records"}${auKind ? " · " + esc(kindLabel[auKind] || auKind) : ""}${shownMoney > 0 ? " · " + inr(shownMoney) + " in total" : ""}</p>` : ""}
     ${list.length ? `<div class="au-rows">${list.map((r) => {
       const [ico, label] = AUDIT_KIND[r.kind] || ["•", r.kind];
+      // ── NO INVOICE, NO BILL NUMBER (owner, 2026-08-26) ────────────────────────────────────
+      // "whenever the print … is not clicked, the invoice has not been generated, so the KOT will
+      // not know which bill number it is cut from. It will only [show] table and the time."
+      // The internal `bill_no` is a daily counter a table takes the moment it opens — it is NOT a
+      // document anyone has seen. Printing it beside a cancelled KOT made a manager read "Bill
+      // #1074 was cancelled" when no bill had ever been issued, which is the confusion this whole
+      // record exists to prevent. So it is shown ONLY once a tax invoice exists to attach it to;
+      // until then the KOT is identified the way it is identified on the floor — table and time.
       const bits = [r.table_number ? "T" + esc(r.table_number) : "", r.kot_no != null ? "KOT #" + esc(r.kot_no) : "",
-        r.bill_no != null ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
+        (r.invoice_no && r.bill_no != null) ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
         r.item_title ? esc(r.item_title) + (r.qty > 1 ? " ×" + esc(r.qty) : "") : "",
         r.amount != null ? inr(parseFloat(r.amount) || 0) : ""].filter(Boolean).join(" · ");
       // ── THE TAGS, AND THE ONE QUESTION THAT MAY STILL BE OPEN (owner, 2026-08-18) ───────────
@@ -8019,6 +8075,16 @@ function bindAudit() {
       b.textContent = "Saving…";
       try {
         const r2 = await api("POST", "/audit/classify", { order_id: orderId, made });
+        // A QUEUED ANSWER IS NOT A RECORDED ANSWER (T5 sweep #7, 2026-08-22). With no signal the
+        // outbox resolves { ok:true, queued:true }, so this said "Recorded as a loss — the
+        // ingredients stay used" and then reloaded the record from the saved copy, where the row
+        // still reads "Not answered yet". The screen contradicted its own toast, and the sentence
+        // it chose was the one that claims an inventory consequence.
+        if (wasQueued(r2)) {
+          b.disabled = false; b.textContent = was;
+          toast("Saved on this device ✓ — the answer will be recorded the moment you're back online.", "ok");
+          return;
+        }
         toast(made
           ? "Recorded as a loss" + (r2 && r2.lossCost ? " of " + inr(r2.lossCost) : "") + " — the ingredients stay used"
           : "Recorded — the ingredients go back into stock", "ok");
@@ -8070,6 +8136,10 @@ async function openRemovalDetail(id) {
      server that does not send them leaves the card exactly as it was. */
   const aft = d.__after || null;
   const goneNow = !aft || aft.state === "removed" || aft.state === "cancelled";
+  // Resolved once: the snapshot's value if it kept one, else the row's own (see the note at
+  // "Which KOT" below for why the bill number hides until an invoice exists).
+  const invNo = (w && w.invoice_no) || d.invoice_no || null;
+  const billNo = (w && w.bill_no != null) ? w.bill_no : (d.bill_no != null ? d.bill_no : null);
   const sideRows = [
     ["Kitchen ticket", w && w.kot_no != null ? "KOT #" + w.kot_no : null, aft && aft.kot_no != null ? "KOT #" + aft.kot_no : null],
     ["Table", w && w.table_number ? "T" + w.table_number : null, aft && aft.table_number ? "T" + aft.table_number : null],
@@ -8093,7 +8163,30 @@ async function openRemovalDetail(id) {
       }).join("")}</div>
     </div>`;
   const changedNames = sideRows.filter((r) => moved(r[1], r[2])).map((r) => String(r[0]).toLowerCase());
-  const beforeAfter = w ? `<div class="au-d-head">Before and after</div>
+  // ── WHAT THIS DID TO THE TABLE'S BILL (owner, 2026-08-26) ────────────────────────────────────
+  // "the before and after in the audit section should be shown like actual … previously the whole
+  // bill was this much and after cutting, this has been removed and the bill is this much."
+  // The two boxes below compare the KOT with ITSELF — useful, but they never answer what it did to
+  // the TABLE's bill, which is the question actually being asked. This band does, in one line, in
+  // money, every time. The server works both figures out (lib/auditDetail.ts → auditBillSides);
+  // an older server sends nothing and this simply does not draw.
+  const bs = d.__billSides || null;
+  const billSwing = bs ? `<div class="au-swing">
+      <div class="au-swing-h">What this did to the bill</div>
+      <div class="au-swing-row">
+        <span class="au-swing-box"><i>Bill was</i><b>${inr(bs.before)}</b>${bs.lines_before != null ? `<em>${esc(bs.lines_before)} line${bs.lines_before === 1 ? "" : "s"}</em>` : ""}</span>
+        <span class="au-swing-op">−</span>
+        <span class="au-swing-box au-swing-cut"><i>Taken out</i><b>${inr(bs.removed)}</b>${bs.lines_before != null && bs.lines_after != null ? `<em>${esc(bs.lines_before - bs.lines_after)} line${(bs.lines_before - bs.lines_after) === 1 ? "" : "s"}</em>` : ""}</span>
+        <span class="au-swing-op">=</span>
+        <span class="au-swing-box au-swing-now"><i>Bill is now</i><b>${inr(bs.after)}</b>${bs.lines_after != null ? `<em>${esc(bs.lines_after)} line${bs.lines_after === 1 ? "" : "s"}</em>` : ""}</span>
+      </div>
+      ${bs.after === 0 && bs.removed > 0
+        ? `<div class="au-swing-note">Nothing is left on this bill — every KOT on it has been cancelled, so the bill itself now counts as cancelled and was never a sale.</div>`
+        : bs.removed === 0
+        ? `<div class="au-swing-note">This bill is unchanged — what this record names is still on it.</div>`
+        : ""}
+    </div>` : "";
+  const beforeAfter = w ? `${billSwing}<div class="au-d-head">Before and after</div>
       ${goneNow ? `<div class="au-gone-note">${aft && aft.state === "cancelled"
         ? "This ticket was cancelled — nothing was charged for it. The left column is what it held."
         : "This is off the books now. The left column is what it held when it was removed — the row itself is kept, which is why you can still read it."}</div>` : ""}
@@ -8118,12 +8211,13 @@ async function openRemovalDetail(id) {
       ${row("Who", esc(d.actor || "—") + (d.actor_role ? ` · ${esc(d.actor_role)}` : ""))}
       ${row("Reason", esc(auditReasonTxt(d)))}
       ${d.amount != null ? row("Value removed", inr(parseFloat(d.amount) || 0)) : ""}
-      <div class="au-d-head">Which ticket / bill</div>
+      <div class="au-d-head">Which KOT${invNo ? " / bill" : ""}</div>
       ${row("Kitchen ticket", (w && w.kot_no != null ? w.kot_no : d.kot_no) != null ? "KOT #" + esc((w && w.kot_no != null ? w.kot_no : d.kot_no)) : "—")}
-      ${row("Bill number", (w && w.bill_no != null ? w.bill_no : d.bill_no) != null ? "#" + esc((w && w.bill_no != null ? w.bill_no : d.bill_no)) : "—")}
-      ${row("Invoice", (w && w.invoice_no) || d.invoice_no ? esc((w && w.invoice_no) || d.invoice_no) : "not invoiced")}
       ${row("Table", (w && w.table_number) || d.table_number ? "T" + esc((w && w.table_number) || d.table_number) : "no table (walk-in / parcel)")}
       ${w && w.ordered_at ? row("Ordered at", whenLong(w.ordered_at)) : ""}
+      ${invNo
+        ? row("Bill number", billNo != null ? "#" + esc(billNo) : "\u2014") + row("Invoice", esc(invNo))
+        : `<div class="au-d-none">No invoice was ever printed for this table, so this KOT belongs to no bill number — it is identified by its table and its time above. A bill number is only shown once a tax invoice exists to carry it.</div>`}
       ${w && w.customer ? row("Customer", esc(w.customer) + (w.customer_phone ? ` · ${esc(w.customer_phone)}` : "")) : ""}
       <div class="au-d-head">What was on it${w && w.item_count != null ? ` · ${esc(w.item_count)} line${w.item_count === 1 ? "" : "s"}` : ""}</div>
       ${lines ? `<div class="au-d-items">${lines}</div>`
@@ -8471,13 +8565,13 @@ async function closeFinishedTable(t) {
   // (it moves to Bills), nothing is deleted, and a table closed by mistake comes back through
   // "Restore to floor". The two guards above still refuse VISIBLY if the tile was stale.
   try {
-    await api("POST", `/sessions/${sess.id}/close`);
+    const _wq = await api("POST", `/sessions/${sess.id}/close`);
     state.selectedTable = null;
     state.openSess = null;
     document.querySelector(".tbl-modal-overlay")?.remove();          // the detail popup, if this came from there
     state.floatingTables = (state.floatingTables || []).filter((f) => !partyTablesOf(t).some((x) => String(x) === String(f.table)));
     await loadSessions();
-    toast(`${tableLabel(t)} closed — the bill is saved in Bills`, "ok");
+    okToast(_wq, `${tableLabel(t)} closed — the bill is saved in Bills`);
   } catch (e) {
     // errText(), not e.message: a busy server or a dropped connection must read as itself here
     // (this panel already has that translator) — never "TimeoutError: The operation was aborted".
@@ -8486,7 +8580,7 @@ async function closeFinishedTable(t) {
 }
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
 async function setSessAutoApprove(id, value) {
-  try { await api("POST", "/sessions/" + id + "/auto-approve", { value: !!value }); await loadSessions(); toast(value ? "Auto-approve on" : "Auto-approve off", "ok"); }
+  try { const _wq = await api("POST", "/sessions/" + id + "/auto-approve", { value: !!value }); await loadSessions(); okToast(_wq, value ? "Auto-approve on" : "Auto-approve off"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // memberAction: approve a waiting guest, or remove one from the table.
@@ -8499,9 +8593,9 @@ async function memberAction(id, kind) {
   const prev = m ? { approved: m.approved, removed: m.removed } : null;
   if (m) { if (kind === "approve") m.approved = true; else m.removed = true; refreshTableDetail(); }
   try {
-    await api("POST", "/members/" + id + "/" + (kind === "approve" ? "approve" : "remove"));
+    const _wq = await api("POST", "/members/" + id + "/" + (kind === "approve" ? "approve" : "remove"));
     await loadSessions();
-    toast(kind === "approve" ? "Approved" : "Removed", "ok");
+    okToast(_wq, kind === "approve" ? "Approved" : "Removed");
   } catch (e) {
     if (m && prev) { m.approved = prev.approved; m.removed = prev.removed; refreshTableDetail(); } // revert on failure
     toast("Failed: " + e.message, "err");
@@ -8511,7 +8605,7 @@ async function memberAction(id, kind) {
 // add to the blocklist (by member id, and phone if we have one).
 async function kickMember(id) {
   if (!(await confirmDialog("Kick this guest from the table? Their access ends now — the table stays open.", "Kick"))) return;
-  try { await api("POST", "/members/" + id + "/remove"); await loadSessions(); toast("Guest removed", "ok"); }
+  try { const _wq = await api("POST", "/members/" + id + "/remove"); await loadSessions(); okToast(_wq, "Guest removed"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // Transfer the table: this guest becomes the HEAD (owns the tab, approves
@@ -8519,14 +8613,14 @@ async function kickMember(id) {
 // the café or never answers join requests. Confirmed first: it's a hand-over.
 async function makeHead(id) {
   if (!(await confirmDialog("Make this guest the table's head? The current head is kicked out and this guest takes over approvals.", "Transfer"))) return;
-  try { await api("POST", "/members/" + id + "/make-head"); await loadSessions(); toast("Head transferred", "ok"); }
+  try { const _wq = await api("POST", "/members/" + id + "/make-head"); await loadSessions(); okToast(_wq, "Head transferred"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 async function banMember(id, phone) {
   if (!(await confirmDialog("Ban this guest? They're kicked now and added to the blocklist.", "Ban"))) return;
   try {
-    await api("POST", "/blocklist", { member_id: id, phone: phone || undefined }); // server also kicks them from their seat in the same call now (B23)
-    await loadSessions(); toast("Banned", "ok");
+    const _wq = await api("POST", "/blocklist", { member_id: id, phone: phone || undefined }); // server also kicks them from their seat in the same call now (B23)
+    await loadSessions(); okToast(_wq, "Banned");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // itemStatus: move one session item forward (received → preparing → served).
@@ -8566,17 +8660,17 @@ async function resolveRequest(id, status) {
   state.summary = Object.assign({}, state.summary, { requests: before.filter((r) => r.id !== id) });
   floorOpsInFlight++;
   loadSessions(true);
-  try { await api("POST", "/requests/" + id + "/resolve", { status }); floorOpsInFlight--; await loadSessions(); toast(status === "approved" ? "Approved" : "Dismissed", "ok"); }
+  try { const _wq = await api("POST", "/requests/" + id + "/resolve", { status }); floorOpsInFlight--; await loadSessions(); okToast(_wq, status === "approved" ? "Approved" : "Dismissed"); }
   catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { requests: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
 // block: add a phone/table to the blocklist (opts says which).
 async function block(opts) {
-  try { await api("POST", "/blocklist", opts); await loadSessions(); toast("Blocked", "ok"); }
+  try { const _wq = await api("POST", "/blocklist", opts); await loadSessions(); okToast(_wq, "Blocked"); }
   catch (e) { toast("Couldn't block: " + e.message, "err"); }
 }
 // unblock: remove an entry from the blocklist.
 async function unblock(id) {
-  try { await api("DELETE", "/blocklist/" + id); await loadSessions(); toast("Unblocked", "ok"); }
+  try { const _wq = await api("DELETE", "/blocklist/" + id); await loadSessions(); okToast(_wq, "Unblocked"); }
   catch (e) { toast("Couldn't unblock: " + e.message, "err"); }
 }
 // attendCall: mark a waiter call as handled.
@@ -8590,7 +8684,7 @@ async function attendCall(id) {
   floorOpsInFlight++;
   loadSessions(true);
   try {
-    await api("PATCH", "/calls/" + id, { resolved: true });
+    const _wq = await api("PATCH", "/calls/" + id, { resolved: true });
     floorOpsInFlight--;
     if (target && target.table_number) await pollTables([String(target.table_number)]); else await loadSessions();
     // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
@@ -8600,7 +8694,7 @@ async function attendCall(id) {
       icon: "🔔",
       onUndo: async () => { try { await api("PATCH", "/calls/" + id, { resolved: false }); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
     });
-    else toast("Marked attended", "ok");
+    else okToast(_wq, "Marked attended");
   }
   catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { calls: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
@@ -8706,12 +8800,18 @@ const itemsForOrder = (oid) => (state.board.items || []).filter((i) => i.order_i
 // Per-item rows for an order, unified: session order_items if present, else the items JSON.
 function orderItemRows(o) {
   const rows = itemsForOrder(o.id);
+  // IS THIS ORDER'S BILL ALREADY INVOICED? (owner, 2026-08-26.) Worked out ONCE here rather than
+  // at each of the ~6 places that draw a dish row, so "invoiced" cannot come to mean two things on
+  // two screens. A live invoice number locks the row's 🗑; a VOIDED one does not, because that
+  // bill was deliberately reopened. Rides on every row so itemRowHtml() needs no extra argument.
+  const _s = o.session_id ? (state.board.sessions || []).find((x) => x.id === o.session_id) : null;
+  const invoiceLive = !!(_s && _s.invoice_no != null && !_s.invoice_voided);
   // Carry options/removed/note through so the table panel can show the full
   // customization (what the guest chose, what to leave out) — not just the name.
   // is_mrp rides along from order_items (mig 270) so every screen that lists a dish can wear
   // the MRP stamp — the flag is FROZEN on the sold line, so a reprint says what it said then.
-  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
-  return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
+  if (rows.length) return rows.map((it) => ({ kind: "session", invoiceLive, id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
+  return (o.items || []).map((it, idx) => ({ kind: "legacy", invoiceLive, orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
 }
 
 // What the guest tapped, as an emoji for the tile / call list.
@@ -9160,7 +9260,7 @@ function floorTileHtml(i) {
     // by how wide the tile actually is: "＋ Take order" while it genuinely fits, and the bare ＋ when
     // it does not (a crowded tile, a dense floor, a finished table).
     //
-    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R28: there is NO third, short "Order"
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R31: there is NO third, short "Order"
     // face, and there must never be one again. The T3 sweep (2026-08-06) added one, this sweep
     // briefly restored it after a later change had made it unreachable, and he removed it looking at
     // the real tile: "instead of order is written that should be just a plus icon, nothing else, and
@@ -9170,7 +9270,7 @@ function floorTileHtml(i) {
     // bug. The size may change; the two faces may not.
     + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
-    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R29: there is no 🍽️ Serve-all on the
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R32: there is no 🍽️ Serve-all on the
     // tile. Offered as a way to make serving one tap instead of two ("tile → 🍽️ Serve all"), he said
     // "we will not do any of that stuff". Serving stays two taps. It also protects this row, which he
     // has ruled on twice (R4, and "never make take order button small"): a fifth control on an 89px
@@ -9999,8 +10099,8 @@ function bindFloor() {
     b.disabled = true;
     const i = b.dataset.prok.indexOf(":"), kind = b.dataset.prok.slice(0, i), id = b.dataset.prok.slice(i + 1);
     try {
-      await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
-      toast("Marked resolved ✓", "ok");
+      const _wq = await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
+      okToast(_wq, "Marked resolved ✓");
       await pollOrders();
     } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
   }));
@@ -10288,7 +10388,11 @@ function itemRowHtml(row, editing = false) {
   // total server-side (see lfh_delete_order_item) so no stale money is left behind.
   // …but NOT once it's SERVED — a delivered dish is a financial record; you don't
   // silently delete it (mirror the tablet, which also blocks delete on served).
-  const delBtn = (row.kind === "session" && row.status !== "served") ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
+  // …and not once the invoice is printed (owner, 2026-08-26) — same rule as the ✕ Cancel above,
+  // and the server has always refused it here (invoiceLockedByItem); the button simply stopped
+  // being offered for the served case only. `itemRowInvoiceLive` is set by the caller from the
+  // session this row belongs to; absent (a legacy order, a parcel) it is false and nothing changes.
+  const delBtn = (row.kind === "session" && row.status !== "served" && !row.invoiceLive) ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   // "preparing", not "cooking": the tile above this card and the guest's own order tracker both
   // say Preparing (the tile's label comes from the DATABASE, lfh_table_view_summary), so calling
@@ -10394,7 +10498,7 @@ function openDishEditModal(itemId, rerender) {
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one person's "more spicy" silently wiping another's "less spicy".
       if (note !== String(item.note || "").trim()) {
-        await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
+        const _wq = await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
       }
       if (!same(newItemRemoved, itemRemoved)) {
         await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
@@ -10404,7 +10508,7 @@ function openDishEditModal(itemId, rerender) {
       }
       close();
       await loadSessions(); if (rerender) rerender();
-      toast("Dish updated", "ok");
+      okToast(_wq, "Dish updated");
     } catch (e) {
       // SOMEONE ELSE GOT THERE FIRST. Close, refresh, and hold the message on screen long
       // enough to be read — this person's edit did NOT save and they need to know why.
@@ -10620,7 +10724,17 @@ function tablePanelParts(t, host = "float") {
     // a credit note, which keep the sale on the books. A part-served ticket counts as served: the
     // guest has eaten something.
     const anyServed = (o) => orderItemRows(o).some((r) => r.status === "served") || o.status === "served";
-    const cancelBtn = (o) => (anyServed(o) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕ Cancel</button>`);
+    // ── AND NOT ONCE THE INVOICE IS PRINTED (owner, 2026-08-26) ────────────────────────────────
+    // "whenever the invoice has been printed — like you have clicked the print button — after
+    // [that] you won't be able to delete the thing." A printed tax invoice is a document the guest
+    // is holding; taking a KOT off the bill behind it would leave the paper and the record
+    // disagreeing, and the number carrying a total that exists nowhere. The way out is REOPEN
+    // (which retires the number and records why) or, once settled, a credit note — both keep the
+    // sale on the books. The server refuses it as well (invoiceLockedByOrder in the editor route);
+    // this only stops offering a button that would be refused, because hiding is never the guard.
+    // A VOIDED invoice does not lock: that bill was reopened on purpose.
+    const invoiceLive = !!(sess && sess.invoice_no != null && !sess.invoice_voided);
+    const cancelBtn = (o) => ((anyServed(o) || invoiceLive) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
     const newBlocks = newOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
       return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot">${cancelBtn(o)}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
@@ -10655,7 +10769,7 @@ function tablePanelParts(t, host = "float") {
     // instead of being counted in silence.
     const shownN = newOrders.length + liveOrders.length;
     const voidedN = os.length - shownN;
-    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R30: this sentence is where it STOPS.
+    // REJECTED (owner, 2026-08-17) — docs/REJECTED-IDEAS.md R33: this sentence is where it STOPS.
     // Offered a next step for a table in this state — a line saying what to do, or a ⏻ that ends an
     // empty party — he said "we will not do any of that stuff". State the truth and leave it: the
     // bill is in the record, the table is usable, and no table ends itself (mig 254).
@@ -10922,7 +11036,7 @@ function openAddDishModal(orderId, rerender) {
       if (d && d.open_price) { price = await pricePrompt(d.title); if (price == null) return; }
       const r = await api("POST", `/orders/${orderId}/add-item`, { dishId: b.dataset.add, qty: 1, ...(price != null ? { price } : {}) });
       if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), "err"); return; }
-      toast("Dish added — bill updated", "ok");
+      okToast(r, "Dish added — bill updated");
       await loadSessions(); if (rerender) rerender();
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
@@ -12047,7 +12161,7 @@ function openShiftPicker(t, sess) {
     try {
       const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
       if (!r.ok) { toast("Couldn't shift: " + (KOT_REASON_TEXT[r.reason] || r.reason || ""), "err"); return; }
-      toast(`Shifted to ${tileFace(to)}`, "ok");
+      okToast(r, `Shifted to ${tileFace(to)}`);
       followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
@@ -12921,8 +13035,8 @@ async function printJobHere(id, btn) {
       allergies: Array.isArray(o.allergies) ? o.allergies : [],
       reprint: r.job ? r.job.reprint !== false : true,
     }));
-    await api("POST", `/print-jobs/${id}/dismiss`, {});
-    toast("Printed here ✓ — the kitchen job is closed.", "ok");
+    const _wq = await api("POST", `/print-jobs/${id}/dismiss`, {});
+    okToast(_wq, "Printed here ✓ — the kitchen job is closed.");
     await pollOrders();
   } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
 }
@@ -13044,7 +13158,7 @@ function bindPrintStationStrip(root) {
       const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
       if (r && r.station && printTargetSays) printTargetSays.station = r.station;
       if (take) lsSet(PRINT_HERE_KEY, "on");     // taking it IS the answer to "should this screen print?"
-      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.", "ok");
+      okToast(r, take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
       if (state.tab === "tables") renderEditor(); else if (state.tab === "general") renderEditor();
       if (take) managerPrintPass();              // anything already waiting prints straight away
     } catch (e) {
@@ -13330,6 +13444,10 @@ async function openSplitSettle(t) {
     closeM();
     try {
       const r = await api("POST", `/tables/${t}/pay-split`, { splits });
+      // A QUEUED WRITE HAS NO COUNT (T5 sweep #7, 2026-08-22) — this said "Paid in 3 parts 💳 —
+      // undefined orders settled" with no signal. The sibling split path a few hundred lines
+      // below already checks `r.queued`; this one was the odd one out.
+      if (wasQueued(r)) { toast(`Saved on this device ✓ — the ${splits.length} parts will settle the moment you're back online.`, "ok"); await pollTables([String(t)]); return; }
       toast(`Paid in ${splits.length} parts 💳 — ${r.count} order${r.count === 1 ? "" : "s"} settled`, "ok");
       await pollTables([String(t)]);
     } catch (e) { toast("Couldn't split-settle: " + e.message, "err"); }
@@ -13378,7 +13496,7 @@ function openMoveItemPicker(t) {
       try {
         const r = await api("POST", `/order-items/${itemId}/move`, { to });
         if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-        toast(`Dish moved to ${tileFace(to)} (new KOT)`, "ok");
+        okToast(r, `Dish moved to ${tileFace(to)} (new KOT)`);
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
   }));
@@ -13419,6 +13537,10 @@ function openMergePicker(t, sess) {
     try {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
       if (r && r.ok === false) { toast("Couldn't merge: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
+      // WHICH TABLE HOLDS THE BILL IS THE SERVER'S ANSWER (T5 sweep #7, 2026-08-22). With no
+      // signal `r.parent_table` is absent and this fell back to the guess made on screen, then
+      // announced the merge as done — over a floor where the two tables are still separate.
+      if (wasQueued(r)) { toast("Saved on this device ✓ — the tables will be joined onto one bill the moment you're back online.", "ok"); return; }
       toast(`Merged into ${tileFace((r && r.parent_table) || keeps)} — one bill`, "ok");
       // Fresh tiles + merges list first, then follow the table the SERVER kept (the lowest
       // number holds the bill — not always the one that was tapped). Same fix as the desktop
@@ -13474,7 +13596,7 @@ function openMoveKotPicker(t) {
       try {
         const r = await api("POST", `/orders/${orderId}/move`, { to });
         if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-        toast(`KOT moved to ${tileFace(to)}`, "ok");
+        okToast(r, `KOT moved to ${tileFace(to)}`);
         // Both tables repaint via the RPC's breadcrumbs (targeted refetch) — no manual reload.
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
@@ -13765,9 +13887,9 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
     // "applied" would be a lie until the order is actually placed.
     if (pending) { pending.onApply(Math.max(0, Math.min(amount, maxDisc)), amount > 0 ? note : ""); return; }
     try {
-      await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
+      const _wq = await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
       await loadSessions(); if (rerender) rerender();
-      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed", "ok");
+      okToast(_wq, amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed");
     } catch (e) {
       // SOMEONE ELSE DISCOUNTED THIS BILL FIRST — say so in words (T3 sweep, 2026-08-06). This
       // write sends `expect`, so the server refuses rather than overwriting, and it sends back a
@@ -13890,7 +14012,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
       const r = await api("POST", `/items/${b.dataset.itemDel}/delete`, { reason_code: reason.code, reason_note: reason.note });
       await loadSessions();
       if (rerender) rerender();
-      toast(r && r.order_cancelled ? "Dish removed — order now empty, cancelled" : "Dish removed — bill updated", "ok");
+      okToast(r, r && r.order_cancelled ? "Dish removed — order now empty, cancelled" : "Dish removed — bill updated");
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
   // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
@@ -14049,8 +14171,12 @@ async function acceptOrder(orderId) {
   try {
     const qA = wasQueued(await api("POST", "/orders/" + orderId + "/accept", null, { table: o && o.table_number })); release();
     if (!qA) await loadSessions();   // saved-not-sent → keep what the tap just showed
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: "Order accepted", sub: o ? `T${o.table_number} · tap undo to unsend` : "Tap undo to unsend", icon: "✋", onUndo: () => editorUndoServe(snap) });
-    else toast("Order accepted → preparing", "ok");
+    // NO UNDO BAR ON ACCEPT (owner, 2026-08-26: "remove for accept keep for serve"). Accepting is
+    // the most repeated tap of a service and the least consequential — it only tells the kitchen to
+    // start, and a wrongly-accepted ticket is still cancellable from the table until it is served.
+    // A card sliding up on every single accept was the noise; SERVE keeps its undo because a
+    // wrongly-served dish has no other way back on this panel. Do not re-add one here.
+    toast("Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
@@ -14133,6 +14259,25 @@ async function serveAllOrder(orderId) {
 // moment the queue drains — the panel refreshes on `lfh:outbox-flushed` (see the listener at the
 // bottom of this file) — and until then the table carries the ⏳ mark that says so.
 const wasQueued = (r) => !!(r && r.queued === true);
+
+// ── ONE SENTENCE FOR EVERY WRITE THAT HAS NOT LEFT THIS DEVICE (owner, 2026-08-26) ────────────
+//
+// "on bad wifi every message tells the truth, so a manager can trust what he reads."
+//
+// api() hands every non-GET to the offline outbox, and the outbox resolves { ok:true, queued:true }
+// instead of throwing — so a handler with only a try/catch sees a SUCCESS and says so. Eight sites
+// that announce money or mint a numbered document were fixed one at a time (items 2-5); this is the
+// rest of the panel, and it is deliberately ONE helper rather than fifty rewordings:
+//
+//   · a manager learns the sentence ONCE and then recognises it anywhere;
+//   · fifty hand-written variations is how two screens end up disagreeing about the same state;
+//   · and a new write site gets the behaviour by using okToast() instead of remembering a rule.
+//
+// It is not a warning and not an error: the work IS saved, it IS going, and the queue drawer and
+// the offline bar already say how much is waiting. It only stops the panel claiming a thing has
+// happened when it has not.
+const QUEUED_LINE = "Saved on this device ✓ — it'll send by itself the moment you're back online.";
+const okToast = (r, msg, ms) => toast(wasQueued(r) ? QUEUED_LINE : msg, "ok", undefined, ms);
 
 // ── WHERE SERVER TRUTH MEETS THIS DEVICE'S OWN WORK ──────────────────────────────────────────
 //
@@ -14245,8 +14390,8 @@ async function acceptTableOrders(t) {
     // refresh THIS tile's summary so the grid reflects truth — unless the change is still on
     // this device, in which case the saved copy would revert the tile we just flipped.
     if (!qAll) await pollTables([String(t)]);
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: recv.length > 1 ? `${recv.length} orders accepted` : "Order accepted", sub: `T${t} · tap undo to unsend`, icon: "✋", onUndo: () => editorUndoServe(snap) });
-    else toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
+    // No undo bar on accept — same rule as the single accept above (owner, 2026-08-26).
+    toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); } // reload truth on failure
   finally { release(); }
@@ -14330,7 +14475,8 @@ async function attendTableCalls(t) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; } };
   try {
-    for (const c of cs) await api("PATCH", "/calls/" + c.id, { resolved: true });
+    let anyQueued = false;
+    for (const c of cs) anyQueued = wasQueued(await api("PATCH", "/calls/" + c.id, { resolved: true })) || anyQueued;
     release(); await pollTables([String(t)]); // clears the tile's call emoji from the summary
     const callIds = [...ids];
     if (window.LFH_UNDO) LFH_UNDO.show({
@@ -14339,7 +14485,7 @@ async function attendTableCalls(t) {
       icon: "🔔",
       onUndo: async () => { try { await Promise.all(callIds.map((cid) => api("PATCH", "/calls/" + cid, { resolved: false }))); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
     });
-    else toast("Attended", "ok");
+    else okToast(anyQueued ? { queued: true } : null, "Attended");
   }
   catch (e) { release(); state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + errText(e), "err"); }
   finally { release(); }
@@ -14369,10 +14515,10 @@ async function restartTable(t) {
     // ONE atomic server call: archive the round + release members + CLEAR the table's live signals
     // (so no ghost waiter-call bell lingers on the emptied table) + reopen if sessions are on.
     // (B12 — was a client PATCH loop that never cleared the signals.)
-    await api("POST", "/tables/" + t + "/restart", {});
+    const _wq = await api("POST", "/tables/" + t + "/restart", {});
     release();
     await pollTables([String(t)]); // refresh this tile's summary (cheap, single-table)
-    toast(`${tableLabel(t)} restarted — still open`, "ok");
+    okToast(_wq, `${tableLabel(t)} restarted — still open`);
   } catch (e) { release(); toast("Couldn't restart: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
@@ -14695,14 +14841,14 @@ function showCustDetail(id) {
 // exitUser: remove a guest from their table (from the Log tab).
 async function exitUser(memberId) {
   if (!(await confirmDialog("Remove this guest from the table? They can't order or call until they rejoin.", "Remove"))) return;
-  try { await api("POST", "/members/" + memberId + "/remove"); await loadUsers(); toast("Guest removed", "ok"); }
+  try { const _wq = await api("POST", "/members/" + memberId + "/remove"); await loadUsers(); okToast(_wq, "Guest removed"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // blockUser: block a guest by phone (preferred) or table, so they hit a blocked screen.
 async function blockUser(phone, table) {
   const by = phone ? `phone ${phone}` : `table ${table}`;
   if (!(await confirmDialog(`Block this guest (by ${by})? They'll see a blocked screen and can't order or call.`, "Block"))) return;
-  try { await api("POST", "/blocklist", phone ? { phone } : { table }); await loadUsers(); toast("Blocked", "ok"); }
+  try { const _wq = await api("POST", "/blocklist", phone ? { phone } : { table }); await loadUsers(); okToast(_wq, "Blocked"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // blockDevice: block a staff DEVICE (a tablet / kitchen screen) by its device id.
@@ -14710,13 +14856,13 @@ async function blockUser(phone, table) {
 async function blockDevice(deviceId) {
   if (!deviceId) return;
   if (!(await confirmDialog("Block this device? The tablet/kitchen screen using it won't be able to take orders or act until you unblock it.", "Block device"))) return;
-  try { await api("POST", "/blocklist", { device_id: deviceId, reason: "device" }); await loadUsers(); toast("Device blocked", "ok"); }
+  try { const _wq = await api("POST", "/blocklist", { device_id: deviceId, reason: "device" }); await loadUsers(); okToast(_wq, "Device blocked"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // unblockLog: remove someone from the blocklist (a guest OR a device). After it,
 // loadUsers refreshes the blocklist so the operation-log buttons flip back too.
 async function unblockLog(id) {
-  try { await api("DELETE", "/blocklist/" + id); await loadUsers(); toast("Unblocked", "ok"); }
+  try { const _wq = await api("DELETE", "/blocklist/" + id); await loadUsers(); okToast(_wq, "Unblocked"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 
@@ -14735,7 +14881,24 @@ const PLAT_META = {
   other:    { label: "Other",    cls: "o" },
 };
 const platMoney = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
-function platAge(iso) { const m = Math.floor(Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000)); return m < 1 ? "just now" : m + "m"; }
+// HOW OLD IS THIS PLATFORM ORDER? Minutes, then hours, then days — the same steps the kitchen
+// wall uses (public/panels/kitchen/app.js, T4 sweep 2026-08-11) and the same reason.
+// THE UNIT USED TO NEVER CHANGE (T5 sweep #7, 2026-08-23). This returned bare minutes forever, so
+// a parcel left from the day before read "2709m" on the Platform board — measured on the running
+// panel. At a glance "2709m" reads as roughly forty-five minutes; it is forty-five HOURS, which is
+// the opposite of the truth, on the one board where age is the whole point (a delivery order
+// nobody has picked up). Minutes are dropped past a day: nobody needs them at that range and the
+// chip is a tight space. Under an hour nothing changes at all.
+function platAge(iso) {
+  const t = new Date(iso).getTime();
+  if (!isFinite(t)) return "";                    // say nothing rather than nonsense
+  const m = Math.floor(Math.max(0, (Date.now() - t) / 60000));
+  if (m < 1) return "just now";
+  if (m < 60) return m + "m";
+  const h = Math.floor(m / 60);
+  if (h >= 24) return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  return h + "h " + (m % 60) + "m";
+}
 function platColOf(st) {
   if (st === "new") return "new";
   if (st === "accepted" || st === "preparing") return "prep";
@@ -14840,7 +15003,7 @@ function bindPlatform() {
     document.addEventListener("click", () => { simMenu.hidden = true; }, { once: true });
     simMenu.querySelectorAll("[data-plat-sim]").forEach((b) => b.onclick = async (e) => {
       e.stopPropagation(); simMenu.hidden = true; b.disabled = true;
-      try { await api("POST", "/platform/test", { channel: b.dataset.platSim }); toast("Demo order added ✓", "ok"); await loadPlatform(); }
+      try { const _wq = await api("POST", "/platform/test", { channel: b.dataset.platSim }); okToast(_wq, "Demo order added ✓"); await loadPlatform(); }
       catch (err) { toast("Failed: " + err.message, "err"); }
     });
   }
@@ -14862,7 +15025,7 @@ function bindPlatform() {
     // without it charges the customer more than the record says they paid.
     try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: o.discount ?? (o.payload || {}).discount, discount_note: o.discount_note ?? (o.payload || {}).discount_note ?? null }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
-    try { await api("POST", `/platform/${id}/printed`, {}); toast("Bill printed ✓", "ok"); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${id}/printed`, {}); okToast(_wq, "Bill printed ✓"); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
   });
   document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
@@ -14887,7 +15050,7 @@ function bindPlatform() {
     b.disabled = true;
     const picked = await openPaymentMethodModal(Number(o.total) || 0, `Collect ${o.source === "parcel" ? "parcel" : "order"}`, { methodOnly: true, crm: false });
     if (!picked || picked.special) { b.disabled = false; return; }   // cancelled — the card stays
-    try { await api("POST", `/platform/${id}/pay`, { method: picked.method }); toast(`Collected via ${picked.method} ✓`, "ok"); await loadPlatform(); }
+    try { const _wq = await api("POST", `/platform/${id}/pay`, { method: picked.method }); okToast(_wq, `Collected via ${picked.method} ✓`); await loadPlatform(); }
     catch (e) { toast("Failed: " + e.message, "err"); b.disabled = false; }
   });
 }
@@ -15093,7 +15256,22 @@ async function generateInvoice(sid) {
   // Returns TRUE only when a number was actually issued — printIssuingInvoice relies on it, so a
   // failed issue can never be followed by a printed bill carrying no invoice number.
   try {
-    await api("POST", `/sessions/${sid}/invoice`, body);
+    const r = await api("POST", `/sessions/${sid}/invoice`, body);
+    // ── A QUEUED WRITE HAS NOT ISSUED A NUMBER (T5 sweep #7, 2026-08-22) ────────────────────
+    // The comment above says this returns true "only when a number was actually issued", and
+    // with no signal it did the opposite: api() hands a non-GET to the outbox, which resolves
+    // { ok:true, queued:true } instead of throwing, so nothing here saw a failure. The toast
+    // said "Invoice generated", this returned TRUE, and printIssuingInvoice() went straight on
+    // to print — from loadOrders()' saved copy, where invoice_no is still null. A printed bill
+    // carrying no invoice number is the exact thing invoice-first exists to stop.
+    // An invoice number can only be minted by the server (it is a gapless per-year series), so
+    // there is nothing honest to print until the queue drains. The write still goes — it is in
+    // the queue under its own action id and lands at-most-once on reconnect — so this says what
+    // is true and refuses to print, rather than cancelling the person's work.
+    if (wasQueued(r)) {
+      toast("No internet — the invoice number is given by the server, so nothing is printed yet. It will be issued the moment you're back online.", "err");
+      return false;
+    }
     await loadOrders();
     toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok");
     return true;
@@ -15125,11 +15303,42 @@ async function voidInvoice(sid) {
   const label = (REOPEN_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, "");
   const reason = [label, rr.note].filter(Boolean).join(" — ");
   try {
-    await api("POST", `/sessions/${sid}/void-invoice`, { reason, reason_code: rr.code, reason_note: rr.note || null });
+    const _wq = await api("POST", `/sessions/${sid}/void-invoice`, { reason, reason_code: rr.code, reason_note: rr.note || null });
     await loadOrders();
-    toast("Bill reopened — add or change items, then Print again for a new invoice", "ok");
+    okToast(_wq, "Bill reopened — add or change items, then Print again for a new invoice");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
+// PUT A FINISHED TABLE BACK ON THE FLOOR (owner, 2026-08-26; mig 365).
+//
+// "You should reopen table not the bill … if the table has already taken the order, it shouldn't
+//  be able to reopen. If the table is free, then only it should be able to reopen, and after
+//  reopen you can add the order to that particular bill, you can't delete."
+//
+// The party paid, left, and came back. voidInvoice() above is the OTHER case — a bill still live
+// on the floor being corrected before it is settled — and it refuses a closed one, correctly.
+//
+// What this does NOT do, and must never be made to do: un-pay anything. The money collected stays
+// collected, the retired invoice number stays retired and on record, and every KOT already on the
+// bill stays put — the route has always refused to cancel a PAID order, which is what makes the
+// reopened bill add-only without needing a new rule for it.
+async function reopenTable(sid) {
+  const ss = (state.board.sessions || []).find((x) => x.id === sid) || {};
+  const where = ss.table_number != null ? tableLabel(ss.table_number) : "this table";
+  // The same reason picker a reopen has always used — this IS the confirmation, so there is no
+  // second yes/no on top of it (owner, 2026-08-05).
+  const rr = await askReopenReason(`${where}${ss.invoice_no != null ? ` · invoice #${ss.invoice_no}` : ""} — the table comes back so this party can order again`);
+  if (!rr) return; // cancelled — a reason is required
+  const label = (REOPEN_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, "");
+  const reason = [label, rr.note].filter(Boolean).join(" — ");
+  try {
+    const r = await api("POST", `/sessions/${sid}/reopen-table`, { reason, reason_code: rr.code, reason_note: rr.note || null });
+    // A queued write has not reopened anything — the floor behind this is unchanged (item 5's rule).
+    if (wasQueued(r)) { toast("Saved on this device ✓ — the table will come back the moment you're back online.", "ok"); return; }
+    await loadSessions(); await loadOrders();
+    toast(`${where} is back on the floor — add the order, then Print for a new invoice`, "ok");
+  } catch (e) { toast(errText(e), "err", undefined, 9000); }
+}
+
 // Issue a CREDIT NOTE — the legal way to refund/correct a bill WITHOUT changing it (used
 // once a bill is settled and can't be edited). Records a new, numbered credit document.
 async function creditNote(sid) {
@@ -15139,7 +15348,14 @@ async function creditNote(sid) {
   if (!amount || amount <= 0) { toast("Enter a valid amount", "err"); return; }
   const reason = await promptDialog("Why this credit note? (required)", { confirmLabel: "Issue credit note", placeholder: "overcharge, refund, correction…", required: true });
   if (reason == null) return;
-  try { const cn = await api("POST", `/sessions/${sid}/credit-note`, { amount, reason }); await loadOrders(); toast(`Credit note #${cn && cn.credit_no ? cn.credit_no : ""} issued`, "ok"); }
+  // A CREDIT NOTE IS A NUMBERED DOCUMENT, AND THE SERVER GIVES THE NUMBER (T5 sweep #7,
+  // 2026-08-22). With no signal the outbox resolves { ok:true, queued:true }, so this printed
+  // the sentence "Credit note # issued" — a document announced with a blank number.
+  try {
+    const cn = await api("POST", `/sessions/${sid}/credit-note`, { amount, reason });
+    if (wasQueued(cn)) { toast("Saved on this device ✓ — no internet, so the credit note has no number yet. It will be issued the moment you're back online.", "ok"); return; }
+    await loadOrders(); toast(`Credit note #${cn && cn.credit_no ? cn.credit_no : ""} issued`, "ok");
+  }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 async function loadOrders() {
@@ -16313,10 +16529,10 @@ function bindBanquet() {
     row.querySelector("[data-bq-del]").onclick = async () => {
       if (!(await confirmDialog(`Delete "${item.title}" from the banquet packages?`, "Delete"))) return;
       try {
-        await api("POST", "/banquet/item-delete", { id });
+        const _wq = await api("POST", "/banquet/item-delete", { id });
         bq.items = bq.items.filter((i) => i.id !== id);
         renderEditor();
-        toast("Deleted", "ok");
+        okToast(_wq, "Deleted");
       } catch (e) { toast("Couldn't delete: " + e.message, "err"); }
     };
   });
@@ -16329,7 +16545,7 @@ function bindBanquet() {
       const row = await api("POST", "/banquet/item-save", { title, price, unit: "per plate", active: true, sort_order: bq.items.length + 1 });
       bq.items.push(row);
       renderEditor();
-      toast("Added", "ok");
+      okToast(row, "Added");
     } catch (e) { toast("Couldn't add: " + e.message, "err"); }
   };
 
@@ -16462,6 +16678,18 @@ function bindBanquet() {
       };
       const payload = lines.map((l) => ({ id: l.id, qty: l.qty, disc: l.disc, price: l.open ? l.price : undefined }));
       const r = await api("POST", "/banquet/bill", { table: t, lines: payload, meta });
+      // ── SAME RULE AS THE INVOICE (T5 sweep #7, 2026-08-22) ─────────────────────────────────
+      // With no signal the outbox resolves { ok:true, queued:true } and every field below is
+      // undefined, so the toast read "Bill undefined created — ₹0." and the print call two
+      // lines down produced a banquet SHEET numbered `undefined` with ₹0 in every column —
+      // handed to a customer. The line under it already says to print from the server's frozen
+      // figures and never from the screen's copy; when the write is still on this device there
+      // are no server figures at all.
+      if (wasQueued(r)) {
+        toast("Saved on this device ✓ — no internet, so the bill has no number yet and nothing is printed. It will be created the moment you're back online.", "err");
+        issue.disabled = false;   // the button comes back, or the tap has vanished in silence
+        return;
+      }
       toast(`Bill ${r.bill_no} created — ${inr(r.total)}.`, "ok");
       // print from the SERVER's frozen figures, never from the screen's copy
       printBanquetBill({
@@ -16622,6 +16850,9 @@ const XRAY_CONTROLS = [
   { selector: "[data-qop]", flag: "take_orders|parcel", label: "Take orders / Parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  // Reopening a finished TABLE is the same money power as reopening a live bill — the route checks
+  // void_bills for both — so it wears the same marker and disappears for the same people.
+  { selector: "[data-reopen-table]", flag: "void_bills", label: "Void / reopen bills" },
   // Credit note is the SAME money power as reopen (the server refuses it via void_bills —
   // "Money action → void_bills" at the credit-note endpoint), but this row was missing, so a
   // manager without the power saw a fully clickable button that only failed after they had

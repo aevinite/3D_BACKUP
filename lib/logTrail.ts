@@ -119,6 +119,9 @@ const PLACE: Record<string, Place> = {
   close_unpaid: { area: "Orders & bills", screen: "Settle the bill" },
   invoice_generate: { area: "Orders & bills", screen: "Print the bill" },
   invoice_void: { area: "Orders & bills", screen: "Reopen the bill" },
+  // A SETTLED bill coming back onto its own free table (mig 365) — a different act from voiding
+  // a live bill's invoice above, and it reads differently in the log on purpose.
+  table_reopened: { area: "Orders & bills", screen: "Reopen the table" },
   credit_note: { area: "Orders & bills", screen: "Reopen the bill" },
   order_tip: { area: "Orders & bills", screen: "Settle the bill" },
   khata_park: { area: "Orders & bills", screen: "Pay later (khata)" },

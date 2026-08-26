@@ -37,7 +37,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 // The admin stays invisible to a MANAGER too — the Audit now obeys the rule the Activity log
 // already did (lib/auditActor.ts).
 import { auditForReader, forReader } from "@/lib/auditActor";
-import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
+import { auditAfter, auditBillHtml, auditBillSides } from "@/lib/auditDetail";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 // The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
@@ -1356,7 +1356,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
         // the paper or in the Audit — it changes one word on one button, nothing else.
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
-          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
@@ -1408,6 +1408,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const s = map[o.session_id];
           if (s) {
             o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no;
+            // IS THE TABLE STILL ON THE FLOOR? (owner, 2026-08-26.) The Bills tab has to tell a
+            // LIVE bill being corrected before payment from a FINISHED one whose party has left —
+            // they take two different doors (void-invoice vs reopen-table, mig 365) and the button
+            // has to pick the right one. It cannot ask state.board.sessions: that holds only the
+            // SELECTED table's slice, so in the Bills tab it is empty and every bill would look
+            // open. Found by driving it — the button rendered, and rendered the wrong door.
+            o.session_status = s.status;
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
@@ -2539,13 +2546,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // …with the two boxes and the bill, so the manager's card is the SAME card the owner and the
         // admin read (one record, one story — the rule this whole area exists under).
         const dMeta = ((one[0] as Record<string, unknown>).meta || {}) as Record<string, unknown>;
-        const [dAfter, dBill] = await Promise.all([
-          auditAfter(rid, (one[0] as Record<string, unknown>).order_id ? String((one[0] as Record<string, unknown>).order_id) : null),
+        const dRow = one[0] as Record<string, unknown>;
+        const dOrderId = dRow.order_id ? String(dRow.order_id) : null;
+        const [dAfter, dBill, dBillSides] = await Promise.all([
+          auditAfter(rid, dOrderId),
           auditBillHtml(rid, (dMeta.was || null) as Record<string, unknown> | null),
+          // WHAT THIS DID TO THE TABLE'S BILL (owner, 2026-08-26) — the whole-bill before/after,
+          // as opposed to the KOT compared with itself. See auditBillSides() for how both numbers
+          // are got without inventing any history.
+          auditBillSides(rid, dRow.session_id ? String(dRow.session_id) : null,
+            (dMeta.was || null) as Record<string, unknown> | null, dOrderId),
         ]);
         return ok({
           ...forReader(one[0] as { actor?: string | null; actor_role?: string | null }, !g.user),
-          __after: dAfter, __billHtml: dBill,
+          __after: dAfter, __billHtml: dBill, __billSides: dBillSides,
         });
       }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
@@ -3804,6 +3818,48 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       return ok(Array.isArray(data) ? data[0] : data);
     }
+    // sessions/:id/reopen-table — PUT THE TABLE BACK, not the bill (owner, 2026-08-26).
+    //
+    // "You should reopen table not the bill … if the table has already taken the order, it
+    //  shouldn't be able to reopen. If the table is free, then only it should be able to reopen,
+    //  and after reopen you can add the order to that particular bill, you can't delete."
+    //
+    // The sibling above (void-invoice) reopens a bill that is still LIVE, for edits before it is
+    // paid. This one is the other case: a party that paid, left, and came back. The bill is closed
+    // and settled; the table is free; they want one more coffee. Until now the app's only answer
+    // was a credit note, which is a refund document, not a way to sell them a coffee.
+    //
+    // Every rule lives in the RPC (mig 365) so all three doors obey it — the table must be free,
+    // there must be a real sale to come back to, the invoice number is retired rather than reused,
+    // and nothing is un-paid. The route's job is the permission, the tenant boundary, the reason,
+    // and turning the RPC's codes into sentences a person can act on.
+    if (a === "sessions" && c === "reopen-table") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("reopen a bill");
+      const ownsRe = must(await sb.from("sessions").select("id,status,invoice_no,invoice_voided,table_number,bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; status?: string | null; invoice_no?: string | null; invoice_voided?: boolean | null; table_number?: string | null; bill_no?: number | null } | null;
+      if (!ownsRe) return err("That table isn't for this restaurant.", 404);
+      if (ownsRe.status === "open") return err("This bill is already open — the table is live right now.", 409);
+      const reReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      if (!reReason) return err("A reason is required to reopen a table.", 400);
+      const { data: reData, error: reErr } = await sb.rpc("lfh_reopen_table", { p_session: b, p_reason: reReason, p_actor: actorName });
+      if (reErr) {
+        if (reErr.code === "LFH03" || /another party is sitting/i.test(reErr.message))
+          return err(`Someone else is sitting at ${ownsRe.table_number ? "T" + ownsRe.table_number : "that table"} right now. The table has to be free before this bill can come back to it.`, 409);
+        if (reErr.code === "LFH04" || /nothing to reopen/i.test(reErr.message))
+          return err("Every KOT on this bill was cancelled, so there is no sale to reopen.", 409);
+        throw pgError(reErr);
+      }
+      // The table + bill, never the session uuid — the same rule the sibling handlers follow, so a
+      // person reading the Audit sees what they saw on the floor.
+      await log("editor", "table_reopened", {
+        restaurant_id: rid, table_number: ownsRe.table_number ?? null,
+        detail: `Bill #${ownsRe.bill_no ?? "?"}` + (ownsRe.invoice_no ? ` · Invoice ${ownsRe.invoice_no} retired` : "") + ` · ${reReason}`,
+        device_id: dev,
+      });
+      invalidateFloor(rid);
+      return ok(reData);
+    }
+
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
     // A reason is REQUIRED (owner: every reopen must say why). Refused once settled (mig 189).
     if (a === "sessions" && c === "void-invoice") {
@@ -5320,6 +5376,33 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,khata_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
+      // ── ONCE THE INVOICE IS PRINTED, NOTHING COMES OFF THE BILL (owner, 2026-08-26) ───────────
+      // His words: *"whenever the invoice has been printed — like you have clicked the print button
+      // — after [that] you won't be able to delete the thing."*
+      //
+      // Until now the only bars on cancelling a KOT were "is it paid?" and, in the panel, "has any
+      // dish been served?". An INVOICED but not-yet-paid bill fell through both: a manager could
+      // print a tax invoice, hand it to the guest, and then void a KOT off it. The paper in the
+      // guest's hand and the record would then disagree, and the invoice number would be carrying a
+      // total that no longer exists anywhere — which is the shape of a silent downward revision,
+      // the thing docs/COMPLIANCE-GUARDRAILS.md §2 refuses outright.
+      //
+      // The legal route after an invoice exists is unchanged and already built: REOPEN the bill
+      // (which voids the invoice, retires its number and records why — mig 189), change what needs
+      // changing, and print again for a new number; or, once settled, a CREDIT NOTE. Both keep the
+      // sale on the books. So this refuses and names the door rather than just saying no.
+      //
+      // Here and not only in the panel because three doors reach this route (manager, tablet, and
+      // the admin console acting as a restaurant), and a guard in one screen is a guard one caller
+      // obeys.
+      //
+      // ONE RULE, ONE PLACE: invoiceLockedByOrder() is the same helper that already locks the
+      // per-dish delete, the quantity stepper and the discount. A live invoice number locks the
+      // bill; a VOIDED one does not, because the bill was deliberately reopened and is editable
+      // again. Reusing it is what stops "invoiced" meaning four slightly different things.
+      if (patch.status === "cancelled" && await invoiceLockedByOrder(id)) {
+        return err("This bill's invoice has already been printed, so no KOT can be taken off it. Reopen the bill first — that retires the invoice number and records why — or issue a credit note if it is already settled.", 409);
+      }
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
       // On 2026-07-31 it was put behind void_bills, reasoning that a cancel voids money. Then on
       // 2026-08-02 the owner made "Reopen a bill" default OFF for every restaurant — and because

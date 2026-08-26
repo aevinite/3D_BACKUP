@@ -91,6 +91,60 @@ export async function auditAfter(rid: string, orderId: string | null | undefined
 }
 
 /**
+ * WHAT THE WHOLE BILL WAS WORTH BEFORE THIS, AND WHAT IT IS WORTH NOW (owner, 2026-08-26).
+ *
+ * His words: *"the before and after in the audit section should be shown like actual … previously
+ * the whole bill was this much and after cutting, this has been removed and the bill is this much."*
+ *
+ * The two boxes above this one compare the KOT with ITSELF, which answers "what was on the ticket"
+ * but never "what did this do to the table's bill" — and that second question is the one a manager
+ * and an officer both actually ask.
+ *
+ * HOW THE TWO NUMBERS ARE GOT, and why neither is invented:
+ *   · AFTER  = the live (non-cancelled, non-tombstoned) orders on this session, summed NOW.
+ *   · REMOVED = what this record took out, from the snapshot the audit row already stores.
+ *   · BEFORE = AFTER + REMOVED. No bill history is needed and none is guessed: the bill before the
+ *     removal is, by definition, the bill after it plus the thing that came out.
+ *
+ * Returns null when the removal was never about a table's bill (a dish taken off the MENU has no
+ * session), so the card simply does not draw the row — an older server that sends nothing leaves
+ * the card exactly as it was.
+ *
+ * Scoped to the restaurant, column-listed, capped, and read only when someone opens a card.
+ */
+export async function auditBillSides(
+  rid: string,
+  sessionId: string | null | undefined,
+  was: Record<string, unknown> | null | undefined,
+  removedOrderId: string | null | undefined,
+): Promise<{ before: number; after: number; removed: number; lines_before: number; lines_after: number } | null> {
+  if (!sessionId) return null;
+  const rows = (await sb.from("orders")
+    .select("id, total, status, deleted_at, items")
+    .eq("session_id", sessionId).eq("restaurant_id", rid).limit(200)).data as Record<string, unknown>[] | null;
+  if (!rows) return null;
+  const live = rows.filter((o) => !o.deleted_at && o.status !== "cancelled");
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const after = r2(live.reduce((a, o) => a + (Number(o.total) || 0), 0));
+  const linesAfter = live.reduce((a, o) => a + (Array.isArray(o.items) ? (o.items as unknown[]).length : 0), 0);
+  // What came out. The snapshot is the honest source — the row itself may since have been read
+  // again, and on a tombstoned order it may not be readable at all.
+  const removed = r2(Number((was && was.total) ?? 0) || 0);
+  const linesRemoved = Array.isArray(was && was.items) ? (was!.items as unknown[]).length : 0;
+  // A guard against double-counting: if the removed order is somehow STILL live (a restore, or a
+  // record about something that was never actually taken out), `after` already contains it and
+  // adding it again would invent money. Then before === after, which is the truth.
+  const stillLive = !!removedOrderId && live.some((o) => String(o.id) === String(removedOrderId));
+  return {
+    before: stillLive ? after : r2(after + removed),
+    after,
+    removed: stillLive ? 0 : removed,
+    lines_before: stillLive ? linesAfter : linesAfter + linesRemoved,
+    lines_after: linesAfter,
+  };
+}
+
+/**
  * THE BILL AS IT STOOD WHEN IT WAS REMOVED — real HTML from the real document builder.
  *
  * Returns null when there is no bill to draw (no snapshot, or a snapshot with no lines — a dish off
