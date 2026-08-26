@@ -188,7 +188,9 @@
     "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs",
     "verify:retention": "node scripts/verify-retention-lock.mjs",
     "verify:floor-offplan": "node scripts/verify-floor-offplan.mjs",
-    "verify:tip": "node scripts/verify-tip.mjs"
+    "verify:tip": "node scripts/verify-tip.mjs",
+    "verify:owner-s7": "node scripts/verify-owner-territory-s7.mjs",
+    "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",
