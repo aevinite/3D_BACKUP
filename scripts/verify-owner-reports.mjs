@@ -637,6 +637,39 @@ console.log("\nT11-C · a report must read the takings, not the discount");
     "the newest lfh_owner_revenue_timeseries no longer carries the explicit hist column list — a later " +
       "migration has re-introduced an older body. Take the TRUE LATEST definition before replacing one of these.",
   );
+
+  // ── …AND A CALENDAR-DAY ROLLUP MUST NEVER ANSWER A 05:00 WINDOW (mig 367) ────────────────
+  // orders_daily_agg.day is the IST CALENDAR date (mig 190), so the rollup cannot answer a
+  // BUSINESS day (05:00 IST → 05:00 IST) — which is what range=day / today / yesterday all ask
+  // for. lfh_owner_sales_report has always fenced this (rollup only on a month bucket), which is
+  // why the day sheet's MONEY was right; lfh_owner_payment_breakdown had no fence, so the
+  // Settlement panel underneath that money silently answered for the calendar day. Measured on
+  // French House before mig 367: 22 Aug read ₹94,952 collected over a settlement of ₹1,23,386,
+  // and 23 Aug read ₹0 over a settlement of ₹441.
+  const pb = latestBodyOf("lfh_owner_payment_breakdown");
+  check(
+    "the settlement reads the same day the money does",
+    !!pb && /use_rollup/.test(pb.text) && /date_trunc\('day', p_from AT TIME ZONE 'Asia\/Kolkata'\)/.test(pb.text),
+    `${pb ? pb.file : "not found"} — lfh_owner_payment_breakdown must only read orders_daily_agg when ` +
+      "p_from really is IST midnight, and read live orders otherwise. Without that fence the Day summary's " +
+      "Settlement panel answers for the CALENDAR day while the Total collected tile above it answers for the " +
+      "BUSINESS day, and the two disagree on any day already rolled up.",
+  );
+  check(
+    "…and it drops BOTH rollup bounds when the window is not calendar-aligned",
+    !!pb && /hist_max_day/.test(pb.text) && /tail_start FROM bounds/.test(pb.text),
+    `${pb ? pb.file : "not found"} — fencing hist alone is not enough: tail_start must fall to -infinity too, ` +
+      "or the live branch still starts at the watermark and the window loses everything before it.",
+  );
+  // lfh_owner_revenue_timeseries is correct today only because its day-bucket fence happens to
+  // line up with the fact that every day-bucket window this app asks for starts at IST midnight.
+  // Say so out loud, so a future business-day day-bucket window is not added silently.
+  check(
+    "…and the revenue timeseries still refuses the rollup on any bucket but 'day'",
+    !!ts && /\(SELECT b FROM params\) = 'day'/.test(ts.text),
+    "the newest lfh_owner_revenue_timeseries has lost its rollup fence. It reads the same calendar-day " +
+      "rollup, so an hour-bucket or a business-day window must not touch it.",
+  );
 }
 
 console.log("\nT11-D · printing, and the phone");
