@@ -17548,13 +17548,18 @@ function renderXrayRibbon(higher, zones) {
   const sig = `${who}|${sim ? "sim" : "full"}|${asName}|${restName}|${zones.map((z) => z.label).join(",")}`;
   if (rb.dataset.sig === sig) return;
   rb.dataset.sig = sig;
-  // The ADMIN came here from the console → show the PATH (Restaurants › name ›
-  // Manager panel), the same breadcrumb the owner panel's admin bar uses (owner,
-  // 2026-07-06). An OWNER looking into their own manager panel has no console to
-  // crumb back to, so they keep the plain restaurant-name label.
+  // The ADMIN came here from the console → show the PATH (Dashboard › name › Manager panel),
+  // the same breadcrumb the owner panel's admin bar uses. An OWNER looking into their own
+  // manager panel has no console to crumb back to, so they keep the plain name label.
+  //
+  // IT STARTS AT THE DASHBOARD, NOT AT "RESTAURANTS" (owner, 2026-08-26): *"if i go from
+  // dashboard to the manager panel view of some restaurant then what i see path like restaurant
+  // then restaurant name and then manager panel — it should be like dashboard and restaurant name
+  // and manager panel … you want to go back to dashboard"*. He arrives from the dashboard, so the
+  // trail has to lead back to it in one tap; "Restaurants" was a step he never took.
   const crumbs = who === "Admin"
-    ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-      `<i class="fas fa-chevron-right rb-sep"></i><span>${esc(restName) || "…"}</span>` +
+    ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Dashboard</a>` +
+      `<i class="fas fa-chevron-right rb-sep"></i><a id="xrayRestLink">${esc(restName) || "…"}</a>` +
       `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
     : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
   // WHOSE panel is being measured. A person pin now shows the FULL panel with their gaps
@@ -17577,10 +17582,18 @@ function renderXrayRibbon(higher, zones) {
     `<button class="rb-exit" id="xrayExit"><i class="fas fa-arrow-rotate-left"></i> Exit view</button>`;
   const xrayFullBtn = document.getElementById("xrayFullBtn");
   if (xrayFullBtn) xrayFullBtn.onclick = () => xraySetViewReal(false);
-  const xrayHome = document.getElementById("xrayHome");
-  if (xrayHome) xrayHome.onclick = () => {
-    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  // GO BACK TO THE ADMIN CONSOLE, AND STOP ACTING AS THIS RESTAURANT ON THE WAY OUT.
+  // The crumb used to be a plain jump: the admin left the panel but the act-as cookie stayed
+  // set for six hours, so re-opening a panel silently re-entered this restaurant. The owner
+  // panel's bar was fixed for exactly that on 2026-07-06 and these three were not.
+  const goConsole = async (href) => {
+    try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+    try { window.top.location.href = href; } catch { window.location.href = href; }
   };
+  const xrayHome = document.getElementById("xrayHome");
+  if (xrayHome) xrayHome.onclick = () => goConsole("/aevinite");
+  const xrayRestLink = document.getElementById("xrayRestLink");
+  if (xrayRestLink) xrayRestLink.onclick = () => goConsole("/aevinite/restaurants");
   document.getElementById("xrayExit").onclick = async () => {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }

@@ -5162,16 +5162,24 @@ function renderXrayRibbon() {
     rb.dataset.sig = simSig;
     rb.innerHTML =
       `<span class="rb-tag">Admin view · ${asName ? `as ${esc(asName)}` : "as real tablet"}</span>` +
-      `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-      `<span class="rb-sep">›</span><span>${restS ? esc(restS) : "…"}</span>` +
+      `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Dashboard</a>` +
+      `<span class="rb-sep">›</span><a id="xrayRestLink">${restS ? esc(restS) : "…"}</a>` +
       `<span class="rb-sep">›</span><span>Tablet panel</span></nav>` +
       `<span class="rb-spacer"></span>` +
       `<button id="xrayFullBtn" title="Back to the full admin view (everything visible)">See full admin view</button>` +
       `<button class="rb-exit" id="xrayExit">Exit view</button>`;
     document.getElementById("xrayFullBtn").onclick = () => xraySetViewReal(false);
-    document.getElementById("xrayHome").onclick = () => {
-      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    // GO BACK TO THE ADMIN CONSOLE, AND STOP ACTING AS THIS RESTAURANT ON THE WAY OUT.
+    // The crumb used to be a plain jump: the admin left the panel but the act-as cookie stayed
+    // set for six hours, so re-opening a panel silently re-entered this restaurant. The owner
+    // panel's bar was fixed for exactly that on 2026-07-06 and these three were not.
+    const goConsole = async (href) => {
+      try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+      try { window.top.location.href = href; } catch { window.location.href = href; }
     };
+    document.getElementById("xrayHome").onclick = () => goConsole("/aevinite");
+    const rl1 = document.getElementById("xrayRestLink");
+    if (rl1) rl1.onclick = () => goConsole("/aevinite/restaurants");
     document.getElementById("xrayExit").onclick = async () => {
       try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
       try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
@@ -5198,18 +5206,27 @@ function renderXrayRibbon() {
   const n = zones.length;
   rb.innerHTML =
     `<span class="rb-tag">Admin view${whoName ? ` · ${esc(whoName)}'s access` : ""}</span>` +
-    // The PATH the admin walked in through — Restaurants › name › Tablet panel —
-    // the owner panel's breadcrumb language (owner, 2026-07-06). This ribbon is
-    // admin-only (tHigher), so the console crumb is always right here.
-    `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-    `<span class="rb-sep">›</span><span>${rest ? esc(rest) : "…"}</span>` +
+    // The PATH the admin walked in through — Dashboard › name › Tablet panel — the owner panel's
+    // breadcrumb language. This ribbon is admin-only (tHigher), so the console crumb is always
+    // right here. It starts at the DASHBOARD because that is where the admin came from (owner,
+    // 2026-08-26); "Restaurants" was a step he never took.
+    `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Dashboard</a>` +
+    `<span class="rb-sep">›</span><a id="xrayRestLink">${rest ? esc(rest) : "…"}</a>` +
     `<span class="rb-sep">›</span><span>Tablet panel</span></nav>` +
     `<span class="rb-spacer"></span>` +
     `<button id="xrayZonesBtn">${whoName ? `${n} thing${n === 1 ? "" : "s"} ${esc(whoName)} doesn't have` : `${n} control${n === 1 ? "" : "s"} off for waiters`} ▾</button>` +
     `<button class="rb-exit" id="xrayExit">Exit view</button>`;
-  document.getElementById("xrayHome").onclick = () => {
-    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  // GO BACK TO THE ADMIN CONSOLE, AND STOP ACTING AS THIS RESTAURANT ON THE WAY OUT.
+  // The crumb used to be a plain jump: the admin left the panel but the act-as cookie stayed
+  // set for six hours, so re-opening a panel silently re-entered this restaurant. The owner
+  // panel's bar was fixed for exactly that on 2026-07-06 and these three were not.
+  const goConsole = async (href) => {
+    try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+    try { window.top.location.href = href; } catch { window.location.href = href; }
   };
+  document.getElementById("xrayHome").onclick = () => goConsole("/aevinite");
+  const rl2 = document.getElementById("xrayRestLink");
+  if (rl2) rl2.onclick = () => goConsole("/aevinite/restaurants");
   document.getElementById("xrayExit").onclick = async () => {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
