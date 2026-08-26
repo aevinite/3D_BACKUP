@@ -875,6 +875,32 @@ async function run() {
     watch(guest);
     await guest.goto(`${BASE}/r/french-house/menu`, { waitUntil: "domcontentloaded" });
     await waitControlled(guest);
+
+    // WHOSE MENU IS THIS? The last-resort page cannot fetch anything, so the only way it can name
+    // the restaurant is if a real guest visit stored it. This check exists because the first
+    // version of that feature SHIPPED BROKEN on restaurant #1: MenuView hands the shell
+    // `logoText={undefined}` for the flagship, so nothing was ever written, and the static
+    // "writer and reader agree on the key" check passed the whole time. Caught on the deployed
+    // site by reading the value, which is what this now does.
+    {
+      // POLL, don't read once. `waitControlled` resolves when the service worker takes the client,
+      // which is BEFORE React has finished hydrating and run the effect that writes this. Reading
+      // once here reported "no name stored" on a build that stores it correctly — the same lesson
+      // as the tile-chip check in section 3.
+      const stored = await waitFor(
+        () => guest.evaluate(() => { try { return localStorage.getItem("lfh_brand"); } catch { return null; } }),
+        8000);
+      let parsed = null; try { parsed = JSON.parse(stored || "null"); } catch { /* not JSON */ }
+      parsed && typeof parsed.name === "string" && parsed.name.trim()
+        ? ok(`a real guest visit stored the restaurant's name for the offline card ("${parsed.name}")`)
+        : bad("a guest visit stored no restaurant name",
+          `localStorage.lfh_brand = ${JSON.stringify(stored)} — the no-signal screen will stay anonymous`);
+      // …and under the slug the offline page derives for THIS path, or it will refuse to print it.
+      parsed && String(parsed.slug ?? "") === "french-house"
+        ? ok("…under the slug the last-resort page derives for this path")
+        : bad("the stored slug is not the one the offline page will look for",
+          `stored ${JSON.stringify(parsed && parsed.slug)}, this path resolves to "french-house"`);
+    }
     await guest.reload({ waitUntil: "domcontentloaded" });
     // 75s. This is the SETUP step for everything below it: if the menu hasn't painted live, the
     // saved-copy and offline checks all fail too, and the whole section reports four faults for
