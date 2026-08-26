@@ -249,6 +249,16 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// A SEARCH SUGGESTION SHOWS THE WHOLE DISH NAME (owner, 2026-08-26: "can do 7 but you have keep ui
+// good make sure"). It was one `nowrap` line beside a fixed-width price column, so 70 of the 464
+// dish names on this stack were cut — "Paneer Stuffed L…". Up to three lines now, which fit inside
+// the height the row already had (its 42px photo sets 63px), so the UI does not change for a short
+// name and the row does not grow for most long ones either.
+check("P15607", "a search suggestion may use more than one line, so a long name is whole", () =>
+  rx(F.css, /\.search-result-name \{[\s\S]{0,400}?line-clamp: 3/) &&
+  !rx(F.css, /\.search-result-name \{[^}]*white-space: nowrap/) &&
+  rx(F.css, /\.search-result-name \{[\s\S]{0,400}?overflow-wrap: anywhere/));
+
 // A RESTAURANT'S OWN NAME IS NEVER CUT (owner, 2026-08-26). The wordmark ran out of room next to
 // the top bar's fixed buttons and ended in "little French hou…" on a 320px phone. It uses the same
 // shrink-to-fit helper the dish names have used since 2026-08-05 — which only ever asked whether
@@ -355,6 +365,27 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: no suggestion name is cut, on the restaurant that HAS the long ones, at phone and
+    // desktop width — and the rows stay the height they always were.
+    for (const [slug, qq, wdt] of [["demo-bistro", "cho", 360], ["aangan-garden-restaurant", "pa", 360], ["demo-bistro", "cho", 1280]]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 820 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector("#search-input", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(2000);
+      await pg2.fill("#search-input", qq);
+      await pg2.waitForSelector(".search-result", { timeout: 20000 }).catch(() => {});
+      await pg2.waitForTimeout(1200);
+      const r = await pg2.evaluate(() => [...document.querySelectorAll(".search-result")].map((x) => {
+        const n = x.querySelector(".search-result-name");
+        return { cut: n.scrollHeight > n.clientHeight + 1, h: Math.round(x.getBoundingClientRect().height), name: n.textContent.trim() };
+      }));
+      check("P15607", `LIVE: ${slug} "${qq}" @${wdt}px — every suggestion name is whole`, () =>
+        ({ ok: r.length > 0 && r.every((x) => !x.cut),
+           note: `${r.filter((x) => x.cut).length} cut of ${r.length}; tallest row ${Math.max(0, ...r.map((x) => x.h))}px` }));
+      await cc.close();
+    }
+
     // LIVE: the wordmark is whole at every width a diner might hold, on a long name and a short
     // one. 320px is the one that used to cut it; the rest are here so a future "fix" cannot buy
     // the narrow case by shrinking the name on phones that never needed it.
