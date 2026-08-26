@@ -454,12 +454,15 @@ function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner;
       : { c: "#fbbf24", i: "fa-circle-exclamation", t: "Doesn’t match yet." };
   return (
     <ModalShell id="admin-owner-delete" onClose={onClose} width={460} label={`Move ${owner.name} to the recycle bin`}>
-      <ModalHead tone="danger" icon="fa-trash-can" title={`Move ${owner.name} to the recycle bin?`} sub="Restorable for 90 days — nothing is erased yet." subColor="#fca5a5" />
+      {/* NOT "for 90 days" (T16 sweep #7, 2026-08-27) — the wait was removed on 2026-08-20 and
+          migration 342 dropped the database lock with it. Restoring has no deadline, and a
+          permanent removal has no wait either; both facts are said plainly below. */}
+      <ModalHead tone="danger" icon="fa-trash-can" title={`Move ${owner.name} to the recycle bin?`} sub="Restorable at any time — nothing is erased yet." subColor="#fca5a5" />
       <div style={{ padding: "14px 20px 4px", display: "grid", gap: 12 }}>
         <FactList danger facts={[
           { i: "fa-box-archive", c: "#fbbf24", t: <>They leave the Owners list and go to the <b>Recycle bin</b></> },
           { i: "fa-store", c: "#34d399", t: <>Their restaurants <b>stay linked</b> and come back if you restore</> },
-          { i: "fa-clock-rotate-left", c: "#34d399", t: <><b>Restorable for 90 days</b>; only after that can they be permanently removed</> },
+          { i: "fa-clock-rotate-left", c: "#34d399", t: <><b>Restorable at any time</b> — no deadline; they can also be removed for good from the bin, which can&rsquo;t be undone</> },
         ]} />
         <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Type <b style={{ color: "var(--text)" }}>{owner.username}</b> to confirm:</div>
         <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={owner.username} autoComplete="off" spellCheck={false} aria-label="Type the username to confirm deletion"
@@ -825,12 +828,12 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
           <div className="hue-ink" style={{ fontSize: 13, fontWeight: 700, ["--hue" as string]: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
           {owner.active ? (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              To delete this owner, <b>suspend them first</b> (the reversible step). Deleting then moves them to the <b>Recycle bin</b> — restorable for 90 days.
+              To delete this owner, <b>suspend them first</b> (the reversible step). Deleting then moves them to the <b>Recycle bin</b> — restorable at any time.
             </div>
           ) : (
             <>
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                This owner is suspended. Deleting moves them to the <b>Recycle bin</b>, where they can be <b>restored for 90 days</b>; nothing is erased yet and their restaurants stay linked. Only after 90 days can they be permanently removed.
+                This owner is suspended. Deleting moves them to the <b>Recycle bin</b>, where they can be <b>restored at any time</b>; nothing is erased yet and their restaurants stay linked. From the bin they can also be removed for good whenever you choose, and that cannot be undone.
               </div>
               <button style={btn("#991b1b")} disabled={busy} onClick={() => setShowDelete(true)}><i className="fas fa-trash-can" style={{ marginRight: 6, fontSize: 11 }} aria-hidden="true" />Move to recycle bin</button>
             </>

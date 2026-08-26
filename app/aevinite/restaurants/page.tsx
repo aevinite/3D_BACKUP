@@ -970,10 +970,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   );
 }
 
-// DangerCard — move a restaurant to the 90-day RECYCLE BIN. Distinct from Suspend:
+// DangerCard — move a restaurant to the RECYCLE BIN. Distinct from Suspend:
 // suspend just hides the guest menu (reversible instantly, staff/admin keep working);
-// DELETE puts the whole restaurant in the bin (guest 404 + staff logins blocked) and
-// starts a 90-day clock, after which it can be permanently purged from the bin. To
+// DELETE puts the whole restaurant in the bin (guest 404 + staff logins blocked), from
+// where it can be restored at any time OR permanently removed at any time. To
 // make an accidental delete near-impossible, the admin must TYPE the exact name to
 // confirm (the GitHub pattern). Restaurant #1 (default) can never be deleted.
 function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaurant; onDeleted: () => void; onChanged: () => void }) {
@@ -1035,10 +1035,20 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
       </div>
 
       {/* 2) Delete — only after suspending (owner rule 2026-07-24). */}
+      {/* WHAT THE BIN ACTUALLY DOES NOW (T16 sweep #7, 2026-08-27). This said "recycle bin for
+          90 days … you can restore it any time in those 90 days; only after that can it be
+          permanently removed" — which stopped being true on 2026-08-20, when the owner removed
+          the wait ("i wanna chnage the rule that you camn't permamnetly delete from recycle bin")
+          and migration 342 dropped the database's half of the lock. So this card was promising a
+          three-month protection window that nothing enforces: an admin could read it, delete a
+          client's restaurant believing it was safe until November, and somebody could clear it out
+          of the bin the same minute. The recycle bin's own page has said "there is no waiting
+          period" since that day; this is the screen that still disagreed with it. */}
       <p className="hint">
-        Delete <b>{restaurant.name}</b> — it moves to the <b>recycle bin for 90 days</b>. Its guest menu goes offline and
-        staff can&apos;t log in, but nothing is erased. You can <b>restore</b> it any time in those 90 days; only after that can it be
-        permanently removed.
+        Delete <b>{restaurant.name}</b> — it moves to the <b>recycle bin</b>. Its guest menu goes offline and
+        staff can&apos;t log in, but nothing is erased, and you can <b>restore</b> it from the bin at any time —
+        there is no deadline. From the bin it can also be <b>removed for good</b> whenever you choose, and that
+        part cannot be undone (its bills are still kept).
       </p>
       {restaurant.active ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
