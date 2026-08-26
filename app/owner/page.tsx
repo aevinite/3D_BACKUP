@@ -1483,6 +1483,12 @@ export default function OwnerDashboard() {
         sub={offNote ? offSub
           : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"
           : foodLost > 0 ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where food was made`
+          // A FAILED FOOD-LOSS READ IS NOT A ZERO (T12 sweep, 2026-08-27). The route returns null
+          // when it could not read the expenses rows, and says in its own comment that a silent 0
+          // "would tell him he wasted nothing, which is the wrong way for this to fail". The popup
+          // said so; the tile face fell through to the staff-pay wording and said nothing at all,
+          // so a total that is too low looked complete.
+          : kMain && kMain.foodLoss == null ? "staff pay only — we couldn\u2019t read the food figure"
           : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
       <Kpi k="On hand" onOpen={offNote ? undefined : () => setTileOpen("onhand")} v={offNote ? "—" : onHand} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub : "revenue minus expenses"} />
@@ -1571,17 +1577,26 @@ export default function OwnerDashboard() {
         audit: true,
         open: "team",
       };
-      case "onhand": return {
+      case "onhand": {
+        // ── AND THIS POPUP HAS TO ADMIT IT AS WELL (T12 sweep, 2026-08-27) ──────────────────────
+        // `foodLoss === null` means the server could not READ that figure, not that it was zero.
+        // The Expenses popup one tap away has always said so on its own row; this one printed a
+        // flat "− ₹0" and then called the result "Money on hand" as if it were settled — the one
+        // line on the page where an unread cost makes the ANSWER too big. Measured by replaying
+        // the server's own answer: "Less food made then binned − ₹0 · Money on hand ₹13,41,642".
+        const foodUnread = !!kMain && kMain.foodLoss == null;
+        return {
         title: "On hand", sub: `what is left of the period · ${per}`,
         rows: [
           ["Revenue", inr(kMain?.revenue ?? 0)],
           ["Less staff pay", "− " + inr(staffOut)],
-          ["Less food made then binned", "− " + inr(foodLost)],
-          ["Money on hand", inr(onHand), undefined, true],
+          ["Less food made then binned", "− " + inr(foodLost),
+            foodUnread ? "we couldn\u2019t read this — any food you lost is missing from the sum below" : undefined],
+          ["Money on hand", inr(onHand), foodUnread ? "this may be too high, for the reason above" : undefined, true],
         ],
         note: "Takings minus what the period cost you. It is not a bank balance — rent, bills and any stock you have not recorded here are not in it, and food is counted when it is used rather than when it was bought.",
         open: "team",
-      };
+      }; }
       default: return null;
     }
   };
