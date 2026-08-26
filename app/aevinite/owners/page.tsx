@@ -882,7 +882,14 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
   const [reveal, setReveal] = useState<{ id: string; name: string; password: string; warn?: string } | null>(null);
   const creatingRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
-  useAdminModal(dialogRef, "admin-new-owner", onClose);
+  // ── CLOSING THIS DIALOG AFTER A CREATE MUST STILL REFRESH THE ROSTER (T16 sweep #7, 2026-08-27)
+  // Only the "Done" button called onCreated(), which is what reloads the list and selects the new
+  // person. Escape, the phone Back button and a tap on the scrim all went to onClose(), which just
+  // hides the card — so an owner who HAD been created was missing from the roster until the page
+  // was reloaded, and the obvious next move is to create them again. `close` routes every exit
+  // through the same answer, and costs no extra request when nothing was created.
+  const close = () => { if (reveal) onCreated(reveal.id); else onClose(); };
+  useAdminModal(dialogRef, "admin-new-owner", close);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -903,7 +910,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div onClick={close} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="New owner" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         {reveal ? (
           <div style={{ ...card, pointerEvents: "auto", width: "min(100%, 440px)", display: "grid", gap: 12 }}>
@@ -951,7 +958,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="submit" disabled={busy} style={{ ...btn("#22c55e"), flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Creating…" : "Create owner & show password"}</button>
-              <button type="button" style={btn("#374151")} onClick={onClose}>Cancel</button>
+              <button type="button" style={btn("#374151")} onClick={close}>Cancel</button>
             </div>
           </form>
         )}
