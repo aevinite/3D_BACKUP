@@ -166,13 +166,8 @@ export default function AdminPrinting() {
             Which computer prints which piece of paper. A small helper program on a computer asks us every
             two seconds whether there is anything for it — so paper comes out with no window open, nothing
             logged in, and nothing to keep in front. <Link href="/print-setup.html" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</Link>
-            {" · "}
-            {/* THE BOARDS POINT AT EACH OTHER (owner, 2026-08-26: "board should be sync"). Who MAY be a
-                printing screen is a person's permission and belongs on Access; WHERE the paper comes out
-                is this board. Each says so and links to the other, so neither reads as the whole answer. */}
-            <Link href={rid ? `/aevinite/access?rid=${encodeURIComponent(rid)}` : "/aevinite/access"} style={{ color: "var(--accent)" }}>
-              Who may be the printer → Access &amp; permissions
-            </Link>
+{/* The link to Access lives on the address book below, where the permission actually bites — two
+                links to one place in one screenful is the clutter that made this header hard to read. */}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -203,22 +198,29 @@ export default function AdminPrinting() {
               Both must be on. With the first one off, nothing about printing appears anywhere in their
               panels — no greyed-out buttons, nothing at all.
             </p>
-            {[
-              { key: "allowed", on: st.printing.allowed, label: "We allow this restaurant to print", what: "Your switch. Off means the whole feature does not exist for them." },
-              { key: "on", on: st.printing.on, label: "Auto-print is on", what: "Their pause button — off while a printer is being serviced. Tickets wait; nothing is lost." },
-            ].map((sw) => (
-              <div key={sw.key} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border)" }}>
-                <button className={`adm-btn${sw.on ? " primary" : ""}`} style={{ fontSize: 12, minWidth: 74 }}
-                  disabled={busy === "switch"}
-                  onClick={async () => { const d = await post("switch", { [sw.key]: !sw.on }); if (d) void load(); }}>
-                  {sw.on ? "On" : "Off"}
-                </button>
-                <div>
-                  <b style={{ fontSize: 13.5 }}>{sw.label}</b>
-                  <div className="adm-muted" style={{ fontSize: 12.5 }}>{sw.what}</div>
+            {/* THE SAME STATE-PAIR PATTERN AS THE ACCESS CARD (owner, 2026-08-26: "the printer menu ui
+                is also diff and shit too… make both the option looks on the both mode are clearly
+                visible and easy to access"). Two boards were describing the same two facts in two
+                visual languages — a person had to learn each one separately. One pattern, one place
+                to learn it: the fact on the left, YES/NO on the right, and the action only where
+                there is something to do. */}
+            <div className="adm-state">
+              {[
+                { key: "allowed", on: st.printing.allowed, label: "Aevidine allows this restaurant to print", what: "Your switch. Off means the whole feature does not exist for them — nothing greyed out, nothing at all." },
+                { key: "on", on: st.printing.on, label: "The restaurant has auto-print on", what: "Their pause button — off while a printer is serviced. Tickets wait; nothing is lost." },
+              ].map((sw) => (
+                <div key={sw.key} className={`adm-state-row ${sw.on ? "yes" : "no"}`}>
+                  <span className="adm-state-dot" aria-hidden="true" />
+                  <span className="who"><b>{sw.label}</b><br />{sw.what}</span>
+                  <span className="adm-state-val">{sw.on ? "YES" : "NO"}</span>
+                  <button className={`adm-btn${sw.on ? "" : " primary"}`} style={{ fontSize: 12, minWidth: 82 }}
+                    disabled={busy === "switch"}
+                    onClick={async () => { const d = await post("switch", { [sw.key]: !sw.on }); if (d) void load(); }}>
+                    {sw.on ? "Switch off" : "Switch on"}
+                  </button>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           {/* ── 2 · the computers ───────────────────────────────────────────────────────── */}
@@ -350,6 +352,26 @@ export default function AdminPrinting() {
               One line each. A line left empty says so on their screens — it never goes quietly. The backup
               takes over only if the first printer has printed nothing for a minute.
             </p>
+            {/* THE FALLBACK, for a restaurant that names no route at all (mig 336). It moved here from the
+                Access card, because printing belongs to one board — and it is a SELECT, not three radio
+                cards, because it is the answer that matters least: a route overrules it the moment one
+                exists, and most restaurants will have one. */}
+            <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
+              <span className="lbl">With <b>no line filled in below</b>, which screen prints the kitchen slips?</span>
+              <select className="adm-input" style={{ minWidth: 210, marginLeft: "auto" }} value={st.printing.target || "kitchen"}
+                onChange={async (e) => { const d = await post("switch", { target: e.target.value }); if (d) void load(); }}>
+                <option value="kitchen">The kitchen screen</option>
+                <option value="counter">The counter (manager) screen</option>
+                <option value="both">Both — the counter is the backup</option>
+              </select>
+            </div>
+            {/* WHERE THE OTHER HALF OF THIS LIVES. The same shape as the Access card's pointer, so the
+                two boards read as one system rather than two products. */}
+            <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
+              <span className="lbl">Who <b>may</b> be a printing screen is a person&apos;s own permission, on</span>
+              <b>Access &amp; permissions</b>
+              <a href={rid ? `/aevinite/access?rid=${encodeURIComponent(rid)}` : "/aevinite/access"}>Open Access →</a>
+            </div>
             {(st.kinds || []).map((kind) => {
               const r = draft[kind] || { agent: null, printer: null };
               const a = r.agent ? byId.get(r.agent) : undefined;

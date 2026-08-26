@@ -181,12 +181,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // ── the two switches, in the same place as everything else about printing ──────────────────
   if (seg[0] === "switch") {
     const patch: Record<string, boolean> = {};
+    const patch2: Record<string, string> = {};
     if (typeof body.allowed === "boolean") patch.auto_print_kot_allowed = body.allowed;
     if (typeof body.on === "boolean") patch.auto_print_kot = body.on;
-    if (!Object.keys(patch).length) return err("Nothing to change.");
-    const up = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    // THE COARSE FALLBACK (mig 336: kitchen | counter | both). It used to be three radio cards in the
+    // Access card's KOT block; it lives HERE now, because this is the board that owns printing and two
+    // screens answering "who prints" was the confusion the owner asked to end. It still matters: it is
+    // what decides which screen prints for a restaurant with NO route at all, and a route (mig 341)
+    // overrules it whenever one exists.
+    if (typeof body.target === "string") {
+      if (!["kitchen", "counter", "both"].includes(body.target)) return err("That is not one of the three answers.");
+      patch2.kot_print_target = body.target;
+    }
+    if (!Object.keys(patch).length && !Object.keys(patch2).length) return err("Nothing to change.");
+    const up = await sb.from("settings").update({ ...patch, ...patch2 }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
     if (up.error) return err("Could not save that.");
-    await logAction("admin", "print_switch", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(" ") });
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: [...Object.entries(patch), ...Object.entries(patch2)].map(([k, v]) => `${k}=${v}`).join(" ") });
     return NextResponse.json({ ok: true });
   }
 

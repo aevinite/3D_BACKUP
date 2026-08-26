@@ -142,9 +142,9 @@ const adminRoute = read("app/api/admin/restaurants/settings/route.ts");
 check(/kot_print_target/.test(mig336) && /'kitchen', 'counter', 'both'/.test(mig336),
   "mig 336 defines who may print (kitchen | counter | both) with a CHECK constraint",
   "mig 336 no longer constrains kot_print_target — a typo could take a restaurant's printing away");
-check(/kot_print_target/.test(admin) && /Which screen prints the ticket/.test(admin),
-  "the choice lives in the ADMIN console's KOT printing card",
-  "the 'which screen prints' choice has left the admin console — and it cannot go in the manager panel: that Settings section is hidden from EVERYONE there (owner, 2026-07-31)");
+check(/kot_print_target/.test(read("app/aevinite/printing/page.tsx")) || /kot_print_target/.test(read("components/admin/RestaurantSettings.tsx")),
+  "the 'which screen prints' fallback is still somewhere in the ADMIN console (it cannot live in the manager panel — that Settings section is hidden from everyone)",
+  "the 'which screen prints' choice has left the admin console altogether — a restaurant with no route has no way to move printing between the kitchen and the counter. It moved from the Access card to the Printing board on 2026-08-26; if you are moving it again, keep it inside /aevinite.")
 check(/"kot_print_target",/.test(admin),
   "…and the key is in the admin form's saved-keys list (a missing key looks editable and saves nothing)",
   "kot_print_target is missing from SETTINGS_KEYS — the control would silently save nothing");
