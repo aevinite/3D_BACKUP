@@ -733,9 +733,10 @@ export default function OwnerStaffPage() {
            nobody — which is exactly how dead code survives. If a permission control ever belongs on
            an owner screen again that is a decision, not a restyle: the switches live on
            /aevinite → Access and permissions. Guarded by verify:owner-panel section 11. */
-        /* Reach badges — one letter shows how far a power reaches (M = managers).
-           Accent-tinted when it reaches, muted outline when it doesn't. The letter
-           itself carries the meaning (never colour-only) + a tooltip. */
+        /* (The comment that used to sit here described the reach badges — part of the same
+           Powers-tab block deleted above. It outlived its rules and was left standing over the
+           .ost-tabs rule, so it read as an explanation of the tab strip. Removed 2026-08-27: after
+           deleting a feature, check the tense of every comment left behind, not only the code.) */
         .ost-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: var(--border); }
         .ost-tab { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
         .ost-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
