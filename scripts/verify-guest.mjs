@@ -323,11 +323,27 @@ check("P15602", "an open search is a back-step, so back does not offer to leave 
 // 0 over the saved position before the restore could read it, so every Back landed at the top of
 // the menu. Both halves matter — the static one names the two moving parts so nobody removes them
 // by accident, and the LIVE one is the only thing that could have caught it in the first place.
+// …AND IT REMEMBERS THE DISH, NOT JUST THE PIXEL (owner, 2026-08-26: "can do the 10 and 11").
+// A pixel is a fact about a page that has not finished growing; the dish under the header is a fact
+// about the menu. The id is what the restore aims at, re-read every tick so it follows the dish as
+// the lazy photos above it arrive; the pixel stays as the fallback for when that dish is no longer
+// there. A bare number written by an older build is still read correctly.
+check("P15611", "the menu remembers WHICH DISH the diner was at, not only how far down", () => {
+  const saves = rx(F.menuView, /JSON\.stringify\(\{ y: Math\.round\(el\.scrollTop\), id \}\)/);
+  const reads = has(F.menuView, "let y = 0, wantId = \"\";") && rx(F.menuView, /y = parseInt\(raw, 10\) \|\| 0;/);
+  const aims = has(F.menuView, "const targetTop = () => {", "CSS.escape(wantId)") &&
+               rx(F.menuView, /const want = targetTop\(\);/);
+  const grace = rx(F.menuView, /Date\.now\(\) - started > 700 && lastSet >= 0/);
+  return { ok: saves && reads && aims && grace, note: `saves=${saves} reads both shapes=${reads} aims at the dish=${aims} grace period=${grace}` };
+});
+
 check("P15332", "the saved scroll position is not written over before it is restored", () => {
-  const gated = rx(F.menuView, /if \(restoreSettled\.current\) \{\s*try \{ sessionStorage\.setItem\(sk\("lfh_menu_scroll"\)/);
+  // The SAVE is still gated on the restore having settled — that is the fault this row exists for.
+  // (The value it writes became `{ y, id }` on 2026-08-26; see P15611.)
+  const gated = rx(F.menuView, /if \(restoreSettled\.current\) \{[\s\S]{0,1600}?sessionStorage\.setItem\(sk\("lfh_menu_scroll"\)/);
   const reaims = has(F.menuView, "const aim = ()", "scrollHeight", 'behavior: "instant"') &&
                  rx(F.menuView, /restoreSettled\.current = true/);
-  const bounded = has(F.menuView, "stalls >= 3", "2500");
+  const bounded = has(F.menuView, "stalls >= 3", "4000");
   return { ok: gated && reaims && bounded, note: `gated=${gated} re-aims=${reaims} bounded=${bounded}` };
 });
 
@@ -581,6 +597,24 @@ async function live(base) {
       check("P15332", `LIVE: ${slug} Back returns to the same dish`, () =>
         ({ ok: !!before && before === after, note: `left at "${before}", came back to "${after}"` }));
       await c.close(); }
+    // LIVE: the memory's fallbacks. A dish that has gone, and a value written by an older build,
+    // must both still land the diner in the right place — and a corrupt one must not break the menu.
+    for (const [seed, label, wantY] of [
+      ['"1438"', "a bare number from an older build", 1438],
+      ['JSON.stringify({ y: 1438, id: "/r/french-house/item/zz-gone?cat=x" })', "a dish that is no longer on the menu", 1438],
+    ]) {
+      const cc = await b.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+      const pg2 = await cc.newPage();
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.evaluate((v) => sessionStorage.setItem("lfh_menu_scroll:french-house", eval(v)), seed);
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(5000);
+      const y = await pg2.evaluate(() => Math.round(document.getElementById("main-scroll").scrollTop));
+      check("P15611", `LIVE: ${label} still restores`, () =>
+        ({ ok: Math.abs(y - wantY) < 120, note: `landed at ${y}, wanted about ${wantY}` }));
+      await cc.close();
+    }
   } finally { await b.close(); }
 }
 

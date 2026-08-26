@@ -710,7 +710,30 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         // sets it and has nothing to scroll either. The shrink and frost maths below still run on
         // mount, which is what that mount call was actually for.
         if (restoreSettled.current) {
-          try { sessionStorage.setItem(sk("lfh_menu_scroll"), String(el.scrollTop)); } catch {}
+          // REMEMBER THE DISH, NOT JUST THE PIXEL (owner, 2026-08-26 — "can do the 10 and 11").
+          //
+          // A pixel offset is a fact about a page that has not finished growing. Every dish photo
+          // is lazy with no reserved box, so the list gets TALLER after the diner leaves and the
+          // number we saved stops meaning the same place — which is why coming back needed a
+          // re-aiming loop and could still land short. The dish under the header is a fact about
+          // the MENU, and it stays true however the page settles.
+          //
+          // Both are stored: the id is what we aim at, the pixel is the fallback for when that
+          // dish is no longer on screen (a filter changed, the dish was taken off the menu, or the
+          // guest came back to a different restaurant). A value written by an older build is a bare
+          // number and is still read correctly — see the restore.
+          try {
+            const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
+            // THE FIRST DISH THE DINER CAN ACTUALLY SEE — the one whose top is at or below the
+            // header line, not the one half-hidden behind it. Anchoring on the half-hidden card put
+            // it fully below the header on the way back, which moved the whole list up by one row
+            // and returned the diner to the dish BEFORE the one they left at. Measured: left at
+            // "Mint Melon Juice", came back to "Nutella Shake".
+            const first = Array.from(el.querySelectorAll<HTMLElement>(".item-card-link"))
+              .find((c) => c.getBoundingClientRect().top >= head - 4);
+            const id = first?.getAttribute("href") || "";
+            sessionStorage.setItem(sk("lfh_menu_scroll"), JSON.stringify({ y: Math.round(el.scrollTop), id }));
+          } catch {}
         }
         // SCROLL-LINKED SHRINK. The brand bar (.nav) is LOCKED at the top. As the
         // category bar pins right under it and you keep scrolling, the cards
@@ -803,7 +826,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     if (scrollRestored.current || !menuData.length) return;
     scrollRestored.current = true;  // mark done so we never jump twice
     try {
-      const y = parseInt(sessionStorage.getItem(sk("lfh_menu_scroll")) || "0", 10);
+      // Reads BOTH shapes: `{ y, id }` from this build, and a bare number from an older one still
+      // sitting in a diner's tab. Neither can throw the restore off — a bad blob just means no
+      // memory, which is where every first visit starts anyway.
+      const raw = sessionStorage.getItem(sk("lfh_menu_scroll")) || "";
+      let y = 0, wantId = "";
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") { y = parseInt(String(parsed.y), 10) || 0; wantId = String(parsed.id || ""); }
+        else y = parseInt(String(parsed), 10) || 0;
+      } catch { y = parseInt(raw, 10) || 0; }
       const el = document.getElementById("main-scroll");
       if (y > 0 && el) {
         // TWO FRAMES IS NOT ENOUGH — THE PAGE IS STILL GROWING (guest sweep T1, sweep #7).
@@ -824,17 +856,50 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         // INSTANT, never smooth: `#main-scroll` carries `scroll-behavior: smooth` (globals.css) for
         // the category tap, so a plain `el.scrollTop = y` ANIMATES — the diner would watch the menu
         // scroll past on the way back, and the re-aim could not tell that motion from their own.
+        // WHERE ARE WE AIMING? The remembered DISH if it is still on this menu, and its position is
+        // re-read every tick — so as the lazy photos above it arrive and push it down, the target
+        // follows it instead of going stale. That is the thing a saved pixel can never do. No dish
+        // (or it has gone) → the pixel, exactly as before.
+        const targetTop = () => {
+          if (wantId) {
+            const card = el.querySelector<HTMLElement>(`.item-card-link[href="${CSS.escape(wantId)}"]`);
+            if (card) {
+              const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
+              return Math.max(0, el.scrollTop + card.getBoundingClientRect().top - head - 12);
+            }
+          }
+          return y;
+        };
+        // BEING ON TARGET IS NOT THE SAME AS BEING FINISHED. The first version of this stopped the
+        // moment it reached the dish — and then the lazy photos ABOVE it loaded, pushed it down, and
+        // nothing was watching any more. Measured: French House landed 234px short and Aangan 364px,
+        // both exactly one row above the right dish. So it only stops once it is on the dish AND the
+        // page has stopped growing for three ticks running.
         let lastSet = -1, lastHeight = -1, stalls = 0;
         const started = Date.now();
         const aim = () => {
-          if (lastSet >= 0 && Math.abs(el.scrollTop - lastSet) > 2) { restoreSettled.current = true; return; }
-          if (el.scrollTop >= y - 2) { restoreSettled.current = true; return; }
+          // The guest scrolled themselves — they have taken over, get out of the way.
+          //
+          // …BUT NOT IN THE FIRST HALF-SECOND. Next's router scrolls this container back to the top
+          // as part of the hop, and that lands AFTER our first aim — so the position moved without
+          // us moving it and this test read the ROUTER as the diner and gave up. Measured: the
+          // restore stopped 202px short and never corrected, on every menu. Nobody scrolls a page
+          // they have not seen yet, so the first 700ms belong to the browser, not to them.
+          if (Date.now() - started > 700 && lastSet >= 0 && Math.abs(el.scrollTop - lastSet) > 2) {
+            restoreSettled.current = true; return;
+          }
           const h = el.scrollHeight;
           stalls = h === lastHeight ? stalls + 1 : 0;
           lastHeight = h;
-          if (stalls >= 3 || Date.now() - started > 2500) { restoreSettled.current = true; return; }
-          el.scrollTo({ top: y, behavior: "instant" as ScrollBehavior });
-          lastSet = el.scrollTop;
+          const want = targetTop();
+          const onTarget = Math.abs(el.scrollTop - want) <= 4;
+          // There, and the page has settled underneath us. Or we have simply run out of patience:
+          // 4s covers a 199-dish menu filling in its photos, and the loop is a scrollTop read.
+          if ((onTarget && stalls >= 3) || Date.now() - started > 4000) { restoreSettled.current = true; return; }
+          if (!onTarget) {
+            el.scrollTo({ top: want, behavior: "instant" as ScrollBehavior });
+            lastSet = el.scrollTop;
+          }
           setTimeout(aim, 100);
         };
         requestAnimationFrame(() => requestAnimationFrame(aim));
