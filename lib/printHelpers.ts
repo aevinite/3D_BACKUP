@@ -41,12 +41,39 @@ export const isPrintKind = (v: unknown): v is PrintKind =>
 /** One line of the address book: "kitchen slips → this machine → this printer", plus an optional
  *  second choice for when the first prints nothing. Both halves are names the MACHINE reported,
  *  never typed by a person — which is why a printer nobody owns can never be routed to. */
+/** WHO does the printing for one kind of paper. Two shapes, and the owner picks per line (2026-08-26:
+ *  "if I want to print from kitchen panel or maybe I want to print from manager panel and which
+ *  particular manager… which owner panel… which PC will be open and from that same PC the print is
+ *  going to happen — all will be decided by me").
+ *
+ *  · "computer" — a helper program on a machine prints it on a named printer. No window, no login.
+ *  · "screen"   — a PANEL prints it, the old way, but now NARROWED: which panel, optionally WHICH
+ *                 PERSON (a named manager, a named owner), and optionally which exact device.
+ *
+ *  A screen route is not a step backwards: it is the honest answer for a restaurant that will not
+ *  install anything, and it is now precise instead of "whichever screen volunteered first". */
+export type RouteVia = "computer" | "screen";
+export const ROUTE_PANELS = ["kitchen", "manager", "owner", "tablet"] as const;
+export type RoutePanel = (typeof ROUTE_PANELS)[number];
+export const isRoutePanel = (v: unknown): v is RoutePanel =>
+  typeof v === "string" && (ROUTE_PANELS as readonly string[]).includes(v);
+
 export type PrintRoute = {
+  via?: RouteVia;              // absent = "computer" when an agent is named, else nothing is routed
   agent: string | null;        // print_agents.id
   printer: string | null;      // the printer name as its own computer knows it
   backupAgent?: string | null;
   backupPrinter?: string | null;
   backupAfterMs?: number;
+  /** via:"screen" — WHICH panel prints it. */
+  panel?: RoutePanel | null;
+  /** …and optionally WHICH PERSON, by staff_users.id. Null = anybody on that panel who is allowed to
+   *  print. Named = only that person's screen, which is the "which particular manager" answer. */
+  person?: string | null;
+  personName?: string | null;  // remembered for the screens, so a name never needs a second read
+  /** …and optionally which DEVICE (the per-browser id print_stations already uses). Null = any device
+   *  that person signs in on; named = that one PC, which is the "from that same PC" answer. */
+  device?: string | null;
   /** Overrides what the machine reported. This is the line the owner needs for his banquet machine:
    *  an A4 printer that is loaded with sheets "almost half or smaller than half of it" — so the
    *  paper is a per-route answer (A4 · A5 · A6 · or two typed numbers), never a guess from the
@@ -207,10 +234,18 @@ export async function readRoutes(rid: string): Promise<PrintRoutes> {
       backupPrinter: o.backupPrinter ? String(o.backupPrinter).slice(0, 120) : null,
       backupAfterMs: typeof o.backupAfterMs === "number" && o.backupAfterMs >= 5000 ? o.backupAfterMs : BACKUP_AFTER_MS_DEFAULT,
       paper: asPaper(o.paper),
+      via: o.via === "screen" ? "screen" : o.agent ? "computer" : undefined,
+      panel: isRoutePanel(o.panel) ? o.panel : null,
+      person: o.person ? String(o.person) : null,
+      personName: o.personName ? String(o.personName).slice(0, 80) : null,
+      device: o.device ? String(o.device).slice(0, 120) : null,
     };
   }
   return out;
 }
+
+/** Is this line pointing at a SCREEN (a panel/person/device) rather than a helper on a computer? */
+export const isScreenRoute = (r: PrintRoute | undefined): boolean => !!(r && r.via === "screen" && r.panel);
 
 /**
  * The page size a document must be built at for THIS printer: the route's own answer if the admin
@@ -259,8 +294,41 @@ export async function writeRoutes(rid: string, patch: Record<string, unknown>): 
     if (typeof main === "string") return { error: main };
     const backup = pick("backupAgent", "backupPrinter");
     if (typeof backup === "string") return { error: backup };
+    // ── A SCREEN ROUTE (via:"screen") ─────────────────────────────────────────────────────────
+    // It names a PANEL, and may narrow to one PERSON and one DEVICE. Everything is checked against
+    // real rows: a person must be this restaurant's staff, and their role must be able to stand at
+    // that panel — a waiter cannot be the owner panel's printer, and a route that names an impossible
+    // pair would print nowhere while looking set.
+    if (o.via === "screen") {
+      const panel = o.panel;
+      if (!isRoutePanel(panel)) return { error: "Pick which screen prints it — kitchen, manager, owner or tablet." };
+      let personId: string | null = null, personName: string | null = null;
+      if (o.person) {
+        const u = (await sb.from("staff_users").select("id, name, username, role, active")
+          .eq("id", String(o.person)).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null } | null;
+        if (!u) return { error: "That person is not one of this restaurant's staff." };
+        if (u.active === false) return { error: `${u.name || u.username} is switched off, so their screen cannot be the printer.` };
+        const role = String(u.role || "");
+        const fits = panel === "kitchen" ? role === "kitchen"
+          : panel === "tablet" ? role === "tablet" || role === "waiter"
+          : panel === "owner" ? role === "owner"
+          : role === "manager" || role === "owner";          // the manager panel: a manager, or the owner in manager mode
+        if (!fits) return { error: `${u.name || u.username} is a ${role || "person"}, so their screen is not the ${panel} panel.` };
+        personId = u.id; personName = String(u.name || u.username || "").slice(0, 80) || null;
+      }
+      next[kind] = {
+        via: "screen", agent: null, printer: null,
+        panel, person: personId, personName,
+        device: o.device ? String(o.device).slice(0, 120) : null,
+        ...(asPaper(o.paper) ? { paper: asPaper(o.paper) } : {}),
+      };
+      continue;
+    }
+
     const paper = asPaper(o.paper);
     next[kind] = {
+      via: main.agent ? "computer" : undefined,
       ...main,
       backupAgent: backup.agent, backupPrinter: backup.printer,
       backupAfterMs: typeof o.backupAfterMs === "number" && o.backupAfterMs >= 5000 ? o.backupAfterMs : BACKUP_AFTER_MS_DEFAULT,
@@ -461,4 +529,57 @@ export async function helpersFor(rid: string, kinds: PrintKind[]): Promise<Recor
     };
   }
   return out;
+}
+
+// ── WHO PRINTS THIS KIND OF PAPER — the single answer every screen and every route obeys ───────
+export type PrintTarget =
+  | { kind: "none" }
+  | { kind: "computer"; agent: string; printer: string; connected: boolean; secondsAgo: number | null;
+      backup: { agent: string; printer: string } | null }
+  | { kind: "screen"; panel: RoutePanel; person: string | null; personName: string | null; device: string | null };
+
+export async function targetFor(rid: string, kind: PrintKind): Promise<PrintTarget> {
+  const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
+  return resolveTarget(routes[kind], agents);
+}
+
+/** Same answer for several kinds in ONE pair of reads (the panels need three at a time). */
+export async function targetsFor(rid: string, kinds: PrintKind[]): Promise<Record<string, PrintTarget>> {
+  const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
+  return kinds.reduce<Record<string, PrintTarget>>((a, k) => { a[k] = resolveTarget(routes[k], agents); return a; }, {});
+}
+
+function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTarget {
+  if (isScreenRoute(r)) {
+    return { kind: "screen", panel: r!.panel as RoutePanel, person: r!.person ?? null,
+             personName: r!.personName ?? null, device: r!.device ?? null };
+  }
+  if (!r?.agent || !r.printer) return { kind: "none" };
+  const a = agents.find((x) => x.id === r.agent);
+  if (!a) return { kind: "none" };                       // the machine was removed — screens may print again
+  const b = r.backupAgent && r.backupPrinter ? agents.find((x) => x.id === r.backupAgent) : null;
+  return { kind: "computer", agent: a.name, printer: r.printer, connected: a.connected, secondsAgo: a.secondsAgo,
+           backup: b ? { agent: b.name, printer: r.backupPrinter as string } : null };
+}
+
+/**
+ * May THIS screen print that paper?
+ *
+ * Asked on the server, with the person and device taken from the request — never from the panel's
+ * word for itself. Three ways to answer yes, and they are deliberately in this order:
+ *   · nothing is routed        → yes, whoever is entitled may print (the behaviour before any of this)
+ *   · a COMPUTER is routed     → no. A screen must never race a helper: two printers, one ticket.
+ *   · a SCREEN is routed       → only the named panel, and only the named person, and only the named
+ *                                device. Any part left blank means "anyone on that side".
+ */
+export function screenMayPrint(
+  t: PrintTarget,
+  who: { panel: RoutePanel; personId?: string | null; deviceId?: string | null },
+): { ok: boolean; why?: "computer" | "other_panel" | "other_person" | "other_device" } {
+  if (t.kind === "none") return { ok: true };
+  if (t.kind === "computer") return { ok: false, why: "computer" };
+  if (t.panel !== who.panel) return { ok: false, why: "other_panel" };
+  if (t.person && t.person !== (who.personId || "")) return { ok: false, why: "other_person" };
+  if (t.device && t.device !== (who.deviceId || "")) return { ok: false, why: "other_device" };
+  return { ok: true };
 }

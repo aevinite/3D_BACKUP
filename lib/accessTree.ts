@@ -121,7 +121,7 @@ export type Node = {
   // the restaurant-detail page. `settings:<id>` renders one section of RestaurantSettings,
   // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
   // removed setting and permission from restaurant detail — everything will be here".
-  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding";
+  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding" | "printing";
   // A format screen that can SHOW its finished page: puts a "Preview / Print" button at the
   // top right of the embedded editor, opening the real bill drawn from this restaurant's
   // settings (owner, 2026-08-02). The value picks which document — and every one of them is
@@ -245,6 +245,18 @@ const ACTIONS: ActionDef[] = [
     what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it. Managers only — a waiter can never reopen a bill." },
   { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", mgrDef: true, cap: true,
     what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
+  // MAY THIS PERSON'S SCREEN BE THE PRINTER (owner, 2026-08-26: "which particular manager I want the
+  // printing should happen… all will be decided by me"). One row here is three things at once, which
+  // is the whole reason it goes here and not in a printing-only list: the Access screen row, the row on
+  // that person's own profile (lib/staffCaps walks these folders), and a server gate the manager route
+  // asks before a screen may claim any paper.
+  //
+  // It is ELIGIBILITY, not the choice. The Printing menu picks WHO prints; this says who may be picked
+  // — so switching it off takes a person out of the picker AND stops their screen printing, even if
+  // they were already chosen. Default ON, because every manager screen could print before this existed
+  // and a rebuild must not quietly take that away.
+  { id: "print_here", name: "May be the printer (print on their own screen)", flag: "print_here", mgrDef: true,
+    what: "Their screen may print this restaurant's paper — kitchen slips, bills, banquet sheets — on whatever printer that machine is set to. Turn it OFF for a phone: a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the paper. Where printing actually happens is chosen on Printing (Aevidine holds that): a computer running the print helper, or a named screen — and only a person with this on can be that named screen." },
   // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
   // its own thing, and one switch covering create/reset/delete was three very different amounts of
   // trust behind a single yes. It lives in "What a manager can manage", split up.
@@ -499,9 +511,18 @@ export const SECTIONS: Section[] = [
           },
         ],
       },
+      // THE TWO BOARDS SAY THE SAME THING (owner, 2026-08-26: "board should be sync. Right now it's
+      // not"). This row used to be the ONLY printing row on this screen, while the whole of
+      // who-prints-what lived on the Printing menu and appeared nowhere here. Its child now opens that
+      // menu inside this row, so one screen answers both questions — is printing allowed, and where
+      // does the paper actually come out.
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
         bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", preview: "kot",
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check is inside, and Preview at the top right shows the ticket itself — the very same one the manager panel and the kitchen board print, not a mock-up of it." },
+        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. WHERE they come out is the row below: a computer running the print helper, or a named screen. The printer check is inside, and Preview at the top right shows the ticket itself — the very same one the manager panel and the kitchen board print, not a mock-up of it.",
+        children: [
+          { id: "print_where", name: "Which printer gets which paper", bind: { t: "none" }, panel: "printing",
+            what: "The printing setup for this restaurant: the computers that may print (each running the small helper program), and one line per kind of paper — kitchen slips, bills, banquet sheets, parcel labels — saying which printer it comes out of, on which machine, at which paper size, with an optional backup printer. A line can name a SCREEN instead of a computer: which panel, which person, and even which PC. Held by Aevidine; the restaurant sees all of it, read-only, on the owner and manager screens. Who MAY be a printing screen is the “May be the printer” row in each person's own permissions." },
+        ] },
       // ⚡ QO/P — the floor's quick-order screen (owner, 2026-08-02). A main feature, not an
       // extra: it is how a whole order gets punched in at speed. Default ON (mig 257) because
       // it REPLACED the 🥡 New Parcel button every floor already had — shipping it off would

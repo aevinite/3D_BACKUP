@@ -44,6 +44,24 @@ function EmbeddedPanel({ what, preview }: { what: NonNullable<Node["panel"]>; pr
   // render an empty dropdown that looks like a broken feature.
   if (!rest) return <div className="at-panel-wait">Pick a restaurant to edit this.</div>;
   if (what === "branding") return <div className="at-panel"><BrandingCard restaurant={rest} /></div>;
+  // PRINTING lives on its own page, because it is a whole board of its own (computers, their printers,
+  // a line per kind of paper). Embedding a copy of it here would be a second version of that board to
+  // keep in step — the exact drift the owner asked to end ("board should be sync"). So this row is the
+  // doorway, with the one fact worth having before you walk through it.
+  if (what === "printing") {
+    return (
+      <div className="at-panel">
+        <p style={{ margin: "0 0 10px", fontSize: 13.5, lineHeight: 1.55 }}>
+          Which printer gets which paper — kitchen slips, bills, banquet sheets — and which computer or
+          which person&apos;s screen prints it. One board, so this screen and that one can never describe
+          this restaurant differently.
+        </p>
+        <a className="at-preview-btn" href={`/aevinite/printing?rid=${encodeURIComponent(rest.id)}`}>
+          Open Printing for {rest.name || "this restaurant"} →
+        </a>
+      </div>
+    );
+  }
   const section = what.slice("settings:".length) as SettingsSection;
   // A format screen answers "what will this look like?" only if you can SEE it (owner,
   // 2026-08-02). The button sits top-right of the editor and opens the finished page in its

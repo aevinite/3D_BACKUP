@@ -47,7 +47,7 @@ import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, r
 // A COMPUTER (a helper) can own the paper now — mig 341. When one does, no screen prints that kind:
 // a helper prints on the printer the address book names, a screen prints on whatever its own machine
 // defaults to, and both printing means the same ticket in two rooms.
-import { helperFor, helpersFor, queueJob } from "@/lib/printHelpers";
+import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint } from "@/lib/printHelpers";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
@@ -65,6 +65,16 @@ async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; bac
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
   if (helper.owned) return { mayPrint: false, backup: false, target, helper };
+  // ── THE NEWER ANSWER WINS OVER THE OLDER ONE (found by the printing sweep, 2026-08-26) ────────
+  // mig 336's kot_print_target is the OLD, coarse question: kitchen | counter | both. mig 341's route
+  // can now name this very panel — and the sweep caught the two disagreeing: with a route saying
+  // "the manager screen prints the kitchen slips" and the old target still saying "kitchen", the
+  // manager screen was refused by the older setting and the owner's own choice did nothing.
+  // A route that names a panel IS the decision; the coarse target only speaks when no route does.
+  const screenRoute = await targetFor(rid, "kot");
+  if (screenRoute.kind === "screen") {
+    return { mayPrint: on && screenRoute.panel === "manager", backup: false, target, helper };
+  }
   return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
 }
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
@@ -2062,13 +2072,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // BILL whether a computer will do it, and this is the read it already makes. One pair of
       // queries for all three (helpersFor), not three pairs.
       const owners = await helpersFor(rid, ["kot", "bill", "banquet"]);
-      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners });
+      // The same one resolver: which panel/person/device the owner named for each kind of paper.
+      const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
+      const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
+      const mayKot = screenMayPrint(targets.kot, whoAmI);
+      // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here"). Eligibility comes
+      // before the route: a manager the restaurant has switched off is not handed paper even if the
+      // route names their panel, and the answer is sent back so their screen says why rather than
+      // going quiet. Asked with `g.user` — the admin viewing (no user) is not a person to gate.
+      const mayBePrinter = g.user ? await managerCan(g, rid, "print_here") : true;
+      if (!t.mayPrint || !mayKot.ok || !mayBePrinter) {
+        return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners,
+                    targets, printRefused: !mayBePrinter ? "not_allowed" : mayKot.ok ? null : mayKot.why });
+      }
       // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
       // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
       // station's name instead, so it can offer "print here instead" rather than quietly racing.
       if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners });
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners, targets });
     }
 
 
@@ -4706,6 +4728,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // before the admin changed the setting would otherwise keep claiming tickets the kitchen is
       // now supposed to print — the classic "the screen said yes, the server says no" fault.
       const t = await counterPrintTarget(rid);
+      // …and the PERSON's own permission, and the ROUTE's own choice of panel/person/device. Three
+      // separate questions, all re-asked here rather than trusted from the caller: is this person
+      // allowed to be a printer at all (accessTree "print_here"), and is this the screen the owner
+      // actually named on the Printing menu.
+      const tgtK = await targetsFor(rid, ["kot"]);
+      const mayK = screenMayPrint(tgtK.kot, { panel: "manager", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
+      const allowedToPrint = g.user ? await managerCan(g, rid, "print_here") : true;
+      if (!allowedToPrint) return ok({ won: [], refused: "not_allowed" });
+      if (!mayK.ok) return ok({ won: [], refused: mayK.why === "computer" ? "helper" : mayK.why, printTarget: tgtK.kot });
       const gate = await mayClaim(rid, {
         deviceId: deviceIdFrom(req), panel: "editor", label: "Counter · manager screen",
         auto: t.mayPrint, roomAllowed: t.mayPrint, by: actorName || null,
