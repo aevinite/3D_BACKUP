@@ -732,7 +732,20 @@ export default function OwnerDashboard() {
     try {
       const rid = sk === "group" ? null : sk;
       // records ride ONCE per restaurant (unbounded scan — not worth re-running per range).
-      const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
+      // ── AND "ONCE" HAS TO MEAN ONCE (T12 sweep, 2026-08-27) ──────────────────────────────────
+      // The guard read `recsRef`, which is only filled after a request has ANSWERED. Every
+      // dashboard open dispatches the main-range payload and the month payload in the SAME effect
+      // pass, so neither had answered when the second one built its query and BOTH carried
+      // `records=1`. Measured on one cold open of French House:
+      //   analytics?range=30d …&records=1
+      //   analytics?range=month…&records=1     ← the same all-time scan, again
+      // `lfh_owner_records` is the one read on this route the server deliberately keeps OUTSIDE the
+      // snapshot cache because it is unbounded, so this was the most expensive request on the page,
+      // paid for twice per open, per restaurant, for a payload only one of them can use. A ref set
+      // SYNCHRONOUSLY at ask-time is the fix; it is cleared when the answer says the read failed,
+      // so a retry can still happen (see the records handling below).
+      const recQ = rid && !(rid in ((recsRef.current) || {})) && !recsAsked.current.has(rid) ? "&records=1" : "";
+      if (recQ) recsAsked.current.add(rid!);
       const refQ = opts?.refresh ? "&refresh=1" : "";
       const a = await fetch(`/api/owner/analytics?${opts?.qs ?? `range=${range}`}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
       // A deliberate "Reports aren't enabled for this restaurant" (403, `disabled: true`) is a
@@ -763,7 +776,10 @@ export default function OwnerDashboard() {
       // with the range dropdown. A later successful read clears it.
       if (rid) {
         if (a.records) { setRecs((m) => ({ ...m, [rid]: a.records })); setRecsUnread((m) => (m[rid] ? { ...m, [rid]: false } : m)); }
-        else if (Array.isArray(a.partial) && a.partial.includes("records")) setRecsUnread((m) => ({ ...m, [rid]: true }));
+        else if (Array.isArray(a.partial) && a.partial.includes("records")) {
+          setRecsUnread((m) => ({ ...m, [rid]: true }));
+          recsAsked.current.delete(rid);   // it failed, so the next fetch may ask again
+        }
       }
       setErr(null);
       reportRealtime("online");
@@ -775,6 +791,8 @@ export default function OwnerDashboard() {
     }
   }, [scp]);
   const recsRef = useRef(recs); recsRef.current = recs;
+  /** Restaurants whose all-time records have been ASKED for this visit — see the note in fetchPayload. */
+  const recsAsked = useRef<Set<string>>(new Set());
   const cacheRef = useRef(cache); cacheRef.current = cache;
   const moneyRef = useRef(moneyCache); moneyRef.current = moneyCache;
 
