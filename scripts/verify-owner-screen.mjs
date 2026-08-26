@@ -267,7 +267,7 @@ check("the cancellation note offers a door to the record",
   "app/owner/page.tsx: the popup note says cancellations live in Audit & logs but no longer links\n       there — and the link must stay gated on the same `logs` entitlement the sidebar uses.");
 // ── 14. the detail opens on the scope and period on screen ──────────────────────────────────────
 check("the dashboard sends the VIEWED scope and the chosen range",
-  /q\.set\("view", activeRid \?\? "all"\)/.test(homeC) && /q\.set\("range", globalRange\)/.test(homeC),
+  /q\.set\("view", activeRid \?\? "all"\)/.test(homeC) && /q\.set\("range", [^)]*globalRange\)/.test(homeC),
   "app/owner/page.tsx: the detail link stopped carrying `view` and `range`. Then it falls back to the\n       admin's own ?rid pin, and from the All-restaurants view every tile lands on ONE restaurant —\n       his bug of 2026-08-18.");
 {
   const rep = read("app/owner/reports/page.tsx");
@@ -462,6 +462,19 @@ check("…and says so on screen, with one tap to try now",
 check("the Refresh buttons on Audit & logs keep their icon gap",
   (auditC.match(/fas fa-rotate" style=\{\{ marginRight: 6 \}\}/g) || []).length === 2,
   "app/owner/activity/page.tsx: a Refresh button lost its icon margin. .owx .adm-btn is a flex row, and a\n       flex container collapses the leading space of a text run — so the glyph sits hard against the word.");
+
+// 18 — the all-time records scan is asked for ONCE per restaurant, not once per payload in flight
+check("the unbounded all-time-records read is asked for once, at ask-time",
+  /recsAsked\.current\.has\(rid\)/.test(homeC) && /if \(recQ\) recsAsked\.current\.add\(rid!\)/.test(homeC),
+  "app/owner/page.tsx: the records=1 guard is back on `recsRef` alone, which is only filled once a\n       request has ANSWERED — so the main-range and month payloads, dispatched in the same pass, both\n       carry it and the one read the server keeps outside its cache runs twice on every open.");
+check("…and a failed records read can still be retried",
+  /recsAsked\.current\.delete\(rid\)/.test(homeC),
+  "app/owner/page.tsx: the ask-flag is never cleared, so a records read that failed can never be tried\n       again for the rest of the visit.");
+
+// 19 — the one tile that does not follow the dropdown links to its OWN period
+check("the Today popup's report link opens TODAY, not the dropdown's period",
+  /q\.set\("range", t === "daysummary" \? "today" : globalRange\)/.test(homeC),
+  "app/owner/page.tsx: the Today popup says 'it is always today' and its 'See the full detail' link\n       carries the dropdown's range again — one screen, two answers, one tap apart.");
 
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",

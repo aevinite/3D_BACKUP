@@ -1342,11 +1342,17 @@ export default function OwnerDashboard() {
   //     authorisation pin and must keep meaning that, or a tab could re-scope its own permissions.
   //   • `range=<the dropdown's value>` — "if I'm at thirty days all restaurant and I open the detail
   //     view of orders then it should be also open in thirty days and all restaurant."
+  //   • …EXCEPT for the one tile that does not follow the dropdown (T12 sweep, 2026-08-27). The
+  //     "Today so far" popup says so in its own words — "This one does not follow the period above
+  //     — it is always today" — and then its "See the full detail" link carried `range=30d` and
+  //     opened a thirty-day report. Measured: on Last 30 days the Today popup's footer link was
+  //     `…&range=30d&open=daysummary`. One screen, two answers, one tap apart. The link now carries
+  //     the period the popup is actually about.
   const detailHref = (t: string) => {
     const q = new URLSearchParams();
     if (scopePin) { q.set("rid", scopePin); const a = asValue(); if (a) q.set("as", a); }
     q.set("view", activeRid ?? "all");
-    q.set("range", globalRange);
+    q.set("range", t === "daysummary" ? "today" : globalRange);
     q.set("open", t);
     return `/owner/reports?${q.toString()}`;
   };
