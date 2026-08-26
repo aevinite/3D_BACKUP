@@ -1074,7 +1074,7 @@ async function bulkDeleteDishes() {
   // "Deleted 5 dishes" could appear over 5 dishes that are all still on the menu. The undo bar is
   // still offered for whatever DID go, because that part is real.
   if (failed) toast(`Deleted ${done} — ${failed} could NOT be deleted. They are still on the menu.`, "err", undefined, 9000);
-  if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 6, onUndo: undoDelete });
+  if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 5, onUndo: undoDelete });
   else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
 
@@ -7241,7 +7241,7 @@ async function removeRecord() {
         if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
       } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
     };
-    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 6, onUndo: undoRec });
+    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 5, onUndo: undoRec });
     else toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: undoRec }, 6000);
   } catch (e) {
     toast("Delete failed: " + e.message, "err");
@@ -14152,8 +14152,12 @@ async function acceptOrder(orderId) {
   try {
     const qA = wasQueued(await api("POST", "/orders/" + orderId + "/accept", null, { table: o && o.table_number })); release();
     if (!qA) await loadSessions();   // saved-not-sent → keep what the tap just showed
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: "Order accepted", sub: o ? `T${o.table_number} · tap undo to unsend` : "Tap undo to unsend", icon: "✋", onUndo: () => editorUndoServe(snap) });
-    else toast("Order accepted → preparing", "ok");
+    // NO UNDO BAR ON ACCEPT (owner, 2026-08-26: "remove for accept keep for serve"). Accepting is
+    // the most repeated tap of a service and the least consequential — it only tells the kitchen to
+    // start, and a wrongly-accepted ticket is still cancellable from the table until it is served.
+    // A card sliding up on every single accept was the noise; SERVE keeps its undo because a
+    // wrongly-served dish has no other way back on this panel. Do not re-add one here.
+    toast("Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
@@ -14348,8 +14352,8 @@ async function acceptTableOrders(t) {
     // refresh THIS tile's summary so the grid reflects truth — unless the change is still on
     // this device, in which case the saved copy would revert the tile we just flipped.
     if (!qAll) await pollTables([String(t)]);
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: recv.length > 1 ? `${recv.length} orders accepted` : "Order accepted", sub: `T${t} · tap undo to unsend`, icon: "✋", onUndo: () => editorUndoServe(snap) });
-    else toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
+    // No undo bar on accept — same rule as the single accept above (owner, 2026-08-26).
+    toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); } // reload truth on failure
   finally { release(); }

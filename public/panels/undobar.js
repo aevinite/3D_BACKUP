@@ -19,7 +19,12 @@
 // carries ZERO egress on its own: showing/hiding is pure DOM; the only network call is
 // the caller's onUndo(), and only if the staff taps it.
 (function () {
-  var DEFAULT_SECONDS = 4;  // the takeback window the owner asked for ("maybe 3 or 4 sec")
+  // ── HOW LONG THE WINDOW IS (owner, twice) ─────────────────────────────────────────────────
+  // 2026-08-17: "maybe 3 or 4 sec" → 4.
+  // 2026-08-26: "keep undo button for 5 sec like not more" (the ceiling) and, of the bar that is
+  // kept, "decrese time for it" → 3. A shorter window is the point: the card is in the way of the
+  // floor, and three seconds is long enough to catch the tap you regret the instant you make it.
+  var DEFAULT_SECONDS = 3;
   var MAX_SECONDS = 5;      // …and never longer (owner, 2026-08-26). Enforced in show().
   var RING_LEN = 113;       // circumference of r=18 (2·π·18 ≈ 113.1) — the dash length
 
