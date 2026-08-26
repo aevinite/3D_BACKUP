@@ -49,6 +49,24 @@ type Removal = {
 const REMOVAL_KIND: Record<string, [string, string]> = Object.fromEntries(
   Object.keys(KIND_LABEL).map((k) => [k, [KIND_ICON[k] || "•", KIND_LABEL[k]] as [string, string]]),
 );
+// ── AND A KIND NOBODY MAPPED STILL HAS TO READ AS ENGLISH (T12 sweep, 2026-08-27) ──────────────
+// The row below used to fall back to ["•", r.kind] — the raw database word. That is not
+// hypothetical: app/api/owner/customers/route.ts writes `kind: "customer_erased"` into
+// deletion_audit, and public/panels/auditsort.js has no KIND_LABEL entry for it, so the top row of
+// this record on French House read, verbatim:
+//
+//     • customer_erased · Guest ending 1601
+//
+// on the one screen whose whole job is to be the plain-English record. The map knows the row in
+// every other way — lfh_audit_risk calls it `data` and the risk strip already prints
+// "🧹 Guest data erased" — only the WORDS were missing. The real fix is one line in auditsort.js so
+// all three panels (owner, manager, admin) and the removal-detail card say the same thing; that
+// file is outside this sweep's fence, so it is reported. This is the floor underneath it: whatever
+// kind arrives, the screen says something a person can read, never a column value.
+function humanKind(kind: string): string {
+  const words = String(kind || "").replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Something was removed";
+}
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",
   guest_changed: "Guest changed their mind",
@@ -498,7 +516,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <div className="adm-logwrap aud-stack">
           <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
           {list.map((r) => {
-            const [ico, label] = REMOVAL_KIND[r.kind] || ["•", r.kind];
+            const [ico, label] = REMOVAL_KIND[r.kind] || ["•", humanKind(r.kind)];
             const bits = [
               r.table_number ? `Table ${r.table_number}` : "",
               r.kot_no != null ? `KOT #${r.kot_no}` : "",

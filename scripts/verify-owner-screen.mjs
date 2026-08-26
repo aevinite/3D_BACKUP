@@ -476,6 +476,30 @@ check("the Today popup's report link opens TODAY, not the dropdown's period",
   /q\.set\("range", t === "daysummary" \? "today" : globalRange\)/.test(homeC),
   "app/owner/page.tsx: the Today popup says 'it is always today' and its 'See the full detail' link\n       carries the dropdown's range again — one screen, two answers, one tap apart.");
 
+// 20 — a removal kind nobody mapped still reads as English, never as a column value
+check("an unmapped removal kind is humanised, not printed raw",
+  /function humanKind/.test(auditC) && /REMOVAL_KIND\[r\.kind\] \|\| \["•", humanKind\(r\.kind\)\]/.test(auditC),
+  "app/owner/activity/page.tsx: the removals row falls back to the raw `r.kind` again. It is not\n       hypothetical — app/api/owner/customers writes kind: \"customer_erased\", auditsort.js has no label\n       for it, and the top row of the record read '• customer_erased · Guest ending 1601'.");
+// …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
+// It is a note because the words live in public/panels/auditsort.js, which the owner console only
+// READS — a guard that goes red over a file its own territory cannot edit is a guard that gets
+// ignored. The source of truth for "what can be written" is the RemovalKind union in
+// lib/removalAudit.ts; the source of truth for "what has words" is auditsort's KIND_LABEL block.
+{
+  const kinds = new Set([...read("lib/removalAudit.ts").matchAll(/^\s*\|\s*"([a-z_]{4,40})"/gm)].map((m) => m[1]));
+  const lab = read("public/panels/auditsort.js");
+  const block = lab.slice(lab.indexOf("var KIND_LABEL"), lab.indexOf("var KIND_ICON") + 1 || undefined);
+  const labelled = new Set([...block.matchAll(/^\s*([a-z_]{4,40})\s*:/gm)].map((m) => m[1]));
+  const unnamed = [...kinds].filter((k) => !labelled.has(k));
+  if (unnamed.length) {
+    console.log(`  note  ${unnamed.length} removal kind(s) this app can write have no words in public/panels/auditsort.js:`);
+    console.log(`        ${unnamed.join(", ")}`);
+    console.log(`        They reach the screen through humanKind() in app/owner/activity/page.tsx, which is a`);
+    console.log(`        floor, not a label. The real fix is one KIND_LABEL + KIND_ICON line each, so the owner,`);
+    console.log(`        manager and admin panels and the removal-detail card all say the same words.`);
+  }
+}
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
