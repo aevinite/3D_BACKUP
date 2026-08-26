@@ -73,10 +73,22 @@ type PRow = { id: string; name: string; slug: string; active: boolean; panels: P
 type PData = { rows: PRow[]; roles: string[]; attention: number; generatedAt: string };
 
 const ROLE_LABEL: Record<string, string> = { manager: "Manager", kitchen: "Kitchen", tablet: "Tablet", owner: "Owner" };
+// THE GRID HAS TO AGREE WITH THE PAGE'S OWN WORDS (T17 sweep #7, 2026-08-27).
+// The legend under this grid says, in the owner's own framing: "Quiet = nothing for over an hour,
+// which is normal when a restaurant is closed", and the check row above it says the same ("22 more
+// are simply quiet, which is normal"). The dot then painted every one of those in the DANGER
+// colour — so on this platform three of the first four restaurants were a solid wall of red for a
+// state the page had just called normal, and "Never seen" (the one the page says is genuinely
+// unfinished setup) wore the identical red, told apart only by being hollow.
+//
+// That is the same fault the amber banner here was removed for, and the same one behind R42/R43:
+// a warning that is up on every load stops being read, and it takes the real one down with it.
+// Quiet is now the neutral tone it is described as; NEVER SEEN keeps the danger colour and is the
+// only red in the grid, which is exactly what the "Staff screens" check counts.
 const PSTATUS = {
   online: { c: "var(--adm-ok)", t: "Online" },
   idle: { c: "#d4a574", t: "Idle" },
-  offline: { c: "var(--adm-danger)", t: "Quiet" },
+  offline: { c: "var(--muted)", t: "Quiet" },
   never: { c: "var(--adm-danger)", t: "Never seen" },
   off: { c: "var(--muted)", t: "Off" },
 } as const;
@@ -86,7 +98,10 @@ function PanelCell({ p }: { p: Panel }) {
   // red "never/quiet" owner cell was a false alarm — render it neutral instead.
   const ownerQuiet = p.role === "owner" && (p.status === "never" || p.status === "offline");
   const s = ownerQuiet ? { c: "var(--muted)", t: p.status === "never" ? "Not signed in" : "Quiet" } : PSTATUS[p.status];
-  const hollow = p.status === "never" && !ownerQuiet;
+  // "Never seen" used to be drawn hollow only because "Quiet" already had the same red fill and the
+  // two needed telling apart. Quiet is neutral now, so the one state that really is unfinished gets
+  // the solid dot — the only red in the grid, and the one the check row above actually counts.
+  const hollow = false;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }} title={p.on ? (p.lastSeen ? `Last active ${timeAgo(p.lastSeen)}` : "Never seen active") : "Panel disabled for this restaurant"}>
       <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", border: hollow ? `1px solid ${s.c}` : undefined, backgroundColor: hollow ? "transparent" : s.c }} aria-hidden="true" />

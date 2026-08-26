@@ -249,10 +249,19 @@ ok(!/All \{memories\.length\} record/.test(REPAIR), "P23163",
   "repair: the already-fixed heading counts every restaurant's records again");
 ok(/\{scopedMemories\.map\(/.test(REPAIR), "P23164", "repair: the already-fixed list renders the unscoped array again");
 
+// ── 21 · System health's panel grid agrees with its own legend ────────────────────────────────
+// The legend calls Quiet "normal when a restaurant is closed" and the check row calls it normal
+// too — and the dot painted all 28 of them in the danger colour, the same red as the 3 that
+// genuinely need him. Same family as R42/R43: a warning that is always up is not a warning.
+ok(/offline: \{ c: "var\(--muted\)", t: "Quiet" \}/.test(HEALTH), "P23171",
+  "health: a quiet panel is drawn in the alarm colour again, for a state this page's own legend calls normal");
+ok(/never: \{ c: "var\(--adm-danger\)", t: "Never seen" \}/.test(HEALTH), "P23172",
+  "health: 'Never seen' lost the danger colour — it is the one panel state the page says is genuinely unfinished");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 15 fixes");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 21 fixes");
