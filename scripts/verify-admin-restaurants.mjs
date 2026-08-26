@@ -531,6 +531,24 @@ console.log("\n21. The recycle bin carries no permission flag that can only say 
   want(/daysHeld: number/.test(BIN), "…while `daysHeld`, which is a fact rather than a permission, stays");
 }
 
+
+console.log("\n22. Suspend is described by what it actually stops");
+{
+  // The suspended line said "the guest menu is offline AND STAFF CAN'T LOG IN". That is the
+  // recycle BIN's behaviour: soft_delete writes deleted_at and /api/panel-login refuses on it.
+  // Suspend writes only `restaurants.active`, which the tenant resolver reads for the GUEST menu
+  // — nothing on the staff sign-in path reads it. (item 12.)
+  want(!/The guest menu is offline and staff can't log in/.test(RESTn),
+    "the suspended-state line no longer claims suspending stops the restaurant's own staff signing in");
+  want(/Its own staff can still sign in to their panels/.test(REST),
+    "…and says what suspend really does, and which step does stop them");
+  const LOGIN = read("app/api/panel-login/route.ts");
+  want(/isRestaurantDeleted\(/.test(LOGIN) && !/\.active\b[^)]*restaurant/.test(LOGIN),
+    "…which is still true of the sign-in path: it refuses a BINNED restaurant, and reads no `active` flag");
+  want(/staff can&apos;t log in/.test(REST) || /staff can't log in/.test(REST),
+    "…and the DELETE paragraph, where that sentence IS true, still carries it");
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");

@@ -1056,9 +1056,20 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingBottom: 14, marginBottom: 14, borderBottom: "var(--border)" }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>{restaurant.active ? "Suspend this restaurant" : "Restaurant is suspended"}</div>
+          {/* ── WHAT SUSPEND ACTUALLY STOPS (T16 sweep #7, 2026-08-27) ─────────────────────────
+              The suspended line said "the guest menu is offline AND STAFF CAN'T LOG IN". That is
+              the RECYCLE BIN's behaviour, borrowed by mistake: soft_delete writes deleted_at and
+              /api/panel-login refuses on it (isRestaurantDeleted). Suspend writes only
+              `restaurants.active`, which the tenant resolver reads to stop serving the guest menu
+              — nothing on the staff sign-in path reads it, so the restaurant's own manager,
+              kitchen and waiter can still sign in. The route's own comment says as much, and the
+              other three sentences on this screen (the confirm, the status card, and the line
+              above) all describe it correctly. This was the one that disagreed — and it disagreed
+              in the direction that matters, because an admin reading it would believe a suspended
+              restaurant's staff had been shut out when they had not. */}
           <p className="hint" style={{ margin: "3px 0 0" }}>{restaurant.active
             ? "Takes the guest menu offline immediately. Staff panels stay reachable to you. Instantly reversible — nothing is erased."
-            : "The guest menu is offline and staff can't log in. Reactivate any time, or delete it below."}</p>
+            : "The guest menu is offline. Its own staff can still sign in to their panels — deleting it below is what stops that. Reactivate any time."}</p>
         </div>
         {restaurant.active
           ? <button className="adm-btn danger" disabled={susBusy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />{susBusy ? "Suspending…" : "Suspend…"}</button>
