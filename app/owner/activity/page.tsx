@@ -67,6 +67,16 @@ function humanKind(kind: string): string {
   const words = String(kind || "").replace(/[_-]+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Something was removed";
 }
+/** KIND_LABEL, with a readable word filled in for anything nobody named — see humanKind above.
+ *  The CHIPS need this as much as the rows do: `AUDITSORT.kindCountsFrom` is handed the label map
+ *  and falls back to the raw kind itself, so the chip strip printed "• customer_erased 2" beside
+ *  ten properly-named chips (seen on a 360px screenshot, T12 sweep 2026-08-27). One map, so the
+ *  chip, the row, the search and the "· <kind>" line under it can never say four different things. */
+function labelsWith(...sets: (string | null | undefined)[][]): Record<string, string> {
+  const out: Record<string, string> = { ...KIND_LABEL };
+  for (const set of sets) for (const k of set) if (k && !out[k]) out[k] = humanKind(k);
+  return out;
+}
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",
   guest_changed: "Guest changed their mind",
@@ -371,7 +381,8 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
 
   // Chips are built from the WHOLE feed, not the filtered slice — a chip's count must not change
   // when you tap it, and a type must stay reachable once you have narrowed to another one.
-  const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KIND_LABEL, KIND_ICON);
+  const KINDS = labelsWith((counts || []).map((c) => c.kind), (removals || []).map((r) => r.kind));
+  const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KINDS, KIND_ICON);
   // NO CLIENT-SIDE FALLBACK HERE, AND THAT IS RIGHT — the comment that used to sit on this line
   // described one that does not exist, which is worse than none (T12 sweep, 2026-08-27). The
   // Activity half below really does need its fallback, because its chips are counted from the page
@@ -381,7 +392,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
   const activeKind = kind;
   // The SERVER already narrowed to `kind` — passing it again here would be harmless but it would also
   // hide a mismatch between the two, so the client only searches and sorts.
-  const list = AUDITSORT.view(removals || [], { q, sort, kindLabel: KIND_LABEL, reasonLabel: REMOVAL_REASON });
+  const list = AUDITSORT.view(removals || [], { q, sort, kindLabel: KINDS, reasonLabel: REMOVAL_REASON });
   // What the visible rows come to in money — the figure an owner is really after when they pick
   // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
   const shownMoney = AUDITSORT.sumAmount(list);
@@ -488,7 +499,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
           {list.length.toLocaleString("en-IN")} {list.length === 1 ? "record" : "records"}
           {pages > 1 ? ` on this page of ${total.toLocaleString("en-IN")}` : ""}
-          {activeKind ? ` · ${KIND_LABEL[activeKind] || activeKind}` : ""}
+          {activeKind ? ` · ${KINDS[activeKind] || humanKind(activeKind)}` : ""}
           {shownMoney > 0 ? ` · ${inr(shownMoney)}${pages > 1 ? " on this page" : " in total"}` : ""}
         </p>
       )}
@@ -516,7 +527,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <div className="adm-logwrap aud-stack">
           <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
           {list.map((r) => {
-            const [ico, label] = REMOVAL_KIND[r.kind] || ["•", humanKind(r.kind)];
+            const [ico, label] = REMOVAL_KIND[r.kind] || ["•", KINDS[r.kind] || humanKind(r.kind)];
             const bits = [
               r.table_number ? `Table ${r.table_number}` : "",
               r.kot_no != null ? `KOT #${r.kot_no}` : "",
