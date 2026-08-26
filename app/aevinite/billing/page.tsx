@@ -179,6 +179,11 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
   const toast = useToast();
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  // A refusal on a payment ROW belongs beside the payment rows (T16 sweep #7, 2026-08-27).
+  // deletePayment used to write into payMsg, which is rendered next to the "Add payment" button
+  // one section up — on a restaurant with a year of history that message can be well off-screen,
+  // so pressing the bin looked like it did nothing.
+  const [histMsg, setHistMsg] = useState<string | null>(null);
   // Synchronous guard so a double-click can't record the same payment twice (audit 2026-07-07).
   const payingRef = useRef(false);
   // Stable per-payment action id → a lost-response RETRY (same id) is deduped server-side so
@@ -248,11 +253,13 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
   const deletePayment = async (id: string) => {
     if (!confirm("Delete this payment record?")) return;
+    setHistMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_payment", payment_id: id }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't delete.");
       await loadHistory(); onChanged();
-    } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); }
+      setHistMsg("Payment record deleted.");
+    } catch (e) { setHistMsg("Couldn't delete that payment — " + (e instanceof Error ? e.message : String(e))); }
   };
 
   const inputStyle: React.CSSProperties = { padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, width: "100%" };
@@ -328,6 +335,14 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
             <div style={{ borderTop: "var(--border)", paddingTop: 16 }}>
               <h2 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 800 }}>Payment history</h2>
+              {histMsg && (
+                <div role="status" style={{ margin: "0 0 10px", padding: "7px 11px", borderRadius: 8, fontSize: 12.5,
+                  color: /^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)",
+                  border: `1px solid color-mix(in srgb, ${/^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)"} 45%, transparent)`,
+                  background: `color-mix(in srgb, ${/^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)"} 10%, transparent)` }}>
+                  {histMsg}
+                </div>
+              )}
               {payments === null ? (
                 <SkelList rows={4} label="Loading" />
               ) : payments.length === 0 ? (
