@@ -255,6 +255,49 @@ console.log("\n7) A staff panel's FIRST visit saves its board too");
   await p2.close();
 }
 
+// ── 8 · WHICH VERSION OF THE OFFLINE LAYER IS ACTUALLY RUNNING? ────────────────────────────
+// The worker answers a {type:"LFH_PING"} message with its own VERSION. That handler had NO
+// CALLER anywhere in the repo — and the sweep-#6 ledger recorded it as green with the note "used
+// by verify-warm-shell.mjs", which was never true: `git log -S LFH_PING` shows it has only ever
+// appeared in public/sw.js. So a row said the hook was covered, and nothing was asking.
+//
+// It is worth asking, because VERSION is load-bearing and had nothing watching it either. Every
+// cache name interpolates it, `activate` deletes every lfh- cache that is not one of the four
+// current names, and /offline.html is PRECACHED — so a device keeps serving the old page until
+// those names change. That is exactly why the file's own header says to bump it. If VERSION and
+// the live cache names ever disagree, a deploy silently keeps the previous offline layer.
+console.log("\n8) The running worker agrees with the file about its VERSION");
+{
+  const declared = (readFileSync(join(ROOT, "public/sw.js"), "utf8").match(/const VERSION = "([^"]+)"/) || [])[1];
+  const p3 = await ctx.newPage();
+  await p3.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await p3.evaluate(() => navigator.serviceWorker.ready);
+  const reported = await p3.evaluate(() => new Promise((resolve) => {
+    const done = (v) => resolve(v);
+    const t = setTimeout(() => done(null), 4000);   // never hang the suite on a silent worker
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data && e.data.type === "LFH_PONG") { clearTimeout(t); done(e.data.version || ""); }
+    });
+    navigator.serviceWorker.controller.postMessage({ type: "LFH_PING" });
+  }));
+  reported === declared
+    ? ok(`the controlling worker reports the VERSION the file declares (${declared})`)
+    : bad("the running offline layer is not the one in the file",
+      reported === null
+        ? "LFH_PING got no answer — the diagnostic hook is dead, so nothing can tell which layer a device is on"
+        : `sw.js says ${declared}, the worker says ${reported}`);
+
+  // …and every live cache name really carries it. A name that missed the bump survives `activate`
+  // only by accident, and one that carries an OLD version is a cache nothing will ever clear.
+  const names = await p3.evaluate(() => caches.keys().then((k) => k.filter((x) => x.startsWith("lfh-"))));
+  const versions = [...new Set(names.map((n) => n.slice(n.lastIndexOf("-") + 1)))];
+  versions.length === 1 && versions[0] === declared
+    ? ok(`all ${names.length} live cache(s) carry that same version`)
+    : bad("the live caches do not all carry the declared version",
+      `declared ${declared}, found ${versions.join(", ")} in: ${names.join(", ")}`);
+  await p3.close();
+}
+
 await browser.close();
 server.close();
 console.log(`\n${fail ? "❌" : "✅"} warm shell: ${pass} passed, ${fail} failed\n`);

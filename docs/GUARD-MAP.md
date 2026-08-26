@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **146** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **148** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 146 names in their head, so in practice a person runs none of them, or reaches for
+can hold 148 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -187,6 +187,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | behaviour when the server is overloaded | `verify:busy` | starts its own local server | no |
 | behaviour with no internet | `verify:offline`, `verify:outbox`, `verify:warm-shell` | mixed | no |
 | `public/offline.html` — the last-resort screen | `verify:offline-retry` ← it must keep ONE backing-off retry loop however many times the device says it is back, and must never blame the wrong side | starts its own local stub | no |
+| `public/sw.js` VERSION, `lib/userAuth.ts` heartbeat, or the admin System health screen | `verify:sw-version` ← can we still see which offline layer a staff device is running (mig 366)? Drives the whole four-link chain: the worker stamps `X-LFH-SW` on reads it already makes, the throttled heartbeat records it, the admin health read counts current vs behind, and the screen says it in words. A break in link 1 reads as *every device is up to date*, which is why this is proved at the SERVER and not by sniffing the browser | app running + `.env.local` | **only the fixture manager's own heartbeat row, which every normal request already updates** |
 | a read about EVERY restaurant in an owner's estate (or the admin's whole platform) | `verify:id-chunks` ← 800 uuids is 29.6 KB of URL and PostgREST answers "Bad Request"; a select with no `.limit()` is silently capped at 1,000 rows. Either way the estate comes back SHORT with no error — a restaurant missing from the owner's own sidebar, a module reading as OFF, activity hidden that they may see. Route it through `lib/inChunks.ts` (measured limits are in its header) | nothing | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
 | anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
@@ -230,6 +231,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | anything under `scripts/` or `tests/` | `verify:test-safety` ← our own tests must not trip the app's rate limits | nothing | no |
 | anything under `scripts/` or `tests/` | `verify:guards-alive` ← **can every guard still RUN?** A dead guard looks exactly like a guard nobody ran, and neither looks like a red: no `${…}` handed to something that must resolve it (a double-quoted template is just a string — this is what killed `verify:edge-cases` for weeks), no retired panel port (:4001–:4003), every repo path a script names still exists (the `verify:cache` fault), every `verify:*` entry points at a real file, every guard is reachable, everything parses, and every app-driving guard does the app-up preflight | nothing | no |
 | a guard that places a real order, or a phantom table appeared on the manager's floor | `verify:fixtures` ← no test may leave a table on anybody's floor. Checks the 12 throwaway table names for a live order, an open session, or a stuck kitchen ticket, with an age window so a run in progress is never mistaken for a leak. `--clean` retires what it finds the way a real cancellation does (mig 190 refuses a hard delete) | `.env.local` (dev DB) | **only with `--clean`, and only these test tables** |
+| a guard that CHOOSES its own table instead of using a fixed off-plan name | `verify:fixture-pickers` ← a script that opens or closes a session and picks its table from a numeric range must consult `claimedTables()`. A dynamic picker with no free table BORROWS one by closing its bill, and closing a session archives every unpaid live order on it (mig 232) — so it ends another lane's party mid-run and THAT lane reports a fault in the product. Measured twice now: sweep #6 on `pickFreeTable`, sweep #7 on `verify-offline.mjs` §5b, both on table 28 | nothing — static | no |
 | a file's line endings | `verify:ui` (check 14) | nothing | no |
 | `package.json` dependencies, or `package-lock.json` | `verify:deps` ← fails only on a **new** high/critical advisory; the parked ones are acknowledged by name inside the script | **the npm registry** (skips, never fails, when offline) | no |
 | **the owner says "check the securities" / "check security"** — or you touched a login, a permission, or anything about one restaurant seeing another's data | **`docs/SECURITY-CHECKLIST.md`** ← his own 20-point list (kept 2026-08-16) **plus** the 8 points this app needs that the list never mentions. Read its wording warning FIRST. | mixed, per row | no |

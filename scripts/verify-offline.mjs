@@ -369,6 +369,18 @@ async function run() {
   };
   const closeSession = (id) => setupPost(`/api/editor/sessions/${id}/close`, { force: true });
 
+  // HOW MANY TABLES THIS RESTAURANT REALLY HAS — asked once, shared by BOTH pickers below.
+  // It used to live inside pickFreeTable, so the second picker (§5b) hard-coded 30 instead and
+  // inherited none of the reasoning written above it. One definition, one answer.
+  let floorCountCache = null;
+  const getFloorCount = async () => {
+    if (floorCountCache !== null) return floorCountCache;
+    const r = await staff.request.get(`${BASE}/api/editor/all`).then((x) => x.json()).catch(() => null);
+    const n = Number(r && (r.table_count ?? (r.settings && r.settings.table_count)));
+    floorCountCache = Number.isFinite(n) && n > 0 ? n : 30;
+    return floorCountCache;
+  };
+
   // A genuinely FREE table to test on. On a real floor (and after a few runs of this
   // script) there may not be one, so if every table is occupied we free the longest-running
   // one first. Scans the tile keys themselves rather than 1..table_count, because a table
@@ -386,11 +398,7 @@ async function run() {
     // that number in here. Picking one made the app refuse the order it was asked to place —
     // "Table 992 doesn't exist (this place has 30 tables)" — and the whole offline section then
     // failed for a reason that was the fixture's, not the product's. (2026-07-31)
-    const floorCount = await (async () => {
-      const r = await staff.request.get(`${BASE}/api/editor/all`).then((x) => x.json()).catch(() => null);
-      const n = Number(r && (r.table_count ?? (r.settings && r.settings.table_count)));
-      return Number.isFinite(n) && n > 0 ? n : 30;
-    })();
+    const floorCount = await getFloorCount();
     keys = keys.filter((k) => { const n = Number(k); return Number.isFinite(n) && n >= 1 && n <= floorCount; });
     // …AND NEVER A TABLE ANOTHER GUARD OWNS (sweep #6 / T28, 2026-08-22). The fallback below BORROWS a
     // table by closing its bill, which on a shared dev database means ending another lane's party
@@ -745,8 +753,23 @@ async function run() {
       //   t2  staff close and bill the table
       // then we replay with queued-at = t1, which is after the party arrived and before it
       // was billed — exactly the situation the guard exists for.
+      // …AND NEVER A TABLE ANOTHER GUARD OWNS. pickFreeTable() above was taught this in sweep #6
+      // and this loop, added separately, walked DOWN from 30 by hand and re-opened the identical
+      // hole — on the identical table. Measured 2026-08-22: it took table 28, which
+      // scripts/sweep/fixtureTables.mjs reserves for verify-void-on-joined-party ("the joined table
+      // whose food must survive"), and then closed and billed it at t2 below. Closing a session
+      // cancels and archives every unpaid live order on it (mig 232), so the other guard's party is
+      // destroyed mid-run and IT reports a void that had worked perfectly. A collision like that
+      // looks exactly like a real product fault and only happens when the two runs overlap.
+      //
+      // The floor count matters for the same reason it does up there: a hard-coded 30 probes a
+      // table a smaller restaurant does not have, and the app then refuses the order this check is
+      // built on ("Table 30 doesn't exist").
+      const ownedTables = new Set(claimedTables());
+      const gFloor = await getFloorCount();
       let gt = null;
-      for (let i = 30; i >= 1; i--) {
+      for (let i = gFloor; i >= 1; i--) {
+        if (ownedTables.has(String(i))) continue;
         const probe = await staff.request.get(`${BASE}/api/editor/sessions?table=${i}`).then((r) => r.json()).catch(() => null);
         const list = Array.isArray(probe) ? probe : (probe && (probe.sessions || probe.rows)) || [];
         if (!list.some((r) => r && r.status !== "closed")) { gt = String(i); break; }
