@@ -47,22 +47,33 @@
     .brand { font: 800 11px/1 system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase;
              color: #7dd3fc; margin: 0 0 10px; }
     .brand[hidden] { display: none; }
-    .dot { width: 40px; height: 40px; margin: 0 auto 10px; border-radius: 999px; display: grid; place-items: center;
-           background: rgba(239, 68, 68, .16); border: 1px solid rgba(239, 68, 68, .4); }
-    .dot span { width: 11px; height: 11px; border-radius: 999px; background: #ef4444; animation: p 1.6s ease-in-out infinite; }
-    .dot.warn { background: rgba(245, 158, 11, .16); border-color: rgba(245, 158, 11, .45); }
-    .dot.warn span { background: #f59e0b; }
-    @keyframes p { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+    /* THE SIGNAL IS THE HERO, replacing a pulsing dot that sat above it telling the same story.
+       "if the action is fluctuating … you don't even need to show that, you can just show that sign
+       of connection is low" (owner, 2026-08-26). One indicator, not two.
+       .dot is kept as a no-op because say() still sets its class. */
+    .dot { display: none; }
+    .bars-hero { display: flex; align-items: flex-end; justify-content: center; gap: 5px;
+                 height: 40px; margin: 2px auto 12px; }
+    .bars-hero i { width: 9px; border-radius: 3px; background: currentColor; opacity: .16;
+                   transition: opacity .35s ease; }
+    .bars-hero i:nth-child(1) { height: 14px } .bars-hero i:nth-child(2) { height: 20px }
+    .bars-hero i:nth-child(3) { height: 27px } .bars-hero i:nth-child(4) { height: 33px }
+    .bars-hero i:nth-child(5) { height: 40px }
+    .bars-hero i.on { opacity: 1; }
+    /* the tallest lit bar breathes while we wait, so the screen is visibly alive without a second
+       thing to look at. With no signal at all, the shortest bar breathes instead. */
+    .bars-hero i.on:last-of-type, .bars-hero.none i:first-child { animation: pulse 1.7s ease-in-out infinite }
+    .bars-hero.none i:first-child { opacity: .55 }
+    @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .3 } }
     h1 { margin: 0 0 6px; font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
     p { margin: 0 0 10px; color: #b8c5de; font-size: 13.5px; }
-    .why { margin: 10px 0 0; padding: 10px 12px; border-radius: 11px; text-align: left;
-           background: rgba(56, 189, 248, .09); border: 1px solid rgba(56, 189, 248, .28);
-           color: #cfe6f8; font-size: 12.5px; }
-    .why b { color: #7dd3fc; display: block; margin-bottom: 2px; }
-    .safe { margin: 10px 0 12px; font-size: 12px; color: #a7dbb6; text-align: left;
-            padding: 9px 11px; border-radius: 11px;
-            background: rgba(34, 197, 94, .1); border: 1px solid rgba(34, 197, 94, .3); }
-    .safe b { color: #86efac; }
+    /* ONE LINE, NOT A BOX. The owner looked at the first version and said it plainly: "this too
+       many text … if you wanna add text add it like it looks merged". It had SIX blocks of words in
+       three separate coloured boxes — a verdict, a sub-line, a signal box, a cause box and a
+       reassurance box — stacked down the screen with the game after them. Everything a person needs
+       is now one strip and two short lines. */
+    .foot { margin-top: 11px; font-size: 11.5px; color: #8fa1bf; line-height: 1.5; }
+    .foot b { color: #86efac; font-weight: 700; }
     button.act { width: 100%; padding: 12px 16px; border: 0; border-radius: 11px; cursor: pointer;
             font: 800 14.5px/1 system-ui, sans-serif; color: #06131f; background: #38bdf8; }
     button.act:active { transform: translateY(1px); }
@@ -71,24 +82,24 @@
     button.ghost[hidden] { display: none; }
     .hint { margin-top: 10px; font-size: 12px; color: #8fa1bf; }
 
-    /* ── THE METER ─────────────────────────────────────────────────────────────────────────── */
-    .meter { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; padding: 9px 11px;
-             border-radius: 11px; background: rgba(148, 163, 184, .1);
-             border: 1px solid rgba(148, 163, 184, .18); text-align: left; }
-    .bars { display: flex; align-items: flex-end; gap: 3px; height: 20px; flex: 0 0 auto; }
-    .bars i { width: 5px; border-radius: 2px; background: currentColor; opacity: .18; }
-    .bars i:nth-child(1) { height: 7px }  .bars i:nth-child(2) { height: 10px }
-    .bars i:nth-child(3) { height: 13px } .bars i:nth-child(4) { height: 16px }
-    .bars i:nth-child(5) { height: 20px }
-    .bars i.on { opacity: 1; }
-    .m-txt { flex: 1; min-width: 0; }
-    .m-txt b { display: block; font: 800 12.5px/1.25 system-ui, sans-serif; }
-    .m-txt span { display: block; font-size: 11px; color: #93a4c2; }
-    .m-num { font: 800 12.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; flex: 0 0 auto;
-             font-variant-numeric: tabular-nums; }
+    /* ── THE SIGNAL ────────────────────────────────────────────────────────────────────────── */
+    /* THE DINOSAUR PAGE IS THE TARGET. "it should look properly good, like the game of that
+       dinosaur — it does look great, very synced" (owner, 2026-08-26). That page is an icon, one
+       line and the game; nothing else competes for attention.
+       This screen had SIX blocks of words in THREE bordered boxes — a verdict, a sub-line, a signal
+       box, a cause box and a reassurance box — with the game underneath them all. What is left: the
+       signal, the title, one short line, the game, the buttons, and one closing line doing two jobs.
+       The signal WORD and the measurement sit on one small line under the title, with no box: a
+       bordered panel is what made each of these read as a separate announcement. */
+    .sig { margin: 0 0 4px; font: 800 12.5px/1.4 system-ui, sans-serif; }
+    .sig .m-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700;
+                  font-variant-numeric: tabular-nums; opacity: .9; font-size: 11.5px; }
+    .why-line { margin: 0 0 12px; font-size: 12.5px; color: #9db0cd; line-height: 1.45; }
 
     /* ── THE GAME ──────────────────────────────────────────────────────────────────────────── */
-    .game { position: relative; margin: 12px 0 0; border-radius: 12px; overflow: hidden;
+    /* a gap under it too: the game panel and the Try again button were touching, which read as one
+       cramped block rather than two things */
+    .game { position: relative; margin: 12px 0 14px; border-radius: 12px; overflow: hidden;
             background: #070b14; border: 1px solid rgba(148, 163, 184, .18);
             touch-action: none; }
     .game canvas { display: block; width: 100%; height: 168px; }
@@ -118,18 +129,17 @@
 <body>
   <main class="card">
     <div class="brand" id="brand" hidden></div>
-    <div class="dot warn" id="dot"><span></span></div>
+    <div class="dot" id="dot"><span></span></div><!-- draws nothing; say() still sets its class -->
+
+    <!-- THE SIGNAL, AS THE ONE INDICATOR. Reading it costs nothing — see THE METER in the script. -->
+    <div class="bars-hero none" id="bars" style="color:#94a3b8"><i></i><i></i><i></i><i></i><i></i></div>
     <h1 id="title">Can't open this screen</h1>
-    <p id="sub">This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
-
-    <!-- THE LIVE SIGNAL METER (owner, 2026-08-26). Costs nothing — see the script. -->
-    <div class="meter" id="meter">
-      <span class="bars" id="bars" style="color:#94a3b8"><i></i><i></i><i></i><i></i><i></i></span>
-      <span class="m-txt"><b id="m-label">Checking the signal…</b><span id="m-note">this costs no data</span></span>
-      <span class="m-num" id="m-num"></span>
-    </div>
-
-    <div class="why" id="why"><b>Checking what's wrong...</b><span>One moment.</span></div>
+    <p class="sig"><span id="m-label">Checking&hellip;</span> <span class="m-num" id="m-num"></span></p>
+    <!-- EMPTY until a cause has actually been tested. It was seeded with "this screen hasn't been
+         opened on this device yet" — true, but a different KIND of statement from the tested cause
+         that replaces it, sitting in the slot reserved for one. The rule this page exists to keep
+         is that it never names a cause before it has established one. -->
+    <p class="why-line" id="why"></p>
 
     <!-- THE GAME. Optional, ignorable, and it never sits between the person and the buttons. -->
     <div class="game" id="game">
@@ -138,16 +148,15 @@
       <div class="g-ov" id="gov"><div><b>While you wait&hellip;</b>Catch the plates.<small>Drag, or use the arrow keys</small></div></div>
     </div>
 
-    <!-- SAY ONLY WHAT IS ACTUALLY GUARANTEED. This used to claim that EVERYTHING done while offline
-         was stored on this device and would send itself — a promise this page cannot keep and cannot
-         check. It is untrue for a device whose storage is refused, and for the guest actions that
-         have no queue at all. -->
-    <div class="safe"><b>Anything already saved on this device is safe.</b> It sends itself the
-      moment the connection is back &mdash; keep this open so it can.</div>
-
     <button type="button" class="act" id="retry">Try again</button>
     <button type="button" class="act ghost" id="home">Go to the home screen</button>
-    <div class="hint" id="hint">Checking the connection...</div>
+
+    <!-- ONE CLOSING LINE DOING TWO JOBS: the promise, and when we look again. It says only what is
+         actually guaranteed — this once claimed that EVERYTHING done offline was stored and would
+         send itself, which this page cannot keep and cannot check (a device whose storage is
+         refused; the guest actions that have no queue). "Anything already saved" keeps that
+         precision in a third of the words. -->
+    <p class="foot"><b>Anything already saved is safe.</b> <span id="hint">Checking the connection&hellip;</span></p>
   </main>
   <script>
     var $ = function (id) { return document.getElementById(id); };
@@ -263,13 +272,13 @@
       });
     }
 
-    function say(kind, title, whyTitle, whyText) {
+    // The cause is ONE short line inside the state strip now, not a bold heading plus a paragraph
+    // in a box of its own. The rule it exists for is unchanged: never state a cause that has not
+    // been tested, and never blame the wrong side.
+    function say(kind, title, why) {
       $("dot").className = "dot" + (kind === "device" ? "" : " warn");
       $("title").textContent = title;
-      while ($("why").firstChild) $("why").removeChild($("why").firstChild);
-      var b = document.createElement("b"); b.textContent = whyTitle;
-      var s = document.createElement("span"); s.textContent = whyText;
-      $("why").appendChild(b); $("why").appendChild(s);
+      $("why").textContent = why;
       document.title = title + " — your work is safe";
     }
 
@@ -329,24 +338,26 @@
         var n = probeFresh ? fromProbe(lastProbe) : null;
         var src = "measured just now";
         if (n === null) { n = fromBrowser(); src = conn ? "as your phone reports it" : ""; }
-        var bars = $("bars"), label = $("m-label"), note = $("m-note"), num = $("m-num");
+        var bars = $("bars"), label = $("m-label"), num = $("m-num");
 
         if (n === null) {
           // Nothing knowable — say that, rather than draw a number we do not have.
-          bars.style.color = "#94a3b8";
+          bars.style.color = "#94a3b8"; bars.className = "bars-hero none";
           for (var j = 0; j < bars.children.length; j++) bars.children[j].className = "";
           label.textContent = navigator.onLine === false ? "No signal" : "Signal unknown";
-          note.textContent = navigator.onLine === false
-            ? "this device isn't connected"
-            : "this phone doesn't report signal strength";
-          num.textContent = "";
+          label.style.color = "#94a3b8";
+          // NEVER INVENT BARS: a browser with no Network Information API (every iPhone) is told so
+          // rather than shown a strength we do not have.
+          num.textContent = navigator.onLine === false ? "" : "this phone doesn't report signal strength";
+          num.style.color = "#8fa1bf";
           return;
         }
         var t = TIERS[Math.max(0, Math.min(5, n))];
         bars.style.color = t.colour;
+        bars.className = "bars-hero" + (t.n === 0 ? " none" : "");
         for (var i = 0; i < bars.children.length; i++) bars.children[i].className = i < t.n ? "on" : "";
         label.textContent = t.label;
-        note.textContent = src ? t.note + " · " + src : t.note;
+        label.style.color = t.colour;
         // The millisecond figure only when it was really measured — never from an estimate.
         num.textContent = probeFresh && lastProbe.status ? lastProbe.ms + " ms" : "";
         num.style.color = t.colour;
@@ -370,8 +381,7 @@
       if (navigator.onLine === false) {
         meter.repaint();
         say("device", "No internet right now",
-          "This device is offline.",
-          "It isn't connected to Wi-Fi or mobile data. Reconnect and this screen will open itself.");
+          "Not connected to Wi-Fi or mobile data. Reconnect and this screen opens itself.");
         return Promise.resolve(false);
       }
       return ping(REACH, 6000).then(function (reach) {
@@ -380,20 +390,16 @@
         // the whole site is unreachable — both are described the same honest way.
         if (!reach.status) {
           say("device", "No internet right now",
-            "This device can't reach the internet.",
-            "Wi-Fi can say it's connected and still have no internet (a common hotel or cafe network). " +
-            "Check the connection — this screen will open itself the moment it's back.");
+            "Wi-Fi can look connected and still have none. This screen opens itself the moment it's back.");
           return false;
         }
         // We DID reach our server, so the internet is not the problem. Say so plainly.
         return ping(HEALTH, 9000).then(function (health) {
           if (health.ok) return true; // everything is back
           say("app", "The app isn't answering yet",
-            "Your internet is fine — this one is on us.",
             health.timedOut
-              ? "The app's server was reached but its database isn't responding, so screens that need data can't load yet. It usually comes back on its own, and anything already saved on this device is safe."
-              : "The app's server answered with an error (" + (health.status || "no status") +
-                "), so screens that need data can't load yet. It usually comes back on its own, and anything already saved on this device is safe.");
+              ? "Your internet is fine — this one is on us. It usually comes back on its own."
+              : "Your internet is fine — this one is on us (error " + (health.status || "?") + "). It usually comes back on its own.");
           return false;
         });
       });

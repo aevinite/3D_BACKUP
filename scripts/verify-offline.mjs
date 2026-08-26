@@ -1075,8 +1075,16 @@ async function run() {
     for (let i = 0; i < 20 && !(await fresh.evaluate(() => navigator.onLine === false).catch(() => false)); i++) await sleep(250);
     // A URL that certainly has no saved copy on this device.
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
-    const lastResort = await bodyWhenSettled(fresh, /This screen hasn['\u2019]t been opened on this device/i);
-    /This screen hasn['\u2019]t been opened on this device/i.test(lastResort)
+    // IS THIS OUR PAGE? Asked STRUCTURALLY, not by a sentence. It used to look for "This screen
+    // hasn't been opened on this device", and that sentence was cut on 2026-08-26 when the owner
+    // said the screen had too much text — so a wording change read as "the branded page was not
+    // served". The signal meter plus both ways out exist on no other page in this app, and they
+    // cannot be trimmed away without the checks below failing for their own reasons.
+    const lastResort = await bodyWhenSettled(fresh, /No internet|isn['\u2019]t answering|Can['\u2019]t open this screen/i);
+    const isOurPage = await fresh.evaluate(() =>
+      !!document.getElementById("m-label") && !!document.getElementById("retry") && !!document.getElementById("home")
+    ).catch(() => false);
+    isOurPage
       ? ok("it shows our own page, not the browser's error page")
       : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
     // The reassurance has to be TRUE as well as present. It used to promise that "any orders or
@@ -1084,7 +1092,9 @@ async function run() {
     // storage was refused, and false for the guest actions that have no queue. So the check is now
     // for the honest form (what was SAVED is safe) and it FAILS on the old blanket promise, which
     // is the only way a well-meaning revert gets noticed.
-    const reassures = /already saved on this device is safe/i.test(lastResort);
+    // "on this device" was cut with the rest of the trimming; the precision that matters is
+    // ALREADY SAVED, which is what makes the sentence true rather than a blanket promise.
+    const reassures = /already saved[^.]*is safe/i.test(lastResort);
     const overPromises = /Nothing you did is lost/i.test(lastResort) || /any orders or changes you made/i.test(lastResort);
     reassures && !overPromises
       ? ok("and it reassures them their work is safe, without promising more than we keep")
@@ -1109,7 +1119,9 @@ async function run() {
     };
     const verdict = await waitFor(async () => {
       const v = await verdictOf();
-      return /This device is offline|can't reach the internet/i.test(v) ? v : null;
+      // Any of the wordings that name THE DEVICE as the problem. Shortened 2026-08-26; the rule
+      // being asserted — blame the right side — is exactly the same.
+      return /This device is offline|can't reach the internet|No internet right now|Not connected to Wi-Fi|Wi-Fi can look connected/i.test(v) ? v : null;
     }, 10000);
     verdict
       ? ok("and it says WHY it couldn't open (this device is offline)")
@@ -1121,7 +1133,26 @@ async function run() {
     (await fresh.locator("#home").count()) > 0 && (await fresh.locator("#home").isVisible())
       ? ok("and it offers the way out (go to the home screen)")
       : bad("the last-resort page has no way out");
+    // ── AND IT TAKES YOU BACK BY ITSELF ─────────────────────────────────────────────────────
+    // The owner's requirement, in his words (2026-08-26): "if the connection is there it should
+    // auto take you to the thing". The page has always claimed to — "this screen opens itself the
+    // moment it's back" — and NOTHING checked it. A promise printed on a screen with nothing
+    // asserting it is the shape of every stale claim this project has had to unpick.
+    //
+    // So: restore the connection and touch NOTHING. It must leave the no-signal screen on its own
+    // and land on a real page. The signal meter is the marker for "still the no-signal screen",
+    // because it exists on no other page.
     await goOnline(ctx);
+    {
+      const left = await fresh.waitForFunction(() => !document.getElementById("m-label"), null, { timeout: 90000 })
+        .then(() => true).catch(() => false);
+      await sleep(1200);
+      const stillOffline = await fresh.evaluate(() => !!document.getElementById("m-label")).catch(() => true);
+      left && !stillOffline
+        ? ok("and when the connection comes back it takes you off that screen by itself, with nothing tapped")
+        : bad("the last-resort page did not move on by itself once the connection returned",
+          "it prints \"this screen opens itself the moment it's back\" — if that is not true it is a promise on a screen that cannot keep it");
+    }
     await fresh.close();
 
     // ══ NO FALSE ALARMS ON A HEALTHY CONNECTION ════════════════════════════════

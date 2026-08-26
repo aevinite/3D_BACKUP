@@ -129,10 +129,11 @@ const run = async () => {
     }
 
     // ── THE ROUTES THAT HAVE THEIR OWN 404 ──────────────────────────────────────────────────
-    // A dish page carries its own not-found (components/GuestNotFound.tsx), so it never reaches
-    // the docket. That is fine and it predates today's work — but the RULE still has to hold, and
-    // it is the rule that matters rather than which drawing appears: a guest looking for a missing
-    // page must never be handed a way out that leads to the staff password screen.
+    // A dish page carries its own not-found (components/GuestNotFound.tsx). It shows the SAME
+    // docket with the SAME words — the owner threw out the dish-specific variant on 2026-08-26
+    // ("we don't even need it") — so what is asserted here is the rule, not the drawing: a guest
+    // looking for a missing page must never be handed a way out that leads to the staff password
+    // screen, and the words must not have drifted back into a special case.
     for (const path of ["/r/french-house/item/no-such-dish", "/item/no-such-dish"]) {
       const p = await ctx.newPage();
       try {
@@ -148,10 +149,66 @@ const run = async () => {
         });
         const toMenu = s.hrefs.some((h) => /\/menu$/.test(h));
         const toRoot = s.hrefs.some((h) => h === "/");
-        toMenu && !toRoot
-          ? ok(`${path} has its own guest 404 ("${s.heading}") and its way out is a menu, not the staff door`)
+        // and it must NOT have grown a dish-specific wording again
+        const noDishVariant = !/dish/i.test(s.heading || "");
+        toMenu && !toRoot && noDishVariant
+          ? ok(`${path} shows the guest docket ("${s.heading}") and its way out is a menu, not the staff door`)
           : bad(`${path}'s 404 offers a way out that is not a menu`,
             `links: ${JSON.stringify(s.hrefs.slice(0, 4))} — "/" redirects to the staff password screen`);
+      } finally { await p.close().catch(() => {}); }
+    }
+
+    // ── THE WAY OUT MUST BE READABLE ────────────────────────────────────────────────────────
+    //
+    // This is here because it went wrong and nothing caught it. app/globals.css carries
+    // `a { color: inherit !important }` so guest links never turn blue, and an !important
+    // declaration beats any normal one however specific — so the colours set on these buttons never
+    // applied to an anchor and the text inherited the page colour. Measured on the built site: the
+    // guest button 1.19:1 and the STAFF button 1.00:1, which is text the exact colour of the thing
+    // it is printed on. Both ways out were invisible. Every other check was green, because every
+    // other check asked what the buttons SAID and where they WENT, never whether anyone could see
+    // them. The owner found it by looking.
+    {
+      const p = await ctx.newPage();
+      try {
+        const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+                             return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+        const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+        for (const [path, label] of [["/menu/no-such-page", "the guest 404"], ["/manager/no-such-page", "the staff 404"], ["/item/no-such-dish", "the dish 404"]]) {
+          await p.goto(BASE + path, { waitUntil: "domcontentloaded" });
+          await p.waitForFunction(() => !!document.querySelector("a.nf-btn, a.btn"), null, { timeout: 20000 }).catch(() => {});
+          const seen = await p.evaluate(() => {
+            const parse = (x) => { const m = String(x).match(/rgba?\(([^)]+)\)/); return m ? m[1].split(",").slice(0, 3).map(Number) : null; };
+            return [...document.querySelectorAll("a.nf-btn, a.btn, button.nf-btn")].map((e) => {
+              // FINDING THE REAL BACKDROP, and this took a correction. A ghost button has a
+              // transparent background, so the backdrop is an ancestor's — but these screens are
+              // painted with a radial-gradient, which is a background-IMAGE and reports its
+              // background-COLOR as transparent. Walking up only for a colour therefore sailed
+              // past the cream gradient all the way to the body's near-black and reported the
+              // perfectly readable "Try again" at 1.15:1. So a gradient counts: take the first
+              // colour it declares, which is the one under the top of the card.
+              const cs = getComputedStyle(e);
+              let bg = parse(cs.backgroundColor);
+              if (!bg || /rgba\(0, 0, 0, 0\)/.test(cs.backgroundColor)) {
+                let n = e.parentElement;
+                while (n) {
+                  const s2 = getComputedStyle(n);
+                  if (s2.backgroundColor && !/rgba\(0, 0, 0, 0\)/.test(s2.backgroundColor)) { bg = parse(s2.backgroundColor); break; }
+                  if (s2.backgroundImage && s2.backgroundImage !== "none" && /rgba?\(/.test(s2.backgroundImage)) { bg = parse(s2.backgroundImage); break; }
+                  n = n.parentElement;
+                }
+              }
+              return { txt: e.textContent.trim(), fg: parse(cs.color), bg: bg || [11, 16, 32] };
+            });
+          });
+          const unreadable = seen.filter((b) => b.fg && ratio(b.fg, b.bg) < 4.5)
+            .map((b) => `"${b.txt}" at ${ratio(b.fg, b.bg).toFixed(2)}:1`);
+          seen.length && unreadable.length === 0
+            ? ok(`${label}: every way out is readable (${seen.map((b) => ratio(b.fg, b.bg).toFixed(1) + ":1").join(", ")})`)
+            : bad(`${label} has a way out nobody can read`,
+              seen.length ? unreadable.join(", ") + " — 4.5:1 is the floor; 1.00:1 means the text is the same colour as the button"
+                          : "no buttons were found at all");
+        }
       } finally { await p.close().catch(() => {}); }
     }
 

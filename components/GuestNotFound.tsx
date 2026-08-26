@@ -19,21 +19,20 @@
 // the menu page itself uses. Menu answers → offer it. Menu doesn't → say so plainly and point
 // at a member of staff, instead of offering a button that 404s straight back here.
 //
-// ── THE LOOK: THE ORDER DOCKET, AND WHY IT SAYS "DISH" AND NOT "404" ────────────────────────
+// ── THE LOOK: THE ORDER DOCKET, AND ONE SET OF WORDS ────────────────────────────────────────
 //
-// The owner picked the order-slip-on-the-spike screen for guests on 2026-08-26, and then asked
-// the right question about this one: *"What are the missing dish? … maybe it will go back and
-// say the dish has not been there."*
+// The owner picked the order-slip-on-the-spike screen for guests on 2026-08-26. It briefly had a
+// dish-specific variant of the docket ("DISH — off the menu") and he threw that out the same day:
+// *"we don't need this dish isn't in menu one … we don't even need it."* He is right — a guest does
+// not care whether the address or the dish is the thing that is missing, only how to get back to
+// the menu. One screen, one set of words, less to keep true.
 //
-// So this is the SAME docket as the general guest 404 — one look for a guest, not two — but the
-// docket does not say TABLE 404. A missing dish is a genuinely different event from a wrong
-// address, and the paper says which it is:
+// TWO STATES REMAIN, and the second is logic rather than decoration:
 //
-//     the general guest 404 →  TABLE  404   · status: no such table
-//     a dish that is gone   →  DISH   —     · status: off the menu
-//     the whole menu is off →  MENU   —     · status: not serving
+//     a guest page that is not there →  TABLE 404 · no such table  · stamped VOID
+//     the whole menu is switched off →  MENU  —   · not serving     · stamped CLOSED
 //
-// That last state is the one that must never offer a button, because there is nothing behind it.
+// That second one must never offer a button, because there is nothing behind it.
 //
 // It keeps this screen's own typeface and theme tokens rather than system-ui (visual sweep
 // 2026-08-05): this was once the only guest screen drawn in a different typeface with no theme,
@@ -79,10 +78,14 @@ const CSS = `
   border-radius: 4px; opacity: 0; animation: gnfSlam .32s cubic-bezier(.2,1.4,.4,1) 1.25s forwards; }
 .gnf h1 { font-size: 21px; margin: 12px 0 8px; font-weight: 800; }
 .gnf .sub { color: #b3aa9d; font-size: 14px; margin: 0 auto 20px; max-width: 33ch; }
+/* !important on the COLOUR, not just the underline: app/globals.css has
+   \`a { color: inherit !important }\` to stop guest links turning blue, and that beats any normal
+   declaration however specific — so this button's text inherited the page colour and measured
+   1.19:1 against its own background. Unreadable, on the only control this screen offers. */
 .gnf .btn, .gnf a.btn:visited, .gnf a.btn:hover, .gnf a.btn:active {
   display: block; width: 100%; padding: 13px 18px; border-radius: 12px; border: 0;
   font: 700 14.5px/1 system-ui, sans-serif; cursor: pointer;
-  background: #fffdf6; color: #23201c; text-decoration: none !important; }
+  background: #fffdf6; color: #23201c !important; text-decoration: none !important; }
 @keyframes gnfDrop { 0% { transform: translateY(-190px) rotate(-13deg); opacity: 0 }
                      55% { opacity: 1 } 70% { transform: translateY(4px) rotate(4deg) }
                      100% { transform: translateY(0) rotate(0); opacity: 1 } }
@@ -101,10 +104,6 @@ export default function GuestNotFound() {
   // restaurant #1 by definition (same rule as lib/tenantStorage + restaurant-context).
   const m = pathname.match(/^\/r\/([^/]+)/);
   const slug = m ? decodeURIComponent(m[1]) : /^\/item(\/|$)/.test(pathname) ? DEFAULT_RESTAURANT_SLUG : null;
-  // Is this a DISH link, or some other guest page? The docket says which, because "that dish is
-  // gone" and "that address is wrong" are different things to be told.
-  const isDish = /(^|\/)item\//.test(pathname);
-
   // null = still asking · true = this restaurant's menu is live · false = it isn't.
   const [menuLive, setMenuLive] = useState<boolean | null>(null);
   useEffect(() => {
@@ -116,22 +115,17 @@ export default function GuestNotFound() {
     return () => { alive = false; };
   }, [slug]);
 
-  // Three states, and the docket is filled in from whichever one this is. The menu-is-off case
-  // deliberately gets no button at all: there is nothing behind it, and offering one would bounce
-  // a guest straight back to this screen.
+  // Two states. The menu-is-off case deliberately gets no button at all: there is nothing behind
+  // it, and offering one would bounce a guest straight back to this screen.
   const off = menuLive === false;
-  const kind = off ? "Menu" : isDish ? "Dish" : "Table";
-  const mark = off ? "—" : isDish ? "—" : "404";
-  const status = off ? "not serving" : isDish ? "off the menu" : "no such table";
-  const stamp = off ? "Closed" : isDish ? "Gone" : "Void";
-  const title = off
-    ? "This menu isn’t available right now"
-    : isDish ? "That dish isn’t on the menu" : "That table doesn’t exist";
+  const kind = off ? "Menu" : "Table";
+  const mark = off ? "—" : "404";
+  const status = off ? "not serving" : "no such table";
+  const stamp = off ? "Closed" : "Void";
+  const title = off ? "This menu isn’t available right now" : "That table doesn’t exist";
   const sub = off
     ? "Please ask a member of staff — they can bring you the menu or scan the current code for your table."
-    : isDish
-      ? "It may have been taken off the menu, or the link was an old one. Everything else is still there."
-      : "The page you asked for isn’t here. If you’re sitting down, scan the QR code on your table again — or ask a member of staff.";
+    : "The page you asked for isn’t here. If you’re sitting down, scan the QR code on your table again — or ask a member of staff.";
 
   return (
     <>

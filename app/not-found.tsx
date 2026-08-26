@@ -75,9 +75,20 @@ function readAudience(): { aud: Aud; slug: string; href: string; label: string }
 
 const CSS = `
 .nf { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 24px; text-align: center; }
-/* the global \`a { color: inherit !important }\` keeps guest links from turning blue, and would
-   force these buttons' text to the body colour — a stronger selector is the only way past it */
+/* THE WAY OUT WAS INVISIBLE, AND THIS IS WHY.
+   app/globals.css carries \`a { color: inherit !important }\` so guest links never turn blue. An
+   !important declaration beats ANY normal one however specific, so the colours set on .nf-home and
+   .nf-again below never applied to an anchor: its text simply inherited the page colour. Measured
+   on the built site — the guest button came out at 1.19:1 and the STAFF button at 1.00:1, which is
+   text the exact colour of the thing it is printed on. Both "Go to the menu" and "Go to the home
+   screen" were unreadable, on the one control these screens exist to offer.
+   I had written the comment that a stronger selector was needed and then only overridden the
+   UNDERLINE. It needs !important on the colour too. */
 .nf a.nf-btn, .nf a.nf-btn:visited, .nf a.nf-btn:hover, .nf a.nf-btn:active { text-decoration: none !important; }
+.nf-g a.nf-home, .nf-g a.nf-home:visited, .nf-g a.nf-home:hover, .nf-g a.nf-home:active { color: #23201c !important; }
+.nf-g a.nf-again, .nf-g a.nf-again:visited { color: #d9d1c5 !important; }
+.nf-s a.nf-home, .nf-s a.nf-home:visited, .nf-s a.nf-home:hover, .nf-s a.nf-home:active { color: #fff9f0 !important; }
+.nf-s a.nf-again, .nf-s a.nf-again:visited { color: #241a12 !important; }
 .nf .nf-btn { display: block; width: 100%; padding: 14px 18px; border-radius: 12px; border: 0;
               font: 700 14.5px/1 system-ui, sans-serif; cursor: pointer; }
 .nf .nf-wrap { width: min(420px, 100%); }
