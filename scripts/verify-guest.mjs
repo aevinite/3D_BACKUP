@@ -54,7 +54,7 @@ const F = {
   legacy: code("app/item/[slug]/page.tsx"), q: code("app/q/[code]/page.tsx"),
   sgate: code("components/SessionGate.tsx"), menuLib: code("lib/menu.ts"),
   navp: code("components/NavPicker.tsx"),
-  accent: code("lib/accent.ts"), editorJs: read("public/panels/editor/app.js"),
+  accent: code("lib/accent.ts"), fit: code("lib/useFitText.ts"), header: code("components/Header.tsx"), editorJs: read("public/panels/editor/app.js"),
   css: read("app/globals.css"), offHtml: read("public/offline.html"), sw: read("public/sw.js"),
 };
 
@@ -249,6 +249,16 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// A RESTAURANT'S OWN NAME IS NEVER CUT (owner, 2026-08-26). The wordmark ran out of room next to
+// the top bar's fixed buttons and ended in "little French hou…" on a 320px phone. It uses the same
+// shrink-to-fit helper the dish names have used since 2026-08-05 — which only ever asked whether
+// text was too TALL, so a one-line `nowrap` name was invisible to it.
+check("P15605", "the wordmark shrinks to fit instead of being cut", () =>
+  has(F.header, 'from "@/lib/useFitText"', "useFitText<HTMLHeadingElement>") &&
+  (F.header.match(/ref=\{brandRef\}/g) || []).length === 2);
+check("P15606", "the fit helper notices a name that is too WIDE, with no slack", () =>
+  rx(F.fit, /el\.scrollWidth > el\.clientWidth;/) && !rx(F.fit, /el\.scrollWidth > el\.clientWidth \+ 1/));
+
 // ONE THEME COLOUR ON THE CATEGORY BAR, NOT ONE PER CATEGORY (owner, 2026-08-26):
 // *"do the theme colour one only it look professional like it was previous no random colours"*.
 // The chip must emit no per-category colour at all — that absence is what makes the stylesheet
@@ -345,6 +355,37 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: the wordmark is whole at every width a diner might hold, on a long name and a short
+    // one. 320px is the one that used to cut it; the rest are here so a future "fix" cannot buy
+    // the narrow case by shrinking the name on phones that never needed it.
+    for (const wdt of [320, 360, 390, 768]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 780 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".brand-title", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForFunction(() => document.fonts?.status === "loaded", null, { timeout: 15000 }).catch(() => {});
+      await pg2.waitForTimeout(1200);
+      const r = await pg2.evaluate(() => { const e = document.querySelector(".brand-title");
+        return e ? { cut: e.scrollWidth > e.clientWidth, size: getComputedStyle(e).fontSize, text: e.innerText.replace(/\s+/g, " ") } : null; });
+      check("P15605", `LIVE: the wordmark is whole at ${wdt}px`, () =>
+        ({ ok: !!r && !r.cut, note: r ? `"${r.text}" at ${r.size}` : "no wordmark" }));
+      await cc.close();
+    }
+    // …and the dish names the helper was built for are still whole, at both shapes of screen.
+    for (const [slug, wdt] of [["aangan-garden-restaurant", 360], ["french-house", 1280]]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 800 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".dish-name", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForFunction(() => document.fonts?.status === "loaded", null, { timeout: 15000 }).catch(() => {});
+      await pg2.waitForTimeout(1500);
+      const r = await pg2.evaluate(() => { const n = [...document.querySelectorAll(".dish-name")];
+        return { total: n.length, cut: n.filter((e) => e.scrollHeight > e.clientHeight + 1 || e.scrollWidth > e.clientWidth).length }; });
+      check("P15605", `LIVE: ${slug} dish names still whole at ${wdt}px`, () =>
+        ({ ok: r.total > 0 && r.cut === 0, note: `${r.cut} cut of ${r.total}` }));
+      await cc.close();
+    }
+
     // LIVE: the selected chip's icon and its own label share ONE ink, on every restaurant and both
     // skins. They did not: light gave a white icon above a near-black label on the same gold fill,
     // and dark did the reverse. Invisible while every chip carried its own ink, obvious the moment
@@ -353,7 +394,12 @@ async function live(base) {
       for (const theme of ["light", "dark"]) {
         const { c, pg } = await open(`/r/${slug}/menu`, 3000);
         await pg.evaluate((t) => { localStorage.setItem("lfh_theme", t); }, theme);
-        await pg.reload({ waitUntil: "domcontentloaded" }); await pg.waitForTimeout(3500);
+        await pg.reload({ waitUntil: "domcontentloaded" });
+        // WAIT FOR THE CHIP, do not sleep and hope. The scroll-spy marks one only after the dishes
+        // have painted, and on a dev server under load that is well past any fixed timeout — which
+        // made this read "no active chip" perhaps one run in three.
+        await pg.waitForSelector(".cat-card.active", { timeout: 30000 }).catch(() => {});
+        await pg.waitForTimeout(600);
         const r = await pg.evaluate(() => {
           const on = document.querySelector(".cat-card.active"); if (!on) return null;
           const ic = on.querySelector(".cat-icon"), nm = on.querySelector(".cat-name");
@@ -398,7 +444,9 @@ async function live(base) {
     // assert the same dish is under the header. Asserts the DISH, not a pixel: the page can settle a
     // few px either way and the diner would never know, but landing on a different dish is the bug.
     for (const slug of ["french-house", "aangan-garden-restaurant"]) {
-      const { c, pg } = await open(`/r/${slug}/menu`, 6000);
+      const { c, pg } = await open(`/r/${slug}/menu`, 1500);
+      await pg.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg.waitForTimeout(2500);
       const topDish = () => pg.evaluate(() => [...document.querySelectorAll(".item-card")]
         .find((x) => x.getBoundingClientRect().top > 150)?.querySelector(".dish-name")?.textContent.trim() || "");
       await pg.evaluate(() => document.getElementById("main-scroll").scrollTo({ top: 1500, behavior: "instant" }));
@@ -413,6 +461,7 @@ async function live(base) {
       await pg.waitForLoadState("networkidle").catch(() => {});
       await pg.waitForTimeout(2500);
       await pg.goBack({ waitUntil: "networkidle" }).catch(() => {});
+      await pg.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
       await pg.waitForTimeout(4500);
       const after = await topDish();
       check("P15332", `LIVE: ${slug} Back returns to the same dish`, () =>

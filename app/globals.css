@@ -172,6 +172,16 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
   .nav-actions { gap: 4px; }
   .nav { padding-left: calc(10px + env(safe-area-inset-left)); padding-right: calc(10px + env(safe-area-inset-right)); }
 }
+/* …and on the NARROWEST phones (owner, 2026-08-26: a name must never be cut), spend the decorative
+   tracking before the font size. At 320px the wordmark had 98px and wanted 120px; letter-spacing
+   alone was ~24px of that — 19 characters at 1.28px alone. Dropping it to a hairline buys the room
+   back without making the restaurant's own name smaller than the rest of the bar. useFitText in
+   components/Header.tsx handles whatever is still too long after this, so an unusually long name
+   shrinks a step instead of ending in "…". */
+@media (max-width: 360px) {
+  .brand-title { letter-spacing: 0.2px; }
+  .nav-actions { gap: 3px; }
+}
 .nav-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .nav-btn {
   width: clamp(34px, 8.5vw, 42px);
