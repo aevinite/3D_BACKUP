@@ -93,11 +93,28 @@ console.log("The owner's cockpit — Menu, Team, Settings\n");
   if (src) {
     const bare = code(src);
     const hasRef = /errRef/.test(bare);
-    const scrolls = /errRef\.current\?\.scrollIntoView[\s\S]{0,200}\[err\]/.test(bare);
+    const scrolls = /errRef\.current\?\.scrollIntoView[\s\S]{0,240}\[\s*err\b[^\]]*\]/.test(bare);
     const attached = /ref=\{errRef\}/.test(bare);
     if (hasRef && scrolls && attached) ok("a refusal on the roster brings itself into view");
     else bad(`the roster's error banner is not scrolled into view (ref=${hasRef} effect=${scrolls} attached=${attached}) `
       + "— on a phone it renders above the fold and the tap looks ignored");
+    // …AND SO DOES THE SECOND ONE (T13 sweep, 2026-08-27 — measured).
+    // The effect above was keyed on `[err]` alone. Setting state to the string it already holds is a
+    // no-op in React, so a run of identical refusals — the same username typed twice, the same short
+    // password — re-rendered nothing and the effect never fired again. Measured on a 360×780 phone:
+    // attempt 1 put the banner at y = 194 (on screen), attempt 2 left it at y = -1190 (off the top),
+    // with the owner's typing still in the boxes. The message must therefore carry something that
+    // ALWAYS moves, and the effect must watch it.
+    // This asserts the property, not the name: whatever the counter is called, both `say` and `fail`
+    // must bump it, and the scroll effect must depend on it.
+    const nonce = (bare.match(/const \[(\w+), set(\w+)\] = useState\(0\)/) || [])[1];
+    const bumps = nonce
+      && new RegExp(`say = useCallback\\([\\s\\S]{0,220}set${nonce[0].toUpperCase()}${nonce.slice(1)}\\(`).test(bare)
+      && new RegExp(`fail = useCallback\\([\\s\\S]{0,320}set${nonce[0].toUpperCase()}${nonce.slice(1)}\\(`).test(bare);
+    const watched = nonce && new RegExp(`errRef\\.current\\?\\.scrollIntoView[\\s\\S]{0,240}\\[[^\\]]*\\b${nonce}\\b`).test(bare);
+    if (bumps && watched) ok("…and so does the SECOND identical refusal — the message carries a counter that always moves");
+    else bad(`a repeated identical refusal would not come back onto the screen (counter=${nonce || "none"} bumped=${!!bumps} watched=${!!watched}) `
+      + "— React skips a re-render when the message is unchanged, so the scroll never fires again");
   }
 }
 

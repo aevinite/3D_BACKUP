@@ -149,11 +149,22 @@ export default function OwnerStaffPage() {
   // ONE door for every message on this page, so the heading always matches the reason.
   // `say` is for something we refuse ourselves (a name too short); `fail` is for a thrown error,
   // which knows its own kind — a network throw has no kind at all, and that really is a fault.
-  const say = useCallback((msg: string, kind: ErrKind = "refused") => { setErrKind(kind); setErr(msg); }, []);
+  // THE SAME REFUSAL, A SECOND TIME, WAS NOT BROUGHT BACK ONTO THE SCREEN (T13 sweep, 2026-08-27 —
+  // measured). `setErr("…taken at this restaurant…")` with the string already in state is a no-op:
+  // React sees the same value, does not re-render, and the scroll-into-view effect below — which
+  // depends on `err` — never runs. On a 360×780 phone the first refused Add scrolled the banner to
+  // y = 194 (visible); tapping Add again with the same name left it at y = -1190, off the top of the
+  // screen, with the owner's typing still in the boxes and nothing appearing to happen. Exactly the
+  // fault that effect was added to fix, for every attempt after the first.
+  // So the message carries a counter that always moves, and the effect watches that too. A tap must
+  // never vanish in silence, and "you already know" is not an answer to the second tap.
+  const [errAt, setErrAt] = useState(0);
+  const say = useCallback((msg: string, kind: ErrKind = "refused") => { setErrKind(kind); setErr(msg); setErrAt((n) => n + 1); }, []);
   const fail = useCallback((e: unknown) => {
     const kind: ErrKind = e instanceof CallError ? e.kind : "fault";
     setErrKind(kind);
     setErr(e instanceof Error ? e.message : String(e));
+    setErrAt((n) => n + 1);
   }, []);
 
   const load = useCallback(async () => {
@@ -190,10 +201,12 @@ export default function OwnerStaffPage() {
   // absolutely nothing happen: their typing still in the boxes, no message anywhere on screen.
   // "A tap must never vanish in silence" (CLAUDE.md) — a refusal the person cannot see is the
   // same as no refusal at all.
+  // `errAt` is in the dependency list on purpose — see the note on it above. Without it, only the
+  // FIRST of a run of identical refusals reaches the screen.
   useEffect(() => {
     if (!err) return;
     errRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [err]);
+  }, [err, errAt]);
 
   const canEditPowers = actor === "owner" || actor === "admin";
 
