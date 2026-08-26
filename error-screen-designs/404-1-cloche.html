@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Nothing under this cloche</title>
+<style>
+  /* DESIGN 1 — THE DISH THAT GOT AWAY.
+     The cloche lifts once, reveals an empty plate, and a wisp of steam escapes. The "404" is not
+     typed: the two 4s are drawn and the 0 IS the plate, so the number is part of the picture
+     rather than sitting on top of it. One-shot, then it rests — the person wants to leave. */
+  :root { color-scheme: light; --ink:#2a1c10; --muted:#7a6552; --gold:#c8963f; --cream:#fdf8f0; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:28px;
+         background: radial-gradient(120% 90% at 50% -10%, #fffdf8 0%, var(--cream) 45%, #f2e6d3 100%);
+         color:var(--ink); font:500 15px/1.55 "Georgia", "Times New Roman", serif; text-align:center; }
+  .card { width:min(440px,100%); }
+
+  /* ── the stage ─────────────────────────────────────────────────────────── */
+  .stage { position:relative; width:100%; height:210px; margin:0 auto 6px; }
+  .num { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:6px; }
+  /* The 4s are drawn strokes, not a font, so they sit in the same visual language as the plate. */
+  .four { width:56px; height:96px; position:relative; opacity:0; animation:fourIn .7s cubic-bezier(.2,.9,.3,1) 1.35s forwards; }
+  .four::before, .four::after { content:""; position:absolute; background:var(--gold); border-radius:3px; }
+  .four::before { width:7px; height:62px; left:30px; top:0; box-shadow:0 62px 0 -0px var(--gold); }
+  .four::after { width:7px; height:66px; left:30px; top:0;
+                 transform-origin:top center; transform:rotate(34deg); }
+  .four i { position:absolute; left:6px; top:56px; width:48px; height:7px; background:var(--gold); border-radius:3px; }
+  .four:last-of-type { animation-delay:1.5s; }
+
+  /* the plate is the 0 */
+  .plate-wrap { position:relative; width:104px; height:96px; }
+  .plate { position:absolute; left:0; bottom:14px; width:104px; height:26px; border-radius:50%;
+           background:linear-gradient(#fff,#efe4d3); box-shadow:0 6px 14px rgba(90,64,34,.18);
+           border:1px solid #e6d8c2; }
+  .plate::after { content:""; position:absolute; left:26px; top:7px; width:52px; height:12px;
+                  border-radius:50%; background:#f7efe2; box-shadow:inset 0 1px 2px rgba(120,95,60,.18); }
+
+  /* the cloche: slides in, lifts, tilts away */
+  .cloche { position:absolute; left:2px; bottom:26px; width:100px; height:62px;
+            border-radius:100px 100px 6px 6px;
+            background:linear-gradient(160deg,#f6f6f8 0%,#c9ccd6 42%,#8f949f 100%);
+            box-shadow:inset -8px -6px 14px rgba(255,255,255,.6), 0 8px 16px rgba(60,50,40,.22);
+            transform-origin:80% 100%;
+            animation:clocheIn .8s cubic-bezier(.2,.9,.3,1) .15s both, clocheLift 1.1s cubic-bezier(.4,0,.2,1) .95s forwards; }
+  .cloche::after { content:""; position:absolute; left:44px; top:-9px; width:12px; height:12px;
+                   border-radius:50%; background:linear-gradient(#fff,#a9aeb9); }
+  /* the shine that travels across the dome as it lifts */
+  .cloche i { position:absolute; inset:0; border-radius:inherit; overflow:hidden; }
+  .cloche i::before { content:""; position:absolute; top:-10%; left:-40%; width:35%; height:130%;
+                      background:linear-gradient(90deg,transparent,rgba(255,255,255,.85),transparent);
+                      transform:skewX(-18deg); animation:shine 2.6s ease-in-out 1.2s infinite; }
+
+  /* steam escaping the moment the lid breaks the seal */
+  .steam { position:absolute; left:50%; bottom:44px; translate:-50% 0; width:60px; height:70px; pointer-events:none; }
+  .steam span { position:absolute; bottom:0; width:7px; height:7px; border-radius:50%;
+                background:rgba(190,170,140,.5); opacity:0; }
+  .steam span:nth-child(1){ left:12px; animation:puff 2.4s ease-out 1.15s infinite; }
+  .steam span:nth-child(2){ left:27px; animation:puff 2.4s ease-out 1.5s infinite; }
+  .steam span:nth-child(3){ left:41px; animation:puff 2.4s ease-out 1.85s infinite; }
+
+  @keyframes clocheIn  { from { opacity:0; transform:translateX(-26px) } to { opacity:1; transform:none } }
+  @keyframes clocheLift{ to { transform:translate(34px,-64px) rotate(20deg); opacity:.92 } }
+  @keyframes fourIn    { from { opacity:0; transform:translateY(10px) scale(.92) } to { opacity:1; transform:none } }
+  @keyframes shine     { 0%,55%{ left:-40% } 85%,100%{ left:110% } }
+  @keyframes puff      { 0%{ opacity:0; transform:translateY(0) scale(.7) }
+                         25%{ opacity:.65 }
+                         100%{ opacity:0; transform:translateY(-52px) scale(1.9) } }
+
+  /* ── the words ─────────────────────────────────────────────────────────── */
+  #brand { font:800 11.5px/1 system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase;
+           color:var(--gold); margin-bottom:14px; }
+  #brand[hidden] { display:none; }
+  h1 { font-size:23px; margin:6px 0 8px; font-weight:700; letter-spacing:-.01em; }
+  #why { color:var(--muted); font-size:14.5px; margin:0 auto 26px; max-width:34ch; }
+  .acts { display:flex; flex-direction:column; gap:10px; }
+  a, button { font:700 14.5px/1 system-ui,sans-serif; border-radius:999px; padding:14px 18px;
+              cursor:pointer; text-decoration:none; border:0; }
+  #home { background:var(--ink); color:var(--cream); }
+  #retry { background:transparent; color:var(--ink); border:1px solid rgba(42,28,16,.22); }
+  #home:active, #retry:active { transform:translateY(1px); }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* Still, but the story still reads: the lid is already off and to one side. */
+    .cloche { animation:none; transform:translate(34px,-64px) rotate(20deg); }
+    .cloche i::before, .steam span { animation:none; }
+    .steam span { opacity:.4 }
+    .four { animation:none; opacity:1 }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <div class="stage">
+      <div class="num">
+        <div class="four"><i></i></div>
+        <div class="plate-wrap">
+          <div class="plate"></div>
+          <div class="cloche"><i></i></div>
+          <div class="steam"><span></span><span></span><span></span></div>
+        </div>
+        <div class="four"><i></i></div>
+      </div>
+    </div>
+    <h1 id="title">Nothing under this one</h1>
+    <p id="why">That page isn&rsquo;t on the menu. If you&rsquo;re at a table, scan the QR code again &mdash;
+       or ask a member of staff.</p>
+    <div class="acts">
+      <a id="home" href="/">Go to the menu</a>
+      <button id="retry" type="button" onclick="location.reload()">Try again</button>
+    </div>
+    <div class="hint" id="hint" style="margin-top:16px;font-size:12.5px;color:var(--muted)"></div>
+  </main>
+<script>
+  // Prototype only: shows the restaurant's name the same way the real screens do, from the value
+  // the guest menu stores. Never a guess — nothing is shown if there is nothing stored.
+  (function(){ try {
+    var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+    if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+  } catch (e) {} })();
+</script>
+</body>
+</html>

@@ -420,6 +420,83 @@ async function run() {
           : bad("the slug is no longer handed in", "deriving it in two places is how the two drift apart");
       }
 
+      // ══ 8 · THE SIGNAL METER MUST COST NOTHING ════════════════════════════════════════════
+      //
+      // The owner's condition when he asked for a live signal bar (2026-08-26): "make sure it
+      // doesn't increase any kind of load on our backend egress". That is not a nice-to-have on
+      // this product — egress is the budget it will not spend loosely — so it is a CHECK, not a
+      // comment. The meter is allowed exactly two sources, both free:
+      //   1. navigator.connection, which the browser measures from traffic the device already made
+      //      and which fires a `change` event, so "live" costs one listener and no requests
+      //   2. the round trip of the two probes THIS PAGE ALREADY MAKES on its retry timer
+      //
+      // A future change that reaches for its own speed test — a download of a test file, a poll of
+      // an endpoint — is exactly what this catches, and it would be invisible otherwise.
+      {
+        mode = "app-down";   // both probes answer, so the meter has a real measurement to show
+        const p = await browser.newPage();
+        const paths = [];
+        p.on("request", (r) => { try { paths.push(new URL(r.url()).pathname); } catch { /* ignore */ } });
+        try {
+          await p.addInitScript(COMPRESS);
+          await p.goto(base + "/offline.html", { waitUntil: "domcontentloaded" });
+          await sleep(2500);
+
+          // Only the page itself and the two probes. Anything else is a new cost.
+          const ALLOWED = new Set(["/offline.html", "/api/__offline-check", "/api/health"]);
+          const extra = [...new Set(paths)].filter((x) => !ALLOWED.has(x));
+          extra.length === 0
+            ? ok(`the signal meter added no requests of its own (${[...new Set(paths)].length} path(s), all expected)`)
+            : bad("something on the last-resort page is making requests it did not before",
+              `unexpected: ${extra.join(", ")}\n       `
+              + "The meter may only read navigator.connection and the round trip of the probes the "
+              + "page already makes. A speed test of its own is exactly what the owner ruled out.");
+
+          // …and it must actually SAY something, or it is decoration pretending to be information.
+          const label = (await p.locator("#m-label").textContent().catch(() => "")) || "";
+          label.trim() && !/^Checking/.test(label)
+            ? ok(`the meter reports a real reading ("${label.trim()}")`)
+            : bad("the meter never resolved to a reading", JSON.stringify(label));
+
+          // NEVER INVENT BARS. With a measurement it may light them; with nothing to go on it must
+          // say so rather than draw a number it does not have.
+          const html = readFileSync(join(ROOT, "public/offline.html"), "utf8");
+          /this phone doesn't report signal strength/.test(html)
+            ? ok("with nothing to measure the meter says so, instead of inventing a signal")
+            : bad("the meter has lost its honest fallback",
+              "on a browser with no Network Information API (every iPhone) it would otherwise draw a guess");
+          /navigator\.connection/.test(html)
+            ? ok("it reads the browser's own free estimate")
+            : bad("the meter no longer reads navigator.connection", "the only zero-cost live source");
+          !/setInterval\([^)]*fetch|fetch\([^)]*speed|\/api\/(ping|speed|bandwidth)/.test(html)
+            ? ok("nothing here polls or runs a speed test")
+            : bad("the meter appears to be making its own measurements", "that is the cost the owner ruled out");
+        } finally { await p.close().catch(() => {}); }
+      }
+
+      // ══ 9 · THE GAME MUST KNOW ITS PLACE ══════════════════════════════════════════════════
+      // It is a kindness while someone is stuck, not a feature. So: it stops when the connection
+      // comes back, it is gone entirely for anyone who asked their phone to stop animating, and it
+      // never sits between the person and the two buttons.
+      {
+        const html = readFileSync(join(ROOT, "public/offline.html"), "utf8");
+        /LFH_GAME\.stop\(/.test(html) && /if \(window\.LFH_GAME\) window\.LFH_GAME\.stop/.test(html)
+          ? ok("the game is stopped by the retry loop the moment the connection is proven back")
+          : bad("nothing stops the game when the connection returns",
+            "a game that outlives its reason for existing is just in the way");
+        /prefers-reduced-motion: reduce\)[\s\S]{0,400}\.game \{ display: none/.test(html)
+          ? ok("there is no game at all for anyone who asked their phone to stop moving things")
+          : bad("the game ignores the reduced-motion preference");
+        /document\.hidden/.test(html)
+          ? ok("the game pauses while the tab is hidden — a phone with no signal often has no battery either")
+          : bad("the game keeps running while nobody is looking");
+        // The invite that sits over the canvas must not swallow the first tap. It did, and the game
+        // could never be started at all — caught by driving it, not by reading it.
+        /\.g-ov \{[^}]*pointer-events: none/.test(html)
+          ? ok("the game's invite lets the first tap through to the game")
+          : bad("the invite overlay will swallow the first tap, so the game can never start");
+      }
+
       // /offline.html is PRECACHED, so a device keeps the old copy until the cache names move.
       // Changing the page without bumping VERSION ships a fix nobody receives.
       /BUMP THIS whenever \/offline\.html changes/.test(sw2)

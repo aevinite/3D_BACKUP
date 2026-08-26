@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>No internet — your work is safe</title>
+<style>
+  /* DESIGN 8 — CATCH THE DISHES. The dino-game one.
+     Chrome's game works because you are STUCK: it turns dead time into something to do, and it
+     never gets in the way of leaving. So: slide the tray, catch the plates, don't drop three.
+     The rules it must obey to belong on THIS screen:
+       · the verdict and the way out stay visible above it — the game is never the whole screen
+       · it stops dead the instant the connection is back, mid-game, and says so
+       · it costs almost nothing: one canvas, paused entirely when the tab is hidden
+       · it is optional. Nobody has to notice it, and the buttons work whether you play or not. */
+  :root { color-scheme:dark; --ink:#eef2fb; --muted:#9fb0cd; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:22px;
+         background:radial-gradient(120% 100% at 50% -10%, #182034 0%, #0d1220 55%, #080b13 100%);
+         color:var(--ink); font:500 15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+         text-align:center; overscroll-behavior:none; }
+  .card { width:min(430px,100%) }
+  #brand { font:800 11px/1 system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase;
+           color:#7dd3fc; margin-bottom:10px }
+  #brand[hidden]{ display:none }
+  h1 { font-size:20px; margin:0 0 5px; font-weight:800 }
+  #why { color:var(--muted); font-size:13.5px; margin:0 auto 14px; max-width:34ch }
+
+  .game { position:relative; border-radius:16px; overflow:hidden; background:#0a0f1c;
+          border:1px solid rgba(148,163,184,.2); touch-action:none; cursor:none }
+  canvas { display:block; width:100%; height:220px }
+  .hud { position:absolute; top:8px; left:10px; right:10px; display:flex; justify-content:space-between;
+         font:800 11.5px/1 ui-monospace,Menlo,monospace; letter-spacing:.08em; color:#8fa6c8;
+         pointer-events:none; text-transform:uppercase }
+  .hud .lives { color:#fca5a5 }
+  .overlay { position:absolute; inset:0; display:grid; place-items:center; background:rgba(8,11,19,.82);
+             font:700 13.5px/1.5 system-ui,sans-serif; padding:18px; color:#dbe6fb }
+  .overlay[hidden] { display:none }
+  .overlay b { display:block; font-size:16px; margin-bottom:6px }
+  .overlay small { display:block; color:var(--muted); font-weight:500; margin-top:6px }
+  .tapline { font-size:12px; color:#6f83a6; margin:9px 0 16px }
+
+  .safe { margin:14px auto 16px; max-width:34ch; font-size:12.5px; color:#a8dcb4 }
+  .safe b { color:#86efac }
+  .acts { display:flex; flex-direction:column; gap:9px }
+  button.b,a { font:700 14.5px/1 system-ui,sans-serif; border-radius:12px; padding:13px 18px;
+               cursor:pointer; text-decoration:none; border:0 }
+  #retry { background:#38bdf8; color:#06131f }
+  #home  { background:transparent; color:#cfe0f7; border:1px solid rgba(148,163,184,.34) }
+  #hint  { margin-top:12px; font-size:12.5px; color:#8397ba }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* No game at all for anyone who has asked their phone to stop moving things. They get the
+       plain screen, which said everything it needed to anyway. */
+    .game, .tapline { display:none }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <h1 id="title">No internet right now</h1>
+    <p id="why">This screen hasn&rsquo;t been opened on this device yet, so there&rsquo;s nothing saved to show.</p>
+
+    <div class="game" id="game">
+      <canvas id="c" width="800" height="440" aria-label="A small game: catch the falling plates"></canvas>
+      <div class="hud"><span>Caught <b id="score">0</b></span><span class="lives" id="lives">♥♥♥</span></div>
+      <div class="overlay" id="ov"><div><b>While you wait&hellip;</b>Catch the plates.
+        <small>Drag, or use the arrow keys</small></div></div>
+    </div>
+    <p class="tapline">It stops by itself the moment the connection is back.</p>
+
+    <p class="safe"><b>Anything already saved on this device is safe.</b> It sends itself the moment
+       the connection is back.</p>
+    <div class="acts">
+      <button id="retry" class="b" type="button" onclick="location.reload()">Try again</button>
+      <a id="home" href="/">Go to the menu</a>
+    </div>
+    <div id="hint">Checking again in 5s&hellip;</div>
+  </main>
+<script>
+(function () {
+  var cv = document.getElementById("c"); if (!cv) return;
+  var ctx = cv.getContext("2d");
+  var W = cv.width, H = cv.height;
+  var ov = document.getElementById("ov"), scoreEl = document.getElementById("score"), livesEl = document.getElementById("lives");
+
+  var tray = { x: W / 2, w: 130 };
+  var plates = [], score = 0, lives = 3, started = false, over = false, dead = false;
+  var raf = null, last = 0, spawnAt = 0, speed = 0.16;
+
+  // ── input: drag anywhere on the canvas, or the arrow keys ────────────────────────────────
+  var toX = function (clientX) {
+    var r = cv.getBoundingClientRect();
+    return ((clientX - r.left) / r.width) * W;
+  };
+  var move = function (x) { tray.x = Math.max(tray.w / 2, Math.min(W - tray.w / 2, x)); if (!started) begin(); };
+  cv.addEventListener("pointerdown", function (e) { cv.setPointerCapture(e.pointerId); move(toX(e.clientX)); });
+  cv.addEventListener("pointermove", function (e) { if (e.buttons || e.pointerType === "touch") move(toX(e.clientX)); });
+  window.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft")  { move(tray.x - 46); e.preventDefault(); }
+    if (e.key === "ArrowRight") { move(tray.x + 46); e.preventDefault(); }
+  });
+
+  function begin() { started = true; ov.hidden = true; spawnAt = performance.now() + 400; }
+
+  function reset() { plates = []; score = 0; lives = 3; over = false; speed = 0.16; paint(); }
+
+  function spawn(now) {
+    plates.push({ x: 44 + Math.random() * (W - 88), y: -30, vy: speed + Math.random() * 0.05,
+                  r: 26, spin: (Math.random() - 0.5) * 0.06, a: 0 });
+    // it gets harder, but slowly, and it caps — this is a distraction, not a challenge
+    speed = Math.min(0.42, speed + 0.008);
+    spawnAt = now + Math.max(420, 1150 - score * 22);
+  }
+
+  function drawPlate(p) {
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
+    ctx.fillStyle = "#f4f7ff"; ctx.strokeStyle = "#c9d4e8"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.34, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#e3eaf8";
+    ctx.beginPath(); ctx.ellipse(0, 0, p.r * 0.52, p.r * 0.17, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawTray() {
+    var y = H - 46;
+    ctx.fillStyle = "#8b98ae";
+    ctx.beginPath(); ctx.roundRect(tray.x - tray.w / 2, y, tray.w, 15, 7); ctx.fill();
+    ctx.fillStyle = "#c3cede";
+    ctx.beginPath(); ctx.roundRect(tray.x - tray.w / 2, y - 5, tray.w, 10, 5); ctx.fill();
+    // two little hands under it, so it reads as a waiter's tray rather than a paddle
+    ctx.fillStyle = "#e9b98f";
+    ctx.beginPath(); ctx.roundRect(tray.x - 26, y + 15, 12, 22, 6); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(tray.x + 14, y + 15, 12, 22, 6); ctx.fill();
+  }
+
+  function paint() {
+    ctx.clearRect(0, 0, W, H);
+    // the pass, drawn as a soft band so the plates have somewhere to fall from
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "rgba(56,189,248,.10)"); g.addColorStop(1, "transparent");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    plates.forEach(drawPlate);
+    drawTray();
+    if (over) {
+      ctx.fillStyle = "rgba(8,11,19,.78)"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#eef2fb"; ctx.textAlign = "center";
+      ctx.font = "800 30px system-ui,sans-serif";
+      ctx.fillText("Caught " + score, W / 2, H / 2 - 6);
+      ctx.font = "600 18px system-ui,sans-serif"; ctx.fillStyle = "#9fb0cd";
+      ctx.fillText("Tap to play again", W / 2, H / 2 + 28);
+    }
+    if (dead) {
+      ctx.fillStyle = "rgba(8,11,19,.86)"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#86efac"; ctx.textAlign = "center"; ctx.font = "800 26px system-ui,sans-serif";
+      ctx.fillText("Back online", W / 2, H / 2 - 4);
+      ctx.font = "600 17px system-ui,sans-serif"; ctx.fillStyle = "#cfe0f7";
+      ctx.fillText("reloading…", W / 2, H / 2 + 26);
+    }
+  }
+
+  function step(now) {
+    raf = null;
+    if (document.hidden || dead) return;                 // paused: nobody is looking
+    var dt = Math.min(48, now - (last || now)); last = now;
+    if (started && !over) {
+      if (now >= spawnAt) spawn(now);
+      for (var i = plates.length - 1; i >= 0; i--) {
+        var p = plates[i];
+        p.y += p.vy * dt; p.a += p.spin;
+        var trayY = H - 46;
+        if (p.y > trayY - 12 && p.y < trayY + 26 && Math.abs(p.x - tray.x) < tray.w / 2 + p.r * 0.5) {
+          plates.splice(i, 1); score++; scoreEl.textContent = score;
+        } else if (p.y - p.r > H) {
+          plates.splice(i, 1); lives--;
+          livesEl.textContent = "♥".repeat(Math.max(0, lives)) || "—";
+          if (lives <= 0) over = true;
+        }
+      }
+    }
+    paint();
+    schedule();
+  }
+  function schedule() { if (!raf && !document.hidden && !dead) raf = requestAnimationFrame(step); }
+
+  cv.addEventListener("pointerup", function () { if (over) { reset(); begin(); } });
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = null; } else { last = 0; schedule(); }
+  });
+
+  paint(); schedule();
+
+  // ── the retry rhythm, and the STOP ──────────────────────────────────────────────────────
+  // The real page proves the connection and reloads. Here the same shape: a backing-off, jittered
+  // gap, and when it "comes back" the game freezes mid-play and says so rather than carrying on
+  // as if nothing happened. A game that outlives its reason for existing is just in the way.
+  var hint = document.getElementById("hint");
+  var wait = 5000, dueAt = Date.now() + wait;
+  setInterval(function () {
+    if (dead) return;
+    var left = Math.max(0, dueAt - Date.now());
+    hint.textContent = left > 400 ? "Checking again in " + Math.ceil(left / 1000) + "s…" : "Checking now…";
+    if (left <= 0) {
+      wait = Math.min(wait * 2, 60000);
+      dueAt = Date.now() + Math.round(wait * (0.75 + Math.random() * 0.5));
+      // In the prototype nothing is really down, so demonstrate the stop once, on the third check.
+      if (wait >= 20000 && !dead) { dead = true; if (raf) cancelAnimationFrame(raf); raf = null; paint();
+        hint.textContent = "Back online — reloading…"; }
+    }
+  }, 250);
+})();
+(function(){ try {
+  var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+  if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+} catch (e) {} })();
+</script>
+</body>
+</html>
