@@ -752,6 +752,26 @@ else ok("the read/write route derives every allow-list from the model");
   if (!keys.length) fail("could not read the HELP_SHOTS map — if it moved, update this guard");
   else if (stale.length) fail(`${stale.length} help-picture key(s) name a row that does not exist, so those rows silently show no picture: ${stale.join(", ")}`);
   else ok(`all ${keys.length} help-picture keys name a real row`);
+
+  // ── AND THE FILE IT PROMISES MUST BE IN THE REPO (sweep #7 T15, 2026-08-27) ────────────────
+  // The half above checks the KEY. Nobody was checking the VALUE, and two entries named a
+  // picture that has never been in `public/admin-help` — `allergy_other → allergy-other.png`
+  // and `guest_note → guest-note.png`. Nothing looked broken, which is exactly why it lasted:
+  // since the 2026-08-18 fix a row with no picture says "there wasn't a good picture for this
+  // one", and a row whose named file is missing says the identical thing. So an EXPLICIT entry —
+  // whose whole meaning is "I have a picture for this row" — degrades into the same screen as no
+  // entry at all, and the person who forgot to commit the .png is never told.
+  //
+  // Only the explicit list is checked. The derived fallback (a row with no entry probes
+  // `<id>.png` and `<id-with-dashes>.png`) is a guess by design and is allowed to miss.
+  {
+    const named = [...body.replace(/\/\/[^\n]*/g, "").matchAll(/"([a-z0-9_\-]+)"/g)].map((m) => m[1]);
+    const gone = [...new Set(named)].filter((n) => {
+      try { readFileSync(join(root, "public/admin-help", `${n}.png`)); return false; } catch { return true; }
+    });
+    if (gone.length) fail(`${gone.length} help-picture(s) are promised by name and are not in public/admin-help, so those rows say "there wasn't a good picture" while the code claims one: ${gone.join(", ")}`);
+    else ok(`all ${new Set(named).size} explicitly-named help pictures are in the repo`);
+  }
 }
 
 // ── 23 · A MODULE GATE WITH NO SWITCH ON THE SCREEN ─────────────────────────
