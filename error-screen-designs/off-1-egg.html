@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>No internet — your work is safe</title>
+<style>
+  /* DESIGN 6 — THE EGG ON THE PAN (the owner's own idea).
+     The point is not that an egg is charming. The point is that the egg's DONENESS is the
+     countdown: raw and pale when the next connection check is far away, browning at the edges as
+     it approaches, and it sizzles hardest at the moment the check actually fires. So the animation
+     is not decoration sitting next to a progress bar — it IS the progress bar, and a person can
+     read "something is about to happen" without reading a single word. */
+  :root { color-scheme:dark; --ink:#f4ece0; --muted:#b6a894; --pan:#2b2b30; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:26px;
+         background:radial-gradient(120% 100% at 50% -10%, #2c2620 0%, #1a1714 55%, #100e0c 100%);
+         color:var(--ink); font:500 15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:center; }
+  .card { width:min(430px,100%); }
+  #brand { font:800 11px/1 system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase;
+           color:#d9a557; margin-bottom:14px }
+  #brand[hidden]{ display:none }
+
+  /* ── the pan ───────────────────────────────────────────────────────────── */
+  .stage { position:relative; width:210px; height:170px; margin:0 auto 6px; }
+  .pan { position:absolute; left:0; bottom:26px; width:184px; height:184px; border-radius:50%;
+         background:radial-gradient(circle at 38% 32%, #4a4a52 0%, var(--pan) 48%, #17171b 100%);
+         box-shadow:0 16px 34px rgba(0,0,0,.55), inset 0 3px 8px rgba(255,255,255,.07); }
+  .pan::after { content:""; position:absolute; inset:14px; border-radius:50%;
+                background:radial-gradient(circle at 42% 36%, #3a3a41, #202024 70%);
+                box-shadow:inset 0 4px 12px rgba(0,0,0,.6); }
+  .handle { position:absolute; right:-58px; bottom:104px; width:84px; height:15px; border-radius:8px;
+            background:linear-gradient(#3b3b42,#22222a); transform:rotate(-16deg);
+            box-shadow:0 5px 12px rgba(0,0,0,.5) }
+
+  /* the egg: white, then yolk. The --done variable drives every cooked-looking thing at once. */
+  .egg { position:absolute; left:38px; bottom:74px; width:110px; height:84px; z-index:2; }
+  .white { position:absolute; inset:0; border-radius:52% 48% 46% 54% / 56% 44% 56% 44%;
+           background:radial-gradient(circle at 40% 38%, #fffdf7 0%, #f7efdf 60%, #efe2c9 100%);
+           box-shadow:0 5px 14px rgba(0,0,0,.4);
+           /* the browning: a ring that grows and darkens with --done (0 → 1) */
+           outline:calc(var(--done) * 3.2px) solid rgba(150,92,32,calc(.15 + var(--done) * .55));
+           outline-offset:-2px;
+           filter:saturate(calc(1 + var(--done) * .5));
+           transition:outline-width .5s linear, outline-color .5s linear;
+           animation:wobble 3.2s ease-in-out infinite }
+  /* crispy lace at the edge, only really visible once it is browning */
+  .white::after { content:""; position:absolute; inset:-3px; border-radius:inherit; pointer-events:none;
+    opacity:var(--done);
+    background:radial-gradient(6px 4px at 8% 46%, #8a4f18 45%, transparent 47%),
+               radial-gradient(5px 4px at 92% 40%, #8a4f18 45%, transparent 47%),
+               radial-gradient(6px 4px at 30% 92%, #8a4f18 45%, transparent 47%),
+               radial-gradient(5px 3px at 70% 6%, #8a4f18 45%, transparent 47%);
+    transition:opacity .5s linear }
+  .yolk { position:absolute; left:34px; top:22px; width:42px; height:38px; border-radius:50%;
+          background:radial-gradient(circle at 36% 32%,
+            hsl(calc(46 - var(--done) * 12) 95% calc(72% - var(--done) * 10%)) 0%,
+            hsl(calc(38 - var(--done) * 10) 92% calc(56% - var(--done) * 10%)) 70%);
+          box-shadow:inset 0 -3px 7px rgba(150,90,20,.5), 0 2px 6px rgba(0,0,0,.35);
+          transition:background .5s linear;
+          animation:jiggle 2.4s ease-in-out infinite }
+
+  /* sizzle: little bubbles at the rim. They speed up as --done approaches 1. */
+  .sizzle { position:absolute; left:30px; bottom:70px; width:126px; height:50px; z-index:1; pointer-events:none }
+  .sizzle span { position:absolute; bottom:0; width:5px; height:5px; border-radius:50%;
+                 background:rgba(255,236,200,.6); opacity:0;
+                 animation:spit calc(2.6s - var(--done) * 1.5s) ease-out infinite }
+  .sizzle span:nth-child(1){ left:6px;  animation-delay:0s }
+  .sizzle span:nth-child(2){ left:34px; animation-delay:.35s }
+  .sizzle span:nth-child(3){ left:66px; animation-delay:.7s }
+  .sizzle span:nth-child(4){ left:98px; animation-delay:1.05s }
+  .sizzle span:nth-child(5){ left:50px; animation-delay:1.4s }
+
+  @keyframes wobble { 0%,100%{ transform:scale(1) } 50%{ transform:scale(1.012,.99) } }
+  @keyframes jiggle { 0%,100%{ transform:translate(0,0) } 50%{ transform:translate(.8px,-1.2px) } }
+  @keyframes spit   { 0%{ opacity:0; transform:translateY(0) scale(.6) }
+                      20%{ opacity:.85 } 100%{ opacity:0; transform:translateY(-34px) scale(1.5) } }
+
+  /* ── the words ─────────────────────────────────────────────────────────── */
+  h1 { font-size:21px; margin:12px 0 6px; font-weight:800 }
+  #why { color:var(--muted); font-size:14px; margin:0 auto 4px; max-width:32ch }
+  .safe { margin:16px auto 20px; max-width:34ch; font-size:13px; color:#a8dcb4 }
+  .safe b { color:#86efac }
+  .acts { display:flex; flex-direction:column; gap:10px }
+  button,a { font:700 14.5px/1 system-ui,sans-serif; border-radius:12px; padding:14px 18px;
+             cursor:pointer; text-decoration:none; border:0 }
+  #retry { background:#e8b04b; color:#2a1c08 }
+  #home  { background:transparent; color:#e6dccd; border:1px solid rgba(255,255,255,.2) }
+  #hint  { margin-top:14px; font-size:12.5px; color:#9a8d7c }
+
+  @media (prefers-reduced-motion: reduce) {
+    .white,.yolk,.sizzle span { animation:none }
+    .sizzle span { opacity:.4 }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <div class="stage" style="--done:0">
+      <div class="pan"></div><div class="handle"></div>
+      <div class="egg"><div class="white"></div><div class="yolk"></div></div>
+      <div class="sizzle"><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    <h1 id="title">No internet right now</h1>
+    <p id="why">This screen hasn&rsquo;t been opened on this device yet, so there&rsquo;s nothing saved to show.</p>
+    <p class="safe"><b>Anything already saved on this device is safe.</b> It sends itself the moment
+       the connection is back.</p>
+    <div class="acts">
+      <button id="retry" type="button" onclick="location.reload()">Try again</button>
+      <a id="home" href="/">Go to the menu</a>
+    </div>
+    <div id="hint">Checking again in 5s&hellip;</div>
+  </main>
+<script>
+  // THE EGG IS THE COUNTDOWN.
+  //
+  // One variable, --done, runs 0 → 1 across the gap before the next connection check, and every
+  // cooked-looking thing in the CSS above reads from it: the browning ring, the crispy lace, the
+  // colour of the yolk, and how fast the pan spits. So the picture and the words can never
+  // disagree, because they are driven by the same number.
+  //
+  // The real page's retry gap doubles and is jittered; this prototype uses the same shape so the
+  // pacing he sees is the pacing he would get.
+  (function () {
+    var stage = document.querySelector(".stage");
+    var hint  = document.getElementById("hint");
+    var wait  = 5000, dueAt = Date.now() + wait, raf = null;
+
+    var frame = function () {
+      // Paused entirely when the tab is hidden: a phone with no signal is often a phone with a
+      // low battery, and there is nobody looking at it anyway.
+      if (document.hidden) { raf = null; return; }
+      var left = Math.max(0, dueAt - Date.now());
+      var done = 1 - left / wait;
+      stage.style.setProperty("--done", done.toFixed(3));
+      hint.textContent = left > 400 ? "Checking again in " + Math.ceil(left / 1000) + "s…" : "Checking now…";
+      if (left <= 0) {
+        // A check "fires": in the real page this is where the two probes run. Here it just resets
+        // with the next, longer, jittered gap — the same backing-off rhythm.
+        wait = Math.min(wait * 2, 60000);
+        dueAt = Date.now() + Math.round(wait * (0.75 + Math.random() * 0.5));
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    var start = function () { if (!raf && !document.hidden) raf = requestAnimationFrame(frame); };
+    document.addEventListener("visibilitychange", function () { if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = null; } else start(); });
+    start();
+  })();
+  (function(){ try {
+    var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+    if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+  } catch (e) {} })();
+</script>
+</body>
+</html>
