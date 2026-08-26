@@ -480,6 +480,11 @@ check("the Today popup's report link opens TODAY, not the dropdown's period",
 check("an unmapped removal kind is humanised, not printed raw",
   /function humanKind/.test(auditC) && /REMOVAL_KIND\[r\.kind\] \|\| \["•", humanKind\(r\.kind\)\]/.test(auditC),
   "app/owner/activity/page.tsx: the removals row falls back to the raw `r.kind` again. It is not\n       hypothetical — app/api/owner/customers writes kind: \"customer_erased\", auditsort.js has no label\n       for it, and the top row of the record read '• customer_erased · Guest ending 1601'.");
+// 21 — the skin broadcast has exactly ONE writer, and it is not inside a state updater
+check("the skin's three writes sit outside setSkin's updater",
+  /const toggleSkin = \(\) => \{\s*const next = skin === "dark"/.test(shellC) && !/setSkin\(\(cur\) => \{/.test(shellC),
+  "components/owner/OwnerShell.tsx: the localStorage write, the cookie write and the lfh:owner-skin\n       broadcast are back inside setSkin's updater. React requires an updater to be pure and calls it\n       twice in development to catch this — measured: one tap fired the broadcast twice. This is the\n       one event that drives the EMBEDDED panel's skin, and its rule is one writer.");
+
 // …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
 // It is a note because the words live in public/panels/auditsort.js, which the owner console only
 // READS — a guard that goes red over a file its own territory cannot edit is a guard that gets
