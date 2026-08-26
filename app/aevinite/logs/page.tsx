@@ -16,6 +16,9 @@ import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail,
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
+// The ONE definition of "is this the same problem" — shared with the Repair board's ×N tile and
+// with /api/admin/resolve-error, so this screen can never disagree with what the server just did.
+import { errorSig } from "@/lib/errorSignature";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
@@ -241,8 +244,17 @@ export default function AdminLogs() {
   // every matching row locally the way the server does, and reload only if the server rejects it.
   const markResolved = async (a: Action, resolved: boolean) => {
     const now = new Date().toISOString();
+    // THE SAME DEFINITION OF "THE SAME PROBLEM" AS THE SERVER (T17 sweep #7, 2026-08-27). This
+    // compared the message text character for character while /api/admin/resolve-error moved to the
+    // shared errorSig() — which folds away the parts that change between occurrences (order ids,
+    // row counts, and the browser's own "Uncaught ReferenceError:" prefix). Measured on this stack:
+    // of 42 groups in the live error feed, 3 hold rows whose text differs, the worst being nine
+    // rows of one fault written two ways. So pressing "Mark resolved" cleared all nine on the
+    // server and struck through only the ones that matched letter for letter — the rest stayed red
+    // until the next refresh, with no hint that anything had happened to them.
+    const wantSig = errorSig(a.detail);
     const sameGroup = (x: Action) => x.level === "error" && x.panel === a.panel && x.action === a.action
-      && (x.detail ?? null) === (a.detail ?? null) && (x.restaurant_id ?? null) === (a.restaurant_id ?? null);
+      && errorSig(x.detail) === wantSig && (x.restaurant_id ?? null) === (a.restaurant_id ?? null);
     setOps((prev) => prev ? prev.map((x) => sameGroup(x) ? { ...x, resolved_at: resolved ? now : null } : x) : prev);
     const r = await adminFetch<{ ok: boolean }>("/api/admin/resolve-error", {
       method: "POST",

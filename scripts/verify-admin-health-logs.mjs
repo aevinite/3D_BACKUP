@@ -210,6 +210,17 @@ ok(/issuesErr \? "—"/.test(REPAIR), "P23119",
 ok(/attErr \? "—"/.test(REPAIR), "P23120",
   "repair: the need-attention pill no longer shows '—' when its feed failed");
 
+// ── 17 · one definition of "the same problem", client and server ──────────────────────────────
+// /api/admin/resolve-error groups by the shared errorSig(); the Logs page compared the message
+// text character for character, so "Mark resolved" cleared nine rows on the server and struck
+// through only the ones that matched letter for letter.
+ok(/from "@\/lib\/errorSignature"/.test(LOGS), "P23131",
+  "logs: the shared error signature is no longer imported — the local group test will drift from the server's again");
+ok(/errorSig\(x\.detail\) === wantSig/.test(LOGS), "P23132",
+  "logs: markResolved compares message text directly again — it will leave a group's twins red after the server clears them");
+ok(!/\(x\.detail \?\? null\) === \(a\.detail \?\? null\)/.test(LOGS), "P23132",
+  "logs: the old character-for-character detail comparison is back in markResolved");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
