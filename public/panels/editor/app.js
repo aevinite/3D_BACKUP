@@ -3364,7 +3364,8 @@ function ordersPreviousHtml(today, previous) {
       <div class="bill-search bill-search-one">
         <i class="fas fa-magnifying-glass"></i>
         <input type="text" data-bill-q value="${esc(state.billSearch || "")}"
-          placeholder="Search anything — name, phone, bill or invoice no. (even the last digits), table, dish, ₹" autocomplete="off"/>
+          placeholder="Search a name, phone, bill no., table, dish or ₹" autocomplete="off"
+          title="One box, every field at once: the guest's name or phone, a bill or invoice number (even just its last digits), the table, a dish on it, the ₹ total, or a word like paid / unpaid / cancelled / khata."/>
         ${q ? `<button type="button" class="bill-qx" data-bill-qx title="Clear the search">✕</button>` : ""}
       </div>
       <select class="bill-sort" data-bill-sort>
