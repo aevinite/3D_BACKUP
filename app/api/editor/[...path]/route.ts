@@ -37,7 +37,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 // The admin stays invisible to a MANAGER too — the Audit now obeys the rule the Activity log
 // already did (lib/auditActor.ts).
 import { auditForReader, forReader } from "@/lib/auditActor";
-import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
+import { auditAfter, auditBillHtml, auditBillSides } from "@/lib/auditDetail";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 // The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
@@ -2539,13 +2539,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // …with the two boxes and the bill, so the manager's card is the SAME card the owner and the
         // admin read (one record, one story — the rule this whole area exists under).
         const dMeta = ((one[0] as Record<string, unknown>).meta || {}) as Record<string, unknown>;
-        const [dAfter, dBill] = await Promise.all([
-          auditAfter(rid, (one[0] as Record<string, unknown>).order_id ? String((one[0] as Record<string, unknown>).order_id) : null),
+        const dRow = one[0] as Record<string, unknown>;
+        const dOrderId = dRow.order_id ? String(dRow.order_id) : null;
+        const [dAfter, dBill, dBillSides] = await Promise.all([
+          auditAfter(rid, dOrderId),
           auditBillHtml(rid, (dMeta.was || null) as Record<string, unknown> | null),
+          // WHAT THIS DID TO THE TABLE'S BILL (owner, 2026-08-26) — the whole-bill before/after,
+          // as opposed to the KOT compared with itself. See auditBillSides() for how both numbers
+          // are got without inventing any history.
+          auditBillSides(rid, dRow.session_id ? String(dRow.session_id) : null,
+            (dMeta.was || null) as Record<string, unknown> | null, dOrderId),
         ]);
         return ok({
           ...forReader(one[0] as { actor?: string | null; actor_role?: string | null }, !g.user),
-          __after: dAfter, __billHtml: dBill,
+          __after: dAfter, __billHtml: dBill, __billSides: dBillSides,
         });
       }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
@@ -5320,6 +5327,33 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,khata_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
+      // ── ONCE THE INVOICE IS PRINTED, NOTHING COMES OFF THE BILL (owner, 2026-08-26) ───────────
+      // His words: *"whenever the invoice has been printed — like you have clicked the print button
+      // — after [that] you won't be able to delete the thing."*
+      //
+      // Until now the only bars on cancelling a KOT were "is it paid?" and, in the panel, "has any
+      // dish been served?". An INVOICED but not-yet-paid bill fell through both: a manager could
+      // print a tax invoice, hand it to the guest, and then void a KOT off it. The paper in the
+      // guest's hand and the record would then disagree, and the invoice number would be carrying a
+      // total that no longer exists anywhere — which is the shape of a silent downward revision,
+      // the thing docs/COMPLIANCE-GUARDRAILS.md §2 refuses outright.
+      //
+      // The legal route after an invoice exists is unchanged and already built: REOPEN the bill
+      // (which voids the invoice, retires its number and records why — mig 189), change what needs
+      // changing, and print again for a new number; or, once settled, a CREDIT NOTE. Both keep the
+      // sale on the books. So this refuses and names the door rather than just saying no.
+      //
+      // Here and not only in the panel because three doors reach this route (manager, tablet, and
+      // the admin console acting as a restaurant), and a guard in one screen is a guard one caller
+      // obeys.
+      //
+      // ONE RULE, ONE PLACE: invoiceLockedByOrder() is the same helper that already locks the
+      // per-dish delete, the quantity stepper and the discount. A live invoice number locks the
+      // bill; a VOIDED one does not, because the bill was deliberately reopened and is editable
+      // again. Reusing it is what stops "invoiced" meaning four slightly different things.
+      if (patch.status === "cancelled" && await invoiceLockedByOrder(id)) {
+        return err("This bill's invoice has already been printed, so no KOT can be taken off it. Reopen the bill first — that retires the invoice number and records why — or issue a credit note if it is already settled.", 409);
+      }
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
       // On 2026-07-31 it was put behind void_bills, reasoning that a cancel voids money. Then on
       // 2026-08-02 the owner made "Reopen a bill" default OFF for every restaurant — and because

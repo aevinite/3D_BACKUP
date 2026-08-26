@@ -3464,6 +3464,15 @@ function billLineHtml(b) {
 // Every screen below reads this, so the pill, the receipt heading and the search word can never
 // disagree. The order matters and mirrors lib/billLedger.ts's deriveBillState on the server:
 // cancelled wins, then pay-later, then on-the-house, then part-paid, then paid, then running.
+// REJECTED (owner, 2026-08-26) — docs/REJECTED-IDEAS.md R47: a bill is never cancelled as an ACT.
+// There is no "✕ Cancel this bill" button and there must never be one. A bill BECOMES cancelled
+// when every KOT on it is cancelled, which is exactly what the first line below derives. Offered
+// the alternative — one bill-level cancel with one reason and one clean audit row — together with
+// the compliance research behind it, he chose the KOT trail instead: "if there is a bill there is
+// 1 KOT and it has been cancelled. It can go in the cancel bill. I agree to you like that, so
+// there will not be bill cancellation. Only there will be only KOT cancellation and which will be
+// going on audit section. Let's keep it like that."
+// Do not add a bill-level cancel, a bill-level cancel reason, or a session `cancelled_at`.
 function billState(b) {
   if (b.cancelled) return "cancelled";
   if (b.khata) return "khata";
@@ -7965,8 +7974,16 @@ function auditHtml() {
     ${list.length ? `<p class="au-count">${list.length} ${list.length === 1 ? "record" : "records"}${auKind ? " · " + esc(kindLabel[auKind] || auKind) : ""}${shownMoney > 0 ? " · " + inr(shownMoney) + " in total" : ""}</p>` : ""}
     ${list.length ? `<div class="au-rows">${list.map((r) => {
       const [ico, label] = AUDIT_KIND[r.kind] || ["•", r.kind];
+      // ── NO INVOICE, NO BILL NUMBER (owner, 2026-08-26) ────────────────────────────────────
+      // "whenever the print … is not clicked, the invoice has not been generated, so the KOT will
+      // not know which bill number it is cut from. It will only [show] table and the time."
+      // The internal `bill_no` is a daily counter a table takes the moment it opens — it is NOT a
+      // document anyone has seen. Printing it beside a cancelled KOT made a manager read "Bill
+      // #1074 was cancelled" when no bill had ever been issued, which is the confusion this whole
+      // record exists to prevent. So it is shown ONLY once a tax invoice exists to attach it to;
+      // until then the KOT is identified the way it is identified on the floor — table and time.
       const bits = [r.table_number ? "T" + esc(r.table_number) : "", r.kot_no != null ? "KOT #" + esc(r.kot_no) : "",
-        r.bill_no != null ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
+        (r.invoice_no && r.bill_no != null) ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
         r.item_title ? esc(r.item_title) + (r.qty > 1 ? " ×" + esc(r.qty) : "") : "",
         r.amount != null ? inr(parseFloat(r.amount) || 0) : ""].filter(Boolean).join(" · ");
       // ── THE TAGS, AND THE ONE QUESTION THAT MAY STILL BE OPEN (owner, 2026-08-18) ───────────
@@ -8099,6 +8116,10 @@ async function openRemovalDetail(id) {
      server that does not send them leaves the card exactly as it was. */
   const aft = d.__after || null;
   const goneNow = !aft || aft.state === "removed" || aft.state === "cancelled";
+  // Resolved once: the snapshot's value if it kept one, else the row's own (see the note at
+  // "Which KOT" below for why the bill number hides until an invoice exists).
+  const invNo = (w && w.invoice_no) || d.invoice_no || null;
+  const billNo = (w && w.bill_no != null) ? w.bill_no : (d.bill_no != null ? d.bill_no : null);
   const sideRows = [
     ["Kitchen ticket", w && w.kot_no != null ? "KOT #" + w.kot_no : null, aft && aft.kot_no != null ? "KOT #" + aft.kot_no : null],
     ["Table", w && w.table_number ? "T" + w.table_number : null, aft && aft.table_number ? "T" + aft.table_number : null],
@@ -8122,7 +8143,30 @@ async function openRemovalDetail(id) {
       }).join("")}</div>
     </div>`;
   const changedNames = sideRows.filter((r) => moved(r[1], r[2])).map((r) => String(r[0]).toLowerCase());
-  const beforeAfter = w ? `<div class="au-d-head">Before and after</div>
+  // ── WHAT THIS DID TO THE TABLE'S BILL (owner, 2026-08-26) ────────────────────────────────────
+  // "the before and after in the audit section should be shown like actual … previously the whole
+  // bill was this much and after cutting, this has been removed and the bill is this much."
+  // The two boxes below compare the KOT with ITSELF — useful, but they never answer what it did to
+  // the TABLE's bill, which is the question actually being asked. This band does, in one line, in
+  // money, every time. The server works both figures out (lib/auditDetail.ts → auditBillSides);
+  // an older server sends nothing and this simply does not draw.
+  const bs = d.__billSides || null;
+  const billSwing = bs ? `<div class="au-swing">
+      <div class="au-swing-h">What this did to the bill</div>
+      <div class="au-swing-row">
+        <span class="au-swing-box"><i>Bill was</i><b>${inr(bs.before)}</b>${bs.lines_before != null ? `<em>${esc(bs.lines_before)} line${bs.lines_before === 1 ? "" : "s"}</em>` : ""}</span>
+        <span class="au-swing-op">−</span>
+        <span class="au-swing-box au-swing-cut"><i>Taken out</i><b>${inr(bs.removed)}</b>${bs.lines_before != null && bs.lines_after != null ? `<em>${esc(bs.lines_before - bs.lines_after)} line${(bs.lines_before - bs.lines_after) === 1 ? "" : "s"}</em>` : ""}</span>
+        <span class="au-swing-op">=</span>
+        <span class="au-swing-box au-swing-now"><i>Bill is now</i><b>${inr(bs.after)}</b>${bs.lines_after != null ? `<em>${esc(bs.lines_after)} line${bs.lines_after === 1 ? "" : "s"}</em>` : ""}</span>
+      </div>
+      ${bs.after === 0 && bs.removed > 0
+        ? `<div class="au-swing-note">Nothing is left on this bill — every KOT on it has been cancelled, so the bill itself now counts as cancelled and was never a sale.</div>`
+        : bs.removed === 0
+        ? `<div class="au-swing-note">This bill is unchanged — what this record names is still on it.</div>`
+        : ""}
+    </div>` : "";
+  const beforeAfter = w ? `${billSwing}<div class="au-d-head">Before and after</div>
       ${goneNow ? `<div class="au-gone-note">${aft && aft.state === "cancelled"
         ? "This ticket was cancelled — nothing was charged for it. The left column is what it held."
         : "This is off the books now. The left column is what it held when it was removed — the row itself is kept, which is why you can still read it."}</div>` : ""}
@@ -8147,12 +8191,13 @@ async function openRemovalDetail(id) {
       ${row("Who", esc(d.actor || "—") + (d.actor_role ? ` · ${esc(d.actor_role)}` : ""))}
       ${row("Reason", esc(auditReasonTxt(d)))}
       ${d.amount != null ? row("Value removed", inr(parseFloat(d.amount) || 0)) : ""}
-      <div class="au-d-head">Which ticket / bill</div>
+      <div class="au-d-head">Which KOT${invNo ? " / bill" : ""}</div>
       ${row("Kitchen ticket", (w && w.kot_no != null ? w.kot_no : d.kot_no) != null ? "KOT #" + esc((w && w.kot_no != null ? w.kot_no : d.kot_no)) : "—")}
-      ${row("Bill number", (w && w.bill_no != null ? w.bill_no : d.bill_no) != null ? "#" + esc((w && w.bill_no != null ? w.bill_no : d.bill_no)) : "—")}
-      ${row("Invoice", (w && w.invoice_no) || d.invoice_no ? esc((w && w.invoice_no) || d.invoice_no) : "not invoiced")}
       ${row("Table", (w && w.table_number) || d.table_number ? "T" + esc((w && w.table_number) || d.table_number) : "no table (walk-in / parcel)")}
       ${w && w.ordered_at ? row("Ordered at", whenLong(w.ordered_at)) : ""}
+      ${invNo
+        ? row("Bill number", billNo != null ? "#" + esc(billNo) : "\u2014") + row("Invoice", esc(invNo))
+        : `<div class="au-d-none">No invoice was ever printed for this table, so this KOT belongs to no bill number — it is identified by its table and its time above. A bill number is only shown once a tax invoice exists to carry it.</div>`}
       ${w && w.customer ? row("Customer", esc(w.customer) + (w.customer_phone ? ` · ${esc(w.customer_phone)}` : "")) : ""}
       <div class="au-d-head">What was on it${w && w.item_count != null ? ` · ${esc(w.item_count)} line${w.item_count === 1 ? "" : "s"}` : ""}</div>
       ${lines ? `<div class="au-d-items">${lines}</div>`
@@ -8735,12 +8780,18 @@ const itemsForOrder = (oid) => (state.board.items || []).filter((i) => i.order_i
 // Per-item rows for an order, unified: session order_items if present, else the items JSON.
 function orderItemRows(o) {
   const rows = itemsForOrder(o.id);
+  // IS THIS ORDER'S BILL ALREADY INVOICED? (owner, 2026-08-26.) Worked out ONCE here rather than
+  // at each of the ~6 places that draw a dish row, so "invoiced" cannot come to mean two things on
+  // two screens. A live invoice number locks the row's 🗑; a VOIDED one does not, because that
+  // bill was deliberately reopened. Rides on every row so itemRowHtml() needs no extra argument.
+  const _s = o.session_id ? (state.board.sessions || []).find((x) => x.id === o.session_id) : null;
+  const invoiceLive = !!(_s && _s.invoice_no != null && !_s.invoice_voided);
   // Carry options/removed/note through so the table panel can show the full
   // customization (what the guest chose, what to leave out) — not just the name.
   // is_mrp rides along from order_items (mig 270) so every screen that lists a dish can wear
   // the MRP stamp — the flag is FROZEN on the sold line, so a reprint says what it said then.
-  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
-  return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
+  if (rows.length) return rows.map((it) => ({ kind: "session", invoiceLive, id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
+  return (o.items || []).map((it, idx) => ({ kind: "legacy", invoiceLive, orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
 }
 
 // What the guest tapped, as an emoji for the tile / call list.
@@ -10317,7 +10368,11 @@ function itemRowHtml(row, editing = false) {
   // total server-side (see lfh_delete_order_item) so no stale money is left behind.
   // …but NOT once it's SERVED — a delivered dish is a financial record; you don't
   // silently delete it (mirror the tablet, which also blocks delete on served).
-  const delBtn = (row.kind === "session" && row.status !== "served") ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
+  // …and not once the invoice is printed (owner, 2026-08-26) — same rule as the ✕ Cancel above,
+  // and the server has always refused it here (invoiceLockedByItem); the button simply stopped
+  // being offered for the served case only. `itemRowInvoiceLive` is set by the caller from the
+  // session this row belongs to; absent (a legacy order, a parcel) it is false and nothing changes.
+  const delBtn = (row.kind === "session" && row.status !== "served" && !row.invoiceLive) ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   // "preparing", not "cooking": the tile above this card and the guest's own order tracker both
   // say Preparing (the tile's label comes from the DATABASE, lfh_table_view_summary), so calling
@@ -10649,7 +10704,17 @@ function tablePanelParts(t, host = "float") {
     // a credit note, which keep the sale on the books. A part-served ticket counts as served: the
     // guest has eaten something.
     const anyServed = (o) => orderItemRows(o).some((r) => r.status === "served") || o.status === "served";
-    const cancelBtn = (o) => (anyServed(o) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕ Cancel</button>`);
+    // ── AND NOT ONCE THE INVOICE IS PRINTED (owner, 2026-08-26) ────────────────────────────────
+    // "whenever the invoice has been printed — like you have clicked the print button — after
+    // [that] you won't be able to delete the thing." A printed tax invoice is a document the guest
+    // is holding; taking a KOT off the bill behind it would leave the paper and the record
+    // disagreeing, and the number carrying a total that exists nowhere. The way out is REOPEN
+    // (which retires the number and records why) or, once settled, a credit note — both keep the
+    // sale on the books. The server refuses it as well (invoiceLockedByOrder in the editor route);
+    // this only stops offering a button that would be refused, because hiding is never the guard.
+    // A VOIDED invoice does not lock: that bill was reopened on purpose.
+    const invoiceLive = !!(sess && sess.invoice_no != null && !sess.invoice_voided);
+    const cancelBtn = (o) => ((anyServed(o) || invoiceLive) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this KOT — nothing is charged for it">✕ Cancel</button>`);
     const newBlocks = newOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
       return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot">${cancelBtn(o)}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
