@@ -239,6 +239,45 @@ export default function OwnerCustomers() {
 
   const rows = customers || [];
 
+  // ── THE LINE UNDER THE LIST HAS TO BE ABOUT THE LIST YOU ARE LOOKING AT (sweep 7 · T14) ─────────
+  // It read `summary.total > summary.shown`, and `summary.total` is the head-count of EVERY guest in
+  // scope — it knows nothing about which group tab is open. So on "Blocked", with both blocked
+  // guests on screen, it said *"Showing the 2 most-recent of 26. Search to find an older guest."*
+  // Measured on French House 2026-08-27: Regulars 13 of 13 and Blocked 2 of 2 both carried it. An
+  // owner reads that as "24 more blocked guests are hidden from me", goes looking, and finds nothing.
+  // Every group has an exact head-count already in the reply, so each one can be asked its own
+  // question: Everyone → total · Regulars → visits ≥ 2 · Blocked → blocked · First-timers →
+  // total − regulars (both are head-counts over the same scope, so the subtraction is exact).
+  // The tiles ride the 5-minute snapshot while the list is live, so a stale tile can read LOWER than
+  // the rows on screen — hence `> rows.length`, never `!==`: the line appears only when there really
+  // is something past the end.
+  const LIST_PAGE = 300;   // /api/owner/customers → .limit(300)
+  const segTotal = !summary ? null
+    : seg === "regulars" ? summary.returning
+    : seg === "blocked" ? summary.blocked
+    : seg === "new" ? Math.max(0, summary.total - summary.returning)
+    : summary.total;
+  const segNoun = seg === "regulars" ? " regulars" : seg === "blocked" ? " blocked" : seg === "new" ? " first-timers" : "";
+  // One footer, rendered by both the phone list and the desktop table, so the two cannot drift.
+  // A plain function, not a component: a component declared inside render is a new type on every
+  // render (React remounts it, and `react-hooks/static-components` fails the lint on it).
+  const listFoot = (gap: number) => {
+    if (search.trim()) return (
+      <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
+        {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
+      </div>
+    );
+    // Nothing is hidden unless the read actually HIT the cap — and the tiles ride a 5-minute
+    // snapshot while the list is live, so without this a tile one guest ahead of the list would
+    // print the line on a page that is showing everybody.
+    if (rows.length < LIST_PAGE || segTotal === null || segTotal <= rows.length) return null;
+    return (
+      <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
+        Showing the {rows.length} most-recent of {segTotal.toLocaleString("en-IN")}{segNoun}. Search to find an older guest.
+      </div>
+    );
+  };
+
   return (
     <>
       <h1 className="adm-page-h">Customers</h1>
@@ -342,15 +381,7 @@ export default function OwnerCustomers() {
                     </button>
                   </div>
                 ))}
-                {search ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
-                  </div>
-                ) : summary && summary.total > summary.shown ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
-                  </div>
-                ) : null}
+                {listFoot(2)}
               </div>
             ) : (
               <div className="adm-tablewrap" style={{ overflow: "auto" }}>
@@ -404,16 +435,9 @@ export default function OwnerCustomers() {
                 </table>
                 {/* Only the UNFILTERED list is "the N most-recent of TOTAL" — during a search the
                     rows are matches, not the most-recent, and total is the whole-list head-count, so
-                    the line would be misleading (audit 2026-07-09). Show a plain match count instead. */}
-                {search ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
-                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
-                  </div>
-                ) : summary && summary.total > summary.shown ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
-                    Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
-                  </div>
-                ) : null}
+                    the line would be misleading (audit 2026-07-09). Show a plain match count instead.
+                    The group tab narrows it further; see `segTotal` above. */}
+                {listFoot(10)}
               </div>
             )}
           </div>

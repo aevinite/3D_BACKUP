@@ -16,6 +16,20 @@ import fs from "node:fs";
 import path from "node:path";
 
 const read = (f) => { try { return fs.readFileSync(path.resolve(f), "utf8"); } catch { return null; } };
+// A `mustNot` is tested against the CODE ONLY — comments stripped first.
+//
+// WHY (sweep 7 · T14, 2026-08-27). Item 19's rule forbids `summary.total > summary.shown`, the
+// expression that made a filtered list claim guests it was not hiding. The fix removed it from the
+// code and explained it in a comment above — and the guard went red, pointing at its own obituary.
+// This project has been bitten by that before: "a red guard can be asserting a retired rule", and a
+// guard that fires on the sentence describing a fix teaches people to delete the sentence.
+// Block comments (and JSX `{/* … */}`) go first, then `//` to end of line — with the `[^:]` guard so
+// a `https://` inside a string is left alone. `must` rules still read the WHOLE file, because
+// several of them deliberately assert that an explanation is still there (item 4's R34 note).
+const codeOnly = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+
 let fail = 0, pass = 0;
 const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
 const bad = (m) => { fail++; console.log(`  ❌ ${m}`); };
@@ -244,6 +258,24 @@ const RULES = [
       /key: `investate:v2:\$\{scopeKeyOf\(null, !!scope\.all, ids\)\}/,   // keyed on the whole scope
     ],
   },
+  // ══ SWEEP 7 · TERMINAL 14 (2026-08-27) ════════════════════════════════════════════════════════
+  // Same shape as everything above it: the server sent an exact answer and the screen said
+  // something else. Each rule is separate so one can be reverted alone.
+  {
+    item: 19, file: CUSTOMERS,
+    say: "the line under the list is about the GROUP on screen, and only when the list hit its cap",
+    must: [
+      /const LIST_PAGE = 300;/,                                   // the cap the route really applies
+      /seg === "regulars" \? summary\.returning/,                  // each group asks its own head-count
+      /seg === "blocked" \? summary\.blocked/,
+      /seg === "new" \? Math\.max\(0, summary\.total - summary\.returning\)/,
+      /if \(rows\.length < LIST_PAGE \|\| segTotal === null \|\| segTotal <= rows\.length\) return null;/,
+    ],
+    mustNot: [
+      // the whole-scope total must never again be the "of N" for a filtered list
+      /summary\.total > summary\.shown/,
+    ],
+  },
   {
     item: 7, file: MANAGER,
     say: "the Manager-mode fallback heading uses a class the stylesheet defines",
@@ -279,7 +311,7 @@ for (const r of RULES) {
   const src = read(r.file);
   if (src === null) { bad(`item ${r.item}: ${r.file} not found (if it moved, update this guard)`); continue; }
   const missing = (r.must || []).filter((re) => !re.test(src));
-  const present = (r.mustNot || []).filter((re) => re.test(src));
+  const present = (r.mustNot || []).filter((re) => re.test(codeOnly(src)));
   if (!missing.length && !present.length) ok(`item ${r.item} · ${r.say}`);
   else {
     bad(`item ${r.item} · ${r.say}`);
