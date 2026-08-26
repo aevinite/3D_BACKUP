@@ -663,9 +663,24 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
       ) : rows === null ? (
         <div className="adm-empty">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="adm-empty">{scopeName
-          ? `No staff activity at ${scopeName} yet — pick another restaurant above, or All restaurants, to see the rest.`
-          : "No staff activity yet — it appears here as your team works."}</div>
+        /* ── AN EMPTY ANSWER IS NOT THE SAME AS AN EMPTY RECORD (T12 sweep, 2026-08-27) ──────────
+           The SEARCH BOX and the severity chips are both server-side (loadActivity puts `q` and
+           `level` on the request), so when either narrows the record to nothing the server answers
+           with zero rows — and this branch, which used to be worded for "your team has done nothing
+           yet", is the one that fires. Measured on French House: typing a word that matches nothing
+           printed "No staff activity yet — it appears here as your team works." over a log holding
+           8,829 entries. The removals half beside it has always told these three facts apart, and
+           this half is the one an owner searches. Search first, then severity, then the real
+           nothing-yet — and each narrowed state carries its own way back out. */
+        <div className="adm-empty">
+          {q.trim()
+            ? <>Nothing matches that. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setQ("")}>Clear the search</button></>
+            : level
+              ? <>Nothing marked {level === "warn" ? "Notable" : "Info"}{scopeName ? ` at ${scopeName}` : ""}. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setLevel("")}>Show all</button></>
+              : scopeName
+                ? `No staff activity at ${scopeName} yet — pick another restaurant above, or All restaurants, to see the rest.`
+                : "No staff activity yet — it appears here as your team works."}
+        </div>
       ) : !list || list.length === 0 ? (
         /* Narrowed to nothing. "Nothing of that kind" and "nothing has happened" are different
            facts, and a narrowed type needs a way back out of it — the same three-state treatment
