@@ -249,6 +249,14 @@ check("P15366", "at 99 the card refuses out loud and claims nothing", () => {
   return { ok: gated && noBounce && stillSays, note: `gated=${gated} bounce=${noBounce} message=${stillSays}` };
 });
 
+// THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8"). The list layout is mobile-first;
+// on a laptop the same row is 1100px and the name and price sat squeezed at the left with the
+// button at the far right and nothing in between. The price now sits at the RIGHT-hand end, beside
+// the button. Phones must be untouched, which is why the rules live in a min-width query.
+check("P15608", "on a wide screen the list row puts the price at the right-hand end", () =>
+  rx(F.css, /@media \(min-width: 701px\) \{[\s\S]{0,1800}?\.items-container:not\(\.gallery-mode\) \.dish-info \{[\s\S]{0,200}?grid-template-areas: "name price" "meta price"/) &&
+  rx(F.css, /\.items-container:not\(\.gallery-mode\) \.cart-add-btn:hover \{ transform: translateY\(-50%\) scale\(1\.12\); \}/));
+
 // A SEARCH SUGGESTION SHOWS THE WHOLE DISH NAME (owner, 2026-08-26: "can do 7 but you have keep ui
 // good make sure"). It was one `nowrap` line beside a fixed-width price column, so 70 of the 464
 // dish names on this stack were cut — "Paneer Stuffed L…". Up to three lines now, which fit inside
@@ -365,6 +373,42 @@ async function live(base) {
       check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
+    // LIVE: the wide list row is laid out and nothing in it overlaps — and the PHONE is untouched.
+    // The veg mark centred beside the button was the first attempt and the two landed on top of
+    // each other, so every pair is measured rather than eyeballed.
+    for (const wdt of [1440, 900, 360]) {
+      const cc = await b.newContext({ viewport: { width: wdt, height: 900 }, isMobile: wdt < 700, hasTouch: wdt < 700 });
+      const pg2 = await cc.newPage();
+      await pg2.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg2.waitForSelector(".item-card", { timeout: 30000 }).catch(() => {});
+      await pg2.waitForTimeout(1800);
+      await pg2.locator('.switch-opt[aria-label="List view"]').click().catch(() => {});
+      await pg2.waitForTimeout(1400);
+      const r = await pg2.evaluate(() => {
+        const card = document.querySelector(".items-container:not(.gallery-mode) .item-card");
+        if (!card) return null;
+        const g = (e) => { const x = e?.getBoundingClientRect(); return x ? { l: x.left, r: x.right, t: x.top, b: x.bottom } : null; };
+        const box = g(card), price = g(card.querySelector(".dish-price")), btn = g(card.querySelector(".cart-add-btn")),
+              veg = g(card.querySelector(".diet-badge")), name = g(card.querySelector(".dish-name"));
+        const over = (a, c2) => !!(a && c2 && a.l < c2.r && c2.l < a.r && a.t < c2.b && c2.t < a.b);
+        // Measure where the price STARTS, not where it ends. On a phone it is a full-width block, so
+        // its right edge is near the card's right edge even though it is left-aligned under the name —
+        // which is exactly how the first version of this check fooled itself.
+        return { box, price, btn, veg, name, priceVsBtn: over(price, btn), vegVsBtn: over(veg, btn),
+          priceAtRight: !!(price && name) && (price.l - name.l) > 200 };
+      });
+      if (wdt >= 701) {
+        check("P15608", `LIVE: ${wdt}px list row — the price sits at the right-hand end`, () =>
+          ({ ok: !!r && r.priceAtRight, note: r ? `the price starts ${Math.round(r.price.l - r.name.l)}px right of the name` : "no list row" }));
+        check("P15608", `LIVE: ${wdt}px list row — nothing overlaps`, () =>
+          ({ ok: !!r && !r.priceVsBtn && !r.vegVsBtn, note: r ? `price/button=${r.priceVsBtn} veg/button=${r.vegVsBtn}` : "no list row" }));
+      } else {
+        check("P15608", "LIVE: 360px list row — the phone layout is untouched", () =>
+          ({ ok: !!r && !r.priceAtRight, note: r ? `the price still starts ${Math.round(r.price.l - r.name.l)}px from the name, i.e. stacked under it as before` : "no list row" }));
+      }
+      await cc.close();
+    }
+
     // LIVE: no suggestion name is cut, on the restaurant that HAS the long ones, at phone and
     // desktop width — and the rows stay the height they always were.
     for (const [slug, qq, wdt] of [["demo-bistro", "cho", 360], ["aangan-garden-restaurant", "pa", 360], ["demo-bistro", "cho", 1280]]) {

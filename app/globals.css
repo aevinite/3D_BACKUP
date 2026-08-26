@@ -1196,6 +1196,48 @@ body.menu-frost .nav {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px;
 }
 
+/* ── THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8") ─────────────────────────────
+   The list layout was designed for a phone, where a row is 330px wide and everything is naturally
+   close together. On a laptop the same row is 1100px: the name and price sat squeezed against the
+   left edge, the add button sat at the far right, and the whole middle was empty — a long, sparse
+   journey for the eye and a layout that looks unfinished on the big screen the product gets shown
+   on.
+   So on a wide screen ONLY, and in the list view only, the price moves to the right-hand end of the
+   row, beside the button, and the button centres itself vertically against it. The name and the
+   rating/prep line keep their own stacked column on the left. Nothing about the phone changes: the
+   whole block is inside a min-width query that starts above the 700px the rest of this file already
+   treats as "not a phone", and the gallery view is untouched at every width. */
+@media (min-width: 701px) {
+  .items-container:not(.gallery-mode) .dish-info {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "name price" "meta price";
+    align-items: center;
+    column-gap: 28px;
+    /* Clear the absolutely-positioned add button (36px) and the veg badge above it. */
+    padding-right: 60px;
+  }
+  .items-container:not(.gallery-mode) .dish-name { grid-area: name; margin-bottom: 2px; padding-right: 0; }
+  .items-container:not(.gallery-mode) .dish-meta { grid-area: meta; margin-bottom: 0; }
+  .items-container:not(.gallery-mode) .dish-price {
+    grid-area: price; text-align: right; font-size: 17px; white-space: nowrap;
+    /* The phone rule scales the price from its LEFT edge on hover; at the right-hand end of a wide
+       row that would push it outward, into the button. */
+    transform-origin: right center;
+  }
+  /* The button belongs beside the price, not below it. `bottom: auto` releases the phone rule.
+     The hover rule further down this file sets `transform: scale(1.12)`, which would drop the
+     centring — so both states spell the translate out. */
+  .items-container:not(.gallery-mode) .cart-add-btn,
+  .items-container:not(.gallery-mode) .cart-qty-row {
+    top: 50%; bottom: auto; transform: translateY(-50%);
+  }
+  .items-container:not(.gallery-mode) .cart-add-btn:hover { transform: translateY(-50%) scale(1.12); }
+  /* The veg mark STAYS in its top-right corner. Centring it beside the button was the first
+     attempt and put the two on top of each other — measured, they overlapped at 1440px and at
+     900px. In the corner it clears the centred button by 6px on a 120px-tall row. */
+}
+
 /* --- "ALL" VIEW: collapsible category dropdowns --- */
 /* Each category becomes a section: a tappable header (name + count + chevron) and,
    when open, its normal grid of dish cards underneath. Capped + centred on wide
