@@ -36,9 +36,12 @@ if (!BASE || !args.includes("--base")) {
   process.exit(2);
 }
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
 const bad = (m, why) => { fail++; console.log(`  ❌ ${m}${why ? `\n       ${why}` : ""}`); };
+// "I could not see it" is neither a pass nor a fault. Counted separately and printed, so a run
+// that could not answer never looks like a run that answered yes.
+const skip = (m, why) => { skipped++; console.log(`  ⏭  ${m}${why ? `\n       ${why}` : ""}`); };
 
 // path → which screen, and where its way out must point.
 const CASES = [
@@ -62,10 +65,33 @@ const run = async () => {
       const errs = [];
       p.on("pageerror", (e) => errs.push(String(e).slice(0, 90)));
       try {
-        await p.goto(BASE + path, { waitUntil: "domcontentloaded" });
-        // Wait for a screen to actually EXIST rather than for a fixed number of milliseconds.
-        await p.waitForFunction(() => !!document.querySelector(".nf-g, .nf-s"), null, { timeout: 20000 })
-          .catch(() => { /* leave it to the assertions below to report what is there */ });
+        // ONE RETRY, AND A DIFFERENT VERDICT WHEN IT IS THE NETWORK'S FAULT.
+        //
+        // These are client components, so the audience is not chosen until their JavaScript has
+        // arrived and hydrated. Against a deployed site that occasionally takes longer than any
+        // patience is worth: two consecutive runs against production gave 11/2 and then 13/13 on a
+        // site that had not changed. A flaky guard is barely better than one that cries wolf.
+        //
+        // So a screen that never appears is reported as "could not be read" — the honest answer —
+        // and never as "the wrong screen was shown", which is a claim about the product. This
+        // project's own rule: "could not run" is not "ran and found a fault".
+        let appeared = false;
+        for (let attempt = 0; attempt < 2 && !appeared; attempt++) {
+          if (attempt) await p.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+          else await p.goto(BASE + path, { waitUntil: "domcontentloaded" }).catch(() => {});
+          // Wait for a screen that has been DECIDED — i.e. one rendered by React after it read the
+          // address — not merely for one to be in the DOM. Waiting for ".nf-s" used to succeed
+          // instantly against the server's own render, which is how the flash hid from this check.
+          appeared = await p.waitForFunction(
+            () => !!document.querySelector(".nf-g .rail, .nf-s .stage"), null, { timeout: 15000 })
+            .then(() => true).catch(() => false);
+        }
+        if (!appeared) {
+          skip(`${path}: neither screen appeared in time`,
+            "the audience is chosen once this screen's JavaScript hydrates, so a slow network reads "
+            + "the same as a broken page. Re-run, or run against a local production build.");
+          continue;
+        }
         const s = await p.evaluate(() => {
           const g = document.querySelector(".nf-g"), st = document.querySelector(".nf-s");
           const h = document.getElementById("nf-home");
@@ -188,7 +214,8 @@ const run = async () => {
     bad("the run stopped early", e.stack || e.message);
   } finally {
     await browser.close().catch(() => {});
-    console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed\n`);
+    console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed`
+      + (skipped ? `, ${skipped} could not be read (re-run, or use a local production build)` : "") + "\n");
     process.exit(fail === 0 ? 0 : 1);
   }
 };

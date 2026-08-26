@@ -180,12 +180,22 @@ const CSS = `
 }`;
 
 export default function NotFound() {
-  // "staff" on the server and on the very first client render, so a JavaScript-less browser still
-  // gets a working screen. useLayoutEffect corrects it before the browser paints, so nobody ever
-  // SEES the wrong one.
-  const [a, setA] = useState<{ aud: Aud; slug: string; href: string; label: string }>(
-    { aud: "staff", slug: "", href: "/", label: "Go to the home screen" },
-  );
+  // NOTHING IS RENDERED UNTIL WE KNOW WHO IS LOOKING, and that is a correction of my own first go.
+  //
+  // The first version defaulted to "staff" so that a JavaScript-less browser got something. But
+  // the server has no address to read, so it SERVER-RENDERED the staff screen — which the browser
+  // paints — and only then did useLayoutEffect flip it to the guest one. useLayoutEffect beats the
+  // paint of ITS OWN render, not the paint of the server's HTML. So a diner really could see the
+  // staff screen first and then watch it change.
+  //
+  // Caught by running the guard against the deployed site repeatedly: two runs in seven read
+  // "staff" on a guest path, on a site that was otherwise correct. On localhost it never showed up,
+  // because hydration there is instant.
+  //
+  // So: null until decided, and a <noscript> block below carries a plain working screen for a
+  // browser with JavaScript switched off. A 404 has nothing to gain from being server-rendered —
+  // no search engine needs it — and a blank instant is far better than the wrong screen.
+  const [a, setA] = useState<{ aud: Aud; slug: string; href: string; label: string } | null>(null);
   const [name, setName] = useState("");
   const [popped, setPopped] = useState(0);
 
@@ -206,6 +216,28 @@ export default function NotFound() {
   }, []);
 
   const reload = () => location.reload();
+
+  // Until the audience is known: the stylesheet (so the chosen screen paints complete, with no
+  // unstyled flash of its own) and a no-JavaScript fallback. Nothing else.
+  if (!a) {
+    return (
+      <>
+        <style dangerouslySetInnerHTML={{ __html: CSS }} />
+        <noscript>
+          <div className="nf nf-s">
+            <div className="nf-wrap">
+              <h1>We can&rsquo;t find that page</h1>
+              <p className="sub">It may have moved, or the link was mistyped.</p>
+              {/* Both doors, because with no JavaScript we cannot tell which one this person needs.
+                  The menu first: a diner is the one who would be stranded by the wrong choice. */}
+              <a className="nf-btn nf-home" href="/menu">Go to the menu</a>
+              <a className="nf-btn nf-again" href="/">Go to the home screen</a>
+            </div>
+          </div>
+        </noscript>
+      </>
+    );
+  }
 
   return (
     <>
