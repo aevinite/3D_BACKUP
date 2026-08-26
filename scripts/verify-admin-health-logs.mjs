@@ -193,6 +193,23 @@ for (const [name, src] of [["repair", REPAIR], ["logs", LOGS], ["rate-limits", L
 ok(/limit=\$\{ERROR_FEED_LIMIT\}/.test(REPAIR), "P08202", "repair: the error feed lost its limit");
 ok(/limit=\$\{FEED_LIMIT\}/.test(LOGS), "P08202", "logs: a feed lost its limit");
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// SWEEP #7 (terminal 17, 2026-08-27) — six more, each one watched happening on the running app.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── 16 · the Repair status strip must fail the way its sections do ────────────────────────────
+// With the complaints feed unreachable the pill read a confident "0 open complaints", and "need
+// attention" sat on the still-loading "…" for ever — two inches from the "problems open" pill,
+// which correctly showed "—". Neither failure reached the "couldn't read …" line either.
+ok(/failed\.push\("complaints"\)/.test(REPAIR), "P23117",
+  "repair: a failed complaints read is no longer named in the 'couldn't read' line under the counts");
+ok(/failed\.push\("account health"\)/.test(REPAIR), "P23118",
+  "repair: a failed account-health read is no longer named in the 'couldn't read' line under the counts");
+ok(/issuesErr \? "—"/.test(REPAIR), "P23119",
+  "repair: the open-complaints pill shows a number again when its feed failed — a reassuring zero");
+ok(/attErr \? "—"/.test(REPAIR), "P23120",
+  "repair: the need-attention pill no longer shows '—' when its feed failed");
+
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

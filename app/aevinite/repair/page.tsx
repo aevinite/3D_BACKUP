@@ -234,8 +234,14 @@ export default function AdminRepair() {
     if (e.ok) { setErrors(e.data.actions || []); setWaiting(e.data.waiting ?? null); } else { failed.push("problems"); setWaiting(null); }
     if (q.ok) setRequests(q.data.requests || []); else failed.push("the Claude queue");
     if (h.ok) setRuns(h.data.runs || []); else failed.push("Claude's history");
-    if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
-    if (at.ok) { setAtt(at.data); setAttErr(false); } else setAttErr(true);
+    // THE STRIP HAS TO FAIL THE WAY THE SECTIONS DO (T17 sweep #7, 2026-08-27). These two were the
+    // only feeds whose failure never reached the counts at the top: with the complaints list
+    // unreachable the pill read a confident "0 open complaints", and "need attention" sat on the
+    // still-loading "…" for ever — two inches from the "problems open" pill, which correctly said
+    // "—". Watched happen with both routes made to fail. Same rule as every other feed here: a
+    // failed read is not an all-clear, and it is named in the line under the strip.
+    if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else { setIssuesErr(true); failed.push("complaints"); }
+    if (at.ok) { setAtt(at.data); setAttErr(false); } else { setAttErr(true); failed.push("account health"); }
     if (rl.ok) { setRlHits(rl.data.events || []); setRlRules(rl.data.rules || []); } else failed.push("rate limits");
     if (mem.ok) setMemories(mem.data.memories || []); else failed.push("the already-fixed record");
     setProblemsErr(e.ok ? "" : (e.error || "Couldn't load the problem list."));
@@ -621,11 +627,15 @@ export default function AdminRepair() {
         <a className={`rp-pill${shownRlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
           <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : rlErr ? "—" : shownRlHits.length}</span><span>limit{shownRlHits.length === 1 && !rlErr ? "" : "s"} reached</span>
         </a>
-        <a className={`rp-pill${openTickets ? " warn" : ""}`} href="#complaints" title="Jump to complaints">
-          <i className="fas fa-flag" aria-hidden="true" /><span className="n">{openTickets}</span><span>open complaint{openTickets === 1 ? "" : "s"}</span>
+        {/* "—", never a reassuring 0 and never an eternal "…", when the feed behind the number did
+            not arrive — the same rule the two pills above already follow. */}
+        <a className={`rp-pill${!issuesErr && openTickets ? " warn" : ""}`} href="#complaints"
+          title={issuesErr ? "The complaints list didn't load — this is not an all-clear" : "Jump to complaints"}>
+          <i className={`fas ${issuesErr ? "fa-circle-question" : "fa-flag"}`} aria-hidden="true" /><span className="n">{errLoading ? "…" : issuesErr ? "—" : openTickets}</span><span>open complaint{openTickets === 1 && !issuesErr ? "" : "s"}</span>
         </a>
-        <a className={`rp-pill${attCount ? " warn" : ""}`} href="#at-risk" title="Jump to at-risk restaurants">
-          <i className="fas fa-heart-pulse" aria-hidden="true" /><span className="n">{att ? attCount : "…"}</span><span>need attention</span>
+        <a className={`rp-pill${!attErr && attCount ? " warn" : ""}`} href="#at-risk"
+          title={attErr ? "Account health didn't load — this is not an all-clear" : "Jump to at-risk restaurants"}>
+          <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need attention</span>
         </a>
         <div className="rp-pill">
           <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
