@@ -543,6 +543,14 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
       ok("printing: it stops and restarts on visibilitychange, and unhooks itself");
     else bad("the printing poll does not stop/restart on visibilitychange (or leaks its listener)");
 
+    // ── the icon must not touch its label ──
+    // `.owx .adm-btn` is `display: inline-flex` with no gap, and a flex container trims the leading
+    // space of a text run: `<i/> Open the…` measured 0px between the glyph and the O.
+    const guide = bare.slice(bare.indexOf("print-setup.html\""), bare.indexOf("print-setup.html\"") + 300);
+    if (/gap:\s*\d/.test(guide)) ok("printing: the guide button's icon is spaced off its label");
+    else bad("the printer-guide button's icon touches its first letter — the console's button is a "
+      + "flex box with no gap, so the space in the markup is trimmed away");
+
   }
 }
 
