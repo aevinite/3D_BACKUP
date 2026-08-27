@@ -1,7 +1,7 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (69 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (81 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -51,6 +51,46 @@ Driven, not read: the whole flow (register → helper hello → "Yes — print h
 "Nobody" → auto-print off → test page → the helper claims it) was run headless on 2026-08-27 in both
 panel skins with zero console errors, and `verify:printing-sweep` grew 12 phases (83–94) that ask the
 real server as the real manager, with and without the permission.
+
+## 2026-08-27 (later) — how far behind the printer is
+
+> Owner: *"'the printer is off' and 'the printer is off and eleven orders are stacked up' stop looking
+> the same. The second one means somebody should be reading the screen instead of waiting for paper…
+> can do this too on whichever user it's on — then when anything happens they will get it."*
+
+`waitingToPrint(rid, kind)` in `lib/printQueue.ts`: **one** round trip, an exact count with no rows
+transferred, plus the single oldest row so the number can become a sentence. `STUCK_AFTER_MS` (60s)
+travels with it, so no screen keeps its own idea of how long is too long.
+
+**The count alone is never allowed to raise an alarm.** Four waiting is normal for two seconds and an
+emergency after ten minutes; a badge showing "1" every time a ticket passes through the queue is
+permanent furniture, and permanent furniture is invisible. Everything loud is keyed on the AGE.
+
+Four places, same field, same words:
+
+| Where | What a person sees |
+|---|---|
+| Kitchen → the 🖨❗ button | a red count badge, **only** once the oldest is over a minute old |
+| Kitchen → 🖨 sheet | a **Tickets waiting** row under the three existing ones, plus a red box saying *read the orders off this screen and cook from it* |
+| Manager → floor strip | one row, **first** in the strip, with *Where the paper goes →* — and **no "Resolved"**, because the tickets are still there and ticking it off would be a lie |
+| Manager Settings → Printing and admin → Printing, step 4 | the same fact as a state row |
+
+**Two faults it dragged into the light:**
+
+1. **`state.helper` was never assigned in the kitchen panel.** The 🖨 sheet has read it since the
+   helper shipped (2026-08-20) to say *"these tickets print on <printer> from <computer>"* — and
+   nothing ever set it, so that whole branch was dead code. A cook standing beside a perfectly good
+   printer at a silent screen got the generic answer instead of the true one, which is exactly the
+   mystery the branch was written to end. `printRefused` was unused in the same way, and now says
+   *why* this screen is not the printer.
+2. **One dead printer produced SEVEN rows in the manager's strip** — the pile-up row plus five named
+   "a reprint hasn't printed" rows, i.e. the same fault told six times, pushing the row that explains
+   it off the screen. When the pile-up row shows, only the OLDEST named row is kept, because it
+   carries the one button the pile-up row cannot (*Print here instead*).
+
+A third state was added to the shared state-pair pattern: **`warn`**. `no` is neutral — a fact that
+happens to be false — and it paints its value in `--muted`, so the word **STUCK** read as a
+switched-off setting. `warn` carries the danger colour, a filled dot and its own border.
 
 ## Why the browser can never do this
 

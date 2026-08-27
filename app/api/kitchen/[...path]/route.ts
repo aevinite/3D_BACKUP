@@ -25,7 +25,7 @@ import { panelFailure } from "@/lib/panelFailure";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // The print queue itself (mig 269 + 335) — shared with the manager route so two panels can never
 // drift into two different ideas of what "claimed" means.
-import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, takeStation, releaseStation, mayClaim } from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, ordersAlreadyQueued, stationView, takeStation, releaseStation, mayClaim, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
 // WHEN A COMPUTER OWNS THE PAPER, A SCREEN MUST NOT ALSO PRINT IT (mig 341). A helper prints on the
 // printer the address book names; a screen prints on whatever that machine's default printer is. Both
 // printing means the same ticket in two places — and the screen's copy is the one that comes out in
@@ -307,8 +307,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const boardDev = deviceIdFrom(req);
       const station = await stationView(rid, boardDev);
       if (station.mine) await touchStationSafe(rid, boardDev);
+      // HOW FAR BEHIND THE PRINTER IS (owner, 2026-08-27). It cannot be counted from `printJobs`
+      // above, and that is the whole point: when a helper owns the kitchen slips this screen is
+      // handed NOTHING on purpose, which is exactly the moment a cook needs to know that eleven
+      // tickets are stacked up behind a dead printer. One round trip, count only, no rows.
+      const waiting = await waitingToPrint(rid, "kot");
       return ok({
         printJobs, queuedFor, station,
+        // { n, oldestMs } — and the threshold travels with it, so the panel never has to hold its
+        // own copy of "how long is too long" (a second copy is how two screens start disagreeing
+        // about whether the same printer is stuck).
+        waiting, stuckAfterMs: STUCK_AFTER_MS,
         orders: live.orders, items: live.items, dishes: must(dishes),
         platform: platformRows,
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,

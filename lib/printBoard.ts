@@ -18,6 +18,7 @@ import {
   type AgentView, type PrintRoutes, type PaperSize, type RoutableKind,
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { waitingToPrint, STUCK_AFTER_MS } from "@/lib/printQueue";
 
 export {
   STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES,
@@ -37,6 +38,10 @@ export type BoardState = {
   agents: AgentView[];
   routes: PrintRoutes;
   waiting: number;
+  /** HOW FAR BEHIND, not just how many (owner, 2026-08-27). The count alone cannot tell a two-second
+   *  blip from a dead printer, so the age of the oldest kitchen slip travels with it — and
+   *  `stuckAfterMs` travels too, so no screen keeps its own copy of "how long is too long". */
+  stuck: { n: number; oldestMs: number | null; afterMs: number };
   recent: BoardJob[];
   /** Both rungs of the old mig-107 pair. `allowed` is Aevidine's; `on` is now shown as the Kitchen
    *  slips line's own answer, never as a second switch of its own (that duplicate is what made one
@@ -52,13 +57,16 @@ const JOB_COLS = "id, kind, status, printer, printed_by, attempts, error, create
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */
 export async function printBoardState(rid: string, opts?: { deviceId?: string | null; recent?: number }): Promise<BoardState> {
-  const [agents, routes, waiting, setRow, jobs] = await Promise.all([
+  const [agents, routes, waiting, setRow, jobs, stuck] = await Promise.all([
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
     sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
     sb.from("print_jobs").select(JOB_COLS).eq("restaurant_id", rid)
       .order("created_at", { ascending: false }).limit(Math.min(30, Math.max(5, opts?.recent ?? 12))),
+    // Kitchen slips only: they are the paper with a person standing over it, and a bill waiting two
+    // seconds for somebody to press Print is not a pile-up.
+    waitingToPrint(rid, "kot"),
   ]);
   const s = (setRow.data || {}) as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean };
   const dv = String(opts?.deviceId || "").trim();
@@ -70,6 +78,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     agents,
     routes,
     waiting,
+    stuck: { ...stuck, afterMs: STUCK_AFTER_MS },
     recent: (jobs.data || []) as BoardJob[],
     printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true },
     thisComputer: dv ? agents.find((a) => a.owner_device === dv) || null : null,

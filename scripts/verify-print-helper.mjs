@@ -352,6 +352,68 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "printBoardState lost thisComputer — the restaurant's own screen cannot tell its machine from someone else's");
 }
 
+// ── 8c · HOW FAR BEHIND THE PRINTER IS (owner, 2026-08-27) ────────────────────────────────────
+// "'The printer is off' and 'the printer is off and eleven orders are stacked up' stop looking the
+// same. The second one means somebody should be reading the screen instead of waiting for paper."
+{
+  const queue = read("lib/printQueue.ts");
+  const board = read("lib/printBoard.ts");
+
+  check(/export async function waitingToPrint/.test(queue) && /count: "exact"/.test(queue) && /export const STUCK_AFTER_MS/.test(queue),
+    "the pile-up is ONE counted read — how many, and how old the oldest is",
+    "waitingToPrint is gone: the count and the age are what turn a number into a sentence, and no screen can work them out for itself");
+
+  // THE AGE IS NOT OPTIONAL. A count alone cannot tell a two-second blip from a dead printer, and a
+  // badge that shows "1" every time a ticket passes through the queue is permanent furniture — which
+  // is invisible, which is how a real pile-up gets missed. This is the don't-cry-wolf rule.
+  check(/oldestMs/.test(queue) && /oldestMs/.test(kpanel) && /oldestMs/.test(epanel) && /oldestMs/.test(page),
+    "…and every screen that shows it also has the age, so nothing shouts on the count alone",
+    "a screen shows the waiting COUNT without the age of the oldest ticket — it will cry wolf on a healthy printer");
+  check(/stuckAfterMs/.test(kroute) && /stuckAfterMs/.test(eroute) && /afterMs/.test(board),
+    "…and the threshold is the SERVER's, sent with the number",
+    "a panel now keeps its own copy of 'how long is too long' — two screens will disagree about whether the same printer is stuck");
+
+  // IT MUST REACH THE ONE SCREEN THAT CANNOT COUNT IT ITSELF. When a helper owns the kitchen slips,
+  // the kitchen board is handed no jobs on purpose — which is the exact moment the number matters.
+  check(/waitingToPrint\(rid, "kot"\)/.test(code(kroute)),
+    "the kitchen board carries it even when that screen is handed no tickets at all",
+    "the kitchen board lost the waiting count — with a helper owning the paper it has nothing to count, so a cook at a dead printer cannot see the pile");
+  check(/prsheet-wait/.test(kpanel) && /prsheet-wait/.test(read("public/panels/kitchen/style.css")),
+    "…and the 🖨 sheet has its own row for it, above the fold",
+    "the 'Tickets waiting' row is gone from the kitchen printer sheet");
+  check(/function paintPrinterBadge/.test(kpanel) && /prbadge/.test(read("public/panels/kitchen/style.css")),
+    "…with the count on the bar button, so the sheet does not have to be opened to learn it",
+    "the printer button's waiting badge is gone");
+  check(/function printerStatusHtml/.test(kpanel) && /paintPrinterSheetStatus/.test(kpanel),
+    "…and a sheet left open is repainted, so the number a cook walks away from is the number they come back to",
+    "the printer sheet's status is built inline again: it will go stale under a cook who is reading it");
+
+  // …AND THE MANAGER, WHOSE STRIP IS AN ALARM. A count of tickets that are still sitting there is
+  // not a report somebody can tick off, so it must not offer "Resolved" — that would be a lie.
+  check(/kind: "waiting"/.test(epanel) && /data-prsetup/.test(epanel),
+    "the manager's floor says it too, and offers the one move that helps instead of a 'Resolved' that would be a lie",
+    "the pile-up row is gone from the manager's floor strip, or it grew a Resolved button — the tickets are still there, so ticking it off says something untrue");
+  check(/waitingToPrint\(rid, "kot"\)/.test(code(eroute)) && /stuck: \{ \.\.\.stuck, afterMs: STUCK_AFTER_MS \}/.test(board),
+    "…and both printing boards read it from the shared board, in the same words",
+    "the shared board lost the pile-up, so the admin console and the restaurant's own screen will describe it differently");
+
+  // "NO" IS NEUTRAL; THIS IS WRONG. The state pair's `no` paints its value in --muted, which made the
+  // word STUCK read as a switched-off setting rather than a printer nobody is watching. `warn` is the
+  // third state, and it carries the danger colour AND a filled dot AND a border — never colour alone.
+  check(/\.adm-state-row\.warn/.test(read("app/globals.css")) && /\.pw-state-row\.warn/.test(read("public/panels/editor/style.css")),
+    "…and a stuck printer uses the WARN state, not the neutral 'no' one",
+    "the warn state is gone: the word STUCK would be painted in the muted grey that means 'switched off'");
+  check(/"warn" : "yes"/.test(code(page)) && /"warn" : "yes"/.test(epanel),
+    "…on both boards",
+    "a printing board went back to rendering a stuck printer as a neutral 'no'");
+
+  // A DURATION, NOT A TIMESTAMP. "nothing since 14 min ago" says when twice, and it shipped that way
+  // for one run of this test — worth a check, because it reads fine until you say it out loud.
+  check(!/(since|for) \$\{[^}]*\}[^`]*ago/.test(epanel) && !/come out (since|for) <b>\{age\}<\/b>[^<]*ago/.test(page),
+    "…and the age is said once (a duration), never 'since 14 min ago'",
+    "a pile-up line reads 'since N min ago' — two ways of saying when, in one sentence");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",

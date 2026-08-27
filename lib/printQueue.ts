@@ -39,6 +39,47 @@ const liveFilter = () =>
   `status.eq.queued,and(status.eq.printing,claimed_at.lt.${new Date(Date.now() - STALE_CLAIM_MS).toISOString()})`;
 
 /**
+ * HOW FAR BEHIND IS THE PRINTER — the number a cook at a dead printer actually needs.
+ *
+ * Owner, 2026-08-27: *"'the printer is off' and 'the printer is off and eleven orders are stacked up'
+ * stop looking the same. The second one means somebody should be reading the screen instead of
+ * waiting for paper."*
+ *
+ * Every printing screen already says whether printing is on, which screen prints, and who is
+ * printing right now. None of them said HOW MUCH had piled up — and the one case where it matters
+ * most is the one where the screen is handed nothing at all: when a helper owns the paper, the
+ * kitchen's own job read is deliberately empty, so the board could not have counted them itself.
+ *
+ * TWO NUMBERS, ONE ROUND TRIP. The count is exact and transfers no rows; the single row that does
+ * come back is the OLDEST one, which is what turns a number into a sentence. Four tickets waiting is
+ * normal for two seconds and an emergency after ten minutes, and the count alone cannot tell those
+ * apart — so nothing anywhere is allowed to shout on the count by itself.
+ *
+ * `kind` defaults to kitchen slips because that is the paper with a person standing over it.
+ */
+export async function waitingToPrint(
+  rid: string,
+  kind: "kot" | "bill" | "banquet" | null = "kot",
+): Promise<{ n: number; oldestMs: number | null }> {
+  let q = sb.from("print_jobs")
+    .select("created_at", { count: "exact" })
+    .eq("restaurant_id", rid)
+    // "Stuck" is queued OR claimed-and-never-reported. Deliberately NOT liveFilter()'s stale window:
+    // that window exists so another screen may STEAL a job, and a ticket claimed nine seconds ago by
+    // a machine that has since died is still a ticket nobody has. It counts from the first second.
+    .in("status", ["queued", "printing"]);
+  if (kind) q = q.eq("kind", kind);
+  const r = await q.order("created_at", { ascending: true }).limit(1);
+  const n = r.count || 0;
+  const first = (r.data || [])[0] as { created_at?: string } | undefined;
+  return { n, oldestMs: n && first?.created_at ? Date.now() - new Date(first.created_at).getTime() : null };
+}
+
+/** Long enough that a working printer is never called stuck. A helper polls every 2s and a screen
+ *  every 20s at worst, so a minute of silence is not a slow moment — it is nothing happening. */
+export const STUCK_AFTER_MS = 60_000;
+
+/**
  * Tickets waiting to print for this restaurant, with the order + item rows joined on so the
  * caller can print without trusting its own board (a reprint is usually for a KOT that has long
  * left it).
