@@ -267,13 +267,24 @@ check("P15612", "a wake only happens on a REAL back-forward restore, in all thre
 // *"yes for this guest should be redirected to menu … and if written login or aevinite then only
 // locate to there"*). Dropping the "/r/" from a menu address landed a guest on the software
 // company's 404 whose only button led to the staff sign-in.
+// ASSERT THE BEHAVIOUR, NOT THE IMPLEMENTATION (sweep #7 / T28, 2026-08-27). These two used to
+// name the exact call the first version made — `router.replace(\`/r/${slug}/menu\`)` and
+// `{kind === "staff" && (` — so when the two picked 404 designs replaced the whole file, both went
+// red for the shape rather than for the behaviour, and the shape is not what the owner asked for.
+// (The behaviour really HAD been lost too; the live rows below are what proved it.)
 check("P15609", "the wrong-turn page resolves a guest address to its menu", () =>
-  has(F.nf, '"use client"', 'method: "HEAD"', "router.replace(`/r/${slug}/menu`)") &&
+  has(F.nf, '"use client"', 'method: "HEAD"') &&
   rx(F.nf, /const STAFF_WORDS = /) &&
+  // it must LEAVE for the menu, by whatever route — and replace, never push, so Back does not
+  // return the visitor to the same dead end.
+  rx(F.nf, /(location|router)\.replace\(\s*`\/r\/\$\{[^}]+\}\/menu`/) &&
   // HEAD, not GET: the menu is ~24KB and only the yes/no is wanted.
-  !rx(F.nf, /fetch\([^)]*menu-data[^)]*\)\s*\.then/));
+  rx(F.nf, /menu-data`?[^)]*\{\s*method:\s*"HEAD"/));
 check("P15610", "…and the staff sign-in is offered ONLY when the address says staff", () =>
-  rx(F.nf, /\{kind === "staff" && \(/) && !rx(F.nf, /href="\/"/));
+  // the way out is "/" (the staff door) on the STAFF screen only; every guest branch leaves for a
+  // menu, and the staff word list is what decides which.
+  rx(F.nf, /aud: "staff"[\s\S]{0,60}href: "\/"/) &&
+  !rx(F.nf, /aud: "guest"[\s\S]{0,80}href: "\/"/));
 
 // THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8"). The list layout is mobile-first;
 // on a laptop the same row is 1100px and the name and price sat squeezed at the left with the

@@ -38,7 +38,7 @@ import Link from "next/link";
 type Aud = "guest" | "staff";
 
 /** The audience, the restaurant this path belongs to, and where the way out should go. */
-function readAudience(): { aud: Aud; slug: string; href: string; label: string } {
+function readAudience(): { aud: Aud; slug: string; href: string; label: string; maybe?: string } {
   const p = typeof location === "undefined" ? "" : location.pathname || "";
   const pinned = (): string => {
     let t = "";
@@ -70,7 +70,47 @@ function readAudience(): { aud: Aud; slug: string; href: string; label: string }
     const slug = pinned() || fromQuery();
     return { aud: "guest", slug, href: slug ? `/r/${slug}/menu` : "/menu", label: "Go to the menu" };
   }
-  return { aud: "staff", slug: "", href: "/", label: "Go to the home screen" };
+  // NOT A GUEST DOOR AND NOT A STAFF WORD — it may still be a restaurant's own address with the
+  // "/r/" dropped, and that has to be ASKED, not guessed. See resolveSlug() below.
+  const seg = p.split("/").filter(Boolean)[0] || "";
+  let maybe = "";
+  try { maybe = decodeURIComponent(seg).toLowerCase(); } catch { maybe = ""; }
+  if (STAFF_WORDS.test(p)) maybe = "";
+  if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(maybe)) maybe = "";
+  return { aud: "staff", slug: "", href: "/", label: "Go to the home screen", maybe };
+}
+
+// The words that mean "this person was heading somewhere staff-only". `/login` and `/aevinite` are
+// the two the owner named; the panels are the same kind of address and would be just as wrong to
+// answer with a restaurant's menu.
+const STAFF_WORDS = /(^|\/)(login|staff-login|aevinite|admin|manager|editor|kitchen|tablet|owner)(\/|$)/i;
+
+/**
+ * A DINER WHO DROPPED THE "/r/" IS SENT TO THE MENU, NOT TO A PASSWORD SCREEN.
+ *
+ * Owner, 2026-08-26: *"yes for this guest should be redirected to menu if you make it like that if
+ * possible and if written login or aevinite then only locate to there"*.
+ *
+ * A menu's real address is /r/<slug>/menu. Drop the "/r/" — by editing a shared link, or retyping
+ * one — and the visitor lands here, on the STAFF screen, whose way out is "/" and therefore the
+ * staff sign-in. A guest mid-meal shown a password prompt is the exact dead end these two screens
+ * exist to remove.
+ *
+ * This was built on 2026-08-26 and then lost three days later, when the two picked 404 designs
+ * replaced this whole file and the redirect was not carried across. verify:guest has been red on
+ * clean main for it ever since (11 checks). Restored here, inside the new design rather than beside
+ * it. (sweep #7 / T28, 2026-08-27.)
+ *
+ * ONE HEAD REQUEST to the menu-data endpoint — the same gate the menu page itself uses, so a
+ * switched-off restaurant, or one whose Menu feature is off, correctly does NOT resolve and the
+ * visitor keeps the screen they would have had. HEAD, not GET: a menu is ~24KB and none of it is
+ * wanted, only the yes/no.
+ */
+async function resolveSlug(slug: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/r/${encodeURIComponent(slug)}/menu-data`, { method: "HEAD", cache: "no-store" });
+    return r.ok;
+  } catch { return false; }   // offline → never promise a menu we cannot reach
 }
 
 const CSS = `
@@ -209,12 +249,27 @@ export default function NotFound() {
   // So: null until decided, and a <noscript> block below carries a plain working screen for a
   // browser with JavaScript switched off. A 404 has nothing to gain from being server-rendered —
   // no search engine needs it — and a blank instant is far better than the wrong screen.
-  const [a, setA] = useState<{ aud: Aud; slug: string; href: string; label: string } | null>(null);
+  const [a, setA] = useState<{ aud: Aud; slug: string; href: string; label: string; maybe?: string } | null>(null);
   const [name, setName] = useState("");
   const [popped, setPopped] = useState(0);
 
   useLayoutEffect(() => {
     const next = readAudience();
+    // An address that might be a restaurant with the "/r/" dropped is ASKED about before anything
+    // is shown. `a` stays null meanwhile, which this screen already treats as "not decided yet" —
+    // a blank instant, never the wrong screen. If it resolves we leave for the menu and no 404 is
+    // ever painted; if it does not, the screen this address would have had appears as normal.
+    if (next.maybe) {
+      let alive = true;
+      resolveSlug(next.maybe).then((real) => {
+        if (!alive) return;
+        // replace, not assign: the address they typed was never a real page, so it must not sit in
+        // their history waiting for Back to return them to this same dead end.
+        if (real) location.replace(`/r/${next.maybe}/menu`);
+        else setA(next);
+      });
+      return () => { alive = false; };
+    }
     setA(next);
     // The restaurant's own name, when this device stored it — and ONLY for the same restaurant this
     // path resolves to, so one restaurant's name can never appear on another's screen. Never a
