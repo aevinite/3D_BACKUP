@@ -1,0 +1,75 @@
+-- 371 · A re-seed cannot hand a narrowed waiter section back to the whole floor
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════
+-- ⚠ MIGRATION NUMBER: 369 — the next free number after main's 368, and the SECOND number this file
+--   has carried. It was written as 371 to leave room for two parallel worktrees that already hold an
+--   uncommitted 369 (T22's `a_mark_must_not_outlive_its_party_on_the_delete_path` and T24's
+--   `a_purge_clears_the_pending_printer_handshakes`) — and `npm run verify:grants` refused it: the
+--   folder's own sequence check fails on any unexplained gap, so 369 and 370 came back as MISSING
+--   and a shared guard went red. Leaving a hole is worse than sharing a number, because the hole
+--   needs a KNOWN_GAPS entry that goes stale the moment those two land. So this file takes 369 and
+--   whoever merges second renumbers — which is the folder's established practice (see mig 352's own
+--   header, which carried three numbers for the same reason). Every statement here is
+--   INSERT … ON CONFLICT DO NOTHING, so the file is correct at ANY number.
+--   `npm run verify:db-parity` section A2 is what catches a clash while it is still just a rename.
+--
+-- BACKEND ONLY — NOTHING ON SCREEN CHANGES. Not one row of business data is created, changed or
+-- deleted by this file. It writes one row to the ledger migration 307 built.
+--
+-- ── WHAT THIS CLOSES ────────────────────────────────────────────────────────────────────────────
+-- `scripts/seed-supabase.mjs` step 1 runs EVERY file in this folder, in filename order,
+-- unconditionally — there is no ledger of what has already been applied. Migration 307 built the
+-- ledger for the two offenders in 001–150; migration 321 named the shape and wrapped four more in
+-- 151–308; migration 352 wrapped three more (235 twice, 301) found by sweep #6.
+--
+-- The shape, in 321's own words:
+--
+--     "a WHERE that tests 'is it not the value I want' rather than absence."
+--
+-- Sweep #7 re-read migrations at POSITIONS 231–339 of the sorted folder — which begins at
+-- `223_…`, eight files BELOW where sweep #6's territory started — and found one more:
+--
+--   225_sections_follow_table_count — WHERE THE OWNER WOULD SEE IT: the waiter tablet. Every waiter
+--       would silently get every table on the floor back, and the Users/Access screen would show
+--       their section as the whole floor again.
+--
+--       Migration 225 closed a real gap: raising a restaurant's table count used to leave the new
+--       tables in NOBODY's section, so guests sat at a table no tablet could see. Its trigger
+--       (only ever on a GROWING floor) is the permanent fix and is deliberately NOT touched here.
+--       Its trailing BACKFILL is the one-time half — "close the gap that already exists" — and its
+--       WHERE is `EXISTS (a table in 1..table_count this waiter does not hold)`. That is true of the
+--       gap it was written for, and equally true of every section a manager has deliberately
+--       narrowed since. Narrowing is the whole point of the feature: the file's own header says
+--       "a section is only ever a SUBTRACTION from the floor, never a hole in it".
+--
+--       So on a re-seed the backfill re-widens every narrowed section to the full floor. Nothing
+--       appears on screen and nothing is written to the Activity log to say it happened.
+--
+--       MEASURED on the backup database, 2026-08-28: 0 waiters are narrowed today — migration 223's
+--       backfill gave every one of them the whole floor and nobody has cut a section yet — so the
+--       guard costs nothing now and the fix is free. The day someone uses the feature is the day a
+--       re-seed would take it away again, and that is exactly the day nobody would be looking.
+--
+-- ── HOW IT WORKS IN BOTH DIRECTIONS (migration 307's reasoning, restated) ───────────────────────
+--   · EXISTING database (every live stack): the statement has already run its legitimate time.
+--     Recording the key now is the whole fix — the very next re-seed skips it.
+--   · FRESH database seeded from zero: 225 sorts BEFORE 307, so it runs once while the ledger does
+--     not exist yet — which `lfh_already_applied` reads as "not yet applied", exactly right — and
+--     then this file records it. The second pass skips it.
+--
+-- ── THE STATEMENT IS NOT DISABLED, ONLY MADE ONCE-ONLY ─────────────────────────────────────────
+-- Nothing here turns a migration off. The guarded block still runs its single legitimate time on
+-- any database that has not had it; what changes is that the SECOND run is a no-op with a NOTICE
+-- saying so, instead of a silent rewrite of a manager's decision.
+--
+-- GUARD: `npm run verify:grants` derives the population of one-time keys from this folder and
+-- checks BOTH directions — every key a migration passes to `lfh_already_applied()` must have a row
+-- here, and every row here must be checked by some migration. It cannot fall behind again.
+-- ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+INSERT INTO public.lfh_applied_once (key, note) VALUES
+  ('225_sections_follow_table_count',
+   'Widens every waiter''s assigned_tables to the whole floor wherever a table in 1..settings.table_count is missing from their section. Correct exactly once — it closes the gap migration 225 was written for. On a re-run it also re-widens every section a manager deliberately narrowed, which is the normal state of the feature, with nothing on screen to say so. Measured 2026-08-28: 0 waiters narrowed today.')
+ON CONFLICT (key) DO NOTHING;
+
+-- Afterwards every key any migration in this folder passes to lfh_already_applied() has a row here:
+--   select key from public.lfh_applied_once order by key;
