@@ -1,5 +1,122 @@
 # T28 — THE REPO'S OWN TESTS · findings
 
+## ══ SWEEP #7 · 2026-08-27/28 · branch `sweep7/t28-repo-guards` · port 4228 ══════════════════════
+
+Territory: `scripts/**`, `tests/**`, and the 150 `verify:*` / `test:*` entries in `package.json`.
+All 500 sweep-#6 rows re-run (490 ✅ · 10 ⏭ · **0 ❌ — no regression**, and 13 long-standing skips
+closed). 500 new rows written and executed, `P28601`–`P29100`.
+
+**Nine guards were red or crashing on clean main when this run started. THREE were the app; SIX were
+the guard itself.** Every one is fixed here, one commit each, numbered to match the chat report.
+
+Legend: `confirmed` = I watched it happen · `code-read` = reasoned from the source.
+
+### FIXED — the app
+
+**9 · The wrong-turn redirect the owner asked for was built, then lost in a merge · confirmed · HIGH**
+`app/not-found.tsx`. Owner, 2026-08-26: *"yes for this guest should be redirected to menu … and if
+written login or aevinite then only locate to there"*. Built the same day (2805c879). PRs
+#1122/#1123/#1124 then replaced the file with the two 404 screens he picked, and the redirect was not
+carried across. A diner who drops the `/r/` from a menu link was getting the BURNT TOAST staff
+screen, whose only way out is `/` → `/login`, the staff password prompt — the exact dead end both
+screens exist to remove. `verify:guest` was red for it, 11 checks. Restored inside the new design;
+measured: all four wrong-turn addresses now land on the real menu with 59 dishes, and every staff and
+guest address is unchanged. `verify:notfound` 16/16.
+
+**3 · The admin's Printing overview read the restaurant list with no ceiling · confirmed · MEDIUM**
+`app/api/admin/printing/[...path]/route.ts`. Three of its four whole-platform reads carry a
+`.limit()`; the restaurants read carried none, so PostgREST's own cap would silently shorten it and
+the screen would stop listing later restaurants with no error anywhere. `verify:admin-api-a` had been
+red on clean main for it (181 checks, 1 failing). One line.
+
+**4 · A purge would leave the print-helper pairings behind · confirmed · MEDIUM**
+Yesterday's migration 368 added `print_pairings`, which carries a `restaurant_id`, and nobody added
+it to `admin_purge_restaurant()`. `verify:purge` was red for it. Reading it out: the rows are
+ten-minute handshakes and `lib/printPair.ts` sweeps every expired row platform-wide, so a delete line
+would be dead code — but "it cleans itself up" is exactly the claim that rots into a stale allowance.
+So the guard gained a third list, `SELF_CLEARING`, and every entry is PROVED on each run against the
+live schema and the live source.
+
+### FIXED — the guards
+
+**1 · Three new guards answered a stopped app with a stack trace · confirmed · HIGH**
+`verify-notfound-audience`, `verify-sw-version-report`, `verify-printing-sweep` all landed on
+2026-08-26 needing a running app and none did the appUp preflight, so `verify:guards-alive` check 7
+had been red on clean main ever since. All three now exit 2 with one plain sentence.
+
+**2 · Two guards ignored `--base` and quietly drove port 4000 — the owner's own window · confirmed · HIGH**
+`verify-access-live` and `verify-manager-hidden` resolved `process.env.VERIFY_BASE || "localhost:4000"`.
+Every lane hands over its own port as `-- --base …`; both ignored the flag. Measured:
+`npm run verify:access-live -- --base http://localhost:4228` refused with "nothing is answering at
+http://localhost:4000". Both use `baseFrom(process.argv)` now, and `verify:guards-alive` gained
+check 7 to keep it that way — proved by re-introducing the fault.
+
+**5 · verify:write-paths called two quiet days a data fault · confirmed · MEDIUM**
+Phase 3819 measured rollup freshness from the newest day that HAS A ROW. Two days with no sales read
+as four days of drift. It measures the rollup's own marker now, in two halves: never AHEAD of
+today−2 (the half that would be a real money fault), and not more than a week behind.
+
+**6 · verify:test-safety never looked in four sub-folders · confirmed · MEDIUM**
+It listed three folders flatly, so eleven scripts were invisible to it — including the five under
+`scripts/sweep/t3/` that place real orders. It is the guard whose whole job is "a test write must
+name its restaurant", and it runs as a hook on any `scripts/` edit. Walks every depth now; all eleven
+newly-covered files pass.
+
+**7 · The guard that catches dead guards was never wired into its own hook · confirmed · MEDIUM**
+`verify-guards-alive.mjs` has said "meant to run as a hook on any edit under scripts/ or tests/"
+since it was written, and the PostToolUse hook never listed it — which is why item 1 sat red unseen.
+It now reads the payload on stdin and exits 0 at once unless the edit is a script, a test or
+`package.json`, so it costs nothing on an unrelated edit. Wired in.
+
+**10 · verify:rota-clash left a waiter holding two tables instead of thirty · confirmed · HIGH**
+Every check passed and then the restore ITSELF timed out. `finally` saved nothing — the restore is
+what failed — so the run exited 1, reading as an app fault, and left diagt1 on `[4,5]`. Confirmed on
+the database and put back by hand. Three tries, a loud failure, and the SQL to run by hand.
+
+**11 · verify:guest reported three menus broken because SENTRY answered 429 · confirmed · MEDIUM**
+It counted every response ≥400 whoever answered it. Also: it failed the "one menu read per load"
+check against a dev server while its own note said dev double-mounts every effect; and its staff-404
+rows looked for `href="/login"`, the shape the owner replaced. All three fixed; the fourth (who
+`/signup` belongs to) is a real disagreement with `verify:notfound` and is printed as an OPEN
+QUESTION rather than guessed at.
+
+**13 · verify:tablet tapped Espresso, and Espresso has three sizes · confirmed · HIGH**
+It clicked the first dish on the Quick-order grid and assumed the order now had something in it. A
+dish with sizes opens a popup instead — correct behaviour — so the cart stayed empty, `#sendOrder`
+stayed `disabled`, and the guard died on a 30-second click, taking 24 checks with it. Nothing was
+wrong with the panel. 103/103 green now.
+
+**18 · verify:test-safety failed on an argument it does not use · confirmed · LOW**
+It read `argv[2]` as its repo root, so `-- --base <url>` — which every lane passes to every guard —
+made it scan a folder called "--base" and exit 1.
+
+### BUILT — improvements
+
+**8 · Eight guards that find their own subjects now refuse when they find none**
+Each walks a folder to decide what to check. An empty walk made every check pass because none ran,
+and the last line still said OK — the shape `verify:cache` died in for a month. Each now states its
+floor. Proved from an empty folder.
+
+**12 · Five guards borrow a real restaurant's settings and only put them back if nothing interrupts them**
+New `scripts/sweep/restore.mjs`. What each borrows: "print the customer on the bill"; the owner's
+entitlements; the printing routes, auto-print switches and manager permissions; a waiter's rota; the
+restaurant's TABLE COUNT. A leftover switch looks exactly like a decision somebody made on purpose.
+`verify-customers` was additionally setting two switches to a hard-coded `true` having never read
+what they were. Guarded by a new check 11 in `verify:test-safety`.
+
+### OPEN — for the owner
+
+**14 · Two guards disagree about who a stray address belongs to.** `verify:notfound` says `/signup`
+and a switched-off restaurant get the STAFF 404; `verify:guest` says they get the guest advice. Both
+quote him, from the same day. Printed as an open question; not guessed at.
+**15 · Should `verify:manager-live-rush` place orders on Aangan at all?** Unchanged from sweep #6.
+**16 · `verify:void-party` still goes red when another guard overlaps it** — green twice on its own.
+**17 · `verify:heatmap-parity` can never assert anything** — retire it or let it stage its own baseline.
+
+---
+
+## ⚠️ HISTORY — sweep #6, 2026-08-22. Every item below was fixed then; kept because the ledger rows reference it.
+
 Territory: `scripts/**`, `tests/**`, the `verify:*` entries in `package.json`.
 Branch `sweep6/t28-the-guards` · worktree `/Users/aevinite/Documents/Projects/sweep6/T28` · port 4128.
 All 29 items below are FIXED in this branch, one commit each, numbered to match.
