@@ -69,6 +69,13 @@ function walk(dir, out = []) {
   return out;
 }
 const routes = walk(join(root, "app/api"));
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). The route half of this
+// guard walks app/api for its subjects; an empty walk would leave only the two named-file checks
+// running and still print "all N checks passed". The floor is well below today's real count.
+if (routes.length < 30) {
+  console.log(`\n✗ verify:panel-secrets walked only ${routes.length} route file(s) under app/api — there are dozens. The route checks did not run.`);
+  process.exit(1);
+}
 let checked = 0;
 for (const file of routes) {
   const src = readFileSync(file, "utf8");
