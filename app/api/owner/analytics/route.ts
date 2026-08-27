@@ -582,7 +582,22 @@ export async function GET(req: NextRequest) {
     // average and made it drift UPWARD as open tables settled with no new orders. paid-count
     // comes from the payment breakdown (already fetched, WHERE payment_status='paid'). (owner 2026-07-06)
     const paidOrders = (pm.data ?? []).reduce((a: number, r: Record<string, unknown>) => a + (Number(r.orders) || 0), 0);
-    const prev = prevWin ? await windowTotals([rid], prevWin.from, prevWin.to) : null;
+    // ── A FAILED ▲/▼ COMPARISON MUST NOT THROW THE DASHBOARD AWAY (T20 sweep #7, 2026-08-27) ────────
+    // `windowTotals` is the one helper here that THROWS instead of returning an error object, and this
+    // await sits INSIDE the cached compute — so a failed previous-window RPC left the whole compute,
+    // hit the outer catch, and answered "Couldn't load your dashboard just now" for ONE restaurant.
+    // Every real number on that page had already been read successfully.
+    //
+    // The GROUP scope has caught it since T9 finding F12 (`.catch(... return null)` on line ~388, with
+    // the reasoning written out: "the ▲/▼ comparison chips simply don't render — never a wrong delta").
+    // The restaurant scope was left throwing, so the SAME failure blanked one screen and merely dropped
+    // two little arrows on the other. Same policy on both halves now: no delta beats no dashboard.
+    const prev = prevWin
+      ? await windowTotals([rid], prevWin.from, prevWin.to).catch((e) => {
+          console.error("[owner/analytics] previous-window totals failed:", e instanceof Error ? e.message : e);
+          return null;
+        })
+      : null;
     // Previous window's revenue per bucket (ascending) for the overlay line. Non-fatal.
     // Cap to the window END — the day-grain RPC ignores p_to (mig 190 `hist`, see group note).
     const prevCut = prevTsWin ? Date.parse(prevTsWin.to) : Infinity;
