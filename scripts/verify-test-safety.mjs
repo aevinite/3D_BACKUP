@@ -30,11 +30,23 @@ if (HOOK) {
   ROOT = cut > 0 ? f.slice(0, cut) : ROOT;
 }
 
+// EVERY DEPTH, not three hand-listed folders (sweep #7 / T28, 2026-08-27). This used to read
+// ["scripts", "scripts/sweep", "tests"] only, so four sub-folders that grew afterwards were never
+// looked at — scripts/sweep/t3/ (four scripts that place real orders), scripts/live-fix-watcher/,
+// scripts/panel-stubs/ and scripts/launchagents/. The whole point of this file is "a test write
+// must name its restaurant", and the writes it could not see were exactly the ones nobody reviews.
 const files = [];
-for (const dir of ["scripts", "scripts/sweep", "tests"]) {
-  const d = path.join(ROOT, dir);
-  if (!fs.existsSync(d)) continue;
-  for (const n of fs.readdirSync(d)) if (n.endsWith(".mjs") && n !== "verify-test-safety.mjs") files.push(path.join(dir, n));
+(function walk(rel) {
+  const d = path.join(ROOT, rel);
+  if (!fs.existsSync(d)) return;
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) { if (e.name !== "node_modules") walk(p); continue; }
+    if (e.name.endsWith(".mjs") && e.name !== "verify-test-safety.mjs") files.push(p);
+  }
+})("scripts");
+for (const n of fs.existsSync(path.join(ROOT, "tests")) ? fs.readdirSync(path.join(ROOT, "tests")) : []) {
+  if (n.endsWith(".mjs")) files.push(`tests/${n}`);
 }
 if (!files.length) { if (HOOK) process.exit(0); console.error("no test scripts found under " + ROOT); process.exit(1); }
 
