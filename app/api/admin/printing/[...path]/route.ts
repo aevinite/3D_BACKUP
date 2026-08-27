@@ -69,7 +69,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // N+1 shape the egress rule exists to refuse, and it would get slower with every client signed.
   if (seg[0] === "overview") {
     const [rests, agents, sets, jobs] = await Promise.all([
-      sb.from("restaurants").select("id, name, slug").order("name"),
+      // .limit(400) like its three siblings below — NOT decoration. Without a ceiling PostgREST
+      // applies its own default cap and silently returns a SHORT list, so the overview would stop
+      // showing later restaurants with no error anywhere. (sweep #7 / T28: verify:admin-api-a was
+      // red on clean main for this one line.)
+      sb.from("restaurants").select("id, name, slug").order("name").limit(400),
       sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
         .is("revoked_at", null).limit(400),
       sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
