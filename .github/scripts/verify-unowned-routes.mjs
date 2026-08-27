@@ -92,6 +92,30 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
     "Only the helper holds it. A browser that can see it is a browser that can adopt a machine.");
 }
 
+/* ── the printer setup guide — a static file, offered from five places ───────────────── */
+{
+  // It is public/print-setup.html, not a route. Every place that offers it must open it in a NEW
+  // TAB: it is read WHILE somebody sets a printer up, and opened in the same tab it replaces the
+  // screen they are working on, with no way back. Four of the five call sites did this; the admin
+  // Printing screen used next/link, which navigates in place AND prefetches a file that is not a
+  // route. Checked here rather than in verify:print-helper because two of the five files belong to
+  // no sweep territory.
+  const sites = ["app/aevinite/printing/page.tsx", "app/owner/settings/page.tsx",
+                 "components/admin/RestaurantSettings.tsx"];
+  const bad = [];
+  for (const f of sites) for (const line of read(f).split("\n")) {
+    if (!/print-setup\.html/.test(line)) continue;
+    if (/<Link/.test(line)) { bad.push(`${f}: next/link — navigates in place`); continue; }
+    if (!/target="_blank"/.test(line)) bad.push(`${f}: opens in the same tab`);
+  }
+  want(bad.length === 0,
+    "every link to the printer setup guide opens it in a new tab, leaving the setup screen behind it",
+    `${bad.length} link(s) to the setup guide replace the screen they were opened from`,
+    bad.join("\n      ") +
+    "\n      The guide is read WHILE a printer is being set up. Replacing the Printing screen with it — and\n      " +
+    "it has no way back — means finding that screen again by hand, mid-job.");
+}
+
 /* ── the two crash boundaries — what a person sees when everything else has failed ────── */
 {
   const err = read("app/error.tsx");
