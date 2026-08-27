@@ -320,6 +320,35 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "the two table-label rules have drifted: " + detail + "— the owner ruled 2026-08-05 'it should always be T7', and paper that disagrees with the screen sends staff to the wrong table");
 }
 
+// ── 8a · AND THE ADMIN'S SAMPLE TICKET IS THE THIRD COPY (T25, sweep #7, 2026-08-28) ──────────
+// lib/billPreview.ts builds the KOT the admin previews on Access → "Format of the bill", and its
+// own note on that page promises "the exact ticket the manager panel and the kitchen board print".
+// It cannot IMPORT kotTableLabel — lib/printDocs.ts reaches the service-role client and this file
+// is also imported by a "use client" component — so it writes the short form itself, and the third
+// copy is held here rather than left to drift. It said "Table 5" from the day it was written, which
+// is a label no printer in this app has ever produced.
+{
+  const preview = read("lib/billPreview.ts");
+  const kotArg = (preview.match(/tableLabel:\s*tableNamed\(settings,\s*"([^"]*)"\)/) || [])[1];
+  check(!!kotArg, "the admin KOT preview's table label was found",
+    "tableLabel: tableNamed(settings, \"…\") is no longer in lib/billPreview.ts — this parity test cannot run");
+  if (kotArg) {
+    // Drive the SERVER rule for the same table the sample uses, and demand the identical string.
+    const srvSrc = docs.slice(docs.indexOf("export function kotTableLabel"), docs.indexOf("const restName"));
+    const body = srvSrc.slice(srvSrc.indexOf("{") + 1, srvSrc.lastIndexOf("}")).replace(/: [A-Za-z<>|,\s{}\[\]]+(?=[,)])/g, "");
+    const serverLabel = new Function("order", "tableNames", body);
+    const expected = serverLabel({ table_number: "5" }, null);
+    check(kotArg === expected,
+      `the admin's sample kitchen ticket labels its table the same way the printer does ("${expected}")`,
+      `the admin KOT preview says "${kotArg}" where the printed ticket says "${expected}" — the page promises "the exact ticket the manager panel and the kitchen board print", and the owner ruled 2026-08-05 "it should always be T7"`);
+  }
+  // …and the BILL preview beside it uses the same short form, so the two halves of one page agree.
+  const billArg = (preview.match(/tableDisp:\s*tableNamed\(settings,\s*"([^"]*)"\)/) || [])[1];
+  check(billArg === kotArg,
+    "the sample bill and the sample kitchen ticket name the table identically",
+    `the bill preview says "${billArg}" and the KOT preview says "${kotArg}" — one page, two answers`);
+}
+
 // ── 8b · THREE REAL MENUS, not one page being filtered ────────────────────────────────────────
 // Owner, 2026-08-20: "I want it like three proper menus — if you click Windows it will NOT scroll".
 // Before this, picking an OS hid the other two but flung the page 5,000px into its own middle, and the

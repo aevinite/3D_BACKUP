@@ -66,7 +66,20 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
       head: "KITCHEN TICKET · SAMPLE",
       kot: "SAMPLE",
       // A restaurant that renamed its tables should see the name it will really get.
-      tableLabel: tableNamed(settings, "Table 5"),
+      //
+      // "T5", NEVER "Table 5" (owner, 2026-08-05: *"it should always be T7"*). This said
+      // "Table 5" from the day it was written, so the admin's sample ticket showed a table
+      // label the printer has never produced — `lib/printDocs.ts → kotTableLabel()` builds
+      // `"T" + t`, and the kitchen board's own `tlong()` agrees with it (they are held
+      // together by the parity test in scripts/verify-print-helper.mjs). The whole promise
+      // printed at the top of this page is "the exact ticket the manager panel and the
+      // kitchen board print", and on the one line a cook reads first it was not.
+      //
+      // The rule is NOT imported: lib/printDocs.ts reaches the service-role client, and this
+      // file is also imported by components/admin/RestaurantSettings.tsx, a "use client"
+      // component — the same trap lib/printBoardWords.ts was split out for. So the short form
+      // is written here and the parity test now drives all THREE copies instead of two.
+      tableLabel: tableNamed(settings, "T5"),
       when: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
       lines: SAMPLE.map((l) => ({ qty: l.qty, title: l.title, options: l.options, note: l.note })),
       allergies: SAMPLE_ALLERGY,
