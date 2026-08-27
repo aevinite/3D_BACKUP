@@ -64,7 +64,7 @@ another's data** and **money that must not vanish** — the two things that actu
    on 2026-08-16 ("do 1, 2 — leave 3, 4 for later").
 2. **The content policy is REPORT-ONLY** (`Content-Security-Policy-Report-Only` in
    `next.config.ts`) — it watches, it does not block. Measured clean on 15 real screens on the live
-   site, but the app has 56 page routes. **Do not flip it blind**; sweep every route first. Owner
+   site, but the app has 57 page routes. **Do not flip it blind**; sweep every route first. Owner
    parked it the same day.
 3. **`innerHTML` inside `public/panels/*.js` is not fully audited** (point 15).
 4. **Input validation is per-route discipline** with no guard behind it (point 14).
