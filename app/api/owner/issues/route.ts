@@ -114,7 +114,13 @@ export async function PATCH(req: NextRequest) {
   const status = body?.status === "open" ? "open" : "resolved";
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const issue = (await sb.from("issues").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
+  // "I COULDN'T ASK" IS NOT "IT DOESN'T EXIST" (T20 sweep #7, 2026-08-27). `.error` was never
+  // inspected, so a blip answered a bare `{"error":"not found"}` 404 — nothing retries that, so the
+  // resolve/reopen tap is lost and the complaint stays as it was with no explanation. The same
+  // correction /api/owner/audit's detail read was given as finding F8.
+  const issueQ = await sb.from("issues").select("id, restaurant_id").eq("id", id).maybeSingle();
+  if (issueQ.error) return dbFail("owner/issues.lookup", issueQ.error, { message: "Couldn't open that complaint just now — please try again." });
+  const issue = issueQ.data as { restaurant_id: string } | null;
   if (!issue) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!inScope(scope, issue.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
