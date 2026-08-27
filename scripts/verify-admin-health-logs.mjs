@@ -285,6 +285,18 @@ ok(/us-slide/.test(USAGE), "P23604",
   "usage: the phone hint that the table slides sideways is gone — two of the five sort headings are unreachable without it");
 ok(/@media \(max-width: 560px\) \{ \.us-slide \{ display: inline; \} \}/.test(USAGE), "P23605",
   "usage: the slide hint is no longer phone-only — it must not show where the table does not slide");
+// ── 24 · the Claude queue obeys the picker, and SAYS what it left out ─────────────────────────
+// The last list on this page the restaurant picker did not reach. A queue is different from the
+// other lists: "nothing is waiting" is a conclusion you would act on, so what is filtered out is
+// stated rather than silently dropped.
+ok(/const scopedRequests = rid \?/.test(REPAIR), "P23606",
+  "repair: the Claude queue ignores the restaurant picker again");
+ok(/const requestsElsewhere = requests\.length - scopedRequests\.length/.test(REPAIR), "P23607",
+  "repair: the queue no longer counts what the picker hid, so it cannot say so");
+ok(/queued at other restaurants/.test(REPAIR), "P23608",
+  "repair: the 'N more are queued at other restaurants' line is gone — a narrowed queue must not read as an empty one");
+ok(/queuedKeys = new Set\(requests\.map/.test(REPAIR), "P23609",
+  "repair: queuedKeys was scoped by restaurant — it must stay platform-wide, or Fix-now re-offers a ticket that already exists and files it twice");
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);

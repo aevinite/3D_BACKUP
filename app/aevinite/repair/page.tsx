@@ -581,6 +581,19 @@ export default function AdminRepair() {
   // (mig 183) and nothing was reading it — and the server built it with a different formula from
   // the tile's own group key, so even a reader would not have matched. Both sides now use
   // errorGroupKey(), so the queue and the board describe a problem the same way.
+  // ── AND THE QUEUE (T17 sweep #7, 2026-08-27) ────────────────────────────────────────────────
+  // The last list on this page the picker did not reach. A ticket carries the restaurant it was
+  // filed for, so choosing one narrows the queue like everything else — and, unlike the other
+  // lists, what is left out is SAID rather than silently dropped: a queue is work in flight, and
+  // "there are two more, at other restaurants" is the thing you would want to know before
+  // assuming nothing is being worked on. A ticket filed with no restaurant (a platform-wide
+  // report from the box below) belongs to the all-restaurants view only, which is the same rule
+  // the problem board follows.
+  const scopedRequests = rid ? requests.filter((q) => q.restaurant_id === rid) : requests;
+  const requestsElsewhere = requests.length - scopedRequests.length;
+  // NOTE: `queuedKeys` deliberately stays UNSCOPED. It answers "has this problem already been
+  // sent?", and the answer is yes whichever restaurant is on screen — scoping it would re-offer
+  // "Fix now" for a ticket that already exists and file it a second time.
   const queuedKeys = new Set(requests.map((q) => q.err_key).filter(Boolean) as string[]);
   const alreadyQueued = (g: ErrGroup) => sent.has(g.key) || queuedKeys.has(g.key);
 
@@ -647,8 +660,9 @@ export default function AdminRepair() {
           title={attErr ? "Account health didn't load — this is not an all-clear" : "Jump to at-risk restaurants"}>
           <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need attention</span>
         </a>
-        <div className="rp-pill">
-          <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
+        <div className="rp-pill" title={requestsElsewhere > 0 ? `${requestsElsewhere} more ${requestsElsewhere === 1 ? "is" : "are"} queued at other restaurants` : undefined}>
+          <i className="fas fa-robot" aria-hidden="true" /><span className="n">{scopedRequests.length}</span><span>waiting for Claude</span>
+          {requestsElsewhere > 0 ? <span style={{ opacity: 0.75 }}>· +{requestsElsewhere} elsewhere</span> : null}
         </div>
         <div className="rp-pill">
           <i className="fas fa-screwdriver-wrench" aria-hidden="true" /><span className="n">{TOOLS.length}</span><span>hands-on tools</span>
@@ -1150,14 +1164,29 @@ export default function AdminRepair() {
       </div>
 
       {/* ── Waiting for Claude ─────────────────────────────────────────── */}
-      {requests.length > 0 && (
+      {(scopedRequests.length > 0 || requestsElsewhere > 0) && (
         <>
           <div className="rp-sec-h">
             <i className="fas fa-robot" aria-hidden="true" style={{ color: "var(--muted)" }} />
-            <h2>Waiting for Claude</h2><span className="rp-chip">{requests.length}</span>
+            <h2>Waiting for Claude</h2>
+            {scopedRequests.length ? <span className="rp-chip">{scopedRequests.length}</span> : null}
+            <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName || "all restaurants"}</span>
           </div>
+          {/* WHAT IS LEFT OUT IS SAID, not silently dropped. Everywhere else on this page a
+              narrowed list simply shows less; a QUEUE is different, because "nothing is waiting"
+              is a conclusion you would act on. */}
+          {requestsElsewhere > 0 && (
+            <p className="adm-muted" style={{ fontSize: 12.5, margin: "-4px 0 8px" }}>
+              <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+              {requestsElsewhere} more {requestsElsewhere === 1 ? "is" : "are"} queued at other restaurants.{" "}
+              <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+            </p>
+          )}
+          {scopedRequests.length === 0 ? (
+            <div className="adm-empty">Nothing is queued for {scopedName}.</div>
+          ) : (
           <div className="adm-card" style={{ marginBottom: 6 }}>
-            {requests.map((q) => (
+            {scopedRequests.map((q) => (
               <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
                 <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1168,6 +1197,7 @@ export default function AdminRepair() {
               </div>
             ))}
           </div>
+          )}
         </>
       )}
 
