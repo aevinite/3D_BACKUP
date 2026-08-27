@@ -362,7 +362,22 @@ export default function AdminBills() {
           <div className="adm-empty">
             {q || from || to
               ? "No bill matches that search or date range."
-              : state === "deleted" ? "No bills have been deleted." : "No bills in this view."}
+              : state === "deleted" ? "No bills have been deleted."
+              // "NONE ON THIS PAGE" AND "NONE AT ALL" MUST NOT READ THE SAME (T18 sweep #7, item 2).
+              // Five of the six state buckets can only be worked out by rolling a session up with
+              // its orders, so the endpoint narrows them AFTER reading a page of sessions — the
+              // route says so in its own comment. When that page happens to hold none of the chosen
+              // state the list is empty even though older pages have plenty, and this said "No bills
+              // in this view." full stop. Measured on backup: Running, Settled, Pay-later and On the
+              // house all came back empty on the newest page while the server was still handing back
+              // a cursor, and a settled bill (#644, My Little French House, ₹441) was sitting three
+              // pages further back — unreachable, because the Load-older footer below is only drawn
+              // when there is at least one row. On the screen whose stated job is proving no sale
+              // quietly vanished, "the newest bills hold none" was being shown as "there are none".
+              : nextBefore
+                ? (state ? `No “${META[state as BillState].label}” bills on this page — there are older ones.`
+                         : "No bills on this page — there are older ones.")
+                : "No bills in this view."}
           </div>
         )
           : rows.map((b) => {
@@ -454,14 +469,21 @@ export default function AdminBills() {
           })}
 
         {/* Walking further back. Present whenever the server says there is an older page, so the
-            admin is never silently stopped at the newest one. */}
-        {d && rows.length > 0 && nextBefore && (
+            admin is never silently stopped at the newest one.
+            AND THAT INCLUDES A PAGE THAT CAME BACK EMPTY (T18 sweep #7, item 2). This was gated on
+            `rows.length > 0`, which is the one case where the way onward matters most: the five
+            derived state buckets are narrowed after the page is read, so choosing Settled on a
+            newest page that holds none left the admin looking at "No bills in this view." with no
+            button to press — while the cursor to the next page was right there in the reply. */}
+        {d && nextBefore && (
           <div style={{ padding: "14px 16px", textAlign: "center", borderTop: "1px solid var(--adm-line, rgba(255,255,255,0.06))" }}>
             <button className="adm-btn" onClick={loadMore} disabled={moreBusy}>
               {moreBusy ? "Loading…" : "Load older bills"}
             </button>
             <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
-              Showing {rows.length} — there are older ones. Use the dates or the search to jump straight to a bill.
+              {rows.length > 0
+                ? <>Showing {rows.length} — there are older ones. Use the dates or the search to jump straight to a bill.</>
+                : <>Keep going back, or use the dates and the search to jump straight to a bill.</>}
             </div>
           </div>
         )}
