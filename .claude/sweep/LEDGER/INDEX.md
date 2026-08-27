@@ -48,6 +48,8 @@ again. Read those before reporting anything.
 > | T4 · working offline, and in every language | `P16601`–`P17100` | ✅ 500 written, 500 executed (497 ✅ · 3 ❌→✅ fixed on the branch) — plus all 500 of `P01501`–`P02000` re-run: **no regression**, 4 expectations moved, and one row (`P01936`) found to have been **filed green on a claim that was never true** |
 > | T17 · the admin's health, logs, issues & limits | `P23101`–`P23600` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌, and that one is a single line in a file this territory does not own) — plus all 500 of `P08001`–`P08500` re-run: **ONE REGRESSION** (`P08095` — the server moved to the shared `errorSig()` group and the Logs page was left comparing message text letter-for-letter, so "Mark resolved" cleared 9 rows server-side and struck through 1), 1 row newly red (`P08201`), 4 ⏭ unchanged, and 11 expectations moved because System health was rebuilt. **6 problems fixed, one commit each.** |
 >
+> | T29 · docs, tooling, root config and the remainder | `P29101`–`P29600` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌ recorded as a decision, not fixed) — plus all 500 of `P14001`–`P14500` re-run: **NO REGRESSION**, 3 rows **filed green in sweep #6 on a claim that was never true** (`P14044` nine documents in no index · `P14466` `next.config.ts` had no guard and no guard-map row · `P14188` a dead owner component), 4 expectations moved, 2 handoffs landed. **8 problems fixed, one commit each, 3 new CI guards.** |
+>
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
 > deliberately small so it does not collide with that rebuild.

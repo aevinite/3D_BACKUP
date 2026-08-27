@@ -1,281 +1,134 @@
-# T29 findings — the docs, the tooling, and everything nobody else owned
+# T29 findings — sweep #7, docs · tooling · root config · the remainder
 
-Sweep #6, terminal 29. 500 phases (`.claude/sweep/LEDGER/T29.md`, P14001–P14500).
-Every row below passed the four-test gate in `.claude/sweep/SWEEP-RULES.md` §5 before a line changed.
-`confirmed` = I watched it happen · `code-read` = reasoned from the source.
+Terminal 29 of 40, 2026-08-27/28, against `origin/main` **c005b3d3**.
+Branch `sweep7/t29-docs-and-remainder` · worktree `../wt-s7-t29` · port **4229**.
 
-**Two of my own candidate findings were withdrawn after checking them properly** and are recorded at
-the bottom, because a withdrawn finding is worth as much to the next sweep as a real one.
+Ledger: `.claude/sweep/LEDGER/T29.md` — 500 sweep-#6 rows re-run in place, plus 500 new rows in
+`P29101`–`P29600`. **No regression.** Three sweep-#6 rows were filed green on a claim that was never
+true; those are items 1, 4 and 5 below.
 
----
-
-## F1 · The rulebook's "complete" list of gated API routes was missing three of them — HIGH · code-read
-
-- **Where:** backend only, nothing on screen. `docs/CLAUDE-DETAIL.md` → `## Security gate`.
-- **Who is worse off:** the next session or audit. That section states outright that its lists are
-  COMPLETE and that *"an API route absent from here must have a gate"*. `/api/maintenance`,
-  `/api/issue-media` and `/api/print-agent/**` were in neither list. **All three are correctly
-  gated** — the two by a familiar helper that sits outside the four `[...path]` panel families the
-  list named by shape, the third by a per-machine printing token rather than any cookie. So an audit
-  obeying the rule is sent at three routes that are fine, and the worst case is someone "adding" a
-  cookie gate to the printing door and stopping the paper at a restaurant.
-- **Reachable:** any session that follows the rule as written. The section's own text records the
-  identical thing happening to `/api/guest/call-waiter`, found nine days earlier.
-- **Fixed:** all three added, each with what actually gates it and why its shape hid it, plus a note
-  in the list's own "this keeps happening" paragraph.
-- **Guarded:** `node .github/scripts/verify-doc-counts.mjs` — enumerates every `app/api/<family>`
-  from `git ls-files` and fails if one is not named in that section. 21 families today.
-
-## F2 · The printer setup doc still told you to use a download route that was deleted — HIGH · code-read
-
-- **Where:** backend only for the doc itself, but it decides what a restaurant is told. The
-  reader-facing page is **admin console → a restaurant → 🖨 KOT printing → "Open the setup guide"**
-  (also owner → Settings, admin → Printing, and the kitchen panel's 🖨❗ sheet) → `/print-setup.html`.
-- **Who is worse off:** the person setting up a restaurant's printer, and the owner. `docs/KITCHEN-PRINT-SETUP.md`
-  §9 described, in the present tense, generating the starter script from `lib/printStation.ts` via
-  `app/api/print-station/[file]/route.ts`. **Both were DELETED on 2026-08-19** (commit `606b8969`)
-  because generating it changed nothing: macOS Gatekeeper and Windows SmartScreen flag a script for
-  having ARRIVED FROM THE WEB, so the owner still met *"could not verify it is free of malware"* with
-  only Done or Move to Bin. A session reading that section rebuilds the download and walks him back
-  into the dialog — and the live page is guarded against exactly that (`verify:print-helper` asserts
-  nothing is offered as a download), so the doc and the guard were arguing.
-- **Reachable:** any session sent to that doc by `CLAUDE.md`'s KOT/bills line.
-- **Fixed:** §9 rewritten as **attempt 1 (wrong, and why it could not work) → attempt 2 (the live
-  design)**, naming the deleted files as deleted and saying plainly not to re-add a ⬇ button. The
-  same stale claim was marked superseded in `.claude/REQUESTS.md`, and the `.gitignore` comment that
-  called the `.bat` launcher "a shipped deliverable" now says the exception is dead and why.
-- **Guarded:** `verify:print-helper` already asserts the live page offers no download;
-  `verify-doc-counts.mjs` now also fails if `docs/KITCHEN-PRINT-SETUP.md` loses the sentence
-  "offers nothing to download".
-
-## F3 · CI was RED on clean `main`, and had been — HIGH · confirmed
-
-- **Where:** backend only, nothing on screen — the ✗ on every push and pull request.
-- **Who is worse off:** everybody. `npm run verify:static` — the step `.github/workflows/checks.yml`
-  runs on every push — exited 1 on an untouched checkout of `origin/main`: **2 of 32 guards failed.**
-  A permanently red check is a check nobody reads, and the next real break arrives invisible. The
-  workflow's own header explains at length why one stale guard must not silence the others; this is
-  the other half of the same problem.
-- **Reachable:** every push, on every branch, by every one of the 30 sweep terminals.
-- **The two:**
-  - `verify-doc-pointers.mjs` — `docs/GUARD-MAP.md` had no row for `verify:split-payment` or
-    `verify:t24-money-rules`. **Fixed** (see F4).
-  - `verify-rejected-ideas.mjs` — a file in `scripts/` claims a REJECTED decision without pointing
-    at the doc. **Not my territory → handoff H1**, with the exact one-line change.
-- **Guarded:** `verify:pointers` already guards its half in both directions and is green again.
-
-## F4 · The guard map had no row for two money guards, and its own counts were wrong — HIGH · confirmed
-
-- **Where:** backend only, nothing on screen. `docs/GUARD-MAP.md`.
-- **Who is worse off:** anyone who changes the split-payment flow or a money library — the map exists
-  so a person can look up which check covers the file they touched, and for those two the answer was
-  "nothing here". `verify:split-payment` guards *"the parts must add up to the bill the SERVER
-  recomputed"*; `verify:t24-money-rules` is the whole regression guard for `lib/tax*`, `lib/paySplit`,
-  `lib/clash*`, `lib/idempotency*`, `lib/userAuth`, `lib/rateLimit`. Both are about money a person
-  could be wrongly charged, and both were invisible.
-- **Reachable:** the moment anyone consults the map, which is what `CLAUDE.md` and `README.md` both
-  tell them to do.
-- **Fixed:** a row for each, in the money section, saying what it asserts and where it bites. Also
-  in the same file: the headline said 97 commands (134), the admin-console heading said 22 pages (23),
-  and one row named "migration 355", which does not exist — the cancel-and-loss work is
-  `340_was_the_food_actually_made.sql` (renumbered from 337). All corrected.
-- **Guarded:** `verify:pointers` (rows, both directions) + `verify-doc-counts.mjs` (the numbers).
-
-## F5 · Five hard counts in the rulebooks no longer matched the code — HIGH · confirmed
-
-- **Where:** backend only, nothing on screen. `CLAUDE.md`, `README.md`, `docs/CLAUDE-DETAIL.md`,
-  `docs/GUARD-MAP.md`, `docs/SECURITY-CHECKLIST.md`, `.github/dependabot.yml`.
-- **Who is worse off:** every new session, and therefore the owner. The worst one:
-  `CLAUDE.md` said *"all **48** `/api/admin/*` routes check `tokenIsValid`"* and, in the same
-  sentence, that the route count must EQUAL the number that grep the gate. There are **50**, and
-  **all 50 carry the gate**. So a session doing exactly what the rule says counts 50, reads 48, and
-  concludes two admin routes are ungated. There are none. That is an hour hunting a fault that does
-  not exist — and if it "fixes" it, it edits working code. *This is the answer to the question this
-  terminal was asked: what would a brand-new session reading only `CLAUDE.md` get wrong today.*
-- **The five:** Next 16.2.6 → **16.3.0** · React 19.2.4 → **19.2.8** · 55 → **56** page routes ·
-  48 → **50** admin API routes · 22 → **23** admin-console pages. Each was copied into three or four
-  documents, so every copy was wrong the same way. (`/owner` at 16 pages was correct.)
-- **Reachable:** every session, every request — `CLAUDE.md` is re-read before the user types.
-- **Fixed:** all of them, in every document, and byte-neutrally in `CLAUDE.md` (it is 56 bytes under
-  a 24,000-byte budget — see improvement note I3).
-- **Guarded:** `node .github/scripts/verify-doc-counts.mjs`, wired into CI. 20 counts across 6
-  documents, each anchored to its own sentence so a re-wording fails loudly instead of switching the
-  check off silently. Proven to exit 1 when a count is wrong.
-
-## F6 · Three panels at the restaurant's own address had no browser-tab name — MEDIUM · confirmed
-
-- **Where:** **manager panel, kitchen panel and waiter tablet — the browser TAB, at the restaurant's
-  own web address** (`/r/<slug>/manager`, `/r/<slug>/kitchen`, `/r/<slug>/tablet`). What he would
-  SEE: three open tabs all reading **"Aevidine — Restaurant OS"**, with no way to tell which is which.
-- **Who is worse off:** a manager and a waiter, mid-service. The T15 sweep fixed exactly this on
-  2026-08-05 — it named the tab on `/manager`, `/kitchen` and `/tablet` because *"a manager with the
-  manager panel, the kitchen screen and the waiter view open in three tabs had three identical tabs
-  to pick from"*. The twin routes never got the line. And the twins are the addresses **a
-  restaurant's own staff use**; the `/panel` form is the one the admin console opens. So the fix
-  landed on the tabs we look at and missed the tabs they look at.
-- **Reachable:** any restaurant whose staff sign in at their own address, which is the design.
-  Watched in a browser, signed in, before and after: three identical titles → three named ones.
-- **Fixed:** one `export const metadata` line in each of the three route files, matching its twin
-  exactly.
-- **Guarded:** `node .github/scripts/verify-twin-route-parity.mjs` — every panel must name its tab,
-  its twin must agree, the three must differ from each other, and none may use the root default.
-  Proven to exit 1 when a title is removed.
-
-## F7 · `.claude/REQUESTS.md` showed three finished things as still owed — MEDIUM · confirmed
-
-- **Where:** backend only for the file, but each item is a thing he can see:
-  1. the **restaurant's name in the panel header** (manager / kitchen / tablet),
-  2. the **restaurant's name on each row** of admin → Audit & logs and owner → Activity,
-  3. a signed-in **admin with no restaurant chosen being sent back to `/aevinite`** instead of into a
-     bare panel.
-- **Who is worse off:** the owner. All three shipped. Reading his own list, he sees work he is
-  already paying for as outstanding — and the third entry was even written in the past tense
-  ("no longer admit…", "Also killed the silent default…") and still carried an empty box.
-- **Reachable:** every time he opens the list.
-- **Fixed:** all three ticked, each with a dated note saying HOW it was verified. Items 1 and 2 were
-  driven in a real browser first (the manager header reads "Manager · little French house"; the
-  kitchen header carries the name as a pill; owner → Activity showed 201 rows each carrying a 🏬
-  name; admin → Audit & logs showed 199, across several restaurants, **and** the per-restaurant
-  filter he offered as the alternative). Item 3 is one shared gate, `panelAdminRid()`.
-- **Not ticked:** the other 36 open rows. A tick means built AND watched working, and I only ticked
-  what I could prove.
-
-## F8 · The rulebook said a tenant menu always opens dark; it depends on an admin setting — MEDIUM · confirmed
-
-- **Where:** **guest menu** — the skin a diner sees on `/r/<slug>/menu` and `/q/<code>`. Documented in
-  `CLAUDE.md`'s light-mode line and `docs/CLAUDE-DETAIL.md`'s Known-gotchas section.
-- **Who is worse off:** whoever writes the next "both skins" check, and therefore the owner when it
-  passes on the wrong assumption. The doc said tenant menus *"default to DARK when nothing is
-  saved"*, full stop, in the very paragraph that warns you to check before writing such a test.
-  In fact the tenant door only re-stamps dark when that restaurant's **Access → Menu → Format →
-  Default** is set to dark. Neither restaurant on the dev database has it set, so both tenant doors
-  open LIGHT today — I drove both, in a brand-new browser context, at 1280×800 and at 360×780.
-- **Reachable:** immediately, for anyone reading the line.
-- **Fixed:** both documents now state the real rule, name the setting and the screen, and record what
-  the dev database actually has.
-- **Also found while checking it → handoff H2:** the dish page does not repeat that boot script, so a
-  dark-default restaurant's dish page renders LIGHT on a full page load. Documented in the same
-  gotcha; the code fix is another terminal's file.
-
-## F9 · `README.md` promised a green local run meant a green CI run — LOW · confirmed
-
-- **Where:** backend only, nothing on screen. `README.md` → "Before you push".
-- **Who is worse off:** whoever pushes. It said `npm run verify:push` *"runs exactly what CI runs …
-  so a green run locally means a green run there."* CI also runs `verify:deps`, which `verify:push`
-  does not — so a new dependency advisory turns CI red after a clean local run, and the promise is
-  what makes that confusing rather than obvious.
-- **Reachable:** every push.
-- **Fixed:** the sentence now says CI runs those **plus two more** and names both (`verify:deps` and
-  the new doc-counts guard), with what each one needs. The "~120 more verify:* scripts" beside it was
-  also wrong (130) and is now counted by the guard.
-
-## F10 · `.gitignore`'s comment named four hook guards; nine are wired — LOW · confirmed
-
-- **Where:** backend only, nothing on screen. `.gitignore`, the block explaining why
-  `.claude/settings.json` is versioned.
-- **Who is worse off:** a session judging how much the PostToolUse hook covers. The comment named
-  four; the hook runs nine.
-- **Fixed:** it now says it was four when written, is nine now, and to read the live list out of
-  `.claude/settings.json` rather than trust a count in a comment — which is precisely how it rotted.
-
-## F11 · `docs/README.md` sent a reader to a folder that is no longer in the repo — LOW · confirmed
-
-- **Where:** backend only, nothing on screen. `docs/README.md` → "Design artefacts".
-- **Who is worse off:** anyone looking for the competitor research. `docs/competitor-dashboards/`
-  does not exist; the screenshots (185 files / 26 MB) were untracked in the T10 sweep and live on the
-  owner's Mac only. The same table's guard count said 95 when there are 136.
-- **Fixed:** the dead row removed, replaced by a "not here any more" note saying where they live and
-  that nothing in the repo points at them; the count corrected and now guarded.
-
-## F12 · `docs/SECURITY-CHECKLIST.md` had no record of this run — LOW · confirmed
-
-- **Where:** backend only, nothing on screen. §4, the log.
-- **Who is worse off:** the owner. The file's own instruction is *"Record the date and the result in
-  §4 each time"*, and the last entry was 2026-08-16.
-- **Fixed:** a 2026-08-22 row naming every row I re-ran and its result — **including the one that
-  failed.** `verify:grants` is RED on the dev database, and honestly so: `lfh_request_verification()`
-  is created by `supabase/migrations/296` and is absent from the database, so either 296 never
-  applied there or it was dropped by hand. The grant rules themselves are intact — a function that is
-  not there cannot be over-granted — and nothing about it reaches a restaurant's screen. It needs
-  someone who owns `supabase/migrations/`; see handoff H3.
-- **Guarded:** `verify-doc-counts.mjs` fails if §4 is ever removed.
+Every item below is one commit, with its number in the message, so any single one can be dropped.
 
 ---
 
-## 🔗 HANDOFF — the real fix lives in another terminal's file
+## 1 · Nine documents in `docs/` had no row in the index of that folder
+**Where:** backend only, nothing on screen — the contents page a session reads to find out what has
+been written down about this app.
+`docs/README.md`'s own closing line promises "Adding a document? Put it in the right table above in
+the same commit." Nine live documents had no row: `SECURITY-CHECKLIST.md`, `KITCHEN-PRINT-SETUP.md`,
+`PRINT-HELPER.md`, `PRINT-TEST-PLAN.md`, `CANCEL-AND-LOSS-SPEC.md` and all four HRMEX documents.
+All nine existed before sweep #6 ran, so `P14044`'s green was **false, not a regression**.
+**Fix:** all nine listed; the four HRMEX ones get a third table, **STUDIES**, because they are live
+documents describing something that is *not built*.
+**Guard:** `.github/scripts/verify-doc-counts.mjs` §5 — fails when a file in `docs/` has no row.
 
-### H1 → T28 (`scripts/**`) · this is what is keeping CI red
+## 2 · The rulebook described a floating panel switcher deleted in June
+**Where:** backend only, nothing on screen — `docs/CLAUDE-DETAIL.md`'s app map.
+It said, in the present tense, that an "admin-only floating switcher (`components/AdminSwitcher`)
+hops between panels". That component was deleted on **2026-06-26**, commit `2b9d3933`, whose message
+is *"kill dead AdminSwitcher"*.
+**Fix:** the sentence records the deletion and says not to re-create it.
+**Guard:** `verify-doc-counts.mjs` §6 — every code path named in a LIVE rulebook resolves, or is on
+an explicit list of recorded deletions. It is a LIST and not a prose heuristic on purpose: the first
+draft read the surrounding sentence for the word "deleted", and that paragraph ends "…were deleted",
+so it would have waved through the exact shape it exists to catch.
 
-`scripts/verify-t24-money-rules.mjs` line ~583 explains, in a comment, why an earlier version of a
-check went red on the four `REJECTED (owner, 2026-08-16)` comments that `CLAUDE.md` requires. Because
-that comment contains the literal marker `REJECTED (owner,` and the file does **not** mention
-`docs/REJECTED-IDEAS.md`, `verify:rejected` reports it as *"a file claiming a REJECTED decision
-without pointing at the doc"*. The guard has an exemption for itself only.
+## 3 · The guard map sent anyone editing the guest API to a folder that does not exist
+**Where:** backend only, nothing on screen — `docs/GUARD-MAP.md` §12's routing table.
+It named `app/api/menu`. That has never existed; the guest API family is `app/api/guest`.
+**Fix:** the row names the real folder. **Guard:** the same §6 as item 2.
 
-**Exact change (one line):** in that comment, name the doc — e.g.
-`…the four \`REJECTED (owner, 2026-08-16)\` comments that CLAUDE.md requires (docs/REJECTED-IDEAS.md)…`
-That satisfies the guard's actual intent (a reader can find the decision and its date) and makes
-`verify:rejected`, `verify:static` and therefore CI green again. Alternatively, teach
-`scripts/verify-rejected-ideas.mjs` that a marker inside a comment ABOUT the marker is not a claim —
-but the one-line version is smaller and does not weaken the check.
+## 4 · A dead owner component
+**Where:** Owner panel — nothing on screen, in either skin; it is mounted nowhere.
+`components/owner/RangeSlider.tsx` — the segmented date-range control the owner picked in July 2026.
+The dashboard v2 rebuild replaced one global range strip with a per-card range dropdown (his own
+later decision) and the file was left behind, imported by nothing. `P14188`'s "8/8 used" was wrong.
+**Fix:** deleted. **Guard:** `P29438`/`P29439` in the ledger re-derive "every owner component is
+imported by something" on every re-run.
 
-### H2 → T2 (`app/r/[restaurant]/item/**`) · a dark-default restaurant's dish page opens light
+## 5 · Nothing in this repo had ever read `next.config.ts`
+**Where:** backend only, nothing on screen — but that file decides what every visitor's browser is
+told.
+`docs/GUARD-MAP.md` §11 answers *"I changed this file — which check covers it?"*. It had a row for
+`.vercelignore` and for `package.json`'s dependencies, and **none for `next.config.ts`**. A grep of
+every guard in the repo found not one that reads it. That single file holds the response headers,
+whether the content policy is still report-only (parked 2026-08-16), whether HSTS carries `preload`,
+which eight surfaces refuse an outside frame while the guest menu deliberately does not, and which
+outside image hosts are granted. Each fact was hand-verified by a sweep every few weeks and by
+nothing in between. `P14466`'s green was **false**.
+**Fix + guard:** `.github/scripts/verify-root-config.mjs` — **24 static checks** over
+`next.config.ts`, `vercel.json`, `.vercelignore`, `package.json`'s scripts and `tsconfig.json`.
+Repo-only. Wired into `.github/workflows/checks.yml`, plus the missing §11 row.
+Proven to exit 1 on five separate breakages — including a `preload` added to HSTS, which the first
+draft could NOT see because the header value itself contains a semicolon and the lazy match stopped
+inside the string.
 
-`app/r/[restaurant]/menu/page.tsx` and `app/q/[code]/page.tsx` each render an inline boot script that
-re-stamps `data-theme="dark"` when `settings.menuDefaultMode === "dark"` and nothing is saved, because
-the root layout cannot know which restaurant is opening.
-`app/r/[restaurant]/item/[slug]/page.tsx` renders **outside `AppShell`** — the reason the maintenance
-switch, the menu switch and the accent all had to be repeated there — and it does **not** repeat that
-script. So for a restaurant whose Default is dark, a **full page load** of a dish URL (a shared link,
-a refresh, a QR pointing at a dish) renders in the LIGHT skin while its menu is dark. A client-side
-tap from the menu is fine: `data-theme` survives the navigation.
+## 6 · After linking a printer's computer, a manager was sent to a password prompt
+**Where:** the Allow page a printer's computer opens for itself (`/pair`) → the green **"This
+computer can print now"** screen → the button **"Choose which printer prints what →"**. Same on the
+**"Already linked"** screen.
+That button went to `/aevinite/printing` for everybody. The printing board lives in TWO places
+(mig 367): the Aevidine console, and the restaurant's own **Manager panel → Settings → Printing**.
+The person at the printer is usually the manager, and `/aevinite` redirects them to
+`/staff-login?next=/aevinite` — a password prompt they have no answer to, which reads like their own
+sign-in just failed, at the exact moment the guide says to go and choose printers.
+**Fix:** the button branches on who pressed Allow. The admin still gets the console; a manager gets
+their own panel plus a line naming **Settings → Printing** in words (the panel has no deep link to
+that section, so the words are the direction). `GET /api/pair`'s already-linked answer now carries
+`who` — without it that screen could not tell the two apart.
+**Guard:** `.github/scripts/verify-unowned-routes.mjs`, also in CI. It judges each `/aevinite` link
+**by the line it is written on**, not by whether the file mentions an admin check somewhere — the
+first draft did the latter and would have passed the original fault.
 
-**Exact change:** copy the same guarded `<script>` from `app/r/[restaurant]/menu/page.tsx` (the
-`settings.menuDefaultMode === "dark" && (...)` block) into the dish page, above `ItemClient`.
-**Severity note, honestly:** neither restaurant on the dev database has the dark default set today, so
-nothing is broken right now — the path opens the moment an admin sets it, and the control is shipped.
-I documented it in `docs/CLAUDE-DETAIL.md`'s Known-gotchas as the fourth thing of that shape.
+## 7 · The printer guide replaced the Printing screen instead of opening beside it
+**Where:** Admin console → **Printing** → the header line **"The restaurant's own guide →"**.
+Four other places offer that same guide — the owner's Settings, the admin restaurant card and its
+three per-OS jumps — and all four open it in a new tab, because it is read *while* a printer is
+being set up. This one used `next/link`. The guide is a static file in `public/`, not a route, so it
+navigated in place: the screen somebody was mid-setup on disappeared, and the guide has no way back.
+**Fix:** a plain link with `target="_blank" rel="noopener"`, identical to the other four.
+**Guard:** `verify-unowned-routes.mjs` now checks all five call sites.
 
-### H3 → whoever owns `supabase/migrations/` (T21–T23) · `verify:grants` is red on the dev database
-
-`lfh_request_verification()` is created by `supabase/migrations/296_database_layer_a_sweep_fixes.sql`,
-is retired by no later migration, and is **not in the dev database**. `verify:grants` reports it twice
-(once as a stale `ANON_ALLOWED` entry, once as a missing function). Either 296 never applied there, or
-it was removed by hand. If it is meant to be gone, `DROP` it in a migration so the intent is written
-down; if not, re-apply 296. Nothing here reaches a restaurant's screen and no grant is too wide — a
-function that does not exist cannot be over-granted. Not in my territory, and it needs the live
-database, so it is not a CI matter either.
-
-### H4 → T28 (`scripts/**`) · two stale comments, trivial
-
-- `scripts/verify-cancel-loss.ts` line 3 says it guards *"P1 of docs/CANCEL-AND-LOSS-SPEC.md
-  (migration 355)"*. There is no migration 355; the file is
-  `340_was_the_food_actually_made.sql` (renumbered from 337 on 2026-08-19). I fixed the copy of that
-  number in `docs/GUARD-MAP.md`; the guard's own header still has it.
-- `scripts/set-glb-cache.mjs` line ~7 says it only ever read `public/content/menu.json`
-  *"(which no longer exists)"*. It does exist and is tracked.
+## 8 · Every button label on the Allow page sat jammed against the top of its button
+**Where:** the Allow page (`/pair`) — every screen of it, on a phone and on a desktop. The label sat
+flush against the TOP edge of a 52px button with **34px of empty space underneath**, measured.
+The rule asked for `line-height: 52px` and then, three declarations later, `font: inherit`. `font`
+is a **shorthand**: it resets `line-height` to `normal`, so the 52px was thrown away and the browser
+fell back to a 19.5px line at the top of a 52px box. Nothing else was wrong — markup, class names,
+colours and the tap target were all correct, which is why no existing guard could see it.
+**Fix:** centred with grid instead. That also survives a label that WRAPS, which "Choose which
+printer prints what →" does on a phone; a 52px line-height would have pushed the second line out.
+**Guard:** `verify-unowned-routes.mjs` fails when any rule on that page declares `line-height`
+before a `font` shorthand.
 
 ---
 
-## Withdrawn — candidates that did NOT survive checking, recorded so the next sweep does not re-raise them
+## Not fixed, and why
 
-- **`docs/CLAUDE-DETAIL.md` "points at the deleted `.claude/work-checker-lessons.md`".** A mechanical
-  dead-pointer scan flagged it. Reading the context: both mentions are already deletion RECORDS —
-  one says *"which was deleted when the work-checker was retired"*, the other sits under
-  **"What was deleted that day, and must never be recreated"**. The document is correct. I had
-  started an edit and reverted it; the file's diff for this is empty.
-- **`docs/PROJECT-HISTORY.md` "points at the retired `docs/FLOOR-TIMEOUT-WATCH.md`".** Same shape.
-  The heading above it reads *"CLOSED 2026-08-05 — measured, and the watch retired"* and the sentence
-  says the files *"were designed to be deleted once answered"*. Correct as written; edit reverted,
-  diff empty.
-- **`next.config.ts`'s `images.remotePatterns` grant for `images.unsplash.com` is dead.** It is not.
-  `public/content/starter-menu.json` carries 10 unsplash photo URLs and is read by
-  `lib/starterMenu.ts` — a brand-new restaurant's first dish photos come from there.
-- **Eight HISTORY documents "have lost their `⚠️ HISTORY` banner".** My first grep looked for
-  `⚠️ HISTORY` and the banners are written `⚠️ **HISTORY`. All nine are present and correct.
-- **19 duplicated migration numbers.** `verify:ui` already reports *"362 migrations, no NEW duplicated
-  number (19 already on main)"* — a known, accepted state, not something this sweep discovered.
-- **The printing route's done/failed report accepts a job no computer has claimed** (`job.agent_id &&
-  job.agent_id !== agent.id`), while the document fetch requires a claim strictly. I could not state
-  a normal-use path that reaches it, so per §5 it is not a finding and I changed no working code.
-  Listed as a 🟡 for him instead.
+| what | why not |
+|---|---|
+| **A restaurant whose admin sets the DARK menu default gets a LIGHT dish page on a full page load.** `app/r/[restaurant]/menu/page.tsx` carries the boot script behind `settings.menuDefaultMode === "dark"`; `app/r/[restaurant]/item/[slug]/page.tsx` carries none. Ledger rows `P14317`, `P14460`, `P14462`. | **T2's file** — outside this territory. Handed off by sweep #6 and still open on `main`. Neither dev tenant has the dark default set today, so nothing is broken right now; the path opens the moment an admin sets it. |
+| **`public/content/starter-menu.json` loads 62 of its 72 dish photos from `www.themealdb.com`, which `next.config.ts` does not grant.** Ledger row `P29492`. | Nothing breaks today: the dish cards render a plain `<img>`, not `next/image`, so the grant is never consulted, and the content policy allows any https image host. Granting an outside host is a **permission decision**, and it is a landmine only for the day a card switches to `next/image` — where it would hit **brand-new restaurants only**. Reported as a numbered decision, not silently granted. |
+| **Three rows on `.claude/REQUESTS.md` are built in the code but still read as owed** (the 2026-07-28 per-tab admin session separation, the `?view=real` "see the actual panel" toggle, and the `admin:view` log marking with its 🛡 pill). | His own rule says a tick means built **AND watched working in a browser**. I have code evidence for all three and a browser check for none. Ticking them would claim something I did not do. Raised as a numbered decision instead. |
+
+## Guards added by this run
+
+| command | checks | where it runs |
+|---|---|---|
+| `node .github/scripts/verify-doc-counts.mjs` (extended) | +2 sections: every document in `docs/` has a row in its index; every code path named in a live rulebook resolves or is a recorded deletion | CI, every push |
+| `node .github/scripts/verify-root-config.mjs` (**new**) | 24 — the browser headers, the region, the upload list, the build settings | CI, every push |
+| `node .github/scripts/verify-unowned-routes.mjs` (**new**) | 15 — the Allow page and its door, the setup-guide links, the two crash boundaries, the first paint | CI, every push |
+
+All three are repo-only: no key, no database, no network, no running app. Every one was proven to
+exit 1 before it was committed.
+
+## Gates
+
+`npm run typecheck` ✅ · `npm run lint` ✅ (0 errors) · `verify:static` 33/33 ✅ ·
+`verify:access` ✅ · `verify:pointers` ✅ · `verify:no-ask` ✅ · `verify:rejected` ✅ ·
+`verify:print-helper` 100/100 ✅ · `verify:taps` ✅ · `verify:twins` ✅ · `verify:ui` ✅ ·
+`verify:deps` ✅ · `verify:clash-coverage` ✅ · `verify:ledger-index` ✅ · `test:money` /
+`test:errors` / `test:units` ✅ · the three new guards ✅. `verify:everything` was **never** run.
+
+Zero database rows created. Aangan read once, never written. Port 4229 only. Four sign-ins for the
+whole run.
