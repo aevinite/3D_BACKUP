@@ -3700,7 +3700,7 @@ function billPaidHtml(b, m) {
   }
   if (b.onHouse) {
     return `<div class="br-paid br-house"><b>On the house \u2014 ${inr(0)} collected.</b>
-      <span>Comped deliberately. The bill is closed and counted at zero.</span></div>`;
+      <span>Given free on purpose. The bill is closed and counted at zero.</span></div>`;
   }
   const parts = Array.isArray(b.parts) ? b.parts : [];
   const collectedParts = parts.filter((p) => p.method !== "Pay later");
