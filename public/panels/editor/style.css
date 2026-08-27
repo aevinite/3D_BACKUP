@@ -16,6 +16,15 @@
   --gold-ink: var(--gold);
   --gold-strong: #e8b884;
   --gold-grad: linear-gradient(180deg, #e8b884, #d4a574);   /* the gold FILL, per skin — dark ink sits on it */
+  /* THE GRADIENT THAT PAINTS THE WORD "Manager" IN THE TOP BAR — ink, not fill (T26 sweep #7,
+     2026-08-27). .brand uses background-clip:text, so this gradient IS the lettering, and it was
+     reading the FILL golds: on the light skin's near-white bar the panel's own name measured
+     2.64:1 against the 3:1 a 20px/800 word needs. Same trap --gold-ink was created for one sweep
+     earlier, and the same trap the note below .brand already describes for the restaurant's name
+     beside it — that fix moved the NAME and left the panel's own word behind. The kitchen board
+     and the waiter tablet paint their titles in --text and read 14.6:1, so this was also the one
+     panel out of three that looked different. Dark is byte-identical to what it was (7.73:1). */
+  --brand-grad: linear-gradient(90deg, var(--gold-strong), var(--gold));
 /* ── ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22) ────────────────────────────────
    Every sheet, drawer and confirm box on this panel dims the page behind it, and each one had
    picked its own value: rgba(0,0,0,.55), .6, .62 and rgba(8,5,2,.6). Two overlays on the same
@@ -912,7 +921,7 @@ body {
   box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 10px 26px rgba(0,0,0,0.28);
 }
 .brand {
-  background: linear-gradient(90deg, var(--gold-strong), var(--gold));
+  background: var(--brand-grad);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .brand span { -webkit-text-fill-color: initial; color: initial; }
@@ -3671,6 +3680,9 @@ html[data-theme="light"]{
      which is the gold mixed 65% with black → 5.89:1 on white, 4.97:1 on --bg. Fills,
      borders and glows keep the bright gold and look exactly as they did. */
   --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
+  /* The same 65%-toward-black recipe applied to BOTH stops, because on this skin the gradient is
+     lettering rather than a fill: 6.92:1 and 5.58:1 on the bar, against 3.50 and 2.64 before. */
+  --brand-grad: linear-gradient(90deg, color-mix(in srgb, var(--gold-strong) 65%, #000), var(--gold-ink));
   --green:#15803d;
   --red:#dc2626;
   --shadow-sm:0 1px 2px rgba(60,45,20,.07);
