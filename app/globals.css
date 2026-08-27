@@ -4124,6 +4124,14 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-state-val { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
 .adm-state-row.yes .adm-state-val { color: var(--adm-ok, #30a46c); }
 .adm-state-row.no  .adm-state-val { color: var(--muted); }
+/* A THIRD STATE: not "no", but WRONG (added 2026-08-27 for the stuck-ticket row). "no" is neutral —
+   a fact that happens to be false — and it paints the value in --muted, which made the word STUCK
+   read as a switched-off setting rather than a printer nobody is watching. Warn carries the danger
+   colour AND a filled dot AND its own border, so it is never colour alone. */
+.adm-state-row.warn { border-color: var(--adm-danger, #e5484d);
+  background: color-mix(in srgb, var(--adm-danger, #e5484d) 8%, var(--card)); }
+.adm-state-row.warn .adm-state-dot { background: var(--adm-danger, #e5484d); }
+.adm-state-row.warn .adm-state-val { color: var(--adm-danger, #e5484d); }
 
 /* A quiet block for "what this means", collapsed by default. The printing card had six lines of
    technical prose above the controls; the detail is kept, just not in the way. */

@@ -43,7 +43,7 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 // The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
 // claim from the same rows, and one implementation is what stops them drifting into two ideas of
 // "claimed" — which would be a ticket printed twice.
-import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation } from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
 // A COMPUTER (a helper) can own the paper now — mig 341. When one does, no screen prints that kind:
 // a helper prints on the printer the address book names, a screen prints on whatever its own machine
 // defaults to, and both printing means the same ticket in two rooms.
@@ -2053,7 +2053,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const byId = new Map(os.map((x) => [x.id, x]));
           jobs = jobs.map((j) => ({ ...j, kot_no: byId.get(j.order_id as string)?.kot_no ?? null, table_number: byId.get(j.order_id as string)?.table_number ?? null }));
         }
-        return { events: ev.data || [], stuck: jobs };
+        // HOW MANY ARE STACKED UP (owner, 2026-08-27). The `stuck` list above is deliberately
+        // narrow — five rows, 90 seconds old, so it can name each one — and it can never answer
+        // "how far behind are we": a hundred tickets behind a dead printer show as five. This is the
+        // whole number, counted (no rows), with the age of the oldest so the strip can tell a
+        // two-second blip from an emergency. It rides the read the floor already shares.
+        const waiting = await waitingToPrint(rid, "kot");
+        return { events: ev.data || [], stuck: jobs, waiting, stuckAfterMs: STUCK_AFTER_MS };
       });
       // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249). A handful of rows, restaurant-scoped, live
       // ones only — small enough to ride along with every floor read, and the floor needs it on
@@ -2108,6 +2114,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // BILL whether a computer will do it, and this is the read it already makes. One pair of
       // queries for all three (helpersFor), not three pairs.
       const owners = await helpersFor(rid, ["kot", "bill", "banquet"]);
+      // …and how far behind the printer is, on the SAME read (owner, 2026-08-27). It is sent whether
+      // or not this screen may print, for the same reason the station is: "eleven tickets are stacked
+      // up" is exactly what a manager needs to see about a printer that is not theirs.
+      const waiting = await waitingToPrint(rid, "kot");
       // The same one resolver: which panel/person/device the owner named for each kind of paper.
       const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
       const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
@@ -2119,14 +2129,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const mayBePrinter = g.user ? await managerCan(g, rid, "print_here") : true;
       if (!t.mayPrint || !mayKot.ok || !mayBePrinter) {
         return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners,
+                    waiting, stuckAfterMs: STUCK_AFTER_MS,
                     targets, printRefused: !mayBePrinter ? "not_allowed" : mayKot.ok ? null : mayKot.why });
       }
       // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
       // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
       // station's name instead, so it can offer "print here instead" rather than quietly racing.
-      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners });
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners, targets });
+      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS, targets });
     }
 
 

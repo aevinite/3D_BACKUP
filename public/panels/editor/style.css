@@ -4624,6 +4624,10 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
 .pw-val { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
 .pw-state-row.yes .pw-val { color: var(--green, #30a46c); }
 .pw-state-row.no  .pw-val { color: var(--muted); }
+/* The same third state as the console's .adm-state-row.warn: not "no", but WRONG. */
+.pw-state-row.warn { border-color: var(--red); background: color-mix(in srgb, var(--red) 9%, var(--panel-2)); }
+.pw-state-row.warn .pw-dot { background: var(--red); }
+.pw-state-row.warn .pw-val { color: var(--red); font-weight: 800; }
 
 /* "Who prints this?" — one question, three answers. 44px minimum, the chosen one carries weight,
    a ring and a tick, never colour alone. */

@@ -10245,6 +10245,14 @@ function bindFloor() {
     } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
   }));
   ed.querySelectorAll("[data-prhere]").forEach((b) => (b.onclick = () => printJobHere(b.dataset.prhere, b)));
+  // The pile-up row's one button: it takes the manager to the screen that says where the paper is
+  // supposed to come out, which is the only useful next move from the floor. A tap must never do
+  // nothing (verify:taps), so it is bound in the same place as its siblings.
+  ed.querySelectorAll("[data-prsetup]").forEach((b) => (b.onclick = () => {
+    setTab("general");
+    state.settingsSection = "printing";
+    renderEditor();
+  }));
   // "Should this screen print the kitchen tickets?" — the print-station strip beside the printer-
   // problem one (mig 336). Bound on the same pass so a repaint never leaves a dead button.
   bindPrintStationStrip(ed);
@@ -13118,9 +13126,39 @@ function printerAlerts() {
     text: `${PRINTER_KIND_TEXT[e.kind] || "Printer problem"} — ${e.printer ? e.printer : "kitchen"}${e.reported_by ? " · " + e.reported_by : ""}${(e.count || 1) > 1 ? ` · ×${e.count}` : ""}`,
     at: e.last_at,
   });
-  for (const j of pr.stuck || []) out.push({
+  // HOW FAR BEHIND THE PRINTER IS (owner, 2026-08-27). FIRST in the list on purpose: the named rows
+  // below it are five individual tickets, and "eleven are stacked up" is the sentence that decides
+  // whether somebody walks to the printer or starts reading orders off the screen.
+  //
+  // It appears only when the OLDEST one is genuinely old (the server sends the threshold). A row that
+  // said "1 waiting" every time a ticket passed through would be permanent furniture — and this strip
+  // is the manager's alarm, so anything permanent in it is the don't-cry-wolf rule being broken.
+  const w = pr.waiting || null;
+  const wAfter = typeof pr.stuckAfterMs === "number" ? pr.stuckAfterMs : 60000;
+  if (w && Number(w.n) > 0 && Number(w.oldestMs || 0) >= wAfter) {
+    const n = Number(w.n);
+    out.push({
+      key: "wait:" + n, id: "waiting", kind: "waiting", icon: "🧾",
+      // "for 11m ago" — timeAgo() already carries the "ago", so the sentence has to be built around
+      // it, not in front of it. Written out in words because a manager reads this at a glance.
+      text: `${n} kitchen ticket${n === 1 ? "" : "s"} waiting to print — the oldest has been waiting ${
+        Number(w.oldestMs) < 3600000 ? Math.round(Number(w.oldestMs) / 60000) + " minutes" : Math.round(Number(w.oldestMs) / 3600000) + " hours"
+      }. Tell the kitchen to read the orders off their screen; every ticket still prints, in order, once the printer works.`,
+      at: new Date(Date.now() - Number(w.oldestMs)).toISOString(),
+    });
+  }
+  // ONE STORY, TOLD ONCE. The rows below name individual tickets, and they earn their place when a
+  // single reprint jams while everything else prints. When the pile-up row above is showing, NOTHING
+  // is printing — so five named rows are the same fault five times, and they push the row that
+  // actually explains it off the screen. (Measured: seven rows for one dead printer.)
+  //
+  // The oldest one is kept, because it carries the one button the pile-up row cannot: "Print here
+  // instead". So the manager still has a way to get that ticket onto paper.
+  const pileUp = out.length > 0;
+  const named = pileUp ? (pr.stuck || []).slice(0, 1) : (pr.stuck || []);
+  for (const j of named) out.push({
     key: "job:" + j.id, id: j.id, kind: "job", icon: "🧾",
-    text: `A reprint (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""}) hasn't printed in the kitchen${j.status === "failed" ? ` — it failed ${j.attempts} times` : " — is the kitchen screen open?"}`,
+    text: `${pileUp ? "The oldest of them" : "A reprint"} (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""}) hasn't printed in the kitchen${j.status === "failed" ? ` — it failed ${j.attempts} times` : pileUp ? " — print it here if it is needed now" : " — is the kitchen screen open?"}`,
     at: j.created_at,
   });
   return out;
@@ -13131,7 +13169,13 @@ function printerStripHtml() {
   return `<div class="prstrip">` + list.map((a) => `<div class="prstrip-row">
     <span class="prstrip-ico">${a.icon}</span><span class="prstrip-txt">${esc(a.text)}<small>${esc(timeAgo(a.at))}</small></span>
     ${a.kind === "job" ? `<button class="btn" data-prhere="${esc(a.id)}">🖨 Print here instead</button>` : ""}
-    <button class="btn" data-prok="${esc(a.kind)}:${esc(a.id)}">✓ Resolved</button>
+    ${a.kind === "waiting"
+      // NO "Resolved" ON THE PILE-UP ROW. Every other row is a REPORT — a person said the paper
+      // jammed, and ticking it off says "dealt with". This row is a COUNT of tickets that are still
+      // sitting there: a button that made it disappear would be a lie, and the row goes away by
+      // itself the moment the printer prints. It offers the one thing that actually helps instead.
+      ? `<button class="btn" data-prsetup="1">Where the paper goes →</button>`
+      : `<button class="btn" data-prok="${esc(a.kind)}:${esc(a.id)}">✓ Resolved</button>`}
   </div>`).join("") + `</div>`;
 }
 // Toast NEW problems the moment a floor read carries them (realtime makes that near-instant);
@@ -13542,10 +13586,27 @@ function formPrinting(s) {
     : j.status === "failed" ? `<span style="color:var(--red)">gave up after ${j.attempts}</span>`
     : j.status === "dismissed" ? `<span class="muted">nothing to print</span>`
     : `<span style="color:var(--amber,#f5a524)">${esc(j.status)}</span>`;
+  // HOW FAR BEHIND (owner, 2026-08-27) — the same fact the kitchen's 🖨 sheet and the floor strip
+  // show, in the same words, from the same server field. A count on its own is not information:
+  // "4 waiting" is normal for two seconds and an emergency after ten minutes.
+  const sk = B.stuck || { n: 0, oldestMs: null, afterMs: 60000 };
+  const skStuck = Number(sk.n) > 0 && Number(sk.oldestMs || 0) >= Number(sk.afterMs || 60000);
+  // A DURATION, not a timestamp: "nothing since 14 min ago" is two ways of saying when at once.
+  const skAge = !sk.oldestMs ? "" : Number(sk.oldestMs) < 60000 ? "under a minute"
+    : Number(sk.oldestMs) < 3600000 ? Math.round(Number(sk.oldestMs) / 60000) + " minutes"
+    : Math.round(Number(sk.oldestMs) / 3600000) + " hours";
   const step4 = `<div class="card"><h3>${esc(STEP.four || "4 · What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px">
       Nothing here is a guess: a job says <b>printed</b> only after the printer confirmed it.
     </p>
+    ${Number(sk.n) > 0 ? `<div class="pw-state" style="margin-bottom:12px"><div class="pw-state-row ${skStuck ? "warn" : "yes"}">
+      <span class="pw-dot" aria-hidden="true"></span>
+      <span class="who"><b>${Number(sk.n)} kitchen slip${Number(sk.n) === 1 ? "" : "s"} waiting to print</b><br>${
+        skStuck
+          ? `Nothing has come out for <b>${esc(skAge)}</b>. Tell the kitchen to read the orders off their screen — every slip still prints, in order, once the printer is working.`
+          : `The oldest has been waiting ${esc(skAge)} — they are going through normally.`}</span>
+      <span class="pw-val">${skStuck ? "STUCK" : "OK"}</span>
+    </div></div>` : ""}
     ${!(B.recent || []).length ? `<p class="muted" style="font-size:13px;margin:0">Nothing has printed yet.</p>` : `
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
         <thead><tr style="text-align:left;color:var(--muted)">

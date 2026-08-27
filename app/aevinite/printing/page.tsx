@@ -31,8 +31,9 @@ type Route = { agent: string | null; printer: string | null; backupAgent?: strin
 type Person = { id: string; name: string; role: string; panels: string[] };
 type Device = { device_id: string; label?: string | null; panel?: string | null; last_seen_at?: string | null };
 type Job = { id: string; kind: string; status: string; printer: string | null; printed_by: string | null; attempts: number; error: string | null; created_at: string; done_at: string | null };
+type Stuck = { n: number; oldestMs: number | null; afterMs: number };
 type State = {
-  agents: Agent[]; routes: Record<string, Route>; waiting: number; recent: Job[];
+  agents: Agent[]; routes: Record<string, Route>; waiting: number; stuck?: Stuck; recent: Job[];
   kinds: string[]; printing: { allowed: boolean; on: boolean; target: string };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
 };
@@ -534,6 +535,33 @@ export default function AdminPrinting() {
               The last few pieces of paper, and what became of them. Nothing here is a guess: a job says
               “done” only after the printer confirmed it.
             </p>
+            {/* HOW FAR BEHIND, not just how many (owner, 2026-08-27: "'the printer is off' and 'the
+                printer is off and eleven orders are stacked up' stop looking the same"). The same
+                field, the same words and the same threshold as the kitchen's own 🖨 sheet and the
+                manager's floor strip — the server sends `afterMs`, so no screen holds its own idea
+                of how long is too long. */}
+            {st.stuck && st.stuck.n > 0 ? (() => {
+              const sk = st.stuck as Stuck;
+              const stuck = (sk.oldestMs ?? 0) >= sk.afterMs;
+              // A DURATION, not a timestamp: "nothing since 14 min ago" says when twice.
+              const age = !sk.oldestMs ? "" : sk.oldestMs < 60000 ? "under a minute"
+                : sk.oldestMs < 3600000 ? `${Math.round(sk.oldestMs / 60000)} minutes`
+                : `${Math.round(sk.oldestMs / 3600000)} hours`;
+              return (
+                <div className="adm-state" style={{ marginBottom: 12 }}>
+                  <div className={`adm-state-row ${stuck ? "warn" : "yes"}`}>
+                    <span className="adm-state-dot" aria-hidden="true" />
+                    <span className="who">
+                      <b>{sk.n} kitchen slip{sk.n === 1 ? "" : "s"} waiting to print</b><br />
+                      {stuck
+                        ? <>Nothing has come out for <b>{age}</b>. The kitchen screen shows this too, and tells the cooks to read the orders off it — every slip still prints, in order, once the printer works.</>
+                        : <>The oldest has been waiting {age} — they are going through normally.</>}
+                    </span>
+                    <span className="adm-state-val">{stuck ? "STUCK" : "OK"}</span>
+                  </div>
+                </div>
+              );
+            })() : null}
             {st.recent.length === 0 ? (
               <div className="adm-muted" style={{ fontSize: 13 }}>Nothing has been printed yet.</div>
             ) : (

@@ -1554,6 +1554,97 @@ function renderKitchenSettings() {
 // manager's floor with one tap. Same overlay discipline as the 86 board: registered as a
 // back layer, closable by ✕/backdrop/back button, and the tap is never swallowed in
 // silence (buttons disable while sending, every outcome toasts).
+// ── HOW FAR BEHIND THE PRINTER IS, said the same way in three places ─────────────────────────
+// Owner, 2026-08-27: the sheet already answered "is printing on", "which screen prints" and "who is
+// printing right now" — it never answered "how much has piled up". A number alone cannot say it:
+// four waiting is normal for two seconds and an emergency after ten minutes. So the number ALWAYS
+// travels with the age of the oldest one, and only the age is allowed to raise an alarm.
+function waitingWords() {
+  const w = state.waiting || { n: 0, oldestMs: null };
+  const n = Number(w.n || 0);
+  if (!n) return { n: 0, stuck: false, text: "none — everything has printed", cls: "ok" };
+  const ms = Number(w.oldestMs || 0);
+  const stuck = ms >= (state.stuckAfterMs || 60000);
+  const age = ms < 60000 ? "just now"
+    : ms < 3600000 ? Math.round(ms / 60000) + " min ago"
+    : Math.round(ms / 3600000) + "h ago";
+  return {
+    n, stuck, age, cls: stuck ? "bad" : "ok",
+    text: `${n} ticket${n === 1 ? "" : "s"} — oldest ${age}`,
+  };
+}
+
+// The status rows at the top of the 🖨 sheet. ONE copy, used by the first render and by every board
+// read afterwards, so a sheet left open never quietly goes out of date while a cook reads it.
+function printerStatusHtml() {
+  const tgt = state.kotPrintTarget || "kitchen";
+  // A COMPUTER, NOT A SCREEN (mig 341). When a helper program owns the kitchen slips, this screen
+  // prints nothing at all — and the cook must be able to read WHY and WHERE from here, or a quiet
+  // screen beside a working printer is a mystery. The helper's name and printer are the answer.
+  const hlp = state.helper && state.helper.owned ? state.helper : null;
+  // WHY, in the words a cook can act on. `printRefused` is the server's own reason (screenMayPrint),
+  // and it outranks the coarse kitchen|counter|both target — a route that names another screen or a
+  // computer is the decision, and saying "this screen" under it would be a lie.
+  const refused = state.printRefused || null;
+  const where = hlp ? (esc(hlp.printer) + " — from " + esc(hlp.agent))
+    : refused === "off" ? "nobody — kitchen slips are switched off for this restaurant"
+    : refused === "other_panel" ? "another screen — not this one"
+    : refused === "other_person" ? "one named person's screen — not this one"
+    : refused === "other_device" ? "one named computer — not this one"
+    : tgt === "counter" ? "the counter screen — not this one"
+    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
+    : "this screen";
+  // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
+  const stn = state.station || null;
+  const nowPrinting = hlp
+    ? (hlp.connected ? esc(hlp.agent) + " (ready)" : esc(hlp.agent) + " — asleep, tickets are waiting")
+    : stn && stn.mine ? "THIS screen"
+    : stn && stn.active ? (esc(stn.active.label || (stn.active.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (stn.stale ? " (gone quiet)" : ""))
+    : "no screen yet";
+  const w = waitingWords();
+  return `<div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
+      <div><span>Tickets print on</span><b>${where}</b></div>
+      <div><span>Printing right now</span><b>${nowPrinting}</b></div>
+      <div class="prsheet-wait ${w.cls}"><span>Tickets waiting</span><b>${esc(w.text)}</b></div>
+      ${w.stuck ? `<p class="prsheet-stuck"><b>Nothing has printed for a while.</b> ${w.n} ticket${w.n === 1 ? " is" : "s are"} stacked up behind the printer — <b>read the orders off this screen</b> and cook from it while somebody looks at the paper. Nothing is lost: every one of them still prints, in order, the moment the printer is working.</p>` : ""}
+      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}${hlp.backup ? ` If it prints nothing for a minute, ${esc(hlp.backup.printer)} takes over.` : ""}</p>` : ""}
+      ${!hlp && !state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
+      ${!hlp && tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}`;
+}
+
+// Keep an OPEN sheet truthful. A cook opens it, walks to the printer, comes back — and the number
+// they left is the number they read. Repainting only the status block keeps their scroll position
+// and never re-enables a report button they are mid-tap on.
+function paintPrinterSheetStatus() {
+  const host = document.querySelector("#prSheet .prsheet-status");
+  if (host) host.innerHTML = printerStatusHtml();
+}
+
+// …and the count on the bar itself, so nobody has to open the sheet to find out. It appears ONLY
+// when the oldest ticket is genuinely old (STUCK_AFTER_MS, sent by the server): a badge that showed
+// "1" every time a ticket passed through the queue would be permanent furniture, and permanent
+// furniture is invisible — which is how a real pile-up gets missed.
+function paintPrinterBadge() {
+  const btn = document.getElementById("printerBtn");
+  if (!btn) return;
+  const w = waitingWords();
+  let tag = btn.querySelector(".prbadge");
+  if (!w.stuck) {
+    if (tag) tag.remove();
+    btn.removeAttribute("data-stuck");
+    btn.title = "Report a printer problem — the manager is told right away";
+    return;
+  }
+  if (!tag) { tag = document.createElement("span"); tag.className = "prbadge"; btn.appendChild(tag); }
+  tag.textContent = w.n > 99 ? "99+" : String(w.n);
+  btn.dataset.stuck = "1";
+  // The button already has a title; it becomes the whole sentence, because a badge is a number and
+  // a number is not an instruction.
+  btn.title = `${w.n} kitchen ticket${w.n === 1 ? "" : "s"} waiting to print, oldest ${w.age}. Tap to see what to do.`;
+  // Screen readers get the same sentence: the badge is decorative, the label carries the meaning.
+  btn.setAttribute("aria-label", btn.title);
+}
+
 let prSheetOff = null;
 function openPrinterSheet() {
   if (document.getElementById("prSheet")) return;
@@ -1565,34 +1656,10 @@ function openPrinterSheet() {
   ];
   const ov = document.createElement("div");
   ov.id = "prSheet"; ov.className = "prsheet-ov";
-  // ── WHERE PRINTING STANDS, ON THE KITCHEN SCREEN ITSELF (owner, 2026-08-18) ─────────────────
-  // "It should be shown in kitchen panel, able to see the whole thing." A cook at a silent printer
-  // should not have to ask anyone whether this screen is even meant to be printing — the two answers
-  // that decide it are the admin's, so they are shown as plain sentences, never as dead switches.
-  const tgt = state.kotPrintTarget || "kitchen";
-  // A COMPUTER, NOT A SCREEN (mig 341). When a helper program owns the kitchen slips, this screen
-  // prints nothing at all — and the cook must be able to read WHY and WHERE from here, or a quiet
-  // screen beside a working printer is a mystery. The helper's name and printer are the answer.
-  const hlp = state.helper && state.helper.owned ? state.helper : null;
-  const where = hlp ? (esc(hlp.printer) + " — from " + esc(hlp.agent))
-    : tgt === "counter" ? "the counter screen — not this one"
-    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
-    : "this screen";
-  // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
-  const stn = state.station || null;
-  const nowPrinting = hlp
-    ? (hlp.connected ? esc(hlp.agent) + " (ready)" : esc(hlp.agent) + " — asleep, tickets are waiting")
-    : stn && stn.mine ? "THIS screen"
-    : stn && stn.active ? (esc(stn.active.label || (stn.active.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (stn.stale ? " (gone quiet)" : ""))
-    : "no screen yet";
-  const status = `<div class="prsheet-status">
-      <div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
-      <div><span>Tickets print on</span><b>${esc(where)}</b></div>
-      <div><span>Printing right now</span><b>${nowPrinting}</b></div>
-      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}${hlp.backup ? ` If it prints nothing for a minute, ${esc(hlp.backup.printer)} takes over.` : ""}</p>` : ""}
-      ${!hlp && !state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
-      ${!hlp && tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}
-    </div>`;
+  // WHERE PRINTING STANDS, ON THE KITCHEN SCREEN ITSELF (owner, 2026-08-18: "it should be shown in
+  // kitchen panel, able to see the whole thing"). The rows themselves live in printerStatusHtml() —
+  // one copy, because a board read repaints them under a sheet that is already open.
+  const status = `<div class="prsheet-status">${printerStatusHtml()}</div>`;
   ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer</h3><button class="btn" data-prclose>✕</button></div>
     ${status}
     <p class="prsheet-sub">Something wrong? One tap — the manager is told right away.</p>
@@ -1800,7 +1867,26 @@ async function loadImpl() {
   // Shown in ☰ → Settings and on the 🖨 sheet, so "where is the paper coming out?" is answered on
   // the screen instead of by walking to the printer.
   state.station = data.station || null;
+  // A COMPUTER, NOT A SCREEN (mig 341) — and this line was MISSING since the day the helper shipped
+  // (found 2026-08-27 while adding the waiting count). The 🖨 sheet has always read `state.helper`
+  // to say "these tickets print on <printer> from <computer>", and nothing ever assigned it: the
+  // whole helper branch of that sheet was dead code, so a cook standing beside a perfectly good
+  // printer at a silent screen got the generic answer instead of the true one. That is precisely the
+  // mystery the branch was written to end.
+  state.helper = data.helper || null;
+  // …and WHY this screen is not the printer, when it is not (screenMayPrint's reason). Also never
+  // stored before. It is the difference between "a computer has it" and "the owner named somebody
+  // else's screen", which are two different things for a cook to do about it.
+  state.printRefused = data.printRefused || null;
+  // HOW FAR BEHIND THE PRINTER IS (owner, 2026-08-27: "'the printer is off' and 'the printer is off
+  // and eleven orders are stacked up' stop looking the same"). { n, oldestMs } from the same board
+  // read — this screen CANNOT count it from data.printJobs, because when a computer owns the paper
+  // this screen is handed nothing at all, which is the exact case that matters.
+  state.waiting = data.waiting || { n: 0, oldestMs: null };
+  state.stuckAfterMs = typeof data.stuckAfterMs === "number" ? data.stuckAfterMs : 60000;
+  paintPrinterBadge();
   if (window.__kdsSettingsOpen) renderKitchenSettings();   // the sheet is open: keep it truthful
+  if (document.getElementById("prSheet")) paintPrinterSheetStatus();  // …and so is the 🖨 sheet
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
   // Reprints the manager sent to THIS kitchen's printer (mig 269) — claim, print with the

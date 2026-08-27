@@ -495,6 +495,34 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
 .prsheet-status > div > b { margin-left: auto; text-align: right; }
 .prsheet-status > p { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; line-height: 1.45; }
 
+/* ── HOW FAR BEHIND THE PRINTER IS (owner, 2026-08-27) ───────────────────────────────────────────
+   A separate row, above the fold of the sheet, because it is the one line that can turn "the printer
+   is off" into "the printer is off and eleven orders are stacked up". It is a FACT while everything
+   is fine and a warning only when the oldest ticket is genuinely old — the row is ruled off from the
+   three above it so the eye lands on it either way. */
+.prsheet-wait { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px !important; }
+.prsheet-wait.ok > b { color: var(--fg); }
+/* Colour is never the only signal: the warning row also gets the word "waiting" in bold red AND the
+   paragraph below it, which says what to DO. */
+.prsheet-wait.bad > b { color: var(--red); font-weight: 800; }
+.prsheet-stuck { color: var(--fg) !important; background: color-mix(in srgb, var(--red) 12%, var(--panel-2));
+  border: 1px solid var(--red); border-radius: 9px; padding: 9px 11px; margin-top: 9px !important; }
+.prsheet-stuck b { color: var(--fg); }
+
+/* The same count on the bar button, so nobody has to open the sheet to learn it. Anchored to the
+   button's own top-right corner (position, not transform — a transform-placed badge drifts as the
+   bar reflows, which is the fault the admin rail's own count was fixed for). */
+#printerBtn { position: relative; }
+#printerBtn[data-stuck="1"] { border-color: var(--red); }
+.prbadge { position: absolute; top: -6px; right: -6px; min-width: 19px; height: 19px; padding: 0 5px;
+  border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800;
+  line-height: 19px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.4); pointer-events: none; }
+/* A pile-up is not an animation — it pulses ONCE a second at most, and not at all for anyone who
+   has asked their machine for less motion. */
+@keyframes prbadge-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.13); } }
+.prbadge { animation: prbadge-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .prbadge { animation: none; } }
+
 .prsheet-help { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px;
   color: var(--muted); font-size: 14px; text-decoration: none; }
 .prsheet-help:hover { color: var(--fg); }
