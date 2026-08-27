@@ -287,7 +287,13 @@ export function ReportsStyles() {
       .rs-tc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
       .rs-tc-title { font-size: 12px; font-weight: 700; color: var(--muted); }
       .rs-tc-toggle { display: inline-flex; background: var(--muted2); border-radius: 999px; padding: 3px; gap: 3px; }
-      .rs-tc-toggle button { border: none; background: none; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 14px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+      /* THE UNCHOSEN OPTION SITS ON AN EXTRA TINT, so plain --muted is not enough here (T26 sweep
+         #7, 2026-08-27). --muted is tuned against the card; this control puts a --muted2 strip
+         UNDER it first, and the pair measured 4.34:1 light / 4.39:1 dark — under the 4.5 that
+         11.5px needs, in BOTH skins. Sweep #6 raised the console --muted for exactly this reason
+         and this control stayed under, because the second tint is the part that does the damage.
+         Mixed 22% toward --text rather than given a literal, so it still follows the skin. */
+      .rs-tc-toggle button { border: none; background: none; color: color-mix(in srgb, var(--muted) 78%, var(--text)); font: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 14px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
       .rs-tc-toggle button:hover { color: var(--text); }
       /* --accent-on, not #fff: the owner console's accent is a LIGHT emerald and white on it
          measured 2.54:1 on the Bar/Line toggle (T11 re-run, 2026-08-05). Same token the range
