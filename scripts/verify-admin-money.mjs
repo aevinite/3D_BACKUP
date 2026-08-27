@@ -431,9 +431,16 @@ try {
     // replaced, and a raw scan reads that as the fault still being there — the same trap that made
     // one of this sweep's own new checks red on a green file.
     const rev = R("app/aevinite/revenue/page.tsx").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
-    ok(!/\{r\.nextDue \|\| "—"\}/.test(rev) && /dfmt\(r\.nextDue\)/.test(rev),
-      "the next-due date goes through a formatter, not straight to the screen");
-    ok(/T00:00:00\+05:30/.test(rev), "…and a bare date is pinned to IST before it is formatted");
+    // The formatter is SHARED (components/admin/shared.tsx → istDate), so both halves of this are
+    // asserted where each half now lives: the call site here, the null branch and the IST pin there.
+    // Two copies of a date format is how two screens come to write the same day differently.
+    const sh = R("components/admin/shared.tsx");
+    ok(!/\{r\.nextDue \|\| "—"\}/.test(rev) && /\{istDate\(r\.nextDue\)\}/.test(rev),
+      "the next-due date goes through the shared formatter, not straight to the screen");
+    ok(/export const istDate/.test(sh) && /T00:00:00\+05:30/.test(sh) && /if \(!iso\) return "—"/.test(sh),
+      "…and that formatter pins a bare date to IST and renders — for a null");
+    ok((R("app/aevinite/customers/page.tsx").match(/toLocaleDateString\("en-IN", \{ day: "numeric"/g) || []).length === 0,
+      "…and Customers no longer keeps a second copy of the same format");
     ok(!/new Date\(\)\.getFullYear\(\)/.test(rev) && /d\?\.generatedAt \? new Date\(d\.generatedAt\)/.test(rev),
       "the \"payments in <year>\" label reads the server's own stamp, not the device's clock");
   }
