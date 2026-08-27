@@ -111,6 +111,16 @@ jobs:
       - name: twin route parity
         run: node .github/scripts/verify-twin-route-parity.mjs
 
+      # next.config.ts decides the response headers every visitor gets, whether the content policy
+      # is still report-only (the owner parked flipping it), whether HSTS carries `preload`, and
+      # which eight surfaces refuse to be framed while the guest menu deliberately does not. NOTHING
+      # in this repo read that file: docs/GUARD-MAP.md §11 had a row for .vercelignore and for
+      # package.json's dependencies, and none for the file that talks to the browser. Same step also
+      # holds vercel.json's Mumbai region, the must-revalidate on /sw.js, the anchored /editor line
+      # that once 404'd the manager panel, and tsconfig's strict.
+      - name: root config
+        run: node .github/scripts/verify-root-config.mjs
+
       # The packages we install. NOT in verify:static because it is the one check here that needs
       # the network (it asks npm for the current advisory list), and verify:static is deliberately
       # a repo-only, offline set. It fails ONLY on a NEW high/critical advisory — today's fifteen
