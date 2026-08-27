@@ -276,6 +276,15 @@ ok(/unban_phone/.test(CUSTLOG) && !/select\([^)]*unban_phone/.test(CUSTLOG), "P2
   "custlog: the note explaining why unban_phone is NOT fetched is gone, or it is being fetched again");
 ok(!/"app\/api\/admin\/custlog\/route\.ts":/.test(API_A), "P23603",
   "the spent select(*) allowance for custlog is back in verify-admin-api-a — that file must stay named");
+// ── 23 · the phone hint on a table that really does slide ─────────────────────────────────────
+// The Usage table slides sideways on a phone (T7's deliberate call for a table you read DOWN a
+// column of, and not changed here). What changed since that call is that the headings became sort
+// BUTTONS — and measured at 360px the card is 296px against a 540px row, so Staff and Tables sit
+// off-screen with nothing saying they are there.
+ok(/us-slide/.test(USAGE), "P23604",
+  "usage: the phone hint that the table slides sideways is gone — two of the five sort headings are unreachable without it");
+ok(/@media \(max-width: 560px\) \{ \.us-slide \{ display: inline; \} \}/.test(USAGE), "P23605",
+  "usage: the slide hint is no longer phone-only — it must not show where the table does not slide");
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
