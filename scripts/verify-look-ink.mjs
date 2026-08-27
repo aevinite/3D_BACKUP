@@ -113,7 +113,10 @@ for (const { file, extra } of DOCS) {
 const PAIRS = [
   { file: "public/panels/kitchen/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--skel-hi"] },
   { file: "public/panels/tablet/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--skel-hi", "--gold-ink", "--merge-ink"] },
-  { file: "public/panels/editor/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--gold-grad"] },
+  // --brand-grad paints the word "Manager" itself (background-clip:text), so it is INK and needs a
+  // per-skin value like every other gold that carries words. Missing from the light block, the
+  // panel's own name read 2.64:1 on its own bar (T26, sweep #7).
+  { file: "public/panels/editor/style.css", dark: ":root", light: 'html[data-theme="light"]', tokens: ["--gold-grad", "--brand-grad"] },
   { file: "app/globals.css", dark: ":root", light: '[data-theme="light"]', tokens: ["--border-color", "--accent-ink"] },
 ];
 function blockAt(src, selector) {
@@ -189,6 +192,42 @@ for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/sty
   else ok(`${file} — the skeleton sheen comes from a token`);
 }
 
+// A SURFACE TINT MUST NOT BE USED AS INK (T26, sweep #7). --muted2 is a ~25%-alpha wash that ~15
+// console rules paint a hover row with, and on the guest side it is declared in the LIGHT block
+// only. Used as `color:` or `stroke:` it therefore fails twice over: on DARK the declaration is
+// dropped outright (the dish page's unearned review stars computed to `stroke: none`, so a 3-of-5
+// rating showed three stars and nothing beside them), and on LIGHT it resolves to the wash and
+// measured 1.63:1. Backgrounds, borders and shadows may read it; ink may not.
+{
+  const src = readFileSync("app/globals.css", "utf8");
+  const bad = [];
+  src.split("\n").forEach((l, i) => {
+    if (!/var\(\s*--muted2\b/.test(l)) return;
+    if (!/(^|[;{\s])(color|stroke|fill|-webkit-text-fill-color)\s*:[^;]*var\(\s*--muted2\b/.test(l)) return;
+    if (/var\(\s*--muted2\s*,\s*var\(/.test(l)) return;          // falls back to a real ink token
+    bad.push(`app/globals.css:${i + 1}  ${l.trim().slice(0, 110)}`);
+  });
+  if (bad.length) {
+    fail(`${bad.length} rule(s) paint INK with --muted2, a 25%-alpha surface tint that the guest DARK skin does not declare at all:`);
+    bad.forEach((b) => console.error("    " + b));
+  } else ok("app/globals.css — --muted2 is used as a surface tint only, never as ink");
+}
+
+// THE WAITER TABLET'S SLIDE-IN DRAWER IS PINNED TO TWO EDGES (T26, sweep #7). env() reads 0 inside
+// a panel iframe, which is exactly why --sat/--sab/--sal/--sar exist. Padded a flat 16px, this
+// drawer put its ✕ and the person's name 31px inside a 47px notch; the kitchen board's twin pads
+// all four sides and measured clear at y=61 under the same forced inset.
+{
+  const src = readFileSync("public/panels/tablet/style.css", "utf8");
+  const rule = src.split("\n").find((l) => l.startsWith(".tbl-drawer {"));
+  if (!rule) fail("public/panels/tablet/style.css — no .tbl-drawer rule found; this guard needs updating");
+  else {
+    const missing = ["--sat", "--sar", "--sab"].filter((t) => !rule.includes(t));
+    if (missing.length) fail(`public/panels/tablet/style.css — .tbl-drawer no longer pads for ${missing.join(", ")}; on a notched phone its close button goes back under the cutout`);
+    else ok("public/panels/tablet/style.css — .tbl-drawer pads for the notch on all three edges it touches");
+  }
+}
+
 if (STATIC_ONLY) {
   console.log(bad ? `\n${bad} look fault(s) found (static checks only).` : "\nOK — the static look checks pass (pass a --base to also measure the running app).");
   process.exit(bad ? 1 : 0);
@@ -247,8 +286,21 @@ const INK = `window.__ink = (() => {
     const out={};
     for(const s of sels){ const el=host.querySelector(s);
       if(!el){ out[s]=null; continue; }
-      const cs=getComputedStyle(el); const fg=P(cs.color); const bg=bgOf(el);
-      out[s]={ ratio: fg?R(over(fg,bg),bg):0, color:cs.color,
+      const cs=getComputedStyle(el); const bg=bgOf(el);
+      // GRADIENT-CLIPPED LETTERING has no usable color: with background-clip:text the gradient IS
+      // the ink. Read every stop and report the WORST, which is the honest number for a word whose
+      // far end is the palest part of it. (This is how the manager panel's own name sat at 2.64:1
+      // while the guard beside it reported the restaurant name next to it as fine.)
+      let fg=P(cs.webkitTextFillColor||cs.color), src="color";
+      if((!fg || fg[3]===0) && (cs.webkitBackgroundClip||cs.backgroundClip)==="text"){
+        const bi=cs.backgroundImage||"", stops=[];
+        const re=/(?:color\(\s*srgb[^)]*\)|rgba?\([^)]*\))/gi; let m;
+        while((m=re.exec(bi))){ const c=P(m[0]); if(c && c[3]>0.02) stops.push(c); }
+        if(stops.length){ let worst=null,wr=Infinity;
+          for(const c of stops){ const r=R(over(c,bg),bg); if(r<wr){wr=r;worst=c;} }
+          fg=worst; src="gradient-text (worst stop)"; }
+      }
+      out[s]={ ratio: fg?R(over(fg,bg),bg):0, color:(src==="color"?cs.color:src+" "+cs.backgroundImage.slice(0,60)),
         bg:"rgb("+bg.slice(0,3).map(Math.round).join(",")+")" }; }
     host.remove(); return out;
   };
@@ -275,7 +327,10 @@ const PROBES = [
              [".fnav.on em", 4.5, "the count inside the chosen filter chip (was 3.89 on a 20% black wash)"]] },
   { name: "manager panel", role: "manager", url: "/manager", frame: "/panels/editor/",
     html: `<div class="ftile"><span class="ft-ico ft-ico-go">Y</span></div>
-           <span class="brand"><span class="brand-rest">little French house</span></span>
+           <span class="brand" id="__brandword">Manager<span class="brand-rest">little French house</span></span>
+           <div class="to-rail-h">Categories</div>
+           <div class="to-crail"><button class="to-cat on">Coffee</button></div>
+           <h4 class="to-sec-h">COFFEE</h4><span class="chip alg-other">+ Other</span>
            <div class="fstat warn"><div class="fstat-n">7</div></div>
            <div class="rr-made"><div class="rr-made-q">Was the food made?</div></div>
            <button class="ord-btn pay">Pay</button>
@@ -284,6 +339,11 @@ const PROBES = [
            <span class="tab-badge">3</span>`,
     checks: [[".ft-ico-go", 3, "the tile's accept-this-order tick (was 1.10 on the light skin — invisible)"],
              [".brand-rest", 4.5, "the restaurant's own name in the top bar (was 2.81 on the light skin)"],
+             ["#__brandword", 3, "the panel's OWN name, painted as gradient lettering (was 2.64 on the light skin — the guard measured the restaurant name beside it and missed this one)"],
+             [".to-rail-h", 4.5, "Take order → 'Categories' over the left box (was 2.81 light)"],
+             [".to-crail .to-cat.on", 4.5, "Take order → the chosen category in that box (was 3.14 light)"],
+             [".to-sec-h", 4.5, "Take order → the category heading in the dish list (was 3.71 light)"],
+             [".alg-other", 4.5, "the '+ Other' allergy chip — one rule, four screens (was 2.48 light)"],
              [".fstat-n", 4.5, "the to-pay count in the floor header (was 3.71)"],
              [".rr-made-q", 4.5, "the was-the-food-made question (was pinned to one skin's red)"],
              [".ord-btn.pay", 4.5, "the Pay button's label on its gold fill"],
@@ -293,18 +353,33 @@ const PROBES = [
   { name: "kitchen board", role: "kitchen", url: "/kitchen", frame: "/panels/kitchen/",
     html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>`,
     checks: [["#col-cooking h2", 4.5, "the Cooking lane heading"]] },
+  // THE GUEST SIDE HAD NO PROBE AT ALL until sweep #7, and three of that run's five faults were
+  // here. It needs no login: the menu is the one door that opens to anybody.
+  { name: "guest menu", role: null, url: "/menu?table=1", frame: null, skinKey: "lfh_theme",
+    html: `<div class="cat-card"><div class="cat-icon">C</div><div class="cat-name">Beverages</div></div>
+           <div class="review-card"><div class="rating-row"><span class="rating-count">(12 reviews)</span></div></div>`,
+    checks: [[".cat-name", 4.5, "an unchosen category name under its icon (was 4.13 on the light skin — the card's own tint is darker than the page)"],
+             // 4.4, not 4.5, and the 0.1 is DELIBERATE. Both this and the unselected filter-chip
+             // label take the guest's secondary ink --muted, which on the DARK skin lands at
+             // 4.47:1 on a card — 0.03 short. Sweep #6 measured the same number and parked it in
+             // writing: lifting it repaints every secondary word on the guest menu, which is the
+             // owner's call and not a sweep's. This floor still bites if the value really drops;
+             // it just does not cry wolf about a decision that was already taken.
+             [".rating-count", 4.4, "a dish's review count (was 1.63 light, and on DARK the rule was dropped outright; the guest --muted family sits at 4.47 dark by a recorded decision)"]] },
 ];
 
 const br = await chromium.launch();
 for (const p of PROBES) {
   for (const theme of ["light", "dark"]) {
     const c = await br.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
-    await loginAs(c, p.role, BASE);
+    // p.role === null is the GUEST menu: the one door that opens to anybody, so no login at all.
+    if (p.role) await loginAs(c, p.role, BASE);
     const page = await c.newPage();
-    await page.addInitScript(`try{localStorage.setItem("lfh_panel_theme","${theme}")}catch(e){}`);
+    await page.addInitScript(`try{localStorage.setItem("${p.skinKey || "lfh_panel_theme"}","${theme}")}catch(e){}`);
     await page.goto(BASE + p.url, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForTimeout(7000);
-    const fr = page.frames().find((f) => f.url().includes(p.frame));
+    // A panel lives in an iframe; the guest menu is the page itself.
+    const fr = p.frame ? page.frames().find((f) => f.url().includes(p.frame)) : page.mainFrame();
     if (!fr) { fail(`${p.name} (${theme}) — the panel never loaded, so nothing was measured`); await c.close(); continue; }
     await fr.evaluate(INK);
     const res = await fr.evaluate(([html, sels]) => window.__ink(html, sels), [p.html, p.checks.map((x) => x[0])]);
