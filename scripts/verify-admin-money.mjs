@@ -419,6 +419,22 @@ try {
     await p.close(); await c.close();
   }
 
+  // ── C5 · one way of writing a date, and a year label that is the SERVER's ─────────────────
+  head("C5 · the money screens write a date one way, and take the year from the server");
+  {
+    // `next_due_on` is a bare YYYY-MM-DD and Platform revenue printed it raw, so the Paying table
+    // read "2027-07-04" beside a console that writes "4 Jul 27" everywhere else. And the "payments
+    // in <year>" label came from the BROWSER's clock while the figure is counted against the IST
+    // calendar year — on 31 December west of IST the heading names one year over another year's
+    // money (sweep #7 item 6).
+    const rev = R("app/aevinite/revenue/page.tsx");
+    ok(!/\{r\.nextDue \|\| "—"\}/.test(rev) && /dfmt\(r\.nextDue\)/.test(rev),
+      "the next-due date goes through a formatter, not straight to the screen");
+    ok(/T00:00:00\+05:30/.test(rev), "…and a bare date is pinned to IST before it is formatted");
+    ok(!/new Date\(\)\.getFullYear\(\)/.test(rev) && /d\?\.generatedAt \? new Date\(d\.generatedAt\)/.test(rev),
+      "the \"payments in <year>\" label reads the server's own stamp, not the device's clock");
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {

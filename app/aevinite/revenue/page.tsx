@@ -16,6 +16,18 @@ type Data = {
 };
 
 const money = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+const IST = "Asia/Kolkata";
+// ONE WAY OF WRITING A DATE ACROSS THE MONEY SCREENS (T18 sweep #7, item 6). `next_due_on` is a
+// plain `YYYY-MM-DD` from the database and this page printed it as-is, so the Paying-restaurants
+// table read "2027-07-04" while every other date in the admin console — the Customers table, the
+// Bill ledger's Opened / Closed / Deleted lines, the invoice timeline — reads "4 Jul 27". Pinned to
+// IST, because a bare date parses as UTC midnight and would slip a day west of here.
+const dfmt = (d: string | null) => {
+  if (!d) return "—";
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + "T00:00:00+05:30" : d);
+  if (Number.isNaN(t)) return d;
+  return new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
+};
 const STATUS_COLOR: Record<string, string> = { active: "var(--adm-ok)", trial: "var(--accent)", paused: "#d4a574", cancelled: "var(--adm-danger)" };
 const STATUS_LABEL: Record<string, string> = { active: "Active (paying)", trial: "Trial", paused: "Paused", cancelled: "Cancelled" };
 
@@ -110,7 +122,13 @@ export default function AdminRevenue() {
     { k: "MRR", v: d ? money(d.mrr) : "…", hint: "monthly recurring", accent: true },
     { k: "ARR", v: d ? money(d.arr) : "…", hint: "yearly run-rate" },
     { k: "Active subscriptions", v: d ? num(d.activeSubs) : "…", hint: "paying now" },
-    { k: "Collected this year", v: d ? money(d.collectedThisYear) : "…", hint: "payments in " + new Date().getFullYear() },
+    // THE YEAR COMES FROM THE SERVER'S CLOCK, NOT THE BROWSER'S (T18 sweep #7, item 6). The figure is
+    // counted against the IST calendar year (the route says so and pins it to +05:30); the label was
+    // `new Date().getFullYear()`, the year on whichever device is looking. On 31 December in a
+    // timezone behind IST the two disagree, so the heading would name one year over another year's
+    // money. `generatedAt` is already in the reply.
+    { k: "Collected this year", v: d ? money(d.collectedThisYear) : "…",
+      hint: "payments in " + (d?.generatedAt ? new Date(d.generatedAt).toLocaleDateString("en-IN", { year: "numeric", timeZone: IST }) : "this year") },
     { k: "Collected all-time", v: d ? money(d.collectedAllTime) : "…", hint: "every payment logged" },
   ];
 
@@ -221,7 +239,7 @@ export default function AdminRevenue() {
                 <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.plan}</span>
                 <span className="adm-muted">{r.cycle === "monthly" ? "Monthly" : "Yearly"}</span>
                 <span style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(r.monthly)}</span>
-                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted">{r.nextDue || "—"}</span>
+                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted" title={r.nextDue || undefined}>{dfmt(r.nextDue)}</span>
               </div>
             ))}
           </div>
