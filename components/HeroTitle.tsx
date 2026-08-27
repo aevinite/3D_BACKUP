@@ -60,6 +60,13 @@ export default function HeroTitle({ greeting, title }: { greeting: string; title
     };
   }, [greeting, title]);
 
+  // ⛔ REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. Arabic comes out of THIS split
+  // as disconnected, backwards letters: each grapheme gets its own `display:inline-block` span
+  // (app/globals.css), and a browser can neither join Arabic letters nor order them right-to-left
+  // ACROSS two atomic boxes. It is measured, screenshotted and PARKED — *"don't suggest that
+  // improvement right now"* — so do not "helpfully" fix it, and do not file it as new. The full
+  // note is at the R23 block in lib/i18n.ts. (Pointer added by the T27 sweep, 2026-08-27, which
+  // re-found the fault, fixed it, and had to revert: the decision was three files away.)
   // Turns a piece of text into one <span> per letter AS A READER SEES IT, so each can be
   // animated on its own. Spaces are kept as-is so words don't run together.
   // splitGraphemes, never .split(""): a Devanagari vowel sign cut off from its consonant

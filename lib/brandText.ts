@@ -48,6 +48,14 @@ export function hasBrandMarkers(input: string): boolean {
 // text renders normally. Latin is unchanged (one letter = one grapheme), so #1's English hero
 // animates exactly as before. Arabic benefits too — its letters keep their joining forms.
 //
+// ⛔ THAT LAST SENTENCE IS WRONG, AND IT STAYS — REJECTED (owner, 2026-08-14),
+// docs/REJECTED-IDEAS.md → R23. Grapheme splitting fixes Devanagari and CANNOT fix Arabic: the
+// hero greeting and the intro wordmark put each grapheme in a `display:inline-block` span, and a
+// browser can neither join Arabic letters nor order them right-to-left across two atomic boxes,
+// so every letter falls back to its isolated form and the word reads backwards. Measured with a
+// screenshot (T15, 2026-08-13) and PARKED — *"don’t suggest that improvement right now"*. Do not
+// fix it here, do not add a script check, do not file it as new. Full note: the R23 block in lib/i18n.ts. (Pointer added by T27, 2026-08-27, which re-found it and had to revert.)
+//
 // Falls back to the old behaviour on any runtime without Segmenter (all current browsers and
 // Node 18+ have it); a fallback that splits Latin correctly is better than throwing.
 export function splitGraphemes(input: string): string[] {

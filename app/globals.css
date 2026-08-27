@@ -605,6 +605,12 @@ body.menu-scrolling .chef-call {
 /* letter-by-letter hero reveal (GSAP drives these spans) */
 /* THE GREETING still needs an inline-BLOCK: it is the one that animates `y` (a transform), and a
    transform does nothing to a plain inline box. It is one short tracked word, so it never wraps. */
+/* ⛔ REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. `inline-block` here is what
+   breaks ARABIC in the hero greeting and the intro wordmark: an atomic box per letter, so the
+   browser cannot join the letters or order them right-to-left, and the word reads backwards.
+   It is measured and PARKED — do not switch these to `inline` to "fix" it, and do not report it.
+   (The tagline below IS `inline`, which is why only one of the two hero lines is affected.)
+   Full note: the R23 block in lib/i18n.ts. Pointer added by T27, 2026-08-27. */
 .hero-title-wrap .greet-badge span { display: inline-block; white-space: pre; }
 /* THE TAGLINE MUST NOT BREAK IN THE MIDDLE OF A WORD (T4 sweep, 2026-08-17).
  *
