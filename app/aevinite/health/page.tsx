@@ -47,7 +47,7 @@ type Health = {
   issuesFeedWired: boolean;
   // Dishes ticked "4D" whose model file was never uploaded, so their 3D view cannot open.
   // null = the read failed (say "unreadable", never a reassuring zero).
-  broken3d: { count: number; dishes: { slug: string; title: string; restaurantId: string; missing: string }[] } | null;
+  broken3d: { count: number; capped?: boolean; dishes: { slug: string; title: string; restaurantId: string; missing: string }[] } | null;
   broken3dError: string | null;
   checkedAt: string;
   error?: string;
@@ -286,10 +286,15 @@ export default function AdminHealth() {
       key: "3d", label: "3D dishes", value: "unknown", tone: "unknown",
       means: `Couldn't check the model files${h.broken3dError ? ` (${h.broken3dError})` : ""} — unknown, not zero.`, needsYou: true,
     } : {
-      key: "3d", label: "3D dishes", value: h.broken3d.count === 0 ? "all fine" : String(h.broken3d.count),
+      key: "3d", label: "3D dishes",
+      // "200" and "200 or more" are different answers, and the second one is the true one when the
+      // read hit its ceiling (T17 sweep #7). Every other capped list in this territory says so.
+      value: h.broken3d.count === 0 ? "all fine" : `${h.broken3d.count}${h.broken3d.capped ? "+" : ""}`,
       tone: h.broken3d.count === 0 ? "good" : "warn",
       means: h.broken3d.count === 0
         ? "Every dish marked 4D has its model files uploaded."
+        : h.broken3d.capped
+        ? `At least ${h.broken3d.count} are marked 4D with no model file uploaded, so their 3D view can't open — there may be more than this.`
         : `Marked 4D but the model file was never uploaded, so their 3D view can't open.`,
       needsYou: h.broken3d.count > 0,
     });
@@ -414,7 +419,8 @@ export default function AdminHealth() {
                 </div>
                 {h.broken3d.count > h.broken3d.dishes.length && (
                   <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
-                    Showing the first {h.broken3d.dishes.length} of {h.broken3d.count}.
+                    Showing the first {h.broken3d.dishes.length} of {h.broken3d.count}
+                    {h.broken3d.capped ? " or more — the check stops counting at 200" : ""}.
                   </p>
                 )}
               </div>

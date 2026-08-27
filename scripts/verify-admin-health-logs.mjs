@@ -297,6 +297,19 @@ ok(/queued at other restaurants/.test(REPAIR), "P23608",
   "repair: the 'N more are queued at other restaurants' line is gone — a narrowed queue must not read as an empty one");
 ok(/queuedKeys = new Set\(requests\.map/.test(REPAIR), "P23609",
   "repair: queuedKeys was scoped by restaurant — it must stay platform-wide, or Fix-now re-offers a ticket that already exists and files it twice");
+// ── 25 · a capped 3D count says it is capped ──────────────────────────────────────────────────
+// Every other capped list in this territory says so; this one printed a confident "200" and read
+// as the whole story. Zero on this stack, so it is the rainy-day half of a rule already kept.
+ok(/const BROKEN_3D_LIMIT = 200;/.test(HEALTH_ROUTE), "P23610",
+  "health route: BROKEN_3D_LIMIT is gone — the cap and the count can now disagree");
+ok(/\.limit\(BROKEN_3D_LIMIT\)/.test(HEALTH_ROUTE), "P23611",
+  "health route: the 3D read no longer uses the named limit, so `capped` can be computed against the wrong number");
+ok(/capped: \(broken3dQ\.data \|\| \[\]\)\.length >= BROKEN_3D_LIMIT/.test(HEALTH_ROUTE), "P23612",
+  "health route: the 3D answer no longer reports whether it was capped");
+ok(/h\.broken3d\.capped \? "\+" : ""/.test(HEALTH), "P23613",
+  "health: the 3D check row prints a bare number again for a capped answer");
+ok(/the check stops counting at 200/.test(HEALTH), "P23614",
+  "health: the 3D card no longer says the count stops at 200");
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
