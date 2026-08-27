@@ -201,9 +201,15 @@ function sliceBody(src, at) {
 }
 
 // ── RULE 2 — named columns ───────────────────────────────────────────────────────────────────────
-// The two declared exceptions, each with the reason it is one:
+// The declared exceptions, each with the reason it is one.
+//
+// custlog's was REMOVED on 2026-08-27 (T17 sweep #7, owner asked for it). Its reason —
+// "contact info only, no money column" — was never the whole rule: `blocklist` holds ten
+// columns and the Customers tab renders six, and two of the four it never showed were
+// `unban_phone` / `unban_requested_at`, the number a banned guest leaves when asking to be let
+// back in. That route now names its columns, so it must stay named: leaving a spent allowance
+// behind is how a `select("*")` creeps back in under a reason nobody re-reads.
 const STAR_OK = {
-  "app/api/admin/custlog/route.ts": 'blocklist — contact info only, no money column (stated in the route)',
   "app/api/admin/billing/route.ts": 'the ONE-restaurant billing row, whose every column the editor renders',
 };
 for (const rel of PART_A) {

@@ -24,6 +24,12 @@ const USAGE = read(`${A}/usage/page.tsx`);
 const ISSUES = read(`${A}/issues/page.tsx`);
 const ATTENTION = read(`${A}/attention/page.tsx`);
 const RL_ROUTE = read("app/api/admin/rate-limits/route.ts");
+// Sweep #7 items 7, 10 and 11 reach into three more files. They are READ here, never written:
+// this guard is a static read of the source and nothing else.
+const CUSTLOG = read("app/api/admin/custlog/route.ts");
+const API_A = read("scripts/verify-admin-api-a.mjs");
+const HEALTH_ROUTE = read("app/api/admin/health/route.ts");
+const RESOLVE_ROUTE = read("app/api/admin/resolve-error/route.ts");
 
 const fails = [];
 const ok = (cond, id, msg) => { if (!cond) fails.push(`${id}  ${msg}`); };
@@ -258,6 +264,18 @@ ok(/offline: \{ c: "var\(--muted\)", t: "Quiet" \}/.test(HEALTH), "P23171",
 ok(/never: \{ c: "var\(--adm-danger\)", t: "Never seen" \}/.test(HEALTH), "P23172",
   "health: 'Never seen' lost the danger colour — it is the one panel state the page says is genuinely unfinished");
 
+// ── 22 · a banned guest's phone number does not ride along to a screen that never shows it ────
+// `blocklist` holds ten columns and the Customers tab renders six. Two of the four it never
+// showed were `unban_phone` / `unban_requested_at` — the number a banned guest leaves when asking
+// to be let back in. The old allowance in verify:admin-api-a said "no money column", which was
+// never the whole rule. Both halves are asserted: the read names its columns, AND the spent
+// allowance stays gone, because leaving one behind is how a select("*") creeps back in.
+ok(!/\.select\(\s*["'`]\*/.test(CUSTLOG), "P23601",
+  "custlog: the blocklist read is back to select(*) — it ships four columns the screen never renders");
+ok(/unban_phone/.test(CUSTLOG) && !/select\([^)]*unban_phone/.test(CUSTLOG), "P23602",
+  "custlog: the note explaining why unban_phone is NOT fetched is gone, or it is being fetched again");
+ok(!/"app\/api\/admin\/custlog\/route\.ts":/.test(API_A), "P23603",
+  "the spent select(*) allowance for custlog is back in verify-admin-api-a — that file must stay named");
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
