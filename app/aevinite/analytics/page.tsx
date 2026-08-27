@@ -191,7 +191,16 @@ export default function AdminAnalytics() {
             updated {timeAgo(data.cachedAt)}
           </span>
         ) : null}
-        <button className="adm-btn" disabled={loading} onClick={() => load(range, true)}>
+        {/* REFRESH RE-ASKS FOR WHAT IS ON SCREEN, WHICH MAY BE ONE DAY (T18 sweep #7, item 1).
+            This was `load(range, true)` — no third argument, so `day` defaulted to null and the
+            reply was the WHOLE WINDOW, while `drillDay` stayed set and every label on the page
+            went on naming the drilled day. Measured: drill into 24 Aug (0 orders that day), press
+            ↻, and the tile reads "Orders · 24 Aug  1,047" — the week's total under the day's name,
+            with both card hints saying "for 24 Aug" and the chart still offering "← Back to the
+            whole range". That is exactly the fault the drill-labels fix closed in the T18 sweep of
+            2026-08-20, coming back through the one control that fix never touched. The 60s backstop
+            three lines below has always passed `drillDay`; this is the same call. */}
+        <button className="adm-btn" disabled={loading} onClick={() => load(range, true, drillDay)}>
           <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
         </button>
       </div>
