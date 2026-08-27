@@ -796,7 +796,14 @@ html[data-theme="light"] .inm .alg-removed{ color:#b45309; }
 /* Slide-in settings/profile drawer (built in app.js) */
 .tbl-drawer-backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 80; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
 .tbl-drawer-backdrop.open { opacity: 1; pointer-events: auto; }
-.tbl-drawer { position: fixed; top: 0; right: 0; height: 100dvh; width: min(86vw, 340px); background: var(--panel); border-left: 1px solid var(--line); z-index: 81; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; gap: 12px; padding: 16px 16px calc(16px + var(--sab)); overflow: auto; }
+/* --sat and --sar, not a flat 16px (T26 sweep #7, 2026-08-27). This drawer is pinned top:0 and
+   right:0, so on a notched phone its FIRST row — the ✕ and the person's name — sat 31px inside a
+   47px notch, and held sideways its right edge sat inside the side inset. The kitchen board's twin
+   (.kds-dw) already pads all four sides with the inset aliases and measured clear at y=61 under the
+   same forced 47px; this one measured y=16. Same drawer, same phone, two different answers.
+   env() reads 0 inside the panel iframe, which is exactly why --sat/--sar exist (lib/safeAreaBridge
+   pushes the host's real insets in). LEFT stays flat: this drawer is on the right. */
+.tbl-drawer { position: fixed; top: 0; right: 0; height: 100dvh; width: min(86vw, 340px); background: var(--panel); border-left: 1px solid var(--line); z-index: 81; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; gap: 12px; padding: calc(16px + var(--sat)) calc(16px + var(--sar)) calc(16px + var(--sab)) 16px; overflow: auto; }
 .tbl-drawer.open { transform: translateX(0); }
 /* 44px (owner, 2026-08-22). This one is free of the usual worry: the nearest other control is
    128px away, so there is no neighbour to crowd. It is NOT the panel-sheet close R22 settled -
