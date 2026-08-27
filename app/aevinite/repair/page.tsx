@@ -568,6 +568,13 @@ export default function AdminRepair() {
   const attCount = atRisk.length + onboarding.length;
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
+  // ── EVERY BULK CONFIRM SAYS WHOSE (owner, 2026-08-27) ────────────────────────────────────────
+  // The buttons were already scoped correctly — the picker narrows what you SEE and every "all"
+  // request carries the same restaurant, or none. What they did not do was SAY so at the moment
+  // it matters: the confirm read "Mark all 6 as handled?" whether that meant one restaurant or
+  // nine. The lead sentence above the row says it, but a confirm is the last thing you read
+  // before it happens, and it should not make you look up to check.
+  const scopePhrase = scopedName ? `at ${scopedName}` : "across every restaurant";
   // ONE RESTAURANT PICKER FOR THE WHOLE PAGE (owner, 2026-08-16). It already existed, but only to
   // unlock the hands-on tools at the bottom — so choosing a restaurant appeared to do nothing to
   // the thing you were actually reading. A client rings about THEIR restaurant; there are nine on
@@ -704,19 +711,19 @@ export default function AdminRepair() {
 
           {confirmBulk === "resolve" ? (
             <span className="rp-bulk-ask">
-              <span>Mark all {groups.length} as handled?</span>
+              <span>Mark all {groups.length} {scopePhrase} as handled?</span>
               <button className="adm-btn primary" onClick={resolveAllProblems}>Yes, clear the board</button>
               <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
           ) : confirmBulk === "claude" ? (
             <span className="rp-bulk-ask">
-              <span>Send all {groups.filter((g) => !alreadyQueued(g)).length} to the 2:30 AM robot?</span>
+              <span>Send all {groups.filter((g) => !alreadyQueued(g)).length} {scopePhrase} to the 2:30 AM robot?</span>
               <button className="adm-btn primary" onClick={sendAllToClaude}>Yes, queue them</button>
               <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
           ) : confirmBulk === "later" ? (
             <span className="rp-bulk-ask">
-              <span>Bring them all back…</span>
+              <span>Bring all {groups.length} {scopePhrase} back…</span>
               {LATER_CHOICES.map((c) => (
                 <button key={c.hours} className="adm-btn" onClick={() => snoozeAllProblems(c.hours, c.label)}>{c.label}</button>
               ))}
@@ -725,7 +732,7 @@ export default function AdminRepair() {
           ) : (
             <span className="rp-bulk-btns">
               <button className="adm-btn" disabled={!!bulk} onClick={() => setConfirmBulk("resolve")}
-                title="I've handled all of these — clear the board. Anything that happens again comes straight back.">
+                title={`Clear every problem ${scopePhrase}. I've handled all of these — anything that happens again comes straight back.`}>
                 <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />
                 {bulk === "resolve" ? "Clearing…" : "Resolve all"}
               </button>
@@ -800,7 +807,7 @@ export default function AdminRepair() {
                       </span>
                     ) : null}
                     <span className="rp-panel" style={{ ["--hue" as string]: color, borderColor: color }}>{PANEL_NAME[a.panel] || a.panel}</span>
-                    {a.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{a.restaurant_name}</span> : null}
+                    {a.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{a.restaurant_name}</span> : null}
                     <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(g.latest)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
                   </div>
                   {cameBack ? (
@@ -907,7 +914,7 @@ export default function AdminRepair() {
                 </span>
                 {confirmBulk === "memories" ? (
                   <span className="rp-bulk-ask">
-                    <span>Forget all {scopedMemories.length}?</span>
+                    <span>Forget all {scopedMemories.length} records {scopePhrase}?</span>
                     <button className="adm-btn primary" onClick={forgetAllMemories}>Yes, forget them</button>
                     <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
                   </span>
@@ -936,7 +943,7 @@ export default function AdminRepair() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                       <b style={{ fontSize: 13 }}>{actLabel(m.action)}</b>
                       <span className="rp-panel">{PANEL_NAME[m.panel] || m.panel}</span>
-                      <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{m.restaurant}</span>
+                      <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{m.restaurant}</span>
                       <span className="rp-chip ok">fixed</span>
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
                         fixed {timeAgo(m.fixed_at)}{m.fixed_by ? ` by ${m.fixed_by === "claude" ? "Claude" : "you"}` : ""}
@@ -976,7 +983,7 @@ export default function AdminRepair() {
               one-tap "do it to everyone" is how a limit stops protecting anything. */}
           {shownRlHits.length > 0 && (confirmBulk === "limits" ? (
             <span className="rp-bulk-ask">
-              <span>Clear all {shownRlHits.length} alerts?</span>
+              <span>Clear all {shownRlHits.length} alerts {scopePhrase}?</span>
               <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={dismissAllLimits}>Yes, clear</button>
               <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
@@ -1008,7 +1015,7 @@ export default function AdminRepair() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                   <b style={{ fontSize: 13.5 }}>{rlLabel(h.key)}</b>
                   <span className="rp-chip danger">{h.hit_count} / {h.max_count} per {rlPer(h.window_seconds)}</span>
-                  {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{h.restaurant_name}</span> : null}
+                  {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
                 </div>
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
@@ -1053,7 +1060,7 @@ export default function AdminRepair() {
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {openTickets > 0 && (confirmBulk === "tickets" ? (
             <span className="rp-bulk-ask">
-              <span>Resolve all {openTickets}?</span>
+              <span>Resolve all {openTickets} complaints {scopePhrase}?</span>
               <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={resolveAllTickets}>Yes, resolve</button>
               <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
@@ -1345,7 +1352,20 @@ export default function AdminRepair() {
         .rp-err{position:relative;display:flex;gap:12px;padding:13px 14px 13px 16px;border-radius:12px;border:var(--border);background:var(--card);margin-bottom:10px;overflow:hidden}
         .rp-err-bar{position:absolute;left:0;top:0;bottom:0;width:3px}
         .rp-panel{font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:1px 7px;border-radius:6px;border:1px solid;background:transparent;text-transform:uppercase}
-        .rp-rest{font-size:11.5px;color:var(--muted)}
+        /* THE RESTAURANT NAME IS THE MAIN THING ON A TICKET (owner, 2026-08-27: "in the ticket it
+           should show in maybe some different colour, the restaurant name because that's the main
+           thing"). It was 11.5px in --muted, the same grey as the timestamp beside it — so on a
+           board carrying nine restaurants, the one fact that tells you WHOSE problem this is was
+           the quietest thing on the row.
+           It is now a pill in the console's own accent. Deliberately NOT red, amber or green:
+           those three already mean severity here, and a restaurant is an identity, not a status —
+           a red name on a red tile would compete with the alarm instead of answering it. --accent
+           is a declared token with its own value per skin (gold on dark, tan on light), so this
+           needs no hard-coded hex and cannot go low-contrast when the console is light. */
+        .rp-rest{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;
+                 color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);
+                 border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);
+                 max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .rp-detail{font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}

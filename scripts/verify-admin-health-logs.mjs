@@ -310,10 +310,40 @@ ok(/h\.broken3d\.capped \? "\+" : ""/.test(HEALTH), "P23613",
   "health: the 3D check row prints a bare number again for a capped answer");
 ok(/the check stops counting at 200/.test(HEALTH), "P23614",
   "health: the 3D card no longer says the count stops at 200");
+// ── 26 · every bulk action says WHOSE, and the restaurant name is the thing you see ───────────
+// (owner, 2026-08-27.) The buttons were already scoped correctly — the picker narrows what you see
+// and every "all" request carries that restaurant, or none. Two things were missing: the confirm
+// did not say which, and the restaurant name — the one fact that tells you whose problem a ticket
+// is — was drawn in the same grey as the timestamp beside it.
+ok(/const scopePhrase = scopedName \? `at \$\{scopedName\}` : "across every restaurant"/.test(REPAIR), "P23615",
+  "repair: the one phrase every bulk confirm uses to name its scope is gone");
+{
+  const asks = [...REPAIR.matchAll(/<span>(?:Mark|Send|Bring|Clear|Resolve|Forget) all [\s\S]{0,120}?<\/span>/g)].map((m) => m[0]);
+  ok(asks.length >= 6, "P23616", `repair: expected 6 bulk confirm sentences, found ${asks.length}`);
+  const silent = asks.filter((a) => !a.includes("scopePhrase"));
+  ok(silent.length === 0, "P23617",
+    `repair: ${silent.length} bulk confirm(s) no longer name the restaurant they will act on — the last thing read before nine restaurants are cleared must say which`);
+}
+// The requests themselves must stay scoped: all restaurants -> no restaurant_id, one -> that one.
+ok(/body: JSON\.stringify\(\{ all: true, \.\.\.\(rid \? \{ restaurant_id: rid \} : \{\}\) \}\)/.test(REPAIR), "P23618",
+  "repair: 'Resolve all' no longer sends the chosen restaurant — it would clear every restaurant's board under a banner naming one");
+ok(/all: true, snooze_hours: hours, \.\.\.\(rid \? \{ restaurant_id: rid \} : \{\}\)/.test(REPAIR), "P23619",
+  "repair: 'Remind me later (all)' lost its restaurant scope");
+ok(/action: "dismiss_all", \.\.\.\(rid \? \{ restaurant_id: rid \} : \{\}\)/.test(REPAIR), "P23620",
+  "repair: 'Dismiss all' lost its restaurant scope");
+ok(/if \(scope\) upd = upd\.eq\("restaurant_id", scope\)/.test(RESOLVE_ROUTE), "P23621",
+  "the server no longer honours the restaurant a bulk resolve names (this is the half that actually decides what is cleared)");
+// …and the name is visible.
+ok(!/\.rp-rest\{font-size:11\.5px;color:var\(--muted\)\}/.test(REPAIR), "P23622",
+  "repair: the restaurant name on a ticket is back to muted grey — it is the main thing on the row");
+ok(/\.rp-rest\{[^}]*color:var\(--accent\)/.test(REPAIR), "P23623",
+  "repair: the restaurant chip lost its own colour");
+ok(!/\.rp-rest\{[^}]*(--adm-danger|--adm-warn|--adm-ok)/.test(REPAIR), "P23624",
+  "repair: the restaurant chip is using a SEVERITY colour — a restaurant is an identity, not a status, and a red name on a red tile competes with the alarm");
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 21 fixes");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes");
