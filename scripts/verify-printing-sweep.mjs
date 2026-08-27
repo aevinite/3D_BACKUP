@@ -56,6 +56,7 @@ const read = (p) => { try { return readFileSync(new URL("../" + p, import.meta.u
 // first api() call threw a bare fetch error 20 lines into the run, after the header had already
 // printed, and 500 phases read as broken instead of not started.
 const { requireUp } = await import("./sweep/appUp.mjs");
+const { restoreOnExit } = await import("./sweep/restore.mjs");
 await requireUp(BASE, "the 500-phase printing sweep");
 
 let n = 0, pass = 0, fail = 0, skip = 0;
@@ -242,6 +243,14 @@ const [st0] = await db(`settings?restaurant_id=eq.${RID}&select=modules,auto_pri
 bagWas = st0.modules || {};
 switchesWas = { auto_print_kot: st0.auto_print_kot, auto_print_kot_allowed: st0.auto_print_kot_allowed, kot_print_target: st0.kot_print_target };
 stash({ settings: { modules: bagWas, ...switchesWas } });
+// AND put them back on a CATCHABLE interruption, without waiting for the next run to notice
+// (T28, item 12). The stash above is the stronger half — it survives a kill, which nothing in the
+// process can — but it only heals on the NEXT run, so between a Ctrl-C and that run the restaurant
+// is left with this sweep's printing routes. The two together cover both: this one restores at
+// once when the signal can be caught, the stash covers the kill that cannot be.
+restoreOnExit("the restaurant's printing routes + auto-print switches", async () => {
+  await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ modules: bagWas, ...switchesWas }) });
+});
 
 // Tickets still queued from a killed run sit AHEAD of this run's in the queue. Dismissed, never
 // printed — and scoped to tickets older than this process, so a session testing alongside this one
@@ -703,7 +712,9 @@ await phase("…and a print on ITS printer closes it", async () => {
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
   const setPerm = async (on) => {
     const [r] = await db(`restaurants?id=eq.${RID}&select=manager_permissions`);
-    if (permsWas === null) { permsWas = r.manager_permissions || {}; stash({ restaurant: { manager_permissions: permsWas } }); }
+    if (permsWas === null) { permsWas = r.manager_permissions || {}; stash({ restaurant: { manager_permissions: permsWas } });
+      restoreOnExit("the restaurant's manager_permissions", () =>
+        db(`restaurants?id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ manager_permissions: permsWas }) })); }
     await db(`restaurants?id=eq.${RID}`, { method: "PATCH",
       body: JSON.stringify({ manager_permissions: { ...(r.manager_permissions || {}), print_setup: on } }) });
   };
@@ -2006,6 +2017,11 @@ if (browser) await browser.close();
 } catch (e) { console.log("\n  the sweep could not continue: " + e.message); fail++; }
 
 // ── the ledger, and put the world back ────────────────────────────────────────────────────────
+// This block runs after the big try/catch above, so a THROW still reaches it. What it never covered
+// is an INTERRUPTION — Ctrl-C, or a lane runner killing this guard for running past its timeout —
+// and this sweep changes a real restaurant's printing routes, its auto-print switches and its
+// manager permissions. The same put-backs are registered with restoreOnExit() at the point each
+// original is captured, so a caught signal runs them too. (sweep #7 / T28, 2026-08-27.)
 try { await setRoutes(bagWas.printing?.routes || {}); } catch {}
 try { await db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ modules: bagWas, ...switchesWas }) }); } catch {}
 for (const id of made.events) { try { await db(`printer_events?id=eq.${id}`, { method: "DELETE" }); } catch {} }

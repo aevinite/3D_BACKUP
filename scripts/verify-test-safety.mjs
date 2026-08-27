@@ -371,6 +371,53 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── 11. A TEST THAT FLIPS A REAL SETTING MUST PUT IT BACK EVEN IF IT IS INTERRUPTED ──────────
+//
+// `finally` covers a throw. It does not cover Ctrl-C, and it does not cover a lane runner killing a
+// guard that ran past its timeout. This project's scar is verify:realtime, which switched a
+// category off across seven restaurants and then died two steps later; on 2026-08-27 a smaller
+// version happened again, when verify-rota-clash's restore timed out and left a waiter holding two
+// tables instead of thirty.
+//
+// A setting is not a fixture row. A leftover test TABLE is obvious and verify:fixtures finds it.
+// A leftover SWITCH — "print the customer on the bill", a waiter's rota, which screens the owner
+// can see, the printing routes — looks exactly like a decision somebody made on purpose, and
+// nothing anywhere would ever flag it.
+//
+// So: a script that updates one of these must either register scripts/sweep/restore.mjs, or wire
+// its own SIGINT/SIGTERM handlers (verify-realtime does the latter, and did it first).
+{
+  // SCOPED ON PURPOSE, TWICE OVER, because the first draft of this check cried wolf on six files
+  // that were all correct — and a guard that invents a failure protects nothing.
+  //
+  //  · Only `verify-*` and scripts/sweep/. A SEEDER exists to change something and leave it
+  //    changed (copy-demo-to-prod, reset-diag-password, seed-owner-dev…); there is nothing to put
+  //    back, and demanding one would be nonsense.
+  //  · Only the CONFIGURATION tables — settings, restaurants, and a rota on staff_users. A test
+  //    that updates a row it CREATED (verify-recycle-name binning its own zzerin owner) is tidying
+  //    up, not flipping somebody's switch, and the difference is not something a pattern can see —
+  //    so the pattern is kept to the tables where a leftover is invisible AND belongs to a real
+  //    restaurant.
+  const FLIPS = /from\("(settings|restaurants)"\)[\s\S]{0,140}?\.update\(|(settings|restaurants)\?[a-z_]+=eq[^`"']*`?,\s*\{\s*method:\s*"PATCH"|update\s+staff_users\s+set\s+assigned_tables|assigned_tables:\s*\[/;
+  const bad = [];
+  for (const f of files) {
+    if (!/verify-|\/sweep\//.test(f)) continue;
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    if (!FLIPS.test(code)) continue;
+    if (/restoreOnExit\(/.test(code)) continue;                 // uses the shared helper
+    if (/process\.on\(/.test(code) && /SIG/.test(code)) continue; // wires its own, like verify-realtime
+    if (/sweep\/restore\.mjs/.test(f)) continue;                 // the helper itself
+    bad.push(f);
+  }
+  check(
+    "every test that flips a real setting puts it back on an INTERRUPTION too, not only on a throw",
+    bad.length === 0,
+    bad.join("\n    ") + "\n    Add:  import { restoreOnExit } from \"./sweep/restore.mjs\";  and register the put-back where you capture the original.",
+  );
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

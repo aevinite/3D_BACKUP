@@ -20,6 +20,7 @@ import fs from "node:fs";
 import { loginAs } from "./sweep/login.mjs";
 import { chromium } from "playwright";
 import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const B = ARG("--base", "http://localhost:4937");
@@ -43,6 +44,12 @@ const waiter = (await q(`select id, username, assigned_tables from staff_users
   where restaurant_id='${RID}' and role='tablet' order by username limit 1`))[0];
 if (!waiter) { console.log("  no waiter on this restaurant — nothing to test"); process.exit(0); }
 const original = waiter.assigned_tables || [];
+// The `finally` below covers a throw. It does not cover Ctrl-C, and it does not cover a lane runner
+// killing this guard for running long — and a half-finished run leaves a waiter holding the TWO
+// tables this test gave them instead of their real thirty, on a manager's Tables floor.
+// (sweep #7 / T28, 2026-08-27 — watched it happen, for a different reason, the same day.)
+restoreOnExit(`${waiter.username}'s table rota (${original.length} table(s))`,
+  () => q(`update staff_users set assigned_tables='{${original.join(",")}}' where id='${waiter.id}'`));
 console.log(`  · waiter ${waiter.username} holds ${original.length} table(s)`);
 
 const browser = await chromium.launch();

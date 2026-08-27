@@ -20,6 +20,7 @@
 //   4. ONE SIGN-IN — through the shared cached helper, so a full run can never trip a login limit.
 import { readFileSync } from "node:fs";
 import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
@@ -52,6 +53,11 @@ const OWNBG = `el=>{let n=el,bg="rgba(0, 0, 0, 0)";while(n&&bg==="rgba(0, 0, 0, 
 const { chromium } = await import("playwright");
 const { loginAs } = await import("./sweep/login.mjs");
 const ORIGINAL = await readEnt();
+// It already puts the entitlements back at the end and CHECKS that it did. The gap was an
+// interruption: `finally` covers a throw, not Ctrl-C and not a lane runner killing a slow guard.
+// Leaving this one half-applied means an owner console with screens switched off that nobody
+// switched off. (sweep #7 / T28, 2026-08-27.)
+restoreOnExit("the restaurant's owner_entitlements", () => writeEnt(ORIGINAL));
 const created = []; let dishId = null;
 const br = await chromium.launch();
 const mk = async (o) => { const c = await br.newContext(o); c.setDefaultNavigationTimeout(150000); c.setDefaultTimeout(60000); await loginAs(c, "owner", BASE); return c; };
