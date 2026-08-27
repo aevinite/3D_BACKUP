@@ -20,7 +20,16 @@ import path from "node:path";
 const HOOK = process.argv.includes("--hook");
 const TEST_FILE = /[/\\](scripts|tests)[/\\].*\.mjs$/;
 
-let ROOT = process.argv[2] && process.argv[2] !== "--hook" ? process.argv[2] : process.cwd();
+// The first POSITIONAL argument is the repo root to scan. A FLAG is not a root — this used to take
+// any argv[2], so `npm run verify:test-safety -- --base http://localhost:4228` (which every sweep
+// lane passes to every guard, blindly and correctly) set ROOT to the string "--base" and the run
+// ended with "no test scripts found under --base" and exit 1. A guard that fails because of an
+// argument it does not use is a guard that will be ignored. (sweep #7 / T28, 2026-08-27.)
+// A ROOT IS A FOLDER THAT EXISTS. Not "argv[2]", and not "the first thing without a dash" either:
+// the sweep lanes pass `-- --base http://localhost:4228`, so the first non-dash token is a URL.
+// Ask the disk instead — it cannot be argued with.
+const ROOT_ARG = process.argv.slice(2).find((a) => !a.startsWith("-") && fs.existsSync(path.join(a, "scripts")));
+let ROOT = ROOT_ARG || process.cwd();
 if (HOOK) {
   let raw = ""; try { raw = fs.readFileSync(0, "utf8"); } catch { process.exit(0); }
   let payload = {}; try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
