@@ -36,8 +36,16 @@ type State = {
   agents: Agent[]; routes: Record<string, Route>; waiting: number; stuck?: Stuck; recent: Job[];
   kinds: string[]; printing: { allowed: boolean; on: boolean; target: string };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
+  files?: Record<string, { filename: string; autostart: string; text: string }>;
 };
-type Scripts = Record<string, { filename: string; autostart: string; text: string }>;
+/** ONE ROW PER RESTAURANT (owner, 2026-08-27: "it will be messy when there will be too much
+ *  restaurants… I could be able to differentiate all the restaurants"). */
+type OverRow = {
+  id: string; slug: string; name: string; allowed: boolean; on: boolean;
+  computers: number; connected: number; secondsAgo: number | null; names: string[];
+  routed: number; waiting: number; oldestMs: number | null;
+};
+type Over = { rows: OverRow[]; staleMs: number; stuckAfterMs: number };
 
 const OS_LABEL: Record<string, string> = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
 
@@ -47,6 +55,73 @@ const OS_LABEL: Record<string, string> = { mac: "Mac", windows: "Windows", linux
  *  the screen says out loud rather than pretending is "off". */
 const whoOf = (r?: Route): "computer" | "screen" | "off" | "" =>
   r?.via === "off" ? "off" : r?.via === "screen" || r?.panel ? "screen" : r?.agent ? "computer" : "";
+
+/** THE WATCH SCREEN. Not a form — a list you glance at, ordered so the worst thing is at the top.
+ *
+ *  Every row answers three questions in the order they are asked: is a computer awake, is paper
+ *  stacked up behind it, and has anybody said which printer gets what. A shop that is fine is one
+ *  quiet line; a shop that is broken is red at the top of the page. */
+function Overview({ over, onOpen }: { over: Over; onOpen: (id: string) => void }) {
+  const stuckAfter = over.stuckAfterMs || 60000;
+  const rank = (r: OverRow) => {
+    // Lower sorts first. The order IS the design: a pile-up outranks a sleeping computer, which
+    // outranks "nobody has set this up", which outranks a shop that is simply not entitled.
+    if (r.waiting > 0 && (r.oldestMs ?? 0) >= stuckAfter) return 0;
+    if (r.allowed && r.computers > 0 && r.connected === 0) return 1;
+    if (r.allowed && r.computers === 0) return 2;
+    if (r.allowed && r.routed === 0) return 3;
+    if (!r.allowed) return 5;
+    return 4;
+  };
+  const rows = [...over.rows].sort((a, b) => rank(a) - rank(b) || b.waiting - a.waiting || a.name.localeCompare(b.name));
+  const age = (ms: number | null) => !ms ? "" : ms < 60000 ? "under a minute" : ms < 3600000 ? `${Math.round(ms / 60000)} min` : `${Math.round(ms / 3600000)}h`;
+  const seen = (r: OverRow) =>
+    !r.computers ? "no computer yet"
+    : r.connected ? `awake · seen ${r.secondsAgo ?? 0}s ago`
+    : r.secondsAgo == null ? "never started"
+    : r.secondsAgo > 3600 ? `asleep · ${Math.round(r.secondsAgo / 3600)}h` : `asleep · ${Math.round(r.secondsAgo / 60)} min`;
+
+  const verdict = (r: OverRow) => {
+    if (!r.allowed) return { cls: "off", word: "not switched on", what: "Printing does not exist for them — nothing appears in their panels." };
+    if (r.waiting > 0 && (r.oldestMs ?? 0) >= stuckAfter)
+      return { cls: "warn", word: `${r.waiting} stuck`, what: `Nothing has printed for ${age(r.oldestMs)}. Their kitchen screen is saying so too.` };
+    if (r.computers > 0 && r.connected === 0) return { cls: "warn", word: "asleep", what: "Its helper is not running. Anything sent is waiting." };
+    if (r.computers === 0) return { cls: "todo", word: "no computer", what: "Nobody has run the helper yet, so nothing can print." };
+    if (r.routed === 0) return { cls: "todo", word: "not routed", what: "A computer is here, but nobody has said which printer gets which paper." };
+    return { cls: "ok", word: "printing", what: `${r.connected} computer${r.connected === 1 ? "" : "s"} awake · ${r.routed} of 3 papers routed` };
+  };
+
+  return (
+    <div className="adm-card" style={{ marginTop: 14, marginBottom: 30 }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Every restaurant</h2>
+      <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+        Anything that needs you is at the top. Click a row to set that restaurant up.
+      </p>
+      <div className="adm-over">
+        {rows.map((r) => {
+          const v = verdict(r);
+          return (
+            <button key={r.id} type="button" className={`adm-over-row ${v.cls}`} onClick={() => onOpen(r.id)}>
+              <span className="dot" aria-hidden="true" />
+              <span className="nm">
+                <b>{r.name}</b>
+                {/* No leading em-dash when there is nothing to name: "— · no computer yet" reads
+                    like a missing value beside a real one. */}
+                <small>{r.names.length ? `${r.names.join(", ")} · ${seen(r)}` : seen(r)}</small>
+              </span>
+              <span className="what">{v.what}</span>
+              {/* The word carries the state as well as the colour — colour alone is not an answer
+                  for anyone who cannot tell green from amber (WCAG 1.4.1). */}
+              <span className="tag">{v.word}</span>
+              <span className="go" aria-hidden="true">→</span>
+            </button>
+          );
+        })}
+      </div>
+      {!rows.length ? <p className="adm-muted" style={{ fontSize: 13, margin: 0 }}>No restaurants yet.</p> : null}
+    </div>
+  );
+}
 
 export default function AdminPrinting() {
   const toast = useToast();
@@ -59,10 +134,10 @@ export default function AdminPrinting() {
   // failed to ask (the fault the T17 sweep found on three other admin pages).
   const [loadErr, setLoadErr] = useState("");
   const [busy, setBusy] = useState("");
-  const [newName, setNewName] = useState("");
-  const [made, setMade] = useState<{ name: string; code: string; scripts: Scripts } | null>(null);
   const [os, setOs] = useState<string>("mac");
   const [draft, setDraft] = useState<Record<string, Route>>({});
+  const [over, setOver] = useState<Over | null>(null);
+  const [overErr, setOverErr] = useState("");
 
   useEffect(() => {
     const q = new URLSearchParams(location.search);
@@ -71,7 +146,10 @@ export default function AdminPrinting() {
       if (!r.ok) { setLoadErr(r.error); setLoading(false); return; }
       const all: Rest[] = Array.isArray(r.data) ? r.data : r.data.restaurants || [];
       setRests(all);
-      const pick = all.find((x) => x.id === urlRid) || all.find((x) => x.slug === urlRid) || all[0];
+      // IT OPENS ON THE OVERVIEW, not on whichever restaurant happens to be first alphabetically.
+      // A restaurant is drilled into deliberately, from a row — that is what makes this screen a
+      // place to WATCH from rather than a form to hunt through.
+      const pick = all.find((x) => x.id === urlRid) || all.find((x) => x.slug === urlRid);
       if (pick) setRid(pick.id); else setLoading(false);
     });
   }, []);
@@ -85,6 +163,22 @@ export default function AdminPrinting() {
     setLoadErr(""); setSt(r.data); setDraft(r.data.routes as Record<string, Route>);
   }, [rid]);
   useEffect(() => { void load(); }, [load]);
+
+  const loadOver = useCallback(async () => {
+    const r = await adminFetch<Over>("/api/admin/printing/overview");
+    // A FAILED READ IS NOT AN ALL-CLEAR. Without this the table would render "no restaurants" after
+    // a request that never arrived — a confident wrong answer, which is the fault the T17 sweep
+    // found on three other admin pages.
+    if (!r.ok) { setOverErr(r.error); setOver(null); return; }
+    setOverErr(""); setOver(r.data);
+  }, []);
+  useEffect(() => { if (!rid) void loadOver(); }, [rid, loadOver]);
+  // Only while it is the screen being looked at: "seen 3s ago" is the one live thing on it.
+  useEffect(() => {
+    if (rid) return;
+    const t = setInterval(() => { void loadOver(); }, 12000);
+    return () => clearInterval(t);
+  }, [rid, loadOver]);
 
   // While a helper is connected its "seen 2s ago" is the only live thing on the page, so the page
   // re-reads itself every 10s — slow enough to cost nothing, fast enough that "connected" is true.
@@ -108,14 +202,6 @@ export default function AdminPrinting() {
     return r.data;
   };
 
-  const addComputer = async () => {
-    const name = newName.trim();
-    if (!name) { toast("Give the computer a name first.", "err"); return; }
-    const d = await post("agents", { name });
-    if (!d) return;
-    setMade({ name, code: String(d.code), scripts: d.scripts as Scripts });
-    setNewName(""); void load();
-  };
 
   const saveRoute = async (kind: string) => {
     const r = draft[kind] || {};
@@ -146,12 +232,17 @@ export default function AdminPrinting() {
     <>
       <div className="adm-crumbs" style={{ marginBottom: 10 }}>
         <Link href="/aevinite/restaurants">Restaurants</Link><span className="sep">›</span>
-        <span>{rest?.name || "…"}</span><span className="sep">›</span><span>Printing</span>
+        {/* No "…" placeholder on the overview: there is no restaurant to name yet, and an ellipsis
+            where a name belongs reads as "still loading" for ever. */}
+        {rid ? <><span>{rest?.name || "…"}</span><span className="sep">›</span></> : null}
+        <span>Printing</span>
       </div>
 
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 className="adm-page-h" style={{ marginBottom: 4 }}>Printing</h1>
+          <h1 className="adm-page-h" style={{ marginBottom: 4 }}>
+            {rid ? `Printing · ${rest?.name || "…"}` : "Printing"}
+          </h1>
           <p className="adm-page-sub" style={{ margin: 0, maxWidth: "72ch" }}>
             Which computer prints which piece of paper. A small helper program on a computer asks us every
             two seconds whether there is anything for it — so paper comes out with no window open, nothing
@@ -161,25 +252,49 @@ export default function AdminPrinting() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); setMade(null); }} style={{ minWidth: 190 }}>
-            {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-          <button className="adm-btn" onClick={() => void load()} disabled={loading}>
+          {rid ? (
+            <>
+              <button className="adm-btn" onClick={() => { setRid(""); setSt(null); setLoadErr(""); }}>
+                ← All restaurants
+              </button>
+              <select className="adm-input" value={rid} onChange={(e) => { setRid(e.target.value); }} style={{ minWidth: 180 }}>
+                {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </>
+          ) : null}
+          <button className="adm-btn" onClick={() => (rid ? void load() : void loadOver())} disabled={loading}>
             <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
           </button>
         </div>
       </div>
 
-      {loadErr ? (
+      {/* ── EVERY RESTAURANT, WORST FIRST ────────────────────────────────────────────────────────
+          Owner, 2026-08-27: "it will be messy when there will be too much restaurants." The order is
+          the whole point: a shop with paper stacked up behind a dead printer is at the TOP, and a
+          shop that is quietly fine is at the bottom. Nobody has to go looking. */}
+      {!rid ? (
+        <>
+          {overErr ? (
+            <div className="adm-card" style={{ marginTop: 14, borderLeft: "3px solid var(--adm-danger, #e5484d)" }}>
+              <b>This could not be read.</b> <span className="adm-muted">{overErr}</span>
+              <button className="adm-btn" style={{ marginLeft: 10, fontSize: 12 }} onClick={() => void loadOver()}>Try again</button>
+            </div>
+          ) : null}
+          {!over && !overErr ? <SkelList rows={6} label="Reading every restaurant" /> : null}
+          {over ? <Overview over={over} onOpen={(id) => { setRid(id); setSt(null); }} /> : null}
+        </>
+      ) : null}
+
+      {rid && loadErr ? (
         <div className="adm-card" style={{ marginTop: 14, borderLeft: "3px solid var(--adm-danger, #e5484d)" }}>
           <b>This page could not be read.</b> <span className="adm-muted">{loadErr}</span>
           <button className="adm-btn" style={{ marginLeft: 10, fontSize: 12 }} onClick={() => void load()}>Try again</button>
         </div>
       ) : null}
 
-      {loading && !st ? <SkelList rows={4} label="Loading printing" /> : null}
+      {rid && loading && !st ? <SkelList rows={4} label="Loading printing" /> : null}
 
-      {st ? (
+      {rid && st ? (
         <>
           {/* ── 1 · is printing on at all ───────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14 }}>
@@ -248,19 +363,17 @@ export default function AdminPrinting() {
                         const name = prompt("What should this computer be called?", a.name);
                         if (name && name.trim() && name !== a.name) { const d = await post(`agents/${a.id}/rename`, { name: name.trim() }); if (d) void load(); }
                       }}>Rename</button>
-                    <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!busy}
-                      title="The old code stops working at once. Use this if a code was lost, or a machine was sold."
-                      onClick={async () => {
-                        if (!confirm(`Give “${a.name}” a new code? The old one stops working immediately.`)) return;
-                        const d = await post(`agents/${a.id}/newcode`, {});
-                        if (d) { setMade({ name: a.name, code: String(d.code), scripts: d.scripts as Scripts }); void load(); }
-                      }}>New code</button>
+                    {/* "NEW CODE" IS GONE (mig 368). It minted a fresh token to be carried to a
+                        machine by hand — the whole ritual the pairing handshake replaced. Re-linking a
+                        computer is now: Unlink here, run the file there, press Allow. One path, and it
+                        is the same path as setting one up for the first time. */}
                     <button className="adm-btn danger" style={{ fontSize: 12 }} disabled={!!busy}
+                      title="Its code dies at once and anything routed to it needs choosing again. To bring it back: run the file on that computer and press Allow."
                       onClick={async () => {
-                        if (!confirm(`Remove “${a.name}”? Its code dies at once, and any paper routed to it will say “no printer chosen”.`)) return;
+                        if (!confirm(`Unlink “${a.name}”?\n\nIts code stops working at once, and any paper routed to it will need a printer choosing again.\n\nTo bring it back, run the helper file on that computer and press Allow.`)) return;
                         const d = await post(`agents/${a.id}/revoke`, {});
-                        if (d) { toast(`${a.name} removed.`, "ok"); void load(); }
-                      }}>Remove</button>
+                        if (d) { toast(`${a.name} unlinked.`, "ok"); void load(); }
+                      }}>Unlink</button>
                   </div>
                 </div>
 
@@ -296,50 +409,57 @@ export default function AdminPrinting() {
               </div>
             ))}
 
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-              <input className="adm-input" placeholder="Name a computer — “Shop's computer”" value={newName}
-                onChange={(e) => setNewName(e.target.value)} style={{ minWidth: 220 }} />
-              <button className="adm-btn primary" onClick={() => void addComputer()} disabled={busy === "agents"}>
-                <i className="fas fa-plus" aria-hidden="true" style={{ marginRight: 6 }} />Add a computer
-              </button>
+            {/* "ADD A COMPUTER" IS GONE FROM THIS SCREEN (mig 368). It existed to mint a code here and
+                carry it to a machine in another city — which is what made the helper file different
+                for every restaurant, and what made somebody type a computer name (owner, 2026-08-27:
+                "what the fuck is a computer name"). A computer adds ITSELF now: run the one file,
+                press Allow. The API verb survives for the printing sweep, which needs to create an
+                agent without a browser. */}
+            <div className="adm-elsewhere" style={{ marginTop: 12 }}>
+              <span className="lbl">A computer adds <b>itself</b> — run the file below on it and press <b>Allow</b>.</span>
             </div>
           </div>
 
-          {/* ── the install text, shown ONCE ────────────────────────────────────────────── */}
-          {made ? (
-            <div className="adm-card" style={{ marginTop: 14, borderLeft: "3px solid var(--accent)" }}>
-              <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Set up “{made.name}” — this is shown only once</h2>
-              <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                We keep only a fingerprint of this code, never the code itself, so it cannot be read back
-                later. If it is lost, press <b>New code</b> — nothing is recovered, a fresh one is made.
-                <b> Nothing is downloaded:</b> the person types this file themselves, which is why no
-                security warning can block it.
-              </p>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                {Object.keys(made.scripts).map((k) => (
-                  <button key={k} className={`adm-btn${os === k ? " primary" : ""}`} style={{ fontSize: 12 }} onClick={() => setOs(k)}>
-                    {OS_LABEL[k] || k}
-                  </button>
-                ))}
-              </div>
-              <ol className="adm-muted" style={{ fontSize: 13, margin: "0 0 10px", paddingLeft: 20, lineHeight: 1.7 }}>
-                <li>Open the plain text editor on that computer — <b>{os === "windows" ? "Notepad" : os === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
-                <li>Press <b>Copy</b> below and paste it in.</li>
-                <li>Save it as <b>{made.scripts[os]?.filename}</b>{os === "windows" ? " with “Save as type: All Files”" : ""}.</li>
-                <li>{os === "mac" ? "In Terminal: chmod +x ~/Desktop/print-helper.command — then double-click it." : "Double-click it."}</li>
-                <li>Make it start by itself: <b>{made.scripts[os]?.autostart}</b></li>
-              </ol>
-              <div style={{ position: "relative" }}>
-                <button className="adm-btn" style={{ position: "absolute", top: 8, right: 8, fontSize: 12, zIndex: 2 }}
-                  onClick={() => void copy(made.scripts[os]?.text || "")}>Copy</button>
-                <pre style={{ background: "#0f1420", color: "#e7ecf5", padding: "14px 16px", borderRadius: 11, overflowX: "auto", fontSize: 12, lineHeight: 1.5, maxHeight: 330 }}>
-                  {made.scripts[os]?.text}
-                </pre>
-              </div>
-              <button className="adm-btn" style={{ marginTop: 10, fontSize: 12 }} onClick={() => setMade(null)}>I have saved it — hide this</button>
+          {/* ── 2b · THE ONE FILE, for every restaurant, with nothing secret in it ───────────── */}
+          <div className="adm-card" style={{ marginTop: 14 }}>
+            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>The helper file — the same one for every restaurant</h2>
+            <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+              There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick — it is the
+              same text for every client. It links itself the first time it runs: your browser opens and
+              you press <b>Allow</b>. <b>Nothing is downloaded by hand:</b> a downloaded script is blocked
+              outright by a Mac and warned about by Windows, while a file somebody typed simply opens.
+            </p>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {Object.keys(st.files || {}).map((k) => (
+                <button key={k} className={`adm-btn${os === k ? " primary" : ""}`} style={{ fontSize: 12 }} onClick={() => setOs(k)}>
+                  {OS_LABEL[k] || k}
+                </button>
+              ))}
             </div>
-          ) : null}
+            <ol className="adm-muted" style={{ fontSize: 13, margin: "0 0 10px", paddingLeft: 20, lineHeight: 1.75 }}>
+              <li>On the computer with the printer, open <b>{os === "windows" ? "Notepad" : os === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
+              <li>Press <b>Copy</b> below and paste it in.</li>
+              <li>Save it on the Desktop as <b>{st.files?.[os]?.filename}</b>{os === "windows" ? " with “Save as type: All Files”" : ""}.</li>
+              <li>{os === "mac" ? "In Terminal, once: chmod +x ~/Desktop/print-helper.command — then double-click it." : "Double-click it."}</li>
+              <li>A page opens in that computer&apos;s browser. Press <b>Allow</b>. That is the whole setup.</li>
+            </ol>
+            <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+              <b>Starting up again:</b> {st.files?.[os]?.autostart}
+            </p>
+            <div style={{ position: "relative" }}>
+              <button className="adm-btn" style={{ position: "absolute", top: 8, right: 8, fontSize: 12, zIndex: 2 }}
+                onClick={() => void copy(st.files?.[os]?.text || "")}>Copy</button>
+              <pre style={{ background: "#0f1420", color: "#e7ecf5", padding: "14px 16px", borderRadius: 11, overflowX: "auto", fontSize: 12, lineHeight: 1.5, maxHeight: 300 }}>
+                {st.files?.[os]?.text}
+              </pre>
+            </div>
+          </div>
 
+          {/* THE "SHOWN ONLY ONCE" CARD IS GONE (mig 368). It existed because the file carried a
+              37-character token that we keep only as a hash and can never show again. The file has
+              no token now — it pairs itself — so there is nothing to guard, nothing to save, and
+              nothing to hide afterwards. `New code` on a computer above still shows one, because
+              re-coding a machine legitimately mints a fresh token. */}
           {/* ── 3 · the address book ────────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14 }}>
             <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.three}</h2>

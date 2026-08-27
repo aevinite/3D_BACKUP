@@ -1612,23 +1612,11 @@ function bindPrintingBoard(ed) {
     el.onclick = async () => {
       if (what === "reload") { state.printBoard = state.printBoard || null; await loadPrintBoard(); return; }
       if (what === "os") { state.printOs = el.dataset.os; renderEditor(); return; }
-      if (what === "hide") { state.printMade = null; renderEditor(); return; }
       if (what === "copy") {
-        const made = state.printMade, sc = made && made.scripts && made.scripts[state.printOs || "mac"];
-        if (!sc) return;
-        try { await navigator.clipboard.writeText(sc.text); toast("Copied."); }
+        const cf = (B().files || {})[state.printOs || B().os || "mac"];
+        if (!cf) return;
+        try { await navigator.clipboard.writeText(cf.text); toast("Copied."); }
         catch { toast("Could not copy — select the text and copy it by hand.", "err"); }
-        return;
-      }
-      if (what === "setup") {
-        const box = document.getElementById("pwName");
-        const name = ((box && box.value) || "").trim();
-        if (!name) { toast("Give this computer a name first — “Counter PC”.", "err"); if (box) box.focus(); return; }
-        const d = await post("this-computer", { name });
-        if (!d) return;
-        state.printName = "";
-        if (d.code) state.printMade = { name: d.name, code: d.code, scripts: d.scripts };
-        await loadPrintBoard();
         return;
       }
       if (what === "adopt") {
@@ -1644,10 +1632,11 @@ function bindPrintingBoard(ed) {
         if (d) { toast("Renamed."); await loadPrintBoard(); }
         return;
       }
-      if (what === "newcode") {
-        if (!confirm("Write the helper file again with a NEW code?\n\nThe old code stops working immediately, and the helper on that computer must be replaced with the new file.")) return;
-        const d = await post("newcode", {});
-        if (d) { state.printMade = { name: (B().thisComputer || {}).name || "This computer", code: d.code, scripts: d.scripts }; renderEditor(); }
+      if (what === "unlink") {
+        const nm = (B().thisComputer || {}).name || "this computer";
+        if (!confirm("Unlink \u201c" + nm + "\u201d?\n\nIt stops printing at once, and anything routed to it needs a printer choosing again.\n\nTo bring it back: double-click the helper file on this computer and press Allow.")) return;
+        const d = await post("unlink", {});
+        if (d) { toast("Unlinked."); await loadPrintBoard(); }
         return;
       }
       if (what === "test") {
@@ -13447,11 +13436,11 @@ function formPrinting(s) {
       ${printerChips(mine, true)}
       ${may ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
         <button type="button" class="btn" data-pw="rename">Rename this computer</button>
-        <button type="button" class="btn" data-pw="newcode">Write the helper file again</button>
+        <button type="button" class="btn" data-pw="unlink">Unlink this computer</button>
       </div>
       <p class="muted" style="font-size:12px;margin:8px 0 0">
-        “Write it again” makes a fresh code and shows the file to type. The old code stops working at
-        once — that is also how a lost code is dealt with: nothing is recovered, a new one is made.
+        “Unlink” stops this computer printing at once, and anything routed to it needs a printer
+        choosing again. To bring it back: double-click the helper file here and press <b>Allow</b>.
       </p>` : ""}
     ` : may ? `
       <div class="hint" style="margin-bottom:10px">
@@ -13459,10 +13448,11 @@ function formPrinting(s) {
         into — not on a phone, and not on a tablet. A phone cannot print silently; it can only open a
         print box nobody is watching.
       </div>
-      <div class="pw-row">
-        <input id="pwName" placeholder="Name this computer — “Counter PC”" style="min-width:230px" value="${esc(state.printName || "")}">
-        <button type="button" class="btn primary" data-pw="setup">🖨 This is the computer with the printer</button>
-      </div>
+      <p class="what" style="margin:0 0 8px">
+        Make the file below on that computer and double-click it. It opens a page that asks
+        <b>Allow?</b> — press it, and this section fills itself in.
+        <b>Nothing to name, nothing to copy across.</b>
+      </p>
       ${(B.agents || []).length ? `
         <details class="pw-more"><summary>Already set up? Say which of these computers this is</summary>
           <p class="what" style="margin-top:6px">Pick it and this screen takes over managing it — nothing is
@@ -13483,37 +13473,36 @@ function formPrinting(s) {
     </div>` : ""}
   </div>`;
 
-  // ── the file to type, shown ONCE ───────────────────────────────────────────────────────────
-  // …and it puts itself away the moment the helper answers. The card exists to get a code onto a
-  // machine; a CONNECTED helper is proof the code arrived, so leaving it open just pushes step 3
-  // off the bottom of the screen with instructions the person has already followed.
-  if (state.printMade && mine && mine.connected) state.printMade = null;
-  const made = state.printMade;
-  const os = state.printOs || B.os || "mac";
+  // ── THE ONE FILE — the same text for every restaurant, nothing secret in it (mig 368) ──────
+  // It used to be a per-computer script with a 37-character token baked in, shown ONCE because the
+  // token is stored only as a hash and can never be read back. There is no token in it now — it pairs
+  // itself and a person presses Allow — so it is simply always on the screen for anybody who may set
+  // printers up. That is what makes ONE file work for every restaurant.
+  const files = B.files || {};
+  const pos = state.printOs || B.os || "mac";
   const OSN = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
-  const sc = made && made.scripts ? made.scripts[os] : null;
-  const step2b = made && sc ? `<div class="card" style="border-left:3px solid var(--accent)">
-    <h3>Type this file on “${esc(made.name)}” — shown only once</h3>
+  const pf = files[pos];
+  const step2b = (may && pf) ? `<div class="card"><h3>The helper file</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
-      <b>Nothing is downloaded.</b> A downloaded script is blocked by a Mac (“Apple could not verify…”)
-      and warned about by Windows; a file you typed yourself simply opens. We keep only a fingerprint of
-      the code below, never the code — so it can never be read back, and a lost one is replaced.
+      The same file for every restaurant, with <b>nothing secret in it</b>. <b>Nothing is downloaded:</b>
+      a downloaded script is blocked outright by a Mac and warned about by Windows, while a file you
+      typed yourself simply opens.
     </p>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-      ${Object.keys(made.scripts).map((k) => `<button type="button" class="btn${os === k ? " primary" : ""}" data-pw="os" data-os="${esc(k)}">${esc(OSN[k] || k)}</button>`).join("")}
+      ${Object.keys(files).map((k) => `<button type="button" class="btn${pos === k ? " primary" : ""}" data-pw="os" data-os="${esc(k)}">${esc(OSN[k] || k)}</button>`).join("")}
     </div>
     <ol class="pw-steps">
-      <li>On that computer, open the plain text editor — <b>${os === "windows" ? "Notepad" : os === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
+      <li>On that computer, open <b>${pos === "windows" ? "Notepad" : pos === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
       <li>Press <b>Copy</b> below, and paste it in.</li>
-      <li>Save it on the Desktop as <b>${esc(sc.filename)}</b>${os === "windows" ? ` with <b>Save as type: All Files</b>` : ""}.</li>
-      <li>${os === "mac" ? `Open Terminal and run <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click the file.` : "Double-click the file."}</li>
-      <li>Make it start by itself: <b>${esc(sc.autostart)}</b></li>
+      <li>Save it on the Desktop as <b>${esc(pf.filename)}</b>${pos === "windows" ? ` with <b>Save as type: All Files</b>` : ""}.</li>
+      <li>${pos === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click the file.` : "Double-click it."}</li>
+      <li>A page opens. Press <b>Allow</b>. That is the whole setup.</li>
     </ol>
+    <p class="muted" style="font-size:12.5px;margin:0 0 10px"><b>After a shutdown:</b> ${esc(pf.autostart)}</p>
     <div class="pw-code">
       <button type="button" class="btn" data-pw="copy">Copy</button>
-      <pre>${esc(sc.text)}</pre>
+      <pre>${esc(pf.text)}</pre>
     </div>
-    <div style="margin-top:10px"><button type="button" class="btn" data-pw="hide">I have typed it — hide this</button></div>
   </div>` : "";
 
   // ── 3 · WHICH PRINTER GETS WHICH PAPER ─────────────────────────────────────────────────────
