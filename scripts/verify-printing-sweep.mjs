@@ -52,6 +52,11 @@ const db = (p, init) => fetch(`${U}/rest/v1/${p}`, { ...init, headers: { ...H, .
 const adminCookie = "lfh_staff_auth=" + createHash("sha256").update(env.ADMIN_PASSWORD || "").digest("hex");
 const api = (path, init) => fetch(BASE + path, { ...init, headers: { "content-type": "application/json", cookie: adminCookie, ...(init?.headers || {}) } });
 const read = (p) => { try { return readFileSync(new URL("../" + p, import.meta.url), "utf8"); } catch { return ""; } };
+// Nothing answering on --base is "could not run", never "ran and found a fault". Without this the
+// first api() call threw a bare fetch error 20 lines into the run, after the header had already
+// printed, and 500 phases read as broken instead of not started.
+const { requireUp } = await import("./sweep/appUp.mjs");
+await requireUp(BASE, "the 500-phase printing sweep");
 
 let n = 0, pass = 0, fail = 0, skip = 0;
 const fails = [];

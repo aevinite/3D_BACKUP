@@ -26,6 +26,7 @@
 // So this loads real 404s and asks, of each one: which screen is in the tree, is ONLY that one in
 // the tree, and where does its way out actually point.
 import { chromium } from "playwright";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const args = process.argv.slice(2);
 const BASE = (args[args.indexOf("--base") + 1] || "").replace(/\/$/, "");
@@ -35,6 +36,10 @@ if (!BASE || !args.includes("--base")) {
     "  npm run verify:notfound -- --base http://localhost:4210\n");
   process.exit(2);
 }
+// …and having a base is not the same as something answering on it. Without this, a stopped server
+// answered with a raw ERR_CONNECTION_REFUSED stack, which reads as "this guard is broken" rather
+// than "start the app" — the exact thing scripts/sweep/appUp.mjs was written to end.
+await requireUp(BASE, "the two 404 screens");
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
