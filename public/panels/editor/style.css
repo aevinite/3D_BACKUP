@@ -2996,7 +2996,14 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    Deliberately NOT in quick mode (⚡ QO/P) — that has its own drill bar. */
 .to-rail { flex: 0 0 240px; min-width: 0; display: flex; flex-direction: column;
   background: var(--panel); border-right: 1px solid var(--line); }
-.to-rail-h { padding: 14px 16px 10px; font-weight: 800; font-size: 14px; color: var(--gold); }
+/* --gold-ink, not --gold, on all four of these (T26 sweep #7, 2026-08-27). This is the same trap
+   the --gold-ink note in the light block already describes — "the same gold is also used as INK in
+   a few places, and on a light page that measured 2.48-2.81:1" — except that pass fixed the four
+   sites it had probes for and the whole TAKE ORDER screen was not one of them. Measured on the
+   running panel, light skin: "Categories" over the left box 2.81, the chosen category in that box
+   3.14, the category heading in the dish list 3.71, and the "+ Other" allergy chip 2.48. In the
+   DARK skin --gold-ink IS --gold, so this only moves the skin that was wrong. */
+.to-rail-h { padding: 14px 16px 10px; font-weight: 800; font-size: 14px; color: var(--gold-ink); }
 .to-rail-h i { font-style: normal; font-size: 11.5px; font-weight: 700; color: var(--muted);
   font-variant-numeric: tabular-nums; margin-left: 6px; }
 /* overflow:hidden is the GUARD, not a detail: if a fit is ever impossible the box clips
@@ -3035,10 +3042,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 @media (prefers-reduced-motion: reduce) { .lfh-swipe-more { transition: none; } }
 .to-cat { flex: 0 0 auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
-.to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-strong); border-color: var(--gold); }
+.to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-ink); border-color: var(--gold); }
 .to-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 14px; }
 .to-sec { padding-top: 4px; }
-.to-sec-h { position: sticky; top: 0; z-index: 2; margin: 0 0 8px; padding: 8px 2px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--gold-strong);
+.to-sec-h { position: sticky; top: 0; z-index: 2; margin: 0 0 8px; padding: 8px 2px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--gold-ink);
   background: linear-gradient(180deg, var(--panel) 70%, transparent); }
 .to-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 9px; margin-bottom: 6px; }
 .to-dish { position: relative; display: flex; align-items: center; gap: 11px; text-align: left; padding: 9px 11px; border-radius: 13px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); min-height: 78px; cursor: pointer; transition: border-color .12s, background .12s, transform .08s; }
@@ -3089,7 +3096,7 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    Dashed outline so it reads as "add something", never as an allergy that is currently set;
    it deliberately has no .on state (tapping it opens a dialog). Same treatment wherever an
    allergy list appears in this panel (take order, the dish popup, a placed KOT, ✎ Edit dish). */
-.alg-other { border-style: dashed !important; color: var(--gold); font-weight: 600; }
+.alg-other { border-style: dashed !important; color: var(--gold-ink); font-weight: 600; }
 .alg-other:hover { background: rgba(212, 165, 116, 0.12); }
 .to-note { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-size: 13.5px; resize: vertical; }
 .to-note:focus { outline: none; border-color: var(--gold); }
