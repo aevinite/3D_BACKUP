@@ -177,7 +177,27 @@ const cleanup = [];
   const st2 = (await sb.from("orders_daily_agg_state").select("rolled_through").maybeSingle()).data;
   chk("3819 the rollup is exactly where its own state marker says", newest <= st2.rolled_through,
       `newest day ${newest}, rolled_through ${st2.rolled_through}, today(IST) ${todayIst} (a 2-day lag is by design)`);
-  chk("3819 the 2-day lag is the designed one, not drift", lag <= 3, `${lag} day(s) behind today`);
+  // MEASURE THE ROLLUP, NOT THE TRADE (sweep #7 / T28, 2026-08-27). This used to compare TODAY
+  // against the newest day that HAS A ROW — so two quiet days with no sales read as "the rollup has
+  // drifted 4 days". Measured on the dev stack: newest row 2026-08-23, rolled_through 2026-08-25,
+  // and ZERO orders exist on the 24th or the 25th. The rollup was exactly where it should be; the
+  // restaurant was simply shut. A guard that calls a quiet Tuesday a data fault is one nobody
+  // believes the next time it is right.
+  const rollLag = Math.round((Date.parse(todayIst) - Date.parse(st2.rolled_through)) / 86400e3);
+  // NEVER AHEAD is the half that would be a real money fault: lfh_refresh_orders_daily_agg sets
+  // v_target = today(IST) - 2, "keep 2 live days on top", precisely so the rollup never claims a day
+  // the live tail is still adding to. A marker inside that window means a day is counted twice.
+  chk("3819 the rollup never claims a day the live tail still owns", rollLag >= 2,
+      `rolled_through ${st2.rolled_through} vs today(IST) ${todayIst} — ${rollLag} day(s) back (2 is the design)`);
+  // BEHIND is not a fault by itself, and 3 was the wrong number. Nothing in lib/ or app/ calls the
+  // refresh on a timer — it moves when the work moves — so a dev stack nobody opens Reports on
+  // drifts a day at a time while being perfectly correct. Measured 2026-08-28: rolled_through
+  // 2026-08-25, i.e. 3 back, with ZERO orders on the 24th, 25th, 26th or 27th. A week is where it
+  // stops being "quiet" and starts being "nothing is refreshing this".
+  chk("3819 the rollup is being refreshed at all", rollLag <= 7,
+      `rolled_through ${st2.rolled_through} is ${rollLag} day(s) behind today(IST) ${todayIst}` +
+      (lag > rollLag ? ` — newest day WITH SALES is ${newest} (${lag} back), which is quiet days, not drift` : "") +
+      (rollLag > 7 ? " — open the owner's Reports once, or check what is meant to advance it" : ""));
 }
 
 // ── cleanup: CLOSE every session this test opened, AND TAKE ITS TICKETS OFF THE BOARD ──────────
