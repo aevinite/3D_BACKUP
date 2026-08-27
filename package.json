@@ -19,6 +19,7 @@
     "verify:lifecycle": "node scripts/verify-table-lifecycle.mjs",
     "verify:db-parity": "node scripts/verify-db-parity.mjs",
     "verify:grants": "node scripts/verify-db-grants.mjs",
+    "verify:migration-truth": "node scripts/verify-migration-truth.mjs",
     "verify:run-alone": "node scripts/verify-migration-run-alone.mjs",
     "verify:rpc-scoped": "node scripts/verify-rpc-scoped.mjs",
     "verify:one-number": "node scripts/verify-one-number.mjs",
