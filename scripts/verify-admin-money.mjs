@@ -338,12 +338,61 @@ try {
     const stale = [after.tile, after.sub, after.h2, ...after.hints].filter((t) => /7 days/i.test(t) || /per day/i.test(t));
     ok(stale.length === 0, `after the drill no label still says the whole window${stale.length ? ` — ${JSON.stringify(stale)}` : ` (tile reads "${after.tile}", heading "${after.h2}")`}`);
     ok(after.val === "73", `the tile shows the drilled day's own count (${after.val})`);
-    await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => /Back to the whole range/.test(x.textContent))?.click());
-    await p.waitForTimeout(3500);
-    const back = await read();
-    ok(/7 days/i.test(back.tile) && back.val === "291" && /per day/i.test(back.h2),
-      `Back puts the window's words and figures back together (tile "${back.tile}" ${back.val}, heading "${back.h2}")`);
+    // ↻ REFRESH, STILL DRILLED (sweep #7 item 1). The drill fix above never covered the Refresh
+    // button, which called load(range, true) with no day — so the reply was the whole window while
+    // every label went on naming the drilled day: "Orders · 24 Aug  1,047" over a day that had 0.
+    await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => /hour by hour/.test(x.textContent))?.click());
+    await p.waitForTimeout(4000);
+    await p.evaluate(() => [...document.querySelectorAll("button.adm-btn")].find((x) => /Refresh/.test(x.textContent))?.click());
+    await p.waitForTimeout(4500);
+    const refreshed = await read();
+    const mixed = [refreshed.tile, refreshed.sub, refreshed.h2, ...refreshed.hints].filter((t) => /7 days/i.test(t) || /per day/i.test(t));
+    ok(mixed.length === 0 && refreshed.val === "73",
+      `pressing Refresh while drilled re-asks for the DAY, not the window (tile "${refreshed.tile}" ${refreshed.val}, heading "${refreshed.h2}")${mixed.length ? ` — window words left behind: ${JSON.stringify(mixed)}` : ""}`);
     await p.close(); await c.close();
+  }
+
+  // ── C2(live) · a rounded percentage never says "none" while the count says some ─────────────
+  head('C2(live) · the occupancy tile never prints "(0%)" above a non-zero count');
+  {
+    const c = await ctx();
+    const p = await c.newPage();
+    await p.goto(BASE + "/aevinite/analytics", { waitUntil: "domcontentloaded" });
+    await settle(p);
+    const t = await p.evaluate(() => {
+      const e = [...document.querySelectorAll(".adm-stat")].find((x) => /Tables occupied/i.test(x.textContent));
+      return e ? { v: e.querySelector(".v")?.textContent?.trim(), sub: e.textContent } : null;
+    });
+    if (!t) console.log("⏭ the Tables-occupied tile did not render");
+    else ok(!(Number(String(t.v).replace(/\D/g, "")) > 0 && /\(0%\)/.test(t.sub)),
+      `"${t.v}" occupied and the words read ${(t.sub.match(/\([^)]*%\)/) || ["—"])[0]}`);
+    await p.close(); await c.close();
+  }
+
+  // ── C3 · every money screen's freshness stamp can express MINUTES ──────────────────────────
+  head("C3 · a \"how old are these numbers\" stamp is minutes, never days");
+  {
+    // `ago()` in customers/page.tsx answers in days ("today" for anything under 24h) — it is for a
+    // guest's last visit. The shared timeAgo answers in minutes. A cache stamp must use the latter,
+    // or a five-minute snapshot and a five-hour one read identically (sweep #7 item 4).
+    for (const [f, label] of [["app/aevinite/customers/page.tsx", "Customers"], ["app/aevinite/analytics/page.tsx", "Platform analytics"], ["app/aevinite/revenue/page.tsx", "Platform revenue"]]) {
+      const src = R(f);
+      const stamp = src.match(/(?:counted|updated) \{(\w+)\(/);
+      ok(!!stamp && stamp[1] === "timeAgo", `${label}: the stamp reads ${stamp ? stamp[1] + "()" : "NO STAMP FOUND"}`);
+    }
+  }
+
+  // ── C4 · a heading beside an exact count must not be a capped list's length ─────────────────
+  head("C4 · the Dashboard's headings count everyone, like the cards above them");
+  {
+    // /api/admin/dashboard caps the online list at 200 and the issues list at 50 and sends the exact
+    // totals alongside, saying so in its own comment. A heading built from `list.length` states a
+    // second, smaller number for the same fact on the same screen (sweep #7 item 5).
+    const home = R("app/aevinite/page.tsx");
+    ok(/Working now <span>· \{onlineCount \?\? online\.length\} active<\/span>/.test(home),
+      "\"Working now\" uses the server's exact onlineCount");
+    ok(/Open issues <span>· \{openIssuesCount \?\? openIssues\.length\} open<\/span>/.test(home),
+      "\"Open issues\" uses the server's exact openIssuesCount");
   }
 
   // ── D(live) · every column of a bill row is on screen ──────────────────────────────────────
@@ -367,6 +416,41 @@ try {
     const outside = r.cells.filter((x) => !x.in).map((x) => x.t);
     ok(outside.length === 0 && !r.clipped && !r.pageWide,
       `${tag} ${w}px ${skin}: ${outside.length ? `off screen — ${outside.join(", ")}` : "every column on screen"}${r.clipped ? " · the card CLIPS" : ""}${r.pageWide ? " · the page scrolls sideways" : ""}`);
+    await p.close(); await c.close();
+  }
+
+  // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
+  head("D2(live) · a state chip that comes back empty is not a dead end");
+  {
+    // Five of the six buckets are narrowed AFTER a page of sessions is read, so a newest page can
+    // hold none of the chosen state while older pages hold plenty. The footer used to be gated on
+    // there being at least one row, so exactly then the way onward was withheld — and a settled
+    // bill (#644, ₹441) sat three pages back, unreachable by pressing anything (sweep #7 item 2).
+    const c = await ctx();
+    const p = await c.newPage();
+    await p.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+    await settle(p);
+    let measured = 0;
+    for (const chip of ["Running", "Settled", "Pay-later", "On the house"]) {
+      const clicked = await p.evaluate((label) => {
+        const b = [...document.querySelectorAll("button.blz-chip")].find((x) => x.textContent.includes(label));
+        if (!b) return false; b.click(); return true;
+      }, chip);
+      if (!clicked) continue;
+      await p.waitForTimeout(3000);
+      const st = await p.evaluate(() => ({
+        rows: document.querySelectorAll(".blz-row").length,
+        empty: document.querySelector(".adm-empty")?.textContent?.trim() || "",
+        older: !![...document.querySelectorAll("button.adm-btn")].find((b) => /Load older bills/.test(b.textContent)),
+      }));
+      if (st.rows > 0) continue;                       // this bucket has rows here — nothing to prove
+      measured++;
+      const cursor = await api(`/api/admin/bills?state=${chip === "Pay-later" ? "khata" : chip === "On the house" ? "onhouse" : chip.toLowerCase()}`);
+      if (!cursor.nextBefore) { console.log(`⏭ ${chip}: empty and the server says there is nothing older — correctly final`); continue; }
+      ok(st.older && /there are older ones/.test(st.empty),
+        `${chip}: empty page + an older page exists → ${st.older ? "the way back is offered" : "NO Load-older button"}, and the line reads ${JSON.stringify(st.empty)}`);
+    }
+    if (measured === 0) console.log("⏭ every state bucket has rows on the newest page — nothing to measure on this database");
     await p.close(); await c.close();
   }
 
