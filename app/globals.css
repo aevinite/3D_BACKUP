@@ -867,6 +867,16 @@ body.menu-scrolling .chef-call {
 .cat-name {
   font-size: 10px; color: var(--muted); font-weight: 600; transition: all 0.3s;
 }
+/* THE CARD'S OWN TINT IS DARKER THAN THE PAGE, and 10px secondary ink cannot afford it (T26 sweep
+   #7, 2026-08-27). --muted reads a comfortable 5.09:1 on the light page, but a category card sits
+   on its own #ede7dc tint and the SAME token measured 4.13:1 there — under the 4.5 that 10px needs,
+   on the one row a guest uses to find food. Only the unselected labels are affected; the chosen one
+   fills with the accent and reads 7.72.
+   A relative mix, never a literal: a themed restaurant overrides --muted, and a hex here would pin
+   every tenant to French House's gold. 85% of whatever the tenant's muted is → 5.30:1 on the card.
+   DARK is untouched and measured 4.59:1 on the same cards — over the line, but only just, so if
+   the guest --muted is ever re-tuned this is the row that goes under first. */
+[data-theme="light"] .cat-name { color: color-mix(in srgb, var(--muted) 85%, #000); }
 .cat-card:hover .cat-name { color: var(--text); }
 
 /* --- SEARCH & FILTERS --- */
