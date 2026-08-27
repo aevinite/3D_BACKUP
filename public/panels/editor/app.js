@@ -3522,12 +3522,17 @@ function ordersPreviousHtml(today, previous) {
 
   const groups = [];
   const todayList = shown.filter((b) => b.ts >= dayStart);
-  groups.push(["\u{1F4C5} Today's bills", todayList, "No bills settled today yet."]);
-  if (withYest) groups.push(["\u{1F550} Yesterday's bills", shown.filter((b) => b.ts < dayStart), "No bills from yesterday."]);
+  groups.push(["\u{1F4C5} Today's bills", todayList, "No bills settled today yet.", "No bill from today matches that search."]);
+  if (withYest) groups.push(["\u{1F550} Yesterday's bills", shown.filter((b) => b.ts < dayStart), "No bills from yesterday.", "No bill from yesterday matches that search."]);
 
-  const listHtml = groups.map(([label, list, emptyMsg]) => headFor(label, list) +
+  const listHtml = groups.map(([label, list, emptyMsg, searchMsg]) => headFor(label, list) +
+    // A DAY WITH NO MATCH STILL SAYS SO. Blanking this line while searching was right in spirit —
+    // "No bills from yesterday." is a lie when yesterday HAS bills and none of them match — but it
+    // emptied the BOX rather than replacing the sentence, and .empty carries 60px of padding above
+    // and below. So a search that hit today and missed yesterday printed 120px of blank nothing
+    // under a heading reading "0 bills". Each group now carries its own search-time sentence.
     (list.length ? `<div class="bill-lines">${list.map(billLineHtml).join("")}</div>`
-                 : `<div class="empty">${searching ? "" : emptyMsg}</div>`)).join("");
+                 : `<div class="empty">${searching ? searchMsg : emptyMsg}</div>`)).join("");
 
   // NOTHING FOUND, AND WHY. A search that finds nothing must say whether that is because there is
   // no such bill or because the record only reaches so far — the honest difference between "it
