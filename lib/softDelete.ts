@@ -59,17 +59,35 @@ export async function softDeleteOrders(
   };
   // Only stamp rows not already deleted (idempotent). Grab their sessions to know
   // which tabs might now be fully deleted.
-  const live = (await sb.from("orders").select("id, session_id")
-    .eq("restaurant_id", rid).in("id", ids).is("deleted_at", null)).data as
-    { id: string; session_id: string | null }[] | null;
-  const targetIds = (live || []).map((o) => o.id);
+  //
+  // ── AND THIS READ'S ERROR COUNTS TOO (T25, sweep #7, 2026-08-28) ─────────────────────────────
+  // The long note further down fixed the "who is still busy" read and left THIS one — the very
+  // first statement — reading `.data` with the error thrown away. A failed read gives `null`, so
+  // `targetIds` is empty and the function returns `{ deleted: 0 }`: the caller is told "nothing to
+  // delete", which is what an ALREADY-deleted bill looks like, and the person is shown a success
+  // for a delete that never happened. Every other write in this file throws on its error and says
+  // in as many words why ("NOT swallowed… an unchecked error meant the column stayed null while the
+  // screen looked right"); this read is the last one that did not.
+  //
+  // Chunked for the same reason the read below is: an `.in()` list of 800 ids is 29.6 KB of URL and
+  // PostgREST answers "Bad Request" (measured — lib/inChunks.ts). One bill's orders is a short list
+  // today, but a delete path must be right on its own terms, not because its biggest caller happens
+  // to be small.
+  const liveRead = await readInChunks<{ id: string; session_id: string | null }>(ids, (chunk) =>
+    sb.from("orders").select("id, session_id")
+      .eq("restaurant_id", rid).in("id", chunk).is("deleted_at", null).limit(chunk.length));
+  if (liveRead.error) {
+    throw new Error(`soft-delete could not read those bills: ${(liveRead.error as { message?: string })?.message ?? String(liveRead.error)}`);
+  }
+  const live = liveRead.rows || [];
+  const targetIds = live.map((o) => o.id);
   if (!targetIds.length) return { deleted: 0 };
 
   const ordUpd = await sb.from("orders").update(orderStamp).eq("restaurant_id", rid).in("id", targetIds);
   if (ordUpd.error) throw new Error(`soft-delete failed: ${ordUpd.error.message}`);
 
   // Tombstone any session whose orders are now ALL deleted (a whole-bill delete).
-  const sessionIds = [...new Set((live || []).map((o) => o.session_id).filter(Boolean))] as string[];
+  const sessionIds = [...new Set(live.map((o) => o.session_id).filter(Boolean))] as string[];
   // TWO QUERIES, NOT TWO PER SESSION (2026-08-04). This was a count query AND an update for every
   // session touched — so "clear all freed records" on a busy restaurant fired hundreds of
   // sequential round-trips inside one request and could die part-way, leaving orders deleted while
@@ -98,13 +116,15 @@ export async function softDeleteOrders(
     // owner, 2026-08-21 — but this function is still reachable from the ADMIN bill ledger with a
     // long selection, and a delete path must be right on its own terms, not because its biggest
     // caller happens to have gone away.)
-    const live = await readInChunks<{ session_id: string | null }>(sessionIds, (chunk) =>
+    // Named `stillBusy`, not `live`: the read above now binds `live` too, and one name meaning two
+    // things in one function is the drift this codebase keeps consolidating away.
+    const stillBusy = await readInChunks<{ session_id: string | null }>(sessionIds, (chunk) =>
       sb.from("orders").select("session_id")
         .in("session_id", chunk).is("deleted_at", null).eq("restaurant_id", rid).limit(1000));
-    if (live.error) {
-      throw new Error(`bill tombstone check failed: ${(live.error as { message?: string })?.message ?? String(live.error)}`);
+    if (stillBusy.error) {
+      throw new Error(`bill tombstone check failed: ${(stillBusy.error as { message?: string })?.message ?? String(stillBusy.error)}`);
     }
-    const busy = new Set((live.rows || []).map((o) => o.session_id).filter(Boolean) as string[]);
+    const busy = new Set((stillBusy.rows || []).map((o) => o.session_id).filter(Boolean) as string[]);
     const toTombstone = sessionIds.filter((sid) => !busy.has(sid));
     if (toTombstone.length) {
       const sUpd = await sb.from("sessions").update(sessionStamp)
@@ -129,10 +149,17 @@ export async function restoreOrders(
 ): Promise<{ restored: number }> {
   if (!ids.length) return { restored: 0 };
   const clear = { deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null };
-  const gone = (await sb.from("orders").select("id, session_id")
-    .eq("restaurant_id", rid).in("id", ids).not("deleted_at", "is", null)).data as
-    { id: string; session_id: string | null }[] | null;
-  const targetIds = (gone || []).map((o) => o.id);
+  // Same rule as the delete half above (T25, sweep #7, 2026-08-28): a failed READ used to answer
+  // `{ restored: 0 }`, which the ledger renders as "nothing needed restoring" — the very shape the
+  // note below this line says was fixed for the WRITES and not for the read that feeds them.
+  const goneRead = await readInChunks<{ id: string; session_id: string | null }>(ids, (chunk) =>
+    sb.from("orders").select("id, session_id")
+      .eq("restaurant_id", rid).in("id", chunk).not("deleted_at", "is", null).limit(chunk.length));
+  if (goneRead.error) {
+    throw new Error(`restore could not read those bills: ${(goneRead.error as { message?: string })?.message ?? String(goneRead.error)}`);
+  }
+  const gone = goneRead.rows || [];
+  const targetIds = gone.map((o) => o.id);
   if (!targetIds.length) return { restored: 0 };
   // NEITHER WRITE WAS CHECKED, AND THE COUNT WAS THE INTENTION (fixed 2026-08-11, T7 finding F3).
   // Both updates fired blind and the function returned `targetIds.length` — the number of rows it
@@ -143,7 +170,7 @@ export async function restoreOrders(
   // one screen that carries the "you can restore them" promise (app/api/admin/bills/route.ts).
   const ordUpd = await sb.from("orders").update(clear).eq("restaurant_id", rid).in("id", targetIds);
   if (ordUpd.error) throw new Error(`restore failed: ${ordUpd.error.message}`);
-  const sessionIds = [...new Set((gone || []).map((o) => o.session_id).filter(Boolean))] as string[];
+  const sessionIds = [...new Set(gone.map((o) => o.session_id).filter(Boolean))] as string[];
   if (sessionIds.length) {
     const sUpd = await sb.from("sessions").update(clear).eq("restaurant_id", rid).in("id", sessionIds);
     // The bill would stay tombstoned in the ledger while its orders read alive — the same

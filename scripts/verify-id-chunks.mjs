@@ -51,7 +51,12 @@ const ESTATE_READERS = {
   // answer there marks a bill deleted while its food is live — the half-state that function's own
   // header says persisted for months. It returns one row per ORDER, so it crosses the 1,000-row cap
   // sooner than an estate read does. (T25 sweep, 2026-08-21.)
-  "lib/softDelete.ts": ["softDeleteOrders"],
+  // …and `restoreOrders` beside it (T25 sweep #7, 2026-08-28), for the mirror-image reason. It is
+  // the "you can restore them" promise the admin bill ledger prints, and its first read had the
+  // same unchunked, error-thrown-away shape: a failed read answered `{ restored: 0 }`, which the
+  // ledger renders as "nothing needed restoring" rather than "that did not work". Both functions'
+  // first reads now go through lib/inChunks.ts and throw on a failed chunk.
+  "lib/softDelete.ts": ["softDeleteOrders", "restoreOrders"],
 };
 
 // What counts as chunked: the shared helper, or restaurantNames' own equivalent loop.
