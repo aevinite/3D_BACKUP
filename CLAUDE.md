@@ -148,7 +148,7 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
   embed `public/panels/editor/` — a "manager panel" bug = edit `app.js` there) · `/kitchen` ·
   `/tablet` · `/owner` (16 pages) · `/login`, `/staff-login`. Panel APIs live at
   `app/api/<name>/[...path]/route.ts`.
-- **56 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
+- **57 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
   `/r/<slug>/menu`, `/q/<code>` — every guest rule must hold in all three (PR #761's lesson).
 - Menu data via `lib/menu.ts` (anon key); categories/filters are DB-driven; multilingual via
   `lib/i18n.ts`. **A re-seed re-runs EVERY migration with no ledger** — prefer

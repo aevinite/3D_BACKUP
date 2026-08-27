@@ -507,6 +507,21 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   sha-256 hash (mig 341). Not a cookie and not a login: a printing machine that must survive a power
   cut cannot depend on somebody signing in afterwards. It is scoped to ONE restaurant and to three
   verbs, so it is a printing-only credential — see `docs/PRINT-HELPER.md`.
+  - **TWO verbs under it are deliberately unauthenticated, and grant nothing** (mig 368):
+    `pair/start` — a machine with no credential yet describes itself and is handed a public CODE plus
+    a private SECRET; the row it creates can do exactly one thing, be shown to a signed-in human for
+    approval. And `pair/poll` — answers `waiting`/`expired`, or hands over the token **once**, and
+    only to the process holding that secret. **A wrong secret is answered identically to a code that
+    does not exist**, so this cannot be used to discover codes. The restaurant is chosen by the
+    approver at `/api/pair`, never by the helper.
+- **`/api/pair`** — the print helper's ALLOW door (mig 368). It takes **either** credential and
+  checks them in this order: `tokenIsValid` (the admin), else the staff cookie + `managerCan(…,
+  "print_setup")`. Neither → `signedIn: false` on the GET and **401** on the POST, so a stranger
+  holding a pairing code can do nothing with it.
+  - **A staff member can only ever adopt a machine into their OWN restaurant** — the request's `rid`
+    is ignored for them and taken from their session. Trusting it would let any manager attach a
+    printer to somebody else's shop.
+  - Its two unauthenticated siblings live under `/api/print-agent/pair/*` below, not here.
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
@@ -789,7 +804,7 @@ sections below rather than one long list, because each was written the day its b
 
 ## Routes
 
-There are **56** `page.tsx` routes, not four — count them with
+There are **57** `page.tsx` routes, not four — count them with
 `find app -name page.tsx | wc -l` rather than trusting a list in a document. The ones worth
 knowing by heart:
 
