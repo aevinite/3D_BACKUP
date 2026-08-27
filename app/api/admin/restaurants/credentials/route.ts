@@ -25,6 +25,8 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { openPassword, passwordFields, vaultReady } from "@/lib/passwordVault";
 import { withIdempotency } from "@/lib/idempotency";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -57,32 +59,51 @@ export async function GET(req: NextRequest) {
   const rid = new URL(req.url).searchParams.get("restaurant_id") || "";
   if (!UUID.test(rid)) return err("invalid restaurant_id");
 
-  const rest = (await sb.from("restaurants").select("id, slug, name, active, deleted_at").eq("id", rid).maybeSingle()).data as
-    { id: string; slug: string; name: string; active: boolean; deleted_at: string | null } | null;
+  const restQ = await sb.from("restaurants").select("id, slug, name, active, deleted_at").eq("id", rid).maybeSingle();
+  if (restQ.error) return adminFail("this restaurant's handover sheet", restQ.error, { action: "load" });
+  const rest = restQ.data as { id: string; slug: string; name: string; active: boolean; deleted_at: string | null } | null;
   if (!rest) return err("restaurant not found", 404);
 
   // Its own staff, plus every owner attached through the join table (an owner's `restaurant_id` is
   // only a filing anchor — mig 097 — so owners of THIS restaurant usually sit under another one).
   const [staffQ, linkQ] = await Promise.all([
+    // Bounded (T20 sweep #7, 2026-08-27). Both are ONE restaurant's rows, so PostgREST's cap could
+    // never plausibly bite — but this sheet is the thing the client is handed, and a silently short
+    // list of logins is the one way it can be wrong while looking complete. A ceiling far above any
+    // real staff roll says the bound is deliberate; `.limit(500)` matches the roster's own cap.
     sb.from("staff_users")
       .select("id, username, name, role, active, password_shown, last_seen_at")
-      .eq("restaurant_id", rid).is("deleted_at", null).order("role"),
-    sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid),
+      .eq("restaurant_id", rid).is("deleted_at", null).order("role").limit(500),
+    sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).limit(500),
   ]);
-  if (staffQ.error) return err(staffQ.error.message, 500);
+  // Plain sentence to the console, the database's words in `detail` + the log — the same helper every
+  // sibling admin route uses. These three were the last raw `error.message` bodies in this file
+  // (T20 sweep #7, 2026-08-27).
+  if (staffQ.error) return adminFail("this restaurant's logins", staffQ.error, { action: "load" });
+
+  // ── A SHEET MISSING THE OWNER'S LOGIN IS THE WORST WAY FOR THIS TO FAIL (T20 sweep #7, 2026-08-27) ─
+  // `linkQ.error` was never inspected. An owner's `restaurant_id` is only a filing anchor (mig 097), so
+  // owners of THIS restaurant usually sit under a different one — which means this join IS how they get
+  // onto the sheet. A failed read therefore printed a complete-looking handover sheet with every panel
+  // login on it and NO OWNER LOGIN AT ALL, and the admin hands that to the client. The one credential
+  // the client cares about most, silently absent, on a page whose whole job is completeness.
+  if (linkQ.error) return adminFail("this restaurant's owner logins", linkQ.error, { action: "load" });
 
   const ownerIds = [...new Set((linkQ.data || []).map((l) => l.user_id as string))];
   let ownerRows: Row[] = [];
   if (ownerIds.length) {
     const o = await sb.from("staff_users")
       .select("id, username, name, role, active, password_shown, last_seen_at")
-      .in("id", ownerIds).is("deleted_at", null);
-    if (o.error) return err(o.error.message, 500);
+      .in("id", ownerIds).is("deleted_at", null).limit(ownerIds.length);
+    if (o.error) return adminFail("this restaurant's owner logins", o.error, { action: "load" });
     ownerRows = (o.data || []) as Row[];
   }
 
-  // The primary owner wears the ★ on the sheet, the same badge the Owners roster uses.
-  const primaryId = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle()).data?.owner_user_id as string | null;
+  // The primary owner wears the ★ on the sheet, the same badge the Owners roster uses. A failed read
+  // only costs the badge, so it is reported and the sheet still prints (`primaryUnread` below).
+  const primaryQ = await sb.from("restaurants").select("owner_user_id").eq("id", rid).maybeSingle();
+  if (primaryQ.error) console.error("[admin/credentials] could not read the primary owner:", primaryQ.error.message);
+  const primaryId = primaryQ.data?.owner_user_id as string | null | undefined;
 
   // Merge, dedupe by id (an owner anchored to THIS restaurant appears in both reads).
   const byId = new Map<string, Row>();
@@ -121,6 +142,8 @@ export async function GET(req: NextRequest) {
     // false = no vault key on this deployment, so nothing can be stored or shown. The card says so
     // instead of silently offering a button that would reset a password for nothing.
     vaultReady: vaultReady(),
+    // Only when true: the ★ could not be worked out, so its absence on the sheet means nothing.
+    ...(primaryQ.error ? { primaryUnread: true } : {}),
     generatedAt: new Date().toISOString(),
   });
 }
@@ -138,14 +161,19 @@ async function postImpl(req: NextRequest) {
 
   // The person must really belong to this restaurant — either its own staff, or one of its owners
   // through the join table. Checked server-side so the button can never reach another tenant's login.
-  const u = (await sb.from("staff_users")
+  // A blip must not read as "that login no longer exists" (404, nothing retries it) on the button that
+  // mints a NEW password — nor as "doesn't belong to this restaurant", which is a refusal about
+  // ownership. Both refusals are decided from these reads, so both reads answer for themselves.
+  const uQ = await sb.from("staff_users")
     .select("id, username, name, role, restaurant_id, token_version")
-    .eq("id", userId).is("deleted_at", null).maybeSingle()).data as
-    { id: string; username: string; name: string | null; role: string; restaurant_id: string | null; token_version: number | null } | null;
+    .eq("id", userId).is("deleted_at", null).maybeSingle();
+  if (uQ.error) return adminFail("this login", uQ.error, { action: "load" });
+  const u = uQ.data as { id: string; username: string; name: string | null; role: string; restaurant_id: string | null; token_version: number | null } | null;
   if (!u) return err("That login no longer exists.", 404);
   if (u.restaurant_id !== rid) {
-    const owns = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", userId).maybeSingle()).data;
-    if (!owns) return err("That login doesn't belong to this restaurant.", 403);
+    const ownsQ = await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", userId).maybeSingle();
+    if (ownsQ.error) return adminFail("this login", ownsQ.error, { action: "load" });
+    if (!ownsQ.data) return err("That login doesn't belong to this restaurant.", 403);
   }
 
   const password = genPassword();
@@ -154,7 +182,7 @@ async function postImpl(req: NextRequest) {
   const wr = await sb.from("staff_users")
     .update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null })
     .eq("id", userId).select("id").maybeSingle();
-  if (wr.error) return err(wr.error.message, 500);
+  if (wr.error) return adminFail("this login's new password", wr.error, { action: "save" });
   // Never report a password the database didn't take (the 2026-07-07 rule).
   if (!wr.data) return err("Couldn't set that password — nothing was changed. Please try again.", 500);
 
