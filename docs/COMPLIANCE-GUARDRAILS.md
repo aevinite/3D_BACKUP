@@ -68,7 +68,9 @@ under summons. It puts you in jail, and me with you."* Saying no is the whole ga
 
 Asked directly whether the app should gain a "cancel this whole bill" button — with the research
 above in front of him — he decided the opposite way, and these are his rules. They are recorded
-here because three of them are now enforced in code and the fourth is the next thing to build.
+here because all four are now enforced in code (rule 11 was the last one outstanding; it shipped in
+`supabase/migrations/365_reopen_puts_the_table_back_not_the_bill.sql` — a migration file — on
+2026-08-26).
 
 > 7. **A BILL IS NEVER CANCELLED AS AN ACT. Only a KOT is cancelled.** *"there will not be bill
 >    cancellation. Only there will be only KOT cancellation and which will be going on audit
@@ -95,16 +97,39 @@ here because three of them are now enforced in code and the fourth is the next t
 >     exists nowhere. Enforced in the route (`invoiceLockedByOrder`), which is the same helper that
 >     already locks the per-dish delete, the quantity stepper and the discount. A **voided** invoice
 >     does not lock — that bill was reopened on purpose, and the reopen retired its number.
-> 11. **REOPEN RE-OPENS THE TABLE, NOT THE BILL — and only onto a FREE table.** ⚠️ **NOT BUILT YET.**
+> 11. **REOPEN RE-OPENS THE TABLE, NOT THE BILL — and only onto a FREE table.** ✅ **BUILT** —
+>     `supabase/migrations/365_reopen_puts_the_table_back_not_the_bill.sql` (a migration file).
 >     His ruling, 2026-08-26: *"You should reopen table not the bill … if the table has already taken
 >     the order, it shouldn't be able to reopen. If the table is free, then only it should be able to
 >     reopen, and after reopen you can add the order to that particular bill — you can't delete."*
 >     So: a settled bill may be reopened onto its own table **only while that table has no other live
 >     party**, because reopening onto an occupied table would merge two parties' money. After the
 >     reopen the bill is **add-only** — new KOTs may go on, nothing already on it may come off, and
->     re-printing retires the old invoice number and draws a new one (rule 2). Today
->     `lfh_void_invoice` (mig 278) refuses on `status = 'closed'` outright; that condition is what
->     changes, and it changes in a migration so all three doors obey it.
+>     re-printing retires the old invoice number and draws a new one (rule 2).
+>
+>     **How it was built, checked against the function that is actually installed — not against the
+>     plan.** Migration 365 did NOT loosen `lfh_void_invoice`. That function (mig 189, restated by
+>     278) still refuses the moment the session is closed — `'the bill is settled and cannot be
+>     reopened'`, errcode LFH01 — and that is correct: voiding a LIVE bill's invoice and putting a
+>     SETTLED party back on its table are two different acts and must stay two different doors.
+>     365 added a **new** function, `lfh_reopen_table(p_session, p_reason, p_actor)`, which:
+>       · returns unchanged if the session is already open (idempotent — a replayed offline write or
+>         a double tap must not be an error);
+>       · refuses (LFH04) when every order on the bill was cancelled — there is no sale to come back
+>         to, and reopening would put an empty party on the floor;
+>       · refuses (LFH03) when another party is already open on that table number, naming the table.
+>         `idx_one_open_session_per_table` (mig 082) already made that impossible; what this adds is
+>         a SENTENCE instead of a raw unique-index error;
+>       · retires a LIVE invoice number into the append-only `invoice_events` trail with its reason,
+>         and never reuses it (CGST Rule 46(b)). A bill that drew no number, or whose number is
+>         already voided, simply skips that step;
+>       · sets the session back to `open` and clears `closed_at`, and touches `deleted_at` never.
+>     Nothing is un-paid and no order is altered. Add-only afterwards needed no new rule: every order
+>     on the bill is `payment_status = 'paid'`, and the editor route has always refused to cancel a
+>     paid order. Staff-only, per the mig-038 rule (REVOKE from public/anon/authenticated, GRANT to
+>     service_role — `npm run verify:grants`). The act reads in the Activity log as **Orders & bills
+>     › Reopen the table** (`table_reopened` in `lib/logTrail.ts`), deliberately a different sentence
+>     from **Reopen the bill**, which is still what voiding a live invoice says.
 
 **Why number-keeping is not negotiable (point 2).** CGST Rule 46(b) wants a serial that is
 consecutive and unique for the financial year, and a cancelled invoice retained *with its own
