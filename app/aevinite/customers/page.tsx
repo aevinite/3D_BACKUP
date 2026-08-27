@@ -14,6 +14,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SkelList } from "@/components/admin/Skeleton";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+// The console's own "how long ago" — minutes, not days. See the note at the "counted" stamp below.
+import { timeAgo } from "@/components/admin/shared";
 
 const IST = "Asia/Kolkata";
 
@@ -219,7 +221,20 @@ export default function AdminCustomers() {
           <button className="adm-btn" onClick={() => load({ force: true })} title="Recount the tiles from live data">
             <i className="fas fa-rotate" aria-hidden="true" /> Refresh
           </button>
-          {cachedAt && <span className="adm-muted" style={{ fontSize: 11.5 }}>counted {ago(cachedAt)}</span>}
+          {/* THE STAMP HAS TO BE ABLE TO SAY A TIME (T18 sweep #7, item 4). This used the page's own
+              `ago()`, which answers in DAYS because it was written for a guest's last visit — its
+              first branch is `if (d <= 0) return "today"`. The tiles behind it are a snapshot the
+              cache treats as fresh for five minutes and the page re-reads every sixty seconds, so
+              this line could only ever read "counted today", on every open, forever. Platform
+              analytics and Platform revenue both say "updated just now" / "updated 4m ago" from the
+              shared `timeAgo`, with the exact IST time on hover; this is the same stamp, so it is
+              now the same helper. */}
+          {cachedAt && (
+            <span className="adm-muted" style={{ fontSize: 11.5 }}
+              title={new Date(cachedAt).toLocaleString("en-IN", { timeZone: IST })}>
+              counted {timeAgo(cachedAt)}
+            </span>
+          )}
         </div>
 
         {err && (
