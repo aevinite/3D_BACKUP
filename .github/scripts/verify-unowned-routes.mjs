@@ -92,6 +92,28 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
     "Only the helper holds it. A browser that can see it is a browser that can adopt a machine.");
 }
 
+  // A LABEL MUST SIT IN THE MIDDLE OF ITS BUTTON. The `font:` shorthand RESETS line-height to
+  // `normal`, so a `line-height` written BEFORE it is silently thrown away. That is exactly what
+  // happened here: .pr-btn asked for `line-height: 52px` and then `font: inherit`, and every label
+  // on the page rendered flush against the top edge of a 52px button with 34px of dead space under
+  // it — measured on both a phone and a desktop, and invisible to every other guard, because the
+  // markup, the class names and the colours were all correct.
+  {
+    const pg = read("app/pair/page.tsx");
+    const blocks = [...pg.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]);
+    const clobbered = blocks.filter((b) => {
+      const lh = b.search(/(^|[;\s])line-height\s*:/);
+      const fo = b.search(/(^|[;\s])font\s*:\s*(?!inherit\s*;?\s*$)|(^|[;\s])font\s*:\s*inherit/);
+      return lh >= 0 && fo >= 0 && fo > lh;
+    });
+    want(clobbered.length === 0,
+      "no rule on the Allow page sets a line-height that the font shorthand then throws away",
+      `${clobbered.length} rule(s) declare line-height BEFORE a font shorthand, which resets it`,
+      (clobbered[0] || "").trim().slice(0, 140) +
+      "\n      Either move the line-height AFTER the shorthand, or centre with grid/flex — which also survives a\n      " +
+      "label that wraps to two lines, where a tall line-height would push the second line out of the box.");
+  }
+
 /* ── the printer setup guide — a static file, offered from five places ───────────────── */
 {
   // It is public/print-setup.html, not a route. Every place that offers it must open it in a NEW

@@ -272,15 +272,23 @@ function Style() {
 
   .pr-actions { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
   /* 52px, because this is the one button on the page and it is pressed by somebody standing at a
-     counter, often on a touchscreen till. */
-  .pr-btn { display: block; min-height: 52px; line-height: 52px; border-radius: 12px; border: 0;
-    background: linear-gradient(180deg, #4f8cff, #3a6fe0); color: #fff; font: inherit; font-size: 15px;
-    font-weight: 650; cursor: pointer; text-decoration: none; text-align: center; }
+     counter, often on a touchscreen till.
+     CENTRED WITH GRID, NOT line-height, and that is not a style preference. The font: inherit
+     declaration is a SHORTHAND and it resets line-height to normal; it sat AFTER the line-height
+     declaration, so the 52px was thrown away and every label on this page rendered flush against
+     the top edge of its button with 34px of empty space underneath — measured, on every viewport.
+     Grid centring also survives a label that wraps to two lines, which "Choose which printer prints
+     what" does on a phone; a line-height that tall would have pushed a second line out of the box.
+     (No backticks in this comment: the whole stylesheet is a template literal.) */
+  .pr-btn { display: grid; place-items: center; min-height: 52px; padding: 8px 16px; border-radius: 12px;
+    border: 0; background: linear-gradient(180deg, #4f8cff, #3a6fe0); color: #fff; font: inherit;
+    font-size: 15px; line-height: 1.3; font-weight: 650; cursor: pointer; text-decoration: none;
+    text-align: center; }
   .pr-btn:hover { filter: brightness(1.07); }
   .pr-btn:disabled { opacity: .55; cursor: not-allowed; filter: none; }
   .pr-btn:focus-visible { outline: 2px solid #9ec7ff; outline-offset: 3px; }
   .pr-btn.ghost { background: none; border: 1px solid rgba(255,255,255,.16); color: #cfd7e6;
-    min-height: 44px; line-height: 44px; font-weight: 550; font-size: 14px; }
+    min-height: 44px; font-weight: 550; font-size: 14px; }
 `}</style>
   );
 }
