@@ -26,6 +26,25 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HOOK = process.argv.includes("--hook");
+
+// HOOK MODE READS THE EDIT AND USUALLY DOES NOTHING (sweep #7 / T28, 2026-08-27).
+//
+// This file has said "it is meant to run as a hook on any edit under scripts/ or tests/" since the
+// day it was written, and it was never wired into one — which is why it sat RED on clean main for
+// three guards that landed on 2026-08-26 and nobody saw. The reason it could not simply be added is
+// cost: a full scan parses 218 scripts and takes ~9 seconds, and the PostToolUse hook fires on
+// EVERY Edit and Write in the repo, sharing a 45-second budget with nine other guards.
+//
+// So it does what verify-test-safety.mjs does: read the PostToolUse payload on stdin, and exit 0
+// immediately unless the file just written is one this guard is about. An edit to a component pays
+// nothing; an edit to a guard pays the nine seconds, which is the only time the answer can change.
+if (HOOK) {
+  let raw = ""; try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }
+  let payload = {}; try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
+  const f = String(payload?.tool_input?.file_path || payload?.tool_response?.filePath || "").replace(/\\/g, "/");
+  // package.json matters too: check 4 asks whether every verify:* entry points at a file that exists.
+  if (!/\/(scripts|tests)\/.*\.(mjs|ts)$/.test(f) && !/\/package\.json$/.test(f)) process.exit(0);
+}
 const fails = [];
 const checks = [];
 const check = (name, ok, detail = "") => { checks.push({ name, ok }); if (!ok) fails.push(`${name}\n      ${detail}`); };
