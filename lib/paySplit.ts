@@ -26,7 +26,10 @@ export type SplitLeg = {
   amount: number;
   method: string;
   note?: string | null;
-  // A PAY-LATER part (mig 352): this slice was not collected, it is owed. Either an existing person
+  // A PAY-LATER part (supabase/migrations/364_a_split_part_can_be_pay_later.sql — a MIGRATION
+  // FILE, and it was renumbered 352 → 364 on 2026-08-22 because two migrations landed as 352
+  // twenty minutes apart; every 'mig 352' in this file used to point at the OTHER one, which is
+  // about re-seeding and tax filing): this slice was not collected, it is owed. Either an existing person
   // from the khata book, or a name (+ optional phone) to add. Ignored on any other method.
   khataCustomerId?: string | null;
   khataName?: string | null;
@@ -195,7 +198,7 @@ export async function settleBillInParts(
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };
   }
 
-  // ── IS ONE OF THE PARTS A TAB? (mig 352) ────────────────────────────────────────────────────
+  // ── IS ONE OF THE PARTS A TAB? (mig 364) ────────────────────────────────────────────────────
   // Split payment IS mark-paid — the bill is settled and the table frees either way (owner,
   // 2026-08-21: "it should work like mark as paid but the amount is being split"). The one
   // difference a tab makes is that its slice was not collected, so the bill cannot be stamped paid
@@ -231,7 +234,7 @@ export async function settleBillInParts(
   }
 
   // Every part of ONE tap shares a settle group, so the book can subtract what arrived ALONGSIDE
-  // the tab and nothing else (see mig 352 — without it an earlier settle on the same session would
+  // the tab and nothing else (see mig 364 — without it an earlier settle on the same session would
   // be subtracted from this debt).
   const group = crypto.randomUUID();
   const legs = parts.map((s) => ({
