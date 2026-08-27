@@ -4,7 +4,7 @@
 // never appears. All figures come from /api/admin/revenue (derived from restaurant_billing +
 // restaurant_payments — no schema change). Dark ops-console theme, hand-rolled SVG chart.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
+import { useActiveAutoRefresh, timeAgo, istDate, IST } from "@/components/admin/shared";
 
 type Plan = { plan: string; mrr: number; count: number };
 type Month = { month: string; label: string; collected: number };
@@ -16,18 +16,6 @@ type Data = {
 };
 
 const money = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
-const IST = "Asia/Kolkata";
-// ONE WAY OF WRITING A DATE ACROSS THE MONEY SCREENS (T18 sweep #7, item 6). `next_due_on` is a
-// plain `YYYY-MM-DD` from the database and this page printed it as-is, so the Paying-restaurants
-// table read "2027-07-04" while every other date in the admin console — the Customers table, the
-// Bill ledger's Opened / Closed / Deleted lines, the invoice timeline — reads "4 Jul 27". Pinned to
-// IST, because a bare date parses as UTC midnight and would slip a day west of here.
-const dfmt = (d: string | null) => {
-  if (!d) return "—";
-  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + "T00:00:00+05:30" : d);
-  if (Number.isNaN(t)) return d;
-  return new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
-};
 const STATUS_COLOR: Record<string, string> = { active: "var(--adm-ok)", trial: "var(--accent)", paused: "#d4a574", cancelled: "var(--adm-danger)" };
 const STATUS_LABEL: Record<string, string> = { active: "Active (paying)", trial: "Trial", paused: "Paused", cancelled: "Cancelled" };
 
@@ -239,7 +227,7 @@ export default function AdminRevenue() {
                 <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.plan}</span>
                 <span className="adm-muted">{r.cycle === "monthly" ? "Monthly" : "Yearly"}</span>
                 <span style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(r.monthly)}</span>
-                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted" title={r.nextDue || undefined}>{dfmt(r.nextDue)}</span>
+                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted" title={r.nextDue || undefined}>{istDate(r.nextDue)}</span>
               </div>
             ))}
           </div>

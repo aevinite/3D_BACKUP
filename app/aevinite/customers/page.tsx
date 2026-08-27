@@ -15,9 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SkelList } from "@/components/admin/Skeleton";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 // The console's own "how long ago" — minutes, not days. See the note at the "counted" stamp below.
-import { timeAgo } from "@/components/admin/shared";
+import { timeAgo, istDate, IST } from "@/components/admin/shared";
 
-const IST = "Asia/Kolkata";
 
 type Customer = {
   restaurant_id: string; restaurantName: string; phone: string; name: string | null;
@@ -38,8 +37,10 @@ const SEGMENTS = [
   { k: "blocked", label: "Blocked" },
 ] as const;
 
-const dfmt = (iso: string | null) =>
-  !iso ? "—" : new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
+// dfmt was this page's own copy of "4 Jul 27". It is `istDate` in components/admin/shared.tsx now —
+// Platform revenue needed the same format for its Next-due column, and two copies of a date format
+// is how two screens come to write the same day differently (T18 sweep #7, item 6).
+const dfmt = istDate;
 const ago = (iso: string | null) => {
   if (!iso) return "—";
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400e3);
