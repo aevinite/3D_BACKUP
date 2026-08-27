@@ -276,11 +276,35 @@ const PROFILE_COLS =
 
 // Batch-read whether the payroll module is effective for several restaurants at once, so the
 // roster costs ONE settings read instead of one ladder read per restaurant.
-async function payrollByRid(ids: string[]): Promise<Record<string, boolean>> {
+//
+// ── "COULDN'T READ IT" IS NOT "YOU DON'T HAVE IT" (T20 sweep #7, 2026-08-27) ──────────────────────
+// This read's `.error` was never inspected, so a database blip returned an EMPTY map — and every
+// caller reads that as `payroll_allowed !== true`, i.e. the module is off. The consequences are not
+// cosmetic, and the worst one is on a WRITE:
+//   · `target()` — the front door for every profile and pay write — then refuses with
+//     "Staff profiles & pay aren't enabled for this restaurant." (403). Wrong reason, and a status
+//     nothing retries, so saving a salary during a blip is simply lost. That is EXACTLY finding F7,
+//     which was fixed on 2026-08-12 for the person read ONE LINE ABOVE this one and missed here.
+//   · `staffDetail()` — the same 403 for opening a person who does have a profile;
+//   · `postImpl` — a person is created with their profile and job fields silently dropped;
+//   · the roster — every person comes back `profileEligible: false`, so the profile UI disappears.
+//
+// `null` = "we could not check", and every caller answers `transient()` (a retryable 503) instead of
+// a sentence about the restaurant's setup. Refuse on doubt, which is the rule the four other rungs in
+// this file already keep (`mgrStaffPower`, `scope()`, `target()`, the feature gate).
+//
+// NOT the same thing as `payUnread` further down: that one is about a pay AMOUNT that could not be
+// read, where the roster deliberately stays up and names the gap. This is about whether the feature
+// exists at all, and inventing an answer to that decides permissions.
+async function payrollByRid(ids: string[]): Promise<Record<string, boolean> | null> {
   const out: Record<string, boolean> = {};
   if (!ids.length) return out;
-  const { data } = await sb.from("settings")
+  const { data, error } = await sb.from("settings")
     .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled").in("restaurant_id", ids);
+  if (error) {
+    console.error("[owner/staff] could not read the payroll module state:", error.message);
+    return null;
+  }
   for (const r of (data || []) as any[]) {
     out[r.restaurant_id] = r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false);
   }
@@ -328,9 +352,21 @@ export async function GET(req: NextRequest) {
   // any waiter cap the admin hasn't enabled for the restaurant (the ceiling GAP-B refuses).
   const modsByRid: Record<string, Record<string, boolean>> = {};
   if (ids.length) {
-    const { data: setRows } = await sb.from("settings")
+    // ── A GREYED-OUT SWITCH IS A STATEMENT ABOUT THE ADMIN'S GRANT (T20 sweep #7, 2026-08-27) ────────
+    // `.error` was never inspected, so a failed read left `modsByRid` empty — and the per-person
+    // override UI GREYS every waiter power whose module reads as off. So a blip made it look as though
+    // Aevidine had granted this restaurant none of banquet / table types / table ops / take orders, on
+    // the screen where the owner hands those powers to a waiter. The server's own ceiling (GAP-B, the
+    // CAP_MODULE_GATE below) re-reads the ladder per grant and is unaffected, so nothing wrong could
+    // be SAVED — only shown. Refuse on doubt, like every other rung here.
+    const setQ = await sb.from("settings")
       .select("restaurant_id, banquet_allowed, banquet_owner_control, banquet_enabled, table_tags_allowed, table_tags_owner_control, table_tags_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled")
       .in("restaurant_id", ids);
+    if (setQ.error) {
+      console.error("[owner/staff] could not read which waiter powers this restaurant has:", setQ.error.message);
+      return transient();
+    }
+    const setRows = setQ.data;
     const eff = (r: any, a: string, c: string, e: string) => r?.[a] === true && (r?.[c] !== true || r?.[e] !== false);
     for (const r of (setRows || []) as any[]) modsByRid[r.restaurant_id] = {
       banquet: eff(r, "banquet_allowed", "banquet_owner_control", "banquet_enabled"),
@@ -345,6 +381,7 @@ export async function GET(req: NextRequest) {
   }
   // ── Profiles & pay: the module state + this caller's rights, per restaurant ─────────
   const payrollOn = await payrollByRid(ids);
+  if (!payrollOn) return transient();   // see payrollByRid — never guess whether a feature exists
   const accessByRid: Record<string, PayAccess> = {};
   for (const r of s.restaurants) accessByRid[r.id] = payAccessWith(shownActor(s), r, payrollOn[r.id] === true);
 
@@ -410,7 +447,18 @@ export async function GET(req: NextRequest) {
 
   // Waiter sections: the Add form needs each restaurant's floor size to draw the table
   // picker. One tiny scoped read for the restaurants already in scope.
-  const tcRows = (await sb.from("settings").select("restaurant_id, table_count").in("restaurant_id", s.restaurants.map((r) => r.id))).data || [];
+  // ── CLOSING T13'S HANDOFF: THE FLOOR-SIZE READ NOW ANSWERS FOR ITSELF (T20 sweep #7, 2026-08-27) ─
+  // `.error` was never inspected, so a blip answered `tableCount: 0` for every restaurant — and the
+  // Add-a-waiter form draws its table picker from that number. The owner then got an empty box,
+  // "0 of 0 picked", and the line "Pick at least one table": told to do the one thing the screen was
+  // not offering, with Add disabled and nothing saying why. app/owner/staff/page.tsx already prints an
+  // honest sentence for the empty case and its comment ends "🔗 see the HANDOFF for the server-side
+  // read" — this is that read. `tableCountUnread` lets the page tell "we couldn't read the floor" apart
+  // from "this restaurant genuinely has no tables" (which is not a normal state: the column is NOT
+  // NULL DEFAULT 12 and the admin clamps it to 1–500).
+  const tcQ = await sb.from("settings").select("restaurant_id, table_count").in("restaurant_id", s.restaurants.map((r) => r.id));
+  if (tcQ.error) console.error("[owner/staff] could not read the floor size:", tcQ.error.message);
+  const tcRows = tcQ.data || [];
   const tcByRid: Record<string, number> = Object.fromEntries(tcRows.map((t) => [t.restaurant_id as string, Number(t.table_count) || 0]));
 
   return ok({
@@ -421,6 +469,8 @@ export async function GET(req: NextRequest) {
       ...slim(r), modules: { ...(modsByRid[r.id] || {}), payroll: payrollOn[r.id] === true },
       payAccess: accessByRid[r.id],
       tableCount: tcByRid[r.id] || 0,
+      // Only when it is genuinely true, so a healthy answer is byte-for-byte what it was.
+      ...(tcQ.error ? { tableCountUnread: true } : {}),
     })),
     staff: staffOut,
   });
@@ -447,10 +497,9 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
   // a person the real panel would refuse. Writes below still run with the admin's own power.
   if (!assignableFor(shownActor(s)).includes(u.role)) return bad("You can't open accounts at or above your own level.", 403);
   const r = s.restaurants.find((x) => x.id === u.restaurant_id)!;
-  const acc = await (async () => {
-    const on = (await payrollByRid([u.restaurant_id]))[u.restaurant_id] === true;
-    return payAccessWith(shownActor(s), r, on);
-  })();
+  const payMap = await payrollByRid([u.restaurant_id]);
+  if (!payMap) return transient();      // see payrollByRid
+  const acc = payAccessWith(shownActor(s), r, payMap[u.restaurant_id] === true);
   if (!acc.moduleOn) return ok({ disabled: true, error: "Staff profiles & pay aren't enabled for this restaurant — contact Aevidine." }, 403);
   if (!hasProfile(u.role)) return ok({ notEligible: true, error: "Kitchen logins don't have a profile.", role: u.role }, 200);
 
@@ -693,8 +742,9 @@ async function target(s: Extract<Scope, { ok: true }>, id: string) {
   if (!u) return { err: bad("That person isn't on your staff.", 404) };
   if (!assignableFor(s.actor).includes(u.role)) return { err: bad("You can't manage accounts at or above your own level.", 403) };
   const r = s.restaurants.find((x) => x.id === u.restaurant_id)!;
-  const on = (await payrollByRid([u.restaurant_id]))[u.restaurant_id] === true;
-  const acc = payAccessWith(s.actor, r, on);
+  const payMap = await payrollByRid([u.restaurant_id]);
+  if (!payMap) return { err: transient() };   // see payrollByRid — a lost salary save is the cost
+  const acc = payAccessWith(s.actor, r, payMap[u.restaurant_id] === true);
   if (!acc.moduleOn) return { err: bad("Staff profiles & pay aren't enabled for this restaurant.", 403) };
   if (!hasProfile(u.role)) return { err: bad("Kitchen logins don't have a profile or pay record.", 400) };
   return { u, acc };
@@ -791,8 +841,9 @@ async function postImpl(req: NextRequest): Promise<Response> {
   //    a name and a role. Personal details need the profile power; job & pay are owner/admin only.
   {
     const r = s.restaurants.find((x) => x.id === rid)!;
-    const on = (await payrollByRid([rid]))[rid] === true;
-    const acc = payAccessWith(s.actor, r, on);
+    const payMap = await payrollByRid([rid]);
+    if (!payMap) return transient();          // see payrollByRid
+    const acc = payAccessWith(s.actor, r, payMap[rid] === true);
     if (acc.moduleOn && hasProfile(role)) {
       if (acc.canEditProfile && body?.profile && typeof body.profile === "object") {
         row.profile = mergeProfilePatch({}, body.profile as Record<string, unknown>, PROFILE_FIELDS);
@@ -952,9 +1003,19 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // `select("*")`, which needlessly pulled `password_hash` into the route (it was never
   // echoed to the client, but there is no reason to move secret material at all), and broke
   // the project's own explicit-column rule (found 2026-08-04).
-  const u = (await sb.from("staff_users")
+  // ── "I COULDN'T ASK" IS NOT "THEY AREN'T YOURS" — ON THE ACCOUNT ACTIONS TOO (T20 sweep #7,
+  //    2026-08-27) ────────────────────────────────────────────────────────────────────────────────
+  // Finding F7 (2026-08-12) fixed exactly this read in `staffDetail()` and in `target()`, both of
+  // which now go through `rd()` and answer `transient()`. THIS read — the one behind
+  // reset_password / set_active / set_role / set_permissions / edit — was left as `.data?.[0]`, so a
+  // database blip still answered "That person isn't on your staff." with a 404: the wrong reason (it
+  // reads as a scoping or hierarchy problem and sends the owner looking for one), and a status no
+  // client retries, so resetting a password or switching a login off during a blip is silently lost.
+  const uq = await rd("account", () => sb.from("staff_users")
     .select("id, username, role, restaurant_id, token_version, permissions")
-    .eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
+    .eq("id", id).in("restaurant_id", ids).limit(1));
+  if (uq.error) return transient();
+  const u = (uq.data || [])[0] as { id: string; username: string; role: Role; restaurant_id: string; token_version: number | null; permissions: unknown } | undefined;
   if (!u) return bad("That person isn't on your staff.", 404);
   // Hierarchy: the TARGET must be below the actor's level — a manager can never
   // touch another manager's (or an owner's) account, in any way.
@@ -1062,9 +1123,12 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
     const merged: Record<string, string> = { ...(u.permissions && typeof u.permissions === "object" ? u.permissions : {}) };
     const noted: string[] = [];
-    // Load this restaurant's admin entitlements once, only if an owner grants a manager power.
-    let entsCache: unknown; let entsLoaded = false;
-    const ents = async () => { if (!entsLoaded) { entsCache = (await sb.from("restaurants").select("owner_entitlements").eq("id", u.restaurant_id).maybeSingle()).data?.owner_entitlements ?? null; entsLoaded = true; } return entsCache; };
+    // (The `owner_entitlements` loader that used to sit here is GONE — T20 sweep #7, 2026-08-27.
+    //  It was the memo for `powerEntitled(power_<flag>)`, the rung the T6 pass removed on
+    //  2026-08-06 when the grant check below moved to `access_config[flag].on`. Nothing has called
+    //  it since: a never-invoked closure holding a never-run database read, sitting three lines
+    //  above the check that replaced it — which is the shape that makes the next reader believe
+    //  entitlements are still consulted here. See the note on the feature gate below.)
     for (const [k, v] of Object.entries(patch)) {
       const cap = capByKey.get(k);
       if (!cap) return bad(`"${k}" isn't a permission a ${u.role} has.`);
@@ -1166,7 +1230,11 @@ async function deleteImpl(req: NextRequest) {
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing staff id.");
   const ids = s.restaurants.map((r) => r.id);
-  const u = (await sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
+  // Same rule as patchImpl above (F7's third and fourth reads): a blip must not read as "they
+  // aren't yours", least of all on the one action that removes an account for good.
+  const dq = await rd("account", () => sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).in("restaurant_id", ids).limit(1));
+  if (dq.error) return transient();
+  const u = (dq.data || [])[0] as { username: string; role: string; restaurant_id: string } | undefined;
   if (!u) return bad("That person isn't on your staff.", 404);
   // Hierarchy: can only delete accounts BELOW your level (see assignableFor).
   if (!assignableFor(s.actor).includes(u.role as Role)) return bad("You can't manage accounts at or above your own level.", 403);
