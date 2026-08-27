@@ -44,6 +44,10 @@ if (existsSync(join(ROOT, "tests"))) for (const n of readdirSync(join(ROOT, "tes
 
 // Lines that are pure comment — a rule quoted in prose must never fail its own guard.
 const codeLines = (src) => src.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => !/^\s*(\/\/|\*|\/\*)/.test(l));
+// The same source with whole-line comments dropped, as ONE string. Several checks below ask "does
+// this file call X?" — and this repo's guards explain themselves at length, so the sentence
+// describing the fix will happily match the pattern that looks for the fix. Ask the code.
+const bare = (src) => codeLines(src).map(([, l]) => l).join("\n");
 
 // ── 1 · A TEMPLATE PLACEHOLDER IN A NON-TEMPLATE STRING ──────────────────────────────────────────
 // `"${BASE}/menu"` is not a mistake a reader notices and not one any type-check catches: it is a
@@ -208,7 +212,7 @@ function quotedStrings(src) {
     const drivesBrowser = /\.goto\(|frameLocator\(|newContext\(/.test(src);
     const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}/.test(src);
     if (!drivesBrowser && !fetchesBase) continue;
-    if (/requireAppUp|requireUp/.test(src)) continue;                          // has the preflight
+    if (/requireAppUp|requireUp/.test(bare(src))) continue;                    // has the preflight — in CODE, not in a comment about it
     if (/SKIPPED \(pass --base|skipped the live checks|static only/i.test(src)) continue; // optional live half
     // verify-everything.mjs is the RUNNER, not a guard: it prints the base it resolved and WHERE it
     // came from on every single run, refuses to start while another run holds its lock, and checks it
@@ -225,6 +229,38 @@ function quotedStrings(src) {
   check("every guard that drives the app — a browser OR a fetch of its base — does the app-up preflight (exit 2 + a plain sentence, never a stack trace)",
     bad.length === 0,
     bad.join("\n      ") + "\n      Add:  import { requireUp } from \"./sweep/appUp.mjs\";  then  await requireUp(BASE, \"what it drives\");");
+}
+
+// ── 7 · A GUARD THAT IS TOLD --base MUST GO THERE, NOT TO PORT 4000 ─────────────────────────────
+// Port 4000 is the OWNER'S OWN WINDOW. Every parallel lane is given its own port and hands it over
+// as `-- --base http://localhost:41xx`. Two guards read only VERIFY_BASE and ignored the flag
+// entirely, so being told 4228 they quietly walked 4000 instead — driving, clicking and in one case
+// writing against the window he verifies on, while their output said nothing about it.
+// (sweep #7 / T28, 2026-08-27: verify-access-live and verify-manager-hidden.)
+//
+// The rule is not "use baseFrom()" — a guard may resolve its own base however it likes. The rule is
+// that a guard which drives an app it did not start must LOOK at --base. A guard that starts its own
+// stub server on a port it owns is exempt: nobody hands it a base.
+{
+  const bad = [];
+  for (const f of scriptFiles) {
+    if (!/^scripts\/verify-/.test(f)) continue;
+    const src = read(f);
+    const drivesBrowser = /\.goto\(|frameLocator\(|newContext\(/.test(src);
+    const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}|fetch\(\s*B\s*\+/.test(src);
+    if (!drivesBrowser && !fetchesBase) continue;
+    if (/createServer\(/.test(src)) continue;                        // brings up its own server
+    if (f === "scripts/verify-everything.mjs") continue;              // the runner; prints the base it chose
+    // Any of these means the flag is read: the shared helper, or the script's own argv lookup.
+    // CODE ONLY. Reading the raw source here made this check useless the moment it was written: the
+    // very comment explaining the fix says "baseFrom() takes --base first", and that sentence made
+    // the file look like it read the flag. A guard must never be satisfied by prose about itself.
+    if (/baseFrom\(|requireAppUp\(\s*process\.argv|indexOf\(\s*["']--base["']\s*\)|arg\(\s*["']--base["']|ARG\(\s*["']--base["']|argOf\(\s*["']--base["']/.test(bare(src))) continue;
+    bad.push(f);
+  }
+  check("every guard that drives an app it did not start reads --base (so a lane's own port is honoured, and port 4000 is never taken by surprise)",
+    bad.length === 0,
+    bad.join("\n      ") + "\n      Use baseFrom(process.argv) from ./sweep/appUp.mjs — it takes --base first, then LFH_BASE / VERIFY_BASE / BASE, then :4000.");
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────

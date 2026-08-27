@@ -38,7 +38,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { requireUp } from "./sweep/appUp.mjs";
+import { requireUp, baseFrom } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -46,7 +46,10 @@ const parseEnv = (t) =>
     const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
   }));
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
-const BASE = process.env.VERIFY_BASE || "http://localhost:4000";
+// --base WINS (sweep #7 / T28, 2026-08-27). This read VERIFY_BASE only, so being told
+// `-- --base http://localhost:4228` silently drove http://localhost:4000 — the port the OWNER
+// verifies on. baseFrom() takes --base first, then LFH_BASE / VERIFY_BASE / BASE, then 4000.
+const BASE = baseFrom(process.argv);
 const MGR = { user: process.env.VERIFY_MGR || "diagm1", pass: process.env.VERIFY_MGR_PW || "diag-mgr-2026" };
 // Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
 // stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
