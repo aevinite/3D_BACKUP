@@ -228,6 +228,61 @@ for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/sty
   }
 }
 
+// THE styled-jsx BLOCKS ARE DOCUMENTS TOO, and until sweep #7 no guard read them (T26). The trap
+// is the same one this file was built for — `var(--undeclared, <literal>)`, where the literal then
+// wins in BOTH skins — but it hides better here, because these blocks are scattered across 150 tsx
+// files instead of sitting in one stylesheet.
+//
+// A NEUTRAL fallback is explicitly fine and is NOT reported: a mid-grey at low alpha
+// (rgba(127,127,127,.22) on the connection pill, a 4% wash behind an owner row) reads the same way
+// on a cream page and a near-black one, which is the whole point of choosing it. What must not
+// appear is a fallback tuned for ONE skin — a tan, a brown, a navy — because that is the shape that
+// put the light skin's tan inside the dark skin twice already.
+{
+  const isNeutralGrey = (v) => {
+    let r, g, b;
+    const fn = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(v);
+    if (fn) [r, g, b] = [+fn[1], +fn[2], +fn[3]];
+    else {
+      // #888 and #888888 are just as neutral as rgb(136,136,136) — read both spellings, or the
+      // guard cries wolf about the very fallbacks it is meant to bless.
+      const hx = /^#([0-9a-f]{3}|[0-9a-f]{6})\b/i.exec(v.trim());
+      if (!hx) return false;
+      const h = hx[1].length === 3 ? hx[1].split("").map((c) => c + c).join("") : hx[1];
+      [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    }
+    return Math.max(r, g, b) - Math.min(r, g, b) <= 6;   // r≈g≈b: no hue to be wrong about
+  };
+  const declared = new Set();
+  const tsx = [];
+  for (const dir of ["app", "components"]) walk(dir, tsx);
+  const sources = tsx.filter((f) => f.endsWith(".tsx")).concat(["app/globals.css"]);
+  for (const f of sources) { let t; try { t = readFileSync(f, "utf8"); } catch { continue; }
+    for (const d of declarationsIn(t)) declared.add(d);
+    // style={{ ["--x" as string]: v }} — the inline form the plain declaration regex does not see
+    for (const m of t.matchAll(/\[\s*["'`](--[A-Za-z0-9_-]+)["'`](?:\s+as\s+\w+)?\s*\]\s*:/g)) declared.add(m[1]);
+  }
+  const offenders = [];
+  let blocks = 0;
+  for (const f of sources.filter((x) => x.endsWith(".tsx"))) {
+    const src2 = readFileSync(f, "utf8");
+    for (const b of src2.matchAll(/<style[^>]*jsx[^>]*>\s*\{\s*`([\s\S]*?)`\s*\}\s*<\/style>/g)) {
+      blocks++;
+      if (/-webkit-backdrop-filter/.test(b[1])) offenders.push(`${f} — hand-added -webkit-backdrop-filter; the build then DROPS backdrop-filter entirely`);
+      for (const v of b[1].matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*,\s*([^)]*(?:\([^)]*\))?[^)]*)\)/g)) {
+        const [, tok, fb] = v;
+        if (declared.has(tok) || KNOB.test(tok)) continue;
+        const val = fb.trim();
+        if (SAFE_FALLBACK.test(val) || isNeutralGrey(val)) continue;
+        if (!/^(#[0-9a-f]{3,8}|rgba?\(|hsla?\(|color\()/i.test(val)) continue;
+        offenders.push(`${f} — var(${tok}, ${val}) and ${tok} is declared nowhere, so that literal wins in BOTH skins`);
+      }
+    }
+  }
+  if (offenders.length) { fail(`${offenders.length} styled-jsx rule(s) pin one skin's colour into both:`); offenders.forEach((x) => console.error("    " + x)); }
+  else ok(`${blocks} styled-jsx block(s) — no undeclared token falls back to a colour that only suits one skin`);
+}
+
 if (STATIC_ONLY) {
   console.log(bad ? `\n${bad} look fault(s) found (static checks only).` : "\nOK — the static look checks pass (pass a --base to also measure the running app).");
   process.exit(bad ? 1 : 0);
