@@ -87,7 +87,7 @@ export default function PairPage() {
           The helper is already asking for work. It will start again by itself every time this
           computer is switched on, so you never have to come back to this page.
         </p>
-        <a className="pr-btn ghost" href="/aevinite/printing">Choose which printer prints what →</a>
+        <NextStep who={st?.who} />
       </>
     );
     if (!st) return <p className="pr-lead">Reading…</p>;
@@ -115,7 +115,7 @@ export default function PairPage() {
         <div className="pr-tick" aria-hidden="true">✓</div>
         <h1>Already linked</h1>
         <p className="pr-lead">This computer has been allowed to print. There is nothing left to do.</p>
-        <a className="pr-btn ghost" href="/aevinite/printing">Open Printing →</a>
+        <NextStep who={st.who} />
       </>
     );
 
@@ -208,6 +208,25 @@ export default function PairPage() {
       </div>
       <Style />
     </main>
+  );
+}
+
+// WHERE THIS PERSON GOES NEXT, and it is not the same place for both of them. The printing board
+// lives in TWO places (mig 367): the Aevidine console at /aevinite/printing, and the restaurant's own
+// Manager panel under Settings → Printing. This page is opened by a program on a shop's computer, and
+// the person pressing Allow is USUALLY the manager — for whom /aevinite is a password prompt they do
+// not have an answer to. Sending them there ends the setup at a login screen that reads like their
+// own sign-in just failed, at the exact moment the guide says "now choose which printer prints what".
+function NextStep({ who }: { who?: "admin" | "staff" }) {
+  if (who === "admin") return <a className="pr-btn ghost" href="/aevinite/printing">Choose which printer prints what →</a>;
+  return (
+    <>
+      <a className="pr-btn ghost" href="/manager">Choose which printer prints what →</a>
+      <p className="pr-note">
+        It is in your own panel, under <b>Settings → Printing</b>. Anyone who may set the printers up
+        can open it, and the same screen is where you unlink this computer again.
+      </p>
+    </>
   );
 }
 
