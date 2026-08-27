@@ -791,15 +791,31 @@ export async function GET(req: NextRequest) {
             ? sb.from("expenses").select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason, restaurant_id")
                 .in("restaurant_id", invEnabled).gte("expense_date", dFromM).lte("expense_date", dToM)
                 .order("expense_date", { ascending: false }).limit(MERGED_CAP + 1)
-            : Promise.resolve({ data: [] as Row[] }),
+            : Promise.resolve({ data: [] as Row[], error: null }),
           type === "invwaste"
             ? sb.from("inv_waste_entries").select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
                 .in("restaurant_id", invEnabled).gte("waste_date", dFromM).lte("waste_date", dToM)
                 .order("waste_date", { ascending: false }).limit(MERGED_CAP + 1)
-            : Promise.resolve({ data: [] as Row[] }),
+            : Promise.resolve({ data: [] as Row[], error: null }),
         ]);
-        // Same "say it out loud" rule as the single-restaurant lists below.
-        const expMRows = (expM.data || []) as Row[], wasteMRows = (wasteM.data || []) as Row[];
+        // ── THE RULE THE LINE ABOVE CLAIMED, ACTUALLY APPLIED (T20 sweep #7, 2026-08-27) ──────────
+        // This comment said "same 'say it out loud' rule as the single-restaurant lists below" — and
+        // the code did the opposite: both reads were `.data || []` with no `.error` check, so a failed
+        // read rendered "no expenses this month" / "no waste this month" on the MULTI-restaurant
+        // Inventory report. That is finding F5 exactly, in the branch F5 did not cover, and it is the
+        // worse branch: the hero band above these lists is SUMMED across restaurants, so the totals
+        // stay right while the list under them silently claims the month was empty.
+        //
+        // A comment asserting a rule the code does not keep is worse than no comment, because the next
+        // reader stops checking. Named in `partial` now, exactly like the single-restaurant twin.
+        if (expM.error) console.error("[owner/reports] merged expense list unread:", expM.error.message);
+        if (wasteM.error) console.error("[owner/reports] merged waste list unread:", wasteM.error.message);
+        const mergedPartial: PartialKey[] = [
+          ...(expM.error ? ["expenses" as PartialKey] : []),
+          ...(wasteM.error ? ["waste" as PartialKey] : []),
+        ];
+        const expMRows = (expM.error ? [] : (expM.data || [])) as Row[];
+        const wasteMRows = (wasteM.error ? [] : (wasteM.data || [])) as Row[];
         const expMMore = expMRows.length > MERGED_CAP, wasteMMore = wasteMRows.length > MERGED_CAP;
         return {
           type, range, bucket, merged: true,
@@ -832,6 +848,7 @@ export async function GET(req: NextRequest) {
           expenses: await signRows("inv-media", (expMMore ? expMRows.slice(0, MERGED_CAP) : expMRows) as Record<string, unknown>[], ["photo_url"]),
           waste: wasteMMore ? wasteMRows.slice(0, MERGED_CAP) : wasteMRows,
           listCap: MERGED_CAP, expensesMore: expMMore, wasteMore: wasteMMore,
+          ...(mergedPartial.length ? { partial: mergedPartial } : {}),
         };
       }
       // ── single restaurant (explicit ?rid, or the owner only has one with the module) ──
