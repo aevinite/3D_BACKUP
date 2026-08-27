@@ -163,6 +163,32 @@ for (const [file, needle, what] of [
     : bad(`${file} has lost ${what}`, `expected to find: "${needle}"`);
 }
 
+/* ── 5 · every document in docs/ has a row in docs/README.md ─────────────────────────────
+ * WHY (T29 sweep #7, 2026-08-27). `docs/README.md` is the index of this folder, and its own
+ * closing line promises: "Adding a document? Put it in the right table above in the same commit."
+ * Nothing checked it, and NINE live documents had no row — including `SECURITY-CHECKLIST.md`
+ * (what "check the security" means), both printing documents, the printing test plan, the
+ * cancel-and-loss spec, and the whole four-part HRMEX study. A document nobody's index names is a
+ * document nobody opens: a session looking for the printing rules reads an index that does not
+ * mention printing and concludes there is nothing to read. This is the cheapest possible guard
+ * against that — a filename either appears in the index or it does not.
+ */
+{
+  const INDEX = "docs/README.md";
+  const index = read(INDEX);
+  const docs = tracked
+    .filter((f) => /^docs\/[^/]+\.md$/.test(f))
+    .map((f) => f.slice("docs/".length))
+    .filter((f) => f !== "README.md");
+  const missing = docs.filter((f) => !index.includes(f));
+  missing.length
+    ? bad(`${INDEX} has no row for ${missing.length} document(s) in docs/: ${missing.join(", ")}`,
+        `That file's own closing line says "Adding a document? Put it in the right table above in the same\n      ` +
+        `commit." An unlisted document is one a session never opens — it reads the index, sees no mention of\n      ` +
+        `the subject, and concludes nothing was written about it. Add a row under LIVE, STUDIES or HISTORY.`)
+    : ok(`all ${docs.length} documents in docs/ have a row in docs/README.md`);
+}
+
 /* ── 6 · a live document may not name a code path that no longer exists ──────────────────
  * WHY (T29 sweep #7, 2026-08-27). `verify:pointers` resolves every path named in `CLAUDE.md`.
  * Nothing resolved the paths named in the OTHER rulebooks, and two were dead in the present
