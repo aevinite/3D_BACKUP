@@ -13,6 +13,17 @@
 // A new tenant table is a FAILURE until somebody decides which it is. That decision is cheap; the
 // silent drift was not.
 //
+// AND THE OTHER HALF, ADDED BY SWEEP #7 (T23, 2026-08-28). The check above only ever asked "is this
+// table accounted for SOMEWHERE" — so a table could sit on the KEEP list, with a written reason
+// saying it survives forever, while admin_purge_restaurant() deleted it, and nothing said a word.
+// Four tables were in exactly that state: `expenses`, `inv_purchases`, `inv_purchase_lines` (all
+// three carrying money-out reasons) and `aggregator_orders`, a parcel sale that holds its own
+// total, payment method and invoice number and has no mirror row in `orders`. A list that promises
+// something the function does not do is worse than no list. So KEEP now has to mean KEPT: a KEEP
+// table the purge deletes FAILS. The four are parked in DISPUTED, printed loudly on every run,
+// until the owner rules on them — and the tables the purge deletes with no reason written down
+// anywhere are counted too, because that silence is how `aggregator_orders` got there.
+//
 // DELIBERATELY NOT AUTO-DELETING. Deriving the delete list at runtime was the first idea and it is
 // wrong: the money tables must be kept (owner, 2026-08-11 — "keep bills forever, purge only the
 // rest"), and the surviving rows reference kept rows, so a generated delete order would break a
@@ -63,10 +74,10 @@ const KEEP = new Map([
   ["banquet_bills", "a banquet bill IS a sale"],
   ["orders_daily_agg", "the pre-summed money behind the kept bills"],
   ["orders_report_monthly_agg", "the pre-summed money behind the kept bills"],
-  ["expenses", "money out — a financial record, same reasoning as a sale"],
   ["staff_payments", "payroll paid — money out"],
-  ["inv_purchases", "stock bought — money out"],
-  ["inv_purchase_lines", "the lines of those purchases"],
+  // `expenses`, `inv_purchases` and `inv_purchase_lines` used to be here, with money-out reasons —
+  // and the purge deletes all three. Moved to DISPUTED below (sweep #7, T23, 2026-08-28) so this
+  // list only ever names tables that really do survive. Nothing about the purge itself changed.
   ["khata_customers", "a kept pay-later bill points at the person who owes it"],
   ["owner_records_agg",
     "DERIVED from the kept bills (best day, biggest bill, busiest hour — mig 327) and rebuilt nightly, "
@@ -76,8 +87,38 @@ const KEEP = new Map([
     "the tamper-evidence for the bills a purge KEEPS (mig 332). Not a preference: mig 332's "
     + "trg_bill_chain_append_only trigger REFUSES a delete, so purging it would raise and abort the "
     + "whole purge — and it is what proves the kept sales were never altered. Classified mig 346."],
-  ["settings", "deleted LAST by the purge, after every child (checked separately below)"],
-  ["staff_users", "deleted LAST by the purge, after every child (checked separately below)"],
+]);
+
+// ── DELETED, AND THAT IS THE INTENTION ─────────────────────────────────────────────────────────
+// `settings` and `staff_users` used to sit in KEEP with the note "deleted LAST by the purge, after
+// every child". That note was true and the list was the wrong place for it: KEEP means "survives a
+// purge", and these two do not. They are here so KEEP means exactly one thing (sweep #7, T23).
+const DELETED_LAST = new Map([
+  ["settings", "deleted LAST by the purge, after every child — the recycle-bin screen says so in words"],
+  ["staff_users", "deleted LAST by the purge, after every child — the recycle-bin screen says so in words"],
+]);
+
+// ── ON KEEP IN SPIRIT, DELETED IN FACT — awaiting the owner's decision ─────────────────────────
+// Found by sweep #7 (T23, 2026-08-28) by comparing KEEP against the delete list for the first time.
+// Each of these is a FINANCIAL record that admin_purge_restaurant() deletes today. Nothing is
+// changed here: what a purge removes is the owner's call, not a guard's. They are listed so the
+// contradiction is printed on every run instead of being invisible, and so the KEEP/deleted check
+// below can be strict about everything else.
+const DISPUTED = new Map([
+  ["aggregator_orders",
+    "a PARCEL / platform sale. It carries total, paid, paid_at, payment_method, bill_no, invoice_no "
+    + "and invoice_at, and migration 261 draws those numbers from the SAME series a dine-in bill "
+    + "uses. Measured 2026-08-28: 43 rows, 32 of them invoiced, and NOT ONE has a mirror row in "
+    + "`orders` (order_id is null on all 43) — so a purge is the only thing that touches them and "
+    + "the sale is gone while its invoice number stays consumed in seq_counters. KEEP already says "
+    + "'a banquet bill IS a sale'; a parcel bill is the same thing. Needs the owner's yes."],
+  ["expenses",
+    "money out. KEEP's own reason for this table was 'a financial record, same reasoning as a "
+    + "sale' — and the purge deletes it. One of the two is wrong; the owner decides which."],
+  ["inv_purchases",
+    "stock bought — money out. Same contradiction as `expenses`."],
+  ["inv_purchase_lines",
+    "the lines of those purchases. Same contradiction as `expenses`."],
 ]);
 
 // Tables the purge leaves behind today and we have NOT decided about yet. Listing them here is the
@@ -127,7 +168,8 @@ for (const t of tenant) {
   if (new RegExp(`delete\\s+from\\s+(public\\.)?${t}\\b`, "i").test(def)) purged.add(t);
 }
 
-const unclassified = tenant.filter((t) => !purged.has(t) && !KEEP.has(t) && !UNDECIDED.has(t));
+const known = (t) => KEEP.has(t) || UNDECIDED.has(t) || DELETED_LAST.has(t) || DISPUTED.has(t);
+const unclassified = tenant.filter((t) => !purged.has(t) && !known(t));
 
 pass(`${tenant.length} tables carry a restaurant_id`);
 pass(`${purged.size} are cleared by the purge`);
@@ -141,11 +183,41 @@ else for (const t of unclassified) {
   fail(`${t} carries a restaurant_id but the purge neither clears it nor keeps it on purpose — add it to admin_purge_restaurant(), or to KEEP/UNDECIDED in this file with the reason`);
 }
 
-// A stale name in either list is just as misleading as a missing table.
-for (const t of [...KEEP.keys(), ...UNDECIDED.keys()]) {
+// ── KEEP HAS TO MEAN KEPT ──────────────────────────────────────────────────────────────────────
+// The check above only ever asked "is this table accounted for SOMEWHERE". A table could therefore
+// sit on KEEP — "money out, a financial record, same reasoning as a sale" — while
+// admin_purge_restaurant() deleted it, and nothing said a word. Sweep #7 (T23) found four tables in
+// exactly that state. So: a table on KEEP that the purge DELETES is now a failure. The four known
+// ones live in DISPUTED until the owner rules on them, which is a decision he can see rather than a
+// promise the guard was quietly breaking.
+const keptButDeleted = [...KEEP.keys()].filter((t) => purged.has(t));
+if (keptButDeleted.length === 0) pass("every table on the KEEP list really does survive a purge");
+else for (const t of keptButDeleted) {
+  fail(`${t} is on the KEEP list ("${KEEP.get(t)}") but admin_purge_restaurant() DELETES it — `
+    + `one of the two is wrong. Move it to DISPUTED with the reason, or stop deleting it.`);
+}
+for (const t of DELETED_LAST.keys()) {
+  if (!purged.has(t)) fail(`${t} is listed as "deleted last by the purge" but the purge does not delete it any more — move it to KEEP`);
+}
+if ([...DELETED_LAST.keys()].every((t) => purged.has(t))) pass(`${DELETED_LAST.size} tables are deleted LAST, on purpose, after every child`);
+if (DISPUTED.size) {
+  console.log(`  … ⚠ ${DISPUTED.size} FINANCIAL tables are deleted by a purge and somebody has written down that they should not be.`);
+  console.log(`      This is the owner's decision, not a guard's — it is printed every run so it cannot go quiet again:`);
+  if (!QUIET) for (const [t, why] of DISPUTED) console.log(`      · ${t} — ${why}`);
+}
+// And the other half of the same blind spot: a table can be DELETED with no reason written down
+// anywhere. That is how aggregator_orders came to be purged. Reported, not failed — writing the
+// remaining reasons is a job someone has to do deliberately.
+const deletedWithNoReason = [...purged].filter((t) => !known(t)).sort();
+if (deletedWithNoReason.length === 0) pass("every table the purge deletes has a written reason");
+else console.log(`  … ${deletedWithNoReason.length} tables are deleted with no reason written down anywhere: ${deletedWithNoReason.join(", ")}`);
+
+// A stale name in any list is just as misleading as a missing table.
+const allListed = [...KEEP.keys(), ...UNDECIDED.keys(), ...DELETED_LAST.keys(), ...DISPUTED.keys()];
+for (const t of allListed) {
   if (!tenant.includes(t)) fail(`${t} is listed here but no longer has a restaurant_id column — remove the stale entry`);
 }
-if (![...KEEP.keys(), ...UNDECIDED.keys()].some((t) => !tenant.includes(t))) pass("no stale entries in either list");
+if (!allListed.some((t) => !tenant.includes(t))) pass("no stale entries in any list");
 
 // The two guards the owner's own rules put on this function must still be there.
 if (/never be purged/i.test(def)) pass("restaurant #1 still can never be purged");
