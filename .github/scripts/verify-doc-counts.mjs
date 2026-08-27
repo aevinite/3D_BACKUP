@@ -163,6 +163,70 @@ for (const [file, needle, what] of [
     : bad(`${file} has lost ${what}`, `expected to find: "${needle}"`);
 }
 
+/* ── 6 · a live document may not name a code path that no longer exists ──────────────────
+ * WHY (T29 sweep #7, 2026-08-27). `verify:pointers` resolves every path named in `CLAUDE.md`.
+ * Nothing resolved the paths named in the OTHER rulebooks, and two were dead in the present
+ * tense: `docs/CLAUDE-DETAIL.md` described an "admin-only floating switcher
+ * (components/AdminSwitcher)" that was deleted in June 2026, and `docs/GUARD-MAP.md` sent anyone
+ * editing the guest API to `app/api/menu`, which has never existed (it is `app/api/guest`).
+ *
+ * WHY IT IS AN EXPLICIT LIST AND NOT A CLEVER HEURISTIC, which is the part that matters. A path
+ * scan cannot tell a dead pointer from a deliberate OBITUARY, and these documents are full of
+ * sentences whose whole job is to name a deleted file and say "do not re-create it" — the
+ * print-station launchers, the work-checker, `components/ui/`. Deleting those sentences would be a
+ * real loss. The first draft of this check tried to read the surrounding prose for the word
+ * "deleted"; it both missed a real obituary twelve lines further down AND would have waved through
+ * the very AdminSwitcher sentence it exists to catch, because that paragraph happens to end
+ * "...were deleted". So the rule is blunt on purpose: a path either resolves, or it is named here
+ * with the reason it does not. A new dead path fails LOUDLY and a person decides which it is.
+ */
+{
+  // path → why it is deliberately named although it is not in this checkout.
+  const KNOWN_GONE = {
+    ".claude/deploy.lock":            "exists only while a deploy holds it — that is the whole mechanism",
+    ".claude/verify-everything.lock": "same: a pid lock that exists only while the suite is running",
+    ".claude/work-checker-lessons.md":"the work-checker was retired 2026-08-13; the rule says never recreate it",
+    "components/ui/":                 "never existed — the shadcn CLI is blocked on Tailwind 4 and the doc says so",
+    "components/AdminSwitcher.tsx":   "deleted 2026-06-26 (commit 2b9d3933); the doc now says so in the same sentence",
+    "public/print-station/*":         "deleted 2026-08-19 — nothing is offered as a download any more",
+    "app/api/print-station/":         "deleted 2026-08-19, with the print-station launchers",
+    "app/api/print-station/[file]/route.ts": "deleted 2026-08-19, with the print-station launchers",
+    "lib/printStation.ts":            "deleted 2026-08-19, with the print-station launchers",
+    "docs/FLOOR-TIMEOUT-WATCH.md":    "the floor-timeout watch was closed and retired 2026-08-05; the heading above it says so",
+  };
+  const LIVE = tracked
+    .filter((f) => /^docs\/[^/]+\.md$/.test(f) || f === "CLAUDE.md" || f === "README.md" || f === "AGENTS.md")
+    .filter((f) => !/⚠️\s*\*{0,2}HISTORY/.test(read(f).slice(0, 400)));
+  const EXTS = ["", ".ts", ".tsx", ".mjs", ".js", ".json", ".sql", ".md", ".css", ".html"];
+  const alive = (p) => {
+    const clean = p.replace(/\/$/, "");
+    if (EXTS.some((e) => existsSync(R(clean + e)))) return true;
+    const segs = clean.split("/");
+    const glob = segs.findIndex((s) => s.includes("*") || s.includes("["));
+    if (glob > 0) return existsSync(R(segs.slice(0, glob).join("/")));   // the folder a glob lives in
+    return false;
+  };
+  const PATH_RE = /`((?:app|lib|components|public|scripts|supabase|docs|tests|\.github|\.claude)\/[A-Za-z0-9_@./[\]*-]+)`/g;
+  const dead = [];
+  const usedAllowance = new Set();
+  for (const f of LIVE) for (const m of read(f).matchAll(PATH_RE)) {
+    const p = m[1].replace(/[.,;:]$/, "");
+    if (alive(p)) continue;
+    if (p in KNOWN_GONE) { usedAllowance.add(p); continue; }
+    dead.push(`${f} → ${p}`);
+  }
+  dead.length
+    ? bad(`${dead.length} live document(s) name a code path that is not in this checkout`,
+        [...new Set(dead)].join("\n      ") +
+        `\n      Either fix the path, or — if the thing really was deleted — say so in the same sentence AND add it\n      ` +
+        `to KNOWN_GONE in this file with the reason. An obituary is worth keeping; a path written as though\n      ` +
+        `it were still there sends the next session looking for a file that is not coming.`)
+    : ok(`every code path named in a live rulebook resolves, or is a recorded deletion`);
+  // A stale allowance is not a failure, but it is worth saying out loud.
+  const unused = Object.keys(KNOWN_GONE).filter((p) => !usedAllowance.has(p));
+  if (unused.length) ok(`(${unused.length} recorded deletion(s) no longer mentioned anywhere: ${unused.join(", ")})`);
+}
+
 console.log(fails
   ? `\n❌ verify-doc-counts — ${fails} problem(s). A number in a rulebook that no longer matches the code is a rule that misleads the next session.`
   : "\n✅ verify-doc-counts — every counted claim in the rulebooks matches the code");

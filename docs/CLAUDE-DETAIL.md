@@ -479,9 +479,10 @@ The panels are routes inside it:
 The editor/kitchen/tablet UIs are the original vanilla files served from
 `public/panels/<name>/` (embedded full-screen); their old Express APIs are ported
 to Next route handlers at `app/api/<name>/[...path]/route.ts` (service-role via
-`lib/supabaseAdmin.ts`). The admin-only floating switcher (`components/AdminSwitcher`)
-hops between panels. The old standalone folders + the separate editor repo were deleted
-(`docs/PROJECT-HISTORY.md` §12).
+`lib/supabaseAdmin.ts`). There is **no** floating panel switcher: `components/AdminSwitcher.tsx`
+was DELETED on 2026-06-26 (commit `2b9d3933`, "kill dead AdminSwitcher") and the admin reaches any
+restaurant's panels from `/aevinite` instead — do not re-create it. The old standalone folders +
+the separate editor repo were deleted (`docs/PROJECT-HISTORY.md` §12).
 
 ## Security gate (2026-06-13)
 
