@@ -135,6 +135,34 @@ export function cleanClonedSettings(
   base.parcel_allowed = true;      // permanent (mig 263) — the counter always sells parcels
   base.parcel_owner_control = false;
   base.parcel_enabled = true;
+  // ── KHATA · PAYROLL · INVENTORY — THE THREE LADDERS THAT WERE NEVER GIVEN A DEFAULT ─────────
+  // (T25 sweep #7, 2026-08-28.) The drift guard at the bottom of this function has been naming
+  // these nine columns in the server log on EVERY restaurant creation, and nobody reads a server
+  // log. Measured on the dev database, restaurant #1 — the template every new restaurant is cloned
+  // from — holds:
+  //
+  //     khata_allowed true · khata_owner_control false · khata_enabled true
+  //     payroll_allowed true · payroll_owner_control TRUE · payroll_enabled true
+  //     inventory_allowed false · inventory_owner_control TRUE · inventory_enabled true
+  //
+  // So a brand-new restaurant was born with PAY LATER live and PAYROLL live with the owner already
+  // holding the switch — no admin grant, nobody's decision, and Payroll is staff salaries. That is
+  // the "#1 leaks onto restaurant #2" class this whole file exists to stop, and the checklist rule
+  // it breaks is written down: "new modules default OFF".
+  //
+  // The shape below is the same one every module above uses: the admin holds the feature (allowed
+  // false), no owner transfer (owner_control false), and the owner's own toggle sits at its neutral
+  // ON so the feature works the moment Aevidine grants it. Existing restaurants are untouched —
+  // this function only ever builds a NEW row.
+  base.khata_allowed = false;
+  base.khata_owner_control = false;
+  base.khata_enabled = true;
+  base.payroll_allowed = false;
+  base.payroll_owner_control = false;
+  base.payroll_enabled = true;
+  base.inventory_allowed = false;
+  base.inventory_owner_control = false;
+  base.inventory_enabled = true;
   // Platform board module (mig 209): unlike existing restaurants (backfilled ON), a NEW
   // restaurant starts OFF — it's opt-in (admin turns it on once the restaurant is on the
   // delivery apps). Channels start empty (none live). owner-transfer off, owner toggle neutral-ON.

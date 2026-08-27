@@ -109,6 +109,66 @@ else for (const n of strayTabs) {
   fail(`settings.${n} is a NEW tablet-rung column. It belongs in settings.modules["<module>"].tablet (mig 326).`);
 }
 
+// 3b. EVERY LADDER COLUMN THAT EXISTS MUST HAVE AN EXPLICIT DEFAULT IN THE CLONE
+//     (T25, sweep #7, 2026-08-28.)
+//
+// A new restaurant's `settings` row is CLONED from restaurant #1's (lib/settingsClone.ts — it is
+// the cheapest way to satisfy every NOT-NULL column). So any ladder column that file forgets is
+// inherited from the flagship, silently, for ever. That is the "#1 leaks onto restaurant #2" class
+// the whole file exists to stop, and the checklist rule it breaks is written down: a new module
+// defaults OFF.
+//
+// cleanClonedSettings() already has a drift tripwire for exactly this — and it is a `console.warn`,
+// fired at RUNTIME, inside the request that creates a restaurant. Nobody reads a server log. It had
+// been naming nine columns (khata_*, payroll_*, inventory_*) on every creation, and restaurant #1
+// holds payroll_allowed=true and payroll_owner_control=true, so every restaurant made since was
+// born with staff PAYROLL live and the owner already holding the switch.
+//
+// So the same rule is asserted HERE, where a red line stops a merge. The runtime warn stays: it is
+// right that creating a restaurant never FAILS over a missing default.
+{
+  const cloneSrc = readFileSync(join(root, "lib/settingsClone.ts"), "utf8");
+  // Assignments only — a column NAMED in a comment is documentation, not a default. (Strip the
+  // line comments; never a block-comment stripper, which eats a file at the first `/*` in a regex.)
+  const cloneCode = cloneSrc.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+  const assigned = new Set([...cloneCode.matchAll(/\bbase\.([a-z0-9_]+)\s*=/g)].map((m) => m[1]));
+  const nulled = /const NULL_COLUMNS = \[([\s\S]*?)\]/.exec(cloneSrc);
+  for (const n of (nulled ? [...nulled[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]) : [])) assigned.add(n);
+  // A DEAD COLUMN NEEDS NO DEFAULT, and saying otherwise would make this guard cry wolf on its
+  // first run: settings.table_assign_* still exists (mig 222) but lib/tableAssign.ts answers that
+  // ladder from a hard-coded always-on function and says in as many words that "nothing reads
+  // them". Inheriting a value nothing reads changes nothing for anybody. So the rule is: a ladder
+  // column needs an explicit default the moment some SOURCE FILE reads it — which also means the
+  // day one of these wakes up, this guard asks for its default without anyone remembering to.
+  const readSomewhere = (col) => {
+    const stack = [join(root, "app"), join(root, "lib"), join(root, "components"), join(root, "public")];
+    while (stack.length) {
+      const d = stack.pop();
+      let entries = [];
+      try { entries = readdirSync(d, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const full = join(d, e.name);
+        if (e.isDirectory()) { stack.push(full); continue; }
+        if (!/\.(ts|tsx|mjs|js)$/.test(e.name)) continue;
+        if (full.endsWith("lib/settingsClone.ts")) continue;      // the writer is not a reader
+        // Line comments dropped, so a comment EXPLAINING a retired column is not counted as a
+        // reader. (Never a block-comment stripper — a `/*` inside a regex literal pairs with a
+        // `*/` tens of thousands of characters later and silently eats the file.)
+        const noComments = readFileSync(full, "utf8").replace(/(^|[^:\\])\/\/[^\n]*/g, "$1 ");
+        if (noComments.includes(col)) return true;
+      }
+    }
+    return false;
+  };
+  const missing = [...ladder, ...tabs].filter((n) => !assigned.has(n)).filter(readSomewhere);
+  if (!missing.length) {
+    pass(`all ${ladder.length + tabs.length} ladder and tablet-rung columns get an EXPLICIT default in lib/settingsClone.ts`);
+  } else for (const n of missing) {
+    fail(`lib/settingsClone.ts sets no explicit default for settings.${n} — a new restaurant therefore INHERITS restaurant #1's value for it. Add \`base.${n} = …\` beside the other ladders (a module starts admin-held: allowed false, owner_control false, enabled true).`);
+  }
+}
+
 // 4. the declaration side: nothing may quietly claim to be bag-backed AND own columns
 const model = readFileSync(join(root, "lib/accessModel.ts"), "utf8");
 // Count real DECLARATIONS only — a line starting with * or // is documentation, and counting the
