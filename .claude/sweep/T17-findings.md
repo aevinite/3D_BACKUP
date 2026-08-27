@@ -156,9 +156,21 @@ alarm rather than answer it.
 
 `verify:admin-health` now holds **26** fixes.
 
-## One red that is NOT mine
+## The one red that was not mine — item 12, fixed on his word
 
-`npm run verify:admin-api-a` fails on `app/api/admin/printing/[...path]/route.ts` — one read with
-no ceiling. **It is red on clean `origin/main` too** (checked by reverting my two files and
-re-running), it is in a file this territory does not own, and I have not touched it. Reported here
-so nobody reads it as fallout from this branch.
+`npm run verify:admin-api-a` was failing on `app/api/admin/printing/[...path]/route.ts`: the
+Printing board's people picker read a restaurant's staff with no ceiling, so past PostgREST's own
+default cap people would simply stop appearing in it, with nothing saying the list was short.
+
+**It was red on clean `origin/main` too** — checked by reverting my files and re-running — so it
+was never fallout from this branch. It is not this territory's file either, which is why it was
+reported as a decision rather than changed. He answered *"do what's left"*, so it is built:
+`.limit(500)`, matching every sibling read in that file.
+
+`verify:admin-api-a` now passes **all 181 checks**, for the first time in this run. Removing the
+limit again turns it red, so it stays caught.
+
+⚠️ **It overlaps another terminal.** `sweep7/t15-admin-access` rewrites the column list on the
+line directly above (f8ce16d1), so a one-line merge conflict is likely. Whoever lands second must
+keep **both** the `permissions` column T15 adds and this `.limit(500)`. The guard fails if the
+limit is lost, which is exactly why fixing it beat leaving a note.
