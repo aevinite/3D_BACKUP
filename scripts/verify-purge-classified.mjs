@@ -63,10 +63,17 @@ const KEEP = new Map([
   ["banquet_bills", "a banquet bill IS a sale"],
   ["orders_daily_agg", "the pre-summed money behind the kept bills"],
   ["orders_report_monthly_agg", "the pre-summed money behind the kept bills"],
-  ["expenses", "money out — a financial record, same reasoning as a sale"],
   ["staff_payments", "payroll paid — money out"],
-  ["inv_purchases", "stock bought — money out"],
-  ["inv_purchase_lines", "the lines of those purchases"],
+  // REMOVED FROM THIS LIST (T22 sweep #7, 2026-08-28): `expenses`, `inv_purchases` and
+  // `inv_purchase_lines` sat here reading "money out — a financial record, same reasoning as a
+  // sale" while migrations 321 and 345 have been DELETING all three since 2026-08-16. The list
+  // and the function said opposite things and nothing noticed, because this guard only ever
+  // looked for tables missing from BOTH lists. The migrations are the decision: mig 345's own
+  // header names "expenses, banquet configuration, table QR codes and table tags" among the
+  // things a permanent removal must clear, and the compliance rule it is protecting is about a
+  // SALE (docs/COMPLIANCE-GUARDRAILS.md §3.0) — an expense and a stock purchase are not sales.
+  // So they are purged, they need no classification, and the assertion added at the bottom of
+  // this file now makes a contradiction like that one FAIL instead of sitting in a comment.
   ["khata_customers", "a kept pay-later bill points at the person who owes it"],
   ["owner_records_agg",
     "DERIVED from the kept bills (best day, biggest bill, busiest hour — mig 327) and rebuilt nightly, "
@@ -80,31 +87,26 @@ const KEEP = new Map([
   ["staff_users", "deleted LAST by the purge, after every child (checked separately below)"],
 ]);
 
+// The two entries above are on KEEP for a different reason from all the others: they ARE deleted,
+// just last of all, after every child row that points at them. They are named here so the
+// money-is-kept assertion at the bottom does not read them as a contradiction.
+const DELETED_LAST = new Set(["settings", "staff_users"]);
+
 // Tables the purge leaves behind today and we have NOT decided about yet. Listing them here is the
 // whole point: they are visible, dated, and a person has to choose. Emptying this list is the work.
 const UNDECIDED = new Map([
-  ["banquet_items", "the banquet MENU (not a bill) — almost certainly should be purged"],
-  ["table_tags", "vip/family marks on tables — operational"],
-  ["table_qr_codes", "the printed QR codes — operational"],
+  // Re-derived against the live function on 2026-08-28 (T22, sweep #7). Nineteen of the
+  // twenty-two names that used to sit here — banquet_items, table_tags, table_qr_codes,
+  // print_jobs, printer_events, all three rate_limit_* tables, error_signatures,
+  // customer_devices, customer_visits, orders_change_watermark and the whole inv_* book — are
+  // cleared by admin_purge_restaurant() today and have been since migrations 321/345. Leaving
+  // them here made this guard print "22 tables are LEFT BEHIND and not yet decided" every run,
+  // when the real number was three. A remaining-work list that is 86% wrong is worse than no
+  // list: it is the reason nobody read this section. Re-derive it, do not extend it by hand —
+  // `node scripts/verify-purge-classified.mjs` now fails if a name here is actually purged.
   ["action_idempotency", "at-most-once claims, pruned by age anyway (mig 268)"],
-  ["print_jobs", "print queue — operational"],
-  ["printer_events", "printer history — operational"],
-  ["rate_limit_counters", "throttle counters — operational"],
-  ["rate_limit_events", "throttle hits — operational"],
-  ["rate_limit_rules", "throttle settings — operational"],
-  ["error_signatures", "crash grouping — operational"],
   ["fix_requests", "the Fix-NOW queue — operational"],
-  ["customer_devices", "which device a returning guest used — personal data, probably purge"],
-  ["customer_visits", "visit history — personal data, but a kept bill may reference it"],
   ["table_merges", "which tables were joined — describes how a service ran"],
-  ["orders_change_watermark", "one row per restaurant, a refetch marker — operational"],
-  ["inv_items", "stock list — but kept inv_purchase_lines reference it, so deleting needs care"],
-  ["inv_movements", "stock in/out — operational, references inv_items"],
-  ["inv_counts", "stock takes — operational"],
-  ["inv_count_lines", "lines of a stock take — operational"],
-  ["inv_recipe_lines", "dish→ingredient map — operational, references inv_items"],
-  ["inv_vendors", "suppliers — referenced by kept purchases"],
-  ["inv_waste_entries", "waste log — operational"],
 ]);
 
 console.log("\nAdmin console → Restaurants → Recycle bin → purge: is every tenant table accounted for?");
@@ -147,6 +149,38 @@ for (const t of [...KEEP.keys(), ...UNDECIDED.keys()]) {
 }
 if (![...KEEP.keys(), ...UNDECIDED.keys()].some((t) => !tenant.includes(t))) pass("no stale entries in either list");
 
+// ── THE DIRECTION THIS GUARD NEVER CHECKED (T22, sweep #7, 2026-08-28) ────────────────────────
+// Everything above asks "is any tenant table missing from both lists?". Nothing asked the
+// opposite and far more expensive question: IS THE PURGE DELETING SOMETHING THE KEEP LIST SAYS
+// MUST SURVIVE? That is the compliance direction — "a sale can never disappear"
+// (docs/COMPLIANCE-GUARDRAILS.md §3.0) — and it was unguarded, so this file could sit green
+// while admin_purge_restaurant() erased `orders`.
+//
+// This is not hypothetical. Migration 345 exists because migration 342 rewrote this very
+// function from an older body and silently dropped twenty-two deletes; the same rewrite in the
+// other direction would silently ADD one, and only `verify:fix-survives` would have had a
+// chance of noticing. Three entries (expenses, inv_purchases, inv_purchase_lines) had already
+// drifted into exactly this contradiction — written down as kept, deleted in practice — and
+// stayed that way through five sweeps because no check compared the two.
+const mustSurvive = [...KEEP.keys()].filter((t) => !DELETED_LAST.has(t));
+const wronglyPurged = mustSurvive.filter((t) => purged.has(t));
+if (wronglyPurged.length === 0) {
+  pass(`the ${mustSurvive.length} tables kept on purpose are all absent from the purge's delete list`);
+} else for (const t of wronglyPurged) {
+  fail(`admin_purge_restaurant() DELETES ${t}, but this file keeps it on purpose: "${KEEP.get(t)}" — `
+    + "one of the two is wrong. If the purge is right, take the table off KEEP with the reason; if "
+    + "KEEP is right, this is a sale or a financial record being erased and the migration must go.");
+}
+
+// And the mirror of it, so the remaining-work list cannot rot again: a name on UNDECIDED that the
+// purge actually clears is a false to-do, and it is what made this section unreadable.
+const falseTodo = [...UNDECIDED.keys()].filter((t) => purged.has(t));
+if (falseTodo.length === 0) pass("every name on the not-yet-decided list is genuinely still left behind");
+else for (const t of falseTodo) {
+  fail(`${t} is on the not-yet-decided list but admin_purge_restaurant() already clears it — `
+    + "remove the entry, or this list keeps reporting work that is done");
+}
+
 // The two guards the owner's own rules put on this function must still be there.
 if (/never be purged/i.test(def)) pass("restaurant #1 still can never be purged");
 else fail("the 'default restaurant can never be purged' guard is gone from admin_purge_restaurant()");
@@ -165,6 +199,7 @@ if (/Retention lock/i.test(defCode) || /90 days/.test(defCode)) {
 } else pass("the retention lock stays removed, as the owner asked (mig 342)");
 
 console.log(failed
-  ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — a purge would silently leave a table behind`
-  : "\n✓ every tenant table is either purged or kept on purpose");
+  ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — a purge would leave a table behind, erase one it `
+    + "promised to keep, or report work that is already done"
+  : "\n✓ every tenant table is either purged or kept on purpose, and the money is provably kept");
 process.exit(failed ? 1 : 0);
