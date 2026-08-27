@@ -62,6 +62,13 @@ export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!isUuid(rid)) return bad("Invalid restaurant_id.");
+  // The SAME existence check the upload above has carried since the 2026-07-06 audit — "a valid-looking
+  // but unknown id would … return a URL no restaurant references". Remove had never been given it, so a
+  // stale id updated 0 rows and still answered {ok:true}: the console said the logo was removed, wrote
+  // an audit line saying so, and nothing had changed anywhere. (T20 sweep #7, 2026-08-27.)
+  const exists = await sb.from("restaurants").select("id").eq("id", rid).maybeSingle();
+  if (exists.error) return adminFail("this restaurant's logo", exists.error, { action: "load" });
+  if (!exists.data) return bad("Restaurant not found.", 404);
   const { error } = await sb.from("restaurants").update({ logo_url: null }).eq("id", rid);
   if (error) return adminFail("this restaurant's logo", error, { action: "save" });
   await purgeLogos(rid); // also delete the stored file(s), not just the DB link
