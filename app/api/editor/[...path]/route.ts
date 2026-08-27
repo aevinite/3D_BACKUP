@@ -48,6 +48,13 @@ import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, r
 // a helper prints on the printer the address book names, a screen prints on whatever its own machine
 // defaults to, and both printing means the same ticket in two rooms.
 import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint } from "@/lib/printHelpers";
+// SETTING THE PRINTERS UP FROM THE MACHINE THAT HAS THEM (mig 367, owner 2026-08-27). The same board
+// the admin console draws, narrowed to this computer — same file, same four steps, same words.
+import {
+  agentForDevice, createAgent, writeRoutes, mintAgentToken, syncKotSwitch, isRoutableKind,
+} from "@/lib/printHelpers";
+import { printBoardState } from "@/lib/printBoard";
+import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
@@ -97,6 +104,35 @@ import { panelSafeSettings } from "@/lib/panelSettings";
 import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic"; // always live, never cached
+
+// ── THE INSTALL TEXT, BUILT FOR THE MACHINE ASKING FOR IT ────────────────────────────────────────
+// The site the helper must talk to is taken from THIS request, never from a constant: a code minted
+// on backup points at backup, one minted on the live site points at the live site. A helper aimed at
+// the wrong site is a machine that never prints and never says why.
+const originOfReq = (req: NextRequest) => {
+  const h = req.headers;
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  return host ? `${proto}://${host}` : new URL(req.url).origin;
+};
+
+/** What this browser is running on, so the setup steps open on the right operating system without
+ *  anybody having to choose. A guess, and treated as one: the other two are always one tap away. */
+const osOfRequest = (req: NextRequest): HelperOs => {
+  const ua = (req.headers.get("user-agent") || "").toLowerCase();
+  if (ua.includes("windows")) return "windows";
+  if (ua.includes("mac os") || ua.includes("macintosh")) return "mac";
+  return "linux";
+};
+
+const PANEL_OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
+/** Shown ONCE, when a code is minted or replaced — it is stored only as a hash, so it can never be
+ *  read back. A lost code is REPLACED, never recovered, and the screen says so beside the button. */
+const panelScriptsFor = (origin: string, code: string, label: string) =>
+  Object.fromEntries(PANEL_OS_LIST.map((os) => [os, {
+    filename: HELPER_FILENAME[os], autostart: HELPER_AUTOSTART[os],
+    text: helperScript(os, { origin, code, label }),
+  }]));
 
 // Gate: only a logged-in MANAGER (or the admin super-user) may touch this API.
 // Returns a 401 response to short-circuit, or null to let the handler proceed.
@@ -2094,6 +2130,35 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
 
+
+    // ── SETTINGS → PRINTING: the same board the admin sees, on the machine that has the printer ──
+    //
+    // Owner, 2026-08-27: "that device is connected to the printer, so it will be easy for THAT device
+    // to set up the printer… admin can still see it… but that device will only get the option in
+    // settings, like everyone has their settings where they log out from."
+    //
+    // TWO LEVELS OF ANSWER, and the difference is one permission:
+    //   · anybody who can open Settings gets the READ — is printing on, where does the paper go,
+    //     what has printed. It is the same page they had before, and it tells nobody anything about
+    //     another restaurant.
+    //   · a person with "May set the printers up" (accessTree → print_setup) additionally gets the
+    //     BUTTONS: register this computer, get its code, choose which printer prints what.
+    // The permission is asked here, on the server, and again on every write below — the screen
+    // hiding a button has never been a gate.
+    if (path[0] === "printing" && (path.length === 1 || path[1] === "state")) {
+      const dv = deviceIdFrom(req);
+      const maySetup = g.user ? await managerCan(g, rid, "print_setup") : true;
+      const board = await printBoardState(rid, { deviceId: dv });
+      return ok({
+        ...board,
+        maySetup,
+        deviceId: dv,
+        // Which install text to show FIRST. The browser knows what it is running on, so nobody has to
+        // pick their own operating system off a list and get it wrong — the other two stay one tap away.
+        os: osOfRequest(req),
+        person: g.user ? { id: g.user.id, name: g.user.name || g.user.username || "" } : null,
+      });
+    }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
     // One-off read on the manager's click, never polled. The order may have left the live
@@ -4766,6 +4831,155 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : `try ${r.attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
       });
       return ok({ ok: true, attempts: r.attempts });
+    }
+
+    // ── SETTING THE PRINTERS UP, FROM THE COMPUTER THAT HAS THEM (mig 367) ──────────────────────
+    //
+    // Every verb below asks managerCan("print_setup") FIRST, before it reads or writes a single row.
+    // The screen hides the buttons too, but that is decoration: this is the gate.
+    //
+    // AND EVERY VERB IS SCOPED TO THIS BROWSER'S OWN COMPUTER. A person with the permission can set
+    // up the machine they are sitting at and route paper to it; they cannot rename, re-code or
+    // remove another restaurant's machine, or another machine in their own restaurant. Anything
+    // wider than "this computer" stays with the admin, which is what the owner asked for — the
+    // device does the setting up, Aevidine keeps the whole board.
+    if (a === "printing") {
+      if (g.user && !(await managerCan(g, rid, "print_setup"))) return permDenied("set the printers up");
+      const dv = deviceIdFrom(req);
+      if (!dv) return err("This browser has no device id yet — reload the page and try again.", 400);
+
+      // ── "This is the computer with the printer" ───────────────────────────────────────────────
+      // Registers THIS browser's machine and hands back the one-time code. A second call from the
+      // same browser does not make a second computer: it renames the one it already has, because a
+      // person pressing the button twice means "I am setting this machine up", not "I have two".
+      if (b === "this-computer") {
+        const name = String((body as Record<string, unknown>)?.name || "").trim().slice(0, 60)
+          || (g.user?.name || g.user?.username || "This computer");
+        // ── "I AM THAT COMPUTER" ─────────────────────────────────────────────────────────────
+        // The link between a browser and its helper is the panel's own device id, and a device id
+        // does not survive a cleared browser, a new profile, or a machine that was set up from the
+        // admin console in the first place. Without a way back, the person sitting at the printer
+        // would see "this computer is not set up yet" beside a helper that is plainly running, and
+        // the only way out would be a SECOND registration of the same machine — two rows, one
+        // printer, and half the tickets in the wrong room.
+        //
+        // So a computer can be adopted: pick the one you are sitting at, and this browser becomes
+        // its screen. It never steals a machine from another live browser silently — the row's old
+        // device is replaced, and the change is audited like every other printing change.
+        const adopt = String((body as Record<string, unknown>)?.adopt || "");
+        if (adopt) {
+          const row = (await sb.from("print_agents").select("id, name").eq("id", adopt)
+            .eq("restaurant_id", rid).is("revoked_at", null).maybeSingle()).data as { id: string; name: string } | null;
+          if (!row) return err("That computer is not one of this restaurant's.", 404);
+          await sb.from("print_agents").update({ owner_device: dv, owner_user: g.user?.id || null })
+            .eq("id", row.id).eq("restaurant_id", rid);
+          await logAction("editor", "print_routes_changed", {
+            restaurant_id: rid, device_id: dv,
+            ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+            detail: `this screen now manages the computer “${row.name}”`,
+          });
+          return ok({ adopted: true, id: row.id, name: row.name });
+        }
+        const mine = await agentForDevice(rid, dv);
+        if (mine) {
+          if (name !== mine.name) {
+            const up = await sb.from("print_agents").update({ name }).eq("id", mine.id).eq("restaurant_id", rid).select("id").maybeSingle();
+            if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.", 400);
+          }
+          return ok({ already: true, id: mine.id, name });
+        }
+        const made = await createAgent(rid, name, { deviceId: dv, userId: g.user?.id || null });
+        if ("error" in made) return err(made.error, 400);
+        await logAction("editor", "print_helper_added", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `computer “${name}” set itself up to print`,
+        });
+        return ok({ id: made.id, name, code: made.token, scripts: panelScriptsFor(originOfReq(req), made.token, name) });
+      }
+
+      // ── a fresh code for THIS computer ────────────────────────────────────────────────────────
+      // The old one dies the instant this returns. That is also how a lost code is dealt with:
+      // nothing is recovered, a new one is made, and the helper file is written out again.
+      if (b === "newcode") {
+        const mine = await agentForDevice(rid, dv);
+        if (!mine) return err("This computer has not been set up yet.", 404);
+        const { token, hash } = mintAgentToken();
+        // Cleared WITH the code: the next machine to use it is the machine it now belongs to, so a
+        // replaced code never inherits an old "used on two computers" warning.
+        await sb.from("print_agents").update({ token_hash: hash, fingerprint: null, seen_fingerprints: [] })
+          .eq("id", mine.id).eq("restaurant_id", rid);
+        await logAction("editor", "print_helper_recoded", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `new printing code for “${mine.name}”`,
+        });
+        return ok({ code: token, scripts: panelScriptsFor(originOfReq(req), token, mine.name) });
+      }
+
+      // ── who prints one kind of paper ──────────────────────────────────────────────────────────
+      // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
+      // route from here always means THIS panel and THIS person — narrowing it to somebody else's
+      // screen is an admin act, and letting a manager do it from their own settings would be a way
+      // to move another person's paper without telling them.
+      if (b === "route") {
+        const kind = String((body as Record<string, unknown>)?.kind || "");
+        if (!isRoutableKind(kind)) return err("There is no such kind of paper.", 400);
+        const who = String((body as Record<string, unknown>)?.who || "");
+        const mine = await agentForDevice(rid, dv);
+        let patch: Record<string, unknown>;
+        if (who === "computer") {
+          if (!mine) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
+          const printer = String((body as Record<string, unknown>)?.printer || "");
+          if (!printer) return err("Which printer?", 400);
+          patch = {
+            agent: mine.id, printer,
+            paper: (body as Record<string, unknown>)?.paper ?? undefined,
+            backupAgent: (body as Record<string, unknown>)?.backupAgent ?? null,
+            backupPrinter: (body as Record<string, unknown>)?.backupPrinter ?? null,
+          };
+        } else if (who === "screen") {
+          patch = { via: "screen", panel: "manager", person: g.user?.id || null, device: dv };
+        } else if (who === "off") {
+          patch = { via: "off" };
+        } else {
+          return err("Say who prints it — this computer, a screen, or nobody.", 400);
+        }
+        const saved = await writeRoutes(rid, { [kind]: patch });
+        if ("error" in saved) return err(saved.error, 400);
+        // KITCHEN SLIPS AND auto_print_kot ARE ONE DECISION (see lib/printHelpers → syncKotSwitch).
+        // Without this the trigger would keep filling the basket with slips nobody could claim,
+        // behind a switch that said off — and the two boards would disagree again, which is the
+        // exact fault the owner reported.
+        if (kind === "kot") await syncKotSwitch(rid, who !== "off");
+        await logAction("editor", "print_routes_changed", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `${kind === "kot" ? "kitchen slips" : kind === "bill" ? "bills" : "banquet sheets"} → ${
+            who === "computer" ? `${String((body as Record<string, unknown>)?.printer || "")} on ${mine?.name || "this computer"}`
+              : who === "screen" ? "this screen" : "nobody"}`,
+        });
+        return ok({ routes: saved.routes });
+      }
+
+      // ── a test page on one of THIS computer's printers ────────────────────────────────────────
+      if (b === "test") {
+        const mine = await agentForDevice(rid, dv);
+        if (!mine) return err("Set this computer up first.", 400);
+        const printer = String((body as Record<string, unknown>)?.printer || "");
+        if (!mine.printers.some((x) => x.name === printer)) return err("This computer has no printer by that name.", 400);
+        const q = await queueJob(rid, "test", { by: g.user?.name || g.user?.username || "manager" },
+          { requestedBy: "test page", agentId: mine.id, printer });
+        if ("error" in q) return err("Could not send the test page.", 500);
+        await logAction("editor", "print_test", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `test page to ${printer}`,
+        });
+        return ok({ queued: true, note: mine.connected ? `Sent to ${printer}.` : `Saved — it prints as soon as this computer's helper is running.` });
+      }
+
+      return err("Unknown printing request.", 404);
     }
 
     // ── print-station/take · /release — "print HERE instead" from the counter screen (mig 338) ──

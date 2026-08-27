@@ -49,6 +49,8 @@ const phase = async (title, fn) => {
 // ── the world this sweep works in ─────────────────────────────────────────────────────────────
 const made = { agents: [], jobs: [], orders: [], events: [] };
 let RID = "", bagWas = {}, switchesWas = {}, TOKEN = "", AGENT = null, SESSION = null;
+// The restaurant's manager_permissions, captured the first time 6b changes them and put back at the end.
+let permsWas = null;
 const mint = () => { const t = "lfhp_" + randomBytes(24).toString("base64url"); return { t, h: createHash("sha256").update(t).digest("hex") }; };
 const agentCall = (path, init, tok) => fetch(BASE + "/api/print-agent" + path, { ...init, headers: { "x-lfh-agent": tok || TOKEN, "content-type": "application/json", ...(init?.headers || {}) } });
 const setRoutes = (routes) => db(`settings?restaurant_id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ modules: { ...bagWas, printing: { ...(bagWas.printing || {}), routes } } }) });
@@ -431,6 +433,98 @@ await phase("…and a print on ITS printer closes it", async () => {
   const [e] = await db(`printer_events?id=eq.${made.events[made.events.length - 1]}&select=status`);
   return e.status === "resolved" || "it is still " + e.status; });
 
+// ══ 6b · THE MACHINE WITH THE PRINTER SETS ITSELF UP (mig 367) ═══════════════════════════════
+// The owner's own design, 2026-08-27: "that device is connected to the printer, so it will be easy
+// for THAT device to set up the printer… instead of the admin." Driven as the real manager against
+// the real panel API — the permission is the whole point, so it is asked of the server every time
+// and never mirrored in this file.
+{
+  const DEV2 = "sweep-device-B";
+  const asMgrPost = (path, body, device) => fetch(BASE + "/api/editor" + path, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: MANAGER_COOKIE + "; lfh_panel_device=" + (device || DEVICE) },
+    body: JSON.stringify(body || {}),
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  const asMgrGet = (path, device) => fetch(BASE + "/api/editor" + path, {
+    headers: { cookie: MANAGER_COOKIE + "; lfh_panel_device=" + (device || DEVICE) },
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  const setPerm = async (on) => {
+    const [r] = await db(`restaurants?id=eq.${RID}&select=manager_permissions`);
+    if (permsWas === null) permsWas = r.manager_permissions || {};
+    await db(`restaurants?id=eq.${RID}`, { method: "PATCH",
+      body: JSON.stringify({ manager_permissions: { ...(r.manager_permissions || {}), print_setup: on } }) });
+  };
+
+  await setPerm(false);
+  await phase("without the permission, the panel says setting up is not theirs", async () => {
+    const r = await asMgrGet("/printing/state");
+    return r.body.maySetup === false || `maySetup was ${JSON.stringify(r.body.maySetup)}`;
+  });
+  await phase("…and the SERVER refuses the verb, not just the screen", async () => {
+    const r = await asMgrPost("/printing/this-computer", { name: "sweep PC" });
+    return r.status >= 400 || `it answered ${r.status} — the screen hiding a button has never been a gate`;
+  });
+
+  await setPerm(true);
+  let sweptAgent = null;
+  await phase("with the permission, this browser can register the computer it is sitting at", async () => {
+    const r = await asMgrPost("/printing/this-computer", { name: "Sweep PC" }, DEV2);
+    sweptAgent = r.body.id || null;
+    if (sweptAgent) made.agents.push(sweptAgent);
+    return (r.status === 200 && String(r.body.code || "").startsWith("lfhp_")) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 140)}`;
+  });
+  await phase("…and the row remembers WHICH browser did it (mig 367)", async () => {
+    const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device,owner_user`);
+    return row?.owner_device === DEV2 || `owner_device was ${row?.owner_device}`;
+  });
+  await phase("…a DIFFERENT browser is not handed that computer's code", async () => {
+    const r = await asMgrPost("/printing/newcode", {}, "sweep-device-C");
+    return r.status >= 400 || `it answered ${r.status} — another screen could re-code somebody else's machine`;
+  });
+  await phase("…and pressing “set up” twice makes ONE computer, not two", async () => {
+    const before = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
+    await asMgrPost("/printing/this-computer", { name: "Sweep PC" }, DEV2);
+    const after = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
+    return (before === 1 && after === 1) || `${before} → ${after}`;
+  });
+
+  // The kitchen-slip line IS settings.auto_print_kot. Two boards, one column — the exact fault the
+  // owner reported on 2026-08-26 ("board should be sync, right now it's not").
+  await phase("answering “nobody” on kitchen slips switches auto-print OFF at the source", async () => {
+    const r = await asMgrPost("/printing/route", { kind: "kot", who: "off" }, DEV2);
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=auto_print_kot,modules`);
+    return (r.status === 200 && st.auto_print_kot === false && st.modules?.printing?.routes?.kot?.via === "off")
+      || `status ${r.status} · auto_print_kot ${st.auto_print_kot} · via ${st.modules?.printing?.routes?.kot?.via}`;
+  });
+  await phase("…and with it off, a new order queues NO ticket (the trigger reads that same column)", async () => {
+    const { jobId } = await newOrder(41, "sweep off-line");
+    return jobId === null || "a ticket was queued for a restaurant that had said it does not print them";
+  });
+  await phase("answering “print here” switches it back on and points at THIS computer's printer", async () => {
+    // A route can only ever name a printer the machine itself reported — so report one first.
+    await db(`print_agents?id=eq.${sweptAgent}`, { method: "PATCH",
+      body: JSON.stringify({ printers: [{ name: "Sweep-Printer", paper: { wMm: 79.7, hMm: 64.2 } }] }) });
+    const r = await asMgrPost("/printing/route", { kind: "kot", who: "computer", printer: "Sweep-Printer" }, DEV2);
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=auto_print_kot,modules`);
+    const kot = st.modules?.printing?.routes?.kot || {};
+    return (r.status === 200 && st.auto_print_kot === true && kot.agent === sweptAgent && kot.printer === "Sweep-Printer")
+      || `status ${r.status} · auto_print_kot ${st.auto_print_kot} · ${JSON.stringify(kot).slice(0, 140)}`;
+  });
+  await phase("…a printer the machine never reported is refused", async () => {
+    const r = await asMgrPost("/printing/route", { kind: "bill", who: "computer", printer: "A-Printer-Nobody-Has" }, DEV2);
+    return r.status >= 400 || "a route was saved to a printer that does not exist — it would print nowhere while looking set";
+  });
+  await phase("a browser with no computer of its own cannot route paper to one", async () => {
+    const r = await asMgrPost("/printing/route", { kind: "bill", who: "computer", printer: "Sweep-Printer" }, "sweep-device-D");
+    return r.status >= 400 || "any screen could point the bills at somebody else's printer";
+  });
+  await phase("…but it can ADOPT the machine it is sitting at, instead of registering it twice", async () => {
+    const r = await asMgrPost("/printing/this-computer", { adopt: sweptAgent }, "sweep-device-D");
+    const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device`);
+    return (r.status === 200 && row?.owner_device === "sweep-device-D") || `status ${r.status} · owner_device ${row?.owner_device}`;
+  });
+}
+
 // ══ 7 · THE GUARDS THEMSELVES ════════════════════════════════════════════════════════════════
 for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-format", "verify:print-paper", "verify:access", "verify:taps"]) {
   await phase(`the ${g} guard passes`, () => {
@@ -449,6 +543,8 @@ for (const id of made.events) { try { await db(`printer_events?id=eq.${id}`, { m
 for (const id of made.jobs)   { try { await db(`print_jobs?id=eq.${id}`,   { method: "DELETE" }); } catch {} }
 for (const id of made.orders) { try { await db(`orders?id=eq.${id}`,       { method: "DELETE" }); } catch {} }
 for (const id of made.agents) { try { await db(`print_agents?id=eq.${id}`, { method: "DELETE" }); } catch {} }
+// The manager permission section 6b switched on and off is the restaurant's, not ours (mig 367).
+if (permsWas !== null) { try { await db(`restaurants?id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ manager_permissions: permsWas }) }); } catch {} }
 
 console.log("─".repeat(78));
 console.log(`${n} phases · ${pass} passed · ${fail} failed · ${skip} skipped`);

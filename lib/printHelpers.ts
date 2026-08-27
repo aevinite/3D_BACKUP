@@ -22,6 +22,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { STALE_CLAIM_MS } from "@/lib/printQueue";
+import type { PaperSize } from "@/lib/printBoardWords";
 
 /** A helper that has not said hello inside this window is shown as not connected. It polls every
  *  ~2s, so 30s means "three quarters of a minute of silence" — long enough to survive a hiccup,
@@ -33,10 +34,26 @@ export const HELPER_STALE_MS = 30_000;
  *  printer would lose half its tickets to the counter. */
 export const BACKUP_AFTER_MS_DEFAULT = 60_000;
 
-export const PRINT_KINDS = ["kot", "bill", "banquet", "label", "test"] as const;
+// "label" (parcel stickers) LEFT this list on 2026-08-27. It was never a real kind: nothing in the
+// app ever queued one, lib/printDocs.ts has no builder for it, and it existed only as a fifth empty
+// line in the address book that nobody could ever fill usefully. The owner asked for exactly this —
+// "those minor things which were built before and which are not in use, remove that also".
+export const PRINT_KINDS = ["kot", "bill", "banquet", "test"] as const;
 export type PrintKind = (typeof PRINT_KINDS)[number];
 export const isPrintKind = (v: unknown): v is PrintKind =>
   typeof v === "string" && (PRINT_KINDS as readonly string[]).includes(v);
+
+/** The kinds a person is ever asked to ROUTE — the three real documents this app prints.
+ *
+ *  Owner, 2026-08-27: "which printer gets which paper, so why there are only three options — one is
+ *  bill, one is KOT and one is banquet?" That IS the honest answer, and this constant is where it is
+ *  written down: three documents exist, so three lines exist. "test" is a kind of JOB but never a
+ *  line in the address book — a test page is addressed straight at the printer whose button was
+ *  pressed, so a route for it could only ever contradict the button. */
+export const ROUTABLE_KINDS = ["kot", "bill", "banquet"] as const;
+export type RoutableKind = (typeof ROUTABLE_KINDS)[number];
+export const isRoutableKind = (v: unknown): v is RoutableKind =>
+  typeof v === "string" && (ROUTABLE_KINDS as readonly string[]).includes(v);
 
 /** One line of the address book: "kitchen slips → this machine → this printer", plus an optional
  *  second choice for when the first prints nothing. Both halves are names the MACHINE reported,
@@ -52,14 +69,19 @@ export const isPrintKind = (v: unknown): v is PrintKind =>
  *
  *  A screen route is not a step backwards: it is the honest answer for a restaurant that will not
  *  install anything, and it is now precise instead of "whichever screen volunteered first". */
-export type RouteVia = "computer" | "screen";
+/** …and the third answer, added 2026-08-27 because the owner kept asking for it and it was never
+ *  there: "I WANT A PROPER OPTION TO ON AND OFF IT — for example, if I ON it here, YES, PRINT HERE."
+ *  An EMPTY line and an OFF line look the same to a machine but mean opposite things to a person:
+ *  empty is "nobody has set this up yet", off is "we have decided this does not print". Screens say
+ *  each of them in its own words instead of both going quiet. */
+export type RouteVia = "computer" | "screen" | "off";
 export const ROUTE_PANELS = ["kitchen", "manager", "owner", "tablet"] as const;
 export type RoutePanel = (typeof ROUTE_PANELS)[number];
 export const isRoutePanel = (v: unknown): v is RoutePanel =>
   typeof v === "string" && (ROUTE_PANELS as readonly string[]).includes(v);
 
 export type PrintRoute = {
-  via?: RouteVia;              // absent = "computer" when an agent is named, else nothing is routed
+  via?: RouteVia;              // absent = "computer" when an agent is named, else nothing is routed; "off" = decided not to print
   agent: string | null;        // print_agents.id
   printer: string | null;      // the printer name as its own computer knows it
   backupAgent?: string | null;
@@ -91,7 +113,7 @@ const emptyRoutes = (): PrintRoutes =>
  *  route. It matters more than it looks: a PDF page that is a DIFFERENT SIZE from the paper in the
  *  printer is what makes a driver rotate the ticket or shrink it to half size — the exact fault the
  *  owner photographed on 2026-08-19. Page size and media are made to agree, always. */
-export type PaperSize = { name?: string; wMm: number; hMm: number };
+export type { PaperSize } from "@/lib/printBoardWords";
 
 export type AgentRow = {
   id: string;
@@ -101,6 +123,10 @@ export type AgentRow = {
   printers: { name: string; desc?: string; paper?: PaperSize }[];
   last_seen_at: string | null;
   revoked_at: string | null;
+  /** The browser that set this helper up from its OWN panel (mig 367), if a restaurant did rather
+   *  than the admin. It is how Settings → Printing knows "this computer is already set up". */
+  owner_device?: string | null;
+  owner_user?: string | null;
 };
 export type AgentView = AgentRow & { connected: boolean; secondsAgo: number | null; fingerprintClash: boolean };
 
@@ -115,7 +141,7 @@ const asPaper = (v: unknown): PaperSize | undefined => {
   return { name: o.name ? String(o.name).slice(0, 60) : undefined, wMm: Math.round(w * 10) / 10, hMm: Math.round(h * 10) / 10 };
 };
 
-const AGENT_COLS = "id, restaurant_id, name, fingerprint, seen_fingerprints, printers, last_seen_at, revoked_at";
+const AGENT_COLS = "id, restaurant_id, name, fingerprint, seen_fingerprints, printers, last_seen_at, revoked_at, owner_device, owner_user";
 
 const asPrinters = (v: unknown): { name: string; desc?: string; paper?: PaperSize }[] =>
   Array.isArray(v)
@@ -158,10 +184,20 @@ export async function agentByToken(token: string): Promise<AgentRow | null> {
 
 /** Add a machine and hand back its one-time code. The NAME is what every dropdown shows, so it is
  *  the person's own words ("Shop's computer"), unique per restaurant, and renameable later. */
-export async function createAgent(rid: string, name: string): Promise<{ id: string; token: string } | { error: string }> {
+export async function createAgent(
+  rid: string,
+  name: string,
+  by?: { deviceId?: string | null; userId?: string | null },
+): Promise<{ id: string; token: string } | { error: string }> {
   const label = String(name || "").trim().slice(0, 60) || "New computer";
   const { token, hash } = mintAgentToken();
-  const ins = await sb.from("print_agents").insert({ restaurant_id: rid, name: label, token_hash: hash }).select("id").maybeSingle();
+  const ins = await sb.from("print_agents").insert({
+    restaurant_id: rid, name: label, token_hash: hash,
+    // Set only when the RESTAURANT set itself up from its own panel (mig 367). An admin-made helper
+    // leaves both null, which is exactly what "the admin made this one" looks like on screen.
+    ...(by?.deviceId ? { owner_device: String(by.deviceId).slice(0, 120) } : {}),
+    ...(by?.userId ? { owner_user: by.userId } : {}),
+  }).select("id").maybeSingle();
   if (ins.error || !ins.data) {
     // 23505 = the UNIQUE(restaurant_id, name) — a second "Shop's computer" is a mistake, not a
     // second machine, and telling them so is kinder than silently making two identical rows.
@@ -189,6 +225,18 @@ export async function helloAgent(
   if (seen.size > 1) patch.seen_fingerprints = [...seen].slice(0, 6);
   await sb.from("print_agents").update(patch).eq("id", agent.id);
   return { clash: !!(fp && agent.fingerprint && fp !== agent.fingerprint) };
+}
+
+/** "Is THIS computer already set up?" — the first question Settings → Printing asks of itself.
+ *
+ *  Answered from the panel's own per-device id, the same value print_stations keys on, so a person
+ *  who sets a printer up on the counter machine and then opens the same panel on their phone is
+ *  correctly told the phone is not that computer. One indexed read (mig 367). */
+export async function agentForDevice(rid: string, deviceId: string | null | undefined): Promise<AgentView | null> {
+  const dv = String(deviceId || "").trim();
+  if (!dv) return null;
+  const all = await agentsView(rid);
+  return all.find((a) => a.owner_device === dv) || null;
 }
 
 /** Every helper this restaurant has, with the one fact that matters on screen: is it alive. */
@@ -234,7 +282,7 @@ export async function readRoutes(rid: string): Promise<PrintRoutes> {
       backupPrinter: o.backupPrinter ? String(o.backupPrinter).slice(0, 120) : null,
       backupAfterMs: typeof o.backupAfterMs === "number" && o.backupAfterMs >= 5000 ? o.backupAfterMs : BACKUP_AFTER_MS_DEFAULT,
       paper: asPaper(o.paper),
-      via: o.via === "screen" ? "screen" : o.agent ? "computer" : undefined,
+      via: o.via === "screen" ? "screen" : o.via === "off" ? "off" : o.agent ? "computer" : undefined,
       panel: isRoutePanel(o.panel) ? o.panel : null,
       person: o.person ? String(o.person) : null,
       personName: o.personName ? String(o.personName).slice(0, 80) : null,
@@ -280,6 +328,12 @@ export async function writeRoutes(rid: string, patch: Record<string, unknown>): 
     if (val === null) { next[kind] = { ...EMPTY_ROUTE }; continue; }
     if (!val || typeof val !== "object") return { error: `The route for ${kind} is not readable.` };
     const o = val as Record<string, unknown>;
+    // ── "NO, DO NOT PRINT THIS" ───────────────────────────────────────────────────────────────
+    // The switch the owner asked for, and it is saved as a DECISION, not as an empty line: every
+    // screen can then say "your restaurant has this switched off" instead of the far more alarming
+    // "no printer has been chosen". Nothing else on the line survives — an off line that quietly
+    // kept a printer name would come back on with a printer nobody remembers choosing.
+    if (o.via === "off") { next[kind] = { via: "off", agent: null, printer: null }; continue; }
     const pick = (aKey: string, pKey: string): { agent: string | null; printer: string | null } | string => {
       const aId = o[aKey] ? String(o[aKey]) : null;
       const pName = o[pKey] ? String(o[pKey]) : null;
@@ -457,6 +511,9 @@ export async function queueJob(
 ): Promise<{ id: string } | { error: string }> {
   const R = opts?.routes || await readRoutes(rid);
   const route = R[kind];
+  // SWITCHED OFF IS NOT THE SAME AS UNSET. A test page addressed straight at a printer (opts.agentId)
+  // still goes — that button is how a person checks the printer they just switched back on.
+  if (route.via === "off" && !opts?.agentId) return { error: "switched-off" };
   const agentId = opts?.agentId || route.agent;
   const printer = opts?.printer || route.printer;
   if (!agentId || !printer) return { error: "no-route" };
@@ -467,6 +524,30 @@ export async function queueJob(
   }).select("id").maybeSingle();
   if (ins.error || !ins.data) return { error: "Could not queue that for printing." };
   return { id: (ins.data as { id: string }).id };
+}
+
+/**
+ * The kitchen-slip line and `settings.auto_print_kot` are the SAME decision, so they are the same
+ * control (owner, 2026-08-27: "board should be sync… right now it's not", and separately "I want a
+ * proper option to on and off it").
+ *
+ * Kitchen slips are the one kind a database trigger queues by itself (mig 335), and that trigger
+ * reads `auto_print_kot`. If the address book alone said "do not print" the trigger would go on
+ * filling the basket with tickets nobody could ever claim — a queue that grows for ever behind a
+ * switch that says off. So setting the kitchen-slip line to "do not print" switches auto-print off
+ * at the source, and setting it to anything else switches it back on.
+ *
+ * It is NOT allowed to switch on what Aevidine has not allowed: `auto_print_kot_allowed` is the
+ * admin's entitlement and is never written here.
+ */
+export async function syncKotSwitch(rid: string, on: boolean): Promise<void> {
+  const st = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed")
+    .eq("restaurant_id", rid).maybeSingle()).data as
+    { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+  if (!st) return;
+  if (on && st.auto_print_kot_allowed !== true) return;   // not ours to grant
+  if (st.auto_print_kot === on) return;                   // already right — no write, no audit noise
+  await sb.from("settings").update({ auto_print_kot: on }).eq("restaurant_id", rid);
 }
 
 /** How many notes are still waiting — the "Waiting to print: 0" line, and the honest answer to
@@ -534,6 +615,8 @@ export async function helpersFor(rid: string, kinds: PrintKind[]): Promise<Recor
 // ── WHO PRINTS THIS KIND OF PAPER — the single answer every screen and every route obeys ───────
 export type PrintTarget =
   | { kind: "none" }
+  /** Somebody switched this piece of paper off on purpose. Different from "none" on every screen. */
+  | { kind: "off" }
   | { kind: "computer"; agent: string; printer: string; connected: boolean; secondsAgo: number | null;
       backup: { agent: string; printer: string } | null }
   | { kind: "screen"; panel: RoutePanel; person: string | null; personName: string | null; device: string | null };
@@ -550,6 +633,7 @@ export async function targetsFor(rid: string, kinds: PrintKind[]): Promise<Recor
 }
 
 function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTarget {
+  if (r?.via === "off") return { kind: "off" };
   if (isScreenRoute(r)) {
     return { kind: "screen", panel: r!.panel as RoutePanel, person: r!.person ?? null,
              personName: r!.personName ?? null, device: r!.device ?? null };
@@ -567,6 +651,7 @@ function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTar
  *
  * Asked on the server, with the person and device taken from the request — never from the panel's
  * word for itself. Three ways to answer yes, and they are deliberately in this order:
+ *   · the line is switched OFF → no, and the screen says so in those words
  *   · nothing is routed        → yes, whoever is entitled may print (the behaviour before any of this)
  *   · a COMPUTER is routed     → no. A screen must never race a helper: two printers, one ticket.
  *   · a SCREEN is routed       → only the named panel, and only the named person, and only the named
@@ -575,8 +660,9 @@ function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTar
 export function screenMayPrint(
   t: PrintTarget,
   who: { panel: RoutePanel; personId?: string | null; deviceId?: string | null },
-): { ok: boolean; why?: "computer" | "other_panel" | "other_person" | "other_device" } {
+): { ok: boolean; why?: "off" | "computer" | "other_panel" | "other_person" | "other_device" } {
   if (t.kind === "none") return { ok: true };
+  if (t.kind === "off") return { ok: false, why: "off" };
   if (t.kind === "computer") return { ok: false, why: "computer" };
   if (t.panel !== who.panel) return { ok: false, why: "other_panel" };
   if (t.person && t.person !== (who.personId || "")) return { ok: false, why: "other_person" };

@@ -257,6 +257,18 @@ const ACTIONS: ActionDef[] = [
   // and a rebuild must not quietly take that away.
   { id: "print_here", name: "May be the printer (print on their own screen)", flag: "print_here", mgrDef: true,
     what: "Their screen may print this restaurant's paper — kitchen slips, bills, banquet sheets — on whatever printer that machine is set to. Turn it OFF for a phone: a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the paper. Where printing actually happens is chosen on Printing (Aevidine holds that): a computer running the print helper, or a named screen — and only a person with this on can be that named screen." },
+  // MAY THIS PERSON SET THE PRINTERS UP (owner, 2026-08-27: "that device is connected to the printer,
+  // so it will be easy for THAT device to set up the printer and all that, instead of the admin —
+  // admin can still see it… but that device will set up, and that device will only get the option in
+  // settings, like everyone has their settings where they log out from").
+  //
+  // It is deliberately a SEPARATE row from "May be the printer". They are different amounts of trust:
+  // being the printer is "paper comes out of my machine", setting printers up is "I decide where the
+  // whole restaurant's paper comes out". Default OFF, because it is granted to ONE person — whoever
+  // sits at the machine the printer is plugged into — and a restaurant where every manager can
+  // re-route the kitchen slips is a restaurant where tickets go missing and nobody knows why.
+  { id: "print_setup", name: "May set the printers up (from their own computer)", flag: "print_setup", mgrDef: false,
+    what: "Adds a Printing page to their own Settings, on the computer the printer is plugged into: it can register that computer, get the little helper program's code, and choose which printer prints the kitchen slips, the bills and the banquet sheets. Give it to ONE person — the one sitting at that machine. Aevidine sees and can change everything they do, and nothing here lets them change any other restaurant." },
   // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
   // its own thing, and one switch covering create/reset/delete was three very different amounts of
   // trust behind a single yes. It lives in "What a manager can manage", split up.

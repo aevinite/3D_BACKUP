@@ -11,9 +11,13 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
-  agentsView, createAgent, readRoutes, writeRoutes, waitingCount, mintAgentToken,
-  PRINT_KINDS, isPrintKind, HELPER_STALE_MS, ROUTE_PANELS,
+  agentsView, createAgent, readRoutes, writeRoutes, mintAgentToken,
+  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch,
 } from "@/lib/printHelpers";
+// The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
+// the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
+// not identical"). lib/printBoard.ts is the single copy.
+import { printBoardState } from "@/lib/printBoard";
 import { managerGrantValue } from "@/lib/accessTree";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
@@ -57,16 +61,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   if (!rid) return err("Which restaurant?");
 
   if (!seg.length || seg[0] === "state") {
-    const [agents, routes, waiting, setRow] = await Promise.all([
-      agentsView(rid), readRoutes(rid), waitingCount(rid),
-      sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
-    ]);
-    const s = (setRow.data || {}) as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string };
-    // The last few jobs, so a screen can show "it printed / it didn't and why" without anybody
-    // opening a database. Small and indexed; nothing else needs the rows.
-    const recent = ((await sb.from("print_jobs")
-      .select("id, kind, status, printer, printed_by, attempts, error, created_at, done_at")
-      .eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(12)).data || []);
+    // ONE read of the shared board — the same call the restaurant's own Settings → Printing makes,
+    // so neither screen can show a fact the other does not have.
+    const board = await printBoardState(rid, { recent: 12 });
+    const tgtRow = (await sb.from("settings").select("kot_print_target").eq("restaurant_id", rid).maybeSingle()).data as
+      { kot_print_target?: string } | null;
     // ── WHO can be picked as the printing SCREEN, and WHICH PC ────────────────────────────────
     // The owner asked to choose the panel, the person and the machine ("which particular manager…
     // which owner panel… which PC will be open"). All three lists are read from real rows, so the
@@ -96,12 +95,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       .eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(12)).data || []);
 
     return NextResponse.json({
-      agents, routes, waiting, recent, kinds: PRINT_KINDS, staleMs: HELPER_STALE_MS,
+      ...board,
+      staleMs: HELPER_STALE_MS,
       panels: ROUTE_PANELS, people, devices,
       // Stated so the screen can say it rather than implying it: a manager whose permission is off is
       // missing from `people` on purpose, and this is the link that explains where to switch it on.
       managerMayPrint: mgrPerm,
-      printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true, target: s.kot_print_target || "kitchen" },
+      printing: { ...board.printing, target: tgtRow?.kot_print_target || "kitchen" },
     });
   }
   return err("Unknown request", 404);
@@ -174,6 +174,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (!Object.keys(patch).length) return err("Nothing to save.");
     const saved = await writeRoutes(rid, patch);
     if ("error" in saved) return err(saved.error);
+    // The kitchen-slip line IS settings.auto_print_kot — one decision, one column, one control
+    // (lib/printHelpers → syncKotSwitch). Without this the two boards drift apart again: the address
+    // book would say "nobody prints kitchen slips" while the trigger went on queueing them.
+    if (Object.prototype.hasOwnProperty.call(patch, "kot")) {
+      const k = patch.kot as Record<string, unknown> | null;
+      await syncKotSwitch(rid, !(k === null || k?.via === "off"));
+    }
     await logAction("admin", "print_routes_changed", { restaurant_id: rid, detail: `printing routes updated: ${Object.keys(patch).join(", ")}` });
     return NextResponse.json({ routes: saved.routes });
   }

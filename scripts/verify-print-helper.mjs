@@ -211,7 +211,10 @@ check(/tokenIsValid/.test(adminR)
 check(/aevinite\/printing/.test(read("components/admin/AdminShell.tsx")),
   "…and the menu is reachable from the sidebar, not only by URL",
   "the Printing menu is gone from the admin nav");
-check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "")),
+// The test is about PROSE, so the three shapes that are plainly code are stripped first: a key in a
+// map (`kot:`), a compared literal (`"kot"`) and a property read (`draft.kot`). Anything left is a
+// word on the screen.
+check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\.kot\b/g, "")),
   "the screen speaks the restaurant's words (Kitchen slips), never 'kot'",
   "the admin Printing screen shows the word 'kot' to a human");
 
@@ -271,6 +274,82 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "")),
   check(!/§\d/.test(code(guide)),
     "…and nothing refers to a section by NUMBER any more (the numbers move per menu)",
     "a §number cross-reference is back in the guide: with automatic numbering it points at the wrong section in two of the three menus");
+}
+
+// ── 8b · THE MACHINE WITH THE PRINTER SETS ITSELF UP (mig 367, owner 2026-08-27) ──────────────
+// "That device is connected to the printer, so it will be easy for THAT device to set up the printer
+// and all that, instead of the admin — admin can still see it… but that device will only get the
+// option in settings, like everyone has their settings where they log out from."
+{
+  const mig367 = read("supabase/migrations/367_a_device_sets_up_its_own_printer.sql");
+  const words  = read("lib/printBoardWords.ts");
+  const board  = read("lib/printBoard.ts");
+  const tree   = read("lib/accessTree.ts");
+
+  check(/owner_device/.test(mig367) && /owner_user/.test(mig367) && /print_agents_owner_device_idx/.test(mig367),
+    "a helper remembers WHICH browser set it up, and that question is indexed",
+    "mig 367 has lost owner_device / its index — Settings → Printing then cannot answer 'is this computer already set up?' without a scan");
+
+  check(/id: "print_setup"/.test(tree) && /flag: "print_setup"/.test(tree) && /mgrDef: false/.test(code(tree).match(/id: "print_setup"[\s\S]{0,400}/)?.[0] || ""),
+    "…and setting printers up is its OWN permission, default OFF",
+    "print_setup is gone from the access tree, or defaults ON — it is granted to the ONE person at the machine, not to every manager");
+
+  const eCode = code(eroute);
+  check(/managerCan\(g, rid, "print_setup"\)/.test(eCode),
+    "…asked on the SERVER before any printing setup verb runs, not just hidden on screen",
+    "the panel's printing endpoints no longer check print_setup — hiding a button has never been a gate");
+  check(/agentForDevice\(rid, dv\)/.test(eCode) && !/createAgent\(rid, [^,)]+\)\s*;/.test(eCode),
+    "…and every verb is scoped to THIS browser's own computer, never another machine",
+    "a panel printing verb stopped resolving the machine from this device — a manager could then re-code or re-route somebody else's computer");
+
+  // ONE DECISION, ONE COLUMN. The kitchen-slip line and settings.auto_print_kot are the same
+  // answer; two controls for one value is exactly what made the two boards disagree on 2026-08-26.
+  check(/export async function syncKotSwitch/.test(lib) && /syncKotSwitch\(rid/.test(eCode) && /syncKotSwitch\(rid/.test(code(adminR)),
+    "the kitchen-slip line IS auto_print_kot — both boards write the one column through one function",
+    "a board stopped calling syncKotSwitch: the address book would say 'nobody prints kitchen slips' while the trigger went on queueing them for ever");
+  check(!/key: "on", on: st\.printing\.on/.test(code(page)),
+    "…and the admin board no longer carries a SECOND switch for it",
+    "the duplicate 'the restaurant has auto-print on' switch is back on the admin board — two controls, one column, and they showed opposite answers");
+
+  // THE THIRD ANSWER, everywhere it has to exist.
+  check(/"computer" \| "screen" \| "off"/.test(lib) && /kind: "off"/.test(lib) && /why: "off"/.test(lib),
+    "'nobody prints this' is a real, saved answer — not an empty line pretending to be one",
+    "via:'off' has gone: an empty route and a deliberate no would look identical again, and screens would say 'no printer chosen' at a restaurant that had decided not to print");
+
+  // THE SAME BOARD IN BOTH PLACES. The words live in one file and both screens read that file.
+  check(/STEPS = \{/.test(words) && /KIND_OFF_LABEL/.test(words),
+    "the four steps and the three answers are declared ONCE, in lib/printBoardWords.ts",
+    "the shared printing words are gone — the admin console and the restaurant's own screen will drift into two products again");
+  check(/printBoardWords/.test(page) && /printBoardState/.test(code(adminR)) && /printBoardState/.test(eCode),
+    "…and BOTH boards are built from it",
+    "one of the two printing boards stopped reading the shared words/state");
+  check(/1 · Is printing switched on/.test(words) && /STEP\.one|steps\.one|B\.steps/.test(epanel),
+    "…including the panel, which prints the same headings verbatim",
+    "the manager panel stopped using the shared step headings");
+  // Comments stripped first — this file EXPLAINS why it has no imports, and the explanation says the
+  // word "import" four times. A guard that trips on its own reason is a guard the next person deletes.
+  check(!/^\s*import\b/m.test(code(words)),
+    "…and the words file imports NOTHING, so a client page can read it without dragging the service key in",
+    "lib/printBoardWords.ts grew an import: the admin console is a client component, and verify:static will refuse the whole page");
+
+  check(/data-pw="adopt"/.test(epanel) && /adopt/.test(eCode),
+    "a browser that has lost its device id can say 'I am that computer' instead of registering it twice",
+    "adopt is gone — a cleared browser would set the same machine up a second time, and half the tickets would come out in the wrong room");
+
+  check(/auto_print_kot_allowed === true;/.test(epanel) && !/const printingOn = st\.auto_print_kot === true && st\.auto_print_kot_allowed === true;/.test(epanel),
+    "…and switching kitchen slips off does not hide the screen that switches them back on",
+    "the Printing section is gated on auto_print_kot again: pressing 'Nobody' would make the section vanish, taking its own switch with it");
+
+  // The dead fifth line. Nothing ever queued a 'label' job and no document was ever built for one.
+  check(!/"label"/.test(code(lib)) && !/label: "Parcel labels"/.test(words),
+    "the parcel-label line is gone — nothing ever printed one",
+    "the 'label' kind is back: it is an address-book line nobody can ever fill, which is the clutter the owner asked to remove");
+  check(/ROUTABLE_KINDS = \["kot", "bill", "banquet"\]/.test(lib),
+    "…so there are exactly THREE lines to answer, because this app prints three documents",
+    "ROUTABLE_KINDS changed shape — the three lines are the honest answer to 'why are there only three options'");
+  check(/thisComputer/.test(board) && /owner_device === dv/.test(board + lib),
+    "the board can always answer 'is the computer I am sitting at set up?'",
+    "printBoardState lost thisComputer — the restaurant's own screen cannot tell its machine from someone else's");
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

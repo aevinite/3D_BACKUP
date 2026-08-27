@@ -14,6 +14,10 @@ import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
 import { SkelList } from "@/components/admin/Skeleton";
+// THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
+// identical"). Four steps, three kinds of paper, one sentence each — declared once in
+// lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
@@ -23,7 +27,7 @@ type Agent = {
   connected: boolean; secondsAgo: number | null; fingerprintClash: boolean;
 };
 type Route = { agent: string | null; printer: string | null; backupAgent?: string | null; backupPrinter?: string | null; paper?: Paper;
-  via?: "computer" | "screen"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null };
+  via?: "computer" | "screen" | "off"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null };
 type Person = { id: string; name: string; role: string; panels: string[] };
 type Device = { device_id: string; label?: string | null; panel?: string | null; last_seen_at?: string | null };
 type Job = { id: string; kind: string; status: string; printer: string | null; printed_by: string | null; attempts: number; error: string | null; created_at: string; done_at: string | null };
@@ -34,29 +38,14 @@ type State = {
 };
 type Scripts = Record<string, { filename: string; autostart: string; text: string }>;
 
-// The words a restaurant uses, not ours. "kot" means nothing to anybody outside this codebase.
-const KIND_LABEL: Record<string, string> = {
-  kot: "Kitchen slips", bill: "Bills", banquet: "Banquet sheets", label: "Parcel labels", test: "Test pages",
-};
-const KIND_WHAT: Record<string, string> = {
-  kot: "One slip per order, the moment it is sent. This is the one that must never wait.",
-  bill: "What the guest is handed when they pay.",
-  banquet: "The big event sheet — usually a paper printer, not a till roll.",
-  label: "Stickers for parcel bags, if the restaurant uses them.",
-  test: "Where the “send a test page” button below prints.",
-};
 const OS_LABEL: Record<string, string> = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
-// Common sheets, so nobody has to know that A6 is 105 × 148. "As the printer says" is first because
-// it is right almost always: the machine reads its own paper out of its driver.
-const PAPER_PRESETS: { id: string; label: string; paper: Paper | null }[] = [
-  { id: "auto", label: "As the printer says", paper: null },
-  { id: "a4", label: "A4 · 210 × 297", paper: { wMm: 210, hMm: 297 } },
-  { id: "a5", label: "A5 · 148 × 210 (half of A4)", paper: { wMm: 148, hMm: 210 } },
-  { id: "a6", label: "A6 · 105 × 148 (quarter of A4)", paper: { wMm: 105, hMm: 148 } },
-  { id: "roll80", label: "80mm till roll", paper: { wMm: 79.7, hMm: 64.2 } },
-  { id: "roll58", label: "58mm till roll", paper: { wMm: 57.8, hMm: 64.2 } },
-];
-const paperLabel = (p?: Paper | null) => (p ? `${p.wMm} × ${p.hMm} mm` : "as the printer says");
+
+/** Which of the three answers this line currently gives. It is derived, never stored twice: a line
+ *  that names a computer is answered "computer", one that names a panel is "screen", one saved off is
+ *  "off", and one that has never been touched has no answer yet — which is a fourth, honest state
+ *  the screen says out loud rather than pretending is "off". */
+const whoOf = (r?: Route): "computer" | "screen" | "off" | "" =>
+  r?.via === "off" ? "off" : r?.via === "screen" || r?.panel ? "screen" : r?.agent ? "computer" : "";
 
 export default function AdminPrinting() {
   const toast = useToast();
@@ -193,10 +182,11 @@ export default function AdminPrinting() {
         <>
           {/* ── 1 · is printing on at all ───────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Is printing on for this restaurant</h2>
+            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.one}</h2>
             <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-              Both must be on. With the first one off, nothing about printing appears anywhere in their
-              panels — no greyed-out buttons, nothing at all.
+              Off means the whole feature does not exist for them — no greyed-out buttons anywhere in
+              their panels, nothing at all. Whether kitchen slips actually come out is the{" "}
+              <b>Kitchen slips</b> line in step 3; it is the same switch, asked where it makes sense.
             </p>
             {/* THE SAME STATE-PAIR PATTERN AS THE ACCESS CARD (owner, 2026-08-26: "the printer menu ui
                 is also diff and shit too… make both the option looks on the both mode are clearly
@@ -205,9 +195,13 @@ export default function AdminPrinting() {
                 to learn it: the fact on the left, YES/NO on the right, and the action only where
                 there is something to do. */}
             <div className="adm-state">
+              {/* ONE FACT, ONE CONTROL. "The restaurant has auto-print on" used to sit here as a second
+                  row — and it is the SAME column the Kitchen slips line writes (settings.auto_print_kot),
+                  so two controls were editing one value in two places and disagreeing on screen. It
+                  moved down to step 3, where a person is already deciding what happens to kitchen
+                  slips. Removed 2026-08-27; do not put it back. */}
               {[
-                { key: "allowed", on: st.printing.allowed, label: "Aevidine allows this restaurant to print", what: "Your switch. Off means the whole feature does not exist for them — nothing greyed out, nothing at all." },
-                { key: "on", on: st.printing.on, label: "The restaurant has auto-print on", what: "Their pause button — off while a printer is serviced. Tickets wait; nothing is lost." },
+                { key: "allowed", on: st.printing.allowed, label: "Aevidine allows this restaurant to print", what: "Your switch, and only yours. Off means the whole feature does not exist for them." },
               ].map((sw) => (
                 <div key={sw.key} className={`adm-state-row ${sw.on ? "yes" : "no"}`}>
                   <span className="adm-state-dot" aria-hidden="true" />
@@ -225,7 +219,7 @@ export default function AdminPrinting() {
 
           {/* ── 2 · the computers ───────────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Computers that can print</h2>
+            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.two}</h2>
             <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
               Each one runs the helper. It reports its own printers, so every dropdown below is built from
               what that machine really has — nobody types a printer name.
@@ -347,7 +341,7 @@ export default function AdminPrinting() {
 
           {/* ── 3 · the address book ────────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Which printer gets which paper</h2>
+            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.three}</h2>
             <p className="adm-muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
               One line each. A line left empty says so on their screens — it never goes quietly. The backup
               takes over only if the first printer has printed nothing for a minute.
@@ -356,8 +350,9 @@ export default function AdminPrinting() {
                 Access card, because printing belongs to one board — and it is a SELECT, not three radio
                 cards, because it is the answer that matters least: a route overrules it the moment one
                 exists, and most restaurants will have one. */}
+            {whoOf(draft.kot) === "" ? (
             <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
-              <span className="lbl">With <b>no line filled in below</b>, which screen prints the kitchen slips?</span>
+              <span className="lbl">With <b>no answer on the Kitchen slips line below</b>, which screen prints them?</span>
               <select className="adm-input" style={{ minWidth: 210, marginLeft: "auto" }} value={st.printing.target || "kitchen"}
                 onChange={async (e) => { const d = await post("switch", { target: e.target.value }); if (d) void load(); }}>
                 <option value="kitchen">The kitchen screen</option>
@@ -365,6 +360,7 @@ export default function AdminPrinting() {
                 <option value="both">Both — the counter is the backup</option>
               </select>
             </div>
+            ) : null}
             {/* WHERE THE OTHER HALF OF THIS LIVES. The same shape as the Access card's pointer, so the
                 two boards read as one system rather than two products. */}
             <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
@@ -374,6 +370,7 @@ export default function AdminPrinting() {
             </div>
             {(st.kinds || []).map((kind) => {
               const r = draft[kind] || { agent: null, printer: null };
+              const who = whoOf(r);
               const a = r.agent ? byId.get(r.agent) : undefined;
               const ba = r.backupAgent ? byId.get(r.backupAgent) : undefined;
               const preset = PAPER_PRESETS.find((p) => (p.paper ? r.paper && p.paper.wMm === r.paper.wMm && p.paper.hMm === r.paper.hMm : !r.paper));
@@ -383,98 +380,146 @@ export default function AdminPrinting() {
                     <b style={{ fontSize: 14 }}>{KIND_LABEL[kind] || kind}</b>
                     <span className="adm-muted" style={{ fontSize: 12 }}>{KIND_WHAT[kind]}</span>
                   </div>
-                  {/* WHO DOES THIS ONE (owner, 2026-08-26). Two shapes, and he picks per line: a
-                      COMPUTER running the helper, or a SCREEN — and if a screen, which panel, which
-                      person and which PC. A screen route is not the poor relation: it is the honest
-                      answer for a restaurant that will install nothing, and it is now exact instead of
-                      "whichever screen volunteered first". */}
-                  <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span className="adm-muted" style={{ fontSize: 12, minWidth: 96 }}>Printed by</span>
-                    {([["computer", "A computer (the helper)"], ["screen", "A screen (a person)"]] as const).map(([v, label]) => (
-                      <button key={v} className={`adm-btn${(r.via || (r.agent ? "computer" : "computer")) === v ? " primary" : ""}`}
-                        style={{ fontSize: 12 }}
-                        onClick={() => setR(kind, v === "screen"
-                          ? { via: "screen", agent: null, printer: null, panel: r.panel || "kitchen" }
-                          : { via: "computer", panel: null, person: null, device: null })}>{label}</button>
+
+                  {/* ── ONE QUESTION, THREE ANSWERS ──────────────────────────────────────────────
+                      This line used to carry six controls at once — two shape buttons, a computer, a
+                      printer, a paper size, and two more for the backup — times five kinds of paper.
+                      Thirty controls to answer "where does the paper come out", and the owner said so
+                      plainly (2026-08-27): "right now it feels too much complicated, all the settings
+                      and every single bit of things."
+
+                      So: ONE segmented switch, and only what that answer needs appears under it.
+                      Everything that is a refinement rather than an answer — the backup printer, the
+                      exact person, the exact PC — is folded into "More", which is progressive
+                      disclosure: a person is never shown a control for a decision they have not
+                      reached yet. */}
+                  <div className="adm-who" role="group" aria-label={`Who prints ${KIND_LABEL[kind] || kind}`}>
+                    {WHO_CHOICES.map((c) => (
+                      <button key={c.id} type="button" className={`adm-who-opt${who === c.id ? " on" : ""}`}
+                        aria-pressed={who === c.id}
+                        onClick={() => setR(kind, c.id === "screen"
+                          ? { via: "screen", agent: null, printer: null, backupAgent: null, backupPrinter: null, panel: r.panel || "kitchen" }
+                          : c.id === "off"
+                          ? { via: "off", agent: null, printer: null, backupAgent: null, backupPrinter: null, panel: null, person: null, device: null }
+                          : { via: "computer", panel: null, person: null, device: null })}>
+                        {c.id === "off" ? KIND_OFF_LABEL[kind] || "Nobody" : c.label}
+                      </button>
                     ))}
                   </div>
-                  {(r.via || "computer") === "screen" ? (
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                      <select className="adm-input" style={{ minWidth: 150 }} value={r.panel || ""}
-                        onChange={(e) => setR(kind, { panel: e.target.value || null, person: null })}>
-                        <option value="">— which screen —</option>
-                        {(st.panels || ["kitchen", "manager", "owner", "tablet"]).map((pn) => (
-                          <option key={pn} value={pn}>{pn === "kitchen" ? "Kitchen screen" : pn === "manager" ? "Manager screen" : pn === "owner" ? "Owner screen" : "Waiter tablet"}</option>
-                        ))}
-                      </select>
-                      <select className="adm-input" style={{ minWidth: 180 }} value={r.person || ""}
-                        onChange={(e) => {
-                          const person = e.target.value || null;
-                          setR(kind, { person, personName: (st.people || []).find((x) => x.id === person)?.name || null });
-                        }}>
-                        <option value="">Anyone on that screen</option>
-                        {(st.people || []).filter((x) => !r.panel || x.panels.includes(r.panel)).map((x) => (
-                          <option key={x.id} value={x.id}>{x.name} ({x.role})</option>
-                        ))}
-                      </select>
-                      <select className="adm-input" style={{ minWidth: 170 }} value={r.device || ""}
-                        onChange={(e) => setR(kind, { device: e.target.value || null })}>
-                        <option value="">Any of their devices</option>
-                        {(st.devices || []).map((d) => (
-                          <option key={d.device_id} value={d.device_id}>{d.label || d.panel || "a screen"} · {d.device_id.slice(0, 8)}…</option>
-                        ))}
-                      </select>
-                      <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
-                    </div>
-                  ) : (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                    <select className="adm-input" style={{ minWidth: 170 }} value={r.agent || ""}
-                      onChange={(e) => setR(kind, { agent: e.target.value || null, printer: null })}>
-                      <option value="">— no computer —</option>
-                      {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                    </select>
-                    <select className="adm-input" style={{ minWidth: 190 }} value={r.printer || ""} disabled={!a}
-                      onChange={(e) => setR(kind, { printer: e.target.value || null })}>
-                      <option value="">— no printer —</option>
-                      {(a?.printers || []).map((p) => <option key={p.name} value={p.name}>{p.name}{p.paper ? ` (${paperLabel(p.paper)})` : ""}</option>)}
-                    </select>
-                    <select className="adm-input" style={{ minWidth: 175 }} value={preset?.id || "custom"}
-                      onChange={(e) => {
-                        const id = e.target.value;
-                        if (id === "custom") {
-                          const w = Number(prompt("Paper width in millimetres?", String(r.paper?.wMm || 105)));
-                          const h = Number(prompt("Paper height in millimetres?", String(r.paper?.hMm || 148)));
-                          if (w > 20 && h > 20) setR(kind, { paper: { wMm: w, hMm: h } });
-                          return;
-                        }
-                        setR(kind, { paper: PAPER_PRESETS.find((p) => p.id === id)?.paper || undefined });
-                      }}>
-                      {PAPER_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                      <option value="custom">Type the two numbers…</option>
-                    </select>
-                    <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
-                  </div>
-                  )}
-                  {(r.via || "computer") === "screen" ? (
-                    <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
-                      That screen prints it on whatever printer that machine is set to. Leave the person
-                      blank and anybody allowed on that screen prints; name one and only their screen does.
-                      {st.managerMayPrint === false ? " No manager is offered because “May be the printer” is switched off for managers on Access & permissions." : ""}
+
+                  {who === "" ? (
+                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+                      Nobody has answered this yet. Their screens say <b>&ldquo;no printer chosen&rdquo;</b> rather
+                      than going quiet — pick one of the three above.
                     </p>
-                  ) : (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 7, alignItems: "center" }}>
-                    <span className="adm-muted" style={{ fontSize: 12 }}>If that prints nothing for a minute:</span>
-                    <select className="adm-input" style={{ minWidth: 150, fontSize: 12 }} value={r.backupAgent || ""}
-                      onChange={(e) => setR(kind, { backupAgent: e.target.value || null, backupPrinter: null })}>
-                      <option value="">— no backup —</option>
-                      {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                    </select>
-                    <select className="adm-input" style={{ minWidth: 170, fontSize: 12 }} value={r.backupPrinter || ""} disabled={!ba}
-                      onChange={(e) => setR(kind, { backupPrinter: e.target.value || null })}>
-                      <option value="">— no printer —</option>
-                      {(ba?.printers || []).map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                    </select>
-                  </div>)}
+                  ) : null}
+
+                  {who === "off" ? (
+                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+                      {kind === "kot"
+                        ? "No slip comes out by itself. Orders still reach the kitchen screen, and this also switches the restaurant's auto-print off — one decision, not two."
+                        : "No printer does it silently. The ordinary print window opens for whoever presses Print, exactly as it did before any of this existed."}
+                    </p>
+                  ) : null}
+
+                  {who === "screen" ? (
+                    <>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                        <select className="adm-input" style={{ minWidth: 170 }} value={r.panel || ""}
+                          onChange={(e) => setR(kind, { panel: e.target.value || null, person: null })}>
+                          <option value="">— which screen —</option>
+                          {(st.panels || ["kitchen", "manager", "owner", "tablet"]).map((pn) => (
+                            <option key={pn} value={pn}>{pn === "kitchen" ? "Kitchen screen" : pn === "manager" ? "Manager screen" : pn === "owner" ? "Owner screen" : "Waiter tablet"}</option>
+                          ))}
+                        </select>
+                        <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
+                      </div>
+                      <details className="adm-more" style={{ marginTop: 8 }}>
+                        <summary>Narrow it further — one person, one PC</summary>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                          <select className="adm-input" style={{ minWidth: 190 }} value={r.person || ""}
+                            onChange={(e) => {
+                              const person = e.target.value || null;
+                              setR(kind, { person, personName: (st.people || []).find((x) => x.id === person)?.name || null });
+                            }}>
+                            <option value="">Anyone on that screen</option>
+                            {(st.people || []).filter((x) => !r.panel || x.panels.includes(r.panel)).map((x) => (
+                              <option key={x.id} value={x.id}>{x.name} ({x.role})</option>
+                            ))}
+                          </select>
+                          <select className="adm-input" style={{ minWidth: 180 }} value={r.device || ""}
+                            onChange={(e) => setR(kind, { device: e.target.value || null })}>
+                            <option value="">Any of their devices</option>
+                            {(st.devices || []).map((d) => (
+                              <option key={d.device_id} value={d.device_id}>{d.label || d.panel || "a screen"} · {d.device_id.slice(0, 8)}…</option>
+                            ))}
+                          </select>
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
+                        </div>
+                        <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
+                          That screen prints it on whatever printer that machine is set to. Leave both blank
+                          and anybody allowed on that screen prints it.
+                          {st.managerMayPrint === false ? " No manager is offered because “May be the printer” is switched off for managers on Access & permissions." : ""}
+                        </p>
+                      </details>
+                    </>
+                  ) : null}
+
+                  {who === "computer" ? (
+                    <>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                        <select className="adm-input" style={{ minWidth: 170 }} value={r.agent || ""}
+                          onChange={(e) => setR(kind, { agent: e.target.value || null, printer: null })}>
+                          <option value="">— which computer —</option>
+                          {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                        </select>
+                        <select className="adm-input" style={{ minWidth: 200 }} value={r.printer || ""} disabled={!a}
+                          onChange={(e) => setR(kind, { printer: e.target.value || null })}>
+                          <option value="">— which printer —</option>
+                          {(a?.printers || []).map((p) => <option key={p.name} value={p.name}>{p.name}{p.paper ? ` (${paperLabel(p.paper)})` : ""}</option>)}
+                        </select>
+                        <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
+                      </div>
+                      <details className="adm-more" style={{ marginTop: 8 }}>
+                        <summary>More — paper size, and a backup printer</summary>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                          <span className="adm-muted" style={{ fontSize: 12 }}>Paper:</span>
+                          <select className="adm-input" style={{ minWidth: 185 }} value={preset?.id || "custom"}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              if (id === "custom") {
+                                const w = Number(prompt("Paper width in millimetres?", String(r.paper?.wMm || 105)));
+                                const h = Number(prompt("Paper height in millimetres?", String(r.paper?.hMm || 148)));
+                                if (w > 20 && h > 20) setR(kind, { paper: { wMm: w, hMm: h } });
+                                return;
+                              }
+                              setR(kind, { paper: PAPER_PRESETS.find((p) => p.id === id)?.paper || undefined });
+                            }}>
+                            {PAPER_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                            <option value="custom">Type the two numbers…</option>
+                          </select>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                          <span className="adm-muted" style={{ fontSize: 12 }}>If it prints nothing for a minute:</span>
+                          <select className="adm-input" style={{ minWidth: 155, fontSize: 12 }} value={r.backupAgent || ""}
+                            onChange={(e) => setR(kind, { backupAgent: e.target.value || null, backupPrinter: null })}>
+                            <option value="">— no backup —</option>
+                            {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                          </select>
+                          <select className="adm-input" style={{ minWidth: 175, fontSize: 12 }} value={r.backupPrinter || ""} disabled={!ba}
+                            onChange={(e) => setR(kind, { backupPrinter: e.target.value || null })}>
+                            <option value="">— no printer —</option>
+                            {(ba?.printers || []).map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                          </select>
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
+                        </div>
+                        <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
+                          The paper size is what stops a driver rotating a ticket or shrinking it to half —
+                          leave it on <b>as the printer says</b> unless you know the roll is different.
+                        </p>
+                      </details>
+                    </>
+                  ) : null}
                 </div>
               );
             })}
@@ -483,7 +528,7 @@ export default function AdminPrinting() {
           {/* ── 4 · what has happened ───────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14, marginBottom: 30 }}>
             <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>
-              Waiting to print: {st.waiting}
+              {STEPS.four} — waiting: {st.waiting}
             </h2>
             <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
               The last few pieces of paper, and what became of them. Nothing here is a guess: a job says
