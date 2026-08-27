@@ -76,7 +76,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     //   · devices — the screens that have actually been the printer before (print_stations), so "that
     //     same PC" is a thing he recognises rather than a hex id he has to guess at.
     const staff = ((await sb.from("staff_users").select("id, name, username, role, active")
-      .eq("restaurant_id", rid).order("role")).data || []) as
+      // A CEILING, so PostgREST's own default cannot silently shorten this picker (T17 sweep #7,
+      // 2026-08-27). One restaurant's staff, and every other read in this file already states one.
+      .eq("restaurant_id", rid).order("role").limit(500)).data || []) as
       { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null }[];
     // The manager side of that permission, read the way every other route reads one: the stored value
     // if the admin set it, else what the Access screen shows as the default (managerGrantValue).

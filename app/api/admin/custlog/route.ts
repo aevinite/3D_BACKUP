@@ -22,15 +22,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   try {
     // The guest + blocklist lists are independent — read them in parallel.
-    // (session_members carries restaurant_id so we can tag each row with its restaurant;
-    // blocklist keeps select(*) — it carries no money column, only contact info.)
+    // (session_members carries restaurant_id so we can tag each row with its restaurant.)
+    //
+    // THE BLOCKLIST NAMES ITS COLUMNS TOO (T17 sweep #7, 2026-08-27; owner said do it).
+    // This was `select("*")`, justified in the old note as "it carries no money column, only
+    // contact info". Money was never the only reason for the rule. The table holds TEN columns
+    // and the Customers tab renders six; two of the four it never shows are `unban_phone` and
+    // `unban_requested_at` — the number a banned guest gives when asking to be let back in. That
+    // travelled to the browser on every open of that tab and was thrown away unread. Naming the
+    // columns costs nothing and stops it.
+    // `restaurant_id` is not rendered but IS needed: `tag()` below turns it into the restaurant
+    // NAME that each row shows.
     // NB: the `customers` table used to be fetched here too but the Logs page never rendered
     // it (CustData = members/blocklist/orders/calls) — dropped to stop shipping an unused
     // 120-row payload on every load (audit 2026-07-23).
     let membersQ = sb.from("session_members")
       .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, restaurant_id, session:sessions(table_number, status)")
       .order("joined_at", { ascending: false }).limit(120);
-    let blocklistQ = sb.from("blocklist").select("*").order("blocked_at", { ascending: false }).limit(200);
+    let blocklistQ = sb.from("blocklist")
+      .select("id, phone, device_id, table_number, reason, blocked_at, restaurant_id")
+      .order("blocked_at", { ascending: false }).limit(200);
     if (rid) {
       membersQ = membersQ.eq("restaurant_id", rid);
       blocklistQ = blocklistQ.eq("restaurant_id", rid);

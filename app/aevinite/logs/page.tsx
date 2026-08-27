@@ -16,6 +16,9 @@ import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail,
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
+// The ONE definition of "is this the same problem" — shared with the Repair board's ×N tile and
+// with /api/admin/resolve-error, so this screen can never disagree with what the server just did.
+import { errorSig } from "@/lib/errorSignature";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
@@ -65,6 +68,19 @@ const REMOVAL_KIND: Record<string, [string, string]> = Object.fromEntries(
 const AUD_ICON: Record<string, string> = Object.fromEntries(Object.entries(REMOVAL_KIND).map(([k, v]) => [k, v[0]]));
 const AUD_LABEL: Record<string, string> = Object.fromEntries(Object.entries(REMOVAL_KIND).map(([k, v]) => [k, v[1]]));
 const REMOVAL_REASON: Record<string, string> = AUDITSORT.REASON_LABEL;
+
+// "back in 4h" / "back tomorrow" — timeAgo() only looks BACKWARDS (a future date lands in its
+// `s < 60` branch and reads "just now"), and this label is the one place on the admin's screens
+// that points at a moment which has not happened yet.
+function backIn(iso: string): string {
+  const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  if (mins <= 1) return "any moment";
+  if (mins < 60) return `in ${mins} min`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `in ${hrs}h`;
+  const days = Math.round(hrs / 24);
+  return days === 1 ? "tomorrow" : `in ${days} days`;
+}
 
 export default function AdminLogs() {
   const toast = useToast();
@@ -241,8 +257,17 @@ export default function AdminLogs() {
   // every matching row locally the way the server does, and reload only if the server rejects it.
   const markResolved = async (a: Action, resolved: boolean) => {
     const now = new Date().toISOString();
+    // THE SAME DEFINITION OF "THE SAME PROBLEM" AS THE SERVER (T17 sweep #7, 2026-08-27). This
+    // compared the message text character for character while /api/admin/resolve-error moved to the
+    // shared errorSig() — which folds away the parts that change between occurrences (order ids,
+    // row counts, and the browser's own "Uncaught ReferenceError:" prefix). Measured on this stack:
+    // of 42 groups in the live error feed, 3 hold rows whose text differs, the worst being nine
+    // rows of one fault written two ways. So pressing "Mark resolved" cleared all nine on the
+    // server and struck through only the ones that matched letter for letter — the rest stayed red
+    // until the next refresh, with no hint that anything had happened to them.
+    const wantSig = errorSig(a.detail);
     const sameGroup = (x: Action) => x.level === "error" && x.panel === a.panel && x.action === a.action
-      && (x.detail ?? null) === (a.detail ?? null) && (x.restaurant_id ?? null) === (a.restaurant_id ?? null);
+      && errorSig(x.detail) === wantSig && (x.restaurant_id ?? null) === (a.restaurant_id ?? null);
     setOps((prev) => prev ? prev.map((x) => sameGroup(x) ? { ...x, resolved_at: resolved ? now : null } : x) : prev);
     const r = await adminFetch<{ ok: boolean }>("/api/admin/resolve-error", {
       method: "POST",
@@ -445,7 +470,14 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
         // "Resolved" tag, and offers "Reopen" instead of "Mark resolved". `seen_at` is a separate
         // state (drives the notification bell), never the log colour.
         const isResolved = isErr && !!a.resolved_at;
-        const showRed = isErr && !isResolved;
+        // A REPORT SET TO "COME BACK LATER" MUST SAY SO HERE (T17 sweep #7, 2026-08-27). The Repair
+        // board hides a waiting problem until its moment; this screen is the one that shows every
+        // row, always — and /api/admin/oplog ships `snoozed_until` for exactly this. Nothing read
+        // it, so eight reports the admin had told to come back tomorrow sat here in the same full
+        // red as a live unhandled crash, with nothing to tell the two apart. A wait is not a
+        // resolve, so it keeps its own quiet amber and its own words; the red is what is left.
+        const waitingUntil = isErr && !isResolved && a.snoozed_until && new Date(a.snoozed_until) > new Date() ? a.snoozed_until : null;
+        const showRed = isErr && !isResolved && !waitingUntil;
         // A row is expandable when it carries detail longer than fits on one line, or is a
         // tap-batch / error worth reading in full.
         // Errors keep their raw text (stack/where matters); everything else (esp. tap batches)
@@ -469,8 +501,8 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
               cursor: "pointer",
               // Tint the whole row by severity so unresolved errors jump out; a resolved error
               // (showRed=false) drops back to neutral so it no longer reads as a live problem.
-              background: showRed ? "color-mix(in srgb, var(--adm-danger) 12%, transparent)" : isWarn ? "color-mix(in srgb, var(--adm-warn) 8%, transparent)" : undefined,
-              borderLeft: showRed ? "3px solid var(--adm-danger)" : isWarn ? "3px solid var(--adm-warn)" : "3px solid transparent",
+              background: showRed ? "color-mix(in srgb, var(--adm-danger) 12%, transparent)" : waitingUntil || isWarn ? "color-mix(in srgb, var(--adm-warn) 8%, transparent)" : undefined,
+              borderLeft: showRed ? "3px solid var(--adm-danger)" : waitingUntil || isWarn ? "3px solid var(--adm-warn)" : "3px solid transparent",
               opacity: isResolved ? 0.62 : 1,
             }}
           >
@@ -478,6 +510,8 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
             <div style={{ minWidth: 0 }}>
               <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{actLabel(a.action)}</span>
               {isResolved && <span className="adm-chip" style={{ marginLeft: 6, background: "color-mix(in srgb, var(--adm-ok, #16a34a) 20%, transparent)", color: "var(--adm-ok, #16a34a)", fontWeight: 700 }}><i className="fas fa-check" aria-hidden="true" style={{ marginRight: 4 }} />Resolved</span>}
+              {waitingUntil && <span className="adm-chip" title={`Set to come back on the Repair board ${new Date(waitingUntil).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}. It is still open — nothing was marked fixed.`}
+                style={{ marginLeft: 6, background: "color-mix(in srgb, var(--adm-warn) 20%, transparent)", color: "var(--adm-warn)", fontWeight: 700 }}><i className="fas fa-clock" aria-hidden="true" style={{ marginRight: 4 }} />Waiting · back {backIn(waitingUntil)}</span>}
               {isTabletPin
                 ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}
                     style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", ["--hue" as string]: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>

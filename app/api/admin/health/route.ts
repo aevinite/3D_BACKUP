@@ -12,6 +12,9 @@ export const dynamic = "force-dynamic";
 
 // Only devices seen this recently count toward the offline-layer figure — see the note below.
 const SW_WINDOW_MS = 24 * 60 * 60 * 1000; // a day
+// How many un-uploaded 3D models this page asks for. Named, because a list that comes back exactly
+// this long is a TRUNCATED list and the screen has to say so.
+const BROKEN_3D_LIMIT = 200;
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 
 export async function GET(req: NextRequest) {
@@ -64,7 +67,7 @@ export async function GET(req: NextRequest) {
       .select("slug, title, restaurant_id, model_small_url, model_optimized_url")
       .eq("is4d", true)
       .or("model_small_url.is.null,model_small_url.eq.,model_optimized_url.is.null,model_optimized_url.eq.")
-      .limit(200),
+      .limit(BROKEN_3D_LIMIT),
   ]);
 
   const restaurants = restQ.data || [];
@@ -132,6 +135,12 @@ export async function GET(req: NextRequest) {
     // itself failed, so the page can say "unreadable" instead of a reassuring zero.
     broken3d: broken3dQ.error ? null : {
       count: (broken3dQ.data || []).length,
+      // A CAPPED COUNT MUST SAY IT IS CAPPED (T17 sweep #7, 2026-08-27). The read above stops at
+      // 200 like every other read on this page, so with more than 200 un-uploaded models the
+      // page would print a confident "200" and read as the whole story — the same fault the
+      // Repair board's 50 and the log's 200 were both fixed for. Zero today, so this is the
+      // rainy-day half of a rule the rest of this territory already follows.
+      capped: (broken3dQ.data || []).length >= BROKEN_3D_LIMIT,
       dishes: (broken3dQ.data || []).slice(0, 20).map((d: { slug: string; title: string; restaurant_id: string; model_small_url: string | null; model_optimized_url: string | null }) => ({
         slug: d.slug,
         title: d.title,

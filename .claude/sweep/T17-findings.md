@@ -66,3 +66,111 @@ offer no "Go to that panel" button.
 - The panels grid's sideways scroll and the Operations table's — T7's deliberate call (you read
   down those columns). Only the two-column key -> value lists were changed.
 - R18: no second/deep health check was added, and `/api/health` was not touched.
+
+---
+
+# SWEEP #7 — the same territory, re-run and re-planned (2026-08-27)
+
+Branch `sweep7/t17-admin-health` · dev server 4217 · nothing written to any database.
+
+## The re-run of sweep #6's 500 rows
+
+**495 ✅ · 4 ⏭ · 1 ❌ — and ONE REGRESSION.**
+
+**REGRESSION · `P08095`** — *"Marking resolved flips the whole repeat-group locally the same way
+the server does."* Green in sweep #6, red now. `/api/admin/resolve-error` moved to the shared
+`errorSig()` group (it folds away order ids, row counts and the browser's own
+`Uncaught ReferenceError:` prefix); `app/aevinite/logs/page.tsx` was left comparing `detail`
+character for character. Measured on the live error feed: of 42 groups, 3 hold rows whose text
+differs — the worst being **nine rows of one fault written two ways**. So one press of "Mark
+resolved" cleared nine rows on the server and struck through only the exact matches. Fixed as
+**item 2**, and the guard now asserts the shared function *by name* rather than the client's own
+shape — which is exactly why it did not catch this.
+
+**Newly red · `P08201`** — `app/api/admin/custlog/route.ts:33` reads
+`sb.from("blocklist").select("*")`: ten columns for the six the Customers tab renders, one of them
+a banned guest's `unban_phone`. Bounded at 200 rows, so the cost is small. **Not fixed here** —
+that file belongs to the admin-API terminals. Carried into the chat report as a decision item.
+
+**11 expectations moved** — System health was rebuilt on 2026-08-20 (R42), so the pill strip those
+rows were written against is gone. The rules they protect all still hold, on the check rows that
+replaced it; each row says so and keeps its id.
+
+**All three handoffs from sweep #6 are now BUILT.** H1 — System health and Usage & cost disagreed
+about the staff count; the health route now filters staff to live restaurants. H2 — one fault sat
+on the board as two tiles; `errorSignature.ts` now strips the browser's own `Uncaught
+ReferenceError:` prefix. H3 — five tiles named no restaurant; `app/api/log/client-error` now
+derives the restaurant from the guest URL's own slug, and its header comment cites those exact
+five. **Measured on today's board: 0 of 6 tiles carry a null restaurant.**
+
+## The 500 new rows · `P23101`–`P23600`
+
+**499 ✅ · 1 ❌** (that one is `P23269`, the same `select("*")` as `P08201`).
+
+Six problems found, all fixed, one commit each:
+
+| # | severity | who is worse off | confirmed? | fixed in |
+|---|---|---|---|---|
+| 1 | **high** | the admin — "0 open complaints" over a list the page could not read, and "…" for ever beside it | **watched happen** (both routes made to fail) | `repair/page.tsx` |
+| 2 | **high** | the admin — presses Resolve, watches half the group stay red, cannot tell if it worked | **proved on the live feed** (9 rows / 2 texts) | `logs/page.tsx` |
+| 3 | medium | the admin — 8 reports he set to come back tomorrow look exactly like live crashes | **watched happen** (8 of 200 rows) | `logs/page.tsx` |
+| 4 | low | the admin — "8 reports" under a banner saying one restaurant; 7 were hers | **watched happen** (8 vs 7) | `repair/page.tsx` |
+| 5 | low | the admin — a list, a count and a button that mean three different sets | code-read (no fix records on this stack) | `repair/page.tsx` |
+| 6 | low | everyone — 28 panel cells in the alarm colour for a state the page calls normal | **measured**, both skins | `health/page.tsx` |
+
+Guard: `npm run verify:admin-health` now holds **21** fixes. Each item's assertions are inside
+that item's own commit, so vetoing an item takes its guard with it.
+
+## Two traps recorded so nobody re-derives them
+
+1. **A dev-server page fires every request twice** — Next 16 defaults `reactStrictMode` on. Judge
+   the shape of the calls, never the count.
+2. **Route interception is defeated by the service worker** — a `page.route` handler does not see
+   a request the app's own service worker answers. Five fault-injection checks in this run were
+   falsely green until the context was opened with `serviceWorkers: "block"`.
+
+## The owner picked 7, 8, 9, 10 and 11 (2026-08-27)
+
+Built as five more commits, one per item, on the same branch.
+
+| # | what he gets | evidence |
+|---|---|---|
+| 7 | The Customers tab stops asking for a banned guest's unban phone number, which it never showed | code + `verify:admin-api-a` rule 2; the stale allowance removed and proved able to fail |
+| 8 | On a phone, one line saying the Usage table slides sideways to reach Staff and Tables | visible at 360px, absent at 1280px |
+| 9 | The Claude queue narrows with the picker, and says how many it left elsewhere | code read — the queue is empty on this stack |
+| 10 | System health says "200+" instead of a flat "200" when its 3D check hits its ceiling | forced a capped answer in one browser; real answer unchanged (0, not capped) |
+| 11 | Every "all" button names the restaurant it will act on, and the restaurant name is a blue pill | **the request bodies were intercepted and aborted, so the scoping was proved without writing anything** |
+
+**Item 11's proof, in full.** With French House chosen, "Resolve all" would send
+`{"all":true,"restaurant_id":"00000000-…-0001"}` under the confirm *"Mark all 5 at My Little
+French House as handled?"*. With "All restaurants" chosen it would send `{"all":true}` under
+*"Mark all 6 across every restaurant as handled?"*. The server's own half —
+`if (scope) upd = upd.eq("restaurant_id", scope)` — is asserted by the guard too, because that is
+what actually decides which rows are cleared.
+
+The restaurant pill uses `var(--accent)`, which is blue in this console and already the colour the
+complaint cards used for the same job — so the problem tiles, the rate-limit alerts, the
+fixed-problem records and the complaints now all agree. Deliberately not red, amber or green:
+those three mean severity here, and a red restaurant name on a red tile would compete with the
+alarm rather than answer it.
+
+`verify:admin-health` now holds **26** fixes.
+
+## The one red that was not mine — item 12, fixed on his word
+
+`npm run verify:admin-api-a` was failing on `app/api/admin/printing/[...path]/route.ts`: the
+Printing board's people picker read a restaurant's staff with no ceiling, so past PostgREST's own
+default cap people would simply stop appearing in it, with nothing saying the list was short.
+
+**It was red on clean `origin/main` too** — checked by reverting my files and re-running — so it
+was never fallout from this branch. It is not this territory's file either, which is why it was
+reported as a decision rather than changed. He answered *"do what's left"*, so it is built:
+`.limit(500)`, matching every sibling read in that file.
+
+`verify:admin-api-a` now passes **all 181 checks**, for the first time in this run. Removing the
+limit again turns it red, so it stays caught.
+
+⚠️ **It overlaps another terminal.** `sweep7/t15-admin-access` rewrites the column list on the
+line directly above (f8ce16d1), so a one-line merge conflict is likely. Whoever lands second must
+keep **both** the `permissions` column T15 adds and this `.limit(500)`. The guard fails if the
+limit is lost, which is exactly why fixing it beat leaving a note.
