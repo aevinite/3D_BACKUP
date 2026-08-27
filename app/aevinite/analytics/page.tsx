@@ -222,7 +222,14 @@ export default function AdminAnalytics() {
             href: "/aevinite/floor", title: "Open the live floor",
             sub: t ? (
               <>
-                <span>of {nf.format(t.totalTables)} tables ({Math.round(occupancy * 100)}%)</span>
+                {/* A PERCENTAGE MUST NOT ROUND ITSELF DOWN TO "NONE" (T18 sweep #7, item 3). The
+                    BAR beside this already refuses to disappear — it keeps a 2% sliver whenever a
+                    table is occupied — but the words said `Math.round(occupancy * 100)`%, so on
+                    this platform the tile read "8" above "of 1,850 tables (0%)": eight tables
+                    occupied, nought per cent, with a visible bar under it. Three readings that do
+                    not agree. Under half a per cent now says so in words instead of claiming zero,
+                    which is the same honesty the sliver was given. */}
+                <span>of {nf.format(t.totalTables)} tables ({occupancy > 0 && occupancy * 100 < 0.5 ? "under 1" : Math.round(occupancy * 100)}%)</span>
                 <span style={{ display: "block", height: 6, borderRadius: 999, background: "color-mix(in srgb, var(--accent) 16%, transparent)", overflow: "hidden", marginTop: 6 }}>
                   <span style={{ display: "block", height: "100%", width: `${Math.max(occupancy * 100, t.activeTablesNow > 0 ? 2 : 0)}%`, background: "var(--accent)", borderRadius: 999 }} />
                 </span>
