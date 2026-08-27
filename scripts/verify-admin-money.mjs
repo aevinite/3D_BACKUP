@@ -427,7 +427,10 @@ try {
     // in <year>" label came from the BROWSER's clock while the figure is counted against the IST
     // calendar year — on 31 December west of IST the heading names one year over another year's
     // money (sweep #7 item 6).
-    const rev = R("app/aevinite/revenue/page.tsx");
+    // COMMENTS STRIPPED FIRST. The fix's own comment QUOTES the `new Date().getFullYear()` it
+    // replaced, and a raw scan reads that as the fault still being there — the same trap that made
+    // one of this sweep's own new checks red on a green file.
+    const rev = R("app/aevinite/revenue/page.tsx").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
     ok(!/\{r\.nextDue \|\| "—"\}/.test(rev) && /dfmt\(r\.nextDue\)/.test(rev),
       "the next-due date goes through a formatter, not straight to the screen");
     ok(/T00:00:00\+05:30/.test(rev), "…and a bare date is pinned to IST before it is formatted");
