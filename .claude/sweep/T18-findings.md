@@ -5,7 +5,7 @@
 Ledger: `.claude/sweep/LEDGER/T18.md`. The four-part report went to the terminal window, not to a
 file — that is the owner's instruction for this run.
 
-**Re-run of `P08501`–`P09000`: 500 ✅ · 0 ❌ · NO REGRESSION.** Ten of the eleven reds on the first
+**Re-run of `P08501`–`P09000`: 499 ✅ · 1 ❌ · NO REGRESSION.** The one red, `P08587`, is not a regression — it is a row that was **filed green on a claim that was never true**. It asserts "no stray hairline where a flex row wraps", it was verified by reading a screenshot, and the reading was wrong: measured this run in both skins, the Dashboard's stat strip stacks one cell per row at 360px and three of its four cells still draw a right-hand border. Same construction, same fault sweep #6 fixed on the twin `.rev-strip`. The fix is three lines in `app/globals.css`, which this territory does not own. Ten of the eleven reds on the first
 live pass were my own assertions; the eleventh (`P08917`) turned out to be correct as written, with
 the real fault one step past what it asserts. Two candidate findings were WITHDRAWN by reading
 further — the `[object Object]` risk on the Change log (`restaurants.name` is `text`, migration 078,
@@ -31,6 +31,7 @@ reported nine ✗ and exited 1 — then green again on restore.
 
 | what | where it lives | why not here |
 |---|---|---|
+| Three stray vertical hairlines down the right edge of the Dashboard's stat strip at 360px | `app/globals.css:4754` — `.cmd-strip .cell`, **T26's** file this sweep | Measured, both skins. Add `@media (max-width: 640px) { .cmd-strip .cell { border-right: 0; border-bottom: var(--border); } .cmd-strip .cell:last-child { border-bottom: 0; } }` — the same three lines `.rev-strip` got in sweep #6. `P08587`. |
 | The Change log still scrolls sideways at 360px; TABLE reads "TABLI" and By / Reason / When sit off the right edge | admin → Bills → Change log, the row grid (`minWidth: 720` + `overflowX: auto`) | It IS my file, but folding a six-column table is a visible redesign of a screen already signed off, and T26 owns the look this sweep. `P24064`. |
 | The guest-spread card silently shows at most 8 restaurants | admin → Customers → "Where the guests are" | The `.slice(0, 8)` is in `/api/admin/customers`, which is **T19's** file. The page cannot know how many were dropped. Same class as the busiest-restaurants card fixed in sweep #6. |
 | The 12-month "Collected" grid is built on UTC months while the year boundary is IST | admin → Platform revenue → the chart | `/api/admin/revenue` is **T20's** file (position 45 of 50). Bites for 5½ hours on the 1st of each IST month; on a process west of UTC it would also mislabel all twelve months, though Vercel functions run UTC so that half is not reachable today. |
