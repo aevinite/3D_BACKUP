@@ -21,6 +21,7 @@
 //   node scripts/verify-write-paths.mjs
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { claimedTables, ownerOf } from "./sweep/fixtureTables.mjs";
 // THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
 // /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
 // sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
@@ -62,6 +63,18 @@ for (const m of ((await sb.from("table_merges").select("parent_table,child_table
 // party of its own (mig 299), and `cleanup` only ever held the sessions `mk()` made. So every run
 // leaked exactly one open session, and after enough runs the restaurant had all 30 tables "occupied"
 // and this file failed with `table null` — which is how it went red again the day it went green.
+// ANOTHER GUARD'S TABLE IS BUSY, EVEN WHEN IT IS EMPTY (sweep #7 / T28, 2026-08-27).
+//
+// This picker walks UP from 5 through the whole floor and takes the first table with no open
+// session. On a floor where 5..26 are in use that is table 27 — and 27/28 are
+// verify-void-on-joined-party's reserved pair, the party whose food must survive a void. Two guards
+// on the same table is the failure sweep #6 fixed twice, and it is worse than a flake because it
+// looks exactly like a real fault in the product and only happens when the two runs overlap. I saw
+// verify:void-party go red inside a full lane and green twice on its own this run.
+//
+// scripts/sweep/fixtureTables.mjs is the one place that says which table belongs to which guard.
+// Consulting it costs nothing and is what every other dynamic picker already does.
+for (const t of claimedTables()) busy.add(String(t));
 const used = new Set();
 const freeTable = (n) => {
   for (let t = 5; t <= st.table_count; t++) {
@@ -72,7 +85,8 @@ const freeTable = (n) => {
   // ("both simultaneous orders landed at table null — 0/2") and blames the product for a floor
   // that is simply full. Say what is actually wrong, and say what to do about it.
   throw new Error(
-    `verify-write-paths: no free table on this restaurant — all ${st.table_count} are occupied or caught in a live merge.\n` +
+    `verify-write-paths: no free table on this restaurant — all ${st.table_count} are occupied, caught in a live merge,\n` +
+    `  or claimed by another guard (${claimedTables().filter((t) => /^\d+$/.test(t) && Number(t) <= st.table_count).map((t) => `${t}→${ownerOf(t)}`).join(", ") || "none on this floor"}).\n` +
     `  This is the DEV database's state, not a product fault. Close the stale parties (an OPEN session\n` +
     `  with no live orders on it is a state no screen can show — owner, 2026-08-01) and run again.`
   );

@@ -66,8 +66,19 @@ claimed.length > 0
   ? ok(`the fixture list names ${claimed.length} table(s) that belong to a specific guard`)
   : bad("the fixture list is empty", "nothing below can protect anything while this list has no entries");
 
-// Does this file touch a dining session at all?
-const TOUCHES_SESSION = /sessions\/open|sessions\/[^/`"']*\/close|\/close`|closeSession\s*\(/;
+// Does this file seat a party at a table at all?
+//
+// WIDENED (sweep #7 / T28, 2026-08-27). It used to look only for the session ROUTES —
+// /sessions/open, /sessions/<id>/close. verify-write-paths.mjs seats its parties by calling
+// `lfh_staff_place_order` directly, which opens a session as a side effect, so this guard never
+// looked at it — and verify-write-paths walks UP from table 5 through the whole floor taking the
+// first one with no open session, straight into 27/28, which belong to
+// verify-void-on-joined-party. Two guards on one table is the failure sweep #6 fixed twice; it
+// looks exactly like a real product fault and only happens when the two runs overlap. The picker
+// guard could not see the one unfenced picker left in the folder.
+//
+// So: placing an order at a table number seats a party just as surely as opening a session does.
+const TOUCHES_SESSION = /sessions\/open|sessions\/[^/`"']*\/close|\/close`|closeSession\s*\(|lfh_staff_place_order|lfh_open_session|from\("sessions"\)[\s\S]{0,80}?\.insert\(|\/api\/tablet\/order/;
 
 // TWO THINGS THIS HAD TO LEARN, because the first draft of it cried wolf twice on a clean tree —
 // and a guard that invents a failure protects nothing.
@@ -100,6 +111,12 @@ const FENCED = /claimedTables\s*\(|ownedTables|owned\w*\.has\(|\bowned\b/;
 for (const f of files) {
   const src = readFileSync(f, "utf8");
   const rel = relative(ROOT, f);
+  // GUARDS AND SWEEP HELPERS ONLY. Widening TOUCHES_SESSION (below) also brought in
+  // scripts/load-ramp-orders.mjs, and that is a LOAD TOOL: it exists to fill the floor on purpose,
+  // it is never run beside a guard (the sweep rules forbid it outright), and this check's own
+  // sentence — "borrowing another guard's table destroys that lane's party" — is not about it.
+  // Flagging it would be the guard inventing a failure, which is the one thing it must not do.
+  if (!/^scripts\/verify-|^scripts\/sweep\/|^tests\//.test(rel)) continue;
   if (!TOUCHES_SESSION.test(src)) continue;
 
   const suspects = [];
