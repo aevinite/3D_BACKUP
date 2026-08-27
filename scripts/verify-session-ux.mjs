@@ -167,7 +167,7 @@ try {
   // ?rid= IS NOT OPTIONAL FOR AN ADMIN REQUEST (sweep #6 / T28, 2026-08-22). Every /api/editor write
   // resolves its restaurant through lib/panelScope → panelRestaurantId, which takes it from the staff
   // user for a member of staff and from ?rid= (or the act-as cookie) for the admin super-user. With
-  // neither, editorScope answers 400 "No restaurant scope" — so this call was refused before it ever
+  // neither, editorScope answers 400 "…doesn’t know which restaurant it is for" — so this call was refused before it ever
   // reached the make-head logic, and the three checks below reported the app's behaviour wrongly.
   const mh = await fetch(`${BASE}/api/editor/members/${guest.id}/make-head?rid=${RID}`, {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },

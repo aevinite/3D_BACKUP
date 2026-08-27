@@ -179,7 +179,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope.", 400);
+  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
   if (!(await moduleOn(g, rid))) return err("Inventory isn't enabled for this restaurant.", 403);
   const path = (await ctx.params).path || [];
   const q = req.nextUrl.searchParams;
@@ -361,7 +361,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope.", 400);
+  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
   if (!(await moduleOn(g, rid))) return err("Inventory isn't enabled for this restaurant.", 403);
   const path = (await ctx.params).path || [];
   const actor = actorOf(g);

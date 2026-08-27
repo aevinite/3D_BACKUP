@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   // may name one — and only the admin's cookie makes `?rid=` mean anything (see lib/panelScope.ts).
 
   const rid = panelRestaurantId(req, { user: staff });
-  if (!rid) return bad("No restaurant scope — open this panel from the admin console.", 400);
+  if (!rid) return bad("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
 
   const form = await req.formData().catch(() => null);
   const file = form?.get("file");

@@ -504,7 +504,7 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
     }
   }
   const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
   return rid;
 }
 

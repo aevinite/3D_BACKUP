@@ -141,7 +141,7 @@ const BLOCKED_READ = () => NextResponse.json(
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
   // Blocked device → the whole screen goes dark (see the note by blockedForRead above).
   if (await blockedForRead(deviceIdFrom(req), rid)) return BLOCKED_READ();
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
@@ -391,7 +391,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // Dropping it HERE is not enough on its own — invalidateFloorAfter() above drops it again
   // once the handler has finished, which is what makes "read your own write" actually true.
   if (rid) { invalidateFloor(rid); writeRid.set(req, rid); }
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   try {
