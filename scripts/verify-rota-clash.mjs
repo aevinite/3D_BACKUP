@@ -98,9 +98,32 @@ try {
     /expect:/.test(site) ? "expect present" : "NO expect at the call site — the rota can be overwritten silently");
   check("…naming assigned_tables as the field it edited from", /assigned_tables/.test(site) && /fields:/.test(site));
 } finally {
-  await q(`update staff_users set assigned_tables='{${original.join(",")}}' where id='${waiter.id}'`);
-  const back = (await q(`select assigned_tables from staff_users where id='${waiter.id}'`))[0].assigned_tables || [];
-  console.log(`  · restored ${waiter.username} to ${back.length} table(s)`);
+  // THE RESTORE IS THE ONE WRITE THAT MUST NOT FAIL, SO IT RETRIES AND IT SHOUTS.
+  //
+  // Measured 2026-08-27 (sweep #7 / T28): every check above passed, and then this line itself threw
+  // `Connection terminated due to connection timeout` from the SQL endpoint. Being inside `finally`
+  // saved nothing — the restore is what timed out — so the run ended with the waiter holding the
+  // TWO tables this test gave them instead of their real thirty. On a manager's Tables floor that
+  // is a waiter who has silently lost 28 tables, and the guard exited claiming a fault in the app.
+  //
+  // Three tries with a short back-off, then a line nobody can miss with the exact SQL to run by
+  // hand. A cleanup that can quietly not happen is not a cleanup.
+  let restored = null, lastErr = "";
+  for (let i = 0; i < 3 && restored === null; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 1500 * i));
+    try {
+      await q(`update staff_users set assigned_tables='{${original.join(",")}}' where id='${waiter.id}'`);
+      restored = (await q(`select assigned_tables from staff_users where id='${waiter.id}'`))[0].assigned_tables || [];
+    } catch (e) { lastErr = String(e.message || e).slice(0, 160); }
+  }
+  if (restored === null) {
+    fails++;
+    console.log(`\n  ❌ COULD NOT PUT ${waiter.username}'S ROTA BACK after 3 tries — ${lastErr}`);
+    console.log(`     They are left holding the test's tables, not their own. Run this by hand:`);
+    console.log(`     update staff_users set assigned_tables='{${original.join(",")}}' where id='${waiter.id}';`);
+  } else {
+    console.log(`  · restored ${waiter.username} to ${restored.length} table(s)`);
+  }
   await browser.close();
 }
 console.log(`\n${fails ? `❌ ${fails} check(s) failed` : "✅ PASS — the rota cannot be overwritten behind someone's back"}\n`);
