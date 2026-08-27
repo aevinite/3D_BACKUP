@@ -1,11 +1,56 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (31 checks, in `verify:static`). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (69 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
 > Plain-language plan for him: this file's `## In his words` section.
+
+## 2026-08-27 — the machine with the printer sets ITSELF up (mig 367)
+
+> Owner: *"I will select a particular user which I have created for the particular restaurant …
+> that device is connected to the printer, so it will be easy for that device to set up the printer
+> and all that, instead of the admin. Admin can still see it … but that device will set up, and that
+> device will only get the option in settings, like everyone has their settings where they log out
+> from. The UI/UX is also not identical … and which printer gets which paper — why are there only
+> three options, one is bill, one is KOT and one is banquet? Right now it feels too much complicated."*
+
+Six things changed, and each is guarded:
+
+1. **A helper can be born on the restaurant's own screen.** `print_agents` gained `owner_device`
+   (the panel's `lfh_panel_device`) and `owner_user`. Settings → Printing asks "is the computer I am
+   sitting at already set up?" with one indexed read, and offers **register** / **adopt** if not.
+   *Adopt* exists because a device id does not survive a cleared browser — without it the same
+   machine would be registered twice, and half the tickets would come out in the wrong room.
+2. **A new permission, `print_setup`** (`lib/accessTree.ts` ACTIONS, default **OFF**). It is separate
+   from `print_here` on purpose: being the printer is "paper comes out of my machine", setting
+   printers up is "I decide where the whole restaurant's paper comes out". It is asked on the server
+   before every verb in `/api/editor/printing/*`, and it also opens the Settings tab on its own.
+3. **One board, two places.** `lib/printBoardWords.ts` holds the four step headings, the three kinds
+   and every sentence; `lib/printBoard.ts` holds the one read both screens make. The admin console
+   and the manager panel print those words verbatim. The words file imports **nothing** — the admin
+   page is a client component, so one `import type` from `printHelpers` was enough to drag the
+   service-role module into the browser bundle and make `verify:static` refuse the page.
+4. **One question a line, three answers.** A line used to carry six controls; five kinds of paper
+   made thirty. Now: *A computer* · *A screen* · *Nobody*, and only what that answer needs appears
+   under it. Backup printer, paper size, exact person and exact PC live behind **More**.
+5. **`via: "off"` is a real, saved answer.** An empty line and a deliberate no used to look
+   identical. They say different things now — and for **kitchen slips** the answer also writes
+   `settings.auto_print_kot` through `syncKotSwitch()`, because mig 335's trigger reads that column.
+   Without it the address book would say "nobody prints kitchen slips" while the basket filled for
+   ever. That also removed the DUPLICATE switch from the admin board's step 1: one column, one
+   control, which is what the 2026-08-26 "ON above, OFF below" fault was.
+6. **The dead fifth line is gone.** `label` (parcel stickers) was never queued by anything and had no
+   document builder — it was an address-book row nobody could ever fill. `ROUTABLE_KINDS` is now
+   exactly `kot · bill · banquet`, which is the honest answer to "why are there only three options":
+   **this app prints three documents.** A fourth would need the app to know which items belong to
+   which kitchen section, and no such idea exists in the schema yet.
+
+Driven, not read: the whole flow (register → helper hello → "Yes — print here" → auto-print on →
+"Nobody" → auto-print off → test page → the helper claims it) was run headless on 2026-08-27 in both
+panel skins with zero console errors, and `verify:printing-sweep` grew 12 phases (83–94) that ask the
+real server as the real manager, with and without the permission.
 
 ## Why the browser can never do this
 

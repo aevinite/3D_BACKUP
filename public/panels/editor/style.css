@@ -4598,3 +4598,84 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
   .br-ids { grid-template-columns: 1fr; }
   .br-acts .ord-btn { min-width: 0; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   SETTINGS → PRINTING — THE SAME BOARD THE ADMIN CONSOLE DRAWS (owner, 2026-08-27)
+   ══════════════════════════════════════════════════════════════════════════════════════════
+   "The UI/UX is also not identical." It was not: the admin had a Printing menu with four numbered
+   steps, and this panel had three prose cards in a different order using different words for the
+   same things. A person who learned one learned nothing about the other.
+
+   So this file mirrors app/globals.css's .adm-state / .adm-who / .adm-more, class for class and
+   rule for rule, in the PANEL's own tokens (--panel-2/--text/--muted/--line/--green). Same shapes,
+   same order, same sentences (the sentences themselves come from the server, out of
+   lib/printBoardWords.ts, so neither screen can reword one on its own).
+
+   Every token below already exists in both panel skins, so light mode is not a second design. */
+.pw-state { display: grid; gap: 8px; margin: 0 0 12px; }
+.pw-state-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 11px; background: var(--panel-2); font-size: 13.5px; }
+.pw-state-row .who { color: var(--muted); min-width: 0; flex: 1; }
+.pw-state-row .who b { color: var(--text); font-weight: 650; }
+/* Shape as well as colour — a filled dot for yes, a ring for no (WCAG 1.4.1). */
+.pw-dot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
+.pw-state-row.yes .pw-dot { background: var(--green, #30a46c); }
+.pw-state-row.no  .pw-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
+.pw-val { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
+.pw-state-row.yes .pw-val { color: var(--green, #30a46c); }
+.pw-state-row.no  .pw-val { color: var(--muted); }
+
+/* "Who prints this?" — one question, three answers. 44px minimum, the chosen one carries weight,
+   a ring and a tick, never colour alone. */
+.pw-who { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.pw-opt { appearance: none; cursor: pointer; font: inherit; font-size: 13px; line-height: 1.25;
+  min-height: 44px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--muted); font-weight: 550;
+  transition: background .15s, color .15s, box-shadow .15s; }
+.pw-opt:hover { color: var(--text); }
+/* THE PANEL HAS NO --accent. It calls the same idea --gold (fill) and --gold-ink (the readable
+   version of it, darkened in the light skin) — and an undeclared var() does not fall back, it makes
+   the whole declaration invalid: color-mix() came out transparent and the ring never painted, so the
+   chosen answer was marked by nothing but its font-weight. Measured, not guessed. */
+.pw-opt:focus-visible { outline: 2px solid var(--gold-ink); outline-offset: 2px; }
+.pw-opt.on { background: color-mix(in srgb, var(--gold) 18%, var(--panel-2)); color: var(--text);
+  font-weight: 700; box-shadow: inset 0 0 0 2px var(--gold-ink); }
+.pw-opt.on::before { content: "✓ "; font-weight: 800; color: var(--gold-ink); }
+
+/* The refinements nobody needs on the way in. */
+.pw-more { margin: 8px 0 0; }
+.pw-more > summary { cursor: pointer; font-size: 12.5px; color: var(--gold-ink); list-style: none; padding: 4px 0; }
+.pw-more > summary::-webkit-details-marker { display: none; }
+.pw-more > summary::before { content: "＋ "; font-weight: 700; }
+.pw-more[open] > summary::before { content: "－ "; }
+
+/* One line of the address book. */
+.pw-line { padding: 12px 0; border-top: 1px solid var(--line); }
+.pw-line h4 { margin: 0; font-size: 14px; font-weight: 700; color: var(--text); }
+.pw-line p.what { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.pw-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+/* The panel has no bare `input`/`select` rule — its form controls are styled by `.field input`, and
+   this board is not inside a .field. Without this the printer dropdown rendered as the browser's own
+   white box on a dark panel: unreadable, and obviously from a different product. Same tokens as
+   .field, so it IS the same control. */
+.pw-row select, .pw-row input {
+  min-height: 44px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font: inherit; font-size: 13.5px; }
+.pw-row select:focus, .pw-row input:focus { outline: none; border-color: var(--gold); }
+.pw-row input::placeholder { color: var(--muted); }
+.pw-row label { color: var(--muted); }
+
+/* A printer this computer has reported, with its own test button. */
+.pw-printer { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px; }
+.pw-printer b { color: var(--text); }
+
+/* The helper's own text. Dark whatever the skin is — it is a terminal, and a terminal that changed
+   colour with the theme would look like a different instruction to somebody following the steps. */
+.pw-code { position: relative; }
+.pw-code pre { background: #0f1420; color: #e7ecf5; padding: 14px 16px; border-radius: 11px;
+  overflow-x: auto; font-size: 12px; line-height: 1.5; max-height: 330px; margin: 0; white-space: pre; }
+.pw-code .btn { position: absolute; top: 8px; right: 8px; z-index: 2; }
+.pw-steps { font-size: 13px; margin: 0 0 10px; padding-left: 20px; line-height: 1.8; color: var(--muted); }
+.pw-steps b { color: var(--text); }

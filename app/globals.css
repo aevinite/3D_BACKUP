@@ -4143,6 +4143,22 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-elsewhere a { margin-left: auto; color: var(--accent); font-weight: 650; text-decoration: none; white-space: nowrap; }
 .adm-elsewhere a:hover { text-decoration: underline; }
 @media (max-width: 640px) { .adm-elsewhere a { margin-left: 0; } }
+/* ── "WHO PRINTS THIS?" — one question, three answers, one control (owner, 2026-08-27: "I want a
+   proper option to on and off it… right now it feels too much complicated"). It replaces six
+   controls a line with a segmented switch, and the SAME markup is used on the restaurant's own
+   Settings → Printing screen so the two boards are one thing to learn, not two.
+   The chosen answer carries weight AND a filled background AND a tick — never colour alone
+   (WCAG 1.4.1) — and every target is comfortably over 44px tall on a phone. */
+.adm-who { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.adm-who-opt { appearance: none; cursor: pointer; font: inherit; font-size: 13px; line-height: 1.25;
+  min-height: 44px; padding: 10px 14px; border-radius: 10px; border: var(--border);
+  background: var(--card); color: var(--muted); font-weight: 550; transition: background .15s, color .15s, box-shadow .15s; }
+.adm-who-opt:hover { color: var(--text); }
+.adm-who-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.adm-who-opt.on { background: color-mix(in srgb, var(--accent) 16%, var(--card)); color: var(--text);
+  font-weight: 700; box-shadow: inset 0 0 0 2px var(--accent); }
+.adm-who-opt.on::before { content: "✓ "; font-weight: 800; color: var(--accent); }
+
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── New-restaurant create card (owner 2026-07-24): sectioned form + access setup ── */
 .nr-card { max-width: 760px; }
