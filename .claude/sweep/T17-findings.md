@@ -128,3 +128,37 @@ that item's own commit, so vetoing an item takes its guard with it.
 2. **Route interception is defeated by the service worker** — a `page.route` handler does not see
    a request the app's own service worker answers. Five fault-injection checks in this run were
    falsely green until the context was opened with `serviceWorkers: "block"`.
+
+## The owner picked 7, 8, 9, 10 and 11 (2026-08-27)
+
+Built as five more commits, one per item, on the same branch.
+
+| # | what he gets | evidence |
+|---|---|---|
+| 7 | The Customers tab stops asking for a banned guest's unban phone number, which it never showed | code + `verify:admin-api-a` rule 2; the stale allowance removed and proved able to fail |
+| 8 | On a phone, one line saying the Usage table slides sideways to reach Staff and Tables | visible at 360px, absent at 1280px |
+| 9 | The Claude queue narrows with the picker, and says how many it left elsewhere | code read — the queue is empty on this stack |
+| 10 | System health says "200+" instead of a flat "200" when its 3D check hits its ceiling | forced a capped answer in one browser; real answer unchanged (0, not capped) |
+| 11 | Every "all" button names the restaurant it will act on, and the restaurant name is a blue pill | **the request bodies were intercepted and aborted, so the scoping was proved without writing anything** |
+
+**Item 11's proof, in full.** With French House chosen, "Resolve all" would send
+`{"all":true,"restaurant_id":"00000000-…-0001"}` under the confirm *"Mark all 5 at My Little
+French House as handled?"*. With "All restaurants" chosen it would send `{"all":true}` under
+*"Mark all 6 across every restaurant as handled?"*. The server's own half —
+`if (scope) upd = upd.eq("restaurant_id", scope)` — is asserted by the guard too, because that is
+what actually decides which rows are cleared.
+
+The restaurant pill uses `var(--accent)`, which is blue in this console and already the colour the
+complaint cards used for the same job — so the problem tiles, the rate-limit alerts, the
+fixed-problem records and the complaints now all agree. Deliberately not red, amber or green:
+those three mean severity here, and a red restaurant name on a red tile would compete with the
+alarm rather than answer it.
+
+`verify:admin-health` now holds **26** fixes.
+
+## One red that is NOT mine
+
+`npm run verify:admin-api-a` fails on `app/api/admin/printing/[...path]/route.ts` — one read with
+no ceiling. **It is red on clean `origin/main` too** (checked by reverting my two files and
+re-running), it is in a file this territory does not own, and I have not touched it. Reported here
+so nobody reads it as fallout from this branch.
