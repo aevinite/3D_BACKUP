@@ -19,6 +19,7 @@ import {
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { waitingToPrint, STUCK_AFTER_MS } from "@/lib/printQueue";
+import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 
 export {
   STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES,
@@ -53,6 +54,24 @@ export type BoardState = {
 };
 
 const JOB_COLS = "id, kind, status, printer, printed_by, attempts, error, created_at, done_at";
+
+const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
+
+/**
+ * THE HELPER FILE — one text, the same for every restaurant, with NO secret in it (mig 368).
+ *
+ * It used to be minted per computer with a 37-character token baked in, which is why it could not be
+ * hosted, reused or emailed, and why the owner asked for exactly this (2026-08-27: "there wouldn't be
+ * one key for all restaurants… maybe a pairing code or whatever"). Now the only thing in it that
+ * varies is the SITE, so it is safe to show on any screen and to anybody: on its first run it pairs
+ * itself, and a human presses Allow.
+ */
+export const helperFiles = (origin: string) =>
+  Object.fromEntries(OS_LIST.map((os) => [os, {
+    filename: HELPER_FILENAME[os],
+    autostart: HELPER_AUTOSTART[os],
+    text: helperScript(os, { origin }),
+  }]));
 
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */

@@ -477,9 +477,12 @@ await phase("…and a print on ITS printer closes it", async () => {
     const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device,owner_user`);
     return row?.owner_device === DEV2 || `owner_device was ${row?.owner_device}`;
   });
-  await phase("…a DIFFERENT browser is not handed that computer's code", async () => {
-    const r = await asMgrPost("/printing/newcode", {}, "sweep-device-C");
-    return r.status >= 400 || `it answered ${r.status} — another screen could re-code somebody else's machine`;
+  // "newcode" was RETIRED by mig 368 — the helper file carries no token, so there was nowhere left to
+  // show one. `unlink` is the verb that replaced it, and the rule under test is unchanged: a browser
+  // that does not own a machine cannot act on it.
+  await phase("…a DIFFERENT browser cannot unlink that computer", async () => {
+    const r = await asMgrPost("/printing/unlink", {}, "sweep-device-C");
+    return r.status >= 400 || `it answered ${r.status} — another screen could unlink somebody else's machine`;
   });
   await phase("…and pressing “set up” twice makes ONE computer, not two", async () => {
     const before = (await db(`print_agents?restaurant_id=eq.${RID}&owner_device=eq.${DEV2}&select=id`)).length;
@@ -522,6 +525,78 @@ await phase("…and a print on ITS printer closes it", async () => {
     const r = await asMgrPost("/printing/this-computer", { adopt: sweptAgent }, "sweep-device-D");
     const [row] = await db(`print_agents?id=eq.${sweptAgent}&select=owner_device`);
     return (r.status === 200 && row?.owner_device === "sweep-device-D") || `status ${r.status} · owner_device ${row?.owner_device}`;
+  });
+}
+
+// ══ 6c · THE ZERO-TYPING HANDSHAKE (mig 368) ═════════════════════════════════════════════════
+// Owner, 2026-08-27: "zero typing one, yeah". The helper holds no secret, so the ONLY thing standing
+// between a stranger and a restaurant's printer is this handshake. Every refusal below is a rule.
+{
+  const pair = (path, body) => fetch(BASE + "/api/print-agent/pair/" + path, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}),
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+  let code = null, secret = null;
+  await phase("a helper with NO credential can start a pairing (it grants nothing yet)", async () => {
+    const r = await pair("start", { fingerprint: "sweep-fp-1", hostname: "Sweep Machine", os: "mac",
+      printers: [{ name: "Sweep-Printer", paper: { wMm: 79.7, hMm: 64.2 } }] });
+    code = r.body.code || null; secret = r.body.secret || null;
+    return (r.status === 200 && !!code && !!secret && /\/pair\?c=/.test(String(r.body.pairUrl || "")))
+      || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 120)}`;
+  });
+  await phase("…and it is WAITING, not linked, until a human approves it", async () => {
+    const r = await pair("poll", { code, secret });
+    return r.body.state === "waiting" || `state was ${r.body.state}`;
+  });
+  await phase("…the code ALONE cannot collect a token (only the process that started it can)", async () => {
+    const r = await pair("poll", { code, secret: "not-the-secret" });
+    return r.body.state === "expired" || `a wrong secret got "${r.body.state}" — seeing the code would be enough`;
+  });
+  await phase("…and an unknown code answers exactly like an expired one (no way to discover codes)", async () => {
+    const r = await pair("poll", { code: "ZZZZZZZZ", secret: "whatever" });
+    return r.body.state === "expired" || `state was ${r.body.state}`;
+  });
+  await phase("a SIGNED-OUT browser is not offered the Allow button", async () => {
+    const r = await fetch(`${BASE}/api/pair?c=${code}`).then((x) => x.json());
+    return r.signedIn === false || `signedIn was ${JSON.stringify(r.signedIn)}`;
+  });
+  await phase("…and a signed-out POST cannot approve it", async () => {
+    const r = await fetch(BASE + "/api/pair", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, rid: RID }) });
+    return r.status === 401 || `it answered ${r.status} — anyone could adopt a machine`;
+  });
+
+  let agentId = null;
+  await phase("the ADMIN can approve it, and the machine's OWN name becomes the computer's name", async () => {
+    const r = await api("/api/pair", { method: "POST", body: JSON.stringify({ code, rid: RID }) })
+      .then(async (x) => ({ status: x.status, body: await x.json().catch(() => ({})) }));
+    if (r.body.agentId) { agentId = r.body.agentId; made.agents.push(agentId); }
+    return (r.status === 200 && r.body.name === "Sweep Machine") || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 120)}`;
+  });
+  await phase("…and the printers it reported are already ON the row, so the dropdowns are full at once", async () => {
+    const [row] = await db(`print_agents?id=eq.${agentId}&select=printers,fingerprint`);
+    return (row?.printers?.[0]?.name === "Sweep-Printer" && row.printers[0].paper?.wMm === 79.7 && row.fingerprint === "sweep-fp-1")
+      || JSON.stringify(row);
+  });
+  let token = null;
+  await phase("the helper collects its token — ONCE", async () => {
+    const r = await pair("poll", { code, secret });
+    token = r.body.token || null;
+    return (r.body.state === "linked" && String(token || "").startsWith("lfhp_")) || JSON.stringify(r.body).slice(0, 120);
+  });
+  await phase("…and a SECOND collection gets nothing (a replayed poll cannot copy a credential)", async () => {
+    const r = await pair("poll", { code, secret });
+    return r.body.state === "expired" || `state was ${r.body.state} — the token was handed out twice`;
+  });
+  await phase("…the token it was given really works on the helper's own door", async () => {
+    const r = await fetch(BASE + "/api/print-agent/hello", { method: "POST",
+      headers: { "content-type": "application/json", "x-lfh-agent": token },
+      body: JSON.stringify({ fingerprint: "sweep-fp-1", printers: [{ name: "Sweep-Printer" }] }) });
+    return r.ok || `hello answered ${r.status}`;
+  });
+  await phase("…and approving the same pairing again is refused", async () => {
+    const r = await api("/api/pair", { method: "POST", body: JSON.stringify({ code, rid: RID }) });
+    return r.status >= 400 || `it answered ${r.status} — one pairing could make two computers`;
   });
 }
 

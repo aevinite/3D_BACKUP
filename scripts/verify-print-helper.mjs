@@ -414,6 +414,95 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "a pile-up line reads 'since N min ago' — two ways of saying when, in one sentence");
 }
 
+// ── 8d · ONE FILE, ZERO TYPING (mig 368, owner 2026-08-27) ────────────────────────────────────
+// "There wouldn't be one key for all restaurants… or maybe a pairing code or whatever" → and then,
+// picking between typing six digits and pressing one button: "zero typing one, yeah".
+{
+  const mig368 = read("supabase/migrations/368_a_helper_pairs_itself_no_code_to_carry.sql");
+  const pairLib = read("lib/printPair.ts");
+  const pairApi = read("app/api/pair/route.ts");
+  const pairPage = read("app/pair/page.tsx");
+  const script = read("lib/printHelperScript.ts");
+  const board = read("lib/printBoard.ts");
+
+  check(/create table if not exists public\.print_pairings/i.test(mig368) && /secret_hash/.test(mig368)
+    && /enable row level security/i.test(mig368),
+    "a handshake is a short-lived row, and that table is staff-only (RLS on, no policies)",
+    "mig 368 lost print_pairings or its RLS");
+
+  // THE FILE CARRIES NO SECRET. This is the whole point: it is what lets one file serve every
+  // restaurant, and it is the owner's own ask.
+  check(!/CODE="\$\{safe\(a\.code\)\}"/.test(script) && !/set "CODE=\$\{safe\(a\.code\)\}"/.test(script),
+    "the helper file has no token baked into it — one file works for every restaurant",
+    "a per-restaurant secret is back in the generated helper: the file cannot then be hosted, reused or emailed, and it puts a long-lived credential in a text file on a shop counter");
+  check(/pair\/start/.test(script) && /pair\/poll/.test(script) && /TOKEN_FILE/.test(script),
+    "…it pairs ITSELF and writes its own token to its own disk",
+    "the helper stopped pairing itself, so somebody has to carry a code to the machine again");
+
+  // THE THREE THINGS THAT MAKE IT SAFE. Each is a rule, and each was driven in the sweep.
+  check(/secret_hash !== hash\(secret\)/.test(code(pairLib)) && /state: "expired"/.test(pairLib),
+    "the token is collected with a secret only the helper holds, and a wrong one is answered like an unknown code",
+    "the pairing poll stopped checking the private secret, or now tells the difference between a wrong secret and a missing row — which turns it into a way to discover codes");
+  check(/collected_at/.test(code(pairLib)) && /not\("token_once", "is", null\)/.test(pairLib),
+    "…and it is collected exactly ONCE, with a spent pairing saying so",
+    "a replayed poll can collect the token twice, or a spent pairing answers 'waiting' for ever (the sweep found that one)");
+  check(/tokenIsValid/.test(pairApi) && /managerCan\(/.test(pairApi) && /print_setup/.test(pairApi),
+    "…and only a signed-in human may approve one — the admin, or a manager with print_setup",
+    "the Allow door lost its gate: a stranger could adopt a machine into a restaurant");
+  check(/who\.kind === "admin" \? String\(body\.rid \|\| ""\) : who\.restaurantId/.test(pairApi),
+    "…and a manager can only ever adopt into their OWN restaurant (the body's rid is ignored for them)",
+    "the Allow door trusts a restaurant id from the request for staff — any manager could attach a machine to somebody else's shop");
+  check(/signedIn: false/.test(pairApi) && /Sign in on this computer first/.test(pairPage),
+    "a signed-out browser is told to sign in, not offered the button",
+    "the Allow page offers its button to somebody who is not signed in");
+
+  // THE MACHINE NAMES ITSELF, and starts itself.
+  check(/scutil --get ComputerName/.test(script) && /%COMPUTERNAME%/.test(script),
+    "the machine reports its OWN name, so nobody is asked to invent one",
+    "the helper stopped sending its hostname — somebody has to type a computer name again (owner: 'what the fuck is a computer name')");
+  check(/install_autostart/.test(script) && /LaunchAgents/.test(script) && /GetFolderPath\('Startup'\)/.test(script)
+    && /autostart/.test(script),
+    "…and it installs its own start-up on all three systems, so a shutdown is not a problem in the morning",
+    "auto-start went back to being an INSTRUCTION a person must follow — and a skipped step means the shop opens and nothing prints");
+  check(/Nothing to do/.test(script),
+    "…which the screens state as a fact instead of a to-do",
+    "HELPER_AUTOSTART is telling somebody to do something again");
+
+  // WINDOWS: the hole that made "nothing is downloaded" only true on a Mac.
+  check(/SUMATRA = \{/.test(script) && /sha256:/.test(script) && /certutil -hashfile/.test(script),
+    "Windows fetches its own PDF printer, pinned and checksummed",
+    "the Windows helper is asking a person to download SumatraPDF by hand again, or fetching it without checking what arrived");
+  check(/PaperSizeWidth/.test(script) && /PaperSizeHeight/.test(script),
+    "…and Windows now reports its paper sizes, instead of somebody typing them",
+    "the Windows helper stopped reading paper sizes — and a page that disagrees with the paper is what prints a slip sideways");
+  check(/running\.pid|LOCKFILE/.test(script) && /ALREADY RUNNING/.test(script),
+    "…and a second copy on one machine steps aside instead of fighting for jobs",
+    "the single-instance lock is gone: auto-start plus a double-click would put two helpers on one token");
+
+  // ONE FILE, SHOWN BY BOTH BOARDS, and the code-carrying ceremony retired.
+  check(/export const helperFiles/.test(board) && /files: helperFiles\(/.test(code(adminR)) && /files: helperFiles\(/.test(code(eroute)),
+    "both boards show the SAME one file, from one place",
+    "a printing board builds its own helper file again — two screens can then hand out different helpers");
+  // Comments stripped on both sides: the code that REMOVED this ceremony explains what it removed,
+  // and quotes the old wording to do it. A guard that trips on its own obituary is a guard the next
+  // person deletes (this file's header, and it happened again right here).
+  check(!/shown only once/i.test(code(page)) && !/data-pw="newcode"/.test(epanel) && !/"newcode"/.test(code(eroute)),
+    "the 'new code, shown once' ceremony is gone — there is no token in the file to guard",
+    "the newcode flow is back: it mints a credential that no screen displays any more, which is worse than no button");
+  check(/data-pw="unlink"/.test(epanel) && /b === "unlink"/.test(code(eroute)),
+    "…replaced by Unlink, which also empties the routes that named that machine",
+    "unlink is gone, so there is no way to retire a computer from its own screen");
+
+  // EVERY RESTAURANT ON ONE PAGE.
+  check(/seg\[0\] === "overview"/.test(code(adminR)) && /adm-over-row/.test(page) && /adm-over-row/.test(read("app/globals.css")),
+    "every restaurant is one row on one page, worst first",
+    "the all-restaurants printing page is gone — finding whose printer is down means clicking through every restaurant again (owner: 'it will be messy when there will be too much restaurants')");
+
+  check(/id="after"/.test(read("public/print-setup.html")) && /They shut the computer down at night/.test(read("public/print-setup.html")),
+    "the guide answers what happens after it is installed — shutdowns, restarts, a new computer",
+    "the after-install section is gone from /print-setup.html");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",

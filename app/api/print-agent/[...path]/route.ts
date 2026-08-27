@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
+import { startPairing, pollPairing } from "@/lib/printPair";
 import { finishKotJob } from "@/lib/printQueue";
 import { kotHtmlForOrder, billHtmlForSession, testHtml, withPaper } from "@/lib/printDocs";
 
@@ -30,6 +31,15 @@ const err = (m: string, status = 400) => NextResponse.json({ error: m }, { statu
 // two helpers is ~86k empty polls a day, which is nothing beside one panel's own board reads, and
 // it is the price of paper appearing without anybody watching a screen.
 const POLL_MS = 2000;
+
+// The site the helper must talk to, taken from THIS request rather than a constant, so a pairing
+// started on backup points at backup and one on the live site points at the live site.
+const originOf = (req: NextRequest) => {
+  const h = req.headers;
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  return host ? `${proto}://${host}` : new URL(req.url).origin;
+};
 
 async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
   const t = req.headers.get("x-lfh-agent") || req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
@@ -48,6 +58,33 @@ async function printingOn(rid: string): Promise<boolean> {
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
   const seg = (path || []).map(String);
+
+  // ── PAIRING COMES BEFORE THE GATE, because an unpaired helper has nothing to be gated by ──────
+  //
+  // These two verbs are the ONLY unauthenticated ones in this file, and neither grants anything:
+  //   · pair/start — a machine describes itself and gets a code + a private secret. The row it
+  //     creates can do exactly one thing: be shown to a signed-in human for approval (mig 368).
+  //   · pair/poll  — asks "am I in yet?", and answers with the token exactly ONCE, and only to the
+  //     process holding that private secret. A wrong secret is answered identically to a code that
+  //     does not exist, so this cannot be used to discover codes.
+  //
+  // The restaurant is chosen by the APPROVER, never by the helper. Nothing here can join a
+  // restaurant on its own.
+  if (seg[0] === "pair" && seg[1] === "start") {
+    const b = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const r = await startPairing({
+      fingerprint: b.fingerprint, hostname: b.hostname, printers: b.printers, os: b.os,
+      origin: originOf(req),
+    });
+    if ("error" in r) return err(r.error, 500);
+    return NextResponse.json(r);
+  }
+  if (seg[0] === "pair" && seg[1] === "poll") {
+    const b = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const r = await pollPairing(String(b.code || ""), String(b.secret || ""));
+    return NextResponse.json(r);
+  }
+
   const agent = await whoIsAsking(req);
   if (!agent) return err("This computer's printing code is not valid any more.", 401);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;

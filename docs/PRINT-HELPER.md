@@ -1,7 +1,7 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (81 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (100 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -91,6 +91,85 @@ Four places, same field, same words:
 A third state was added to the shared state-pair pattern: **`warn`**. `no` is neutral — a fact that
 happens to be false — and it paints its value in `--muted`, so the word **STUCK** read as a
 switched-off setting. `warn` carries the danger colour, a filled dot and its own border.
+
+## 2026-08-27 (later still) — ONE file, zero typing, and it starts itself (mig 368)
+
+> Owner: *"There wouldn't be one key for all restaurants. There would be different key for different
+> restaurant or maybe a pairing code or whatever… one software only will be running in their PC just
+> for printing and it will take data from this app… tell me an easy workable idea without any money
+> cost."* Then, picking the handshake: *"zero typing one, yeah."*
+
+**His first idea — one key for every restaurant — was withdrawn by him and would have been refused
+anyway:** one plaintext key on every client's PC means one leak prints at, and reads the bills of,
+every restaurant on the platform, and no shop could be cut off on its own.
+
+### The handshake (the OAuth "device flow" — how a smart TV pairs with Netflix)
+
+```
+helper (holds NO secret)                    the person's browser, on THAT machine
+────────────────────────                    ─────────────────────────────────────
+pair/start ──► code + private secret
+   opens /pair?c=<code> ──────────────────►  sees the hostname + printers it reported
+                                             presses ALLOW ──► approvePairing()
+pair/poll(code, secret) ◄── the token, ONCE
+writes it to its own disk, for ever
+```
+
+Three things do the work, and each has a sweep phase:
+1. **The browser opens on the machine at the printer.** That is the proof of "this is that computer".
+2. **The code is not a credential.** Alone it can only be shown to a signed-in human for approval.
+3. **The token is collected with a secret only the helper holds, exactly once.** Even the person who
+   approved it cannot read it afterwards.
+
+The **restaurant is chosen by the approver, never by the helper** — that is the whole security
+boundary. A manager may only adopt into their own restaurant (the request's `rid` is ignored for
+them); the admin must say which.
+
+### What else went with it
+
+- **The machine names itself.** `scutil --get ComputerName` / `%COMPUTERNAME%`. The "what should this
+  computer be called?" box is gone — his words were *"what the fuck is a computer name"*.
+- **The helper installs its own auto-start.** A macOS **LaunchAgent with KeepAlive** (so it also
+  restarts if it dies mid-service), a Startup-folder shortcut on Windows, a `.desktop` entry on Linux.
+  It used to be an INSTRUCTION, so it was skipped — and a skipped step means the shop opens, nothing
+  prints, and nobody knows why. `HELPER_AUTOSTART` is a statement of fact now, not a to-do.
+- **A single-instance lock**, because auto-start plus a double-click would otherwise put two helpers
+  on one token. The second says "already running" and closes.
+- **Windows fetches its own PDF printer.** Pinned URL + verified SHA-256 (checked by downloading the
+  file on 2026-08-27). Windows has no built-in silent print-to-named-printer, which is why the old
+  script said *"put SumatraPDF.exe next to this file"* — quietly making the client download a program
+  by hand, so *"nothing is downloaded"* was only ever true on a Mac. A checksum mismatch deletes the
+  file and refuses to run.
+- **Windows reports paper sizes** (`Get-PrintConfiguration` + `Get-PrinterProperty`, per printer in a
+  try/catch). It never did, so somebody typed them — and paper size is the setting that decides
+  whether a slip prints sideways or at half size.
+- **"New code / shown only once" is retired.** It minted a token to be carried by hand, and once the
+  file stopped carrying one there was nowhere to show it. **Unlink** replaces it: unlink here, run the
+  file there, press Allow — the same path as a first-time setup. It empties the routes that named the
+  machine, so nothing points at a computer that cannot print.
+- **Every restaurant on one page** (`/api/admin/printing/overview` + the `.adm-over` list). Four
+  whole-table reads for the platform, grouped in memory — never N+1. Sorted worst-first: a pile-up
+  outranks a sleeping computer, which outranks "no computer", which outranks "not routed". His words:
+  *"it will be messy when there will be too much restaurants."*
+- **`managerCan()` moved to `lib/managerCan.ts`**, unchanged. A second door asks it now (`/api/pair`),
+  and a permission rule with two copies is the bug class the access rebuild exists to remove.
+
+### Two faults found by driving it
+
+1. **A spent pairing answered `waiting` for ever** (caught by sweep phase 104). The token had been
+   collected and blanked, so `!token_once` fell through to "waiting" — a helper restarted a moment
+   after collecting would sit being told to wait with a perfectly good token on its disk. `collected_at`
+   now answers `expired`.
+2. **The overview endpoint answered 400 to every request** — it sat below the route's
+   `if (!rid) return err("Which restaurant?")`, and it is the one read with no restaurant behind it.
+   The page rendered nothing and said nothing. Found by opening it.
+
+Also fixed the same day, on the owner's report (*"in the admin, Access and permission, the UI is
+clashing and overlaying"*): the Access search results panel is capped at 560px while the cards behind
+run to ~1015px, so it covered the left half of every card and left the right half lit — sentences
+chopped mid-word with the count pills still glowing beside them. It now has a **scrim that dims AND
+blurs**; a dim alone was measured at rgb(16,20,27) → rgb(10,15,23) on the dark skin, which is a real
+change and invisible to a human.
 
 ## Why the browser can never do this
 

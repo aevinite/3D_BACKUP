@@ -17,7 +17,8 @@ import {
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
 // not identical"). lib/printBoard.ts is the single copy.
-import { printBoardState } from "@/lib/printBoard";
+import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { STUCK_AFTER_MS } from "@/lib/printQueue";
 import { managerGrantValue } from "@/lib/accessTree";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
@@ -57,6 +58,72 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   if (!(await admin(req))) return err("Not authorised", 401);
   const { path } = await ctx.params;
   const seg = (path || []).map(String);
+  // ── EVERY RESTAURANT, ONE ROW ─────────────────────────────────────────────────────────────
+  // Owner, 2026-08-27: *"it will be messy when there will be too much restaurants… I could be able
+  // to differentiate all the restaurants."* He was right — the board showed ONE restaurant at a
+  // time, chosen from a dropdown, so finding out whose printer was down meant clicking through all
+  // of them.
+  //
+  // FOUR READS FOR THE WHOLE PLATFORM, not four per restaurant. Every one is a whole-table read with
+  // a column list, grouped in memory: the alternative (a loop of per-restaurant queries) is the
+  // N+1 shape the egress rule exists to refuse, and it would get slower with every client signed.
+  if (seg[0] === "overview") {
+    const [rests, agents, sets, jobs] = await Promise.all([
+      sb.from("restaurants").select("id, name, slug").order("name"),
+      sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
+        .is("revoked_at", null).limit(400),
+      sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
+      // Only what is STILL WAITING, and only the two columns needed to count it and age it.
+      sb.from("print_jobs").select("restaurant_id, kind, created_at")
+        .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
+    ]);
+    const now = Date.now();
+    const byRest = new Map<string, { n: number; oldest: number | null }>();
+    for (const j of (jobs.data || []) as { restaurant_id: string; created_at: string }[]) {
+      const cur = byRest.get(j.restaurant_id) || { n: 0, oldest: null };
+      cur.n++;
+      const age = now - new Date(j.created_at).getTime();
+      if (cur.oldest == null || age > cur.oldest) cur.oldest = age;
+      byRest.set(j.restaurant_id, cur);
+    }
+    const agentsBy = new Map<string, { id: string; name: string; last_seen_at: string | null; printers: unknown }[]>();
+    for (const a of (agents.data || []) as { restaurant_id: string; id: string; name: string; last_seen_at: string | null; printers: unknown }[]) {
+      const arr = agentsBy.get(a.restaurant_id) || []; arr.push(a); agentsBy.set(a.restaurant_id, arr);
+    }
+    const setBy = new Map((((sets.data || []) as { restaurant_id: string }[])).map((x) => [x.restaurant_id, x as Record<string, unknown>]));
+
+    const rows = (((rests.data || []) as { id: string; name: string; slug: string }[])).map((r) => {
+      const mine = agentsBy.get(r.id) || [];
+      const alive = mine.filter((a) => a.last_seen_at && now - new Date(a.last_seen_at).getTime() < HELPER_STALE_MS);
+      const st = setBy.get(r.id) || {};
+      const bag = (st.modules && typeof st.modules === "object" ? st.modules as Record<string, Record<string, unknown>> : {})["printing"];
+      const routes = (bag && typeof bag.routes === "object" ? bag.routes as Record<string, unknown> : {});
+      const w = byRest.get(r.id) || { n: 0, oldest: null };
+      return {
+        id: r.id, slug: r.slug, name: r.name,
+        allowed: st.auto_print_kot_allowed === true,
+        on: st.auto_print_kot === true,
+        computers: mine.length,
+        connected: alive.length,
+        // The freshest "seen", because "is ANY of their computers alive" is the question.
+        secondsAgo: mine.length
+          ? Math.min(...mine.map((a) => a.last_seen_at ? Math.round((now - new Date(a.last_seen_at).getTime()) / 1000) : 10 ** 9))
+          : null,
+        names: mine.map((a) => a.name).slice(0, 4),
+        routed: Object.keys(routes).filter((k) => {
+          const v = routes[k] as Record<string, unknown> | null;
+          return !!v && (v.via === "off" || v.via === "screen" || !!v.agent);
+        }).length,
+        waiting: w.n,
+        oldestMs: w.oldest,
+      };
+    });
+    return NextResponse.json({ rows, staleMs: HELPER_STALE_MS, stuckAfterMs: STUCK_AFTER_MS });
+  }
+
+  // THE OVERVIEW IS ASKED FIRST, because it is the one read with no restaurant behind it. It used to
+  // sit below this line and every request answered 400 — the page rendered nothing and said nothing
+  // (caught by driving it, 2026-08-27).
   const rid = new URL(req.url).searchParams.get("rid") || "";
   if (!rid) return err("Which restaurant?");
 
@@ -98,6 +165,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 
     return NextResponse.json({
       ...board,
+      // The ONE generic file, shown on the board itself. There is nothing secret in it, so it does
+      // not need a "shown only once" ceremony any more — that whole dance existed because the old
+      // file carried a token (mig 368).
+      files: helperFiles(originOf(req)),
       staleMs: HELPER_STALE_MS,
       panels: ROUTE_PANELS, people, devices,
       // Stated so the screen can say it rather than implying it: a manager whose permission is off is
