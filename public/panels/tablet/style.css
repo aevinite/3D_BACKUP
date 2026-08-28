@@ -1383,3 +1383,63 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
 /* Firefox draws them from the input itself, not a pseudo-element. `textfield` keeps the numeric
    keypad on mobile and drops only the arrows. */
 .disc-pct-input, .disc-amt-input, .disc-pay-input { -moz-appearance: textfield; appearance: textfield; }
+
+/* ── THE ONE SPLIT SCREEN (owner, 2026-08-28) ─────────────────────────────────────────────────
+   Splitting a bill lived on TWO screens with two layouts and two sets of abilities; this is the
+   single one that replaced them, reached from 🧾 KOT ▾ and from the small line at the bottom of
+   the payment sheet. It renders inside the table popup's own card (renderPickerShell), so it
+   inherits the card's scrolling body and its pinned ✕ — the rules below only lay out its rows.
+   Everything is sized for a thumb: no control here is under 44px. */
+.sb-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.sb-tabs .sb-tab { flex: 1 1 auto; min-width: 0; min-height: 44px; white-space: nowrap; }
+.sb-n { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; flex-wrap: wrap; }
+.sb-n .sb-nb { min-width: 44px; min-height: 44px; font-weight: 800; }
+.sb-n b { font-size: 17px; font-variant-numeric: tabular-nums; min-width: 1.5ch; text-align: center; }
+/* A dish row is a two-column button: the dish on the left, whose share it is on the right. */
+.sb-dish { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  width: 100%; margin: 0 0 4px; min-height: 44px; text-align: left; }
+.sb-dish span:last-child { flex: 0 0 auto; color: var(--gold-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+/* One PART. Grid so a method that needs more room (Other's note, Pay later's person) can take a
+   full-width row underneath without the amount box moving. */
+.sb-row { display: grid; grid-template-columns: auto 1fr auto 32px; gap: 8px; align-items: center;
+  margin: 0 0 8px; }
+.sb-row .sb-who { color: var(--muted); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.sb-row .sb-amt, .sb-row .sb-way, .sb-row .sb-note {
+  box-sizing: border-box; min-height: 44px; padding: 10px 12px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
+.sb-row .sb-amt { width: 100%; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sb-row .sb-amt[readonly] { background: var(--panel-2); color: var(--muted); }
+.sb-row .sb-way { font-weight: 600; }
+.sb-row .sb-note { grid-column: 1 / -1; width: 100%; }
+.sb-row .sb-who-btn { grid-column: 1 / -1; min-height: 44px; text-align: left; font-weight: 600; }
+.sb-row .sb-del { width: 32px; min-height: 44px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--muted); font-size: 13px; cursor: pointer; }
+.sb-row .sb-del:hover { border-color: var(--red); color: var(--red); }
+/* No spinner arrows on a money box a finger types — the same rule as the discount screen's three
+   boxes (owner picked, 2026-08-28). type=number stays, for the numeric keypad. */
+.sb-row .sb-amt::-webkit-outer-spin-button, .sb-row .sb-amt::-webkit-inner-spin-button {
+  -webkit-appearance: none; appearance: none; margin: 0; }
+.sb-row .sb-amt { -moz-appearance: textfield; appearance: textfield; }
+/* The running total. Its colour is set inline by the script (green when the parts add up, red when
+   they do not), so only the type is set here. */
+.sb-sum { margin: 10px 0 10px; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+/* A phone: the person label goes above its own row so the amount box keeps its width. */
+@media (max-width: 430px) {
+  .sb-row { grid-template-columns: 1fr auto 32px; }
+  .sb-row .sb-who { grid-column: 1 / -1; margin-bottom: -4px; }
+  .sb-tabs .sb-tab { flex: 1 1 45%; }
+}
+
+/* The payment sheet's small written line to the split screen (owner, 2026-08-28). Deliberately a
+   quiet line and not a tile: every tile above it answers "how did the money come in?", and
+   splitting is a different question. */
+.pay-splitline { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.pay-splitline .pay-split-open { display: block; width: 100%; min-height: 44px; padding: 10px 12px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--muted); font: inherit;
+  font-size: 12.5px; text-align: center; cursor: pointer; }
+.pay-splitline .pay-split-open b { color: var(--gold-ink); font-weight: 800; }
+.pay-splitline .pay-split-open:hover { background: color-mix(in srgb, var(--gold) 10%, transparent); }
+/* "By kitchen ticket" on a bill that IS one ticket: dimmed, still tappable, and it says why when
+   tapped (T7, 2026-08-29). Never `disabled` — a disabled tab on a touch panel swallows the tap,
+   which is the fault #payBill was fixed for. */
+.sb-tabs .sb-tab-off { opacity: .55; }

@@ -196,10 +196,13 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `before returning. Without it the marker above is decoration and the tap is silent again.`,
   );
   check(
-    "tablet: the split-payment button it copies still refuses out loud too",
-    /goBtn\.onclick[\s\S]{0,600}?toast\(/.test(src),
-    `In ${TABLET}, the split "Take payment" button is the pattern #payBill now follows — if it ever\n    ` +
-    `goes back to being disabled, the two controls disagree about the same situation again.`,
+    "tablet: the one split screen's Take-payment button refuses out loud too",
+    /p\.querySelector\("\.sb-go"\)\.onclick = \(\) => \{/.test(src)
+      && /Every part needs an amount above zero/.test(src)
+      && !/sb-go[^>]*disabled/.test(src),
+    `${TABLET}: the pattern the money buttons on this panel all copy — stay ENABLED and say WHY it\n    ` +
+    `will not go. A disabled button that swallows the tap is indistinguishable from a broken one, and\n    ` +
+    `this is the most repeated money control in a service.`,
   );
 }
 
@@ -427,10 +430,12 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
 // narrow and checkable: inside the two split screens, every refusal that quotes a gap or a target
 // uses inrExact.
 {
+  // ONE SCREEN NOW (owner, 2026-08-28) — the KOT-menu split and the payment-sheet split were
+  // merged into renderSplitBill(), so its two refusals are the whole list. The third entry that
+  // used to be here ("the shares must add up to exactly …") belonged to the screen that is gone.
   const shortfall = [
-    ["the split panel's shortfall refusal", /of the bill is still uncovered/],
-    ["the split panel's over-collect refusal", /more than the bill/],
-    ["the KOT-menu split's must-add-up refusal", /shares must add up to exactly/],
+    ["the split screen's shortfall refusal", /of the bill is still uncovered/],
+    ["the split screen's over-collect refusal", /more than the bill/],
   ];
   for (const [what, re] of shortfall) {
     const at = src.search(re);
@@ -443,10 +448,43 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     );
   }
   check(
-    "tablet: the split panel's running total line still uses inrExact too",
-    /function refreshSplitSum\(\)[\s\S]{0,400}?inrExact\(left\)/.test(src),
-    `${TABLET}: refreshSplitSum is the line the refusal has to agree with. If it starts rounding,\n    ` +
-    `the two halves of the same sentence disagree again — which is the fault this pair guards.`,
+    "tablet: the split screen's running total line still uses inrExact too",
+    /const refreshSum = \(\) => \{[\s\S]{0,420}?inrExact\(left\)/.test(src),
+    `${TABLET}: the running total is the line the refusal has to AGREE with — the original fault was\n    ` +
+    `the two halves of one sentence quoting the same number differently ("₹0.40 still to cover" over\n    ` +
+    `"₹0 of the bill is still uncovered"). If either side starts rounding, that comes back.`,
+  );
+  check(
+    "tablet: there is exactly ONE split screen, and both doors open it",
+    (src.match(/function renderSplitBill\(/g) || []).length === 1
+      && !/function renderSplitSettle\(/.test(src)
+      && /kotop === "split"\) renderSplitBill\(/.test(src)
+      && /picked\.special === "split"\) \{ renderSplitBill\(/.test(src),
+    `${TABLET}: splitting a bill must exist ONCE (owner, 2026-08-28: "both have same interface as the\n    ` +
+    `kot one"). It used to exist twice, with different abilities and different endpoints, so a waiter\n    ` +
+    `learned one and met the other. Both 🧾 KOT ▾ and the payment sheet's bottom line must call\n    ` +
+    `renderSplitBill(), and renderSplitSettle must not come back.`,
+  );
+  check(
+    "tablet: the one split screen offers all four ways to divide a bill",
+    ["equal", "custom", "dish", "ticket"].every((m) => new RegExp(`data-mode="${m}"`).test(src)),
+    `${TABLET}: he asked for "equally split custom amount by dish by Kitchen ticket" — all four tabs,\n    ` +
+    `on the one screen. Dropping one silently takes a way of dividing a bill away from a restaurant.`,
+  );
+  check(
+    "tablet: …and every part still pays its own way, pay-later included",
+    /const WAYS = \["UPI", "Cash", "Card", "Other"\]\.concat\(tabletKhataOn\(\) && tshow\("tablet_khata"\) \? \[PAY_LATER\] : \[\]\)/.test(src)
+      && /khataCustomerId: l\.khata\.customer_id/.test(src),
+    `${TABLET}: "by each part, pays its own way. One part on somebody's tab pay later like everything"\n    ` +
+    `(owner, 2026-08-28). Pay later is offered only where the restaurant HAS it and this waiter may\n    ` +
+    `use it — otherwise the screen offers a part the server will refuse.`,
+  );
+  check(
+    "tablet: the split posts to /pay-split, never the older /pay+splits",
+    /actGated\("POST", `\/tables\/\$\{t\}\/pay-split`/.test(src) && !/\/pay`, \{ splits \}/.test(src),
+    `${TABLET}: only /pay-split carries a pay-later part (mig 352 — it checks the khata module and\n    ` +
+    `tablet_khata on top of mark_paid, and parks the tab). The older /pay+splits route refuses one,\n    ` +
+    `so sending there would make "one part on somebody's tab" fail at the server.`,
   );
 }
 
