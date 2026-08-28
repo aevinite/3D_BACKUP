@@ -169,9 +169,21 @@ try {
     await addFirstDish(p);
     await ctx.setOffline(true);
     // A saved WAITER CALL — the row this run fixed.
-    await p.locator(".chef-call").click({ force: true }); await p.waitForTimeout(800);
-    await p.locator("#chef-table").fill("3"); await p.waitForTimeout(300);
-    await p.locator(".chef-reason", { hasText: "Water" }).first().click({ force: true }); await p.waitForTimeout(1600);
+    //
+    // WAIT FOR THE THING, NEVER FOR A CLOCK. On a COLD dev server this route is compiled on the
+    // first hit, so a fixed pause that is plenty on the second run is not enough on the first —
+    // and P16441/P16442 went red on nothing but that. It is the same fault sweep 6's pass 3 fixed
+    // in four of its own rows, and INDEX.md carries it as a standing pre-empt. A false red costs
+    // exactly as much trust as a false green, so each step waits for its own element to exist.
+    await p.locator(".chef-call").waitFor({ state: "visible", timeout: 30_000 });
+    await p.locator(".chef-call").click({ force: true });
+    await p.locator("#chef-table").waitFor({ state: "visible", timeout: 15_000 });
+    await p.locator("#chef-table").fill("3");
+    const water = p.locator(".chef-reason", { hasText: "Water" }).first();
+    await water.waitFor({ state: "visible", timeout: 15_000 });
+    await water.click({ force: true });
+    // …and the chip is what the next two rows read, so wait for IT rather than guessing at 1600ms.
+    await p.locator(".gob-chip").waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
     const chip = await txt(p.locator(".gob-chip"));
     P("P16441", "a saved request for staff appears in the corner", (await p.locator(".gob-chip").count()) === 1);
     P("P16442", "…counted as a REQUEST, not as an order", /request for staff/i.test(chip), chip);
