@@ -211,6 +211,7 @@ for (const [file, needle, what] of [
   const KNOWN_GONE = {
     ".claude/deploy.lock":            "exists only while a deploy holds it — that is the whole mechanism",
     ".claude/verify-everything.lock": "same: a pid lock that exists only while the suite is running",
+    ".claude/settings.local.json":  "gitignored on purpose — the owner's machine has it, a worktree and a fresh clone never do",
     ".claude/work-checker-lessons.md":"the work-checker was retired 2026-08-13; the rule says never recreate it",
     "components/ui/":                 "never existed — the shadcn CLI is blocked on Tailwind 4 and the doc says so",
     "components/AdminSwitcher.tsx":   "deleted 2026-06-26 (commit 2b9d3933); the doc now says so in the same sentence",

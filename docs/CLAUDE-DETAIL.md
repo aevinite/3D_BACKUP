@@ -731,6 +731,38 @@ silence. And never use a shorthand he cannot place: "history file" is banned; wr
 | Admin console | `/aevinite/*` (23 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |
 | Printed paper | — | `public/panels/billdoc.js` | the one print document (bill + KOT) |
 
+## Never ask permission to delete — the full text, and what the guard actually checks
+
+Owner, 2026-08-06, STANDING. The rule itself lives at owner level in `~/.claude/CLAUDE.md`; this is
+the part `CLAUDE.md` used to carry inline and no longer has room for. Nothing here is new — it was
+moved out of the index on 2026-08-28 (T29 sweep #7) so the index could go back to being an index.
+
+**"Anything" means anything.** Files, folders, branches, worktrees, screenshots, temp scripts, dev
+rows, stale doc sections, dead code paths. None of it gets a question first.
+
+**It holds in every permission mode, and especially in bypass-permissions** — where a question
+defeats the whole point of the mode he chose. So: don't hedge it with "shall I remove…", don't offer
+removal as an option in a question, and don't leave junk lying around "to be safe". Report what you
+removed in the reply instead.
+
+**The four carve-outs are HIS rules, not caution anyone invented** — the AV-live stack · the Brain
+vault (`~/Brain`, where a deleted note is not recoverable from git) · another live session's
+uncommitted work in this shared folder · force-pushing `main`. The last two destroy work that is not
+yours to throw away.
+
+**`npm run verify:no-ask`** (auto-runs after any settings or CLAUDE.md edit) fails on three things,
+and the third is the one that matters most:
+
+1. an `ask` permission rule reappearing in any settings file;
+2. the standing order going missing from `~/.claude/CLAUDE.md`, or no longer naming
+   bypass-permissions mode;
+3. **the AV-live `deny` rules being removed in the name of "stop asking me".** "Stop asking me
+   about deletions" must never be implemented by taking the guards off the paying-client stack.
+
+Those denies live in `.claude/settings.local.json`, which is gitignored — so a worktree or a fresh
+clone legitimately has none, and the guard says so rather than crying wolf. Checked on the owner's
+own folder 2026-08-28: 30 deny rules present, both live-stack protections intact.
+
 ## Operational rules — one line each; open the detail/doc BEFORE working in that area
 
 CLAUDE.md carries these as one-liners; this is where each one's full text lives. They are separate
