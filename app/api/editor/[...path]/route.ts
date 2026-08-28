@@ -767,14 +767,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // customer-search?q=98250 — "who is this number?" for the bill's customer box.
     // Fired while the waiter is still typing, so it must stay tiny and quick: prefix-anchored
-    // on the (restaurant_id, phone) index, at most 6 rows, only phone + name + visit count.
+    // on the (restaurant_id, phone) index, at most 12 rows, only phone + name + visit count.
+    // TWELVE, not the four the sheet shows: an answer the database did NOT have to truncate can be
+    // narrowed on-device for every longer number, so one slightly bigger answer replaces several
+    // small ones (owner, 2026-08-28). The cap is real as of migration 365 — before that the LIMIT
+    // sat after a json_agg and capped nothing at all, so this asked for 6 and could get the lot.
     // A complete number is normalised first, so +91 / leading-0 spellings find the same row.
     if (p === "customer-search") {
       const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
       if (q.length < 3) return ok({ matches: [] });
-      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
+      const CUSTOMER_SEARCH_ROWS = 12;
+      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: CUSTOMER_SEARCH_ROWS });
       if (error) throw new Error(error.message);
-      return ok({ matches: Array.isArray(data) ? data : [] });
+      const matches = Array.isArray(data) ? data : [];
+      // `whole` — did this answer hold EVERY customer matching that prefix, or did we cut it off?
+      // The sheet reuses a complete answer for longer numbers without asking again, so it must
+      // never have to GUESS this from a row count and a constant of its own: the two would drift
+      // the moment either side's cap moved, and the sheet would silently narrow from a truncated
+      // list and lose a real customer. The server knows; the server says. A panel too old to
+      // understand the flag simply keeps asking, which is what it did before.
+      return ok({ matches, whole: matches.length < CUSTOMER_SEARCH_ROWS });
     }
 
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the

@@ -229,6 +229,51 @@ const browser = await chromium.launch({ headless: true });
       "key the remembered size by the window's shape, so a laptop and a tablet do not fight over one number");
 }
 
+// ── 6. THE TILL'S CUSTOMER SEARCH IS INSTANT, AND CHEAP ───────────────────────────────────────
+// Owner, 2026-08-28: "if you write the 10th number it will instantly search for your name … even a
+// second shouldn't take … and it should make load on database very less." Both halves are asserted
+// together because they pull against each other: asking more often feels faster and costs more.
+// The fake server here answers in 70ms, which is what Mumbai actually measured.
+{
+  const CUST = readFileSync(join(ROOT, "public/panels/billcustomer.js"), "utf8");
+  const BOOK = Array.from({ length: 40 }, (_, i) => ({ phone: "98250" + String(10000 + i), name: "Person " + i, visits: i % 7 }));
+  BOOK.push({ phone: "9825012345", name: "Meera Shah", visits: 6 });
+  const bads = [];
+  for (const [what, delay] of [["a fast typist", 60], ["an ordinary typist", 180], ["a slow typist", 350]]) {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.route("**/__custsearch*", (r) => r.fulfill({ status: 200,
+      contentType: "text/html; charset=utf-8", body: "<!doctype html><html><body></body></html>" }));
+    await page.goto("http://localhost/__custsearch", { waitUntil: "load" }).catch(() => {});
+    await page.addScriptTag({ content: CUST });
+    await page.evaluate((book) => {
+      window.__calls = [];
+      window.__api = async (m, path) => {
+        const q = decodeURIComponent((path.split("q=")[1]) || "");
+        window.__calls.push(q);
+        await new Promise((r) => setTimeout(r, 70));           // a real Mumbai round trip
+        const LIM = 12, all = book.filter((x) => x.phone.startsWith(q)), rows = all.slice(0, LIM);
+        return { matches: rows, whole: rows.length < LIM };
+      };
+      window.LFH_BILLCUST.ask({ api: window.__api });
+    }, BOOK);
+    await page.click(".bc-phone");
+    for (const ch of "9825012345") { await page.keyboard.type(ch); await page.waitForTimeout(delay); }
+    const typed = Date.now();
+    await page.waitForFunction(() => document.querySelector(".bc-name").value.length > 0, { timeout: 3000 }).catch(() => {});
+    const appeared = Date.now() - typed;
+    const r = await page.evaluate(() => ({ name: document.querySelector(".bc-name").value, calls: window.__calls.length }));
+    await ctx.close();
+    if (r.name !== "Meera Shah") bads.push(`${what}: the name came out "${r.name}"`);
+    else if (appeared > 400) bads.push(`${what}: the name took ${appeared}ms after the last digit`);
+    else if (r.calls > 3) bads.push(`${what}: ${r.calls} requests for one ten-digit number`);
+  }
+  bads.length === 0
+    ? ok("the guest's name appears within a moment of the tenth digit, on at most 3 requests, at every typing speed")
+    : bad(`the till's customer search is slow or expensive: ${bads.join(" · ")}`,
+      "answer a complete number at once (no debounce), reuse an untruncated answer for longer numbers, and never ask twice about a prefix already in flight");
+}
+
 await browser.close();
 console.log(fails
   ? `\n${fails} check(s) FAILED — a bill screen does not show what it should, or the screen reached the paper.`

@@ -803,6 +803,54 @@ for (const [what, ts] of INSTANTS) {
       "this file is the public LFH_BILLDOC API — every door defaults its argument");
 }
 
+// ── 3n. THE TILL'S CUSTOMER SEARCH — THE CAP IS REAL, AND ONLY ONE SIDE HOLDS IT ──────────────
+// `lfh_customer_phone_search` used to put its LIMIT AFTER a `json_agg`, which caps the one
+// aggregate row and not the array inside it — measured before migration 365: asking for 1 returned
+// 5. This fires while a waiter types, on the busiest path in the app.
+// The second half matters just as much: the sheet reuses an answer for LONGER numbers only when
+// the server did not truncate it, and it must never work that out from a row count and a constant
+// of its own. Measured while building this, with the two out of step by six rows: the guest's name
+// never appeared at all. So the server SAYS, and this checks that nothing on the panel guesses.
+{
+  const { readFileSync: rf } = await import("node:fs");
+  const bads = [];
+  // (a) the migration caps ROWS, inside the query, not the aggregate
+  const migs = (await import("node:fs")).readdirSync(join(ROOT, "supabase/migrations"))
+    .filter((f) => /customer_phone_search|bill_customer|row_cap/.test(f)).sort();
+  const live = migs.map((f) => rf(join(ROOT, "supabase/migrations", f), "utf8"))
+    .filter((t) => t.includes("CREATE OR REPLACE FUNCTION lfh_customer_phone_search")).pop();
+  if (!live) bads.push("lfh_customer_phone_search is defined in no migration");
+  else {
+    const fn = live.slice(live.lastIndexOf("CREATE OR REPLACE FUNCTION lfh_customer_phone_search"));
+    const body = fn.slice(0, fn.indexOf("$$;") + 3);
+    const limAt = body.lastIndexOf("LIMIT ");
+    const aggAt = body.lastIndexOf("json_agg");
+    if (limAt < 0) bads.push("the search has no LIMIT at all");
+    else if (limAt > aggAt) bads.push("the LIMIT still sits AFTER json_agg — it caps one aggregate row, not the rows");
+  }
+  // (b) the route sends the truncation flag, and holds the cap in ONE named place
+  const route = rf(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8");
+  const at = route.indexOf('p === "customer-search"');
+  const blk = at < 0 ? "" : route.slice(at, at + 1800);
+  if (!/whole:\s*matches\.length\s*<\s*CUSTOMER_SEARCH_ROWS/.test(blk))
+    bads.push("the route no longer tells the panel whether it truncated");
+  if (!/p_limit:\s*CUSTOMER_SEARCH_ROWS/.test(blk))
+    bads.push("the route's row cap is not the one named constant it reports against");
+  // (c) the panel holds NO cap of its own — that is the drift that loses a customer silently
+  const cust = rf(join(ROOT, "public/panels/billcustomer.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  if (/ASK_ROWS|rows\.length\s*<\s*\d+/.test(cust))
+    bads.push("the panel is guessing the server's cap again instead of reading `whole`");
+  if (!/res && res\.whole === true/.test(cust))
+    bads.push("the panel no longer reads the server's truncation flag");
+  // (d) an unknown flag must mean "keep asking", never "assume complete"
+  if (/whole:\s*true/.test(cust)) bads.push("the panel defaults `whole` to true — an old server would lose customers");
+  bads.length === 0
+    ? ok("the customer search's row cap is real, and only the SERVER decides whether an answer was complete")
+    : bad(`the till's customer search can over-read or lose a customer: ${bads.join(" · ")}`,
+      "cap the ROWS inside the query, and let the server report truncation — a constant on each side drifts silently");
+}
+
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
 // The .d.ts is what the Next server and the admin React screens see. A field the document branches
 // its whole identity on, missing from the type, means a TypeScript caller cannot render that

@@ -30,10 +30,40 @@
  * (lib/billCustomer.ts) — this sheet is the friendly half, not the guard.
  */
 (function () {
-  const MIN_LOOKUP = 4;      // digits before we ask the server anything
-  const DEBOUNCE_MS = 110;   // keystrokes settle fast enough to feel instant
+  const MIN_LOOKUP = 6;      // digits before we ask the server anything
+  const DEBOUNCE_MS = 140;   // keystrokes settle fast enough to feel instant
+  /* HOW MANY ROWS THE SERVER SENDS IS THE SERVER'S BUSINESS. The sheet only ever displays four
+     suggestions, and the server asks the database for more than that on purpose: an answer is only
+     reusable for LONGER numbers when it was not truncated (see narrowLocally), so a small answer is
+     a truncated answer is another request. One slightly bigger answer replaces several small ones.
+     This side deliberately holds NO number for that cap. It reads the server's own `whole` flag,
+     because a constant here and a constant there drift the moment either moves — and the failure
+     that causes is silent and expensive: the sheet would narrow from a truncated list and tell a
+     waiter "New customer" about a regular. Measured while building this, with the two out of step
+     by six rows: the guest's name never appeared at all. */
   const known = new Map();   // "9825012345" -> { name, visits }
-  const prefixCache = new Map(); // "98250" -> [rows]
+  const prefixCache = new Map(); // "982501" -> { rows, whole } — see narrowLocally()
+
+  /* NARROW WITHOUT ASKING (owner, 2026-08-28: "if you write the 10th number it will instantly
+     search for your name … even a second shouldn't take, and it should make load on database very
+     less").
+
+     The trick is that a prefix answer often contains its own future. If the server returned FEWER
+     rows than we asked for, then that answer is the WHOLE set of customers whose number starts
+     with that prefix — nobody was left out. So every longer number starting with it can be
+     answered by filtering that list on this device: no request, no wait, no database at all.
+
+     In practice a waiter types six digits, we ask once, and digits 7 8 9 10 cost nothing — the
+     name appears the instant the tenth digit lands. Only a prefix that came back FULL (the server
+     had to truncate) can still be hiding someone, so only that one is asked about again. */
+  function narrowLocally(raw) {
+    for (var n = raw.length; n >= MIN_LOOKUP; n--) {
+      const hit = prefixCache.get(raw.slice(0, n));
+      if (!hit || !hit.whole) continue;
+      return hit.rows.filter((r) => String(r.phone || "").replace(/\D/g, "").startsWith(raw));
+    }
+    return null;
+  }
 
   const digits = (s) => String(s || "").replace(/\D/g, "");
   // "+91 98250 12345", "098250 12345" and "9825012345" are one person — mirrors
@@ -267,7 +297,14 @@
         });
       }
 
-      let seq = 0, timer = null;
+      /* ONE QUESTION AT A TIME (owner, 2026-08-28 — "less load on the database").
+         Typing is faster than a round trip to Mumbai, so a request for "982501" was still in the
+         air when "9825012" fired the next one, and so on: five questions for one ten-digit number,
+         four of whose answers were thrown away on arrival. While a question is out about a PREFIX
+         of what is now in the box, the answer coming back can only be a superset of what we want —
+         so there is nothing to gain by asking again, and the one already in flight is re-used the
+         moment it lands. */
+      let seq = 0, timer = null, inflight = null;
       async function lookup(immediate) {
         const p = norm(phoneEl.value);
         const raw = digits(phoneEl.value);
@@ -275,30 +312,46 @@
 
         // layer 1 — already on this device: no request at all
         if (p.length === 10 && known.has(p)) { showKnown(known.get(p), p); return; }
-        // layer 2 — a prefix we've already asked about
-        const cached = prefixCache.get(raw);
+        // layer 2 — this prefix, or any shorter one whose answer was complete, already on the device
+        const cached = narrowLocally(raw);
         if (cached) {
           remember(cached);
           const exact = cached.find((r) => norm(r.phone) === p);
           if (p.length === 10) { exact ? showKnown(known.get(p) || { name: exact.name, visits: exact.visits }, p) : showNew(); }
-          else statusEl.textContent = "";
+          else if (!refusing) statusEl.textContent = "";
           showMatches(cached, p);
           return;
         }
-        // layer 3 — one small request; a late answer for older digits is dropped
+        // layer 3 — one small request AT A TIME; a late answer for older digits is dropped
+        if (inflight && raw.startsWith(inflight)) return;   // the answer already on its way covers us
         const mine = ++seq;
         clearTimeout(timer);
         const run = async () => {
+          const asked = raw;
+          inflight = asked;
           try {
-            const res = await api("GET", "/customer-search?q=" + encodeURIComponent(raw));
-            if (mine !== seq || done) return;
+            const res = await api("GET", "/customer-search?q=" + encodeURIComponent(asked));
+            if (done) return;
             const rows = (res && res.matches) || [];
-            prefixCache.set(raw, rows);
+            // `whole` = the server did NOT have to truncate, so this answer is every customer whose
+            // number starts with `asked`, and every longer number can be narrowed from it on-device.
+            // `whole !== true` means either the server truncated, or it is old enough not to say —
+            // both mean "ask again for a longer number", which is exactly what this did before.
+            // Cached even when the digits have moved on: the answer is still true about `asked`,
+            // and throwing it away is what made the next keystroke ask the same question again.
+            prefixCache.set(asked, { rows: rows, whole: res && res.whole === true });
             remember(rows);
+            if (mine !== seq) return;                       // stale: cached, but never painted
             const exact = rows.find((r) => norm(r.phone) === p);
             if (p.length === 10) { exact ? showKnown({ name: exact.name, visits: exact.visits }, p) : showNew(); }
             showMatches(rows, p);
-          } catch { /* offline or slow — the sheet still works, just no auto-fill */ }
+          } catch { /* offline or slow — the sheet still works, just no auto-fill */
+          } finally {
+            if (inflight === asked) inflight = null;
+            // the box moved on while we were waiting — answer where it is NOW, from the cache when
+            // that answer covers it, and only otherwise with a fresh question
+            if (!done && digits(phoneEl.value) !== asked) lookup(true);
+          }
         };
         if (immediate) run(); else timer = setTimeout(run, DEBOUNCE_MS);
       }
@@ -330,7 +383,11 @@
           }
         }
         sync();
-        lookup(false);
+        // A COMPLETE NUMBER IS ASKED ABOUT AT ONCE, never after a wait (owner, 2026-08-28). The
+        // debounce exists so a half-typed number does not fire a request per keystroke; the tenth
+        // digit is not a keystroke on the way to somewhere, it is the answer, and waiting 140ms
+        // before starting is 140ms the waiter spends looking at a box that knows nothing.
+        lookup(norm(phoneEl.value).length === 10);
       });
       phoneEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); nameEl.focus(); } });
       // Enter always goes through the button, so an incomplete sheet REFUSES VISIBLY rather than
