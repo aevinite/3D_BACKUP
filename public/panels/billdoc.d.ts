@@ -87,7 +87,7 @@ export interface BillDocData {
    * incident. Declaring the flag again is what would let a caller pass it, so it stays undeclared.
    * The kitchen TICKET keeps its own `reprint` (BillDocKot below) — that one he confirmed.
    * R37 in docs/REJECTED-IDEAS.md. */
-  /** The bill's position in the signed chain (mig 332) and its `chain_hash`. Supply BOTH or the
+  /** REJECTED (R50) — never rendered. The bill's position in the signed chain (mig 332). Supply BOTH or the
    *  verification line does not print at all. The document takes the first 12 characters of the
    *  hash — enough to identify one bill, short enough for a 66mm roll — and formats the line
    *  itself, so every panel prints the same reference for the same bill.
@@ -139,7 +139,14 @@ export interface BillIdentity {
   gstin: string;
   prefix: string;
   footer: string;
+  /** The word the PAPER uses for tax where it needs a generic one (the MRP note, and the fallback
+   *  line when the configured components do not describe this bill's rate). Defaults to **"GST"** —
+   *  it sits beside CGST/SGST on a document a customer and an inspector read. */
   taxLabel: string;
+  /** The word a STAFF PANEL uses on screen. Defaults to **"Tax"** — a panel is not a tax document
+   *  and does not commit to a regime's name (owner, 2026-08-28). Same setting, different fallback:
+   *  a restaurant that types its own word gets it in both places. */
+  taxLabelScreen: string;
 }
 
 export function billDocHtml(d: BillDocData): string;
@@ -214,6 +221,8 @@ export function orderTaxRate(
   settingsRate: number,
 ): number;
 /** Everything the paper needs, assembled once. Pass what only the panel knows. */
+/** REJECTED (owner, 2026-08-28, R50): the bill prints NO verification line. `billData`
+ * carries no chain field, and `billDocHtml` renders none. See the note in billdoc.js. */
 export function billData(a: {
   settings?: Record<string, unknown>;
   restaurant?: Record<string, unknown>;

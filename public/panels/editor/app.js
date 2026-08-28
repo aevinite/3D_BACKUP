@@ -2561,7 +2561,12 @@ function formGeneral(s) {
     if (!s.restaurant_name) s.restaurant_name = bi.name;
     if (!s.invoice_prefix) s.invoice_prefix = bi.prefix;
     if (!s.bill_footer) s.bill_footer = bi.footer;
-    if (!s.tax_label) s.tax_label = bi.taxLabel;
+    // NOT PREFILLED (owner, 2026-08-28). This wrote the SCREEN's word into `settings.tax_label`,
+    // and that setting also drives the PAPER — so the moment a manager opened this form and saved,
+    // the printed bill started saying "Tax" where every other panel said "GST". One setting with
+    // two right defaults (billIdentity.taxLabel for paper, .taxLabelScreen for screen) only works
+    // while nothing writes a default back in. Shown as a hint on the input instead, exactly as the
+    // GSTIN two lines above already is.
     // Tax rows prefill: no named taxes yet → materialise the 50/50 split the print has
     // always used (e.g. 5% → CGST 2.5 + SGST 2.5) so the owner can rename/re-split it.
     if (!Array.isArray(s.tax_components) || !s.tax_components.length) {
@@ -2594,7 +2599,7 @@ function formGeneral(s) {
     <h4 style="margin:18px 0 6px">Tax lines on the print</h4>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
       The taxes that make up your total (e.g. <b>CGST 2.5%</b> + <b>SGST 2.5%</b>). Each prints
-      as its own line; on screen they show merged as one “${esc((s.tax_label || "Tax").trim() || "Tax")} <b>${compTotal}%</b>” line —
+      as its own line; on screen they show merged as one “${esc(taxLabel(s))} <b>${compTotal}%</b>” line —
       the split and the total can never disagree.
     </p>
     <div class="tax-rows">${taxRows}</div>

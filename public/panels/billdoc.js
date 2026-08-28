@@ -99,22 +99,54 @@
       "spice-route": "Dhanyavaad — padharo! 🍛",
       "green-bowl": "Stay fresh — see you soon! 🥗",
     };
+    /* A FIELD OF SPACES IS AN EMPTY FIELD (T8 sweep #7, 2026-08-22).
+       Every rule below says "empty prints NO line at all", and every one of them was defeated by a
+       single typed space, because `s.x || fallback` treats "  " as a real value. A restaurant whose
+       Billing card held a space in each box printed a letterhead reading
+
+           <blank>            ← the h2, where the biggest text on a customer's bill goes
+           Ph
+           GSTIN
+
+       — a "GSTIN" label with nothing after it on a document headed Tax Invoice, which is the exact
+       thing the note below refuses to do with a placeholder. Trimmed at the one place that resolves
+       the identity, so the document, the preview and the printer all agree. */
+    var pick = function (v) { return String(v == null ? "" : v).trim(); };
     return {
       isDefault: isDefault,
-      name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
+      name: pick(s.restaurant_name) || (isDefault ? "Little French House" : (pick(r.logo_text) || pick(r.name && r.name.en) || "Restaurant")),
       // NO INVENTED IDENTITY ON A REAL BILL (2026-08-04). These used to fall back to
       // DEFAULT_BILL for any restaurant that had not filled its Billing card — so a paying
       // client's tax invoice carried another company's address and a phone number that does not
       // exist, beside a real bill number. The GSTIN line below already refused to invent a value,
       // with a comment saying why; the same reasoning applies here. Empty prints NO line at all.
-      address: s.restaurant_address || "",
-      phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : ""),
+      address: pick(s.restaurant_address),
+      phone: pick(s.restaurant_phone) || (isDefault ? "+91 90999 14418" : ""),
       // NEVER fall back to a placeholder GSTIN — a fake tax number on a real bill is illegal.
       // Empty prints no GSTIN line (the document handles it).
-      gstin: s.gstin || "",
-      prefix: s.invoice_prefix || "INV",
-      footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
-      taxLabel: ((s.tax_label || "Tax") + "").trim() || "Tax",
+      gstin: pick(s.gstin),
+      prefix: pick(s.invoice_prefix) || "INV",
+      footer: pick(s.bill_footer) || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
+      /* TWO PLACES, TWO DEFAULT WORDS, ONE SETTING (owner, 2026-08-28).
+         "for the printed bill, it should show like it is CGST as GST and total GST and all that
+         stuff … but for the panel I want to show just tax, not any particular gst name."
+
+         So the PAPER's generic word defaults to **GST** — it sits beside CGST and SGST rows and is
+         read by a customer and by an inspector, where "Tax 18%" is vaguer than the document should
+         be. The SCREEN's word defaults to **Tax** — a staff panel is not a tax document and should
+         not commit to a tax regime's name.
+
+         It is still ONE setting: the moment a restaurant types its own word (say VAT), both use it.
+         Only the fallback differs, which is the whole point — an unconfigured restaurant gets the
+         right word in each place instead of the same word in the wrong one.
+
+         Nothing may write either default back INTO `settings.tax_label`. That is what caused the
+         split this replaces: the Settings form prefilled the setting with the screen's word, so the
+         PAPER then printed "Tax" on the manager's copy and "GST" everywhere else. Both prefills are
+         now hints, exactly as the GSTIN two lines above already is — nothing fake is saved unless
+         someone types a real value. `verify:print-paper` §3j pins all four cases. */
+      taxLabel: pick(s.tax_label) || "GST",
+      taxLabelScreen: pick(s.tax_label) || "Tax",
     };
   }
 
@@ -145,17 +177,48 @@
     d = d || {};
     var disc = Number(d.discount) || 0;
     var inclusive = !!d.taxIncluded;
+    /* THE UNTAXED PILE IS A PART OF THIS BILL, SO IT CANNOT BE BIGGER THAN IT (T8 sweep #7,
+       2026-08-22). `nontax` is the MRP slice OF the subtotal, and the split is only meaningful while
+       that is true. With nontax 400 against a subtotal of 100 the paper read "Food subtotal ₹-300"
+       beside "MRP items ₹400" — a negative figure in a labelled money box, which is what the
+       2026-08-06 rule forbids. `mrpPart()` already reasons exactly this way for a composition
+       restaurant ("splitting into food and MRP says nothing and reads as broken"), so the same
+       answer is right here: when the pile is not a genuine part of the subtotal, drop the split and
+       print the plain single Subtotal the caller handed us. Unreachable through billData, which
+       builds subtotalShown as foodShown + mrpPart(m) — so nontax is a subset by construction. */
+    var subtotalRaw = Math.round(Number(d.subtotal) || 0);
     var nontax = Math.round(Number(d.nontax) || 0);
-    var subAmount = Math.round((Number(d.subtotal) || 0) - (Number(d.nontax) || 0));
-    var subtotalShown = nontax > 0 ? subAmount : Math.round(Number(d.subtotal) || 0);
+    if (nontax > subtotalRaw || nontax < 0) nontax = 0;
+    /* AN ALL-MRP BILL IS JUST A BILL (owner, 2026-08-28 — item 15). A shop whose whole sale is
+       sealed products printed "Food subtotal ₹0" over "MRP items ₹42": the split into food and
+       sealed goods says nothing when there is no food, and a zero in a labelled money box reads as
+       a mistake even though the column adds up. `mrpPart()` already reasons exactly this way for a
+       composition restaurant ("splitting into food and MRP says nothing and reads as broken"), so
+       the same answer is right here — drop the split and print the plain single Subtotal.
+       A bill with ANY food in it is untouched. */
+    if (nontax > 0 && nontax === subtotalRaw) nontax = 0;
+    var subAmount = subtotalRaw - nontax;
+    var subtotalShown = nontax > 0 ? subAmount : subtotalRaw;
     // THE PAPER NEVER PRINTS A NEGATIVE TAXABLE VALUE (2026-08-06). A discount larger than the row
     // it comes off produced `taxable: -50` and a matching round-off — billRows(subtotal 100,
     // discount 150) measured exactly that. Every real caller clamps first (billMoney caps a discount
     // at its own base), but billDocHtml is also called DIRECTLY by lib/billPreview.ts and the admin
     // preview with hand-built figures, and this function is the last thing between an arithmetic slip
     // and a guest's hands. Clamping here changes nothing for any current caller.
-    var discount = Math.min(Math.round(disc), Math.max(0, subtotalShown));
-    var taxable = subtotalShown - discount;
+    /* THE SAME TWO FLOORS billMoney ALREADY HAS (T8 sweep #7, 2026-08-22). The clamp above stops a
+       discount BIGGER than its row; it did not stop a NEGATIVE one, and the taxable value was not
+       floored at all — while billMoney, thirty lines away in this same file, has always ended
+       `taxable: Math.max(0, ...)`. Two money functions on one document disagreeing about whether a
+       figure can go below zero is how the 2026-08-06 rule ("THE PAPER NEVER PRINTS A NEGATIVE
+       TAXABLE VALUE") gets quietly re-broken. Measured before this: a discount of -50 on a ₹100 row
+       printed no Discount row at all and a phantom "Round off + ₹5"; nontax of 400 against a
+       subtotal of 100 printed "Food subtotal ₹-300".
+       Neither is reachable through billData (it clamps both), and that is exactly why the clamp is
+       here — billDocHtml is also called directly with hand-built figures by lib/billPreview.ts, the
+       admin preview and lib/auditDetail.ts replaying a stored snapshot. No reachable bill moves by
+       a paisa. */
+    var discount = Math.min(Math.max(0, Math.round(disc)), Math.max(0, subtotalShown));
+    var taxable = Math.max(0, subtotalShown - discount);
     var tax = (d.taxRows || []).reduce(function (a, c) { return a + (Math.round(Number(c.amt)) || 0); }, 0);
     var total = Math.round(parseFloat(d.total) || 0);
     // What the rows above the TOTAL actually add up to, in the order a person reads them.
@@ -200,7 +263,15 @@
     // measured, so the money columns below are sized to THIS bill instead of a fixed guess.
     var widest = { qty: 3, rate: 4, amt: 3 };   // never narrower than the QTY/RATE/AMT headings
     var measure = function (k, v) { widest[k] = Math.max(widest[k], String(v).length); };
-    var rows = (d.lines || []).map(function (i) {
+    /* ONE BAD LINE MUST NOT COST THE WHOLE PIECE OF PAPER (T8 sweep #7, 2026-08-22). A single
+       null in a line list threw out of the render — on all three documents — and these are drawn
+       into a window.open or a hidden iframe, so a throw here is a BLANK WINDOW: the kitchen gets no
+       ticket, or the guest gets no bill, with nothing on screen saying why. That is the worst
+       possible shape of "a tap must never vanish in silence", at the till, mid-rush.
+       Every line list this file reads now drops empty entries instead. `items` is JSONB in this
+       product, so a null element is a database write away, and printing the other nine dishes is
+       strictly better than printing nothing. */
+    var rows = (d.lines || []).filter(Boolean).map(function (i) {
       var q = Number(i.qty) || 1;
       var opts = Array.isArray(i.options) ? i.options.filter(function (x) { return Number(x.price); }) : [];
       var addUnit = opts.reduce(function (a, x) { return a + (Number(x.price) || 0); }, 0);
@@ -291,7 +362,11 @@
        between them reads as an arithmetic error even though it isn't.)
        When there are no such lines — every restaurant today — nothing here renders and the
        bill is byte-identical to the one before this feature. */
-    var nontax = Number(d.nontax) || 0;
+    // ONE DECISION ABOUT THE UNTAXED PILE, read from billRows rather than recomputed here (T8
+    // sweep #7, 2026-08-22). These were two separate reads of d.nontax — so the label, the MRP row
+    // and the arithmetic could each answer differently, which is precisely the twin-value hazard
+    // the dead second `subAmount` note above this block was removed for.
+    var nontax = R.nontax;
     var subLabel = nontax > 0 ? "Food subtotal" : "Subtotal";
     // (There used to be a second `subAmount` computed here. It was dead — the render below reads
     // R.subtotal — so a later editor "fixing" one of the two would have changed nothing. Gone.)
@@ -299,7 +374,7 @@
     // separate times for the same bill, which is three chances for two of them to disagree.)
     // What the cancelled bill WOULD have come to — added straight from the printed lines, so
     // the "Ordered value" row and the item rows above it are the same arithmetic.
-    var orderedValue = (d.lines || []).reduce(function (a, i) {
+    var orderedValue = (d.lines || []).filter(Boolean).reduce(function (a, i) {
       return a + (parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1);
     }, 0);
     var roundBlock = R.roundOff !== 0
@@ -311,8 +386,13 @@
     /* The note only claims tax is inside the price when tax genuinely IS inside it — i.e.
        when the restaurant treats MRP as tax-inclusive. Saying it otherwise would be a
        statement on a tax invoice that the accounts do not support. */
+    /* OPTION B (owner chose it, 2026-08-28, after looking at both side by side). The note used to
+       carry its own top rule, which landed about 1.5mm under the TOTAL row's own 2px bottom border
+       — two rules that close together read as a printer stutter on thermal paper rather than as a
+       divider. TOTAL is already fenced above and below; the note does not need a third line to be
+       separated from it, only a little air. Nothing about the words or the money changed. */
     var mrpNote = (nontax > 0 && d.mrpNote)
-      ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">' + esc(d.mrpNote) + "</div>"
+      ? '<div class="mini" style="margin-top:7px">' + esc(d.mrpNote) + "</div>"
       : "";
 
     var custBlock = (d.cust || d.custPhone)
@@ -330,7 +410,35 @@
        Bill" — so a composition tenant's guest was handed a sheet headed TAX INVOICE with the
        restaurant's GSTIN on it. docs/COMPLIANCE-GUARDRAILS.md §3 covered the tax LINE and
        stopped at the letterhead; the money was right and the heading was not. */
-    var docName = d.cancelled ? "Cancelled Bill" : (composition ? "Bill of Supply" : "Tax Invoice");
+    /* A SHEET WITH NO GSTIN ON IT IS NOT A TAX INVOICE (T8 sweep #7, 2026-08-22).
+       This file already refuses to invent a GSTIN — "NEVER fall back to a placeholder GSTIN, a fake
+       tax number on a real bill is illegal" (2026-08-04), so an unconfigured restaurant prints no
+       GSTIN line at all. The heading was never given the same reasoning, so the sheet went on
+       calling itself a TAX INVOICE with the one field that makes it one simply absent.
+
+       CGST Rule 46(b)/(c) makes the supplier's GSTIN a mandatory particular of a tax invoice, and
+       docs/COMPLIANCE-GUARDRAILS.md carries the same rule in one line: "Real GSTIN on any tax
+       invoice". A sheet headed Tax Invoice with no registration on it is not one — the same class
+       of fault as T7's F9, where the money was right and the letterhead was not.
+
+       This is NOT hypothetical or a corner: measured on the dev database, 16 of 17 restaurants have
+       no GSTIN, the flagship included — an empty Billing card is the state every new tenant starts
+       in, and taxModel() falls back to 5% for all of them. So every one of those tenants is handing
+       guests a "Tax Invoice".
+
+       What changed, and only this: the WORD at the top. A restaurant with no GSTIN gets "Bill",
+       which is what it is and what such a restaurant wants. Nothing about the money, the numbers or
+       any row moves — the TOTAL is still passed straight through, and a restaurant that HAS filled
+       its GSTIN in prints exactly what it printed before, byte for byte.
+
+       LEFT FOR THE OWNER, deliberately not changed here: the sheet still adds and names CGST/SGST
+       rows for a restaurant with no registration. Those rupees were genuinely charged and are
+       inside the TOTAL, so removing the rows would stop the column footing — which is a real
+       product decision about what an unregistered tenant should collect, not a formatting one.
+       Written up in .claude/sweep/T8-findings.md. */
+    var registered = !!String(d.gstin == null ? "" : d.gstin).trim();
+    var docName = d.cancelled ? "Cancelled Bill"
+      : (composition ? "Bill of Supply" : (registered ? "Tax Invoice" : "Bill"));
     return '<!doctype html><title>' + docName + " — " + name + "</title>\n"
 + "<style>\n"
 + "  /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver\n"
@@ -520,6 +628,17 @@
    The cancelled band below is unrelated and stays: it changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
+/* REJECTED (owner, 2026-08-28): the number row is ALWAYS labelled "Invoice" — on every document
+   this file prints, a composition-scheme Bill of Supply included. His word: "KEEP INVOICE".
+   It was changed to "Serial no" on a Bill of Supply earlier the same day, on the reasoning that a
+   composition dealer may not issue a tax invoice and that CGST Rule 49 calls that number a serial
+   number. He looked at it and said no. Everyone at the restaurant, and every other screen in this
+   product, calls it the invoice number; a second name for the same number on one document teaches
+   staff there are two things when there is one.
+   Do NOT re-introduce "Serial no", "Bill of supply no", "Document no", or any per-document label
+   here. R49 in docs/REJECTED-IDEAS.md; verify:print-paper §3m fails the build if it changes.
+   (The PREFIX is a different thing and is his to set — Settings › Billing → "Invoice prefix",
+   default INV — so a composition restaurant that wants BOS/2026-27/000118 can already have it.) */
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 /* THE INTERNAL BILL NUMBER IS NOT THE CUSTOMER'S BUSINESS WHEN THERE IS A REAL INVOICE NUMBER
    (owner, 2026-08-21). This app hands out THREE numbers where a POS normally has two: the KOT
@@ -569,24 +688,17 @@
 + ((composition && !d.cancelled)
    ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">Composition taxable person — not eligible to collect tax on supplies.</div>\n'
    : "")
-/* THE VERIFICATION LINE — the signed chain, on the paper (owner, 2026-08-17).
-   Migration 332 writes one hash-chained row the moment a bill becomes a tax document, so a removed
-   or altered sale is DETECTABLE rather than merely forbidden. Until now that proof lived only in
-   the database: the person holding the receipt had to take the software's word for it. Germany's
-   KassenSichV settled this the same way — the signature is printed ON the receipt, which is what
-   makes it checkable by whoever holds it rather than only by whoever owns the server.
-   So: the bill's position in that chain and the first 12 characters of its hash. Twelve is enough
-   to pick one bill out of a restaurant's whole history and short enough for a 66mm roll; the full
-   value stays in the ledger, which is where a real verification reads it from anyway.
-   Formatted HERE, not at the call sites, for the reason this whole file exists — the manager panel,
-   the waiter tablet and the admin preview must print the same reference for the same bill.
-   Renders NOTHING unless the caller supplies both parts, so every bill printed today is unchanged,
-   and never on a cancelled sheet (that sale was withdrawn; its chain row records the issue, and the
-   band across the top is what the paper is for). */
-+ ((!d.cancelled && d.chainSeq != null && d.chainHash)
-   ? '<div class="mini" style="margin-top:6px">Verification ' + esc(String(d.chainSeq)) + " · "
-     + esc(String(d.chainHash).slice(0, 12)) + "</div>\n"
-   : "")
+/* REJECTED (owner, 2026-08-28): the bill carries NO verification line — no chain reference, no
+   sequence number, no hash, no "Verification …" anything. It was built on 2026-08-17 off his own
+   "do both 11 and 12", wired to the data on 2026-08-28, shown to him rendered side by side against
+   a normal bill, and he said **don't do the 19th one**.
+   The reason is the same one that removed the "Reprint · Duplicate" band eleven days earlier
+   (R37): a guest's copy of their own bill does not carry extra marks. The tamper-evident chain
+   (mig 332) is unaffected and still runs on every issued bill — it simply stays where it was,
+   in the records, and is not printed.
+   Do NOT re-add a verification line, a chain reference, a QR code carrying one, or a
+   "scan to verify" note here. R50 in docs/REJECTED-IDEAS.md; verify:print-paper §3d fails the
+   build if any of it comes back onto the sheet. */
 + '<div class="foot">' + footer + "</div>\n"
 + (d.noBar ? "" : pageScript(d.autoPrint));
   }
@@ -674,6 +786,7 @@
   }
 
   function kotLineHtml(r) {
+    r = r || {};   // one bad line must not cost the whole ticket — see the note in billDocHtml
     var opts = Array.isArray(r.options) ? r.options.map(function (x) { return typeof x === "string" ? x : ((x && x.label) || ""); }).filter(Boolean).join(", ") : "";
     var rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
     return '<div class="kl"><span class="q">' + (r.qty || 1) + '×</span><span class="n">' + esc(r.title || "")
@@ -698,7 +811,7 @@
   // (The BILL is a separate document and is already clean at both widths — nothing to do there.)
   function kotDocHtml(o) {
     o = o || {};
-    var linesHtml = o.linesHtml != null ? o.linesHtml : (o.lines || []).map(kotLineHtml).join("");
+    var linesHtml = o.linesHtml != null ? o.linesHtml : (o.lines || []).filter(Boolean).map(kotLineHtml).join("");
     var allergHtml = o.allergHtml != null ? o.allergHtml
       : (Array.isArray(o.allergies) && o.allergies.length ? '<div class="al">⚠ AVOID: ' + esc(o.allergies.join(", ")) + "</div>" : "");
     return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(o.title || "KOT") + "</title><style>\n"
@@ -805,9 +918,47 @@
    His nudge is remembered per browser, and remembering it is the point: a bill window is opened
    dozens of times a shift and nobody wants to re-zoom every time. The word 'fit' is stored so a
    longer bill still fits later, rather than freezing today's percentage. */
-+ "var ZKEY = \"lfh_bill_zoom\", ZMIN = .6, ZMAX = 2, Zn = 0;\n"
+/* REMEMBERED PER SCREEN, NOT ONE SIZE FOR EVERY DEVICE (owner, 2026-08-28 — item 16).
+   The chosen size was stored under one key, so a manager who works on a laptop and a tablet shared
+   a single number between two very different screens: a size picked on the desktop made the bill
+   unreadable on the tablet, and the tablet's choice wasted half the desktop. The key now carries
+   the window's shape, rounded to the nearest 100px so an ordinary resize does not lose the choice
+   but a genuinely different device gets its own. The old single key is still read once as a
+   starting point, so nobody's existing preference is thrown away. */
++ "var ZMIN = .6, ZMAX = 2, Zn = 0;\n"
++ "var ZKEY_OLD = \"lfh_bill_zoom\";\n"
++ "function zKey(){ var w = Math.round((innerWidth || 380) / 100) * 100;\n"
++ "  var h = Math.round((innerHeight || 680) / 100) * 100; return ZKEY_OLD + \":\" + w + \"x\" + h; }\n"
++ "function zGet(){ try{ var v = localStorage.getItem(zKey());\n"
++ "    return v == null ? localStorage.getItem(ZKEY_OLD) : v; }catch(e){ return null; } }\n"
++ "function zSet(v){ try{ localStorage.setItem(zKey(), v); }catch(e){} }\n"
+/* THE ROOM RESERVED FOR THE TOOLBAR HAS TO BE IN THE TOOLBAR'S OWN UNITS (T8 sweep #7,
+   2026-08-22). The bar is `position:fixed` and wound back to life-size with the INVERSE zoom, so
+   its height on screen is constant — but the space kept clear for it is `body{padding-top:calc(2mm
+   + 34px)}`, which sits INSIDE the zoomed body and therefore shrinks with the zoom. The two scale
+   in opposite directions, so the moment the fit lands at or below about 1.0 the bar starts eating
+   the restaurant name — the biggest thing on a customer's bill. Measured:
+
+       A35 360x780, 8-line bill    zoom 1.02   the name is covered by 4px
+       A35 360x780, 60-line bill   zoom 0.60   covered by 26px — the whole name
+       desktop 1280x900, 60 lines  zoom 0.60   covered by 26px
+       desktop 1280x420, 8 lines   zoom 0.60   covered by 26px
+
+   and the 60-line case is not a corner: the owner's own Aangan bill is 178mm of paper, which is
+   what put the 0.6 floor in this file in the first place. The ledger row that checked this
+   (P03899, "on the A35 it does not cover the first line either") passed in sweep #6 because the
+   zoom layer did not exist yet — it landed 2026-08-19.
+
+   So the allowance is now MEASURED from the bar and divided by the zoom, which converts it into
+   the body's own coordinates. It is screen-only: the print rule
+   `@media print{body{...padding:2mm 0 !important}}` carries !important and beats an inline style,
+   so nothing here can reach the paper. The CSS `calc(2mm + 34px)` stays as the fallback for a
+   frame where scripts cannot run. */
++ "function zBarH(){ try{ var b = document.querySelector(\".bar\");\n"
++ "    return b ? b.getBoundingClientRect().height : 0; }catch(e){ return 0; } }\n"
 + "function zApply(z){ Zn = z; try{ document.body.style.zoom = z; }catch(e){}\n"
 + "  try{ var b = document.querySelector(\".bar\"); if (b) b.style.zoom = (1 / z).toFixed(3); }catch(e){}\n"
++ "  try{ var h = zBarH(); if (h > 0) document.body.style.paddingTop = ((h + 8) / z).toFixed(2) + \"px\"; }catch(e){}\n"
 + "  try{ var l = document.querySelector(\".zl\"); if (l) l.textContent = Math.round(z * 100) + \"%\"; }catch(e){} }\n"
 // WHAT "THE HEIGHT OF THE BILL" MEANS, measured twice before it was right:
 //   · body.scrollHeight  — too SHORT: it leaves out body's own margin:10px auto 30px (the white
@@ -817,21 +968,28 @@
 //     report less than the window. Every bill then fitted at ~99% and a SHORT one could never use
 //     the room it had. A min-height on the measured box turns a fit into a no-op.
 // So the content is measured as what it is: the sheet plus its own two margins.
+// The bar's height is subtracted from the WINDOW rather than added to the document, because it
+// does not scale: the height a bill needs on screen is content*z + barH, so the largest zoom that
+// fits is (window - barH) / content. Measured with the top allowance stripped back to the plain
+// 2mm, or the allowance zApply just wrote would be counted twice and each fit would shrink the
+// next one.
 + "function zRoom(){ /* what the document needs at 1x, and what the window has to give */\n"
-+ "  var b = document.body, was = b.style.zoom; b.style.zoom = 1;\n"
++ "  var b = document.body, was = b.style.zoom, wasPad = b.style.paddingTop;\n"
++ "  b.style.zoom = 1; b.style.paddingTop = \"2mm\";\n"
 + "  var cs = getComputedStyle(b), w = b.offsetWidth || 272;\n"
 + "  var h = b.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);\n"
-+ "  b.style.zoom = was; if (!(h > 0)) h = 740;\n"
-+ "  return { z: Math.min(((innerWidth || 380) - 14) / w, ((innerHeight || 680) - 10) / h) }; }\n"
++ "  b.style.zoom = was; b.style.paddingTop = wasPad; if (!(h > 0)) h = 740;\n"
++ "  var room = (innerHeight || 680) - zBarH() - 10;\n"
++ "  return { z: Math.min(((innerWidth || 380) - 14) / w, Math.max(1, room) / h) }; }\n"
 + "function zFit(remember){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round(zRoom().z * 100) / 100));\n"
-+ "  zApply(z); if (remember) { try{ localStorage.setItem(ZKEY, \"fit\"); }catch(e){} } }\n"
++ "  zApply(z); if (remember) zSet(\"fit\"); }\n"
 + "function zStep(d){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round((Zn + d * .15) * 100) / 100));\n"
-+ "  zApply(z); try{ localStorage.setItem(ZKEY, String(z)); }catch(e){} }\n"
-+ "function zStart(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "  zApply(z); zSet(String(z)); }\n"
++ "function zStart(){ var v = zGet();\n"
 + "  var n = parseFloat(v); if (v && v !== \"fit\" && n >= ZMIN && n <= ZMAX) zApply(n); else zFit(0); }\n"
 // A bill window is REUSED for the next bill, so this runs per document, and the fit is redone when
 // the window is resized — but only while he has not set a size of his own, or a drag would undo it.
-+ "addEventListener(\"resize\", function(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "addEventListener(\"resize\", function(){ var v = zGet();\n"
 + "  if (!v || v === \"fit\") zFit(0); });\n"
 + "function printAgain(){ print(); }\n"
 + "function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }\n"
@@ -902,7 +1060,7 @@
   function combineBillLines(entries) {
     var SEP = "\u0001";  // a real, visible escape — see the note above
     var out = [], at = {};
-    (entries || []).forEach(function (e) {
+    (entries || []).filter(Boolean).forEach(function (e) {
       var sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join(SEP);
       var i = at[sig];
       var qty = Math.max(1, parseInt(e.qty, 10) || 1);
@@ -936,11 +1094,38 @@
   /* financialYear / invFmt: the FY of the INVOICE'S OWN date, never "today" — reprinting a March
      invoice after 1 April must keep its issued year, or one sale ends up with two identities and
      the reprint collides with the real invoice of that number. */
+  /* THE FINANCIAL YEAR IS INDIA'S, NOT THE PRINTING DEVICE'S (T8 sweep #7, 2026-08-22).
+     This read `getFullYear()`/`getMonth()` — the machine's own time zone — so the FY inside the
+     invoice number was the last thing on this document still decided by whichever tablet held the
+     paper. Measured on one invoice issued at 2026-04-01 01:00 IST, the first hour of the new
+     Indian financial year:
+
+         India tablet   INV/2026-27/000041      dated 01/04/2026
+         London / UTC   INV/2025-26/000041      dated 01/04/2026
+         New York       INV/2025-26/000041      dated 01/04/2026
+
+     — the same sale, two different invoice numbers, and on the non-India devices a sheet DATED
+     1 April 2026 carrying financial year 2025-26, because the date row was pinned to IST on
+     2026-08-05 and this was not. It is the same fault class as the bill's date (fixed 2026-08-05),
+     the banquet sheet's (2026-08-06) and the kitchen ticket's (2026-08-17); this is the fourth and
+     last place, and it is the worst of them, because the FY is part of the number that IDENTIFIES
+     the tax document. Two devices in one restaurant quoting two numbers for one sale is precisely
+     what `financialYear` was written to prevent when it chose the invoice's own date over "today".
+
+     31 March / 1 April is the single most consequential date in Indian accounting and IST runs
+     +05:30, so every device behind India — the whole of Europe and the Americas — reads the
+     previous FY for the first five and a half hours of it.
+
+     Pinned the same way `kotWhen` derives its business day: shift by +05:30 and read the UTC
+     parts, which is India's calendar date with no imports (this file is loaded by the panels, the
+     Next server and React alike). `verify:print-paper` pins it at the boundary in both directions. */
   function financialYear(when) {
     var d = when ? new Date(when) : new Date();
-    var base = isNaN(d.getTime()) ? new Date() : d;
-    var y = base.getFullYear();
-    var start = base.getMonth() >= 3 ? y : y - 1;
+    var t = d.getTime();
+    var base = isFinite(t) ? t : Date.now();
+    var ist = new Date(base + 330 * 60000);
+    var y = ist.getUTCFullYear();
+    var start = ist.getUTCMonth() >= 3 ? y : y - 1;
     return start + "-" + String(start + 1).slice(2);
   }
   function invFmt(no, when, prefix) {
@@ -1253,7 +1438,7 @@
     var scaleComps = function (bucketPct) {
       var shape = shapeComps.length ? shapeComps : [{ label: "CGST", rate: 1 }, { label: "SGST", rate: 1 }];
       var sum = shape.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
-      if (!sum) return [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: bucketPct }];
+      if (!sum) return [{ label: bi.taxLabel, rate: bucketPct }];   // one word — see mrpNote below
       return shape.map(function (c) {
         return { label: c.label, rate: Math.round(((Number(c.rate) || 0) / sum) * bucketPct * 100) / 100 };
       });
@@ -1295,11 +1480,8 @@
       // the whole idea, so the flag is gone rather than left accepted-and-ignored — a field that
       // silently does nothing is how a band gets drawn again by the next person who finds it.
       // The KOT's own `reprint` flag (kotDocHtml) is untouched and still brands the ticket.
-      // The signed chain (mig 332), straight off the session row when the server sends it. Absent
-      // today on every caller, so nothing prints until the columns are exposed — and then every
-      // panel gets the verification line at once, with no second format to keep in step.
-      chainSeq: sess.chain_seq != null ? sess.chain_seq : undefined,
-      chainHash: sess.chain_hash || undefined,
+      // (No chainSeq / chainHash here — the bill prints no verification line at all. R50; see the
+      // REJECTED note in billDocHtml above. The mig-332 chain still runs, it is just not on paper.)
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
       // en-IN + Asia/Kolkata, NOT the printing device's locale. This is a document headed "Tax
@@ -1320,7 +1502,24 @@
       // declaration to say so — the document decides both from this one flag (T7 finding F9).
       composition: !!m.composition,
       nontax: mrpPart(m), mrpLabel: "MRP items",
-      mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + (((s.tax_label || "GST") + "").trim() || "GST") : "",
+      /* ONE WORD FOR THE TAX, DECIDED ONCE (T8 sweep #7, 2026-08-22). This and two other lines read
+         `s.tax_label || "GST"` inline, while billIdentity — thirty lines away, in the function whose
+         whole job is resolving exactly this kind of value — defaults it to "Tax". A restaurant that
+         has never set the word (the default state) then got a DIFFERENT one depending on which panel
+         printed the bill, because the manager panel copies billIdentity's answer into its own
+         settings first (editor/app.js) and nothing else does:
+
+             manager panel        MRP items include Rs 2 Tax
+             waiter tablet        MRP items include Rs 2 GST
+             Access preview       MRP items include Rs 2 GST
+             admin preview        MRP items include Rs 2 GST
+
+         Same restaurant, same bill, two words — the exact fault this whole file was created to end
+         (owner, 2026-08-02: "whatever the manager panel prints, that is the format ... both should
+         be sync"). All three now read billIdentity's one answer, so they converge on the word the
+         admin's own Settings screen already shows the owner as the default. A restaurant that HAS
+         set its own word was always consistent and is untouched. */
+      mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + bi.taxLabel : "",
       autoPrint: a.autoPrint !== false,
     };
   }
@@ -1425,13 +1624,41 @@ function bqWords(amount) {
    * a = { bill, lines, settings, restaurant, logo }. Pure: no panel state, returns the HTML.
    */
 function banquetDocHtml(a) {
-    var b = a.bill || {}, lines = a.lines || [];
+    a = a || {};   // the whole sheet, like the bill and the ticket, survives a missing argument
+    var b = a.bill || {}, lines = (a.lines || []).filter(Boolean);
     var s = a.settings || {};
     var bi = billIdentity(s, a.restaurant || {});
     var P = bqPaper(s);
   const isA4 = P.size === "a4";
   const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
-  const when = new Date(b.issued_at || Date.now());
+  /* NO DOCUMENT IN THIS FILE PRINTS "Invalid Date" — INCLUDING THIS ONE (T8 sweep #7, 2026-08-22).
+     The kitchen ticket has refused since it was written (`kotWhen` returns "" on an unparseable
+     value) and the thermal bill since 2026-08-05 (`stampAt`'s isNaN fallback). The banquet sheet —
+     the product's largest-value document — guarded none of its THREE date fields, so it printed:
+
+         Dated                Invalid Date        ← the field that decides the GST period
+         Function: Reception · Invalid Date
+         UPI PAY DT.Invalid Date — 500/-
+
+     REACHABLE, and not only through the admin's hand-built preview. `banquet_bills.advances` is
+     JSONB and migrations 237/239 store the date with NO cast — `'date', COALESCE(NULLIF(
+     v_a->>'date',''), to_char(v_now,'YYYY-MM-DD'))` — so any non-empty text the client sends is
+     kept verbatim and comes straight out here. (`fn_date` IS a real `date` column and `issued_at`
+     a timestamptz, so those two are protected by the database; the document is still the last
+     thing between a bad value and a customer's hands, which is the same reasoning that put the
+     guard on the other two documents.)
+
+     bqDay(v) → the IST day as dd/mm/yyyy, or "" when there is nothing real to print. A missing
+     date prints NOTHING rather than a lie; the money on an advance row is never dropped. */
+  const bqDay = (v) => {
+    if (v == null || v === "") return "";
+    const d = new Date(v);
+    const ms = d.getTime();
+    if (!isFinite(ms)) return "";
+    return d.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" });
+  };
+  const issuedMs = new Date(b.issued_at || Date.now()).getTime();
+  const when = new Date(isFinite(issuedMs) ? issuedMs : Date.now());
   // PINNED TO IST, NOT THE PRINTING DEVICE (2026-08-06). These read the device's own time zone —
   // and `[]` left it the 12h/24h choice too — so the SAME banquet invoice printed two different
   // dates: issued_at 2026-08-05T19:30:00Z came out "06-08-2026 01:00AM" on an India-set device and
@@ -1484,7 +1711,7 @@ function banquetDocHtml(a) {
   const comps = cMatch ? tmB.components
     : (halvesMatch
       ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
-      : [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: Math.round(billRate * 10000) / 100 }]);
+      : [{ label: bi.taxLabel, rate: Math.round(billRate * 10000) / 100 }]);   // one word — see billData's mrpNote
   let taxRows;
   if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
     taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
@@ -1514,12 +1741,44 @@ function banquetDocHtml(a) {
      the LAST line absorbs any difference, the same rule the tax columns and the thermal bill's
      splitTax already use. When the lines do add up to the bill (every sheet today) this moves at
      most a paisa, and it is what makes the in-table TOTAL row true by construction. */
+  /* …AND NO CELL IN THAT COLUMN IS EVER NEGATIVE (T8 sweep #7, 2026-08-22).
+     The absorption above put the WHOLE difference on the last line, so whenever the lines added up
+     to MORE than the stored bill — which is the exact case I8 was written for, "a line edited after
+     the bill was saved, or a line missing from the fetch" — the last line went past zero and this
+     sheet printed negative money. Measured on the real rendered A5:
+
+       4  Stage decoration   1   28,800.00   -691.63   18.00%   -124.50
+
+     and it does not need a big gap: a ₹1,00,000 hall beside a ₹100 welcome gift, with the lines
+     ₹1,000 over the bill, printed the gift at -1,000.00 taxable and -90.00 tax.
+
+     The thermal bill has forbidden this since 2026-08-06 — "THE PAPER NEVER PRINTS A NEGATIVE
+     TAXABLE VALUE", the clamp in billRows() — and the rule was never carried to the product's
+     LARGEST-VALUE document. A negative line on a tax invoice reads as a refund nobody gave.
+
+     So the shortfall is absorbed the same way, but walking BACKWARDS from the last line and taking
+     from each only what that line actually has. The column still foots to the TOTAL row by
+     construction (that is what I8 bought), and no cell can go below zero. A sheet whose lines DO
+     add up to its bill — every sheet today — is byte-identical: the drift is 0 and this does
+     nothing. An OVER-shoot (the lines adding to less than the bill) still lands on the last line
+     exactly as before, because growing a line cannot make it negative. */
   if (L.length) {
+    const r2b = (n) => Math.round(n * 100) / 100;
     const sumTaxable = L.reduce((a, l) => a + l.taxable, 0);
-    const drift = Math.round((taxable - sumTaxable) * 100) / 100;
-    if (drift !== 0) {
+    let drift = r2b(taxable - sumTaxable);
+    if (drift > 0) {
       const last = L[L.length - 1];
-      last.taxable = Math.round((last.taxable + drift) * 100) / 100;
+      last.taxable = r2b(last.taxable + drift);
+    } else if (drift < 0) {
+      let owed = -drift;
+      for (let i = L.length - 1; i >= 0 && owed > 0; i--) {
+        const take = Math.min(Math.max(0, L[i].taxable), owed);
+        if (take > 0) { L[i].taxable = r2b(L[i].taxable - take); owed = r2b(owed - take); }
+      }
+      // Only reachable when the bill's OWN taxable is negative (a discount larger than the
+      // subtotal). Nothing on the paper can describe that, so it stays where it always was —
+      // on the last line — rather than being silently spread across lines a guest can read.
+      if (owed > 0) L[L.length - 1].taxable = r2b(L[L.length - 1].taxable - owed);
     }
   }
   /* EACH TAX COLUMN FOOTS TO ITS OWN TOTAL ROW (2026-08-11, T7 finding F10).
@@ -1532,14 +1791,25 @@ function banquetDocHtml(a) {
      tax columns add up to the summary". So the columns are allocated the same way splitTax does it
      for the thermal bill: round every cell except the LAST, and give the last the remainder. */
   const colTax = taxRows.map((c) => {
-    let run = 0;
-    return L.map((l, i) => {
-      const amt = i === L.length - 1
-        ? Math.round(((Number(c.amt) || 0) - run) * 100) / 100
-        : Math.round(l.taxable * ((Number(c.rate) || 0) / 100) * 100) / 100;
-      run = Math.round((run + amt) * 100) / 100;
-      return amt;
-    });
+    const r2c = (n) => Math.round(n * 100) / 100;
+    const target = r2c(Number(c.amt) || 0);
+    // Every cell pro-rata off its own line's taxable value…
+    const cells = L.map((l) => r2c(Math.max(0, l.taxable) * ((Number(c.rate) || 0) / 100)));
+    // …then the difference against the bill's STORED tax is absorbed from the last cell
+    // backwards, taking from each only what it holds — so the column foots to its TOTAL row
+    // AND no cell prints negative tax (T8 sweep #7, 2026-08-22; see the taxable column above,
+    // where the same last-cell-takes-everything rule printed -124.50 on a real A5 sheet).
+    let drift = r2c(target - cells.reduce((a, x) => a + x, 0));
+    if (drift > 0) cells[cells.length - 1] = r2c(cells[cells.length - 1] + drift);
+    else if (drift < 0) {
+      let owed = -drift;
+      for (let i = cells.length - 1; i >= 0 && owed > 0; i--) {
+        const take = Math.min(Math.max(0, cells[i]), owed);
+        if (take > 0) { cells[i] = r2c(cells[i] - take); owed = r2c(owed - take); }
+      }
+      if (owed > 0) cells[cells.length - 1] = r2c(cells[cells.length - 1] - owed);
+    }
+    return cells;
   });
 
   const cols = 5 + taxRows.length * 2;
@@ -1571,7 +1841,7 @@ function banquetDocHtml(a) {
   const terms = [];
   for (const a of (b.advances || [])) {
     if (Number(a.amt) > 0) {
-      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }) : "";
+      const d = bqDay(a.date);
       terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
     }
   }
@@ -1581,7 +1851,7 @@ function banquetDocHtml(a) {
   // IST here too — see the `dstr`/`tstr` note above. A bare date like "2026-08-01" is parsed as
   // midnight UTC, so on a device set behind UTC it printed as 31/07/2026: an advance receipt and a
   // function date both a day out on the same sheet as the invoice date they are meant to support.
-  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }) + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
+  if (b.fn_date && bqDay(b.fn_date)) fnBits.push(bqDay(b.fn_date) + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
   if (b.pax) fnBits.push(b.pax + (b.func || b.fn_date ? " pax" : " plates"));
   const fnLead = fnBits.length && (b.func || b.fn_date) ? "Function: " : "";
   const toBits = [];
