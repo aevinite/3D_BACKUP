@@ -189,6 +189,14 @@
     var subtotalRaw = Math.round(Number(d.subtotal) || 0);
     var nontax = Math.round(Number(d.nontax) || 0);
     if (nontax > subtotalRaw || nontax < 0) nontax = 0;
+    /* AN ALL-MRP BILL IS JUST A BILL (owner, 2026-08-28 — item 15). A shop whose whole sale is
+       sealed products printed "Food subtotal ₹0" over "MRP items ₹42": the split into food and
+       sealed goods says nothing when there is no food, and a zero in a labelled money box reads as
+       a mistake even though the column adds up. `mrpPart()` already reasons exactly this way for a
+       composition restaurant ("splitting into food and MRP says nothing and reads as broken"), so
+       the same answer is right here — drop the split and print the plain single Subtotal.
+       A bill with ANY food in it is untouched. */
+    if (nontax > 0 && nontax === subtotalRaw) nontax = 0;
     var subAmount = subtotalRaw - nontax;
     var subtotalShown = nontax > 0 ? subAmount : subtotalRaw;
     // THE PAPER NEVER PRINTS A NEGATIVE TAXABLE VALUE (2026-08-06). A discount larger than the row
@@ -901,7 +909,20 @@
    His nudge is remembered per browser, and remembering it is the point: a bill window is opened
    dozens of times a shift and nobody wants to re-zoom every time. The word 'fit' is stored so a
    longer bill still fits later, rather than freezing today's percentage. */
-+ "var ZKEY = \"lfh_bill_zoom\", ZMIN = .6, ZMAX = 2, Zn = 0;\n"
+/* REMEMBERED PER SCREEN, NOT ONE SIZE FOR EVERY DEVICE (owner, 2026-08-28 — item 16).
+   The chosen size was stored under one key, so a manager who works on a laptop and a tablet shared
+   a single number between two very different screens: a size picked on the desktop made the bill
+   unreadable on the tablet, and the tablet's choice wasted half the desktop. The key now carries
+   the window's shape, rounded to the nearest 100px so an ordinary resize does not lose the choice
+   but a genuinely different device gets its own. The old single key is still read once as a
+   starting point, so nobody's existing preference is thrown away. */
++ "var ZMIN = .6, ZMAX = 2, Zn = 0;\n"
++ "var ZKEY_OLD = \"lfh_bill_zoom\";\n"
++ "function zKey(){ var w = Math.round((innerWidth || 380) / 100) * 100;\n"
++ "  var h = Math.round((innerHeight || 680) / 100) * 100; return ZKEY_OLD + \":\" + w + \"x\" + h; }\n"
++ "function zGet(){ try{ var v = localStorage.getItem(zKey());\n"
++ "    return v == null ? localStorage.getItem(ZKEY_OLD) : v; }catch(e){ return null; } }\n"
++ "function zSet(v){ try{ localStorage.setItem(zKey(), v); }catch(e){} }\n"
 /* THE ROOM RESERVED FOR THE TOOLBAR HAS TO BE IN THE TOOLBAR'S OWN UNITS (T8 sweep #7,
    2026-08-22). The bar is `position:fixed` and wound back to life-size with the INVERSE zoom, so
    its height on screen is constant — but the space kept clear for it is `body{padding-top:calc(2mm
@@ -952,14 +973,14 @@
 + "  var room = (innerHeight || 680) - zBarH() - 10;\n"
 + "  return { z: Math.min(((innerWidth || 380) - 14) / w, Math.max(1, room) / h) }; }\n"
 + "function zFit(remember){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round(zRoom().z * 100) / 100));\n"
-+ "  zApply(z); if (remember) { try{ localStorage.setItem(ZKEY, \"fit\"); }catch(e){} } }\n"
++ "  zApply(z); if (remember) zSet(\"fit\"); }\n"
 + "function zStep(d){ var z = Math.max(ZMIN, Math.min(ZMAX, Math.round((Zn + d * .15) * 100) / 100));\n"
-+ "  zApply(z); try{ localStorage.setItem(ZKEY, String(z)); }catch(e){} }\n"
-+ "function zStart(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "  zApply(z); zSet(String(z)); }\n"
++ "function zStart(){ var v = zGet();\n"
 + "  var n = parseFloat(v); if (v && v !== \"fit\" && n >= ZMIN && n <= ZMAX) zApply(n); else zFit(0); }\n"
 // A bill window is REUSED for the next bill, so this runs per document, and the fit is redone when
 // the window is resized — but only while he has not set a size of his own, or a drag would undo it.
-+ "addEventListener(\"resize\", function(){ var v = null; try{ v = localStorage.getItem(ZKEY); }catch(e){}\n"
++ "addEventListener(\"resize\", function(){ var v = zGet();\n"
 + "  if (!v || v === \"fit\") zFit(0); });\n"
 + "function printAgain(){ print(); }\n"
 + "function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }\n"

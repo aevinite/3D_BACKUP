@@ -682,6 +682,42 @@ for (const [what, ts] of INSTANTS) {
       "one setting, one default — resolve it in billIdentity and read bi.taxLabel everywhere else");
 }
 
+// ── 3l. AN ALL-MRP BILL IS JUST A BILL ────────────────────────────────────────────────────────
+// A shop whose whole sale is sealed products printed "Food subtotal ₹0" over "MRP items ₹42". The
+// split says nothing when there is no food, and a zero in a labelled money box reads as a mistake
+// even though the column adds up (owner, 2026-08-28). Same reasoning mrpPart() already applies to a
+// composition restaurant. A bill with ANY food in it must be untouched.
+{
+  const rowsOf = (d) => {
+    const html = BILLDOC.billDocHtml({ name: "R", lines: [{ title: "A", qty: 1, price: 42 }],
+      tableDisp: "5", dateStr: "x", ...d });
+    const block = html.slice(html.indexOf('class="totals"'), html.indexOf(">TOTAL<"));
+    return [...block.matchAll(/<div class="t[^"]*"><span>([^<]*)<\/span>/g)].map((m) => m[1]);
+  };
+  const only = rowsOf({ subtotal: 42, nontax: 42, total: 42, taxRows: [] });
+  const mixed = rowsOf({ subtotal: 442, nontax: 42, total: 462,
+    taxRows: [{ label: "CGST", rate: 2.5, amt: 10 }, { label: "SGST", rate: 2.5, amt: 10 }] });
+  const none = rowsOf({ subtotal: 1240, nontax: 0, total: 1302,
+    taxRows: [{ label: "CGST", rate: 2.5, amt: 31 }, { label: "SGST", rate: 2.5, amt: 31 }] });
+  const bads = [];
+  if (only.includes("Food subtotal") || only.includes("MRP items")) bads.push(`an all-sealed bill still splits: ${only.join(" / ")}`);
+  if (!only.includes("Subtotal")) bads.push(`an all-sealed bill lost its Subtotal: ${only.join(" / ")}`);
+  if (!mixed.includes("Food subtotal") || !mixed.includes("MRP items")) bads.push(`a mixed bill stopped splitting: ${mixed.join(" / ")}`);
+  if (!none.includes("Subtotal") || none.includes("MRP items")) bads.push(`an ordinary bill changed: ${none.join(" / ")}`);
+  // and it must still add up in all three
+  for (const [what, d] of [["all sealed", { subtotal: 42, nontax: 42, total: 42, taxRows: [] }],
+    ["mixed", { subtotal: 442, nontax: 42, total: 462, taxRows: [{ label: "C", rate: 2.5, amt: 10 }, { label: "S", rate: 2.5, amt: 10 }] }]]) {
+    const R = BILLDOC.billRows(d);
+    const base = R.disc > 0 ? R.taxable : R.subtotal;
+    if (base + R.tax + R.nontax + R.roundOff !== R.total) bads.push(`${what} no longer foots`);
+    if (Math.abs(R.roundOff) > 2) bads.push(`${what} needs a round-off of ${R.roundOff}`);
+  }
+  bads.length === 0
+    ? ok("a bill of nothing but sealed goods reads as a plain Subtotal, and a mixed bill still splits")
+    : bad(`the sealed-goods split is wrong: ${bads.join(" · ")}`,
+      "drop the split only when there is no food at all — never when there is some");
+}
+
 // ── 3k. ONE BAD LINE DOES NOT COST THE WHOLE PIECE OF PAPER ───────────────────────────────────
 // A single null in a line list threw out of the render, on ALL THREE documents. They are drawn
 // into a window.open or a hidden iframe, so a throw there is a BLANK WINDOW: the kitchen gets no

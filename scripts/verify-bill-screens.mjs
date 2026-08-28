@@ -192,6 +192,43 @@ const browser = await chromium.launch({ headless: true });
       "a lookup answer must not overwrite the message that says WHICH box is missing — hold it until sync() sees the sheet satisfied");
 }
 
+// ── 5. THE CHOSEN SIZE IS REMEMBERED PER SCREEN, NOT ONE FOR EVERY DEVICE ─────────────────────
+// A manager who works on a laptop and a tablet shared ONE remembered number between two very
+// different screens: a size picked on the desktop made the bill unreadable on the tablet, and the
+// tablet's choice wasted half the desktop (owner, 2026-08-28). Needs a real origin, because
+// page.setContent() has no one and localStorage throws there.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await ctx.newPage();
+  await page.route("**/__billzoom*", (r) => r.fulfill({ status: 200,
+    contentType: "text/html; charset=utf-8", body: bill(8) }));
+  const go = async (n) => { await page.goto(`http://localhost/__billzoom${n}`, { waitUntil: "load" }); await page.waitForTimeout(240); };
+  const zoom = () => page.evaluate(() => Number(getComputedStyle(document.body).zoom) || 1);
+  await go(1);
+  await page.click(".bar .zg button:first-child");
+  await page.click(".bar .zg button:first-child");
+  const desktop = await zoom();
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await go(2);
+  const tabletOpened = await zoom();
+  await page.click(".bar .zg button:last-child");
+  const tabletChosen = await zoom();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await go(3);
+  const backOnDesktop = await zoom();
+  const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("lfh_bill_zoom")));
+  await ctx.close();
+  const bads = [];
+  if (Math.abs(backOnDesktop - desktop) > 1e-6) bads.push(`the desktop choice (${desktop}) was lost, came back as ${backOnDesktop}`);
+  if (Math.abs(tabletOpened - desktop) < 1e-6) bads.push("the tablet inherited the desktop's size instead of fitting itself");
+  if (Math.abs(tabletChosen - tabletOpened) < 1e-6) bads.push("the tablet's own choice did not take");
+  if (keys.length < 2) bads.push(`only ${keys.length} remembered size(s): ${keys.join(", ")}`);
+  bads.length === 0
+    ? ok("each screen shape remembers its own size, and one does not overwrite another")
+    : bad(`the remembered size is shared across screens: ${bads.join(" · ")}`,
+      "key the remembered size by the window's shape, so a laptop and a tablet do not fight over one number");
+}
+
 await browser.close();
 console.log(fails
   ? `\n${fails} check(s) FAILED — a bill screen does not show what it should, or the screen reached the paper.`
