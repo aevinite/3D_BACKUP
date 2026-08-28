@@ -173,9 +173,15 @@ all resolving.
 
 ### The ID repair block
 
-**`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are now
-**allocated to T9**. `P15019`–`P15100` remain free for the next repair. **A new sweep starts at
-`P15101`.**
+**`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are
+**allocated to T9**; `P15019`–`P15022` are **allocated to T27** (sweep #7 — it wrote 504 rows into
+a block of 500 and its last four sat inside T28's block; renumbered by T28, 2026-08-28, with a
+banner on `T27.md` saying so). `P15023`–`P15100` remain free for the next repair. **A new sweep
+starts at `P15101`.**
+
+**Two overruns in two sweeps, both the same shape:** a terminal writes a few more rows than its
+block holds and quietly lands in its neighbour's. Both were found by `npm run verify:ledger-index`
+and neither was noticed by the terminal that caused it — so run that guard before filing, not after.
 
 ## Coverage — is every part of this product owned by some ID range?
 
@@ -275,6 +281,7 @@ Every sweep re-discovers these. They are **not** findings. Each is sourced, not 
 | the owner's revenue **includes soft-deleted (binned) bills** | **REQUIRED.** `docs/COMPLIANCE-GUARDRAILS.md` §4: "Z-report / dashboards must include voids and deleted bills". Migration 309's header states the asymmetry: what is **owed** drops a deleted bill, what was **collected** keeps it. Measured on French House: the owner's August figure is ₹3,76,788 all-in, not the ₹2,08,231.50 excluding-deleted one. **Do not "fix" this** — it is the feature that put PetPooja's founders under summons, inverted. |
 | the kitchen has **no profile** | Ruled three times by the owner (2026-07-29, re-confirmed 2026-08-05). `lib/staffProfileShared.ts` → `PROFILE_ROLES`. |
 | Aangan differs from French House | Aangan is the **read-only control** at factory permission defaults. Differences are the point. |
+| a guard places real ORDERS on Aangan (`verify:live-rush`) | **ALLOWED, and asked twice.** Owner, 2026-08-28: *"you can do it on backup you can do anything you want on backup it's the test site only"*. The read-only rule is about Aangan's **permission and feature switches** — the only part of a control restaurant that carries information — never about orders, tables or bills. And the second restaurant is half of what that guard proves: "does one restaurant's rush bleed onto another" cannot be answered with one. Do not re-raise it. |
 | a **reprint** leaves no trace | The owner's decision: a bill reprint is not an event. No band, no audit row, no question. |
 | the manager's **Audit & logs** updates on the 60-second poll, not instantly | Migration 267 moved `staff_actions` onto its own `audit` topic so the oplog stops waking every staff panel. No floor tile renders from it. |
 | `cart`, `cart_updated_at` and `last_activity_at` are **absent** from the sessions breadcrumb watch-list | Stated in migration 299's own header: `cart` has its own trigger (mig 109), and `last_activity_at` is a heartbeat — watching it would wake every device on the floor. |
