@@ -173,6 +173,25 @@ const fail = (m) => fails.push(m);
     else fail("the count line's item_id is no longer checked — the same 22P02 shape, from the body instead of the path");
   }
 
+// ── EVERY RESTAURANT-WIDE LIST READ IN THE WAITER TABLET IS BOUNDED (owner picked it, 2026-08-28) ──
+//
+// CLAUDE.md's rule for a data read is "scoped, with a column list, AND a .limit()". Sweep #7 walked
+// every read in this territory and found exactly ONE place where the third part was missing: the
+// waiter tablet's two `categories` reads. Scoped and column-named, but uncapped — about ten rows on
+// a real restaurant, so it was recorded as an inconsistency rather than a fault, and he picked it.
+//
+// Checked here rather than by walking every chain, because a chain walker gets this wrong in four
+// different ways (a builder head whose .limit() lands on the variable, a write's returning
+// .select(), a read already narrowed to one parent row, and a chain spanning a blank line) — see
+// LEDGER/T10.md. Two named reads, asked about by name.
+{
+  const t = read("app/api/tablet/[...path]/route.ts");
+  const cats = [...t.matchAll(/\.from\("categories"\)([\s\S]{0,220}?)(?=,\n|\);)/g)].map((m) => m[1]);
+  if (!cats.length) fail("the waiter tablet no longer reads categories at all — that cannot be right, so this check has gone stale");
+  else if (cats.every((c) => /\.limit\(\d+\)/.test(c))) ok(`both of the waiter tablet's category reads carry a ceiling (${cats.length} found)`);
+  else fail("a waiter-tablet category read lost its .limit() — it is the one read in this territory that was ever uncapped, and the manager panel's twin has always had one");
+}
+
   // A REPRODUCTION, so this rule is checking behaviour and not a spelling. Two lines, one item.
   const lines = [
     { item_id: "tomato", qty_base: 10000, rate: 20 },

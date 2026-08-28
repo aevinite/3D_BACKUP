@@ -480,7 +480,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "menu-sig") {
       const [mi, cat] = await Promise.all([
         sb.from("menu_items").select("id,title,price,tags").eq("restaurant_id", rid).order("id").limit(2000),
-        sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug"),
+        // .limit(500) to match the manager panel's twin (editor route, GET /all). It is the only
+        // read in this territory that was scoped and column-named but UNBOUNDED — about ten rows on
+        // a real restaurant, so this changes nothing today and closes the one exception to
+        // CLAUDE.md's "column list AND .limit()". (owner picked it, 2026-08-28)
+        sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug").limit(500),
       ]);
       const rows = (must(mi) || []) as { id: string; title: string | null; price: unknown; tags: unknown[] | null }[];
       const cats = (must(cat) || []) as { slug: string; name: unknown; sort_order: unknown; active: unknown }[];
@@ -559,7 +563,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category");
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
-        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color, access_config").eq("id", rid).maybeSingle(),
       ]);
       // KOT ▾ module rung resolved server-side from the settings row itself (canonical
