@@ -14,7 +14,7 @@
 import { MODULE_DEFS, TABLET_PERM_KEYS } from "@/lib/accessModel";
 // The channel defaults are DERIVED from the Access screen's own rows, so "what the ⓘ says is the
 // default" and "what a new restaurant actually gets" are one sentence (see below).
-import { CHANNEL_DEFAULTS } from "@/lib/accessTree";
+import { CHANNEL_DEFAULTS, MODULE_ALLOWED_DEFAULTS } from "@/lib/accessTree";
 
 // Columns that must NEVER be inherited from the template restaurant. (Only REAL, nullable
 // settings columns — verified against the live schema.)
@@ -78,25 +78,45 @@ export function cleanClonedSettings(
   // modules default OFF"). A raw clone copied #1's values, so if the flagship had banquet
   // billing or auto-print-KOT switched on, a brand-new restaurant was born with them enabled
   // (e.g. the manager panel showed the 🎪 Banquet tab) with no admin grant. (migs 130/107.)
-  base.banquet_allowed = false;
+  // banquet_allowed is seeded by the derived loop below, from its own row on the Access screen.
   // Banquet's full ladder (mig 167): a new restaurant starts with the admin holding
   // the switch (no transfer) and the owner toggle at its neutral ON.
   base.banquet_owner_control = false;
   base.banquet_enabled = true;
   base.auto_print_kot_allowed = false;
-  // Table types (VIP/Family/Guest) + khata (mig 166): the whole ladder starts at the
-  // admin's feet for a new restaurant — feature off, no owner transfer, tablet rungs off.
-  base.table_tags_allowed = false;
+  // ── EVERY MODULE'S ADMIN RUNG COMES FROM THE SCREEN, NOT FROM #1 (2026-08-28) ───────────────
+  //
+  // TWO FAULTS, ONE CAUSE. `base` is a COPY of restaurant #1's row, so a module column that is not
+  // explicitly reset here is INHERITED from the flagship — the "#1 leaks onto restaurant #2" class
+  // this file's own header was written about. Only banquet and auto-print were ever reset, and:
+  //
+  //   · khata_allowed and payroll_allowed were never reset, and French House has BOTH ON. So every
+  //     restaurant created was born with Pay later and Payroll switched on while the Access screen
+  //     said they start off. Payroll is the one that matters: it unlocks the staff pay ledger,
+  //     salary visibility and the pay cards on every person's page. Measured on the backup stack
+  //     2026-08-28 — the template row really does have both true.
+  //   · table_ops_allowed and table_tags_allowed WERE reset, to false, so every new restaurant was
+  //     born unable to move a party between tables, join two tables or mark a table VIP. Seven are
+  //     still sitting like that. The owner's word, 2026-08-28: they start ON. They are not premium
+  //     add-ons — lib/accessTree says of this exact pair that "moving/merging/splitting … is how the
+  //     floor RUNS — a restaurant that switched them off could not trade", which is the same reason
+  //     take_orders has always been seeded on.
+  //
+  // So the list is DERIVED rather than hand-typed, exactly like CHANNEL_DEFAULTS above: each
+  // module's admin rung is seeded from the `def` on its own row in lib/accessTree.ts, which is the
+  // value the ⓘ promises. A module added to that screen tomorrow is seeded correctly with no line
+  // written here, and a module that is never reset cannot exist. verify:access check 55 refuses a
+  // module whose seed and screen disagree. Owner transfer stays OFF and _enabled stays true —
+  // only the admin rung is decided here.
+  for (const [col, on] of Object.entries(MODULE_ALLOWED_DEFAULTS)) base[col] = on;
   base.table_tags_owner_control = false;
   base.table_tags_enabled = true;
-  // Table & KOT operations — the KOT ▾ menu (migs 172-177): same fresh-start ladder.
-  base.table_ops_allowed = false;
   base.table_ops_owner_control = false;
   base.table_ops_enabled = true;
   // Order-taking module (mig 179): unlike the modules above, _allowed starts ON for a NEW
   // restaurant too — taking orders is the app's core function, not a premium add-on. The
   // admin can still switch it off per restaurant. (Its tablet cap defaults 'on' above.)
-  base.take_orders_allowed = true;
+  // take_orders_allowed is seeded by the derived loop above, from its own row (which says ON).
   base.take_orders_owner_control = false;
   base.take_orders_enabled = true;
   // PARCEL — the counter parcel (migs 197-198, its own module again since 259). ON for a new
