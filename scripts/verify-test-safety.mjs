@@ -371,13 +371,19 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
 // being told his change was live.
 {
   const pkg = read("package.json");
-  let dev = "";
-  try { dev = (JSON.parse(pkg || "{}").scripts || {}).dev || ""; } catch { /* the JSON check owns that */ }
-  check(
-    "`npm run dev` honours a PORT override, so a parallel lane cannot take port 4000 (the owner's window)",
-    !dev || /\$\{?PORT/.test(dev),
-    `package.json "dev" is ${JSON.stringify(dev)} — a hard-coded port means every lane lands on the same one.\n    Use: next dev -p \${PORT:-4000}`,
-  );
+  let scr = {};
+  try { scr = JSON.parse(pkg || "{}").scripts || {}; } catch { /* the JSON check owns that */ }
+  // BOTH WAYS OF STARTING IT, not just `dev` (sweep #7 / T28, 2026-08-28). `dev` was fixed and
+  // `start` was not, so a lane that wanted to test against a PRODUCTION build — which several
+  // guards require, verify:offline among them — still landed on 4000.
+  for (const name of ["dev", "start"]) {
+    const cmd = scr[name] || "";
+    check(
+      `\`npm run ${name}\` honours a PORT override, so a parallel lane cannot take port 4000 (the owner's window)`,
+      !cmd || /\$\{?PORT/.test(cmd),
+      `package.json "${name}" is ${JSON.stringify(cmd)} — a hard-coded port means every lane lands on the same one.\n    Use: next ${name === "dev" ? "dev" : "start"} -p \${PORT:-4000}`,
+    );
+  }
 }
 
 // ── 11. A TEST THAT FLIPS A REAL SETTING MUST PUT IT BACK EVEN IF IT IS INTERRUPTED ──────────

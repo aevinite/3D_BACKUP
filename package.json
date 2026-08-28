@@ -6,7 +6,7 @@
     "dev": "next dev -p ${PORT:-4000}",
     "build": "next build",
     "prebuild": "node scripts/set-glb-cache.mjs || exit 0",
-    "start": "next start -p 4000",
+    "start": "next start -p ${PORT:-4000}",
     "lint": "eslint",
     "build:vendor": "node scripts/build-vendor.mjs",
     "test:money": "node --test tests/money.test.mjs",
