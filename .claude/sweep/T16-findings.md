@@ -32,6 +32,8 @@ admin cookie was used throughout — so no rate limit could be touched.
 | 11 | Recycle bin | A dead `canPurge` permission flag that could only ever say yes, read by nothing, sitting on the type that describes a permanent delete. |
 | 12 | Restaurants → a SUSPENDED restaurant → Danger zone | The line said suspending stops staff logging in. **It does not** — that is the recycle bin. Three other sentences on the same screen already said so. |
 | 13 | Restaurants → New restaurant → the reused-address note | It said the previous occupant "went to the recycle bin", which is wrong when that restaurant was **removed for good**. |
+| 14 | **Guest menu** — any restaurant made on a reused web address | Its own menu could answer "not available", intermittently, while the console listed it as Active. **Migration 370**; see below. |
+| 15 | Restaurants → the health chip row | Tapping the lit chip again did nothing; the "All" chip was the only way back. |
 
 All 13 are covered by `scripts/verify-admin-restaurants.mjs`, sections 11–23 (30 new checks). Run
 against `origin/main`'s own files, 26 of the 30 go red and the four that pass are the ones asserting
@@ -39,7 +41,10 @@ something that was already true — and every one of the guard's PREVIOUS checks
 
 ---
 
-## Found, NOT fixed here — needs a decision (report items 14 and 15)
+## Items 14 and 15 — reported first, then BUILT on the owner's word (2026-08-28)
+
+Both were listed as decisions rather than changed, because 14 is a database migration outside this
+territory and 15 is a preference. He answered *"do all the other things"*, so both landed.
 
 ### 14 · A restaurant created on a REUSED web address can serve a 404 on its own guest menu
 
@@ -62,18 +67,31 @@ It is **intermittent** — `LIMIT 1` with no order is not deterministic — whic
 the same address can serve one minute and 404 the next. The admin console meanwhile lists the
 restaurant as **Active**, and nothing on any admin screen says otherwise.
 
-**Not fixed here on purpose:** it is a database migration and the guest resolver, neither of which
-is this terminal's territory, and a migration on the shared dev database during a 40-terminal sweep
-is exactly the kind of change that collides. The fix is one clause plus a deterministic order.
+**FIXED — `supabase/migrations/370_a_reused_web_address_serves_the_live_restaurant.sql`.** The
+resolver now orders `(r.deleted_at IS NULL) DESC, r.created_at DESC NULLS LAST`. An ORDER rather
+than a filter, on purpose: mig 319's partial unique index still guarantees at most one LIVE row per
+slug, so that first key decides the answer whenever a live restaurant exists — and when every row
+on the address is gone the function still RETURNS one, so `lib/tenant.ts` nulls it itself exactly as
+before and the retired-address redirect (mig 350) still fires. The only behaviour that moves is the
+broken one.
+
+Proved by running the whole loop **ten times**, because the fault was intermittent — one green pass
+would have proved nothing. 10/10 served the new restaurant's own menu; it failed consistently
+before. Guarded by a new `npm run verify:guest-address` (static by default, `-- --base <url>` drives
+the real loop), sabotage-tested against `origin/main` and against its own migration with the ORDER
+BY removed.
 
 Evidence rows: `P07967`, `P23033`–`P23040`.
 
 ### 15 · The health filter chips on Restaurants do not clear when tapped again
 
-Tapping the active chip a second time leaves the filter on; the "All" chip is the only way out. The
-Owners page's KPI tiles next door DO toggle. Nothing is unreachable, so this is a preference — and
-the two nearest decisions the owner has already made about chip furniture (R25, R40) both went the
-other way, so it is listed rather than built.
+Tapping the active chip a second time left the filter on; the "All" chip was the only way out,
+while the Owners page's KPI tiles next door have toggled since they were built.
+
+**FIXED on the owner's word (2026-08-28).** Tapping the lit chip goes back to All; "All" itself is
+excluded so tapping lit-All stays All; each chip reports its pressed state. Driven on the real
+screen: 9 rows → Dormant → 5 → Dormant again → 9. Guarded by section 24, which also asserts the
+Owners tiles it follows still toggle back, so the two rows cannot drift apart again.
 
 Evidence row: `P22601`.
 
