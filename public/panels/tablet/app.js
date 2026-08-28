@@ -1172,7 +1172,18 @@ async function selectTable(t) {
   if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
   lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
   renderFloor();
-  if (!state.ordering) renderPanel();
+  // …AND NOT WHILE A PICKER IS OPEN (#U1's rule, applied to the one place that was missing it —
+  // T7 sweep #7, 2026-08-28). This repaint lands AFTER an awaited network read, and in that window
+  // the waiter can already have opened 🧾 KOT ▾ and tapped a row: tap a table, tap KOT ▾, tap
+  // "Change table" / "Merge" / "Move a KOT" / "Move a dish" / "Split the bill", and the screen you
+  // just opened is wiped straight back to the table detail as the slice lands. On restaurant wifi
+  // that read takes well over the time it takes to press two buttons, so it is not a narrow race.
+  // Every other automatic repaint — load(), loadTables(), refreshWhoami(), the outbox event — has
+  // carried `&& !state.pickerOpen` since #U1; selectTable was the one that never got it, because it
+  // is the path a person triggers and nobody thought of it as automatic. The half of it that fires
+  // BEFORE the await is deliberately left alone: at that moment no picker can be open yet, and it
+  // is what gives the tap its instant feedback.
+  if (!state.ordering && !state.pickerOpen) renderPanel();
 }
 
 // ── the floor ────────────────────────────────────────────────────────────────
