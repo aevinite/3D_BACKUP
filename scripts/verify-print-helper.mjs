@@ -26,6 +26,7 @@ const adminR = read("app/api/admin/printing/[...path]/route.ts");
 const page   = read("app/aevinite/printing/page.tsx");
 const kroute = read("app/api/kitchen/[...path]/route.ts");
 const eroute = read("app/api/editor/[...path]/route.ts");
+const troute = read("app/api/tablet/[...path]/route.ts");
 const kpanel = read("public/panels/kitchen/app.js");
 const epanel = read("public/panels/editor/app.js");
 const plan   = read("docs/PRINT-HELPER.md");
@@ -181,9 +182,66 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
 }
 
 // ── 5 · the admin looking is not the restaurant printing ──────────────────────────────────────
-check(/adminView: true/.test(eroute) && /force/.test(eroute) && /print_sent_by_admin/.test(eroute),
-  "the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited",
-  "the admin console can print on a paying client's roll just by looking at their panel");
+//
+// EVERY PANEL THAT CAN SEND PAPER, NOT JUST THE MANAGER'S (T10 sweep #7, 2026-08-22).
+// This check read `eroute` alone. The waiter tablet was given the SAME `print/send` verb for
+// mig 341 — its own header says "the same door the manager panel uses" — and it never got the
+// owner's 2026-08-20 rule, so the Aevidine console opening a paying client's tablet and pressing
+// Print put a sheet out at their shop, with no `print_sent_by_admin` row to trace it by. The guard
+// was green throughout, because it was only ever looking at one of the two files. So the list is
+// what is checked now: a THIRD panel that learns to send paper joins this array or fails here.
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+  if (!/a === "print" && b === "send"/.test(code(src))) continue;   // this panel cannot send paper at all
+  check(/adminView: true/.test(src) && /force/.test(src) && /print_sent_by_admin/.test(src),
+    `${name}: the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited`,
+    `${name}: the admin console can print on a paying client's roll just by looking at their panel`);
+}
+
+// A waiter with a SECTION may print their own tables' bills and nobody else's. The shared section
+// gate (lib/tableOfAction.affectedTables) does not recognise ("print","send") and its rule for an
+// unrecognised verb is refuse-everything, so this branch has to ask the question itself — which
+// means the question can also go missing without the shared gate noticing. (T10 sweep #7)
+check(/waiterTables\(actor, rid\)/.test(code(troute).split('a === "print" && b === "send"')[1]?.slice(0, 2000) || ""),
+  "…and a waiter with a section can only send their OWN tables' bills to the printer",
+  "the tablet's print/send has lost its section check — a waiter holding tables 1-5 can print table 20's bill");
+
+// ── 5b · THE LOG ANSWERS "WHICH BILL?", NOT JUST "WHICH PRINTER?" (owner, 2026-08-28) ─────────
+// He was offered a line on the bill card and answered "make log do that". The log could not: the
+// row said `bill sent to Printer_POS_80 on Shop's computer`, which names WHERE the paper came out
+// and never WHICH bill came out of it — so on a busy night no two of forty rows could be told
+// apart. Both routes now name the bill and carry table_number (a field logAction has always
+// accepted and neither passed).
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+  if (!/a === "print" && b === "send"/.test(code(src))) continue;
+  check(/select\("id, table_number, bill_no"\)/.test(src),
+    `${name}: the print/send session read fetches the bill number and the table, so the diary line can name them`,
+    `${name}: print/send no longer reads bill_no/table_number — the log goes back to "a bill was sent", which is every row on the page`);
+  check(/table_number: (printedTable|sess\.table_number)/.test(code(src)),
+    `${name}: …and the print row carries table_number, so it files with the rest of that table's story`,
+    `${name}: the print row dropped table_number again — the Audit tab groups by table and this one floats loose`);
+  check(/detail: `\$\{(printedWhat|billLabel)\} sent to/.test(src),
+    `${name}: …and the sentence itself names the bill ("bill #218 for table 6 sent to …")`,
+    `${name}: the print row's sentence stopped naming the bill`);
+}
+// A bill print is not a kitchen ticket. These two codes are written in exactly two places and BOTH
+// are the bill/banquet door — a kitchen ticket is kot_reprint_sent / kot_printed. Filing them under
+// "Kitchen tickets" put every bill print in the wrong drawer twice: nothing under Bills, and bills
+// under a filter that promised tickets.
+{
+  const trail = read("lib/logTrail.ts");
+  check(/print_sent: \{ area: "Orders & bills", screen: "Print the bill" \}/.test(trail)
+     && /print_sent_by_admin: \{ area: "Orders & bills", screen: "Print the bill" \}/.test(trail),
+    "a bill print is filed under 'Print the bill', not under 'Kitchen tickets'",
+    "print_sent is filed as a kitchen ticket again — it is only ever a bill or a banquet sheet, so the Bills drawer goes empty and the Kitchen-tickets filter fills with bills");
+  // code(), not the raw file: the comment ABOVE the fix explains what "Kitchen tickets" got wrong,
+  // and a guard that trips on its own explanation is a guard the next person deletes. (This one
+  // did exactly that on its first run — the note at the top of this file, learned again.)
+  // The boundary matters: `kot_reprint_sent` CONTAINS "print_sent", and that one genuinely IS a
+  // kitchen ticket. Without the lookbehind this check condemns a correct line.
+  check(!/(?<![a-z_])print_sent(_by_admin)?: \{[^}]*screen: "Kitchen tickets"/.test(code(trail)),
+    "…and neither code has drifted back to the kitchen drawer",
+    "one of the two print codes is back under Kitchen tickets");
+}
 
 // ── 6 · the helper program itself ─────────────────────────────────────────────────────────────
 check(/HELPER_FILENAME/.test(script) && /print-helper\.command/.test(script) && /print-helper\.bat/.test(script) && /print-helper\.sh/.test(script),
