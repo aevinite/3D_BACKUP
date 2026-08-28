@@ -2034,6 +2034,17 @@ stashClear();   // everything is back — a next run has nothing to heal.
 
 console.log("─".repeat(78));
 console.log(`${n} phases · ${pass} passed · ${fail} failed · ${skip} skipped`);
-if (fails.length) { console.log("\nwhat failed:"); for (const f of fails) console.log("  · " + f); }
+if (fails.length) {
+  console.log("\nwhat failed:");
+  for (const f of fails) console.log("  · " + f);
+  // …and the narrowest command that re-checks only the failing stretch. This is 500 phases; re-running
+  // all of them to re-check three is why a suite this size stops being run at all.
+  // (sweep #7 / T28, 2026-08-28.)
+  const nums = fails.map((f) => Number(String(f).split(" ")[0])).filter(Number.isFinite);
+  if (nums.length) {
+    const { rerunLine } = await import("./sweep/rerun.mjs");
+    console.log("\n" + rerunLine("verify:printing-sweep", { base: BASE, from: Math.min(...nums), to: Math.max(...nums) }));
+  }
+}
 console.log("test rows removed; the restaurant's own printing settings put back.");
 process.exit(fail ? 1 : 0);
