@@ -26,6 +26,7 @@ const adminR = read("app/api/admin/printing/[...path]/route.ts");
 const page   = read("app/aevinite/printing/page.tsx");
 const kroute = read("app/api/kitchen/[...path]/route.ts");
 const eroute = read("app/api/editor/[...path]/route.ts");
+const troute = read("app/api/tablet/[...path]/route.ts");
 const kpanel = read("public/panels/kitchen/app.js");
 const epanel = read("public/panels/editor/app.js");
 const plan   = read("docs/PRINT-HELPER.md");
@@ -181,9 +182,66 @@ check(/from \$\{esc\(hlp\.agent\)\}|from " \+ esc\(hlp\.agent\)|esc\(hlp\.printe
 }
 
 // ── 5 · the admin looking is not the restaurant printing ──────────────────────────────────────
-check(/adminView: true/.test(eroute) && /force/.test(eroute) && /print_sent_by_admin/.test(eroute),
-  "the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited",
-  "the admin console can print on a paying client's roll just by looking at their panel");
+//
+// EVERY PANEL THAT CAN SEND PAPER, NOT JUST THE MANAGER'S (T10 sweep #7, 2026-08-22).
+// This check read `eroute` alone. The waiter tablet was given the SAME `print/send` verb for
+// mig 341 — its own header says "the same door the manager panel uses" — and it never got the
+// owner's 2026-08-20 rule, so the Aevidine console opening a paying client's tablet and pressing
+// Print put a sheet out at their shop, with no `print_sent_by_admin` row to trace it by. The guard
+// was green throughout, because it was only ever looking at one of the two files. So the list is
+// what is checked now: a THIRD panel that learns to send paper joins this array or fails here.
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+  if (!/a === "print" && b === "send"/.test(code(src))) continue;   // this panel cannot send paper at all
+  check(/adminView: true/.test(src) && /force/.test(src) && /print_sent_by_admin/.test(src),
+    `${name}: the admin viewing a restaurant's panel prints NOTHING at their shop unless deliberately forced — and that is audited`,
+    `${name}: the admin console can print on a paying client's roll just by looking at their panel`);
+}
+
+// A waiter with a SECTION may print their own tables' bills and nobody else's. The shared section
+// gate (lib/tableOfAction.affectedTables) does not recognise ("print","send") and its rule for an
+// unrecognised verb is refuse-everything, so this branch has to ask the question itself — which
+// means the question can also go missing without the shared gate noticing. (T10 sweep #7)
+check(/waiterTables\(actor, rid\)/.test(code(troute).split('a === "print" && b === "send"')[1]?.slice(0, 2000) || ""),
+  "…and a waiter with a section can only send their OWN tables' bills to the printer",
+  "the tablet's print/send has lost its section check — a waiter holding tables 1-5 can print table 20's bill");
+
+// ── 5b · THE LOG ANSWERS "WHICH BILL?", NOT JUST "WHICH PRINTER?" (owner, 2026-08-28) ─────────
+// He was offered a line on the bill card and answered "make log do that". The log could not: the
+// row said `bill sent to Printer_POS_80 on Shop's computer`, which names WHERE the paper came out
+// and never WHICH bill came out of it — so on a busy night no two of forty rows could be told
+// apart. Both routes now name the bill and carry table_number (a field logAction has always
+// accepted and neither passed).
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+  if (!/a === "print" && b === "send"/.test(code(src))) continue;
+  check(/select\("id, table_number, bill_no"\)/.test(src),
+    `${name}: the print/send session read fetches the bill number and the table, so the diary line can name them`,
+    `${name}: print/send no longer reads bill_no/table_number — the log goes back to "a bill was sent", which is every row on the page`);
+  check(/table_number: (printedTable|sess\.table_number)/.test(code(src)),
+    `${name}: …and the print row carries table_number, so it files with the rest of that table's story`,
+    `${name}: the print row dropped table_number again — the Audit tab groups by table and this one floats loose`);
+  check(/detail: `\$\{(printedWhat|billLabel)\} sent to/.test(src),
+    `${name}: …and the sentence itself names the bill ("bill #218 for table 6 sent to …")`,
+    `${name}: the print row's sentence stopped naming the bill`);
+}
+// A bill print is not a kitchen ticket. These two codes are written in exactly two places and BOTH
+// are the bill/banquet door — a kitchen ticket is kot_reprint_sent / kot_printed. Filing them under
+// "Kitchen tickets" put every bill print in the wrong drawer twice: nothing under Bills, and bills
+// under a filter that promised tickets.
+{
+  const trail = read("lib/logTrail.ts");
+  check(/print_sent: \{ area: "Orders & bills", screen: "Print the bill" \}/.test(trail)
+     && /print_sent_by_admin: \{ area: "Orders & bills", screen: "Print the bill" \}/.test(trail),
+    "a bill print is filed under 'Print the bill', not under 'Kitchen tickets'",
+    "print_sent is filed as a kitchen ticket again — it is only ever a bill or a banquet sheet, so the Bills drawer goes empty and the Kitchen-tickets filter fills with bills");
+  // code(), not the raw file: the comment ABOVE the fix explains what "Kitchen tickets" got wrong,
+  // and a guard that trips on its own explanation is a guard the next person deletes. (This one
+  // did exactly that on its first run — the note at the top of this file, learned again.)
+  // The boundary matters: `kot_reprint_sent` CONTAINS "print_sent", and that one genuinely IS a
+  // kitchen ticket. Without the lookbehind this check condemns a correct line.
+  check(!/(?<![a-z_])print_sent(_by_admin)?: \{[^}]*screen: "Kitchen tickets"/.test(code(trail)),
+    "…and neither code has drifted back to the kitchen drawer",
+    "one of the two print codes is back under Kitchen tickets");
+}
 
 // ── 6 · the helper program itself ─────────────────────────────────────────────────────────────
 check(/HELPER_FILENAME/.test(script) && /print-helper\.command/.test(script) && /print-helper\.bat/.test(script) && /print-helper\.sh/.test(script),
@@ -501,6 +559,111 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(/id="after"/.test(read("public/print-setup.html")) && /They shut the computer down at night/.test(read("public/print-setup.html")),
     "the guide answers what happens after it is installed — shutdowns, restarts, a new computer",
     "the after-install section is gone from /print-setup.html");
+}
+
+// ── 8e · THREE THINGS A REVIEW CAUGHT (owner relayed them, 2026-08-28) ────────────────────────
+{
+  const mcan = read("lib/managerCan.ts");
+  const printApi = code(adminR);
+  const pairPage = read("app/pair/page.tsx");   // its own read — the 8d block's copy is scoped to it
+
+  // 1 · THE PICKER AND THE GATE MUST RESOLVE THE SAME RULE. The Printing board offered a manager
+  // whose own page said no — it read the restaurant-wide grant alone, so a person switched off
+  // individually was still offered, their screen was then refused, and the kitchen got no paper with
+  // nothing on either screen saying why. It failed the other way too.
+  check(/export function managerHasFlag/.test(mcan) && /accessConfig\?\.\[flag\]\?\.on === false/.test(mcan),
+    "one resolver answers 'may this person be the printer' — cap, then their own override, then the default",
+    "managerHasFlag is gone from lib/managerCan.ts: the picker and the gate are two copies of one permission rule again, and they WILL disagree");
+  check(/managerHasFlag\(/.test(printApi) && !/managerGrantValue\("print_here"/.test(printApi),
+    "…and the Printing board's people picker calls it, per person",
+    "the Printing board resolved print_here from the restaurant-wide grant again — a manager switched off individually is offered, picked, and then refused, and nothing says why");
+  check(/permissions/.test(printApi) && /access_config/.test(printApi),
+    "…reading the person's own override AND the feature cap, not just the restaurant default",
+    "the picker stopped reading staff_users.permissions or access_config, so one of the three rungs is missing from its answer");
+
+  // 2 · THE ALLOW PAGE MUST NOT SEND A MANAGER TO OUR PASSWORD WALL. The printing board lives in two
+  // places, and the person standing at the printer is usually the manager.
+  check(/who === "admin"/.test(pairPage) && /href="\/manager"/.test(pairPage),
+    "after linking a computer, a manager is sent to their OWN panel, not to the Aevidine console",
+    "the Allow page's last button goes to /aevinite for everybody again — a manager hits a staff-password screen at the exact moment the guide says to go and choose printers, which reads like their own login just failed");
+  check(/Settings → Printing/.test(pairPage),
+    "…and is told in words where to find it",
+    "the Allow page no longer says WHERE the printing board is on the manager's own panel");
+
+  // 3 · THE GUIDE OPENS BESIDE THE WORK, like the four other places that offer it.
+  check(/print-setup\.html" target="_blank"/.test(page),
+    "the Printing header's guide link opens in a NEW TAB, like the other four",
+    "the guide replaced the Printing screen again — it is read WHILE setting a printer up, and the guide has no way back to the screen you were halfway through");
+}
+
+// ── 8f · TWO MODES, ONE TOGGLE, AND ONLY ONE OF THEM ON SCREEN (owner, 2026-08-28) ────────────
+// "I want both A and B — the toggle AND the simplified UI, and do one thing: you only see the option
+// you have selected, only the setting for that option will be shown." Plus mode B itself: a Chrome
+// that "runs minimised and doesn't auto-open when printing required, doesn't affect other tabs".
+{
+  const stn = read("lib/printStationScript.ts");
+  const helpers = read("lib/printHelpers.ts");
+  const brd = read("lib/printBoard.ts");
+  const guideRaw = read("public/print-setup.html");
+
+  // ── MODE B's LAUNCHER, and the four things that make it not get in the way ──────────────────
+  check(/export function stationScript/.test(stn) && /STATION_FILENAME/.test(stn),
+    "mode B has a launcher of its own — one file per system, the same shape as the helper's",
+    "lib/printStationScript.ts is gone: mode B goes back to being a wall of Terminal commands in the guide");
+  check(/--kiosk-printing/.test(stn) && !/"--kiosk"/.test(stn) && !/--kiosk /.test(stn),
+    "…it prints with no dialog (--kiosk-printing) and is NOT fullscreen-kiosk",
+    "the station launcher gained --kiosk: that is FULLSCREEN kiosk, the opposite of the out-of-the-way window he asked for, and it is what the old guide told people to use");
+  check(/--user-data-dir/.test(stn),
+    "…in its own Chrome profile, so their real Chrome, tabs and logins are untouched",
+    "the station launcher stopped using its own --user-data-dir: it would take over the person's ordinary Chrome");
+  // THE ONE NOBODY WOULD GUESS. A hidden Chrome is throttled, a throttled panel stops polling, and
+  // the tickets just queue while everything looks fine. Measured: 13 beacons in 14 seconds WITH
+  // these flags. They are load-bearing.
+  check(/--disable-background-timer-throttling/.test(stn) && /--disable-backgrounding-occluded-windows/.test(stn)
+    && /--disable-renderer-backgrounding/.test(stn),
+    "…and it carries the three anti-throttling flags, without which a hidden Chrome silently stops printing",
+    "an anti-throttling flag was dropped from the station launcher. Chrome throttles background windows hard: the panel stops polling, tickets queue, and NOTHING on screen says so. Measured 2026-08-28 — 13 beacons in 14 seconds with them.");
+  check(/WASFRONT/.test(stn) && /to activate/.test(stn),
+    "…and on a Mac it hands the screen back to whoever had it",
+    "the mac station launcher stopped restoring focus. Measured: even with open -g -j -n and a real url, the frontmost app went Finder → Google Chrome. An about:blank test says otherwise, which is how a false promise ships.");
+  check(/caffeinate/.test(stn) && /powercfg/.test(stn),
+    "…and it keeps the machine awake, because a sleeping computer prints nothing",
+    "the station launcher no longer stops the machine sleeping — the commonest reason a restaurant says printing stopped overnight");
+  check(!/password|PASSWORD/.test(code(stn)),
+    "…and there is no password in it, like the helper",
+    "a password appeared in the station launcher. The person signs in ONCE in the window it opens; a credential in a text file on a shop counter is what the pairing handshake exists to avoid.");
+
+  // ── THE TOGGLE, and the fact that it MOVES THE ROUTES ───────────────────────────────────────
+  check(/export type PrintMode/.test(helpers) && /export async function writeMode/.test(helpers),
+    "the mode is a stored answer, and changing it is one function",
+    "PrintMode/writeMode are gone: the board has nothing to hang its one toggle off");
+  check(/ROUTABLE_KINDS/.test(helpers.slice(helpers.indexOf("export async function writeMode"))) && /syncKotSwitch\(rid/.test(helpers.slice(helpers.indexOf("export async function writeMode"))),
+    "…and it rewrites the three paper lines into the new mode's shape, re-asserting auto-print",
+    "writeMode stopped moving the routes with the mode. A restaurant switched to Chrome would keep three routes pointing at a computer: the board would say one thing and the paper would do another.");
+  check(/mode: PrintMode/.test(brd) && /export const stationFiles/.test(brd),
+    "…and the shared board carries the mode AND both launcher files, so neither screen invents its own",
+    "lib/printBoard.ts lost the mode or the station files: the two printing screens will drift apart again");
+
+  // ── ONLY THE CHOSEN MODE'S SETTINGS ARE RENDERED — on BOTH screens ──────────────────────────
+  check(/adm-mode/.test(page) && /mode === "computer" \?/.test(page),
+    "the console shows ONE toggle and only that mode's setup",
+    "the admin Printing board stopped branching on the mode — both modes' settings are on screen at once again, which is the twenty-control screen he called shit");
+  check(/pw-mode/.test(epanel) && /mode === "computer"/.test(epanel),
+    "…and so does the restaurant's own screen, the same way",
+    "the manager panel's Printing section is not mode-driven, so the two boards are two different products again");
+  check(/adm-mode/.test(read("app/globals.css")) && /pw-mode/.test(read("public/panels/editor/style.css")),
+    "…with the toggle styled from each side's own tokens, so both skins work",
+    "a mode toggle has no styling on one of the two screens");
+  check(/function FileCard/.test(page),
+    "…and the two launcher cards on the console share ONE component",
+    "the helper file card and the station file card are two copies of one markup again — which is exactly how the wording drifted the first time");
+  check(/b === "mode"/.test(code(eroute)) && /seg\[0\] === "mode"/.test(code(adminR)),
+    "…and both screens have a door to change it, each gated as it already was",
+    "one of the two printing screens can show the toggle but not save it");
+
+  check(/id="twoways"/.test(guideRaw) && /print-station file/.test(guideRaw),
+    "the guide explains both ways and the print-station file",
+    "the setup guide does not mention mode B, so a restaurant handed the station file has nothing to read");
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────

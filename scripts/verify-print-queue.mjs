@@ -87,9 +87,14 @@ check(/the order was deleted before this ticket printed/.test(lib),
 check(/the order was cancelled before this ticket printed/.test(lib) && /=== "cancelled"/.test(lib),
   "a job whose order was CANCELLED is retired too — the kitchen never cooks a cancelled ticket",
   "a cancelled order's ticket can reach the printer again; an order cancelled seconds after it queued would be cooked");
-check(/kitchenMayAuto/.test(kroute) && /kot_print_target/.test(kroute),
-  "the KITCHEN route honours who-prints as well, so 'counter' does not print in both rooms",
-  "the kitchen route ignores kot_print_target — with the counter chosen, a kitchen screen left open prints the same ticket in the other room (measured)");
+// The rule is unchanged; where the answer comes from is not. Since mig 369 the kitchen room is
+// decided by the Kitchen slips ROUTE through screenMayPrint — not by mig 336's coarse column, which
+// could contradict it (the sweep caught the older one winning). So the check asserts the ROUTE is
+// consulted, and that the retired column is NOT.
+check(/kitchenMayAuto/.test(kroute) && /screenMayPrint\(/.test(kroute)
+  && !/kot_print_target/.test(kroute.replace(/^\s*\/\/[^\n]*$/gm, "")),
+  "the KITCHEN room is decided by the Kitchen slips route, so 'the counter prints' does not print in both rooms",
+  "the kitchen route ignores the route, or reads the retired kot_print_target again — with the counter chosen, a kitchen screen left open prints the same ticket in the other room (measured)");
 check(/reprint/.test(kroute) && /A MANUAL REPRINT IS DIFFERENT/.test(kroute),
   "…while a MANUAL reprint still always reaches the kitchen printer",
   "the kitchen's manual reprint is now routed by the automatic setting — the manager pressing 'Reprint in kitchen' is naming that printer on purpose");
@@ -139,18 +144,48 @@ check(/keepAlive: \(\) => !!state\.autoPrintKot/.test(kpanel),
 const mig336 = read("supabase/migrations/336_which_screen_prints_the_ticket.sql");
 const admin = read("components/admin/RestaurantSettings.tsx");
 const adminRoute = read("app/api/admin/restaurants/settings/route.ts");
+// ── kot_print_target IS RETIRED (mig 369) ─────────────────────────────────────────────────────
+// It asked the same question as the Kitchen slips line, in older and vaguer words, and the two could
+// contradict each other. Its three answers live in the route now:
+//   kitchen → a screen route on the kitchen panel
+//   counter → a screen route on the manager panel
+//   both    → a screen route on the kitchen panel WITH backupPanel = manager
+// The column stays (schema changes here are additive, one folder feeds two databases) but nothing
+// may read or write it. These three checks are what stop it creeping back.
+const mig369 = read("supabase/migrations/369_the_old_coarse_print_target_becomes_a_route.sql");
 check(/kot_print_target/.test(mig336) && /'kitchen', 'counter', 'both'/.test(mig336),
-  "mig 336 defines who may print (kitchen | counter | both) with a CHECK constraint",
-  "mig 336 no longer constrains kot_print_target — a typo could take a restaurant's printing away");
-check(/kot_print_target/.test(read("app/aevinite/printing/page.tsx")) || /kot_print_target/.test(read("components/admin/RestaurantSettings.tsx")),
-  "the 'which screen prints' fallback is still somewhere in the ADMIN console (it cannot live in the manager panel — that Settings section is hidden from everyone)",
-  "the 'which screen prints' choice has left the admin console altogether — a restaurant with no route has no way to move printing between the kitchen and the counter. It moved from the Access card to the Printing board on 2026-08-26; if you are moving it again, keep it inside /aevinite.")
-check(/"kot_print_target",/.test(admin),
-  "…and the key is in the admin form's saved-keys list (a missing key looks editable and saves nothing)",
-  "kot_print_target is missing from SETTINGS_KEYS — the control would silently save nothing");
-check(/"kot_print_target",/.test(adminRoute) && /\["kitchen", "counter", "both"\]\.includes/.test(adminRoute),
-  "the admin route accepts only the three answers the queue understands",
-  "the admin settings route no longer sanitises kot_print_target");
+  "mig 336 is untouched — the column and its CHECK constraint stay where they were",
+  "mig 336 was edited. A migration that has run everywhere is history: retire a column in a NEW file, never by rewriting the old one");
+check(/backupPanel/.test(mig369) && /lfh_already_applied/.test(mig369),
+  "mig 369 carried every restaurant's old value into the Kitchen slips line, once",
+  "mig 369 lost the carry-across or its idempotency marker. Two of the dev restaurants were on 'both' with no route — deleting the setting without moving its meaning silently changes how they print");
+{
+  const readers = [
+    ["the kitchen route", kroute],
+    ["the manager route", read("app/api/editor/[...path]/route.ts")],
+    ["the admin printing API", read("app/api/admin/printing/[...path]/route.ts")],
+    ["the admin settings form", admin],
+    ["the admin settings write route", adminRoute],
+    ["the owner settings route", read("app/api/owner/settings/route.ts")],
+    ["the Printing board", read("app/aevinite/printing/page.tsx")],
+  ];
+  const strip = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const guilty = readers.filter(([, t]) => /kot_print_target/.test(strip(t))).map(([n]) => n);
+  check(guilty.length === 0,
+    "…and no code reads or writes it any more — the route is the only answer",
+    `${guilty.join(", ")} still touches kot_print_target. Two settings for one question is what made the manager screen refuse the owner's own choice in August; derive it from the Kitchen slips route instead.`);
+}
+check(/backupPanel/.test(read("lib/printHelpers.ts")) && /backup: true/.test(read("lib/printHelpers.ts")),
+  "…and a screen route can name a BACKUP screen, which is where 'both' went",
+  "backupPanel is gone from the route model: 'the kitchen prints, the counter picks up what it leaves' can no longer be expressed, and the two restaurants that were on 'both' quietly lose their safety net");
+// The old check here asserted that the admin settings route SANITISED kot_print_target to one of
+// three values. There is nothing left to sanitise: the key is off the write allow-list (mig 369), so
+// the rule to assert is that it cannot be written at all. The screen-route validator does the
+// equivalent job now — writeRoutes refuses a panel that is not one of the four, and refuses a backup
+// screen that is the same screen.
+check(/isRoutePanel\(panel\)/.test(read("lib/printHelpers.ts")) && /o\.backupPanel !== panel/.test(read("lib/printHelpers.ts")),
+  "…and the route validator accepts only real panels, and refuses a backup that is the same screen",
+  "writeRoutes stopped checking the panel names, or allows a screen to be its own backup — an age window nothing can ever satisfy looks like a rule and is not one");
 check(/async function counterPrintTarget/.test(eroute) && (eroute.match(/counterPrintTarget\(rid\)/g) || []).length >= 2,
   "the editor route re-asks WHO may print at the claim as well as at the read (never trusts the panel)",
   "the counter-print gate is asked once or not at all — a screen left open from before the setting changed would keep claiming tickets");

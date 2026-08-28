@@ -78,15 +78,43 @@ for (const r of rows) {
     const marks = lines.map((l, i) => (/REJECTED \(owner,/.test(l) ? i : -1)).filter((i) => i >= 0);
     if (!marks.length) { fail(`${r.id}: ${f} carries no "REJECTED (owner, …)" comment`, "the doc says no, the code does not"); continue; }
 
-    // Which symbol should this row's comment be next to? Match the hint against this file.
-    const hint = siteHints.find((h) => h && !h.includes("/") && lines.some((l) => l.includes(h)));
-    if (!hint) { ok(`${r.id} → ${f} carries its REJECTED comment`); continue; }
-    const at = lines.map((l, i) => (l.includes(hint) ? i : -1)).filter((i) => i >= 0);
-    const near = marks.some((m) => at.some((a) => Math.abs(a - m) <= NEAR));
-    if (near) ok(`${r.id} → ${f} carries its REJECTED comment AT ${hint}`);
-    else fail(
-      `${r.id}: ${f} has a REJECTED comment, but not near \`${hint}\` — the place someone would edit`,
-      `comment(s) at line ${marks.map((m) => m + 1).join(", ")}; \`${hint}\` at line ${at.map((a) => a + 1).join(", ")}. ` +
+    // WHICH LINES COUNT AS "THE PLACE SOMEONE WOULD EDIT" — code lines, never comment lines.
+    //
+    // WHY (T27 sweep, 2026-08-28). The hint used to be matched against every line, including the
+    // lines of the REJECTED note itself — and a good note usually names its own anchor, because it
+    // is explaining what not to change. So the note satisfied "is the comment near the code?"
+    // against ITSELF and passed wherever it sat. Found while adding R23's pointers to four files:
+    // all four went green on a word inside the note.
+    //
+    // The masking has to be a real BLOCK-comment strip, not a per-line startsWith test. The first
+    // attempt tested each line for a leading `//` or `*`, which does nothing for the interior of a
+    // `/* … */` in CSS or a `{/* … */}` in JSX — the middle lines of those start with ordinary
+    // words, so a note inside one still matched itself. Blanking the comment RANGES while keeping
+    // the line count is what makes the anchor honest.
+    const masked = src
+      .replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "))   // /* … */ and {/* … */}
+      .replace(/(^|[^:])\/\/[^\n]*/g, (c, p) => p + c.slice(p.length).replace(/./g, " "))
+      .split("\n");
+    const isCode = (i) => (masked[i] || "").trim() !== "";
+    const hasHint = (i, h) => isCode(i) && (masked[i] || "").includes(h);
+
+    // ANY of the row's anchors, not just the first one that happens to appear.
+    //
+    // A row that names several files names several anchors — R23 lists five sites — and `find()`
+    // took the first anchor present in THIS file, which in app/globals.css was `split` (from
+    // `.hero-title.has-split`) rather than the `greet-badge` the row meant for it. The comment was
+    // in exactly the right place and the check still failed. A rejection is satisfied when its note
+    // sits at ONE of the places someone would edit; it does not have to sit at all of them.
+    const usable = siteHints.filter((h) => h && !h.includes("/") && lines.some((_, i) => hasHint(i, h)));
+    if (!usable.length) { ok(`${r.id} → ${f} carries its REJECTED comment`); continue; }
+    const nearHint = usable.find((h) => {
+      const at = lines.map((_, i) => (hasHint(i, h) ? i : -1)).filter((i) => i >= 0);
+      return marks.some((m) => at.some((a) => Math.abs(a - m) <= NEAR));
+    });
+    if (nearHint) { ok(`${r.id} → ${f} carries its REJECTED comment AT ${nearHint}`); continue; }
+    fail(
+      `${r.id}: ${f} has a REJECTED comment, but not near any of \`${usable.join("`, `")}\` — the places someone would edit`,
+      `comment(s) at line ${marks.map((m) => m + 1).join(", ")}. ` +
         `A rejection nobody sees while editing is the one that gets re-suggested — that is what this file exists to stop.`,
     );
   }

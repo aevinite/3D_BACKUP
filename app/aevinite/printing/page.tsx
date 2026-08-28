@@ -17,7 +17,7 @@ import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
 // lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
@@ -27,16 +27,20 @@ type Agent = {
   connected: boolean; secondsAgo: number | null; fingerprintClash: boolean;
 };
 type Route = { agent: string | null; printer: string | null; backupAgent?: string | null; backupPrinter?: string | null; paper?: Paper;
-  via?: "computer" | "screen" | "off"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null };
+  via?: "computer" | "screen" | "off"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null;
+  /** The second screen allowed to take what the first leaves sitting — the retired "both" (mig 369). */
+  backupPanel?: string | null };
 type Person = { id: string; name: string; role: string; panels: string[] };
 type Device = { device_id: string; label?: string | null; panel?: string | null; last_seen_at?: string | null };
 type Job = { id: string; kind: string; status: string; printer: string | null; printed_by: string | null; attempts: number; error: string | null; created_at: string; done_at: string | null };
 type Stuck = { n: number; oldestMs: number | null; afterMs: number };
 type State = {
   agents: Agent[]; routes: Record<string, Route>; waiting: number; stuck?: Stuck; recent: Job[];
-  kinds: string[]; printing: { allowed: boolean; on: boolean; target: string };
+  kinds: string[]; printing: { allowed: boolean; on: boolean };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
+  mode?: "computer" | "screen";
   files?: Record<string, { filename: string; autostart: string; text: string }>;
+  stationFiles?: Record<string, { filename: string; firstRun: string; text: string }>;
 };
 /** ONE ROW PER RESTAURANT (owner, 2026-08-27: "it will be messy when there will be too much
  *  restaurants… I could be able to differentiate all the restaurants"). */
@@ -49,12 +53,6 @@ type Over = { rows: OverRow[]; staleMs: number; stuckAfterMs: number };
 
 const OS_LABEL: Record<string, string> = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
 
-/** Which of the three answers this line currently gives. It is derived, never stored twice: a line
- *  that names a computer is answered "computer", one that names a panel is "screen", one saved off is
- *  "off", and one that has never been touched has no answer yet — which is a fourth, honest state
- *  the screen says out loud rather than pretending is "off". */
-const whoOf = (r?: Route): "computer" | "screen" | "off" | "" =>
-  r?.via === "off" ? "off" : r?.via === "screen" || r?.panel ? "screen" : r?.agent ? "computer" : "";
 
 /** THE WATCH SCREEN. Not a form — a list you glance at, ordered so the worst thing is at the top.
  *
@@ -119,6 +117,50 @@ function Overview({ over, onOpen }: { over: Over; onOpen: (id: string) => void }
         })}
       </div>
       {!rows.length ? <p className="adm-muted" style={{ fontSize: 13, margin: 0 }}>No restaurants yet.</p> : null}
+    </div>
+  );
+}
+
+/** ONE CARD SHAPE FOR BOTH LAUNCHER FILES.
+ *
+ *  The helper file and the print-station file are the same idea told twice — a per-OS tab strip,
+ *  numbered steps, a Copy button and a dark code box. Two copies of that markup is two places for
+ *  the wording to drift, which is the whole reason the printing screens were "not identical" in the
+ *  first place. One component, two callers. */
+function FileCard({ title, lead, files, os, setOs, copy, steps, footer }: {
+  title: string;
+  lead: React.ReactNode;
+  files?: Record<string, { filename: string; text: string }>;
+  os: string;
+  setOs: (v: string) => void;
+  copy: (t: string) => void | Promise<void>;
+  steps: (os: string) => React.ReactNode[];
+  footer: (os: string) => React.ReactNode;
+}) {
+  const f = files?.[os];
+  if (!files || !f) return null;
+  return (
+    <div className="adm-card" style={{ marginTop: 14 }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{title}</h2>
+      <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>{lead}</p>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {Object.keys(files).map((k) => (
+          <button key={k} className={`adm-btn${os === k ? " primary" : ""}`} style={{ fontSize: 12 }} onClick={() => setOs(k)}>
+            {OS_LABEL[k] || k}
+          </button>
+        ))}
+      </div>
+      <ol className="adm-muted" style={{ fontSize: 13, margin: "0 0 10px", paddingLeft: 20, lineHeight: 1.75 }}>
+        {steps(os).map((n, i) => <li key={i}>{n}</li>)}
+      </ol>
+      <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>{footer(os)}</p>
+      <div style={{ position: "relative" }}>
+        <button className="adm-btn" style={{ position: "absolute", top: 8, right: 8, fontSize: 12, zIndex: 2 }}
+          onClick={() => void copy(f.text)}>Copy</button>
+        <pre style={{ background: "#0f1420", color: "#e7ecf5", padding: "14px 16px", borderRadius: 11, overflowX: "auto", fontSize: 12, lineHeight: 1.5, maxHeight: 300 }}>
+          {f.text}
+        </pre>
+      </div>
     </div>
   );
 }
@@ -208,9 +250,26 @@ export default function AdminPrinting() {
     const d = await post("routes", { routes: { [kind]: {
       via: r.via || (r.agent ? "computer" : undefined),
       agent: r.agent, printer: r.printer, backupAgent: r.backupAgent, backupPrinter: r.backupPrinter, paper: r.paper,
-      panel: r.panel, person: r.person, device: r.device,
+      panel: r.panel, person: r.person, device: r.device, backupPanel: r.backupPanel,
     } } });
     if (d) { toast(`${KIND_LABEL[kind] || kind} saved.`, "ok"); void load(); }
+  };
+
+  // THE ONE TOGGLE'S VALUE. Read from the server, never guessed from the routes — the board has to
+  // show ONE setup before any paper has been answered, and a derived mode has no answer then.
+  const mode: "computer" | "screen" = st?.mode === "screen" ? "screen" : "computer";
+
+  /** "Nobody prints this" — saved as a decision, so screens say so instead of "no printer chosen". */
+  const saveOff = async (kind: string) => {
+    const d = await post("routes", { routes: { [kind]: { via: "off" } } });
+    if (d) { toast(`${KIND_LABEL[kind] || kind}: nobody.`, "ok"); void load(); }
+  };
+  /** Switching a paper back ON in SCREEN mode needs no picker — the person is the restaurant's one
+   *  choice, made above. So this is genuinely one tap. */
+  const saveScreen = async (kind: string) => {
+    const person = draft.kot?.person || null;
+    const d = await post("routes", { routes: { [kind]: { via: "screen", panel: "manager", person } } });
+    if (d) { toast(`${KIND_LABEL[kind] || kind}: on.`, "ok"); void load(); }
   };
 
   const setR = (kind: string, patch: Partial<Route>) =>
@@ -244,9 +303,13 @@ export default function AdminPrinting() {
             {rid ? `Printing · ${rest?.name || "…"}` : "Printing"}
           </h1>
           <p className="adm-page-sub" style={{ margin: 0, maxWidth: "72ch" }}>
-            Which computer prints which piece of paper. A small helper program on a computer asks us every
-            two seconds whether there is anything for it — so paper comes out with no window open, nothing
-            logged in, and nothing to keep in front. <Link href="/print-setup.html" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</Link>
+            {/* NEUTRAL NOW. This described the HELPER only ("a small helper program… asks us every two
+                seconds"), which read as the whole truth while the screen offers two ways to print. */}
+            Where this restaurant&apos;s paper comes out. There are two ways to do it — a small program on a
+            computer, or the restaurant&apos;s own Chrome — and the toggle below picks one. {/* A NEW TAB, like the four other places that offer this guide (owner's review, 2026-08-28).
+                It is read WHILE a printer is being set up, so opening it in place threw away the
+                screen you were halfway through — and the guide has no way back to it. */}
+            <a href="/print-setup.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</a>
 {/* The link to Access lives on the address book below, where the permission actually bites — two
                 links to one place in one screenful is the clutter that made this header hard to read. */}
           </p>
@@ -334,318 +397,299 @@ export default function AdminPrinting() {
           </div>
 
           {/* ── 2 · the computers ───────────────────────────────────────────────────────── */}
+          {/* ═══════════════════════════════════════════════════════════════════════════════════
+              2 + 3 · HOW THIS RESTAURANT PRINTS — ONE TOGGLE, AND ONLY ITS OWN SETTINGS
+              ═══════════════════════════════════════════════════════════════════════════════════
+              Owner, 2026-08-28, looking at the old version: "tell me what is this all setting for,
+              like no use… I want a simple toggle… and do one thing: you only see the option you have
+              selected — only the setting for that option will be shown."
+
+              WHAT IT WAS. Three papers × (two shape buttons + a computer + a printer + a paper size
+              + a screen + a person + a device + two backup pickers) and FIVE Save buttons. About
+              twenty controls to answer one question, and every one of them on screen at once whether
+              it applied or not.
+
+              WHAT IT IS. One toggle picks the MECHANISM, and only that mechanism's setup renders —
+              the helper's computers and printers, or the Chrome station's one named person. The three
+              papers then answer the only thing left: which printer (or "nobody"). Nothing on screen
+              belongs to the other mode. That is the UI skill's progressive-disclosure rule, and it is
+              also just what he asked for in his own words.
+
+              The toggle is not cosmetic: writeMode() rewrites the three paper lines into the new
+              mode's shape, so the board and the paper can never say different things. */}
           <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.two}</h2>
+            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>2 · How this restaurant prints</h2>
             <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-              Each one runs the helper. It reports its own printers, so every dropdown below is built from
-              what that machine really has — nobody types a printer name.
+              Pick one. Everything below changes to match it, and nothing from the other way stays on
+              screen. You can switch back at any time — it takes effect within a couple of seconds.
             </p>
 
-            {agents.length === 0 ? (
-              <div className="adm-muted" style={{ fontSize: 13, padding: "6px 0 12px" }}>
-                No computer has the helper yet. Add one below and this restaurant&apos;s paper starts coming out
-                without anybody watching a screen.
-              </div>
-            ) : agents.map((a) => (
-              <div key={a.id} style={{ padding: "10px 0", borderTop: "1px solid var(--border)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                  {dot(a)}
-                  <b style={{ fontSize: 14 }}>{a.name}</b>
-                  <span className="adm-muted" style={{ fontSize: 12 }}>
-                    {a.connected ? `connected · seen ${a.secondsAgo ?? 0}s ago`
-                      : a.last_seen_at ? `last seen ${a.secondsAgo != null && a.secondsAgo > 3600 ? Math.round(a.secondsAgo / 3600) + "h" : Math.round((a.secondsAgo ?? 0) / 60) + " min"} ago`
-                      : "never said hello yet"}
-                  </span>
-                  <span className="adm-muted" style={{ fontSize: 12 }}>· {a.printers.length} printer{a.printers.length === 1 ? "" : "s"}</span>
-                  <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
-                    <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!busy}
-                      onClick={async () => {
-                        const name = prompt("What should this computer be called?", a.name);
-                        if (name && name.trim() && name !== a.name) { const d = await post(`agents/${a.id}/rename`, { name: name.trim() }); if (d) void load(); }
-                      }}>Rename</button>
-                    {/* "NEW CODE" IS GONE (mig 368). It minted a fresh token to be carried to a
-                        machine by hand — the whole ritual the pairing handshake replaced. Re-linking a
-                        computer is now: Unlink here, run the file there, press Allow. One path, and it
-                        is the same path as setting one up for the first time. */}
-                    <button className="adm-btn danger" style={{ fontSize: 12 }} disabled={!!busy}
-                      title="Its code dies at once and anything routed to it needs choosing again. To bring it back: run the file on that computer and press Allow."
-                      onClick={async () => {
-                        if (!confirm(`Unlink “${a.name}”?\n\nIts code stops working at once, and any paper routed to it will need a printer choosing again.\n\nTo bring it back, run the helper file on that computer and press Allow.`)) return;
-                        const d = await post(`agents/${a.id}/revoke`, {});
-                        if (d) { toast(`${a.name} unlinked.`, "ok"); void load(); }
-                      }}>Unlink</button>
-                  </div>
-                </div>
-
-                {a.fingerprintClash ? (
-                  <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--adm-warn, #f5a524)" }}>
-                    <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ marginRight: 6 }} />
-                    This code has been used on more than one computer. No paper is duplicated, but half the
-                    tickets will come out in the wrong room — press <b>New code</b> and set the other machine
-                    up as its own computer.
-                  </div>
-                ) : null}
-
-                {a.printers.length ? (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                    {a.printers.map((p) => (
-                      <span key={p.name} className="adm-muted" style={{ fontSize: 12, border: "1px solid var(--border)", borderRadius: 8, padding: "5px 9px", display: "inline-flex", alignItems: "center", gap: 7 }}>
-                        <i className="fas fa-print" aria-hidden="true" style={{ opacity: 0.6 }} />
-                        <b style={{ color: "var(--text)" }}>{p.name}</b>
-                        {p.desc ? <span>· {p.desc}</span> : null}
-                        {p.paper ? <span>· {paperLabel(p.paper)}</span> : null}
-                        <button className="adm-btn" style={{ fontSize: 11, padding: "3px 8px" }} disabled={!!busy}
-                          onClick={async () => { const d = await post("test", { agentId: a.id, printer: p.name }); if (d) toast(String(d.note || "Sent."), "ok"); }}>
-                          Send a test page
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 7 }}>
-                    It has not reported any printers yet — it reports them the first time the helper runs.
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* "ADD A COMPUTER" IS GONE FROM THIS SCREEN (mig 368). It existed to mint a code here and
-                carry it to a machine in another city — which is what made the helper file different
-                for every restaurant, and what made somebody type a computer name (owner, 2026-08-27:
-                "what the fuck is a computer name"). A computer adds ITSELF now: run the one file,
-                press Allow. The API verb survives for the printing sweep, which needs to create an
-                agent without a browser. */}
-            <div className="adm-elsewhere" style={{ marginTop: 12 }}>
-              <span className="lbl">A computer adds <b>itself</b> — run the file below on it and press <b>Allow</b>.</span>
-            </div>
-          </div>
-
-          {/* ── 2b · THE ONE FILE, for every restaurant, with nothing secret in it ───────────── */}
-          <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>The helper file — the same one for every restaurant</h2>
-            <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-              There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick — it is the
-              same text for every client. It links itself the first time it runs: your browser opens and
-              you press <b>Allow</b>. <b>Nothing is downloaded by hand:</b> a downloaded script is blocked
-              outright by a Mac and warned about by Windows, while a file somebody typed simply opens.
-            </p>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-              {Object.keys(st.files || {}).map((k) => (
-                <button key={k} className={`adm-btn${os === k ? " primary" : ""}`} style={{ fontSize: 12 }} onClick={() => setOs(k)}>
-                  {OS_LABEL[k] || k}
+            <div className="adm-who" role="group" aria-label="How this restaurant prints">
+              {([
+                ["computer", "A computer", "A small program prints silently. No window, nobody logged in. Each paper can have its own printer."],
+                ["screen", "A screen (Chrome)", "The restaurant's own Chrome prints, out of the way, signed in as one person. Nothing to install."],
+              ] as const).map(([m, label, what]) => (
+                <button key={m} type="button" className={`adm-mode${mode === m ? " on" : ""}`}
+                  aria-pressed={mode === m} disabled={busy === "mode"}
+                  onClick={async () => {
+                    if (mode === m) return;
+                    if (!confirm(`Switch this restaurant to “${label}”?\n\nThe three paper lines below move with it — anything you had chosen for the other way is cleared, and a line set to “nobody” stays that way.`)) return;
+                    const d = await post("mode", { mode: m });
+                    if (d) { toast("Saved.", "ok"); void load(); }
+                  }}>
+                  <b>{label}</b>
+                  <small>{what}</small>
                 </button>
               ))}
             </div>
-            <ol className="adm-muted" style={{ fontSize: 13, margin: "0 0 10px", paddingLeft: 20, lineHeight: 1.75 }}>
-              <li>On the computer with the printer, open <b>{os === "windows" ? "Notepad" : os === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
-              <li>Press <b>Copy</b> below and paste it in.</li>
-              <li>Save it on the Desktop as <b>{st.files?.[os]?.filename}</b>{os === "windows" ? " with “Save as type: All Files”" : ""}.</li>
-              <li>{os === "mac" ? "In Terminal, once: chmod +x ~/Desktop/print-helper.command — then double-click it." : "Double-click it."}</li>
-              <li>A page opens in that computer&apos;s browser. Press <b>Allow</b>. That is the whole setup.</li>
-            </ol>
-            <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
-              <b>Starting up again:</b> {st.files?.[os]?.autostart}
-            </p>
-            <div style={{ position: "relative" }}>
-              <button className="adm-btn" style={{ position: "absolute", top: 8, right: 8, fontSize: 12, zIndex: 2 }}
-                onClick={() => void copy(st.files?.[os]?.text || "")}>Copy</button>
-              <pre style={{ background: "#0f1420", color: "#e7ecf5", padding: "14px 16px", borderRadius: 11, overflowX: "auto", fontSize: 12, lineHeight: 1.5, maxHeight: 300 }}>
-                {st.files?.[os]?.text}
-              </pre>
-            </div>
           </div>
 
-          {/* THE "SHOWN ONLY ONCE" CARD IS GONE (mig 368). It existed because the file carried a
-              37-character token that we keep only as a hash and can never show again. The file has
-              no token now — it pairs itself — so there is nothing to guard, nothing to save, and
-              nothing to hide afterwards. `New code` on a computer above still shows one, because
-              re-coding a machine legitimately mints a fresh token. */}
-          {/* ── 3 · the address book ────────────────────────────────────────────────────── */}
+          {/* ── the chosen mode's SETUP — one of these two, never both ───────────────────────── */}
+          {mode === "computer" ? (
+            <>
+              <div className="adm-card" style={{ marginTop: 14 }}>
+                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>The computers that can print</h2>
+                <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+                  Each one runs the helper. It reports its own printers, so every dropdown below is built
+                  from what that machine really has — nobody types a printer name.
+                </p>
+                {agents.length === 0 ? (
+                  <div className="adm-muted" style={{ fontSize: 13, padding: "6px 0 12px" }}>
+                    No computer has the helper yet. Make the file below on the machine the printer is
+                    plugged into, double-click it, and press <b>Allow</b> — it appears here by itself.
+                  </div>
+                ) : agents.map((a) => (
+                  <div key={a.id} style={{ padding: "10px 0", borderTop: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                      {dot(a)}
+                      <b style={{ fontSize: 14 }}>{a.name}</b>
+                      <span className="adm-muted" style={{ fontSize: 12 }}>
+                        {a.connected ? `connected · seen ${a.secondsAgo ?? 0}s ago`
+                          : a.last_seen_at ? `last seen ${a.secondsAgo != null && a.secondsAgo > 3600 ? Math.round(a.secondsAgo / 3600) + "h" : Math.round((a.secondsAgo ?? 0) / 60) + " min"} ago`
+                          : "never said hello yet"}
+                      </span>
+                      <span className="adm-muted" style={{ fontSize: 12 }}>· {a.printers.length} printer{a.printers.length === 1 ? "" : "s"}</span>
+                      <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!busy}
+                          onClick={async () => {
+                            const name = prompt("What should this computer be called?", a.name);
+                            if (name && name.trim() && name !== a.name) { const d = await post(`agents/${a.id}/rename`, { name: name.trim() }); if (d) void load(); }
+                          }}>Rename</button>
+                        <button className="adm-btn danger" style={{ fontSize: 12 }} disabled={!!busy}
+                          title="Its code dies at once and anything routed to it needs choosing again. To bring it back: run the file on that computer and press Allow."
+                          onClick={async () => {
+                            if (!confirm(`Unlink “${a.name}”?\n\nIts code stops working at once, and any paper routed to it will need a printer choosing again.\n\nTo bring it back, run the helper file on that computer and press Allow.`)) return;
+                            const d = await post(`agents/${a.id}/revoke`, {});
+                            if (d) { toast(`${a.name} unlinked.`, "ok"); void load(); }
+                          }}>Unlink</button>
+                      </div>
+                    </div>
+                    {a.fingerprintClash ? (
+                      <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--adm-warn, #f5a524)" }}>
+                        <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ marginRight: 6 }} />
+                        This code has been used on more than one computer. No paper is duplicated, but half the
+                        tickets will come out in the wrong room — unlink it and set the other machine up as its own.
+                      </div>
+                    ) : null}
+                    {a.printers.length ? (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                        {a.printers.map((pr) => (
+                          <span key={pr.name} className="adm-muted" style={{ fontSize: 12, border: "1px solid var(--border)", borderRadius: 8, padding: "5px 9px", display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <i className="fas fa-print" aria-hidden="true" style={{ opacity: 0.6 }} />
+                            <b style={{ color: "var(--text)" }}>{pr.name}</b>
+                            {pr.paper ? <span>· {paperLabel(pr.paper)}</span> : null}
+                            <button className="adm-btn" style={{ fontSize: 11, padding: "3px 8px" }} disabled={!!busy}
+                              onClick={async () => { const d = await post("test", { agentId: a.id, printer: pr.name }); if (d) toast(String(d.note || "Sent."), "ok"); }}>
+                              Test page
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 7 }}>
+                        It has not reported any printers yet — it reports them the first time the helper runs.
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <FileCard title="The helper file — the same one for every restaurant"
+                lead={<>There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick. It links
+                  itself the first time it runs: the browser opens and you press <b>Allow</b>. <b>Nothing is
+                  downloaded by hand</b> — a downloaded script is blocked outright by a Mac and warned about by Windows.</>}
+                files={st.files} os={os} setOs={setOs} copy={copy}
+                steps={(k: string) => [
+                  <>On the computer with the printer, open <b>{k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</>,
+                  <>Press <b>Copy</b> below and paste it in.</>,
+                  <>Save it on the Desktop as <b>{st.files?.[k]?.filename}</b>{k === "windows" ? " with “Save as type: All Files”" : ""}.</>,
+                  k === "mac" ? <>In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click it.</> : <>Double-click it.</>,
+                  <>A page opens in that computer&apos;s browser. Press <b>Allow</b>. That is the whole setup.</>,
+                ]}
+                footer={(k: string) => <><b>Starting up again:</b> {st.files?.[k]?.autostart}</>} />
+            </>
+          ) : (
+            <>
+              <div className="adm-card" style={{ marginTop: 14 }}>
+                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Whose screen prints</h2>
+                <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
+                  One person. The launcher below opens a Chrome signed in as them, out of the way, and that
+                  Chrome does the printing — on whatever printer that machine is set to.
+                </p>
+                <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
+                  <span className="lbl">Who <b>may</b> be a printing screen is a person&apos;s own permission, on</span>
+                  <b>Access &amp; permissions</b>
+                  <a href={rid ? `/aevinite/access?rid=${encodeURIComponent(rid)}` : "/aevinite/access"}>Open Access →</a>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <span className="adm-muted" style={{ fontSize: 12, minWidth: 96 }}>The person</span>
+                  <select className="adm-input" style={{ minWidth: 240 }} value={draft.kot?.person || ""}
+                    onChange={async (e) => {
+                      const person = e.target.value || null;
+                      const d = await post("mode", { mode: "screen", person });
+                      if (d) { toast("Saved.", "ok"); void load(); }
+                    }}>
+                    <option value="">Anyone allowed on the manager screen</option>
+                    {(st.people || []).filter((x) => x.panels.includes("manager")).map((x) => (
+                      <option key={x.id} value={x.id}>{x.name} ({x.role})</option>
+                    ))}
+                  </select>
+                </div>
+                {st.managerMayPrint === false ? (
+                  <p className="adm-muted" style={{ fontSize: 12.5, margin: "9px 0 0" }}>
+                    No manager is offered because <b>“May be the printer”</b> is switched off for every manager
+                    on Access &amp; permissions.
+                  </p>
+                ) : null}
+              </div>
+              <FileCard title="The print-station file — the same one for every restaurant"
+                lead={<>It opens a <b>separate</b> Chrome with its own profile, <b>out of the way</b>, with silent
+                  printing on — so it never comes to the front and never touches their own tabs or logins.
+                  Nothing secret is in it: the person signs in <b>once</b> in the window it opens.</>}
+                files={st.stationFiles} os={os} setOs={setOs} copy={copy}
+                steps={(k: string) => [
+                  <>On the computer by the printer, open <b>{k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</>,
+                  <>Press <b>Copy</b> below and paste it in.</>,
+                  <>Save it on the Desktop as <b>{st.stationFiles?.[k]?.filename}</b>{k === "windows" ? " with “Save as type: All Files”" : ""}.</>,
+                  k === "mac" ? <>In Terminal, once: <b>chmod +x ~/Desktop/print-station.command</b> — then double-click it.</> : <>Double-click it.</>,
+                  <>{st.stationFiles?.[k]?.firstRun}</>,
+                ]}
+                footer={() => <>Leave it running. It keeps the computer awake, because a sleeping machine prints nothing.</>} />
+            </>
+          )}
+
+          {/* ── 3 · the three papers — the ONLY question left ────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.three}</h2>
+            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>3 · The three papers</h2>
             <p className="adm-muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
-              One line each. A line left empty says so on their screens — it never goes quietly. The backup
-              takes over only if the first printer has printed nothing for a minute.
+              {mode === "computer"
+                ? "Three lines, because this app prints three pieces of paper. Each one just needs a printer — or “nobody”."
+                : "Three lines, because this app prints three pieces of paper. Each one is simply on, or “nobody”."}
             </p>
-            {/* THE FALLBACK, for a restaurant that names no route at all (mig 336). It moved here from the
-                Access card, because printing belongs to one board — and it is a SELECT, not three radio
-                cards, because it is the answer that matters least: a route overrules it the moment one
-                exists, and most restaurants will have one. */}
-            {whoOf(draft.kot) === "" ? (
-            <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
-              <span className="lbl">With <b>no answer on the Kitchen slips line below</b>, which screen prints them?</span>
-              <select className="adm-input" style={{ minWidth: 210, marginLeft: "auto" }} value={st.printing.target || "kitchen"}
-                onChange={async (e) => { const d = await post("switch", { target: e.target.value }); if (d) void load(); }}>
-                <option value="kitchen">The kitchen screen</option>
-                <option value="counter">The counter (manager) screen</option>
-                <option value="both">Both — the counter is the backup</option>
-              </select>
-            </div>
-            ) : null}
-            {/* WHERE THE OTHER HALF OF THIS LIVES. The same shape as the Access card's pointer, so the
-                two boards read as one system rather than two products. */}
-            <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
-              <span className="lbl">Who <b>may</b> be a printing screen is a person&apos;s own permission, on</span>
-              <b>Access &amp; permissions</b>
-              <a href={rid ? `/aevinite/access?rid=${encodeURIComponent(rid)}` : "/aevinite/access"}>Open Access →</a>
-            </div>
             {(st.kinds || []).map((kind) => {
               const r = draft[kind] || { agent: null, printer: null };
-              const who = whoOf(r);
+              const off = r.via === "off";
               const a = r.agent ? byId.get(r.agent) : undefined;
-              const ba = r.backupAgent ? byId.get(r.backupAgent) : undefined;
-              const preset = PAPER_PRESETS.find((p) => (p.paper ? r.paper && p.paper.wMm === r.paper.wMm && p.paper.hMm === r.paper.hMm : !r.paper));
+              const preset = PAPER_PRESETS.find((pp) => (pp.paper ? r.paper && pp.paper.wMm === r.paper.wMm && pp.paper.hMm === r.paper.hMm : !r.paper));
               return (
                 <div key={kind} style={{ padding: "12px 0", borderTop: "1px solid var(--border)" }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                     <b style={{ fontSize: 14 }}>{KIND_LABEL[kind] || kind}</b>
                     <span className="adm-muted" style={{ fontSize: 12 }}>{KIND_WHAT[kind]}</span>
                   </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
+                    {/* ON / NOBODY — the only two states a paper has now. The mechanism is the mode. */}
+                    <button className={`adm-btn${off ? "" : " primary"}`} style={{ fontSize: 12, minWidth: 74 }}
+                      disabled={busy === "routes"}
+                      onClick={() => {
+                        if (mode === "screen") { void saveScreen(kind); return; }
+                        setR(kind, { via: "computer" });
+                      }}>
+                      {off ? "Switch on" : "On"}
+                    </button>
+                    <button className={`adm-btn${off ? " primary" : ""}`} style={{ fontSize: 12 }}
+                      disabled={busy === "routes"}
+                      onClick={() => void saveOff(kind)}>
+                      {KIND_OFF_LABEL[kind] || "Nobody"}
+                    </button>
 
-                  {/* ── ONE QUESTION, THREE ANSWERS ──────────────────────────────────────────────
-                      This line used to carry six controls at once — two shape buttons, a computer, a
-                      printer, a paper size, and two more for the backup — times five kinds of paper.
-                      Thirty controls to answer "where does the paper come out", and the owner said so
-                      plainly (2026-08-27): "right now it feels too much complicated, all the settings
-                      and every single bit of things."
-
-                      So: ONE segmented switch, and only what that answer needs appears under it.
-                      Everything that is a refinement rather than an answer — the backup printer, the
-                      exact person, the exact PC — is folded into "More", which is progressive
-                      disclosure: a person is never shown a control for a decision they have not
-                      reached yet. */}
-                  <div className="adm-who" role="group" aria-label={`Who prints ${KIND_LABEL[kind] || kind}`}>
-                    {WHO_CHOICES.map((c) => (
-                      <button key={c.id} type="button" className={`adm-who-opt${who === c.id ? " on" : ""}`}
-                        aria-pressed={who === c.id}
-                        onClick={() => setR(kind, c.id === "screen"
-                          ? { via: "screen", agent: null, printer: null, backupAgent: null, backupPrinter: null, panel: r.panel || "kitchen" }
-                          : c.id === "off"
-                          ? { via: "off", agent: null, printer: null, backupAgent: null, backupPrinter: null, panel: null, person: null, device: null }
-                          : { via: "computer", panel: null, person: null, device: null })}>
-                        {c.id === "off" ? KIND_OFF_LABEL[kind] || "Nobody" : c.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {who === "" ? (
-                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
-                      Nobody has answered this yet. Their screens say <b>&ldquo;no printer chosen&rdquo;</b> rather
-                      than going quiet — pick one of the three above.
-                    </p>
-                  ) : null}
-
-                  {who === "off" ? (
-                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
-                      {kind === "kot"
-                        ? "No slip comes out by itself. Orders still reach the kitchen screen, and this also switches the restaurant's auto-print off — one decision, not two."
-                        : "No printer does it silently. The ordinary print window opens for whoever presses Print, exactly as it did before any of this existed."}
-                    </p>
-                  ) : null}
-
-                  {who === "screen" ? (
-                    <>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                        <select className="adm-input" style={{ minWidth: 170 }} value={r.panel || ""}
-                          onChange={(e) => setR(kind, { panel: e.target.value || null, person: null })}>
-                          <option value="">— which screen —</option>
-                          {(st.panels || ["kitchen", "manager", "owner", "tablet"]).map((pn) => (
-                            <option key={pn} value={pn}>{pn === "kitchen" ? "Kitchen screen" : pn === "manager" ? "Manager screen" : pn === "owner" ? "Owner screen" : "Waiter tablet"}</option>
-                          ))}
-                        </select>
-                        <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
-                      </div>
-                      <details className="adm-more" style={{ marginTop: 8 }}>
-                        <summary>Narrow it further — one person, one PC</summary>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                          <select className="adm-input" style={{ minWidth: 190 }} value={r.person || ""}
-                            onChange={(e) => {
-                              const person = e.target.value || null;
-                              setR(kind, { person, personName: (st.people || []).find((x) => x.id === person)?.name || null });
-                            }}>
-                            <option value="">Anyone on that screen</option>
-                            {(st.people || []).filter((x) => !r.panel || x.panels.includes(r.panel)).map((x) => (
-                              <option key={x.id} value={x.id}>{x.name} ({x.role})</option>
-                            ))}
-                          </select>
-                          <select className="adm-input" style={{ minWidth: 180 }} value={r.device || ""}
-                            onChange={(e) => setR(kind, { device: e.target.value || null })}>
-                            <option value="">Any of their devices</option>
-                            {(st.devices || []).map((d) => (
-                              <option key={d.device_id} value={d.device_id}>{d.label || d.panel || "a screen"} · {d.device_id.slice(0, 8)}…</option>
-                            ))}
-                          </select>
-                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
-                        </div>
-                        <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
-                          That screen prints it on whatever printer that machine is set to. Leave both blank
-                          and anybody allowed on that screen prints it.
-                          {st.managerMayPrint === false ? " No manager is offered because “May be the printer” is switched off for managers on Access & permissions." : ""}
-                        </p>
-                      </details>
-                    </>
-                  ) : null}
-
-                  {who === "computer" ? (
-                    <>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                        <select className="adm-input" style={{ minWidth: 170 }} value={r.agent || ""}
-                          onChange={(e) => setR(kind, { agent: e.target.value || null, printer: null })}>
+                    {/* …and in computer mode, the one thing still to choose. */}
+                    {!off && mode === "computer" ? (
+                      <>
+                        <select className="adm-input" style={{ minWidth: 165 }} value={r.agent || ""}
+                          onChange={(e) => setR(kind, { via: "computer", agent: e.target.value || null, printer: null })}>
                           <option value="">— which computer —</option>
                           {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
                         </select>
-                        <select className="adm-input" style={{ minWidth: 200 }} value={r.printer || ""} disabled={!a}
+                        <select className="adm-input" style={{ minWidth: 195 }} value={r.printer || ""} disabled={!a}
                           onChange={(e) => setR(kind, { printer: e.target.value || null })}>
                           <option value="">— which printer —</option>
-                          {(a?.printers || []).map((p) => <option key={p.name} value={p.name}>{p.name}{p.paper ? ` (${paperLabel(p.paper)})` : ""}</option>)}
+                          {(a?.printers || []).map((pr) => <option key={pr.name} value={pr.name}>{pr.name}{pr.paper ? ` (${paperLabel(pr.paper)})` : ""}</option>)}
                         </select>
                         <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
+                      </>
+                    ) : null}
+                  </div>
+
+                  {off ? (
+                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+                      {kind === "kot"
+                        ? "No slip comes out by itself. Orders still reach the kitchen screen, and this is the same switch as the restaurant's auto-print."
+                        : "No printer does it silently. The ordinary print window opens for whoever presses Print."}
+                    </p>
+                  ) : mode === "screen" ? (
+                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+                      Printed by that screen, on whatever printer the machine is set to.
+                    </p>
+                  ) : !r.agent || !r.printer ? (
+                    <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 0" }}>
+                      Their screens say <b>&ldquo;no printer chosen&rdquo;</b> rather than going quiet — pick a computer and a printer.
+                    </p>
+                  ) : null}
+
+                  {/* Everything that is a refinement rather than an answer. */}
+                  {!off && mode === "computer" && r.agent ? (
+                    <details className="adm-more" style={{ marginTop: 8 }}>
+                      <summary>More — paper size, and a backup printer</summary>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                        <span className="adm-muted" style={{ fontSize: 12 }}>Paper:</span>
+                        <select className="adm-input" style={{ minWidth: 185 }} value={preset?.id || "custom"}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id === "custom") {
+                              const w = Number(prompt("Paper width in millimetres?", String(r.paper?.wMm || 105)));
+                              const h = Number(prompt("Paper height in millimetres?", String(r.paper?.hMm || 148)));
+                              if (w > 20 && h > 20) setR(kind, { paper: { wMm: w, hMm: h } });
+                              return;
+                            }
+                            setR(kind, { paper: PAPER_PRESETS.find((pp) => pp.id === id)?.paper || undefined });
+                          }}>
+                          {PAPER_PRESETS.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
+                          <option value="custom">Type the two numbers…</option>
+                        </select>
+                        <span className="adm-muted" style={{ fontSize: 12 }}>If it prints nothing for a minute:</span>
+                        <select className="adm-input" style={{ minWidth: 150, fontSize: 12 }} value={r.backupAgent || ""}
+                          onChange={(e) => setR(kind, { backupAgent: e.target.value || null, backupPrinter: null })}>
+                          <option value="">— no backup —</option>
+                          {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                        </select>
+                        <select className="adm-input" style={{ minWidth: 165, fontSize: 12 }} value={r.backupPrinter || ""}
+                          disabled={!r.backupAgent}
+                          onChange={(e) => setR(kind, { backupPrinter: e.target.value || null })}>
+                          <option value="">— no printer —</option>
+                          {(byId.get(r.backupAgent || "")?.printers || []).map((pr) => <option key={pr.name} value={pr.name}>{pr.name}</option>)}
+                        </select>
+                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
                       </div>
-                      <details className="adm-more" style={{ marginTop: 8 }}>
-                        <summary>More — paper size, and a backup printer</summary>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                          <span className="adm-muted" style={{ fontSize: 12 }}>Paper:</span>
-                          <select className="adm-input" style={{ minWidth: 185 }} value={preset?.id || "custom"}
-                            onChange={(e) => {
-                              const id = e.target.value;
-                              if (id === "custom") {
-                                const w = Number(prompt("Paper width in millimetres?", String(r.paper?.wMm || 105)));
-                                const h = Number(prompt("Paper height in millimetres?", String(r.paper?.hMm || 148)));
-                                if (w > 20 && h > 20) setR(kind, { paper: { wMm: w, hMm: h } });
-                                return;
-                              }
-                              setR(kind, { paper: PAPER_PRESETS.find((p) => p.id === id)?.paper || undefined });
-                            }}>
-                            {PAPER_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                            <option value="custom">Type the two numbers…</option>
-                          </select>
-                        </div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-                          <span className="adm-muted" style={{ fontSize: 12 }}>If it prints nothing for a minute:</span>
-                          <select className="adm-input" style={{ minWidth: 155, fontSize: 12 }} value={r.backupAgent || ""}
-                            onChange={(e) => setR(kind, { backupAgent: e.target.value || null, backupPrinter: null })}>
-                            <option value="">— no backup —</option>
-                            {agents.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                          </select>
-                          <select className="adm-input" style={{ minWidth: 175, fontSize: 12 }} value={r.backupPrinter || ""} disabled={!ba}
-                            onChange={(e) => setR(kind, { backupPrinter: e.target.value || null })}>
-                            <option value="">— no printer —</option>
-                            {(ba?.printers || []).map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                          </select>
-                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
-                        </div>
-                        <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
-                          The paper size is what stops a driver rotating a ticket or shrinking it to half —
-                          leave it on <b>as the printer says</b> unless you know the roll is different.
-                        </p>
-                      </details>
-                    </>
+                      <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
+                        The paper size is what stops a driver rotating a ticket or shrinking it to half —
+                        leave it on <b>as the printer says</b> unless you know the roll is different.
+                      </p>
+                    </details>
                   ) : null}
                 </div>
               );
             })}
           </div>
-
           {/* ── 4 · what has happened ───────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14, marginBottom: 30 }}>
             <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>

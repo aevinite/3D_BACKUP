@@ -25,7 +25,7 @@ const {
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
-  nodeExpect, expectHeader,
+  nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -752,6 +752,26 @@ else ok("the read/write route derives every allow-list from the model");
   if (!keys.length) fail("could not read the HELP_SHOTS map — if it moved, update this guard");
   else if (stale.length) fail(`${stale.length} help-picture key(s) name a row that does not exist, so those rows silently show no picture: ${stale.join(", ")}`);
   else ok(`all ${keys.length} help-picture keys name a real row`);
+
+  // ── AND THE FILE IT PROMISES MUST BE IN THE REPO (sweep #7 T15, 2026-08-27) ────────────────
+  // The half above checks the KEY. Nobody was checking the VALUE, and two entries named a
+  // picture that has never been in `public/admin-help` — `allergy_other → allergy-other.png`
+  // and `guest_note → guest-note.png`. Nothing looked broken, which is exactly why it lasted:
+  // since the 2026-08-18 fix a row with no picture says "there wasn't a good picture for this
+  // one", and a row whose named file is missing says the identical thing. So an EXPLICIT entry —
+  // whose whole meaning is "I have a picture for this row" — degrades into the same screen as no
+  // entry at all, and the person who forgot to commit the .png is never told.
+  //
+  // Only the explicit list is checked. The derived fallback (a row with no entry probes
+  // `<id>.png` and `<id-with-dashes>.png`) is a guess by design and is allowed to miss.
+  {
+    const named = [...body.replace(/\/\/[^\n]*/g, "").matchAll(/"([a-z0-9_\-]+)"/g)].map((m) => m[1]);
+    const gone = [...new Set(named)].filter((n) => {
+      try { readFileSync(join(root, "public/admin-help", `${n}.png`)); return false; } catch { return true; }
+    });
+    if (gone.length) fail(`${gone.length} help-picture(s) are promised by name and are not in public/admin-help, so those rows say "there wasn't a good picture" while the code claims one: ${gone.join(", ")}`);
+    else ok(`all ${new Set(named).size} explicitly-named help pictures are in the repo`);
+  }
 }
 
 // ── 23 · A MODULE GATE WITH NO SWITCH ON THE SCREEN ─────────────────────────
@@ -920,6 +940,124 @@ else ok("the read/write route derives every allow-list from the model");
   else if (!/manager PIN/.test(settingsLoop))
     fail('the activity line writes a waiter tri-state raw, so the Recent-changes strip says "pin" instead of "on, with a manager PIN"');
   else ok("the activity line says a waiter's PIN state in words, the same way both of its branches do");
+}
+
+// ── 51 · A FOLDER BUILT FROM A GENERATED LIST MUST STILL DESCRIBE ITSELF ───
+// "Permission for manager" takes its rows from `...ACTIONS.map(mgrAction)`, so adding a row to
+// ACTIONS puts it on the screen with the folder's own description unchanged and nobody reminded.
+// That is exactly what happened on 2026-08-26: "May be the printer" joined ACTIONS while the
+// folder still told the admin it held "The money actions … reopen a bill … and discount a bill" —
+// two of three, and the third is not a money action at all. The ⓘ of a folder is the only thing
+// that explains a group before you open it, so a stale one describes a restaurant's permissions
+// wrongly on the one screen that decides them. (sweep #7 T15, 2026-08-27)
+//
+// PINNED TO THE GENERATED FOLDERS ONLY, and that is deliberate. Two earlier drafts of this check
+// tried to judge every folder's prose and both cried wolf on good writing — "Design and styling"
+// says "its theme, logo and wording", which happens to contain three of its rows' words while
+// enumerating nothing, and "What a waiter can do on the floor" mentions khata and parcel only to
+// say a module can hide them. Prose is not a list and a guard cannot tell them apart. A folder
+// whose children are SPREAD IN FROM AN ARRAY is the one shape where the screen can grow a row
+// with no human editing the sentence beside it, so that is the only shape checked here.
+{
+  const spread = [...tree.matchAll(/\.\.\.([A-Z_]+)\.map\(/g)].map((m) => m[1]);
+  if (!spread.length) fail("no folder is built from a generated list any more — if that is right, delete check 51");
+  else {
+    const STOP = new Set(["a","an","the","and","or","of","for","to","on","off","in","at","be","is","it","its",
+      "their","they","them","this","that","own","may","can","with","how","what","which","who","only","new"]);
+    const sig = (str) => str.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3 && !STOP.has(w));
+    // Which folders those arrays feed: the ones whose children are exactly the array's rows.
+    const generated = ALL_NODES.filter((n) => n.bind.t === "none" && n.children?.length
+      && tree.includes(`id: "${n.id}"`) && new RegExp(`id: "${n.id}"[\\s\\S]{0,900}?\\.\\.\\.[A-Z_]+\\.map\\(`).test(tree));
+    if (!generated.length) fail("check 51 could not find the folder built from ACTIONS — if it moved, update this guard");
+    // THE **FIRST SENTENCE**, not the whole paragraph. rowText() in AccessTree.tsx shows only the
+    // first sentence of a description over 45 words and puts the rest behind "more", so a row
+    // named only in the tail is a row the screen never mentions. The first draft of this fix put
+    // a tidy lead-in at the front and the row went from naming two of its three children to
+    // naming none — caught by opening the actual screen, not by this guard, which is why the
+    // guard now asks the same question the screen does.
+    const misses = [];
+    for (const f of generated) {
+      const whole = (f.what || "").trim();
+      const shown = whole.split(/\s+/).length > 45 ? (whole.split(/(?<=[.!?])\s+/)[0] || whole) : whole;
+      const text = shown.toLowerCase();
+      for (const kid of f.children) {
+        if (kid.leftToBuild) continue;
+        const ws = sig(kid.name);
+        if (ws.length && !ws.some((w) => text.includes(w.replace(/s$/, ""))))
+          misses.push(`"${f.name}" never mentions its own row "${kid.name}" in the sentence the ROW shows`);
+      }
+    }
+    if (misses.length) fail(`a folder whose rows are generated has a stale description: ${misses.join("; ")}`);
+    else ok(`the ${generated.length} folder(s) built from a generated list still name every row inside them`);
+  }
+}
+
+// ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
+// CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
+// many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
+// it said 12 and the spec's own command said 9 — three had been built and ticked and nobody
+// moved the number, so every session began hunting three things that do not exist. The spec
+// itself has been wrong this way before: its header records that it "claimed 13 until
+// 2026-08-11, and there were only ever 12". A number nothing checks is a number that drifts.
+//
+// The count uses the spec's OWN command (`grep -c '^- ☐'`), so the two can never disagree about
+// what they are counting: only a line that starts a top-level checklist item. Indented sub-notes
+// and the legend line carry the same glyph and are deliberately not counted. (sweep #7 T15,
+// 2026-08-28)
+{
+  const spec = read("docs/ACCESS-REDESIGN-SPEC.md");
+  const real = spec.split("\n").filter((l) => l.startsWith("- \u2610")).length;
+  const claude = read("CLAUDE.md");
+  const m = claude.match(/ACCESS-REDESIGN-SPEC\.md`?\s*\n?\s*\((\d+) open/);
+  if (!m) fail("CLAUDE.md's Access rule no longer states how many owner asks are still open — put the count back, or delete check 54 with a reason");
+  else if (Number(m[1]) !== real)
+    fail(`CLAUDE.md says ${m[1]} outstanding owner asks on the Access screen and docs/ACCESS-REDESIGN-SPEC.md really has ${real} — every session starts from that number, so it sends them hunting for work that is already done (or hides work that is not)`);
+  else ok(`CLAUDE.md's count of outstanding owner asks is right (${real})`);
+}
+
+// ── 55 · A NEW RESTAURANT MUST BE BORN THE WAY THE SCREEN SAYS IT IS ───────
+// Every module row on Access & permissions carries a `def` — what the ⓘ promises a brand-new
+// restaurant starts with — and lib/settingsClone.ts is what a new row ACTUALLY gets. Two places,
+// one fact, and nothing was comparing them. Check 18 already does this for the three delivery
+// channels and the eight waiter columns; the MODULES, which are the biggest switches on the
+// screen, were the gap.
+//
+// It bit for real in the other direction first: table_ops and table_tags were seeded false and
+// the row's own words admitted it ("A NEW restaurant starts with it OFF, which is why most of
+// them have it off today") — a product describing its own accident. Both ends moved to ON on
+// 2026-08-28 on the owner's word, and this exists so they can only ever move together: change one
+// and the screen describes a restaurant the database disagrees with. (sweep #7 T15, 2026-08-28)
+{
+  const clone = read("lib/settingsClone.ts").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const modules = ALL_NODES.filter((n) => n.bind.t === "module");
+  if (!modules.length) fail("check 55 found no module rows on the Access screen — if they moved, update this guard");
+  else {
+    // Two ways to be right: seeded from the DERIVED map (the good one — a module added to the
+    // screen is then carried automatically), or written by hand with the matching value.
+    const derived = /for \(const \[col, on\] of Object\.entries\(MODULE_ALLOWED_DEFAULTS\)\) base\[col\] = on;/.test(clone);
+    // A HAND-TYPED LINE IS CHECKED EVEN WHEN THE DERIVED LOOP IS PRESENT, because it runs AFTER
+    // the loop and therefore WINS. The first draft of this check returned early on "derived and
+    // the map agrees" and so missed exactly that — a stray `base.table_ops_allowed = false;`
+    // underneath the loop passed clean. Found by re-injecting the fault, which is the only reason
+    // this paragraph exists.
+    const bad = [], unseeded = [];
+    for (const n of modules) {
+      const col = `${n.bind.key}_allowed`;
+      const m = clone.match(new RegExp(`base\\.${col}\\s*=\\s*(true|false)\\s*;`));
+      if (m) {
+        if ((m[1] === "true") !== (n.def === true))
+          bad.push(`"${n.name}": the screen says a new restaurant starts ${n.def === true ? "ON" : "OFF"}, lib/settingsClone writes ${m[1] === "true" ? "ON" : "OFF"}`);
+        continue;                                            // written by hand, and it agrees
+      }
+      if (derived && MODULE_ALLOWED_DEFAULTS[col] === (n.def === true)) continue;   // carried by the loop
+      unseeded.push(col);
+    }
+    // `base` is a COPY of restaurant #1's row, so a module column nobody resets is INHERITED from
+    // the flagship — that is how khata and payroll came to be on for every new restaurant.
+    if (unseeded.length) fail(`lib/settingsClone.ts never resets ${unseeded.join(", ")} — and it clones restaurant #1's row, so a new restaurant INHERITS the flagship's value for those instead of what the Access screen promises`);
+    else if (bad.length) fail(`a new restaurant is not born the way the Access screen says: ${bad.join("; ")}`);
+    else ok(`all ${modules.length} module rows: what a new restaurant is seeded with is what the screen promises${derived ? " (derived, so a new module is carried automatically)" : ""}`);
+  }
 }
 
 // ── report ─────────────────────────────────────────────────────────────────

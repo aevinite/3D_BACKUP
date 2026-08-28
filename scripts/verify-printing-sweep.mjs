@@ -168,7 +168,12 @@ const [kitU] = await db("staff_users?select=id,name&username=eq.diagkitchen");
 // The owner can legitimately stand at the manager panel (manager mode), so they are the right
 // "somebody else" for the named-person phases — a cook is refused by the validator, which is correct
 // and made the first run of this sweep fail on its own bad choice of person.
-const [OWNER] = await db("staff_users?select=id,name&role=eq.owner&limit=1");
+// SCOPED TO THIS RESTAURANT, and that is not a detail (found 2026-08-28). This read had no
+// restaurant filter, so it returned whichever owner row came back first across the whole platform —
+// and when that was another restaurant's owner, writeRoutes correctly refused the shape ("that
+// person is not one of this restaurant's staff") and three phases failed pointing at the product.
+// A sweep that cannot tell its own bad test data from a real fault is worse than no sweep.
+const [OWNER] = await db(`staff_users?select=id,name&role=eq.owner&restaurant_id=eq.${RID}&limit=1`);
 
 const SHAPES = [
   { label: "nothing routed", route: {}, kitchen: true, manager: false },
@@ -181,6 +186,14 @@ const SHAPES = [
   { label: "the manager screen but a DIFFERENT person", route: { kot: { via: "screen", panel: "manager", person: OWNER.id } }, kitchen: false, manager: false, expectRefuse: "other_person" },
   { label: "the kitchen screen on THIS device", route: { kot: { via: "screen", panel: "kitchen", device: DEVICE } }, kitchen: true, manager: false },
   { label: "the kitchen screen on ANOTHER device", route: { kot: { via: "screen", panel: "kitchen", device: "some-other-pc" } }, kitchen: false, manager: false, expectRefuse: "other_device" },
+  // ── THE BACKUP SCREEN — this is the retired kot_print_target = 'both' (mig 369) ──────────────
+  // "The kitchen prints, and the counter picks up anything it has left for 30 seconds." BOTH rooms
+  // must be allowed to ask; what holds the counter back is the AGE of the ticket, not a refusal.
+  // Two of the dev restaurants were on 'both', so this shape is not hypothetical — it is what they
+  // had, carried across.
+  { label: "the kitchen screen WITH the manager as the 30s backup",
+    route: { kot: { via: "screen", panel: "kitchen", backupPanel: "manager", backupAfterMs: 30000 } },
+    kitchen: true, manager: true },
 ];
 for (const sh of SHAPES) {
   // The write itself is a phase: a shape the server refuses to store is a shape nobody can pick.
@@ -433,6 +446,37 @@ await phase("…and a print on ITS printer closes it", async () => {
   const [e] = await db(`printer_events?id=eq.${made.events[made.events.length - 1]}&select=status`);
   return e.status === "resolved" || "it is still " + e.status; });
 
+// ══ 6a2 · THE RETIRED COARSE SETTING (mig 369) ═══════════════════════════════════════════════
+// Owner, 2026-08-28: "right now I don't understand three options… what do you mean by this option?"
+// kot_print_target asked the same question as the Kitchen slips line and could contradict it. It is
+// retired — and these phases are what stop it, or its meaning, quietly coming back.
+{
+  await phase("a screen route can name a BACKUP screen, and it is stored", async () => {
+    const r = await setRoutes({ kot: { via: "screen", panel: "kitchen", backupPanel: "manager", backupAfterMs: 30000 } });
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
+    const k = st.modules?.printing?.routes?.kot || {};
+    return (k.backupPanel === "manager" && k.backupAfterMs === 30000) || JSON.stringify(k);
+  });
+  // THROUGH THE REAL DOOR, not setRoutes(). setRoutes writes the jsonb straight into the database,
+  // which is right for setting up a shape to test — and useless for testing a VALIDATOR, because it
+  // never runs. My first version of this phase did exactly that and "failed" against code that was
+  // fine. The validator lives in writeRoutes, so the request has to go through /api/admin/printing.
+  await phase("…and a screen cannot be its OWN backup (an age window nothing can satisfy is not a rule)", async () => {
+    const r = await api("/api/admin/printing/routes", { method: "POST",
+      body: JSON.stringify({ rid: RID, routes: { kot: { via: "screen", panel: "kitchen", backupPanel: "kitchen" } } }) });
+    const d = await r.json().catch(() => ({}));
+    const k = (d.routes || {}).kot || {};
+    return (r.ok && !k.backupPanel) || `status ${r.status} · stored backupPanel=${k.backupPanel}`;
+  });
+  await phase("…and nothing writes the retired column any more", async () => {
+    const before = (await db(`settings?restaurant_id=eq.${RID}&select=kot_print_target`))[0]?.kot_print_target ?? null;
+    // the admin settings door is the only one that ever accepted it
+    await api("/api/admin/restaurants/settings", { method: "POST", body: JSON.stringify({ rid: RID, kot_print_target: "counter" }) });
+    const after = (await db(`settings?restaurant_id=eq.${RID}&select=kot_print_target`))[0]?.kot_print_target ?? null;
+    return before === after || `the admin settings door wrote it: ${before} → ${after}`;
+  });
+}
+
 // ══ 6b · THE MACHINE WITH THE PRINTER SETS ITSELF UP (mig 367) ═══════════════════════════════
 // The owner's own design, 2026-08-27: "that device is connected to the printer, so it will be easy
 // for THAT device to set up the printer… instead of the admin." Driven as the real manager against
@@ -597,6 +641,58 @@ await phase("…and a print on ITS printer closes it", async () => {
   await phase("…and approving the same pairing again is refused", async () => {
     const r = await api("/api/pair", { method: "POST", body: JSON.stringify({ code, rid: RID }) });
     return r.status >= 400 || `it answered ${r.status} — one pairing could make two computers`;
+  });
+}
+
+// ══ 6d · THE ONE TOGGLE, AND THE ROUTES IT MOVES (owner, 2026-08-28) ═════════════════════════
+// "I want the toggle AND the simplified UI — you only see the option you have selected." The part a
+// screenshot cannot check is that the toggle MOVES the three paper lines: if the mode changed alone,
+// a restaurant switched to Chrome would keep three routes pointing at a computer, the board would say
+// one thing and the paper would do another.
+{
+  const setMode = (mode, person) => api("/api/admin/printing/mode", { method: "POST",
+    body: JSON.stringify({ rid: RID, mode, ...(person ? { person } : {}) }) });
+  const kotRoute = async () => {
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules,auto_print_kot`);
+    return { kot: st.modules?.printing?.routes?.kot || {}, mode: st.modules?.printing?.mode, auto: st.auto_print_kot };
+  };
+
+  await phase("the mode is stored, and defaults to a computer", async () => {
+    const r = await setMode("computer");
+    const a = await kotRoute();
+    return (r.ok && a.mode === "computer") || `status ${r.status} · mode ${a.mode}`;
+  });
+  await phase("switching to A SCREEN moves the paper lines with it", async () => {
+    // give it a computer route first, so there is something to move
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID,
+      routes: { kot: { via: "computer", agent: AGENT.id, printer: VIRT.kitchen } } }) });
+    const r = await setMode("screen", mgr.id);
+    const a = await kotRoute();
+    return (r.ok && a.mode === "screen" && a.kot.via === "screen" && a.kot.person === mgr.id)
+      || `status ${r.status} · ${JSON.stringify(a)}`;
+  });
+  await phase("…and auto-print is re-asserted, so a mode change never silently stops printing", async () => {
+    const a = await kotRoute();
+    return a.auto === true || `auto_print_kot is ${a.auto} after a mode change`;
+  });
+  await phase("a line set to NOBODY survives a mode change — the decision outlives the mechanism", async () => {
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { bill: { via: "off" } } }) });
+    await setMode("computer");
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
+    const bill = st.modules?.printing?.routes?.bill || {};
+    return bill.via === "off" || `the bill line became ${JSON.stringify(bill)} — "we do not print this" was thrown away by a mechanism change`;
+  });
+  await phase("…and going back to a computer does NOT invent a printer nobody chose", async () => {
+    const a = await kotRoute();
+    return (!a.kot.printer && !a.kot.agent) || `it kept ${JSON.stringify(a.kot)} — the board would point at a printer nobody picked`;
+  });
+  await phase("a mode that is not one of the two is refused", async () => {
+    const r = await setMode("carrier-pigeon");
+    return r.status >= 400 || `it answered ${r.status}`;
+  });
+  await phase("…and a person who is not this restaurant's staff is refused", async () => {
+    const r = await setMode("screen", "00000000-0000-0000-0000-0000000000ff");
+    return r.status >= 400 || `it answered ${r.status} — a screen route could name somebody else's staff`;
   });
 }
 

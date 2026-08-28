@@ -71,12 +71,43 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   // an individual's setting WINS over the restaurant-wide owner→manager grant, but never
   // over the admin cap above. 'on'/'pin' = allow this person, 'off' = deny them, absent/
   // 'default' = fall through to the grant. Rides free on u.permissions (no extra query).
-  const ov = u.permissions?.[flag];
-  if (ov === "on" || ov === "pin") return true;
-  if (ov === "off") return false;
   // An ABSENT key used to mean NO here while the Access screen showed the row's default — usually
   // YES. That one line is why a manager was refused things the admin could see switched on, and
   // why every power dropped from the screen was stuck off. managerGrantValue() is the single
   // answer both sides read now (lib/accessTree.ts).
-  return managerGrantValue(flag, r?.manager_permissions?.[flag]);
+  return managerHasFlag(flag, {
+    accessConfig: r?.access_config as Record<string, { on?: boolean }> | null | undefined,
+    managerPermissions: r?.manager_permissions as Record<string, unknown> | null | undefined,
+    ownOverride: u.permissions?.[flag],
+  });
+}
+
+/**
+ * THE SAME THREE RUNGS, WITHOUT A QUERY — for a caller that has already read the rows.
+ *
+ * managerCan() above is for "may the person making THIS request do it". This is for "which of these
+ * fifty people may", which is a different shape: a per-person loop that called managerCan() would
+ * re-read `restaurants` once per person.
+ *
+ * WHY IT EXISTS AT ALL (owner's review, 2026-08-28): the Printing board's people picker resolved
+ * "may be the printer" from the restaurant-wide grant ALONE. So a manager switched off individually
+ * was still offered — pick them, the board says their screen is the printer, and their screen is
+ * refused, so the kitchen never gets the paper and nothing says why. It failed the other way too: a
+ * manager allowed individually could not be picked while the restaurant default was off. The picker
+ * and the gate were two copies of one rule, and they disagreed. There is one copy now, and both
+ * call it.
+ *
+ * The order is the order, and it matters: the Feature half is a CAP (off = nobody, whatever anyone's
+ * own setting says), then the person's own override, then the restaurant-wide default.
+ */
+export function managerHasFlag(flag: string, from: {
+  accessConfig?: Record<string, { on?: boolean }> | null;
+  managerPermissions?: Record<string, unknown> | null;
+  ownOverride?: string | null;
+}): boolean {
+  if (from.accessConfig?.[flag]?.on === false) return false;
+  const ov = from.ownOverride;
+  if (ov === "on" || ov === "pin") return true;
+  if (ov === "off") return false;
+  return managerGrantValue(flag, (from.managerPermissions || {})[flag]);
 }

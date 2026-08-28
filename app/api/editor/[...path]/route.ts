@@ -52,38 +52,56 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
   agentForDevice, createAgent, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
+  writeMode, isPrintMode,
 } from "@/lib/printHelpers";
-import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
 // May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
-// Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
-// mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
+//
+// It asks ONE thing now: the Kitchen slips route (mig 369). It used to ask two — the route AND
+// mig 336's coarse `kot_print_target` — and the printing sweep caught them disagreeing, with the
+// OLDER one winning: a route saying "the manager screen prints the kitchen slips" was refused
+// because an admin had once set "kitchen" months before. Two settings for one question is how the
+// owner's own choice ended up doing nothing, so there is one left.
+//
+// `backup` is no longer a separate setting either: it is `backupPanel` on the route, which is where
+// the retired 'both' went. Both rungs of mig 107 still gate everything (the admin allowed auto-print
+// AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
-  const [stQ, helper] = await Promise.all([
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
+  const [stQ, helper, route] = await Promise.all([
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
+    targetFor(rid, "kot"),
   ]);
-  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
   const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
-  const target = String(st?.kot_print_target || "kitchen");
+  // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
+  // plain words. It is derived from the route now, never stored.
+  const target = route.kind === "screen"
+    ? (route.backupPanel ? "both" : route.panel === "manager" ? "counter" : "kitchen")
+    : "kitchen";
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
   if (helper.owned) return { mayPrint: false, backup: false, target, helper };
-  // ── THE NEWER ANSWER WINS OVER THE OLDER ONE (found by the printing sweep, 2026-08-26) ────────
-  // mig 336's kot_print_target is the OLD, coarse question: kitchen | counter | both. mig 341's route
-  // can now name this very panel — and the sweep caught the two disagreeing: with a route saying
-  // "the manager screen prints the kitchen slips" and the old target still saying "kitchen", the
-  // manager screen was refused by the older setting and the owner's own choice did nothing.
-  // A route that names a panel IS the decision; the coarse target only speaks when no route does.
-  const screenRoute = await targetFor(rid, "kot");
-  if (screenRoute.kind === "screen") {
-    return { mayPrint: on && screenRoute.panel === "manager", backup: false, target, helper };
-  }
-  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
+  const may = screenMayPrint(route, { panel: "manager", personId: null, deviceId: null });
+  // A person/device narrowing is checked per-request elsewhere (this helper has no request in hand),
+  // so "may a manager screen print at all" is the panel-level answer only.
+  // WITH NO ROUTE AT ALL, THE DEFAULT ROOM IS THE KITCHEN — so a manager screen does NOT auto-print.
+  // That is exactly what the retired kot_print_target defaulted to ('kitchen'), and it matters: a
+  // manager panel left open on a restaurant that has never touched the Printing board would
+  // otherwise start pulling kitchen tickets it never used to. Caught by verify:printing-sweep phase
+  // 22 before this shipped; my first version returned true here.
+  // (After mig 369 every existing restaurant HAS a kitchen-slip route, so this branch is only a
+  // brand-new one — where "the kitchen prints" is the right thing to assume.)
+  const panelOk = route.kind === "screen"
+    ? (route.panel === "manager" || route.backupPanel === "manager")
+    : false;
+  return { mayPrint: on && panelOk, backup: !!may.backup, target, helper };
 }
+
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
@@ -487,6 +505,14 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
     }
   }
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   return rid;
 }
@@ -742,14 +768,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // customer-search?q=98250 — "who is this number?" for the bill's customer box.
     // Fired while the waiter is still typing, so it must stay tiny and quick: prefix-anchored
-    // on the (restaurant_id, phone) index, at most 6 rows, only phone + name + visit count.
+    // on the (restaurant_id, phone) index, at most 12 rows, only phone + name + visit count.
+    // TWELVE, not the four the sheet shows: an answer the database did NOT have to truncate can be
+    // narrowed on-device for every longer number, so one slightly bigger answer replaces several
+    // small ones (owner, 2026-08-28). The cap is real as of migration 365 — before that the LIMIT
+    // sat after a json_agg and capped nothing at all, so this asked for 6 and could get the lot.
     // A complete number is normalised first, so +91 / leading-0 spellings find the same row.
     if (p === "customer-search") {
       const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
       if (q.length < 3) return ok({ matches: [] });
-      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
+      const CUSTOMER_SEARCH_ROWS = 12;
+      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: CUSTOMER_SEARCH_ROWS });
       if (error) throw new Error(error.message);
-      return ok({ matches: Array.isArray(data) ? data : [] });
+      const matches = Array.isArray(data) ? data : [];
+      // `whole` — did this answer hold EVERY customer matching that prefix, or did we cut it off?
+      // The sheet reuses a complete answer for longer numbers without asking again, so it must
+      // never have to GUESS this from a row count and a constant of its own: the two would drift
+      // the moment either side's cap moved, and the sheet would silently narrow from a truncated
+      // list and lose a real customer. The server knows; the server says. A panel too old to
+      // understand the flag simply keeps asking, which is what it did before.
+      return ok({ matches, whole: matches.length < CUSTOMER_SEARCH_ROWS });
     }
 
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
@@ -2100,6 +2138,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // The same one generic file the admin console shows — same text, same source, so the two
         // screens cannot hand out different helpers (mig 368).
         files: helperFiles(originOfReq(req)),
+        // MODE B's launcher, sent beside MODE A's. Both are plain text with nothing secret in them,
+        // so the panel can show whichever the mode calls for with no second round trip.
+        stationFiles: stationFiles(originOfReq(req)),
         maySetup,
         deviceId: dv,
         // Which install text to show FIRST. The browser knows what it is running on, so nobody has to
@@ -2734,28 +2775,51 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ adminView: true, printer: own.printer, agent: own.agent });
       }
       const payload: Record<string, unknown> = {};
+      // What the diary line will call this piece of paper, filled in by whichever branch below
+      // resolves it — so the log says "bill #218 for table 6", not just "bill".
+      let printedWhat = kind === "bill" ? "bill" : "banquet sheet";
+      let printedTable: string | null = null;
       if (kind === "bill") {
         const sid = String((body as Record<string, unknown>)?.sessionId || "");
         if (!sid) return err("Which bill?", 400);
         // The session must be this restaurant's — the route handler never trusts the panel's word
         // for whose row it is (every other write here does the same).
-        const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        // `table_number` and `bill_no` ride along so the diary line can NAME the bill — see the
+        // note on logAction below. Same read, two more small columns.
+        const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; table_number: unknown; bill_no: unknown } | null;
         if (!sess) return err("That table's bill is not this restaurant's.", 404);
         payload.sessionId = sid;
         if ((body as Record<string, unknown>)?.parcel) payload.parcel = true;
+        printedTable = sess.table_number != null ? String(sess.table_number) : null;
+        printedWhat = `bill${sess.bill_no != null ? ` #${sess.bill_no}` : ""}`
+          + `${sess.table_number != null ? ` for table ${sess.table_number}` : ""}`;
       } else {
         const bid = String((body as Record<string, unknown>)?.billId || "");
         if (!bid) return err("Which banquet bill?", 400);
-        const bill = (await sb.from("banquet_bills").select("id").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; bill_no: unknown } | null;
         if (!bill) return err("That banquet bill is not this restaurant's.", 404);
         payload.billId = bid;
+        printedWhat = `banquet sheet${bill.bill_no != null ? ` #${bill.bill_no}` : ""}`;
       }
       const q = await queueJob(rid, kind, payload, { requestedBy: g.user?.name || g.user?.username || "manager" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      // ── THE DIARY LINE NAMES *WHICH* BILL (owner, 2026-08-28: "make log do that") ─────────────
+      // Asked for "say who printed a bill, on the bill itself", he answered: let the LOG answer it.
+      // It could not. The row read `bill sent to Printer_POS_80 on Shop's computer` — which says
+      // WHERE the paper came out and never WHICH bill came out of it, so on a night with forty
+      // prints no two rows could be told apart. Both facts were already in reach: `table_number`
+      // is a column logAction has always accepted and nothing here passed, and the bill number is
+      // one extra column on a read this branch already makes.
       await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
+        // Filterable as well as readable: the Audit & logs tab groups by table, so a bill print
+        // now sits with the rest of that table's story instead of floating loose. A banquet sheet
+        // has no table, and stays null rather than being given a pretend one.
+        table_number: printedTable,
         ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`
+        detail: `${printedWhat} sent to ${own.printer} on ${own.agent}`
           + (g.user ? "" : " — sent deliberately from the admin console"),
       });
       // What the person is told, in the words they need: where it went, and — honestly — that it is
@@ -4877,6 +4941,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ ok: true, cleared: Object.keys(patch) });
       }
 
+      // ── WHICH OF THE TWO WAYS THIS RESTAURANT PRINTS ─────────────────────────────────────────
+      // The same one toggle the admin console has, on the screen of the person standing at the
+      // printer — they are the one who knows whether a helper can be installed on that machine or
+      // whether it has to be Chrome. writeMode() brings the three paper lines with it, so the board
+      // and the paper can never say different things.
+      if (b === "mode") {
+        const m = (body as Record<string, unknown>)?.mode;
+        if (!isPrintMode(m)) return err("There are two ways to print: a computer, or a screen.", 400);
+        // A SCREEN ROUTE FROM HERE NAMES THIS PERSON. Choosing somebody else's screen from your own
+        // Settings would move another person's paper without telling them — that stays an admin act.
+        const done = await writeMode(rid, m, { person: g.user?.id || null, panel: "manager" });
+        if ("error" in done) return err(done.error, 400);
+        await logAction("editor", "print_switch", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `printing mode → ${done.mode === "screen" ? "a screen (this restaurant's own Chrome)" : "a computer (the helper)"}`,
+        });
+        return ok(done);
+      }
+
       // ── who prints one kind of paper ──────────────────────────────────────────────────────────
       // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
       // route from here always means THIS panel and THIS person — narrowing it to somebody else's
@@ -4899,7 +4983,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             backupPrinter: (body as Record<string, unknown>)?.backupPrinter ?? null,
           };
         } else if (who === "screen") {
-          patch = { via: "screen", panel: "manager", person: g.user?.id || null, device: dv };
+          // NO `device` HERE, deliberately. The mode toggle stores { person } with no device, and a
+          // per-paper "On" must produce the SAME shape — otherwise one line would be narrowed to this
+          // one PC and the others not, which is a difference nobody asked for and nothing shows.
+          patch = { via: "screen", panel: "manager", person: g.user?.id || null };
         } else if (who === "off") {
           patch = { via: "off" };
         } else {

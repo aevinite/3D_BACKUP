@@ -1613,7 +1613,9 @@ function bindPrintingBoard(ed) {
       if (what === "reload") { state.printBoard = state.printBoard || null; await loadPrintBoard(); return; }
       if (what === "os") { state.printOs = el.dataset.os; renderEditor(); return; }
       if (what === "copy") {
-        const cf = (B().files || {})[state.printOs || B().os || "mac"];
+        // TWO launcher files exist now (helper · print-station), so the button says which it is.
+        const setName = el.dataset.set === "station" ? "stationFiles" : "files";
+        const cf = (B()[setName] || {})[state.printOs || B().os || "mac"];
         if (!cf) return;
         try { await navigator.clipboard.writeText(cf.text); toast("Copied."); }
         catch { toast("Could not copy — select the text and copy it by hand.", "err"); }
@@ -1642,6 +1644,41 @@ function bindPrintingBoard(ed) {
       if (what === "test") {
         const d = await post("test", { printer: el.dataset.printer });
         if (d) { toast(d.note || "Test page sent."); await loadPrintBoard(); }
+        return;
+      }
+      if (what === "mode") {
+        const m = el.dataset.mode;
+        if (m === (B().mode === "screen" ? "screen" : "computer")) return;
+        const label = m === "screen" ? "A screen (Chrome)" : "A computer";
+        if (!confirm("Switch this restaurant to \u201c" + label + "\u201d?\n\nThe three paper lines below move with it — anything chosen for the other way is cleared, and a line set to \u201cnobody\u201d stays that way.")) return;
+        const d = await post("mode", { mode: m });
+        if (d) { toast("Saved."); await loadPrintBoard(); }
+        return;
+      }
+      if (what === "off") {
+        const d = await post("route", { kind: el.dataset.kind, who: "off" });
+        if (d) { toast("Saved."); await loadPrintBoard(); }
+        return;
+      }
+      if (what === "on") {
+        // "On" means whatever the MODE means. In screen mode that is one tap — the person is this
+        // person. In computer mode it needs a printer, and this device's first one is the honest
+        // default so that one tap really is one tap.
+        const kind = el.dataset.kind;
+        const md = B().mode === "screen" ? "screen" : "computer";
+        if (md === "screen") {
+          lsSet(PRINT_HERE_KEY, "on");   // naming this screen IS this device agreeing to print
+          const d = await post("route", { kind, who: "screen" });
+          if (d) { toast("Saved."); await loadPrintBoard(); }
+          return;
+        }
+        const mine2 = B().thisComputer;
+        if (!mine2) { toast("Set this computer up first — the section above.", "err"); return; }
+        if (!(mine2.printers || []).length) { toast("This computer has not listed any printers yet. Start the helper first.", "err"); return; }
+        const r2 = (B().routes || {})[kind] || {};
+        const printer = mine2.printers.some((p) => p.name === r2.printer) ? r2.printer : mine2.printers[0].name;
+        const d = await post("route", { kind, who: "computer", printer });
+        if (d) { toast("Saved."); await loadPrintBoard(); }
         return;
       }
       if (what === "who") {
@@ -2561,7 +2598,12 @@ function formGeneral(s) {
     if (!s.restaurant_name) s.restaurant_name = bi.name;
     if (!s.invoice_prefix) s.invoice_prefix = bi.prefix;
     if (!s.bill_footer) s.bill_footer = bi.footer;
-    if (!s.tax_label) s.tax_label = bi.taxLabel;
+    // NOT PREFILLED (owner, 2026-08-28). This wrote the SCREEN's word into `settings.tax_label`,
+    // and that setting also drives the PAPER — so the moment a manager opened this form and saved,
+    // the printed bill started saying "Tax" where every other panel said "GST". One setting with
+    // two right defaults (billIdentity.taxLabel for paper, .taxLabelScreen for screen) only works
+    // while nothing writes a default back in. Shown as a hint on the input instead, exactly as the
+    // GSTIN two lines above already is.
     // Tax rows prefill: no named taxes yet → materialise the 50/50 split the print has
     // always used (e.g. 5% → CGST 2.5 + SGST 2.5) so the owner can rename/re-split it.
     if (!Array.isArray(s.tax_components) || !s.tax_components.length) {
@@ -2594,7 +2636,7 @@ function formGeneral(s) {
     <h4 style="margin:18px 0 6px">Tax lines on the print</h4>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
       The taxes that make up your total (e.g. <b>CGST 2.5%</b> + <b>SGST 2.5%</b>). Each prints
-      as its own line; on screen they show merged as one “${esc((s.tax_label || "Tax").trim() || "Tax")} <b>${compTotal}%</b>” line —
+      as its own line; on screen they show merged as one “${esc(taxLabel(s))} <b>${compTotal}%</b>” line —
       the split and the total can never disagree.
     </p>
     <div class="tax-rows">${taxRows}</div>
@@ -3522,12 +3564,17 @@ function ordersPreviousHtml(today, previous) {
 
   const groups = [];
   const todayList = shown.filter((b) => b.ts >= dayStart);
-  groups.push(["\u{1F4C5} Today's bills", todayList, "No bills settled today yet."]);
-  if (withYest) groups.push(["\u{1F550} Yesterday's bills", shown.filter((b) => b.ts < dayStart), "No bills from yesterday."]);
+  groups.push(["\u{1F4C5} Today's bills", todayList, "No bills settled today yet.", "No bill from today matches that search."]);
+  if (withYest) groups.push(["\u{1F550} Yesterday's bills", shown.filter((b) => b.ts < dayStart), "No bills from yesterday.", "No bill from yesterday matches that search."]);
 
-  const listHtml = groups.map(([label, list, emptyMsg]) => headFor(label, list) +
+  const listHtml = groups.map(([label, list, emptyMsg, searchMsg]) => headFor(label, list) +
+    // A DAY WITH NO MATCH STILL SAYS SO. Blanking this line while searching was right in spirit —
+    // "No bills from yesterday." is a lie when yesterday HAS bills and none of them match — but it
+    // emptied the BOX rather than replacing the sentence, and .empty carries 60px of padding above
+    // and below. So a search that hit today and missed yesterday printed 120px of blank nothing
+    // under a heading reading "0 bills". Each group now carries its own search-time sentence.
     (list.length ? `<div class="bill-lines">${list.map(billLineHtml).join("")}</div>`
-                 : `<div class="empty">${searching ? "" : emptyMsg}</div>`)).join("");
+                 : `<div class="empty">${searching ? searchMsg : emptyMsg}</div>`)).join("");
 
   // NOTHING FOUND, AND WHY. A search that finds nothing must say whether that is because there is
   // no such bill or because the record only reaches so far — the honest difference between "it
@@ -3695,7 +3742,7 @@ function billPaidHtml(b, m) {
   }
   if (b.onHouse) {
     return `<div class="br-paid br-house"><b>On the house \u2014 ${inr(0)} collected.</b>
-      <span>Comped deliberately. The bill is closed and counted at zero.</span></div>`;
+      <span>Given free on purpose. The bill is closed and counted at zero.</span></div>`;
   }
   const parts = Array.isArray(b.parts) ? b.parts : [];
   const collectedParts = parts.filter((p) => p.method !== "Pay later");
@@ -13420,7 +13467,9 @@ function formPrinting(s) {
     : `<p class="muted" style="font-size:12.5px;margin:7px 0 0">It has not listed any printers yet — it does that the first moment the helper runs.</p>`;
 
   const others = (B.agents || []).filter((a) => !mine || a.id !== mine.id);
-  const step2 = `<div class="card"><h3>${esc(STEP.two || "2 · The computers that can print")}</h3>
+  // NO NUMBER ON THIS ONE. It is not a step any more — it is what card 2's toggle reveals when the
+  // answer is "a computer", and two cards both numbered "2 ·" is worse than neither being numbered.
+  const step2 = `<div class="card"><h3>The computers that can print</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       A computer prints by running one small program — the <b>helper</b>. It asks us every two seconds
       whether there is anything to print, and prints it. No window has to be open, nobody has to stay
@@ -13473,69 +13522,121 @@ function formPrinting(s) {
     </div>` : ""}
   </div>`;
 
-  // ── THE ONE FILE — the same text for every restaurant, nothing secret in it (mig 368) ──────
-  // It used to be a per-computer script with a 37-character token baked in, shown ONCE because the
-  // token is stored only as a hash and can never be read back. There is no token in it now — it pairs
-  // itself and a person presses Allow — so it is simply always on the screen for anybody who may set
-  // printers up. That is what makes ONE file work for every restaurant.
+  // ── 2 · HOW THIS RESTAURANT PRINTS — the one toggle, mirroring the console exactly ──────────
+  // Owner, 2026-08-28: "I want a simple toggle… you only see the option you have selected, only the
+  // setting for that option will be shown." The admin console's card and this one are the SAME card:
+  // same two choices, same words, same order, and only the chosen mode's setup rendered. The person
+  // with "May set the printers up" can move it, because they are the one standing at the machine and
+  // they know whether a helper can be installed on it.
+  const mode = B.mode === "screen" ? "screen" : "computer";
+  const MODES = [
+    ["computer", "A computer", "A small program prints silently. No window, nobody logged in. Each paper can have its own printer."],
+    ["screen", "A screen (Chrome)", "This restaurant's own Chrome prints, out of the way, signed in as one person. Nothing to install."],
+  ];
+  const step2mode = `<div class="card"><h3>2 · How this restaurant prints</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
+      ${may
+        ? "Pick one. Everything below changes to match it, and nothing from the other way stays on screen."
+        : "Set by Aevidine. Everything below follows it."}
+    </p>
+    <div class="pw-who" role="group" aria-label="How this restaurant prints">
+      ${MODES.map(([m, label, what]) => `<button type="button" class="pw-mode${mode === m ? " on" : ""}"
+          aria-pressed="${mode === m ? "true" : "false"}"${may ? ` data-pw="mode" data-mode="${esc(m)}"` : " disabled"}>
+          <b>${esc(label)}</b><small>${esc(what)}</small>
+        </button>`).join("")}
+    </div>
+  </div>`;
+
+  // ── the chosen mode's SETUP — one of these two, never both ──────────────────────────────────
   const files = B.files || {};
+  const sfiles = B.stationFiles || {};
   const pos = state.printOs || B.os || "mac";
   const OSN = { mac: "Mac", windows: "Windows", linux: "Linux / Raspberry Pi" };
-  const pf = files[pos];
-  const step2b = (may && pf) ? `<div class="card"><h3>The helper file</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
-      The same file for every restaurant, with <b>nothing secret in it</b>. <b>Nothing is downloaded:</b>
-      a downloaded script is blocked outright by a Mac and warned about by Windows, while a file you
-      typed yourself simply opens.
-    </p>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-      ${Object.keys(files).map((k) => `<button type="button" class="btn${pos === k ? " primary" : ""}" data-pw="os" data-os="${esc(k)}">${esc(OSN[k] || k)}</button>`).join("")}
-    </div>
-    <ol class="pw-steps">
-      <li>On that computer, open <b>${pos === "windows" ? "Notepad" : pos === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</li>
-      <li>Press <b>Copy</b> below, and paste it in.</li>
-      <li>Save it on the Desktop as <b>${esc(pf.filename)}</b>${pos === "windows" ? ` with <b>Save as type: All Files</b>` : ""}.</li>
-      <li>${pos === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click the file.` : "Double-click it."}</li>
-      <li>A page opens. Press <b>Allow</b>. That is the whole setup.</li>
-    </ol>
-    <p class="muted" style="font-size:12.5px;margin:0 0 10px"><b>After a shutdown:</b> ${esc(pf.autostart)}</p>
-    <div class="pw-code">
-      <button type="button" class="btn" data-pw="copy">Copy</button>
-      <pre>${esc(pf.text)}</pre>
-    </div>
-  </div>` : "";
 
-  // ── 3 · WHICH PRINTER GETS WHICH PAPER ─────────────────────────────────────────────────────
-  // ONE question a line, THREE answers — the same control, the same words and the same order as the
-  // admin console (lib/printBoardWords.ts holds the sentences, so neither screen can reword one).
-  const whoOf = (r) => !r ? "" : r.via === "off" ? "off" : (r.via === "screen" || r.panel) ? "screen" : r.agent ? "computer" : "";
+  // ONE card shape for both launcher files. Two copies of this markup is two places for the wording
+  // to drift, which is exactly how the printing screens became "not identical" the first time.
+  const fileCard = (title, lead, set, steps, footer) => {
+    const f = set[pos];
+    if (!may || !f) return "";
+    return `<div class="card"><h3>${esc(title)}</h3>
+      <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">${lead}</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        ${Object.keys(set).map((k) => `<button type="button" class="btn${pos === k ? " primary" : ""}" data-pw="os" data-os="${esc(k)}">${esc(OSN[k] || k)}</button>`).join("")}
+      </div>
+      <ol class="pw-steps">${steps(pos, f).map((n) => `<li>${n}</li>`).join("")}</ol>
+      <p class="muted" style="font-size:12.5px;margin:0 0 10px">${footer(pos, f)}</p>
+      <div class="pw-code">
+        <button type="button" class="btn" data-pw="copy" data-set="${esc(set === sfiles ? "station" : "helper")}">Copy</button>
+        <pre>${esc(f.text)}</pre>
+      </div>
+    </div>`;
+  };
+
+  const editorWord = (k) => k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano";
+
+  const step2setup = mode === "computer"
+    ? step2 + fileCard(
+        "The helper file",
+        `The same file for every restaurant, with <b>nothing secret in it</b>. <b>Nothing is downloaded:</b>
+         a downloaded script is blocked outright by a Mac and warned about by Windows, while a file you
+         typed yourself simply opens.`,
+        files,
+        (k, f) => [
+          `On that computer, open <b>${editorWord(k)}</b>.`,
+          `Press <b>Copy</b> below, and paste it in.`,
+          `Save it on the Desktop as <b>${esc(f.filename)}</b>${k === "windows" ? " with <b>Save as type: All Files</b>" : ""}.`,
+          k === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click the file.` : "Double-click it.",
+          `A page opens. Press <b>Allow</b>. That is the whole setup.`,
+        ],
+        (k, f) => `<b>After a shutdown:</b> ${esc(f.autostart)}`)
+    : `<div class="card"><h3>Whose screen prints</h3>
+        <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
+          ${may
+            ? `The launcher below opens a Chrome signed in as <b>you</b>, out of the way, and that Chrome does
+               the printing — on whatever printer this machine is set to. Aevidine can name somebody else instead.`
+            : `A screen prints this restaurant's paper${(B.routes && B.routes.kot && B.routes.kot.personName) ? ` — <b>${esc(B.routes.kot.personName)}</b>` : ""}, on whatever printer that machine is set to.`}
+        </p>
+      </div>` + fileCard(
+        "The print-station file",
+        `It opens a <b>separate</b> Chrome with its own profile, <b>out of the way</b>, with silent printing
+         on — so it never comes to the front and never touches your own tabs or logins. Nothing secret is
+         in it: you sign in <b>once</b> in the window it opens.`,
+        sfiles,
+        (k, f) => [
+          `On the computer by the printer, open <b>${editorWord(k)}</b>.`,
+          `Press <b>Copy</b> below, and paste it in.`,
+          `Save it on the Desktop as <b>${esc(f.filename)}</b>${k === "windows" ? " with <b>Save as type: All Files</b>" : ""}.`,
+          k === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-station.command</b> — then double-click the file.` : "Double-click it.",
+          esc(f.firstRun || ""),
+        ],
+        () => `Leave it running. It keeps the computer awake, because a sleeping machine prints nothing.`);
+
+  // ── 3 · THE THREE PAPERS — the only question left ───────────────────────────────────────────
+  // Each paper used to ask "who prints it" with three answers of its own, on top of the printer, the
+  // person and the device. The MODE answers "who" now, so a paper is simply on, or nobody — plus, in
+  // computer mode, which printer.
   const agentName = (id) => ((B.agents || []).find((a) => a.id === id) || {}).name || "another computer";
   const line = (kind) => {
     const r = (B.routes || {})[kind] || {};
-    const w = whoOf(r);
-    const here = w === "computer" && mine && r.agent === mine.id;
-    const elsewhere = w === "computer" && !here;
-    const opts = [
-      { id: "computer", label: mine ? "Yes — print here" : "A computer" },
-      { id: "screen", label: "This screen (a window opens)" },
-      { id: "off", label: L.off[kind] || "Nobody" },
-    ];
+    const off = r.via === "off";
+    const answered = !!r.via;
+    const here = mode === "computer" && mine && r.agent === mine.id;
     return `<div class="pw-line">
       <h4>${esc(L.kind[kind] || kind)}</h4>
       <p class="what">${esc(L.what[kind] || "")}</p>
       ${!may ? `<p class="what" style="margin-top:8px"><b>${esc(
-          w === "off" ? (L.off[kind] || "Nobody")
-          : w === "screen" ? "A screen prints it" + (r.personName ? ` — ${r.personName}` : "")
-          : w === "computer" ? `${r.printer} on ${agentName(r.agent)}`
+          off ? (L.off[kind] || "Nobody")
+          : mode === "screen" ? "On — printed by that screen"
+          : r.printer ? `${r.printer} on ${agentName(r.agent)}`
           : "No printer chosen yet")}</b> — set by Aevidine.</p>`
       : `
-      <div class="pw-who" role="group" aria-label="Who prints ${esc(L.kind[kind] || kind)}">
-        ${opts.map((o) => `<button type="button" class="pw-opt${(o.id === "computer" ? here : w === o.id) ? " on" : ""}"
-            aria-pressed="${(o.id === "computer" ? here : w === o.id) ? "true" : "false"}"
-            data-pw="who" data-kind="${esc(kind)}" data-who="${esc(o.id)}">${esc(o.label)}</button>`).join("")}
+      <div class="pw-who" role="group" aria-label="${esc(L.kind[kind] || kind)}">
+        <button type="button" class="pw-opt${off ? "" : " on"}" aria-pressed="${off ? "false" : "true"}"
+          data-pw="on" data-kind="${esc(kind)}">${off ? "Switch on" : "On"}</button>
+        <button type="button" class="pw-opt${off ? " on" : ""}" aria-pressed="${off ? "true" : "false"}"
+          data-pw="off" data-kind="${esc(kind)}">${esc(L.off[kind] || "Nobody")}</button>
       </div>
-      ${elsewhere ? `<p class="what" style="margin-top:8px">Right now it prints on <b>${esc(r.printer || "")}</b> at <b>${esc(agentName(r.agent))}</b>. Pressing <b>Yes — print here</b> moves it to this computer.</p>` : ""}
-      ${here ? `
+      ${(!off && mode === "computer" && here) ? `
         <div class="pw-row">
           <label class="muted" style="font-size:12.5px">Printer</label>
           <select data-pw="printer" data-kind="${esc(kind)}" style="min-width:210px">
@@ -13554,18 +13655,20 @@ function formPrinting(s) {
           <p class="what">The paper size is what stops a printer turning a slip sideways or shrinking it
           to half. Leave it on <b>as the printer says</b> unless you know the roll is different.</p>
         </details>` : ""}
-      ${w === "screen" ? `<p class="what" style="margin-top:8px">A print window opens on <b>this screen</b> and prints on whatever printer this machine is set to. Do not choose this on a phone.</p>` : ""}
-      ${w === "off" ? `<p class="what" style="margin-top:8px">${esc(kind === "kot"
+      ${(!off && mode === "computer" && !here && answered) ? `<p class="what" style="margin-top:8px">It prints on <b>${esc(r.printer || "a printer")}</b> at <b>${esc(agentName(r.agent))}</b>. Press <b>On</b> to move it to this computer.</p>` : ""}
+      ${(!off && mode === "computer" && !answered) ? `<p class="what" style="margin-top:8px">Nobody has chosen a printer for this yet — their screens say <b>“no printer chosen”</b> rather than going quiet.</p>` : ""}
+      ${(!off && mode === "screen") ? `<p class="what" style="margin-top:8px">Printed by that screen, on whatever printer the machine is set to.</p>` : ""}
+      ${off ? `<p class="what" style="margin-top:8px">${esc(kind === "kot"
           ? "No slip comes out by itself. Orders still appear on the kitchen screen, and this is the same switch as “Kitchen slips print by themselves” at the top."
           : "No printer does it silently — the ordinary print window opens for whoever presses Print.")}</p>` : ""}
-      ${w === "" ? `<p class="what" style="margin-top:8px">Nobody has answered this one yet.</p>` : ""}
       `}
     </div>`;
   };
-  const step3 = `<div class="card"><h3>${esc(STEP.three || "3 · Which printer gets which paper")}</h3>
+  const step3 = `<div class="card"><h3>3 · The three papers</h3>
     <p class="muted" style="font-size:13px;margin:0 0 4px;line-height:1.5">
-      Three lines, because this app prints three pieces of paper. Each one has one question — who
-      prints it — and three answers.
+      ${mode === "computer"
+        ? "Three lines, because this app prints three pieces of paper. Each one just needs a printer — or “nobody”."
+        : "Three lines, because this app prints three pieces of paper. Each one is simply on, or “nobody”."}
     </p>
     ${(B.kinds || ["kot", "bill", "banquet"]).map(line).join("")}
   </div>`;
@@ -13625,7 +13728,7 @@ function formPrinting(s) {
     </div>
   </div>`;
 
-  return step1 + step2 + step2b + step3 + step4 + guide;
+  return step1 + step2mode + step2setup + step3 + step4 + guide;
 }
 
 // One pass of the queue: what is waiting → claim it → print it → say what happened.

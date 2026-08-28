@@ -146,7 +146,51 @@ const fail = (m) => fails.push(m);
     // The movement must be keyed on the LINE id, or a replay double-posts stock.
     if (/dedupe:\s*`pur:\$\{pid\}:\$\{row\.id\}`/.test(inv)) ok("each purchase movement is deduped by its own line id");
     else fail("the purchase movement's dedupe key no longer names the line — a replay can double-post stock");
+
+    // ── EVERY ID BRANCH CHECKS ITS ID (T10 sweep #7) ────────────────────────────────────────────
+    // This file states the rule itself: "Every id this route accepts is a uuid our own UI produced.
+    // Anything else is a BAD REQUEST." Six branches enforced it and the three `counts` ones did
+    // not — and a missing client id arrives as the literal "undefined" (which is exactly why the
+    // three SIBLING catch-all routes all carry emptyIdSegment; this one has no such guard at all).
+    //
+    // `counts/:id/discard` was the one that hurt: `.eq("id","undefined")` errors 22P02, `up.error`
+    // is set, and writeFail answers 500 — which public/panels/outbox.js reads as "the server is up
+    // but can't take it", so it QUEUES the discard, retries it, and finally files it under "needs
+    // you" saying the system couldn't accept it after several tries. That is a sentence about the
+    // server for a value that will never be accepted, and it inverts this codebase's own rule that
+    // a 4xx is told to the person while only a 5xx is saved and retried.
+    for (const [branch, marker] of [
+      ["counts/:id/line", /path\[2\] === "line"\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!isUuid\(path\[1\]\)\) return badId\(\);/],
+      ["counts/:id/submit", /path\[2\] === "submit"\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!isUuid\(path\[1\]\)\) return badId\(\);/],
+      ["counts/:id/discard", /path\[2\] === "discard"\)\s*\{\s*(?:\/\/[^\n]*\n\s*)*if \(!isUuid\(path\[1\]\)\) return badId\(\);/],
+    ]) {
+      if (marker.test(readRaw("app/api/inventory/[...path]/route.ts"))) ok(`inventory ${branch} refuses an id that is not an id, instead of answering "the server is busy"`);
+      else fail(`inventory ${branch} no longer checks its id — a stale/undefined id reaches Postgres, and the 500 it produces is QUEUED and retried as though the server were merely busy`);
+    }
+    // …and the count LINE's item id, which reaches the same kind of column from the body.
+    if (/const itemId = String\(body\.item_id \|\| ""\);[\s\S]{0,240}?if \(!isUuid\(itemId\)\) return badId\(\);/.test(readRaw("app/api/inventory/[...path]/route.ts")))
+      ok("a counted line's ingredient id is checked before it reaches the database");
+    else fail("the count line's item_id is no longer checked — the same 22P02 shape, from the body instead of the path");
   }
+
+// ── EVERY RESTAURANT-WIDE LIST READ IN THE WAITER TABLET IS BOUNDED (owner picked it, 2026-08-28) ──
+//
+// CLAUDE.md's rule for a data read is "scoped, with a column list, AND a .limit()". Sweep #7 walked
+// every read in this territory and found exactly ONE place where the third part was missing: the
+// waiter tablet's two `categories` reads. Scoped and column-named, but uncapped — about ten rows on
+// a real restaurant, so it was recorded as an inconsistency rather than a fault, and he picked it.
+//
+// Checked here rather than by walking every chain, because a chain walker gets this wrong in four
+// different ways (a builder head whose .limit() lands on the variable, a write's returning
+// .select(), a read already narrowed to one parent row, and a chain spanning a blank line) — see
+// LEDGER/T10.md. Two named reads, asked about by name.
+{
+  const t = read("app/api/tablet/[...path]/route.ts");
+  const cats = [...t.matchAll(/\.from\("categories"\)([\s\S]{0,220}?)(?=,\n|\);)/g)].map((m) => m[1]);
+  if (!cats.length) fail("the waiter tablet no longer reads categories at all — that cannot be right, so this check has gone stale");
+  else if (cats.every((c) => /\.limit\(\d+\)/.test(c))) ok(`both of the waiter tablet's category reads carry a ceiling (${cats.length} found)`);
+  else fail("a waiter-tablet category read lost its .limit() — it is the one read in this territory that was ever uncapped, and the manager panel's twin has always had one");
+}
 
   // A REPRODUCTION, so this rule is checking behaviour and not a spelling. Two lines, one item.
   const lines = [

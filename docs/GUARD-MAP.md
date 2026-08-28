@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **150** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **152** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 150 names in their head, so in practice a person runs none of them, or reaches for
+can hold 152 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -105,6 +105,8 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | the owner's Customers / Pay Later / Inventory / Complaints / Manager-mode screens | `verify:owner-money` ← every fault these five screens had was the same shape: the ROUTE did the careful thing (a true head-count, a `moduleOff` flag, a `partial` list, a `?refresh=1` escape hatch, the month's real counts) and the SCREEN quietly ignored it. Also pins the owner's 2026-08-18 decisions (R34: Pay Later never hides itself) and the rendering rule that `--border` is a whole border, not a colour — a 1★ rating drew five gold stars for months because of it. | nothing | no |
 | a login in the recycle bin | `verify:recycle-name` | nothing | no |
 | opening a table that had a join request (the "Attend" flash) | `verify:no-attend-flash`, `verify:open-request-guard` | nothing | no |
+| ANY sentence a person reads on a screen — a label, a button, a warning | `verify:wording` ← the sentences are checked as sentences (T27 sweep, 2026-08-27) | nothing | no |
+| the BILL as it appears on screen — the toolbar, the sheet's fit, the customer sheet | `verify:bill-screens` ← only a browser can answer these: the toolbar never covers the bill, the whole sheet fits the window, nothing on screen reaches the paper, and a refusal is never painted over by a late answer | a running app | no |
 | a parcel, or the 🛵 Platform / 🥡 Parcels tab appearing/disappearing | `verify:parcel-home` ← a parcel has ONE home; the floor must never grow a parcel strip again (owner, 2026-08-14) | nothing | no |
 | a table on the floor whose number is outside the plan ("off-plan") | `verify:floor-offplan` ← an off-plan tile is shown while a party is LIVE on it and never hidden while it is, so a seven-digit number reads as odd rather than vanishing with a real party on it | nothing | no |
 

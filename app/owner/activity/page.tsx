@@ -18,7 +18,7 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, detailForList, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
@@ -683,7 +683,7 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
             const isWarn = a.level === "warn";
             const isResolved = isErr && !!a.resolved_at;
             const showRed = isErr && !isResolved;
-            const det = isErr ? (a.detail || "") : formatActionDetail(a.action, a.detail);
+            const det = isErr ? (a.detail || "") : detailForList(a.action, a.detail);
             // A non-empty actor on a tablet row = the manager whose PIN unlocked it (except
             // the person's own login/profile actions).
             const isPin = isManagerPinRow(a);

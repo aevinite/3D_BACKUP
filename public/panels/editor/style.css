@@ -4646,6 +4646,24 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
   font-weight: 700; box-shadow: inset 0 0 0 2px var(--gold-ink); }
 .pw-opt.on::before { content: "✓ "; font-weight: 800; color: var(--gold-ink); }
 
+/* ── THE ONE TOGGLE, mirroring the console's .adm-mode class for class ────────────────────────
+   Owner, 2026-08-28: "I want a simple toggle… you only see the option you have selected." Two big
+   targets, each carrying its own one-line explanation, because the choice is a MECHANISM and the
+   names alone do not tell you what you get. The chosen one is marked by a tick, a ring, a filled
+   panel AND bold weight — never colour alone (WCAG 1.4.1). */
+.pw-mode { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
+  flex: 1 1 250px; min-height: 64px; padding: 12px 15px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--muted); font: inherit; cursor: pointer;
+  transition: background .15s, box-shadow .15s; }
+.pw-mode b { font-size: 14px; font-weight: 650; color: var(--text); }
+.pw-mode small { font-size: 12px; line-height: 1.45; }
+.pw-mode:hover:not(.on):not(:disabled) { color: var(--text); }
+.pw-mode:focus-visible { outline: 2px solid var(--gold-ink); outline-offset: 2px; }
+.pw-mode:disabled { cursor: default; opacity: .8; }
+.pw-mode.on { background: color-mix(in srgb, var(--gold) 16%, var(--panel-2));
+  box-shadow: inset 0 0 0 2px var(--gold-ink); }
+.pw-mode.on b::before { content: "✓ "; color: var(--gold-ink); font-weight: 800; }
+
 /* The refinements nobody needs on the way in. */
 .pw-more { margin: 8px 0 0; }
 .pw-more > summary { cursor: pointer; font-size: 12.5px; color: var(--gold-ink); list-style: none; padding: 4px 0; }

@@ -12,14 +12,14 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
   agentsView, createAgent, readRoutes, writeRoutes, mintAgentToken,
-  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch,
+  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, writeMode, isPrintMode,
 } from "@/lib/printHelpers";
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
 // not identical"). lib/printBoard.ts is the single copy.
-import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { STUCK_AFTER_MS } from "@/lib/printQueue";
-import { managerGrantValue } from "@/lib/accessTree";
+import { managerHasFlag } from "@/lib/managerCan";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
 
@@ -131,8 +131,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // ONE read of the shared board — the same call the restaurant's own Settings → Printing makes,
     // so neither screen can show a fact the other does not have.
     const board = await printBoardState(rid, { recent: 12 });
-    const tgtRow = (await sb.from("settings").select("kot_print_target").eq("restaurant_id", rid).maybeSingle()).data as
-      { kot_print_target?: string } | null;
     // ── WHO can be picked as the printing SCREEN, and WHICH PC ────────────────────────────────
     // The owner asked to choose the panel, the person and the machine ("which particular manager…
     // which owner panel… which PC will be open"). All three lists are read from real rows, so the
@@ -142,21 +140,37 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     //     A person switched off is not offered, which is what makes that permission mean something.
     //   · devices — the screens that have actually been the printer before (print_stations), so "that
     //     same PC" is a thing he recognises rather than a hex id he has to guess at.
-    const staff = ((await sb.from("staff_users").select("id, name, username, role, active")
+    const staff = ((await sb.from("staff_users").select("id, name, username, role, active, permissions")
       // A CEILING, so PostgREST's own default cannot silently shorten this picker (T17 sweep #7,
       // 2026-08-27). One restaurant's staff, and every other read in this file already states one.
       .eq("restaurant_id", rid).order("role").limit(500)).data || []) as
-      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null }[];
-    // The manager side of that permission, read the way every other route reads one: the stored value
-    // if the admin set it, else what the Access screen shows as the default (managerGrantValue).
-    const perms = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as
-      { manager_permissions?: Record<string, unknown> | null } | null;
-    const mgrPerm = managerGrantValue("print_here", (perms?.manager_permissions || {})["print_here"]);
+      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null;
+        permissions?: Record<string, string> | null }[];
+    // ── PER PERSON, NOT PER RESTAURANT (owner's review, 2026-08-28) ───────────────────────────
+    // This resolved "may be the printer" from the restaurant-wide grant ALONE, while the comment
+    // above claimed it was each person's own permission. So a manager switched off INDIVIDUALLY was
+    // still offered here — pick them, the board says their screen is the printer, and their screen
+    // is refused by managerCan: the kitchen never gets the paper and neither screen says why. It
+    // failed the other way too — a manager allowed individually could not be picked at all while the
+    // restaurant default was off.
+    //
+    // Both sides call managerHasFlag() now, so the picker and the gate cannot disagree. `access_config`
+    // is read as well because it is the CAP: switched off there, nobody may, whatever their own
+    // setting says. Still ONE extra column on a query already being made.
+    const perms = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+      { manager_permissions?: Record<string, unknown> | null; access_config?: Record<string, { on?: boolean }> | null } | null;
+    const mayBePrinter = (u: { role?: string | null; permissions?: Record<string, string> | null }) =>
+      managerHasFlag("print_here", {
+        accessConfig: perms?.access_config,
+        managerPermissions: perms?.manager_permissions,
+        ownOverride: u.permissions?.["print_here"],
+      });
     const people = staff.filter((u) => u.active !== false).map((u) => {
       const role = String(u.role || "");
       const panels = role === "kitchen" ? ["kitchen"]
-        : role === "manager" ? (mgrPerm ? ["manager"] : [])
-        : role === "owner" ? ["owner", "manager"]
+        // An OWNER standing at the manager panel is gated by the same row, for the same reason.
+        : role === "manager" ? (mayBePrinter(u) ? ["manager"] : [])
+        : role === "owner" ? (mayBePrinter(u) ? ["owner", "manager"] : ["owner"])
         : role === "tablet" || role === "waiter" ? ["tablet"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
@@ -169,12 +183,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // not need a "shown only once" ceremony any more — that whole dance existed because the old
       // file carried a token (mig 368).
       files: helperFiles(originOf(req)),
+      // MODE B's launcher, sent alongside. Both are plain text with nothing secret in them, so the
+      // board can show whichever one the mode calls for without a second round trip.
+      stationFiles: stationFiles(originOf(req)),
       staleMs: HELPER_STALE_MS,
       panels: ROUTE_PANELS, people, devices,
       // Stated so the screen can say it rather than implying it: a manager whose permission is off is
       // missing from `people` on purpose, and this is the link that explains where to switch it on.
-      managerMayPrint: mgrPerm,
-      printing: { ...board.printing, target: tgtRow?.kot_print_target || "kitchen" },
+      // "Is ANY manager offered?" — used only to explain an empty picker. Per person now, so a
+      // restaurant where the default is off but one manager is allowed no longer says "nobody".
+      managerMayPrint: staff.some((u) => u.active !== false && String(u.role || "") === "manager" && mayBePrinter(u)),
+      // `target` has left this payload (mig 369). It was the coarse kitchen|counter|both answer, it
+      // asked the same question as the Kitchen slips line in older and vaguer words, and the two
+      // could contradict each other — the printing sweep caught the OLDER one winning, so an owner
+      // who named the manager screen was refused by a setting an admin had touched months before.
+      // Everything it expressed is a screen route with an optional backupPanel now.
+      printing: board.printing,
     });
   }
   return err("Unknown request", 404);
@@ -261,23 +285,39 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // ── the two switches, in the same place as everything else about printing ──────────────────
   if (seg[0] === "switch") {
     const patch: Record<string, boolean> = {};
-    const patch2: Record<string, string> = {};
     if (typeof body.allowed === "boolean") patch.auto_print_kot_allowed = body.allowed;
     if (typeof body.on === "boolean") patch.auto_print_kot = body.on;
-    // THE COARSE FALLBACK (mig 336: kitchen | counter | both). It used to be three radio cards in the
-    // Access card's KOT block; it lives HERE now, because this is the board that owns printing and two
-    // screens answering "who prints" was the confusion the owner asked to end. It still matters: it is
-    // what decides which screen prints for a restaurant with NO route at all, and a route (mig 341)
-    // overrules it whenever one exists.
-    if (typeof body.target === "string") {
-      if (!["kitchen", "counter", "both"].includes(body.target)) return err("That is not one of the three answers.");
-      patch2.kot_print_target = body.target;
-    }
-    if (!Object.keys(patch).length && !Object.keys(patch2).length) return err("Nothing to change.");
-    const up = await sb.from("settings").update({ ...patch, ...patch2 }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    // THE THIRD THING THIS VERB USED TO TAKE IS GONE (mig 369): `target`, the coarse
+    // kitchen|counter|both answer. It is a screen route with an optional backupPanel now, saved
+    // through `routes` above like every other printing decision — one door, not two.
+    if (!Object.keys(patch).length) return err("Nothing to change.");
+    const up = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
     if (up.error) return err("Could not save that.");
-    await logAction("admin", "print_switch", { restaurant_id: rid, detail: [...Object.entries(patch), ...Object.entries(patch2)].map(([k, v]) => `${k}=${v}`).join(" ") });
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(" ") });
     return NextResponse.json({ ok: true });
+  }
+
+  // ── WHICH OF THE TWO WAYS THIS RESTAURANT PRINTS ──────────────────────────────────────────
+  // One toggle, and the three paper lines come with it (lib/printHelpers → writeMode). If the mode
+  // moved on its own, a restaurant switched to Chrome would still have three routes pointing at a
+  // computer: the board would show the Chrome setup while the paper kept coming out of the helper.
+  if (seg[0] === "mode") {
+    if (!isPrintMode(body.mode)) return err("There are two ways to print: a computer, or a screen.");
+    const person = body.person ? String(body.person) : null;
+    if (person) {
+      // A named person must be this restaurant's, and must be able to stand at the panel — the same
+      // check writeRoutes makes, asked here too so the toggle cannot store an impossible pair.
+      const u = (await sb.from("staff_users").select("id, active").eq("id", person).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; active?: boolean | null } | null;
+      if (!u || u.active === false) return err("That person is not one of this restaurant's active staff.");
+    }
+    const done = await writeMode(rid, body.mode, { person });
+    if ("error" in done) return err(done.error);
+    await logAction("admin", "print_switch", {
+      restaurant_id: rid,
+      detail: `printing mode → ${done.mode === "screen" ? "a screen (the restaurant's own Chrome)" : "a computer (the helper)"}`,
+    });
+    return NextResponse.json(done);
   }
 
   // ── send one page to a printer ────────────────────────────────────────────────────────────

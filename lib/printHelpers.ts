@@ -34,6 +34,11 @@ export const HELPER_STALE_MS = 30_000;
  *  printer would lose half its tickets to the counter. */
 export const BACKUP_AFTER_MS_DEFAULT = 60_000;
 
+/** How long a BACKUP SCREEN waits before it may take a kitchen ticket. Shorter than a backup
+ *  printer's minute, because a cook waiting on a slip notices thirty seconds — and it is the exact
+ *  window `kot_print_target = 'both'` used, so nothing changed for a restaurant that was on it. */
+export const SCREEN_BACKUP_MS = 30_000;
+
 // "label" (parcel stickers) LEFT this list on 2026-08-27. It was never a real kind: nothing in the
 // app ever queued one, lib/printDocs.ts has no builder for it, and it existed only as a fifth empty
 // line in the address book that nobody could ever fill usefully. The owner asked for exactly this —
@@ -96,6 +101,14 @@ export type PrintRoute = {
   /** …and optionally which DEVICE (the per-browser id print_stations already uses). Null = any device
    *  that person signs in on; named = that one PC, which is the "from that same PC" answer. */
   device?: string | null;
+  /** A SECOND screen that may take a ticket the first one has left sitting (`backupAfterMs`).
+   *
+   *  This is the retired `kot_print_target = 'both'` (mig 336), brought into the route model by
+   *  mig 369 — "the kitchen screen prints, and the counter picks up anything it has left for 30
+   *  seconds". It is the mirror of `backupAgent` on a computer route, so a screen route and a
+   *  computer route now describe a fallback the same way, and there is ONE place that decides who
+   *  prints instead of two settings that could disagree. */
+  backupPanel?: RoutePanel | null;
   /** Overrides what the machine reported. This is the line the owner needs for his banquet machine:
    *  an A4 printer that is loaded with sheets "almost half or smaller than half of it" — so the
    *  paper is a per-route answer (A4 · A5 · A6 · or two typed numbers), never a guess from the
@@ -287,9 +300,78 @@ export async function readRoutes(rid: string): Promise<PrintRoutes> {
       person: o.person ? String(o.person) : null,
       personName: o.personName ? String(o.personName).slice(0, 80) : null,
       device: o.device ? String(o.device).slice(0, 120) : null,
+      backupPanel: isRoutePanel(o.backupPanel) ? o.backupPanel : null,
     };
   }
   return out;
+}
+
+// ── WHICH OF THE TWO MODES THIS RESTAURANT IS ON ─────────────────────────────────────────────
+//
+// Owner, 2026-08-28: *"there will be 2 mode… I want a toggle and the simplified UI — like you only
+// see the option you have selected, only the setting for that option will be shown."*
+//
+//   · "computer" — a HELPER program prints, silently, with no browser and no login. Each kind of
+//     paper can go to a different printer, which is the thing a browser can never do.
+//   · "screen"   — the restaurant's own CHROME prints, opened by a launcher file, running out of the
+//     way, signed in as ONE named person (lib/printStationScript.ts).
+//
+// WHY IT IS STORED AND NOT DERIVED. It could be read off the routes — a route naming an agent means
+// "computer", one naming a panel means "screen". But the screen has to show ONE setup before any
+// paper has been answered at all, and a derived mode has no answer then. Storing it is what lets the
+// board show the helper's setup OR the Chrome setup and never both.
+//
+// It lives in the module bag (mig 326: a new module adds no column to settings — there are 110).
+export type PrintMode = "computer" | "screen";
+export const isPrintMode = (v: unknown): v is PrintMode => v === "computer" || v === "screen";
+
+/** The default is "computer" because the helper is the better answer: no browser, no login, and one
+ *  printer per kind of paper. A restaurant that has never chosen is shown the helper's setup. */
+export async function readMode(rid: string): Promise<PrintMode> {
+  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as
+    { modules?: unknown } | null;
+  const raw = bagOf(s?.modules)["printing"];
+  return isPrintMode(raw?.mode) ? raw.mode : "computer";
+}
+
+/**
+ * Change the mode — and bring the three paper lines WITH it.
+ *
+ * This is the part that makes one toggle honest. If the mode moved on its own, a restaurant switched
+ * to Chrome would still have three routes pointing at a computer, the board would show the Chrome
+ * setup, and the paper would keep coming out of the helper. One toggle, one truth: every line that
+ * was answered is rewritten into the new mode's shape, and a line set to "nobody" is left alone —
+ * "we do not print this" survives a change of mechanism.
+ */
+export async function writeMode(
+  rid: string,
+  mode: PrintMode,
+  opts?: { person?: string | null; personName?: string | null; panel?: RoutePanel },
+): Promise<{ mode: PrintMode; routes: PrintRoutes } | { error: string }> {
+  const current = await readRoutes(rid);
+  const patch: Record<string, unknown> = {};
+  for (const k of ROUTABLE_KINDS) {
+    const r = current[k];
+    if (r.via === "off") continue;                       // a deliberate no outlives the mechanism
+    if (!r.via) continue;                                // never answered — leave it unanswered
+    patch[k] = mode === "screen"
+      ? { via: "screen", panel: opts?.panel || "manager", person: opts?.person ?? null }
+      // Going back to the helper cannot invent a printer, so the line returns to "not answered
+      // yet" — which the board says out loud rather than pointing at a printer nobody chose.
+      : null;
+  }
+  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: unknown } | null;
+  const bag = { ...bagOf(s?.modules) };
+  bag["printing"] = { ...(bag["printing"] || {}), mode };
+  const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+  if (up.error) return { error: "Could not save which way this restaurant prints." };
+  const after = Object.keys(patch).length ? await writeRoutes(rid, patch) : { routes: current };
+  if ("error" in after) return { error: after.error };
+  // Kitchen slips and auto_print_kot are one decision (syncKotSwitch) — a mode change must not
+  // silently switch printing off, so it is re-asserted from the line's new state.
+  const kot = after.routes.kot;
+  await syncKotSwitch(rid, kot.via !== "off");
+  return { mode, routes: after.routes };
 }
 
 /** Is this line pointing at a SCREEN (a panel/person/device) rather than a helper on a computer? */
@@ -371,10 +453,15 @@ export async function writeRoutes(rid: string, patch: Record<string, unknown>): 
         if (!fits) return { error: `${u.name || u.username} is a ${role || "person"}, so their screen is not the ${panel} panel.` };
         personId = u.id; personName = String(u.name || u.username || "").slice(0, 80) || null;
       }
+      // A BACKUP SCREEN THAT IS THE SAME SCREEN IS NOT A BACKUP. Storing it would make the age
+      // window look like a rule when nothing could ever satisfy it, which is worse than no backup.
+      const bPanel = isRoutePanel(o.backupPanel) && o.backupPanel !== panel ? o.backupPanel : null;
       next[kind] = {
         via: "screen", agent: null, printer: null,
         panel, person: personId, personName,
         device: o.device ? String(o.device).slice(0, 120) : null,
+        backupPanel: bPanel,
+        backupAfterMs: typeof o.backupAfterMs === "number" && o.backupAfterMs >= 5000 ? o.backupAfterMs : SCREEN_BACKUP_MS,
         ...(asPaper(o.paper) ? { paper: asPaper(o.paper) } : {}),
       };
       continue;
@@ -619,7 +706,9 @@ export type PrintTarget =
   | { kind: "off" }
   | { kind: "computer"; agent: string; printer: string; connected: boolean; secondsAgo: number | null;
       backup: { agent: string; printer: string } | null }
-  | { kind: "screen"; panel: RoutePanel; person: string | null; personName: string | null; device: string | null };
+  | { kind: "screen"; panel: RoutePanel; person: string | null; personName: string | null; device: string | null;
+      /** A second screen allowed to take what the first has left sitting, and how long it must wait. */
+      backupPanel: RoutePanel | null; backupAfterMs: number };
 
 export async function targetFor(rid: string, kind: PrintKind): Promise<PrintTarget> {
   const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
@@ -636,7 +725,9 @@ function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTar
   if (r?.via === "off") return { kind: "off" };
   if (isScreenRoute(r)) {
     return { kind: "screen", panel: r!.panel as RoutePanel, person: r!.person ?? null,
-             personName: r!.personName ?? null, device: r!.device ?? null };
+             personName: r!.personName ?? null, device: r!.device ?? null,
+             backupPanel: r!.backupPanel ?? null,
+             backupAfterMs: typeof r!.backupAfterMs === "number" ? r!.backupAfterMs : SCREEN_BACKUP_MS };
   }
   if (!r?.agent || !r.printer) return { kind: "none" };
   const a = agents.find((x) => x.id === r.agent);
@@ -656,14 +747,25 @@ function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTar
  *   · a COMPUTER is routed     → no. A screen must never race a helper: two printers, one ticket.
  *   · a SCREEN is routed       → only the named panel, and only the named person, and only the named
  *                                device. Any part left blank means "anyone on that side".
+ *   · a BACKUP screen is named → yes, but only for tickets older than `afterMs` (mig 369). The
+ *                                caller gets `backup: true` and must apply that window; the first
+ *                                screen always has first refusal.
  */
 export function screenMayPrint(
   t: PrintTarget,
   who: { panel: RoutePanel; personId?: string | null; deviceId?: string | null },
-): { ok: boolean; why?: "off" | "computer" | "other_panel" | "other_person" | "other_device" } {
+): { ok: boolean; backup?: boolean; afterMs?: number; why?: "off" | "computer" | "other_panel" | "other_person" | "other_device" } {
   if (t.kind === "none") return { ok: true };
   if (t.kind === "off") return { ok: false, why: "off" };
   if (t.kind === "computer") return { ok: false, why: "computer" };
+  // ── THE BACKUP SCREEN (mig 369, and it is the retired 'both' setting) ────────────────────────
+  // Answered BEFORE the panel test, because a backup screen is a different panel by definition —
+  // checking "is this the named panel?" first would refuse it and the fallback would never happen.
+  // `backup: true` is not a plain yes: the caller must only offer this screen tickets that have sat
+  // for `afterMs`, so the FIRST screen always gets first refusal. That age test is applied again at
+  // the claim, server-side, so a stale tab cannot jump the queue.
+  if (t.backupPanel && t.backupPanel === who.panel && t.panel !== who.panel)
+    return { ok: true, backup: true, afterMs: t.backupAfterMs };
   if (t.panel !== who.panel) return { ok: false, why: "other_panel" };
   if (t.person && t.person !== (who.personId || "")) return { ok: false, why: "other_person" };
   if (t.device && t.device !== (who.deviceId || "")) return { ok: false, why: "other_device" };

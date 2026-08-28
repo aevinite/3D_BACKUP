@@ -605,6 +605,12 @@ body.menu-scrolling .chef-call {
 /* letter-by-letter hero reveal (GSAP drives these spans) */
 /* THE GREETING still needs an inline-BLOCK: it is the one that animates `y` (a transform), and a
    transform does nothing to a plain inline box. It is one short tracked word, so it never wraps. */
+/* ⛔ REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. `inline-block` here is what
+   breaks ARABIC in the hero greeting and the intro wordmark: an atomic box per letter, so the
+   browser cannot join the letters or order them right-to-left, and the word reads backwards.
+   It is measured and PARKED — do not switch these to `inline` to "fix" it, and do not report it.
+   (The tagline below IS `inline`, which is why only one of the two hero lines is affected.)
+   Full note: lib/i18n.ts → useTranslation. Pointer added by T27, 2026-08-27. */
 .hero-title-wrap .greet-badge span { display: inline-block; white-space: pre; }
 /* THE TAGLINE MUST NOT BREAK IN THE MIDDLE OF A WORD (T4 sweep, 2026-08-17).
  *
@@ -4204,6 +4210,24 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   .adm-over-row .nm { width: auto; flex: 1 1 100%; }
   .adm-over-row .what { flex: 1 1 100%; }
 }
+
+/* ── THE ONE TOGGLE (owner, 2026-08-28: "I want a simple toggle… you only see the option you have
+   selected"). Two big targets, each carrying its own one-line explanation, because the choice is a
+   MECHANISM and the names alone ("a computer" / "a screen") do not tell you what you get.
+   The chosen one is not marked by colour alone — a tick, a ring, a filled panel and bold weight
+   (WCAG 1.4.1). 64px minimum, because this is the most consequential control on the screen. */
+.adm-mode { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
+  flex: 1 1 260px; min-height: 64px; padding: 12px 15px; border-radius: 12px; border: var(--border);
+  background: var(--card); color: var(--muted); font: inherit; cursor: pointer;
+  transition: background .15s, box-shadow .15s; }
+.adm-mode b { font-size: 14px; font-weight: 650; color: var(--text); }
+.adm-mode small { font-size: 12px; line-height: 1.45; }
+.adm-mode:hover:not(.on) { background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.adm-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.adm-mode:disabled { opacity: .6; cursor: progress; }
+.adm-mode.on { background: color-mix(in srgb, var(--accent) 14%, var(--card));
+  box-shadow: inset 0 0 0 2px var(--accent); }
+.adm-mode.on b::before { content: "✓ "; color: var(--accent); font-weight: 800; }
 
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── New-restaurant create card (owner 2026-07-24): sectioned form + access setup ── */

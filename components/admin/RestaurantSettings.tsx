@@ -50,10 +50,11 @@ const KEYS = [
   "banquet_tax_components", "banquet_paper", "banquet_paper_size", "banquet_paper_top",
   "banquet_paper_bot", "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign",
   "banquet_paper_fill", "floor_per_row", "floor_layout_mode",
-  // WHICH screen prints the kitchen ticket (mig 336). Must be listed here — the Save button builds
-  // its patch from this array, and a field missing from it looks editable and saves nothing (which
-  // is exactly what happened when the banquet card was first added).
-  "kot_print_target",
+  // `kot_print_target` LEFT THIS LIST on 2026-08-28 (mig 369). It was the coarse "which screen
+  // prints the kitchen ticket" answer, it asked the same question as the Kitchen slips route and
+  // could contradict it, and no control on any screen writes it any more. The column is retired,
+  // not dropped, and nothing reads it — so a key here would let a stale screen write a value that
+  // then misleads whoever reads the database next.
 ] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -189,7 +190,9 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       if (!s.restaurant_name) s.restaurant_name = restaurant.name;
       if (!s.invoice_prefix) s.invoice_prefix = "INV";
       if (!s.bill_footer) s.bill_footer = "Thank you — please visit again";
-      if (!s.tax_label) s.tax_label = "Tax";
+      // NOT PREFILLED (owner, 2026-08-28) — `tax_label` drives the PRINTED bill as well as the
+      // screen, and they have different right defaults ("GST" on paper, "Tax" on screen). Writing
+      // either one in here made the paper print the screen's word. The field shows it as a hint.
       if (!Array.isArray(s.tax_components) || !(s.tax_components as TaxComp[]).length) {
         const rate = Number(s.tax_rate);
         const pct = (Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : 0.05) * 100;

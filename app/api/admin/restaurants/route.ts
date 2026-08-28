@@ -430,7 +430,7 @@ export async function POST(req: NextRequest) {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
-    if (rid === DEFAULT_RID) return bad("The default restaurant can't be purged.", 400);
+    if (rid === DEFAULT_RID) return bad("The default restaurant can’t be permanently removed.", 400);
     // A FAILED READ IS NOT "NOT FOUND". Deciding a refusal from an unchecked read is the fault
     // fixed in this same file's banquet-numbering gate (T20 item 4) — here it would mean answering
     // "Restaurant not found" for a blip, which sends the admin looking for a row that is right there.
@@ -518,8 +518,11 @@ export async function POST(req: NextRequest) {
     // which DERIVES from managerGrantValue() — i.e. it stores exactly what the Access screen
     // displays, so the row and the screen agree from the first second. `owner_entitlements` is
     // left absent, which the model reads as "all on". Everything on `settings` comes from
-    // cleanClonedSettings (money caps off, floor caps on, modules off). Permissions are changed
-    // afterwards on ONE screen: /aevinite/access.
+    // cleanClonedSettings (money caps off, floor caps on, and each module's admin rung DERIVED
+    // from its own row on the Access screen — the three floor ones on, the premium ones off;
+    // said "modules off" until 2026-08-28, when that stopped being true for take-orders,
+    // move/merge/split and table types). Permissions are changed afterwards on ONE screen:
+    // /aevinite/access.
     const managerPerms: Record<string, boolean> = { ...MP_DEFAULT };
     // 1) the restaurant row (id auto-uuid, active) + the model's own grant baseline.
     const rest = await sb.from("restaurants").insert({

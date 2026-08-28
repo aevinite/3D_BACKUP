@@ -179,6 +179,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope.", 400);
   if (!(await moduleOn(g, rid))) return err("Inventory isn't enabled for this restaurant.", 403);
   const path = (await ctx.params).path || [];
@@ -729,10 +737,12 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: ins.data.id });
     }
     if (path[0] === "counts" && path[1] && path[2] === "line") {
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const itemId = String(body.item_id || "");
       const counted = num(body.counted_base);
       if (!itemId || !Number.isFinite(counted) || counted < 0) return err("Bad count line.");
+      if (!isUuid(itemId)) return badId();
       const c = await sb.from("inv_counts").select("id, status").eq("restaurant_id", rid).eq("id", path[1]).maybeSingle();
       if (!c.data || c.data.status !== "draft") return err("This count is no longer open.", 409);
       const it = await sb.from("inv_items").select("qty_base, avg_cost").eq("restaurant_id", rid).eq("id", itemId).maybeSingle();
@@ -747,6 +757,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok();
     }
     if (path[0] === "counts" && path[1] && path[2] === "submit") {
+      if (!isUuid(path[1])) return badId();
       const c = await sb.from("inv_counts").select("id, status").eq("restaurant_id", rid).eq("id", path[1]).maybeSingle();
       if (!c.data) return err("Count not found.", 404);
       if (c.data.status !== "draft") return err("This count was already submitted.", 409);
@@ -770,6 +781,21 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ adjusted });
     }
     if (path[0] === "counts" && path[1] && path[2] === "discard") {
+      // ── AN ID THAT IS NOT AN ID IS A BAD REQUEST, NOT A BUSY SERVER (T10 sweep #7) ────────────
+      // The rule is stated at the top of this file — "Every id this route accepts is a uuid our own
+      // UI produced. Anything else is a BAD REQUEST — without this, Postgres raises 'invalid input
+      // syntax for type uuid' and the handler answered 500 with the raw DB text." Six branches here
+      // enforce it; the three `counts` ones never did, and this was the one that hurt.
+      //
+      // A missing client id arrives as the literal "undefined" (the reason the three sibling
+      // catch-all routes all carry emptyIdSegment). `.eq("id","undefined")` then errors 22P02,
+      // `up.error` is set, and writeFail answers **500** — which public/panels/outbox.js reads as
+      // "the server is up but can't take it": it QUEUES the discard, retries it several times, and
+      // only then files it under "needs you" saying "The system couldn't accept this after several
+      // tries." That is a sentence about the server, for a value that will never be accepted, and
+      // it is the exact inversion of this codebase's rule that a 4xx is told to the person while a
+      // 5xx is saved and retried (verify:busy — "busy = offline, both ways").
+      if (!isUuid(path[1])) return badId();
       const up = await sb.from("inv_counts").update({ status: "discarded" })
         .eq("restaurant_id", rid).eq("id", path[1]).eq("status", "draft").select("id");
       // A FAILED WRITE IS NOT A WRONG-STATE REFUSAL (T17 sweep, 2026-08-13, finding F11). This
