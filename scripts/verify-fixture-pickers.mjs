@@ -50,7 +50,12 @@ const files = [];
   for (const e of readdirSync(d, { withFileTypes: true })) {
     const p = join(d, e.name);
     if (e.isDirectory()) walk(p);
-    else if (/\.mjs$/.test(e.name) && e.name !== "verify-fixture-pickers.mjs") files.push(p);
+    // .ts AS WELL AS .mjs (sweep #7 / T28, 2026-08-28). Two guards in this folder are TypeScript —
+    // verify-cancel-loss.ts and verify-cancel-made.ts — and this walk skipped both. They happen to
+    // use fixed off-plan names (T12-TEST, T12-P2) so nothing was wrong, but "nothing is wrong today"
+    // is not the same as "this is checked", and the next .ts guard that picks a table dynamically
+    // would have gone unseen. Neither .d.ts nor this file itself.
+    else if (/\.(mjs|ts)$/.test(e.name) && !/\.d\.ts$/.test(e.name) && e.name !== "verify-fixture-pickers.mjs") files.push(p);
   }
 })(SCRIPTS);
 
