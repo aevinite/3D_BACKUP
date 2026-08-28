@@ -13,6 +13,9 @@ import { rd, ReadSet, ReadFailed } from "@/lib/readGuard";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { safeSearch, safePhone } from "@/lib/searchText";
 import { ERASABLE, RETAINED, erasureSummary } from "@/lib/personalData";
+// ONE definition of what a bill was worth, shared with the admin's bill ledger and the audit's
+// money detail. See the khata balance below for why this is imported rather than re-derived.
+import { netOf, type BillOrder } from "@/lib/billLedger";
 
 export const dynamic = "force-dynamic";
 // visits/consent added by Customer CRM (mig 212): a REAL repeat count + the DPDP
@@ -255,8 +258,18 @@ export async function DELETE(req: NextRequest) {
     // Every LIVE, unpaid, uncancelled pay-later order of THIS person at THIS restaurant. The 2000
     // cap is a runaway guard, not a business bound — it is orders-per-person, and a person with
     // 2000 open pay-later bills is a different conversation.
+    //
+    // THE FIGURE IS READ THROUGH `netOf()`, NOT RE-DERIVED HERE (sweep #7, T30, 2026-08-28).
+    // This used to add up `total − disc_gross` inline. That gave the right answer — `net_amount` is
+    // `GENERATED ALWAYS AS (total − disc_gross)` on the database, so the two agree by construction —
+    // but it was a SECOND copy of a money rule, and every duplicated money rule in this codebase's
+    // history has eventually drifted from the original (the printed bill, the KOT, the banquet
+    // sheet, the filing tax split and "the rate this order was charged at" were each consolidated
+    // after a copy went its own way). `net_amount` is selected so netOf() returns the database's own
+    // stored figure and does no arithmetic at all; `total`/`disc_gross` stay in the column list as
+    // its fallbacks. Same definition as the admin's bill ledger and the audit's money detail.
     const bal = await rd("khataBalance", () => sb.from("orders")
-      .select("id, session_id, total, disc_gross")
+      .select("id, session_id, total, discount, disc_gross, net_amount, tax_rate")
       .eq("restaurant_id", restaurantId)
       .eq("khata_customer_id", person.id)
       .not("khata_at", "is", null)
@@ -268,9 +281,8 @@ export async function DELETE(req: NextRequest) {
       // Cannot check whether they owe → refuse. Erasing on doubt is irreversible; waiting is not.
       return dbFail("owner/customers.erase", bal.error, { message: "Couldn't check their pay-later balance just now — please try again." });
     }
-    const theirs = (bal.data || []) as { id: string; session_id: string | null; total: number | null; disc_gross: number | null }[];
-    const owed = Math.round(theirs.reduce((a, o) =>
-      a + ((Number(o.total) || 0) - (Number(o.disc_gross) || 0)), 0) * 100) / 100;
+    const theirs = (bal.data || []) as Array<Pick<BillOrder, "id" | "session_id" | "total" | "discount" | "disc_gross" | "net_amount" | "tax_rate">>;
+    const owed = Math.round(theirs.reduce((a, o) => a + netOf(o as BillOrder), 0) * 100) / 100;
     // BILLS, not order rows — one sitting can be several orders, and the sentence says "bills".
     // Same key the RPC uses for a bill: the session, or the order id when there is no session.
     const bills = new Set(theirs.map((o) => o.session_id ?? o.id)).size;
