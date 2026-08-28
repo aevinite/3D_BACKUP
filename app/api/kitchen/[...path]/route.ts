@@ -11,7 +11,7 @@ import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
-import { liveOrdersAndItems } from "@/lib/liveBoard";
+import { liveOrdersAndItems, stripPlacedBy } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
 import { platformLadder, parcelLadder, tableTagsLadder } from "@/lib/tableTags";
@@ -210,7 +210,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           tableTagMap(rid),
           wantJobs ? pendingKotJobs(rid, { includeAuto: true }) : Promise.resolve([]),
         ]);
-        return ok({ orders: live.orders, items: live.items, tableTags: tags, printJobs: sliceJobs });
+        // `guest: 1` rides along so a guest's own order can ring; the raw who-punched-it columns never leave the server (stripPlacedBy)
+        return ok({ orders: stripPlacedBy(live.orders, true), items: live.items, tableTags: tags, printJobs: sliceJobs });
       }
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
@@ -333,7 +334,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // own copy of "how long is too long" (a second copy is how two screens start disagreeing
         // about whether the same printer is stuck).
         waiting, stuckAfterMs: STUCK_AFTER_MS,
-        orders: live.orders, items: live.items, dishes: must(dishes),
+        // same as the slice: `guest: 1` for a guest's own order, and the raw columns never leave
+        orders: stripPlacedBy(live.orders, true), items: live.items, dishes: must(dishes),
         platform: platformRows,
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
         // Auto-print KOT is ON only when the ADMIN allowed it AND the owner toggled it on

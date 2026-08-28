@@ -14,7 +14,7 @@ import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
-import { liveOrdersAndItems } from "@/lib/liveBoard";
+import { liveOrdersAndItems, stripPlacedBy } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 // A waiter's bill must take the SAME road as a manager's (mig 341). Before this, printing a bill from
 // the tablet opened a window and used whatever printer THAT device defaults to — which on a waiter's
@@ -679,7 +679,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ]);
         return ok({
           sessions, members: must(members) || [], calls: must(calls),
-          orders: live.orders, items: live.items, requests: must(requests),
+          // the who-punched-it columns are selected for the kitchen's chime and never sent to a
+          // browser — this panel's payload is byte-for-byte what it was (stripPlacedBy)
+          orders: stripPlacedBy(live.orders), items: live.items, requests: must(requests),
         });
       }
       // ── NO TABLE = NO ANSWER, AND THAT IS THE POINT (T4 improvement 4, 2026-08-11) ─────────

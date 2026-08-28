@@ -169,6 +169,33 @@ const api = async (method, path, body, opts) => {
   }
   return j;
 };
+// ── DID A MEMBER OF STAFF PUNCH THIS ORDER, OR DID THE GUEST? (owner, 2026-08-26) ───────────────
+//
+// The chime used to key on `member_id`, and that was the fault: a guest who scans the QR and orders
+// WITHOUT joining the table's session has no member id — which is exactly what a waiter-placed order
+// looks like — so it landed on the pass in about two seconds and rang NOTHING. A cook facing away
+// from the board had no way to know food had come in. (Recorded as H1 by the T6 sweep since
+// 2026-08-17; it was thought to need a new column on `orders`. It does not.)
+//
+// `placed_by_id` / `placed_by` have been on `orders` since migration 220 and the manager route says
+// what they mean in its own words: *"NULL keeps meaning the guest ordered it themselves."* Staff
+// panels stamp them when a waiter or manager punches an order; the guest path (lfh_place_order)
+// never touches them. So "did a person standing at the table place this?" is already answered.
+//
+// The change is deliberately additive: everything that rings today still rings. The only case that
+// changes is the silent one — `preparing`, no member id, and nobody stamped on it — which is a guest
+// order and now rings. A waiter's own order stays silent, because the waiter is at the table.
+// The board sends `guest: 1` and NOTHING else — the raw `placed_by_id` / `placed_by` never leave the
+// server (lib/liveBoard.ts → stripPlacedBy), because one is a person's name and together they are
+// ~77 bytes on every order of every board read to answer a yes/no question. The flag is only
+// present when it is TRUE, so a floor of waiter-punched tickets costs nothing at all.
+//
+// One honest edge: on the waiter tablet the stamp is `actor?.id ?? null` with a matching name, so an
+// ADMIN placing an order while acting as nobody leaves both empty and this reads it as a guest's.
+// That way round is the safe one — a chime that should not have rung, rather than food arriving in
+// silence — and an admin punching an order into a live kitchen is not a thing that happens in service.
+const guestPlaced = (o) => !!o && o.guest === 1;
+
 // ── table naming (mig 131) ───────────────────────────────────────────────────
 // The restaurant's OWN name for a table ("A1", "Patio"), from settings.table_names.
 // Empty string when that table has no name, so callers fall back to the number.
@@ -1214,7 +1241,7 @@ async function loadTables(tables) {
   // land on the pass silently. Waiter orders (member_id null) stay chime-free: the
   // waiter is standing at the table. An accepted first order can't double-chime — its
   // id entered knownIds while it was still 'received'.
-  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
+  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && guestPlaced(o))) && !state.knownIds.has(o.id));
   if (newReceived.length) chime();
   // The targeted slice never carries `queuedFor` (it is a whole-board answer), so the net stays out
   // of it on purpose — the queue prints these, and the next full read runs the net if it must.
@@ -1929,7 +1956,7 @@ async function loadImpl() {
   // brand-new platform order.
   const ids = new Set([...data.orders.map((o) => o.id), ...((data.platform || []).map((p) => p.id))]);
   if (state.knownIds) {
-    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
+    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && guestPlaced(o))) && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
     if (newReceived.length || freshPlat) chime();
     // The QUEUE prints new orders now (processPrintJobs, below — mig 335). This is only the net
