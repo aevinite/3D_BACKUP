@@ -1271,14 +1271,19 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
     unconditional dark default** — the older wording here said tenants default dark full stop, and a
     "both skins" test written from that line expects dark and gets light. Checked 2026-08-22 (T29):
     neither restaurant on the dev database has it set, so both tenant doors open LIGHT today.
-    ⚠️ **AND THE DISH PAGE DOES NOT REPEAT IT.** `app/r/[restaurant]/item/[slug]/page.tsx` renders
-    outside `AppShell`, which is why the maintenance switch, the menu switch and the accent each had
-    to be repeated there. The tenant default-skin boot script is a FOURTH thing of exactly that
-    shape and it is missing: for a dark-default restaurant, a **full page load** of a dish URL (a
-    shared link, a refresh, a QR pointing at a dish) renders in the LIGHT skin while the menu is
-    dark. A client-side tap through from the menu is fine — `data-theme` survives the navigation —
-    so this only shows on a cold load. Reported by the T29 sweep; the file belongs to another
-    terminal's territory, so the code fix was handed off rather than made there.
+    ✅ **AND THE DISH PAGE NOW REPEATS IT — fixed 2026-08-28 (T29 sweep #7, on the owner's word).**
+    `app/r/[restaurant]/item/[slug]/page.tsx` renders outside `AppShell`, which is why the
+    maintenance switch, the menu switch and the accent each had to be repeated there. The tenant
+    default-skin boot script is a **FOURTH thing of exactly that shape**, and it was missing: for a
+    dark-default restaurant, a **full page load** of a dish URL (a shared link, a refresh, a QR
+    pointing at a dish) rendered LIGHT while the menu was dark. A tap through from the menu was
+    fine — `data-theme` survives the navigation — so it only ever showed on a cold load, which is
+    why it went unreported for months. The dish page now emits the byte-identical line behind the
+    same condition. Driven end to end: with `spice-route` flipped to dark, a cold load of its dish
+    URL came back `data-theme="dark"` on a dark canvas, and a guest who had chosen light kept light;
+    the setting was restored in the same run. **Guarded** — `.github/scripts/verify-unowned-routes.mjs`
+    fails if either page loses the line. **If you add a FIFTH thing to the menu page's first paint,
+    it has to be repeated here too.**
   - **Manager / kitchen / tablet panels** — their own toggle (`#themeToggle`, wired by
     `public/panels/theme.js`), stored as `lfh_panel_theme`, default **LIGHT** (owner 2026-06-26).
     **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back

@@ -115,6 +115,33 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
     "restaurant #1's name to another tenant is this project's oldest recurring fault.");
 }
 
+/* ── the first paint — the root layout, and the dish page that renders outside it ─────── */
+{
+  // A DISH PAGE RENDERS OUTSIDE AppShell, so everything the shell does for the menu has to be
+  // repeated on it by hand: maintenance mode, the menu switch, the accent — and the restaurant's
+  // DEFAULT light/dark. The fourth was missing for months and left no trace, because tapping
+  // through from the menu puts the choice in localStorage first. Only a FULL load of a dish URL —
+  // a shared link, a refresh, a QR straight to a dish — showed it, and only for a restaurant whose
+  // admin had chosen dark, which neither test restaurant had. Measured: with the default flipped
+  // to dark, a cold load of the dish URL came back light. The two pages must emit the SAME line.
+  const menu = read("app/r/[restaurant]/menu/page.tsx");
+  const dish = read("app/r/[restaurant]/item/[slug]/page.tsx");
+  const LINE = /menuDefaultMode === "dark"/;
+  const BOOT = /localStorage\.getItem\('lfh_theme'\)[\s\S]{0,80}setAttribute\('data-theme','dark'\)/;
+  want(LINE.test(menu) && BOOT.test(menu),
+    "the menu page still applies a restaurant's own default light/dark before it paints",
+    "app/r/[restaurant]/menu/page.tsx has lost its default-skin boot script");
+  want(LINE.test(dish) && BOOT.test(dish),
+    "…and so does the dish page, which renders outside the shell and has to repeat it",
+    "app/r/[restaurant]/item/[slug]/page.tsx no longer applies the restaurant's default light/dark",
+    "A dish opened by a shared link, a refresh or a QR code will come up LIGHT on a restaurant whose\n      " +
+    "admin chose dark. Tapping through from the menu hides it, because the choice is already saved by\n      " +
+    "then — so this is a fault nobody reports and nobody sees in testing.");
+  want(!LINE.test(dish) || /only act when nothing is saved|nothing is saved|has saved nothing/.test(dish),
+    "…and both still leave a guest who has chosen for themselves alone",
+    "the dish page's default-skin script no longer says it defers to the guest's own choice");
+}
+
 /* ── the root layout — the first paint, before anything else has run ──────────────────── */
 {
   const layout = read("app/layout.tsx");
