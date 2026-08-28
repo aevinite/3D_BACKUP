@@ -221,6 +221,10 @@ export function orderTaxRate(
   settingsRate: number,
 ): number;
 /** Everything the paper needs, assembled once. Pass what only the panel knows. */
+/** billData({ …, chainOnPaper }) — set `chainOnPaper: true` to print the mig-332 verification
+ *  line. It is OFF everywhere on purpose: whether a guest's receipt should carry it is an open
+ *  decision (see the note in billData). The reference itself is read from the session, or from the
+ *  order rows the manager's API attaches it to, both parts always from the same place. */
 export function billData(a: {
   settings?: Record<string, unknown>;
   restaurant?: Record<string, unknown>;

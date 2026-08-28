@@ -361,494 +361,53 @@ for (const [what, ts] of INSTANTS) {
   }
 }
 
-// ── 3d. THE VERIFICATION LINE (mig 332) ───────────────────────────────────────────────────────
-// The signed chain is only checkable by whoever holds the paper if it is ON the paper. It prints
-// only when the caller supplies BOTH parts, so a bill printed before the columns are exposed is
-// unchanged — and never on a cancelled sheet, whose sale was withdrawn.
+// ── 3d. THE VERIFICATION LINE (mig 332) — DELIVERED, AND HELD OFF THE PAPER ───────────────────
+// Two separate things, and they are checked separately on purpose.
+//  · DELIVERY (item 23, fixed 2026-08-28): billData used to read the reference off the SESSION
+//    while the manager's API attaches it to every ORDER row, so the two halves never met. It now
+//    reads either, always taking BOTH parts from the same place — a sequence from one row beside a
+//    hash from another would be a reference that verifies nothing.
+//  · THE PAPER (item 19): whether a guest's receipt should carry it at all is the OWNER'S open
+//    decision, so it prints only when a caller says `chainOnPaper: true`, and nothing does. This
+//    guard pins it OFF, so it cannot arrive on a customer's bill by accident before he answers.
 {
   const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
-  const line = { status: "served", subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0, tax_rate: 0.05,
-    items: [{ title: "A", qty: 1, price: 100, tax_mode: "excl" }] };
-  const mk = (sess, extra) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {}, orders: [{ ...line, ...(extra || {}) }], session: sess, autoPrint: false }));
+  const line = { status: "served", subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0,
+    tax_rate: 0.05, items: [{ title: "A", qty: 1, price: 100, tax_mode: "excl" }] };
+  const mk = (a) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {},
+    autoPrint: false, orders: [line], ...a }));
   const ver = (h) => (h.match(/Verification ([^<]*)/) || [])[1] || "";
-  !ver(mk({ bill_no: 1 }))
-    ? ok("a bill with no chain row prints no verification line (every bill today)")
-    : bad("a verification line printed with nothing to verify", "both parts must be supplied or the line stays off");
-  !ver(mk({ bill_no: 1, chain_seq: 7 })) && !ver(mk({ bill_no: 1, chain_hash: "abc" }))
-    ? ok("  …and half a reference prints nothing either")
-    : bad("half a chain reference reached the paper", "a partial reference cannot be checked and must not print");
-  ver(mk({ bill_no: 1, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" })) === "1042 · a3f9c1d2e4b5"
-    ? ok("a chained bill prints its sequence and the first 12 characters of its hash")
-    : bad(`the verification line reads "${ver(mk({ bill_no: 1, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }))}"`,
-      "one format, decided here, so every panel prints the same reference for the same bill");
-  !ver(mk({ bill_no: 1, chain_seq: 9, chain_hash: "deadbeefcafe0000" }, { status: "cancelled" }))
-    ? ok("  …and a cancelled sheet carries none")
-    : bad("a cancelled bill printed a verification line", "that sale was withdrawn; the band across the top is the statement");
-}
+  const REF = { chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" };
 
-// ── 3g. THE DIGIT COUNTER NEVER CONTRADICTS THE BOX BESIDE IT ─────────────────────────────────
-// "0/10" beside a complete number is the sheet giving two answers at once, and at a till the
-// honest reading of it is "retype it". paintCount() only ran on the `input` event, and assigning
-// `.value` from script fires no such event — so a reopened bill (the case the prefill feature was
-// BUILT for, owner 2026-07-30) opened showing "0/10" against "98250 12345", and tapping a
-// suggestion showed "5/10" against a ten-digit number. Measured on a 360px phone, 2026-08-22.
-// Structural, so it cannot come back by a THIRD path being added: every write to the box must
-// either go through setPhone() or be followed immediately by a paintCount().
-{
-  const { readFileSync } = await import("node:fs");
-  const cust = readFileSync(join(ROOT, "public/panels/billcustomer.js"), "utf8");
-  const lines = cust.split("\n");
-  const offenders = [];
-  lines.forEach((ln, i) => {
-    if (!/\bphoneEl\.value\s*=[^=]/.test(ln)) return;
-    if (/const setPhone\s*=/.test(ln)) return;                       // the helper itself
-    const next = (lines[i + 1] || "") + (lines[i + 2] || "");
-    if (!/paintCount\(\)/.test(next)) offenders.push(`line ${i + 1}: ${ln.trim().slice(0, 70)}`);
-  });
-  offenders.length === 0
-    ? ok("every write to the mobile box repaints the digit counter")
-    : bad(`a write to the mobile box leaves the counter stale: ${offenders.join(" · ")}`,
-      "go through setPhone(), or call paintCount() straight after — a counter that contradicts the box reads as 'retype it'");
-  /paintCount\(\);?\s*$/m.test(cust) && /const setPhone = \(v\) => \{ phoneEl\.value = v; paintCount\(\); \}/.test(cust)
-    ? ok("  …and setPhone() is the one door that does it")
-    : bad("setPhone() is gone or no longer repaints", "one door, so a new call site cannot forget");
-}
-
-// ── 3h. NO DOCUMENT PRINTS "Invalid Date" ─────────────────────────────────────────────────────
-// The ticket has refused since it was written and the thermal bill since 2026-08-05. The banquet
-// sheet guarded none of its THREE date fields, so it printed `Dated  Invalid Date` — the field
-// that decides which GST period a sale falls in — plus the same on its function line and on every
-// advance receipt. Reachable through the data, not only the preview: `banquet_bills.advances` is
-// JSONB and migrations 237/239 store the date with NO cast, so any text the client sends is kept.
-{
-  const base = { bill_no: "BQ/2026/014", subtotal: 1000, tax: 180, total: 1180 };
-  const JUNK = ["garbage", {}, "", "2026-13-45", null, 0, NaN, undefined, [], "n/a"];
-  let bad_ = 0, lost = 0;
-  for (const j of JUNK) {
-    const sheets = [
-      ["issued_at", { ...base, issued_at: j }],
-      ["fn_date", { ...base, issued_at: "2026-08-16T16:01:00Z", fn_date: j, func: "Reception" }],
-      ["an advance's date", { ...base, issued_at: "2026-08-16T16:01:00Z", advances: [{ amt: 500, mode: "upi", date: j }] }],
-    ];
-    for (const [field, bill] of sheets) {
-      const html = BILLDOC.banquetDocHtml({ bill, lines: [{ title: "A", qty: 1, price: 1000 }],
-        settings: {}, restaurant: {}, autoPrint: false });
-      if (/Invalid Date|NaN/.test(html)) { bad_++; if (bad_ === 1) bad(`the banquet sheet printed Invalid Date for ${field} = ${JSON.stringify(j)}`, "guard every date read, as the bill and the ticket already do — a missing date prints NOTHING, never a lie"); }
-      // and a missing date must never take the MONEY with it
-      if (field === "an advance's date" && !/500\/-/.test(html)) { lost++; if (lost === 1) bad(`an advance's amount vanished with its date (${JSON.stringify(j)})`, "drop the date, never the rupees"); }
-    }
-  }
-  if (!bad_ && !lost) ok(`all ${JUNK.length * 3} junk-date cases print no "Invalid Date", and every advance keeps its money`);
-  // …and a good sheet is untouched
-  const good = BILLDOC.banquetDocHtml({ bill: { ...base, issued_at: "2026-08-16T16:01:00Z",
-    fn_date: "2026-09-14", func: "Reception", fn_from: "7pm", advances: [{ amt: 500, mode: "upi", date: "2026-08-01" }] },
-    lines: [{ title: "A", qty: 1, price: 1000 }], settings: {}, restaurant: {}, autoPrint: false });
-  (/Dated<\/div><div class="v">16-08-2026/.test(good) && /UPI PAY DT\.01\/08\/2026/.test(good)
-    && /Function: Reception · 14\/09\/2026 7pm/.test(good))
-    ? ok("  …and a sheet with real dates prints all three of them exactly as before")
-    : bad("a good banquet sheet's dates changed", "the guard must only bite on an unparseable value");
-  // the thermal bill and the ticket, same question, so all three stay together
-  for (const j of JUNK) {
-    if (BILLDOC.kotWhen(j) !== "" && /Invalid|NaN/.test(BILLDOC.kotWhen(j))) {
-      bad(`kotWhen(${JSON.stringify(j)}) printed "${BILLDOC.kotWhen(j)}"`, "a ticket never prints Invalid Date"); break; }
-    const d = BILLDOC.billData({ settings: {}, restaurant: {}, session: { invoice_at: j, invoice_no: 1 },
-      orders: [{ status: "served", subtotal: 1, taxable_base: 1, tax_rate: 0.05, items: [{ title: "A", qty: 1, price: 1 }] }] });
-    if (/Invalid|NaN/.test(d.dateStr + d.invNo)) {
-      bad(`the bill printed "${d.dateStr}" / "${d.invNo}" for ${JSON.stringify(j)}`, "the bill never prints Invalid Date either"); break; }
-  }
-  ok("the bill and the ticket refuse the same ten junk values");
-}
-
-// ── 3j. TWO PLACES, TWO DEFAULT WORDS, ONE SETTING ────────────────────────────────────────────
-// Owner, 2026-08-28: the PRINTED bill says GST (it sits beside CGST/SGST and is read by a customer
-// and an inspector); a STAFF PANEL says just "Tax" (a panel is not a tax document). One setting —
-// the moment a restaurant types its own word, both use it. Only the fallback differs.
-//
-// The trap this replaces, and the reason nothing may prefill: the Settings form used to write the
-// SCREEN's word into `settings.tax_label`, and that setting drives the PAPER too — so opening the
-// form and saving made the printed bill say "Tax" where every other panel said "GST".
-{
-  const { readFileSync: rf } = await import("node:fs");
-  const cases = [
-    ["a restaurant that has never set the word", {}, "GST", "Tax"],
-    ["a word of only spaces", { tax_label: "   " }, "GST", "Tax"],
-    ["a restaurant that typed VAT", { tax_label: "VAT" }, "VAT", "VAT"],
-    ["a restaurant that typed GST itself", { tax_label: "GST" }, "GST", "GST"],
+  // OFF unless asked for — including when the reference is right there
+  const offCases = [
+    ["a bill with no chain row at all", { session: { bill_no: 1 } }],
+    ["the reference on the session", { session: { bill_no: 1, ...REF } }],
+    ["the reference on the order rows (today's API shape)",
+      { session: { bill_no: 1 }, orders: [{ ...line, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }] }],
   ];
-  const bads = [];
-  for (const [what, settings, paper, screen] of cases) {
-    const bi = BILLDOC.billIdentity(settings, {});
-    if (bi.taxLabel !== paper) bads.push(`${what}: the PAPER says "${bi.taxLabel}", not "${paper}"`);
-    if (bi.taxLabelScreen !== screen) bads.push(`${what}: the SCREEN says "${bi.taxLabelScreen}", not "${screen}"`);
-  }
-  bads.length === 0
-    ? ok("the paper defaults to GST and a panel defaults to Tax — and a restaurant's own word wins on both")
-    : bad(`the tax word is wrong somewhere: ${bads.join(" · ")}`,
-      "billIdentity carries BOTH — taxLabel for the paper, taxLabelScreen for a panel");
-
-  // …and every place the PAPER needs a generic word reads the paper's one
-  const mrpNote = (settings) => BILLDOC.billData({ settings: { ...settings, mrp_tax_treatment: "inclusive" },
-    restaurant: {}, session: { bill_no: 1 }, autoPrint: false,
-    orders: [{ status: "served", subtotal: 442, taxable_base: 400, nontax_amount: 42, mrp_amount: 42,
-      discount: 0, tax_rate: 0.05, items: [{ title: "Dal", qty: 1, price: 400, tax_mode: "excl" },
-        { title: "Water", qty: 2, price: 21, is_mrp: true, tax_mode: "incl" }] }] }).mrpNote;
-  const bqWord = (settings) => {
-    const html = BILLDOC.banquetDocHtml({ settings, restaurant: {}, autoPrint: false,
-      bill: { bill_no: "B", subtotal: 1000, tax: 180, total: 1180, tax_lines: [] },
-      lines: [{ title: "A", qty: 1, price: 1000 }] });
-    return (html.match(/<span>([A-Za-z]+) 18%<\/span>/) || [])[1];
-  };
-  const surf = [];
-  for (const [what, settings] of cases.map((c) => [c[0], c[1]])) {
-    const want = BILLDOC.billIdentity(settings, {}).taxLabel;
-    const note = mrpNote(settings), bq = bqWord(settings);
-    if (!note.endsWith(" " + want)) surf.push(`${what}: the MRP note says "${note}", not "${want}"`);
-    if (bq !== want) surf.push(`${what}: the banquet fallback says "${bq}", not "${want}"`);
-  }
-  surf.length === 0
-    ? ok("  …and every generic tax word ON PAPER is that one word")
-    : bad(`the paper's tax word differs by surface: ${surf.join(" · ")}`,
-      "read bi.taxLabel — an inline default gives one document a different word from another");
-
-  // NOTHING may write a default back into the setting, in any panel or form
-  const writers = [];
-  for (const f of ["public/panels/editor/app.js", "components/admin/RestaurantSettings.tsx",
-                   "public/panels/tablet/app.js"]) {
-    let src; try { src = rf(join(ROOT, f), "utf8"); } catch { continue; }
-    for (const line of src.split("\n")) {
-      if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue;
-      if (/(s|draft|settings)\.tax_label\s*=(?!=)/.test(line)) writers.push(`${f}: ${line.trim().slice(0, 80)}`);
-    }
-  }
-  writers.length === 0
-    ? ok("  …and no panel or form writes a default back into settings.tax_label")
-    : bad(`a default is being prefilled into settings.tax_label: ${writers.join(" · ")}`,
-      "one setting with two right defaults only works while nothing saves either one — show it as a hint");
-
-  // and the screen's own default still agrees with billIdentity's
-  const ed = rf(join(ROOT, "public/panels/editor/app.js"), "utf8");
-  /function taxLabel\(settings\) \{[\s\S]{0,200}?\|\| "Tax"\) \+ ""\)\.trim\(\) \|\| "Tax";/.test(ed)
-    ? ok("  …and the manager panel's on-screen word still falls back to Tax, as billIdentity says it should")
-    : bad("the manager panel's on-screen tax word no longer falls back to \"Tax\"",
-      "billIdentity.taxLabelScreen is the rule — the panel must agree with it");
-}
-
-// ── 3d. THE VERIFICATION LINE (mig 332) ───────────────────────────────────────────────────────
-// The signed chain is only checkable by whoever holds the paper if it is ON the paper. It prints
-// only when the caller supplies BOTH parts, so a bill printed before the columns are exposed is
-// unchanged — and never on a cancelled sheet, whose sale was withdrawn.
-{
-  const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
-  const line = { status: "served", subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0, tax_rate: 0.05,
-    items: [{ title: "A", qty: 1, price: 100, tax_mode: "excl" }] };
-  const mk = (sess, extra) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {}, orders: [{ ...line, ...(extra || {}) }], session: sess, autoPrint: false }));
-  const ver = (h) => (h.match(/Verification ([^<]*)/) || [])[1] || "";
-  !ver(mk({ bill_no: 1 }))
-    ? ok("a bill with no chain row prints no verification line (every bill today)")
-    : bad("a verification line printed with nothing to verify", "both parts must be supplied or the line stays off");
-  !ver(mk({ bill_no: 1, chain_seq: 7 })) && !ver(mk({ bill_no: 1, chain_hash: "abc" }))
-    ? ok("  …and half a reference prints nothing either")
-    : bad("half a chain reference reached the paper", "a partial reference cannot be checked and must not print");
-  ver(mk({ bill_no: 1, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" })) === "1042 · a3f9c1d2e4b5"
-    ? ok("a chained bill prints its sequence and the first 12 characters of its hash")
-    : bad(`the verification line reads "${ver(mk({ bill_no: 1, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }))}"`,
-      "one format, decided here, so every panel prints the same reference for the same bill");
-  !ver(mk({ bill_no: 1, chain_seq: 9, chain_hash: "deadbeefcafe0000" }, { status: "cancelled" }))
-    ? ok("  …and a cancelled sheet carries none")
-    : bad("a cancelled bill printed a verification line", "that sale was withdrawn; the band across the top is the statement");
-}
-
-// ── 3g. THE DIGIT COUNTER NEVER CONTRADICTS THE BOX BESIDE IT ─────────────────────────────────
-// "0/10" beside a complete number is the sheet giving two answers at once, and at a till the
-// honest reading of it is "retype it". paintCount() only ran on the `input` event, and assigning
-// `.value` from script fires no such event — so a reopened bill (the case the prefill feature was
-// BUILT for, owner 2026-07-30) opened showing "0/10" against "98250 12345", and tapping a
-// suggestion showed "5/10" against a ten-digit number. Measured on a 360px phone, 2026-08-22.
-// Structural, so it cannot come back by a THIRD path being added: every write to the box must
-// either go through setPhone() or be followed immediately by a paintCount().
-{
-  const { readFileSync } = await import("node:fs");
-  const cust = readFileSync(join(ROOT, "public/panels/billcustomer.js"), "utf8");
-  const lines = cust.split("\n");
-  const offenders = [];
-  lines.forEach((ln, i) => {
-    if (!/\bphoneEl\.value\s*=[^=]/.test(ln)) return;
-    if (/const setPhone\s*=/.test(ln)) return;                       // the helper itself
-    const next = (lines[i + 1] || "") + (lines[i + 2] || "");
-    if (!/paintCount\(\)/.test(next)) offenders.push(`line ${i + 1}: ${ln.trim().slice(0, 70)}`);
-  });
-  offenders.length === 0
-    ? ok("every write to the mobile box repaints the digit counter")
-    : bad(`a write to the mobile box leaves the counter stale: ${offenders.join(" · ")}`,
-      "go through setPhone(), or call paintCount() straight after — a counter that contradicts the box reads as 'retype it'");
-  /paintCount\(\);?\s*$/m.test(cust) && /const setPhone = \(v\) => \{ phoneEl\.value = v; paintCount\(\); \}/.test(cust)
-    ? ok("  …and setPhone() is the one door that does it")
-    : bad("setPhone() is gone or no longer repaints", "one door, so a new call site cannot forget");
-}
-
-// ── 3h. NO DOCUMENT PRINTS "Invalid Date" ─────────────────────────────────────────────────────
-// The ticket has refused since it was written and the thermal bill since 2026-08-05. The banquet
-// sheet guarded none of its THREE date fields, so it printed `Dated  Invalid Date` — the field
-// that decides which GST period a sale falls in — plus the same on its function line and on every
-// advance receipt. Reachable through the data, not only the preview: `banquet_bills.advances` is
-// JSONB and migrations 237/239 store the date with NO cast, so any text the client sends is kept.
-{
-  const base = { bill_no: "BQ/2026/014", subtotal: 1000, tax: 180, total: 1180 };
-  const JUNK = ["garbage", {}, "", "2026-13-45", null, 0, NaN, undefined, [], "n/a"];
-  let bad_ = 0, lost = 0;
-  for (const j of JUNK) {
-    const sheets = [
-      ["issued_at", { ...base, issued_at: j }],
-      ["fn_date", { ...base, issued_at: "2026-08-16T16:01:00Z", fn_date: j, func: "Reception" }],
-      ["an advance's date", { ...base, issued_at: "2026-08-16T16:01:00Z", advances: [{ amt: 500, mode: "upi", date: j }] }],
-    ];
-    for (const [field, bill] of sheets) {
-      const html = BILLDOC.banquetDocHtml({ bill, lines: [{ title: "A", qty: 1, price: 1000 }],
-        settings: {}, restaurant: {}, autoPrint: false });
-      if (/Invalid Date|NaN/.test(html)) { bad_++; if (bad_ === 1) bad(`the banquet sheet printed Invalid Date for ${field} = ${JSON.stringify(j)}`, "guard every date read, as the bill and the ticket already do — a missing date prints NOTHING, never a lie"); }
-      // and a missing date must never take the MONEY with it
-      if (field === "an advance's date" && !/500\/-/.test(html)) { lost++; if (lost === 1) bad(`an advance's amount vanished with its date (${JSON.stringify(j)})`, "drop the date, never the rupees"); }
-    }
-  }
-  if (!bad_ && !lost) ok(`all ${JUNK.length * 3} junk-date cases print no "Invalid Date", and every advance keeps its money`);
-  // …and a good sheet is untouched
-  const good = BILLDOC.banquetDocHtml({ bill: { ...base, issued_at: "2026-08-16T16:01:00Z",
-    fn_date: "2026-09-14", func: "Reception", fn_from: "7pm", advances: [{ amt: 500, mode: "upi", date: "2026-08-01" }] },
-    lines: [{ title: "A", qty: 1, price: 1000 }], settings: {}, restaurant: {}, autoPrint: false });
-  (/Dated<\/div><div class="v">16-08-2026/.test(good) && /UPI PAY DT\.01\/08\/2026/.test(good)
-    && /Function: Reception · 14\/09\/2026 7pm/.test(good))
-    ? ok("  …and a sheet with real dates prints all three of them exactly as before")
-    : bad("a good banquet sheet's dates changed", "the guard must only bite on an unparseable value");
-  // the thermal bill and the ticket, same question, so all three stay together
-  for (const j of JUNK) {
-    if (BILLDOC.kotWhen(j) !== "" && /Invalid|NaN/.test(BILLDOC.kotWhen(j))) {
-      bad(`kotWhen(${JSON.stringify(j)}) printed "${BILLDOC.kotWhen(j)}"`, "a ticket never prints Invalid Date"); break; }
-    const d = BILLDOC.billData({ settings: {}, restaurant: {}, session: { invoice_at: j, invoice_no: 1 },
-      orders: [{ status: "served", subtotal: 1, taxable_base: 1, tax_rate: 0.05, items: [{ title: "A", qty: 1, price: 1 }] }] });
-    if (/Invalid|NaN/.test(d.dateStr + d.invNo)) {
-      bad(`the bill printed "${d.dateStr}" / "${d.invNo}" for ${JSON.stringify(j)}`, "the bill never prints Invalid Date either"); break; }
-  }
-  ok("the bill and the ticket refuse the same ten junk values");
-}
-
-// ── 3j. ONE WORD FOR THE TAX, ON EVERY SURFACE ────────────────────────────────────────────────
-// `tax_label` had TWO defaults inside this one file: billIdentity said "Tax", and three inline
-// reads said "GST". A restaurant that has never set the word — the default state — then got a
-// different one depending on which panel printed the bill, because the manager panel copies
-// billIdentity's answer into its own settings first and nothing else does. Manager: "MRP items
-// include Rs 2 Tax". Tablet, Access preview, admin preview: "...Rs 2 GST".
-{
-  const mrpNote = (settings) => BILLDOC.billData({ settings: { ...settings, mrp_tax_treatment: "inclusive" },
-    restaurant: {}, session: { bill_no: 1 }, autoPrint: false,
-    orders: [{ status: "served", subtotal: 442, taxable_base: 400, nontax_amount: 42, mrp_amount: 42,
-      discount: 0, tax_rate: 0.05, items: [{ title: "Dal", qty: 1, price: 400, tax_mode: "excl" },
-        { title: "Water", qty: 2, price: 21, is_mrp: true, tax_mode: "incl" }] }] }).mrpNote;
-  const bqWord = (settings) => {
-    const html = BILLDOC.banquetDocHtml({ settings, restaurant: {}, autoPrint: false,
-      bill: { bill_no: "B", subtotal: 1000, tax: 180, total: 1180, tax_lines: [] },
-      lines: [{ title: "A", qty: 1, price: 1000 }] });
-    return (html.match(/<span>([A-Za-z]+) 18%<\/span>/) || [])[1];
-  };
-  // the manager panel resolves the word FIRST and copies it in; every other surface passes the
-  // settings straight through. Both must land on the same word.
-  const cases = [
-    ["a restaurant that has never set the word", {}],
-    ["the manager panel, which copies billIdentity's answer in first", { tax_label: "Tax" }],
-    ["a whitespace label", { tax_label: "   " }],
-    ["a restaurant that set its own word", { tax_label: "VAT" }],
-  ];
-  const bads = [];
-  for (const [what, settings] of cases) {
-    const want = BILLDOC.billIdentity(settings, {}).taxLabel;
-    const note = mrpNote(settings), bq = bqWord(settings);
-    if (!note.endsWith(" " + want)) bads.push(`${what}: the MRP note says "${note}", not "${want}"`);
-    if (bq !== want) bads.push(`${what}: the banquet fallback says "${bq}", not "${want}"`);
-  }
-  bads.length === 0
-    ? ok("every surface prints ONE word for the tax — billIdentity's answer, whatever the settings say")
-    : bad(`the tax word differs by surface: ${bads.join(" · ")}`,
-      "read bi.taxLabel — an inline `s.tax_label || \"GST\"` gives the tablet a different word from the manager panel");
-  // and there is no second default left in the file
-  const { readFileSync: rf } = await import("node:fs");
-  // Scan the CODE, not the comments — the note explaining this fix quotes the old default, and a
-  // guard that reads its own explanation as evidence is the fault it is meant to catch.
-  const js = rf(join(ROOT, "public/panels/billdoc.js"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
-  const inline = [...js.matchAll(/s\.tax_label\s*\|\|\s*"([^"]*)"/g)].map((m) => m[1]);
-  const stray = inline.filter((w, i) => i > 0 || w !== "Tax");
+  const stray = offCases.filter(([, a]) => ver(mk(a)));
   stray.length === 0
-    ? ok("  …and only billIdentity carries the default")
-    : bad(`a second default for the tax word: ${stray.join(", ")}`,
-      "one setting, one default — resolve it in billIdentity and read bi.taxLabel everywhere else");
-}
+    ? ok("the verification line stays off every bill until the owner asks for it (item 19 is his decision)")
+    : bad(`a verification line reached a guest's bill: ${stray.map((x) => x[0]).join(", ")}`,
+      "it prints only on chainOnPaper — whether a receipt carries it at all is not decided yet");
 
-// ── 3m. THE NUMBER ROW IS NAMED AFTER THE DOCUMENT IT IS ON ───────────────────────────────────
-// A composition restaurant's sheet was headed BILL OF SUPPLY and then labelled its number row
-// "INVOICE" — the sheet arguing with itself on the one document that kind of business hands over.
-// A composition dealer may not issue a tax invoice; CGST Rule 49 asks that sheet for "a consecutive
-// serial number". Nothing about the NUMBER changes — same number, same restaurant-chosen prefix.
-{
-  const SET = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }],
-    gstin: "24ABCDE1234F1Z5" };
-  const row = (extra, cancelled) => {
-    const html = BILLDOC.billDocHtml(BILLDOC.billData({ settings: { ...SET, ...extra }, restaurant: {},
-      autoPrint: false, session: { bill_no: 41, invoice_no: 118, invoice_at: "2026-08-16T16:01:00Z" },
-      orders: [{ status: cancelled ? "cancelled" : "served", subtotal: 880, taxable_base: 880,
-        nontax_amount: 0, discount: 0, tax_rate: extra.price_tax_mode === "composition" ? 0 : 0.05,
-        items: [{ title: "Thali", qty: 4, price: 220 }] }] }));
-    const m = html.match(/<div class="kv"><span>([^<]*)<\/span><b>([^<]*)<\/b>/);
-    return { kind: (html.match(/<div class="kind">([^<]*)/) || [])[1], label: m && m[1], value: m && m[2] };
-  };
-  const cases = [
-    ["an ordinary tax invoice", {}, false, "Tax Invoice", "Invoice"],
-    ["a composition Bill of Supply", { price_tax_mode: "composition" }, false, "Bill of Supply", "Serial no"],
-    ["a cancelled sale", {}, true, "Cancelled Bill", "Invoice"],
-    ["a composition sheet with its own prefix", { price_tax_mode: "composition", invoice_prefix: "BOS" }, false, "Bill of Supply", "Serial no"],
+  // …and when it IS asked for, it works from either shape, and refuses half a reference
+  const on = [
+    ["from the session", { session: { bill_no: 1, ...REF }, chainOnPaper: true }, "1042 · a3f9c1d2e4b5"],
+    ["from the order rows", { session: { bill_no: 1 }, chainOnPaper: true,
+      orders: [{ ...line, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }] }, "1042 · a3f9c1d2e4b5"],
+    ["half a reference on the session", { session: { bill_no: 1, chain_seq: 7 }, chainOnPaper: true }, ""],
+    ["half on one row, half on another", { session: { bill_no: 1 }, chainOnPaper: true,
+      orders: [{ ...line, chain_seq: 5 }, { ...line, chain_hash: "beef0000cafe" }] }, ""],
+    ["a cancelled sale", { session: { bill_no: 1, ...REF }, chainOnPaper: true,
+      orders: [{ ...line, status: "cancelled" }] }, ""],
   ];
-  const bads = [];
-  for (const [what, extra, cancelled, kind, label] of cases) {
-    const r = row(extra, cancelled);
-    if (r.kind !== kind) bads.push(`${what}: headed "${r.kind}"`);
-    if (r.label !== label) bads.push(`${what}: the number row is labelled "${r.label}", not "${label}"`);
-  }
-  // the NUMBER itself, and the restaurant's chosen prefix, must be untouched
-  const own = row({ price_tax_mode: "composition", invoice_prefix: "BOS" }, false);
-  if (!/^BOS\/\d{4}-\d{2}\/000118$/.test(own.value || "")) bads.push(`the chosen prefix did not reach the number: ${own.value}`);
-  const plain = row({}, false);
-  if (!/^INV\/\d{4}-\d{2}\/000118$/.test(plain.value || "")) bads.push(`the default prefix changed: ${plain.value}`);
-  bads.length === 0
-    ? ok("the number row is named after the document it sits on, and the number itself never moves")
-    : bad(`the sheet argues with itself: ${bads.join(" · ")}`,
-      "a Bill of Supply may not call its number an Invoice — but the NUMBER, and the restaurant's own prefix, stay exactly as they are");
-}
-
-// ── 3l. AN ALL-MRP BILL IS JUST A BILL ────────────────────────────────────────────────────────
-// A shop whose whole sale is sealed products printed "Food subtotal ₹0" over "MRP items ₹42". The
-// split says nothing when there is no food, and a zero in a labelled money box reads as a mistake
-// even though the column adds up (owner, 2026-08-28). Same reasoning mrpPart() already applies to a
-// composition restaurant. A bill with ANY food in it must be untouched.
-{
-  const rowsOf = (d) => {
-    const html = BILLDOC.billDocHtml({ name: "R", lines: [{ title: "A", qty: 1, price: 42 }],
-      tableDisp: "5", dateStr: "x", ...d });
-    const block = html.slice(html.indexOf('class="totals"'), html.indexOf(">TOTAL<"));
-    return [...block.matchAll(/<div class="t[^"]*"><span>([^<]*)<\/span>/g)].map((m) => m[1]);
-  };
-  const only = rowsOf({ subtotal: 42, nontax: 42, total: 42, taxRows: [] });
-  const mixed = rowsOf({ subtotal: 442, nontax: 42, total: 462,
-    taxRows: [{ label: "CGST", rate: 2.5, amt: 10 }, { label: "SGST", rate: 2.5, amt: 10 }] });
-  const none = rowsOf({ subtotal: 1240, nontax: 0, total: 1302,
-    taxRows: [{ label: "CGST", rate: 2.5, amt: 31 }, { label: "SGST", rate: 2.5, amt: 31 }] });
-  const bads = [];
-  if (only.includes("Food subtotal") || only.includes("MRP items")) bads.push(`an all-sealed bill still splits: ${only.join(" / ")}`);
-  if (!only.includes("Subtotal")) bads.push(`an all-sealed bill lost its Subtotal: ${only.join(" / ")}`);
-  if (!mixed.includes("Food subtotal") || !mixed.includes("MRP items")) bads.push(`a mixed bill stopped splitting: ${mixed.join(" / ")}`);
-  if (!none.includes("Subtotal") || none.includes("MRP items")) bads.push(`an ordinary bill changed: ${none.join(" / ")}`);
-  // and it must still add up in all three
-  for (const [what, d] of [["all sealed", { subtotal: 42, nontax: 42, total: 42, taxRows: [] }],
-    ["mixed", { subtotal: 442, nontax: 42, total: 462, taxRows: [{ label: "C", rate: 2.5, amt: 10 }, { label: "S", rate: 2.5, amt: 10 }] }]]) {
-    const R = BILLDOC.billRows(d);
-    const base = R.disc > 0 ? R.taxable : R.subtotal;
-    if (base + R.tax + R.nontax + R.roundOff !== R.total) bads.push(`${what} no longer foots`);
-    if (Math.abs(R.roundOff) > 2) bads.push(`${what} needs a round-off of ${R.roundOff}`);
-  }
-  bads.length === 0
-    ? ok("a bill of nothing but sealed goods reads as a plain Subtotal, and a mixed bill still splits")
-    : bad(`the sealed-goods split is wrong: ${bads.join(" · ")}`,
-      "drop the split only when there is no food at all — never when there is some");
-}
-
-// ── 3k. ONE BAD LINE DOES NOT COST THE WHOLE PIECE OF PAPER ───────────────────────────────────
-// A single null in a line list threw out of the render, on ALL THREE documents. They are drawn
-// into a window.open or a hidden iframe, so a throw there is a BLANK WINDOW: the kitchen gets no
-// ticket, or the guest gets no bill, with nothing on screen saying why — the worst possible shape
-// of "a tap must never vanish in silence", at the till, mid-rush. `items` is JSONB in this
-// product, so a null element is one database write away. Printing the other nine dishes beats
-// printing nothing.
-{
-  const cases = [
-    ["a ticket with a null among its lines", () => BILLDOC.kotDocHtml({ rname: "R", kot: 1,
-      lines: [{ qty: 1, title: "Dal" }, null, { qty: 2, title: "Naan" }] }), /Dal/],
-    ["a ticket of nothing but nulls", () => BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [null, undefined] }), /\(no items\)/],
-    ["kotLineHtml with no argument", () => BILLDOC.kotLineHtml(), /class="kl"/],
-    ["banquetDocHtml with no argument", () => BILLDOC.banquetDocHtml(), /Tax Invoice/],
-    ["a bill with a null among its lines", () => BILLDOC.billDocHtml({ name: "R", taxRows: [],
-      lines: [null, { title: "Dal", qty: 1, price: 100 }], subtotal: 100, total: 100 }), /Dal/],
-    ["a banquet sheet with a null line", () => BILLDOC.banquetDocHtml({ bill: { bill_no: "B", subtotal: 100, total: 100 },
-      lines: [null, { title: "Hall", qty: 1, price: 100 }], settings: {}, restaurant: {} }), /Hall/],
-    ["an ORDER carrying a null item", () => BILLDOC.billDocHtml(BILLDOC.billData({ settings: {}, restaurant: {},
-      session: { bill_no: 1 }, orders: [{ status: "served", subtotal: 100, taxable_base: 100, tax_rate: 0.05,
-        items: [null, { title: "Dal", qty: 1, price: 100 }] }] })), /Dal/],
-  ];
-  const bads = [];
-  for (const [what, fn, want] of cases) {
-    try {
-      const html = fn();
-      if (!want.test(html)) bads.push(`${what}: rendered, but the good lines are missing`);
-    } catch (e) { bads.push(`${what}: threw — ${e.message}`); }
-  }
-  bads.length === 0
-    ? ok(`all ${cases.length} bad-line shapes still produce a document, with the good lines on it`)
-    : bad(`a bad line stopped the paper: ${bads.join(" · ")}`,
-      "drop empty entries — these documents render into a window.open, so a throw is a blank window and no paper at all");
-  // every public entry point survives being called with nothing
-  const threw = [];
-  for (const [k, fn] of Object.entries(BILLDOC)) {
-    if (typeof fn !== "function") continue;
-    try { fn(); } catch (e) { threw.push(`${k}: ${e.message}`); }
-  }
-  threw.length === 0
-    ? ok(`  …and all ${Object.keys(BILLDOC).length} entry points survive being called with nothing`)
-    : bad(`an entry point throws on no argument: ${threw.join(" · ")}`,
-      "this file is the public LFH_BILLDOC API — every door defaults its argument");
-}
-
-// ── 3n. THE TILL'S CUSTOMER SEARCH — THE CAP IS REAL, AND ONLY ONE SIDE HOLDS IT ──────────────
-// `lfh_customer_phone_search` used to put its LIMIT AFTER a `json_agg`, which caps the one
-// aggregate row and not the array inside it — measured before migration 365: asking for 1 returned
-// 5. This fires while a waiter types, on the busiest path in the app.
-// The second half matters just as much: the sheet reuses an answer for LONGER numbers only when
-// the server did not truncate it, and it must never work that out from a row count and a constant
-// of its own. Measured while building this, with the two out of step by six rows: the guest's name
-// never appeared at all. So the server SAYS, and this checks that nothing on the panel guesses.
-{
-  const { readFileSync: rf } = await import("node:fs");
-  const bads = [];
-  // (a) the migration caps ROWS, inside the query, not the aggregate
-  const migs = (await import("node:fs")).readdirSync(join(ROOT, "supabase/migrations"))
-    .filter((f) => /customer_phone_search|bill_customer|row_cap/.test(f)).sort();
-  const live = migs.map((f) => rf(join(ROOT, "supabase/migrations", f), "utf8"))
-    .filter((t) => t.includes("CREATE OR REPLACE FUNCTION lfh_customer_phone_search")).pop();
-  if (!live) bads.push("lfh_customer_phone_search is defined in no migration");
-  else {
-    const fn = live.slice(live.lastIndexOf("CREATE OR REPLACE FUNCTION lfh_customer_phone_search"));
-    const body = fn.slice(0, fn.indexOf("$$;") + 3);
-    const limAt = body.lastIndexOf("LIMIT ");
-    const aggAt = body.lastIndexOf("json_agg");
-    if (limAt < 0) bads.push("the search has no LIMIT at all");
-    else if (limAt > aggAt) bads.push("the LIMIT still sits AFTER json_agg — it caps one aggregate row, not the rows");
-  }
-  // (b) the route sends the truncation flag, and holds the cap in ONE named place
-  const route = rf(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8");
-  const at = route.indexOf('p === "customer-search"');
-  const blk = at < 0 ? "" : route.slice(at, at + 1800);
-  if (!/whole:\s*matches\.length\s*<\s*CUSTOMER_SEARCH_ROWS/.test(blk))
-    bads.push("the route no longer tells the panel whether it truncated");
-  if (!/p_limit:\s*CUSTOMER_SEARCH_ROWS/.test(blk))
-    bads.push("the route's row cap is not the one named constant it reports against");
-  // (c) the panel holds NO cap of its own — that is the drift that loses a customer silently
-  const cust = rf(join(ROOT, "public/panels/billcustomer.js"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
-  if (/ASK_ROWS|rows\.length\s*<\s*\d+/.test(cust))
-    bads.push("the panel is guessing the server's cap again instead of reading `whole`");
-  if (!/res && res\.whole === true/.test(cust))
-    bads.push("the panel no longer reads the server's truncation flag");
-  // (d) an unknown flag must mean "keep asking", never "assume complete"
-  if (/whole:\s*true/.test(cust)) bads.push("the panel defaults `whole` to true — an old server would lose customers");
-  bads.length === 0
-    ? ok("the customer search's row cap is real, and only the SERVER decides whether an answer was complete")
-    : bad(`the till's customer search can over-read or lose a customer: ${bads.join(" · ")}`,
-      "cap the ROWS inside the query, and let the server report truncation — a constant on each side drifts silently");
+  const wrong = on.filter(([, a, want]) => ver(mk(a)) !== want);
+  wrong.length === 0
+    ? ok("  …and when it is switched on it reads the same reference from either shape, and refuses half of one")
+    : bad(`the verification reference is wrong: ${wrong.map(([w, a, want]) => `${w} → "${ver(mk(a))}", expected "${want}"`).join(" · ")}`,
+      "both parts must come from the SAME place, and a cancelled sale carries none");
 }
 
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
