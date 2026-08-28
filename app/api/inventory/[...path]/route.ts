@@ -179,7 +179,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
-  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
+  if (!rid) return err("No restaurant scope.", 400);
   if (!(await moduleOn(g, rid))) return err("Inventory isn't enabled for this restaurant.", 403);
   const path = (await ctx.params).path || [];
   const q = req.nextUrl.searchParams;
@@ -361,7 +369,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
-  if (!rid) return err("This screen doesn’t know which restaurant it is for — open it from the admin console.", 400);
+  if (!rid) return err("No restaurant scope.", 400);
   if (!(await moduleOn(g, rid))) return err("Inventory isn't enabled for this restaurant.", 403);
   const path = (await ctx.params).path || [];
   const actor = actorOf(g);

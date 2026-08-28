@@ -205,7 +205,7 @@ try {
   // ?rid= IS NOT OPTIONAL, AND ITS ABSENCE MADE THIS CHECK PASS FOR THE WRONG REASON. Every
   // /api/editor write resolves its restaurant through lib/panelScope → panelRestaurantId: from the
   // staff user for a member of staff, from ?rid= (or the act-as cookie) for the admin super-user. With
-  // neither, editorScope answers 400 "…doesn’t know which restaurant it is for" — the same 400 this line is looking for. So
+  // neither, editorScope answers 400 "No restaurant scope" — the same 400 this line is looking for. So
   // it would have gone green on a build where make-head happily promoted a head on a CLOSED table. The
   // refusal is now read from the words as well as the number, so no other 400 can satisfy it.
   const mh = await fetch(`${BASE}/api/editor/members/${pend.id}/make-head?rid=${RID}`, {

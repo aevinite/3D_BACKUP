@@ -89,6 +89,18 @@ function sentences(src, path) {
   ];
   // Allowed, with the reason. A word is on this list because a REAL SENTENCE legitimately needs it.
   const ALLOWED = [
+    // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+    // It was reworded into plain words and he turned it down on the reachability, not the wording:
+    // *"if you make everything perfect the no 3 will not even happen"*. He is right, and it is worth
+    // writing down rather than re-deriving: lib/panelScope.ts → panelRestaurantId returns
+    // `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so a waiter,
+    // manager or cook can never see this sentence. It reaches exactly one reader — the ADMIN
+    // super-user who opened a panel directly instead of through the console — and that reader knows
+    // what "scope" means. Do not reword these eight, and do not re-report them.
+    //
+    // The word stays WATCHED, so a NEW "scope" on a screen a real person reads is still caught. This
+    // allowance names the sentences, not the word.
+    /^No restaurant scope\.?$|^No restaurant scope — open this panel from the admin console\.$/,
     // "scope" as ordinary English about how far a thing reaches, in a message to US, not to staff.
     /one restaurant\)|all restaurants\)/,
     // The reader here is a developer calling the API with the wrong verb, not anyone on a screen.
