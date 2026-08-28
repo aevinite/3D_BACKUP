@@ -111,6 +111,24 @@ before a `font` shorthand.
 | **`public/content/starter-menu.json` loads 62 of its 72 dish photos from `www.themealdb.com`, which `next.config.ts` does not grant.** Ledger row `P29492`. | Nothing breaks today: the dish cards render a plain `<img>`, not `next/image`, so the grant is never consulted, and the content policy allows any https image host. Granting an outside host is a **permission decision**, and it is a landmine only for the day a card switches to `next/image` — where it would hit **brand-new restaurants only**. Reported as a numbered decision, not silently granted. |
 | **Three rows on `.claude/REQUESTS.md` are built in the code but still read as owed** (the 2026-07-28 per-tab admin session separation, the `?view=real` "see the actual panel" toggle, and the `admin:view` log marking with its 🛡 pill). | His own rule says a tick means built **AND watched working in a browser**. I have code evidence for all three and a browser check for none. Ticking them would claim something I did not do. Raised as a numbered decision instead. |
 
+## After he read the report — 2026-08-28
+
+He answered the numbered items. What changed:
+
+| item | his answer | what happened |
+|---|---|---|
+| **6** — the Allow page sent a manager to a password prompt | **don't do it** | reverted, and the two checks that guarded it removed in the same commit — a guard left asserting a reverted fix is a red check nobody can act on |
+| **7** — the printer guide replaced the Printing screen | **don't do it** | reverted, same commit, guard check removed |
+| **8** — button labels jammed at the top of their buttons | *"show me the visual diff"*, then **do it** | shown side by side on port 6765 (before/after, desktop and phone, with the measured 0px-above/34px-below and 16/18 after); **kept** |
+| **9** — `CLAUDE.md` had 56 bytes left | **do it** | 23,944 → 23,209. No rule dropped: two bullets that had grown back into paragraphs were compressed to pointers, both already written out in full elsewhere |
+| **10** — a starter-menu image host was not granted | **do it** | granted, and the guard now checks BOTH directions |
+| **11** — three built rows read as owed | **do it** | two driven in a browser and ticked; the third part-verified and deliberately left open, with what was and was not seen written into the row |
+| **12** — the dish page lost a restaurant's DARK default | **do it** | fixed in T2's file on his explicit word, driven with a real dark-default restaurant, guarded, and the detail doc's paragraph flipped from a known-fault note to the rule |
+| **13** — five unused starter pictures | **do it** | deleted |
+
+**Final tally: 500 sweep-#6 rows re-run (494 ✅ · 6 ⏭ · 0 ❌ · 0 regressions) and 500 new rows
+(500 ✅). Eleven items fixed and on the branch; two fixed and then reverted on his word.**
+
 ## Guards added by this run
 
 | command | checks | where it runs |
