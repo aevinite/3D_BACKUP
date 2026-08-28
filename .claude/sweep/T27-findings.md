@@ -2,7 +2,7 @@
 
 Branch `sweep7/t27-every-word`, against `origin/main` c005b3d3, 2026-08-27/28.
 Ledger: `.claude/sweep/LEDGER/T27.md` — 500 sweep-#6 rows re-run in place, 500 new rows
-`P28101`–`P28603`. The four-part report went to the terminal, not here.
+`P28101`–`P28604`. The four-part report went to the terminal, not here.
 
 ## 7 problems, 7 commits
 
@@ -72,8 +72,9 @@ Three files is far enough to miss. **Item 1 is that gap closed** — the NO now 
 ## What the owner decided, 2026-08-28
 
 Shown the four-part report, he kept **1, 2, 4, 5, 7**, dropped **3**, widened **6** ("keep removed
-everywhere"), kept **8**, and approved **11** on condition it was totally safe. **10** he left to my
-judgement on cost — measured at 0.13s and not required, so it was left. **9, 12 and 13** dropped.
+everywhere"), kept **8**, and approved **11** on condition it was totally safe. **10** he first left to my
+judgement on cost — measured at 0.13s — and then asked for it outright, so it is built: --hook mode
+skips in 0.05s unless a file that can carry visible text was edited. **9, 12 and 13** dropped.
 
 Two follow-ups came out of that:
 

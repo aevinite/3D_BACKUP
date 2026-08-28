@@ -15,13 +15,47 @@
 // the next person deletes.
 //
 // Reads files only. No key, no database, no browser. Well under a second.
+//
+//   node scripts/verify-wording.mjs            # check this checkout
+//   node scripts/verify-wording.mjs <root>     # check another checkout (worktree)
+//   node scripts/verify-wording.mjs --hook     # Claude Code PostToolUse mode (reads stdin)
+//
+// --hook reads the tool-call JSON on stdin and does NOTHING unless a file that can carry visible
+// text was just edited. That matters more here than for the other guards in the chain: this one
+// reads 269 files to collect its sentences, and most edits in this repo are migrations, docs or
+// scripts, which cannot change a word on a screen. Without the filter it would do the full scan on
+// every edit; with it, it does nothing at all for the majority of them.
+//
+// It derives the checkout root from the edited file's path, so it is correct inside a worktree.
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const ROOT = process.cwd();
-const read = (p) => readFileSync(`${ROOT}/${p}`, "utf8");
+const HOOK = process.argv.includes("--hook");
+// The three trees this guard reads. A file outside them cannot put a word on a screen.
+const TEXT_FILE = /[/\\](app|components|public[/\\]panels)[/\\].*\.(ts|tsx|js)$/;
+
+let ROOT = process.argv[2] && process.argv[2] !== "--hook" ? process.argv[2] : process.cwd();
+if (HOOK) {
+  let raw = "";
+  try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }
+  let payload = {};
+  try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
+  const file = payload?.tool_input?.file_path || payload?.tool_response?.filePath || "";
+  if (!TEXT_FILE.test(file)) process.exit(0);                    // not our business
+  const f = file.replace(/\\/g, "/");
+  // Cut at the FIRST of the three roots so a worktree path resolves to that worktree.
+  const cut = [f.indexOf("/app/"), f.indexOf("/components/"), f.indexOf("/public/panels/")]
+    .filter((i) => i > 0).sort((a, b) => a - b)[0];
+  ROOT = cut > 0 ? file.slice(0, cut) : ROOT;
+}
+// A guard must never break somebody's edit. A missing file mid-rebase goes quiet in hook mode
+// rather than throwing.
+const read = (p) => {
+  try { return readFileSync(`${ROOT}/${p}`, "utf8"); }
+  catch (e) { if (HOOK) process.exit(0); throw e; }
+};
 let failed = 0;
-const ok = (m) => console.log(`  ok   ${m}`);
+const ok = (m) => { if (!HOOK) console.log(`  ok   ${m}`); };
 const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
 
 const files = execFileSync("bash", ["-lc",
@@ -233,13 +267,15 @@ function sentences(src, path) {
 }
 
 
-console.log("");
+if (!HOOK) console.log("");
 if (failed) {
   console.log(`${failed} check(s) failed — see above.`);
+  if (HOOK) process.exit(2);   // tell the editing session immediately, the way the other guards do
   console.log("Every one of these found something real once. If a hit is genuinely fine, add it to");
   console.log("that check's allow-list WITH the reason — do not widen the pattern.");
   process.exit(1);
 }
+if (HOOK) process.exit(0);
 console.log("All checks passed — the sentences on the screens still read as English.");
 if (!existsSync(`${ROOT}/docs/REJECTED-IDEAS.md`)) process.exit(0);
 
