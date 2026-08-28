@@ -29,6 +29,9 @@ export default function PairPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ name: string } | null>(null);
+  // WHO pressed Allow, remembered separately from `st` — the done screen needs it to decide where
+  // its one button goes, and a later poll could arrive with a different shape.
+  const [who, setWho] = useState<"admin" | "staff" | null>(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export default function PairPage() {
       const r = await fetch(`/api/pair?c=${encodeURIComponent(code)}`, { cache: "no-store" });
       const d = (await r.json()) as State;
       setSt(d);
+      if (d.who) setWho(d.who);
       // The machine's own name is the default, so the box is already right and nobody has to think
       // about it (owner: "what the fuck is a computer name"). It stays editable for the one case
       // that matters — two shops both called "Main PC" in his head, not the machine's.
@@ -87,7 +91,18 @@ export default function PairPage() {
           The helper is already asking for work. It will start again by itself every time this
           computer is switched on, so you never have to come back to this page.
         </p>
-        <a className="pr-btn ghost" href="/aevinite/printing">Choose which printer prints what →</a>
+        {/* ── WHERE THIS BUTTON GOES DEPENDS ON WHO PRESSED ALLOW (owner's review, 2026-08-28) ──
+            It went to the Aevidine console for everybody. But the printing board lives in TWO
+            places — the console, and the restaurant's own Manager panel under Settings → Printing —
+            and the person standing at the printer is usually the manager. So tapping it bounced them
+            to a staff-password screen they have no answer to, which reads like their own login had
+            just failed, at the exact moment the guide says "now go and choose printers". */}
+        {who === "admin"
+          ? <a className="pr-btn ghost" href="/aevinite/printing">Choose which printer prints what →</a>
+          : <>
+              <a className="pr-btn ghost" href="/manager">Choose which printer prints what →</a>
+              <p className="pr-note">You will land on your own panel — it is under <b>Settings → Printing</b>.</p>
+            </>}
       </>
     );
     if (!st) return <p className="pr-lead">Reading…</p>;
@@ -115,7 +130,13 @@ export default function PairPage() {
         <div className="pr-tick" aria-hidden="true">✓</div>
         <h1>Already linked</h1>
         <p className="pr-lead">This computer has been allowed to print. There is nothing left to do.</p>
-        <a className="pr-btn ghost" href="/aevinite/printing">Open Printing →</a>
+        {/* Same rule as the green screen above: a manager gets their own panel, not our console. */}
+        {who === "admin"
+          ? <a className="pr-btn ghost" href="/aevinite/printing">Open Printing →</a>
+          : <>
+              <a className="pr-btn ghost" href="/manager">Open Printing →</a>
+              <p className="pr-note">On your own panel, under <b>Settings → Printing</b>.</p>
+            </>}
       </>
     );
 

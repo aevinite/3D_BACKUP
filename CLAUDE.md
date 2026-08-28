@@ -208,9 +208,9 @@ update the detail doc's section in the same commit.
   staff outbox on a misreading.
 - **🔑 Access model v2 (the 4-rung ladder is RETIRED):** a toggle exists only where the owner
   listed one (`lib/accessTree.ts`); only the ADMIN holds permissions; hiding is never the only
-  guard. Spec: `docs/ACCESS-MODEL.md`; **still-unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
-  (9 open `☐` — count it, never trust this number: `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`)**.
-  Guards: `verify:access`, `verify:everything` (`--list` for
+  guard. Spec: `docs/ACCESS-MODEL.md`; **unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
+  (9 open `☐`; recount: `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`)**. Guards:
+  `verify:access`, `verify:everything` (`--list` for
   the phase map — never hard-code phase numbers). **French House is written to; Aangan is the
   READ-ONLY control at factory defaults.**
 - **👤 One profile shape for every person WHO HAS ONE — owner, manager, waiter. KITCHEN HAS NO
