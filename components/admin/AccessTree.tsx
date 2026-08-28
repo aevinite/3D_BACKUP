@@ -215,11 +215,15 @@ const HELP_SHOTS: Record<string, string[]> = {
   // picture must be of the thing you are reading about, so scripts/shot-access-help.mjs grew an
   // owner job per row instead and these are the owner's own pages, ringed on his own nav.
   //
-  // `own_ratings` is deliberately NOT here, and it is the one row with no owner screen to
-  // photograph: the owner panel's nav has no Rating review page at all — its entitlement gates
-  // /api/owner/ratings only. Left unmapped, it derives `ratings.png`, which is the GUEST menu with
-  // the star row ringed. That is what a rating IS, so it represents the row honestly; it is simply
-  // not a picture of a page of his, because there is not one.
+  // `own_ratings` is deliberately NOT here, and the reason recorded until 2026-08-28 was wrong:
+  // it said "there is no owner screen to photograph — the owner panel's nav has no Rating review
+  // page at all". There is no PAGE, but there is a screen. The entitlement gates
+  // /api/owner/ratings, which app/owner/issues/page.tsx fetches, and switching it off hides the
+  // "Guest ratings" TAB on the owner's Feedback & complaints page. So a real picture of his own
+  // screen is possible after all — that tab, ringed — and it would be better than what happens
+  // today: left unmapped, this derives `ratings.png`, the GUEST menu with the star row ringed,
+  // which is what a rating IS but is not his screen. Adding it means an owner job in
+  // scripts/shot-access-help.mjs; listed for the owner rather than guessed at. (sweep #7 T15)
   own_reports: ["own_reports"], own_customers: ["own_customers"], own_issues: ["own_issues"],
   own_settings: ["own_settings"], own_audit: ["own_audit"], own_access: ["own_access"],
   own_menu: ["own_menu"], own_manager_mode: ["own_manager_mode"],

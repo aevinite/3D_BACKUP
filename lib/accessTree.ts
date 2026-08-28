@@ -1017,8 +1017,17 @@ export const SECTIONS: Section[] = [
           { id: "own_settings", name: "Settings", def: true, bind: { t: "section", key: "settings" },
             what: "The owner's own Settings page — their panel's appearance, their password, and what their restaurant has switched on. It is not a permissions screen: an owner configures no permission anywhere." },
           // Renamed from "Ratings" (owner, 2026-08-02: "rating review").
+          // IT IS A TAB, NOT A PAGE, AND SAYING "page" WAS MISLEADING (sweep #7 T15, 2026-08-28).
+          // This row was listed for the owner as a switch with nothing behind it — "the owner panel
+          // has no Rating review page in its nav, yet Access has a switch for it" — and that reading
+          // was wrong. Traced end to end: the entitlement gates /api/owner/ratings, which is fetched
+          // by app/owner/issues/page.tsx, and switching it off makes that page hide its "Guest
+          // ratings" tab (`ratingsOff`) and fall back to Complaints. So the switch is real, it
+          // works, and what an owner loses is visible — it is on a tab of "Feedback & complaints",
+          // not a page of its own. Calling it "page" sent two readers hunting the owner's nav for
+          // something that was never going to be there. Say where it lives.
           { id: "own_ratings", name: "Rating review", def: true, bind: { t: "section", key: "ratings" },
-            what: "The owner's Rating review page — guest stars and written feedback." },
+            what: "Guest stars and written feedback — the “Guest ratings” tab on the owner's Feedback & complaints page. Switch it off and that tab disappears for them; the Complaints half of the same page stays. It is a tab, not a page of its own, so it is not in their left-hand menu." },
           {
             // AUDIT & LOGS (owner, 2026-08-01; renamed + given sub-options 2026-08-02: "name will
             // be changed from audit to audit and logs… and if there is a log separately, you have
