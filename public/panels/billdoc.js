@@ -688,24 +688,17 @@
 + ((composition && !d.cancelled)
    ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">Composition taxable person — not eligible to collect tax on supplies.</div>\n'
    : "")
-/* THE VERIFICATION LINE — the signed chain, on the paper (owner, 2026-08-17).
-   Migration 332 writes one hash-chained row the moment a bill becomes a tax document, so a removed
-   or altered sale is DETECTABLE rather than merely forbidden. Until now that proof lived only in
-   the database: the person holding the receipt had to take the software's word for it. Germany's
-   KassenSichV settled this the same way — the signature is printed ON the receipt, which is what
-   makes it checkable by whoever holds it rather than only by whoever owns the server.
-   So: the bill's position in that chain and the first 12 characters of its hash. Twelve is enough
-   to pick one bill out of a restaurant's whole history and short enough for a 66mm roll; the full
-   value stays in the ledger, which is where a real verification reads it from anyway.
-   Formatted HERE, not at the call sites, for the reason this whole file exists — the manager panel,
-   the waiter tablet and the admin preview must print the same reference for the same bill.
-   Renders NOTHING unless the caller supplies both parts, so every bill printed today is unchanged,
-   and never on a cancelled sheet (that sale was withdrawn; its chain row records the issue, and the
-   band across the top is what the paper is for). */
-+ ((!d.cancelled && d.chainSeq != null && d.chainHash)
-   ? '<div class="mini" style="margin-top:6px">Verification ' + esc(String(d.chainSeq)) + " · "
-     + esc(String(d.chainHash).slice(0, 12)) + "</div>\n"
-   : "")
+/* REJECTED (owner, 2026-08-28): the bill carries NO verification line — no chain reference, no
+   sequence number, no hash, no "Verification …" anything. It was built on 2026-08-17 off his own
+   "do both 11 and 12", wired to the data on 2026-08-28, shown to him rendered side by side against
+   a normal bill, and he said **don't do the 19th one**.
+   The reason is the same one that removed the "Reprint · Duplicate" band eleven days earlier
+   (R37): a guest's copy of their own bill does not carry extra marks. The tamper-evident chain
+   (mig 332) is unaffected and still runs on every issued bill — it simply stays where it was,
+   in the records, and is not printed.
+   Do NOT re-add a verification line, a chain reference, a QR code carrying one, or a
+   "scan to verify" note here. R50 in docs/REJECTED-IDEAS.md; verify:print-paper §3d fails the
+   build if any of it comes back onto the sheet. */
 + '<div class="foot">' + footer + "</div>\n"
 + (d.noBar ? "" : pageScript(d.autoPrint));
   }
@@ -1314,17 +1307,6 @@
   // items 880"). There the plain single Subtotal row is simpler and truer.
   function mrpPart(m) { return m && m.composition ? 0 : (Number(m && m.nontax) || 0); }
 
-  /* chainRef(session, orders) — a bill's position in the signed chain (mig 332) and its hash, as a
-     PAIR. The manager's API attaches these to every order row of the bill; older callers may carry
-     them on the session. Both parts always come from the same place, because a sequence from one
-     row beside a hash from another would be a reference that verifies nothing. */
-  function chainRef(sess, orders) {
-    var s = sess || {};
-    if (s.chain_seq != null && s.chain_hash) return { seq: s.chain_seq, hash: s.chain_hash };
-    var row = (orders || []).find(function (o) { return o && o.chain_seq != null && o.chain_hash; });
-    return row ? { seq: row.chain_seq, hash: row.chain_hash } : { seq: undefined, hash: undefined };
-  }
-
   /* billData(a): everything the paper needs, assembled once. 'a' is what only the PANEL knows:
        settings, restaurant, orders, money (billMoney), session, tableDisp, logo, parcel, autoPrint
      Returns the object billDocHtml() takes, so a caller does:
@@ -1498,26 +1480,8 @@
       // the whole idea, so the flag is gone rather than left accepted-and-ignored — a field that
       // silently does nothing is how a band gets drawn again by the next person who finds it.
       // The KOT's own `reprint` flag (kotDocHtml) is untouched and still brands the ticket.
-      /* THE SIGNED CHAIN (mig 332) — DELIVERED PROPERLY, AND DELIBERATELY NOT ON PAPER YET.
-         (owner, 2026-08-28 — item 23 done, item 19 still his decision.)
-
-         The delivery was broken: this read the reference off the SESSION, while the manager's API
-         attaches it to every ORDER row of the bill (`o.chain_seq` / `o.chain_hash`, the editor
-         route). So the two halves never met and the line could not print however it was called.
-         It now reads the session first and falls back to the orders — taking BOTH parts from the
-         SAME order, because a sequence from one row beside a hash from another would be a
-         verification reference that verifies nothing.
-
-         ⚠️ IT IS STILL OFF, ON PURPOSE, and this is NOT a field that silently does nothing —
-         it is a decision the owner has not made yet. Printing it puts one more line of small print
-         on every guest's receipt, and the very adjacent decision (the "Reprint · Duplicate" band,
-         R37) he reversed two days after asking for it. So the paper is held behind one explicit
-         flag that nothing sets. Switching it on is one word — `chainOnPaper: true` — at the two
-         panels' billData() calls, and every surface lights up together because the format lives in
-         one place. If the answer comes back NO, delete this flag and the two fields with it; do not
-         leave it here half-alive. */
-      chainSeq: a.chainOnPaper ? chainRef(sess, orders).seq : undefined,
-      chainHash: a.chainOnPaper ? chainRef(sess, orders).hash : undefined,
+      // (No chainSeq / chainHash here — the bill prints no verification line at all. R50; see the
+      // REJECTED note in billDocHtml above. The mig-332 chain still runs, it is just not on paper.)
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
       // en-IN + Asia/Kolkata, NOT the printing device's locale. This is a document headed "Tax

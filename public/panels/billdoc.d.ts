@@ -87,7 +87,7 @@ export interface BillDocData {
    * incident. Declaring the flag again is what would let a caller pass it, so it stays undeclared.
    * The kitchen TICKET keeps its own `reprint` (BillDocKot below) — that one he confirmed.
    * R37 in docs/REJECTED-IDEAS.md. */
-  /** The bill's position in the signed chain (mig 332) and its `chain_hash`. Supply BOTH or the
+  /** REJECTED (R50) — never rendered. The bill's position in the signed chain (mig 332). Supply BOTH or the
    *  verification line does not print at all. The document takes the first 12 characters of the
    *  hash — enough to identify one bill, short enough for a 66mm roll — and formats the line
    *  itself, so every panel prints the same reference for the same bill.
@@ -221,10 +221,8 @@ export function orderTaxRate(
   settingsRate: number,
 ): number;
 /** Everything the paper needs, assembled once. Pass what only the panel knows. */
-/** billData({ …, chainOnPaper }) — set `chainOnPaper: true` to print the mig-332 verification
- *  line. It is OFF everywhere on purpose: whether a guest's receipt should carry it is an open
- *  decision (see the note in billData). The reference itself is read from the session, or from the
- *  order rows the manager's API attaches it to, both parts always from the same place. */
+/** REJECTED (owner, 2026-08-28, R50): the bill prints NO verification line. `billData`
+ * carries no chain field, and `billDocHtml` renders none. See the note in billdoc.js. */
 export function billData(a: {
   settings?: Record<string, unknown>;
   restaurant?: Record<string, unknown>;

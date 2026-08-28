@@ -361,53 +361,49 @@ for (const [what, ts] of INSTANTS) {
   }
 }
 
-// ── 3d. THE VERIFICATION LINE (mig 332) — DELIVERED, AND HELD OFF THE PAPER ───────────────────
-// Two separate things, and they are checked separately on purpose.
-//  · DELIVERY (item 23, fixed 2026-08-28): billData used to read the reference off the SESSION
-//    while the manager's API attaches it to every ORDER row, so the two halves never met. It now
-//    reads either, always taking BOTH parts from the same place — a sequence from one row beside a
-//    hash from another would be a reference that verifies nothing.
-//  · THE PAPER (item 19): whether a guest's receipt should carry it at all is the OWNER'S open
-//    decision, so it prints only when a caller says `chainOnPaper: true`, and nothing does. This
-//    guard pins it OFF, so it cannot arrive on a customer's bill by accident before he answers.
+// ── 3d. THE BILL CARRIES NO VERIFICATION LINE, EVER (R50) ─────────────────────────────────────
+// REJECTED (owner, 2026-08-28): "DON'T DO 19TH ONE." It was built on 2026-08-17 off his own "do
+// both 11 and 12", wired to the data on 2026-08-28, and rendered side by side against a normal bill
+// so he could see exactly what it added — one line reading `Verification 1042 · a3f9c1d2e4b5` under
+// the total. He looked at it and said no, for the same reason that removed the "Reprint · Duplicate"
+// band eleven days earlier (R37): a guest's copy of their own bill does not carry extra marks.
+// The tamper-evident chain (migration 332) is UNAFFECTED and still runs on every issued bill. It
+// simply stays in the records and is never printed.
+// This guard pins it OFF in every shape a caller could reach for, including a caller that insists.
 {
-  const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
+  const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }], gstin: "24X" };
   const line = { status: "served", subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0,
     tax_rate: 0.05, items: [{ title: "A", qty: 1, price: 100, tax_mode: "excl" }] };
   const mk = (a) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {},
     autoPrint: false, orders: [line], ...a }));
-  const ver = (h) => (h.match(/Verification ([^<]*)/) || [])[1] || "";
-  const REF = { chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" };
-
-  // OFF unless asked for — including when the reference is right there
-  const offCases = [
-    ["a bill with no chain row at all", { session: { bill_no: 1 } }],
-    ["the reference on the session", { session: { bill_no: 1, ...REF } }],
-    ["the reference on the order rows (today's API shape)",
-      { session: { bill_no: 1 }, orders: [{ ...line, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }] }],
+  const shapes = [
+    ["the reference on the session", mk({ session: { bill_no: 1, chain_seq: 7, chain_hash: "deadbeefcafe" } })],
+    ["the reference on the order rows", mk({ session: { bill_no: 1 },
+      orders: [{ ...line, chain_seq: 1042, chain_hash: "a3f9c1d2e4b5" }] })],
+    ["a caller passing chainOnPaper: true", mk({ session: { bill_no: 1, chain_seq: 7, chain_hash: "deadbeefcafe" },
+      chainOnPaper: true })],
+    ["billDocHtml handed the fields directly", BILLDOC.billDocHtml({ name: "R", taxRows: [],
+      lines: [{ title: "A", qty: 1, price: 100 }], subtotal: 100, total: 100,
+      chainSeq: 1042, chainHash: "a3f9c1d2e4b5" })],
+    ["an ordinary bill", mk({ session: { bill_no: 1 } })],
   ];
-  const stray = offCases.filter(([, a]) => ver(mk(a)));
+  const stray = shapes.filter(([, html]) => /Verification/.test(html)).map(([w]) => w);
   stray.length === 0
-    ? ok("the verification line stays off every bill until the owner asks for it (item 19 is his decision)")
-    : bad(`a verification line reached a guest's bill: ${stray.map((x) => x[0]).join(", ")}`,
-      "it prints only on chainOnPaper — whether a receipt carries it at all is not decided yet");
-
-  // …and when it IS asked for, it works from either shape, and refuses half a reference
-  const on = [
-    ["from the session", { session: { bill_no: 1, ...REF }, chainOnPaper: true }, "1042 · a3f9c1d2e4b5"],
-    ["from the order rows", { session: { bill_no: 1 }, chainOnPaper: true,
-      orders: [{ ...line, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }] }, "1042 · a3f9c1d2e4b5"],
-    ["half a reference on the session", { session: { bill_no: 1, chain_seq: 7 }, chainOnPaper: true }, ""],
-    ["half on one row, half on another", { session: { bill_no: 1 }, chainOnPaper: true,
-      orders: [{ ...line, chain_seq: 5 }, { ...line, chain_hash: "beef0000cafe" }] }, ""],
-    ["a cancelled sale", { session: { bill_no: 1, ...REF }, chainOnPaper: true,
-      orders: [{ ...line, status: "cancelled" }] }, ""],
-  ];
-  const wrong = on.filter(([, a, want]) => ver(mk(a)) !== want);
-  wrong.length === 0
-    ? ok("  …and when it is switched on it reads the same reference from either shape, and refuses half of one")
-    : bad(`the verification reference is wrong: ${wrong.map(([w, a, want]) => `${w} → "${ver(mk(a))}", expected "${want}"`).join(" · ")}`,
-      "both parts must come from the SAME place, and a cancelled sale carries none");
+    ? ok("no verification line reaches a guest's bill, in any shape a caller could ask for (R50)")
+    : bad(`a verification line printed: ${stray.join(", ")}`,
+      "he said don't do it — a guest's copy of their own bill carries no extra marks (R50, same reason as R37)");
+  // …and billData exposes no such field at all, so a panel cannot pass one on by accident
+  const d = BILLDOC.billData({ settings: S, restaurant: {},
+    session: { bill_no: 1, chain_seq: 7, chain_hash: "x" }, orders: [line] });
+  const fields = Object.keys(d).filter((k) => /chain/i.test(k));
+  fields.length === 0
+    ? ok("  …and bill data carries no chain field at all, so nothing can pass one on")
+    : bad(`bill data still exposes: ${fields.join(", ")}`,
+      "a field that silently does nothing is how the line gets drawn again — remove it, do not leave it half-alive");
+  // the bill still prints everything it should
+  /TOTAL/.test(shapes[4][1]) && /class="foot"/.test(shapes[4][1])
+    ? ok("  …and an ordinary bill is otherwise unchanged")
+    : bad("removing the line changed the rest of the bill", "only that line was meant to go");
 }
 
 // ── 3g. THE DIGIT COUNTER NEVER CONTRADICTS THE BOX BESIDE IT ─────────────────────────────────
