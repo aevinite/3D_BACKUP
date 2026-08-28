@@ -232,6 +232,13 @@ function quotedStrings(src) {
     const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}/.test(src);
     if (!drivesBrowser && !fetchesBase) continue;
     if (/requireAppUp|requireUp/.test(bare(src))) continue;                    // has the preflight — in CODE, not in a comment about it
+    // A GUARD THAT SERVES ITS OWN PAGES NEEDS NO APP AND NO BASE (sweep #7 / T28, 2026-08-28).
+    // scripts/verify-bill-screens.mjs opens a browser and navigates — to page.setContent() and to
+    // addresses it fulfils itself with page.route(). There is no server to preflight and no base to
+    // honour; demanding either would be this check inventing a failure on a guard that is right,
+    // which is the one thing a guard must never do. It went red on this file the day both checks
+    // were written, which is how I found out.
+    if (/page\.route\(|\.setContent\(/.test(bare(src)) && !/localhost:\d|\$\{BASE\}|BASE \+/.test(bare(src))) continue;
     if (/SKIPPED \(pass --base|skipped the live checks|static only/i.test(src)) continue; // optional live half
     // verify-everything.mjs is the RUNNER, not a guard: it prints the base it resolved and WHERE it
     // came from on every single run, refuses to start while another run holds its lock, and checks it
@@ -269,6 +276,13 @@ function quotedStrings(src) {
     const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}|fetch\(\s*B\s*\+/.test(src);
     if (!drivesBrowser && !fetchesBase) continue;
     if (/createServer\(/.test(src)) continue;                        // brings up its own server
+    // A GUARD THAT SERVES ITS OWN PAGES NEEDS NO APP AND NO BASE (sweep #7 / T28, 2026-08-28).
+    // scripts/verify-bill-screens.mjs opens a browser and navigates — to page.setContent() and to
+    // addresses it fulfils itself with page.route(). There is no server to preflight and no base to
+    // honour; demanding either would be this check inventing a failure on a guard that is right,
+    // which is the one thing a guard must never do. It went red on this file the day both checks
+    // were written, which is how I found out.
+    if (/page\.route\(|\.setContent\(/.test(bare(src)) && !/localhost:\d|\$\{BASE\}|BASE \+/.test(bare(src))) continue;
     if (f === "scripts/verify-everything.mjs") continue;              // the runner; prints the base it chose
     // Any of these means the flag is read: the shared helper, or the script's own argv lookup.
     // CODE ONLY. Reading the raw source here made this check useless the moment it was written: the
