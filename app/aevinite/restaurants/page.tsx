@@ -210,7 +210,16 @@ export default function AdminRestaurants() {
             const on = healthFilter === key;
             const count = key === "all" ? (list?.length ?? 0) : (healthCounts[key] || 0);
             return (
-              <button key={key} onClick={() => setHealthFilter(key)} className="adm-chip"
+              // TAPPING THE LIT CHIP AGAIN CLEARS IT (T16 sweep #7, 2026-08-28). It used to just
+              // set the same filter again, so the only way back to the whole list was to find the
+              // "All" chip — while the KPI tiles on Owners, the other filter row in this console,
+              // have toggled back since they were built (`setF`). Nothing was unreachable; the two
+              // rows simply behaved differently. "All" is excluded: tapping the lit All must stay
+              // All, not flip to something else.
+              <button key={key} onClick={() => setHealthFilter((cur) => (cur === key && key !== "all" ? "all" : key))}
+                className="adm-chip"
+                aria-pressed={on}
+                title={on && key !== "all" ? `Showing ${lbl.toLowerCase()} only — tap again to show all` : undefined}
                 style={{ cursor: "pointer", padding: "7px 12px", border: on ? `1px solid ${col}` : "var(--border)",
                   background: on ? `color-mix(in srgb, ${col} 18%, transparent)` : "transparent",
                   color: on ? col : "var(--muted)", fontWeight: on ? 700 : 500 }}>

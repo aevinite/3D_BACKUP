@@ -561,6 +561,24 @@ console.log("\n23. The reused-address notice says what really happened to the pr
     "…it says it was removed on that date, which holds whether it was binned or removed for good");
 }
 
+
+console.log("\n24. The health chips clear when the lit one is tapped again");
+{
+  // It used to set the same filter again, so the only way back to the whole list was to find the
+  // "All" chip — while the KPI tiles on Owners, the other filter row in this console, have
+  // toggled back since they were built. Nothing was unreachable; the two rows behaved
+  // differently. (item 15.)
+  want(/setHealthFilter\(\(cur\) => \(cur === key && key !== "all" \? "all" : key\)\)/.test(REST),
+    "tapping the lit health chip goes back to All");
+  want(/key !== "all"/.test(REST),
+    "…and the All chip itself is excluded, so tapping lit-All stays All rather than flipping");
+  want(/aria-pressed=\{on\}/.test(REST),
+    "…and each chip reports its pressed state, the way the Owners tiles already do");
+  // the row it is being made consistent WITH must still behave that way
+  want(/const setF = \(f: Filter\) => setFilter\(\(cur\) => \(cur === f \? "all" : f\)\)/.test(OWN),
+    "…and the Owners KPI tiles, the pattern this follows, still toggle back too");
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");
