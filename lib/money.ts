@@ -27,7 +27,16 @@ const oneDp = (n: number) => n.toFixed(1).replace(/\.0$/, "");
  * `sign: false` (the default) still shows a minus for negative values — pass nothing.
  */
 export function compactINR(value: number): string {
-  const v = Number(value) || 0;
+  // `Number(value) || 0` catches NaN, null, "" and undefined — all falsy — and lets INFINITY
+  // through, because Infinity is truthy. So compactINR(Infinity) printed "₹InfinityCr" straight onto
+  // a chart tile (T25, sweep #7, 2026-08-28). Nothing produces an infinite total today, and that is
+  // exactly why it would be found by a person rather than by a test: it takes one division by a
+  // count that happened to be zero, somewhere upstream, on a screen full of numbers.
+  //
+  // The rule it breaks is written down for this whole sweep: no leaked code text on a screen — no
+  // `undefined`, no `NaN`, no `[object Object]`. Infinity belongs in that list.
+  const n = Number(value);
+  const v = Number.isFinite(n) ? n : 0;
   const neg = v < 0;
   const a = Math.abs(v);
   const body =
