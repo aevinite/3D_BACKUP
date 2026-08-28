@@ -216,17 +216,31 @@ person to redo them — and **the app must work exactly as it did, not break.**
   format, so variants are reference only; Time-explorer = candidate for /owner/reports UI).
 
 ## 2026-07-28 — Admin panel-view isolation + "actual panel" toggle + feature-jump polish
-- [ ] Per-tab session separation: a panel tab opened FROM admin (?rid pin) stays the ADMIN's
+- [x] Per-tab session separation: a panel tab opened FROM admin (?rid pin) stays the ADMIN's
   view even when a real staff/owner login exists in another tab of the same browser — and the
   real logins stay untouched (requireRole/panelAdminRid/ownerScope + owner layout dual-cookie).
+  **VERIFIED IN A BROWSER 2026-08-28 (T29 sweep #7):** one browser, both cookies in the same jar.
+  The real manager tab answered `role=manager`; the `?rid`-pinned tab answered `role=admin,
+  isAdmin=true` in the pinned restaurant; the manager tab was re-read afterwards and was
+  byte-identical, so the admin tab disturbed nothing.
 - [ ] "Zones off for staff" dropdown: every non-granted feature listed; "⚙ change" lands on the
   EXACT control on /aevinite/access (scroll + ~1.5s flash), admin-only settings land on the
   restaurant's ⚙ Settings tab.
-- [ ] "See the actual panel" toggle (bottom of the zones dropdown; kitchen: in the ribbon) —
+- [x] "See the actual panel" toggle (bottom of the zones dropdown; kitchen: in the ribbon) —
   ?view=real per tab, default OFF; whoami answers as the real role; fully working.
+  **VERIFIED IN A BROWSER 2026-08-28 (T29 sweep #7):** the same tab, same cookies —
+  `/manager?rid=…` answered `role=admin, isAdmin=true`, and `/manager?rid=…&view=real` answered
+  `role=manager, isAdmin=false`.
 - [ ] Not-available controls grey (neutral, not golden) + hover "Not available…" tooltip.
 - [ ] Admin panel-view actions logged with actor_id='admin:view' — visible only to the admin
   (owner/manager log reads mask it; admin surfaces show an 🛡 Admin pill).
+  **PART-VERIFIED 2026-08-28 (T29 sweep #7) — left unticked on purpose.** The marking and the
+  masking ARE working and were watched: French House carries real `staff_actions` rows stamped
+  with the admin actor, and the owner's Recent activity screen shows no admin marker at all. The
+  🛡 pill is the half I could NOT get on screen: it lives in the row DETAIL
+  (`components/admin/LogDetailModal.tsx`), not in any list, and the newest admin-actor row was
+  outside the window the screen was showing. A tick means built AND watched working, so this stays
+  open until somebody sees that pill.
 
 ## 2026-07-30 — Live sweep: the "second door" had been LOST in a rebase (my mistake)
 
