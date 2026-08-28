@@ -596,6 +596,76 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "the guide replaced the Printing screen again — it is read WHILE setting a printer up, and the guide has no way back to the screen you were halfway through");
 }
 
+// ── 8f · TWO MODES, ONE TOGGLE, AND ONLY ONE OF THEM ON SCREEN (owner, 2026-08-28) ────────────
+// "I want both A and B — the toggle AND the simplified UI, and do one thing: you only see the option
+// you have selected, only the setting for that option will be shown." Plus mode B itself: a Chrome
+// that "runs minimised and doesn't auto-open when printing required, doesn't affect other tabs".
+{
+  const stn = read("lib/printStationScript.ts");
+  const helpers = read("lib/printHelpers.ts");
+  const brd = read("lib/printBoard.ts");
+  const guideRaw = read("public/print-setup.html");
+
+  // ── MODE B's LAUNCHER, and the four things that make it not get in the way ──────────────────
+  check(/export function stationScript/.test(stn) && /STATION_FILENAME/.test(stn),
+    "mode B has a launcher of its own — one file per system, the same shape as the helper's",
+    "lib/printStationScript.ts is gone: mode B goes back to being a wall of Terminal commands in the guide");
+  check(/--kiosk-printing/.test(stn) && !/"--kiosk"/.test(stn) && !/--kiosk /.test(stn),
+    "…it prints with no dialog (--kiosk-printing) and is NOT fullscreen-kiosk",
+    "the station launcher gained --kiosk: that is FULLSCREEN kiosk, the opposite of the out-of-the-way window he asked for, and it is what the old guide told people to use");
+  check(/--user-data-dir/.test(stn),
+    "…in its own Chrome profile, so their real Chrome, tabs and logins are untouched",
+    "the station launcher stopped using its own --user-data-dir: it would take over the person's ordinary Chrome");
+  // THE ONE NOBODY WOULD GUESS. A hidden Chrome is throttled, a throttled panel stops polling, and
+  // the tickets just queue while everything looks fine. Measured: 13 beacons in 14 seconds WITH
+  // these flags. They are load-bearing.
+  check(/--disable-background-timer-throttling/.test(stn) && /--disable-backgrounding-occluded-windows/.test(stn)
+    && /--disable-renderer-backgrounding/.test(stn),
+    "…and it carries the three anti-throttling flags, without which a hidden Chrome silently stops printing",
+    "an anti-throttling flag was dropped from the station launcher. Chrome throttles background windows hard: the panel stops polling, tickets queue, and NOTHING on screen says so. Measured 2026-08-28 — 13 beacons in 14 seconds with them.");
+  check(/WASFRONT/.test(stn) && /to activate/.test(stn),
+    "…and on a Mac it hands the screen back to whoever had it",
+    "the mac station launcher stopped restoring focus. Measured: even with open -g -j -n and a real url, the frontmost app went Finder → Google Chrome. An about:blank test says otherwise, which is how a false promise ships.");
+  check(/caffeinate/.test(stn) && /powercfg/.test(stn),
+    "…and it keeps the machine awake, because a sleeping computer prints nothing",
+    "the station launcher no longer stops the machine sleeping — the commonest reason a restaurant says printing stopped overnight");
+  check(!/password|PASSWORD/.test(code(stn)),
+    "…and there is no password in it, like the helper",
+    "a password appeared in the station launcher. The person signs in ONCE in the window it opens; a credential in a text file on a shop counter is what the pairing handshake exists to avoid.");
+
+  // ── THE TOGGLE, and the fact that it MOVES THE ROUTES ───────────────────────────────────────
+  check(/export type PrintMode/.test(helpers) && /export async function writeMode/.test(helpers),
+    "the mode is a stored answer, and changing it is one function",
+    "PrintMode/writeMode are gone: the board has nothing to hang its one toggle off");
+  check(/ROUTABLE_KINDS/.test(helpers.slice(helpers.indexOf("export async function writeMode"))) && /syncKotSwitch\(rid/.test(helpers.slice(helpers.indexOf("export async function writeMode"))),
+    "…and it rewrites the three paper lines into the new mode's shape, re-asserting auto-print",
+    "writeMode stopped moving the routes with the mode. A restaurant switched to Chrome would keep three routes pointing at a computer: the board would say one thing and the paper would do another.");
+  check(/mode: PrintMode/.test(brd) && /export const stationFiles/.test(brd),
+    "…and the shared board carries the mode AND both launcher files, so neither screen invents its own",
+    "lib/printBoard.ts lost the mode or the station files: the two printing screens will drift apart again");
+
+  // ── ONLY THE CHOSEN MODE'S SETTINGS ARE RENDERED — on BOTH screens ──────────────────────────
+  check(/adm-mode/.test(page) && /mode === "computer" \?/.test(page),
+    "the console shows ONE toggle and only that mode's setup",
+    "the admin Printing board stopped branching on the mode — both modes' settings are on screen at once again, which is the twenty-control screen he called shit");
+  check(/pw-mode/.test(epanel) && /mode === "computer"/.test(epanel),
+    "…and so does the restaurant's own screen, the same way",
+    "the manager panel's Printing section is not mode-driven, so the two boards are two different products again");
+  check(/adm-mode/.test(read("app/globals.css")) && /pw-mode/.test(read("public/panels/editor/style.css")),
+    "…with the toggle styled from each side's own tokens, so both skins work",
+    "a mode toggle has no styling on one of the two screens");
+  check(/function FileCard/.test(page),
+    "…and the two launcher cards on the console share ONE component",
+    "the helper file card and the station file card are two copies of one markup again — which is exactly how the wording drifted the first time");
+  check(/b === "mode"/.test(code(eroute)) && /seg\[0\] === "mode"/.test(code(adminR)),
+    "…and both screens have a door to change it, each gated as it already was",
+    "one of the two printing screens can show the toggle but not save it");
+
+  check(/id="twoways"/.test(guideRaw) && /print-station file/.test(guideRaw),
+    "the guide explains both ways and the print-station file",
+    "the setup guide does not mention mode B, so a restaurant handed the station file has nothing to read");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",

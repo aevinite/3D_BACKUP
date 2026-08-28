@@ -52,8 +52,9 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
   agentForDevice, createAgent, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
+  writeMode, isPrintMode,
 } from "@/lib/printHelpers";
-import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
@@ -2137,6 +2138,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // The same one generic file the admin console shows — same text, same source, so the two
         // screens cannot hand out different helpers (mig 368).
         files: helperFiles(originOfReq(req)),
+        // MODE B's launcher, sent beside MODE A's. Both are plain text with nothing secret in them,
+        // so the panel can show whichever the mode calls for with no second round trip.
+        stationFiles: stationFiles(originOfReq(req)),
         maySetup,
         deviceId: dv,
         // Which install text to show FIRST. The browser knows what it is running on, so nobody has to
@@ -4937,6 +4941,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ ok: true, cleared: Object.keys(patch) });
       }
 
+      // ── WHICH OF THE TWO WAYS THIS RESTAURANT PRINTS ─────────────────────────────────────────
+      // The same one toggle the admin console has, on the screen of the person standing at the
+      // printer — they are the one who knows whether a helper can be installed on that machine or
+      // whether it has to be Chrome. writeMode() brings the three paper lines with it, so the board
+      // and the paper can never say different things.
+      if (b === "mode") {
+        const m = (body as Record<string, unknown>)?.mode;
+        if (!isPrintMode(m)) return err("There are two ways to print: a computer, or a screen.", 400);
+        // A SCREEN ROUTE FROM HERE NAMES THIS PERSON. Choosing somebody else's screen from your own
+        // Settings would move another person's paper without telling them — that stays an admin act.
+        const done = await writeMode(rid, m, { person: g.user?.id || null, panel: "manager" });
+        if ("error" in done) return err(done.error, 400);
+        await logAction("editor", "print_switch", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `printing mode → ${done.mode === "screen" ? "a screen (this restaurant's own Chrome)" : "a computer (the helper)"}`,
+        });
+        return ok(done);
+      }
+
       // ── who prints one kind of paper ──────────────────────────────────────────────────────────
       // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
       // route from here always means THIS panel and THIS person — narrowing it to somebody else's
@@ -4959,7 +4983,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             backupPrinter: (body as Record<string, unknown>)?.backupPrinter ?? null,
           };
         } else if (who === "screen") {
-          patch = { via: "screen", panel: "manager", person: g.user?.id || null, device: dv };
+          // NO `device` HERE, deliberately. The mode toggle stores { person } with no device, and a
+          // per-paper "On" must produce the SAME shape — otherwise one line would be narrowed to this
+          // one PC and the others not, which is a difference nobody asked for and nothing shows.
+          patch = { via: "screen", panel: "manager", person: g.user?.id || null };
         } else if (who === "off") {
           patch = { via: "off" };
         } else {
