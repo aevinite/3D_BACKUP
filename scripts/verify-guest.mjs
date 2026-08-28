@@ -39,15 +39,15 @@ const has = (s, ...n) => n.every((x) => s && s.includes(x));
 const rx  = (s, r) => !!(s && r.test(s));
 // AN OPEN QUESTION IS NEITHER A PASS NOR A FAULT (sweep #7 / T28, 2026-08-27).
 //
-// Two guards on this branch disagree about who a stray address belongs to. verify:notfound says
-// /signup gets the STAFF screen with its way out at "/" — the owner picked that screen for "any
-// worker" on 2026-08-26. This file says /signup gets the GUEST advice ("scan the QR code…"),
-// because the same day he said the staff door is offered "if written login or aevinite then only".
-// Both quote him; neither is obviously wrong; a switched-off restaurant (/og-s-cafe/menu) is the
-// same question. Making one of them quietly agree with the other would be inventing his answer.
+// Built for a real disagreement: this file and verify:notfound asserted OPPOSITE things about who a
+// stray address belongs to, each quoting the owner from the same day. Rather than make one quietly
+// agree with the other — inventing his answer — the row was printed as a question, counted
+// separately, and kept out of the red. He read it and settled it on 2026-08-28, and the two guards
+// now agree (see the decision written out at the /signup case below).
 //
-// So it is printed as an open question, counted separately, and does not turn the run red. What it
-// must never do is disappear: a question nobody can see is how a decision gets made by accident.
+// KEPT, because the state itself was the useful part and the next disagreement will not announce
+// itself either. It is still in use for a request THIS APP DID NOT MAKE being refused by somebody
+// else's server. A question nobody can see is how a decision gets made by accident.
 const openQuestion = (phase, name, note) => { results.push({ phase, name, ok: true, open: true, note }); };
 
 const check = (phase, name, fn) => {
@@ -521,14 +521,18 @@ async function live(base) {
         wayOut: (document.querySelector(".nf a.nf-home") || {}).getAttribute
           ? document.querySelector(".nf a.nf-home").getAttribute("href") : null,
         guestWords: /scan the QR code/i.test(document.body.innerText) }));
+      // SETTLED 2026-08-28 — this file and verify:notfound now agree, and the decision is written
+      // out in full in both. A stray address, and a restaurant whose menu is switched off, belong
+      // to the GUEST: the advice, no staff sign-in, and no button when we cannot tell which
+      // restaurant they meant. For two days these two guards asserted opposite things about
+      // /signup, each quoting the owner from 2026-08-26; he was shown the disagreement and left the
+      // call to me. A guest sent to the workers' screen is handed a PASSWORD PROMPT, and that is a
+      // worse mistake than a worker being told to scan a QR code.
       const note = `landed on ${r.path}, ${r.cards} dishes, staff screen=${r.staffScreen}, way out=${r.wayOut}, guest advice=${r.guestWords}`;
-      if (want === "guest") {
-        openQuestion("P15609", `LIVE: ${label} (${url}) — WHOSE SCREEN? verify:notfound says staff, this file says the guest advice`, note);
-      } else {
-        const ok = want === "menu" ? (/^\/r\/[^/]+\/menu$/.test(r.path) && r.cards > 0)
-          : (r.staffScreen && r.wayOut === "/");
-        check("P15609", `LIVE: ${label} (${url})`, () => ({ ok, note }));
-      }
+      const ok = want === "menu" ? (/^\/r\/[^/]+\/menu$/.test(r.path) && r.cards > 0)
+        : want === "staff" ? (r.staffScreen && r.wayOut === "/")
+        : (r.guestWords && !r.staffScreen);
+      check("P15609", `LIVE: ${label} (${url})`, () => ({ ok, note }));
       await c.close();
     }
 
