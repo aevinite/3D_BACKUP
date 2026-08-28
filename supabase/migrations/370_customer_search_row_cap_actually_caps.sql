@@ -1,4 +1,11 @@
--- 365_customer_search_row_cap_actually_caps.sql
+-- 370_customer_search_row_cap_actually_caps.sql
+-- RENUMBERED 365 → 370 (T28, sweep #7, 2026-08-29). Two files were both numbered 365 —
+-- this one and 365_reopen_puts_the_table_back_not_the_bill.sql — and `npm run verify:db-parity`
+-- was red on clean main for it. This is the NEWER of the two (2026-08-28 against 2026-08-26),
+-- so this is the one that moves; the rule is that the file which got there first keeps its
+-- number. Safe to move later: the two touch DIFFERENT objects (lfh_customer_phone_search here,
+-- lfh_reopen_table there), so their order never decided anything, and nothing between 365 and
+-- 370 touches lfh_customer_phone_search — the previous edit to it was migration 227.
 --
 -- THE ROW CAP ON THE TILL'S CUSTOMER SEARCH DID NOTHING (T8, sweep #7, owner 2026-08-28).
 --
