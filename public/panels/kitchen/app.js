@@ -650,9 +650,17 @@ function renderColumns() {
   });
   const pb = { new: [], cooking: [], ready: [] };
   (state.platform || []).forEach((p) => { const c = platPhase(p.status); if (pb[c]) pb[c].push(p); });
+  // ── ONE QUEUE INSIDE EACH LANE, NOT TWO (owner, 2026-08-26) ──────────────────────────────────
+  // The WALL board was made first-come-first-served in the T6 sweep of 2026-08-17; the columns were
+  // not. Dine-in tickets were listed first and platform tickets glued on after, so in a busy Cooking
+  // lane an hour-old Zomato order sat below a one-minute table order — and a late delivery order is
+  // the one an aggregator penalises the restaurant for. Both channels are now sorted in ONE pass on
+  // created_at, through the same NaN-safe comparator the wall uses: a platform ticket's created_at
+  // comes from a webhook, so it is exactly the value that must not be subtracted blind.
   const draw = (key, list, plist) => {
-    const desired = list.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
-      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
+    const desired = list.map(({ o, rows }) => ({ id: String(o.id), at: o.created_at, html: ticketHtml(o, rows) }))
+      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, at: p.created_at, html: platTicketHtml(p) })));
+    desired.sort((a, b) => cmpTime(a.at, b.at));
     reconcileList($("#list-" + key), desired);
     $("#count-" + key).textContent = String(list.length + (plist ? plist.length : 0)); // show "0", not a blank pill, when a column is empty (2026-07-05)
   };
