@@ -127,7 +127,26 @@
       gstin: pick(s.gstin),
       prefix: pick(s.invoice_prefix) || "INV",
       footer: pick(s.bill_footer) || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
-      taxLabel: ((s.tax_label || "Tax") + "").trim() || "Tax",
+      /* TWO PLACES, TWO DEFAULT WORDS, ONE SETTING (owner, 2026-08-28).
+         "for the printed bill, it should show like it is CGST as GST and total GST and all that
+         stuff … but for the panel I want to show just tax, not any particular gst name."
+
+         So the PAPER's generic word defaults to **GST** — it sits beside CGST and SGST rows and is
+         read by a customer and by an inspector, where "Tax 18%" is vaguer than the document should
+         be. The SCREEN's word defaults to **Tax** — a staff panel is not a tax document and should
+         not commit to a tax regime's name.
+
+         It is still ONE setting: the moment a restaurant types its own word (say VAT), both use it.
+         Only the fallback differs, which is the whole point — an unconfigured restaurant gets the
+         right word in each place instead of the same word in the wrong one.
+
+         Nothing may write either default back INTO `settings.tax_label`. That is what caused the
+         split this replaces: the Settings form prefilled the setting with the screen's word, so the
+         PAPER then printed "Tax" on the manager's copy and "GST" everywhere else. Both prefills are
+         now hints, exactly as the GSTIN two lines above already is — nothing fake is saved unless
+         someone types a real value. `verify:print-paper` §3j pins all four cases. */
+      taxLabel: pick(s.tax_label) || "GST",
+      taxLabelScreen: pick(s.tax_label) || "Tax",
     };
   }
 

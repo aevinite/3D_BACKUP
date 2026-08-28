@@ -190,7 +190,9 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       if (!s.restaurant_name) s.restaurant_name = restaurant.name;
       if (!s.invoice_prefix) s.invoice_prefix = "INV";
       if (!s.bill_footer) s.bill_footer = "Thank you — please visit again";
-      if (!s.tax_label) s.tax_label = "Tax";
+      // NOT PREFILLED (owner, 2026-08-28) — `tax_label` drives the PRINTED bill as well as the
+      // screen, and they have different right defaults ("GST" on paper, "Tax" on screen). Writing
+      // either one in here made the paper print the screen's word. The field shows it as a hint.
       if (!Array.isArray(s.tax_components) || !(s.tax_components as TaxComp[]).length) {
         const rate = Number(s.tax_rate);
         const pct = (Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : 0.05) * 100;

@@ -139,7 +139,14 @@ export interface BillIdentity {
   gstin: string;
   prefix: string;
   footer: string;
+  /** The word the PAPER uses for tax where it needs a generic one (the MRP note, and the fallback
+   *  line when the configured components do not describe this bill's rate). Defaults to **"GST"** —
+   *  it sits beside CGST/SGST on a document a customer and an inspector read. */
   taxLabel: string;
+  /** The word a STAFF PANEL uses on screen. Defaults to **"Tax"** — a panel is not a tax document
+   *  and does not commit to a regime's name (owner, 2026-08-28). Same setting, different fallback:
+   *  a restaurant that types its own word gets it in both places. */
+  taxLabelScreen: string;
 }
 
 export function billDocHtml(d: BillDocData): string;
