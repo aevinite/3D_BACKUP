@@ -181,16 +181,19 @@ const HELP_SHOTS: Record<string, string[]> = {
   show_reviews: ["reviews-menu", "reviews"],
   viewer3d: ["model3d", "model3d-off"],
   allergy_notes: ["allergies"],
-  // `allergy_other` and `guest_note` had an entry here naming allergy-other.png and
-  // guest-note.png. NEITHER FILE HAS EVER BEEN IN public/admin-help (sweep #7 T15, 2026-08-27).
-  // An explicit entry means "I have a picture for this row", and since the 2026-08-18 fix a row
-  // whose named file is missing shows exactly what a row with no entry shows — "there wasn't a
-  // good picture for this one" — so the promise degraded into silence and nobody was told the
-  // .png had never been committed. Removed rather than left lying: with no entry, helpImages
-  // derives and probes the same two names anyway, so what an admin sees is unchanged, and
-  // `verify:access` check 22 now refuses an entry whose file is not in the repo. To give these
-  // two rows a real picture, add them to scripts/shot-access-help.mjs and re-run it — they are
-  // guest-menu controls (the "＋ Other" allergy chip, and the guest's own note box).
+  // These two named allergy-other.png and guest-note.png and NEITHER FILE HAD EVER BEEN IN
+  // public/admin-help (found sweep #7 T15, 2026-08-27). Nothing looked broken, which is why it
+  // lasted: since the 2026-08-18 fix a row whose named picture is missing shows exactly what a row
+  // with no picture shows, so the promise degraded into silence and nobody was told the .png had
+  // never been committed. `verify:access` check 22 now refuses an entry whose file is absent.
+  //
+  // Both pictures were taken on 2026-08-28 and the entries are real again. Their controls live in
+  // the Customize sheet — the popup that opens when a guest adds a dish — which no job in
+  // scripts/shot-access-help.mjs had ever opened, which is exactly why these two were the ones
+  // that got missed. That script grew a `setup` hook to open it; re-run with
+  // `node scripts/shot-access-help.mjs guest allergy-other` to refresh just one.
+  allergy_other: ["allergy-other"],
+  guest_note: ["guest-note"],
   favourites: ["favorites-heart", "favorites"],
   veg: ["diet_filter"],
   menu_languages: ["languages"],
