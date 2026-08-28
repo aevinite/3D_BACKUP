@@ -608,6 +608,40 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
   }
 }
 
+// ── AN ADMIN CONTROL MUST EXIST IN BOTH SKINS, AND MUST NOT SIT ON ITS NEIGHBOUR ──────────────
+// Owner, 2026-08-28, with a photo of his screen: "whenever the blue colour thing is coming it is
+// crossing the kitchen written thing… and that blue colour is not coming in the light mode."
+// Both were real, and both were one control: the Access tree's Preview / Print button.
+{
+  let tree = ""; try { tree = fs.readFileSync("components/admin/AccessTree.tsx", "utf8"); } catch {}
+  if (tree) {
+    // 1 · NO NEGATIVE MARGIN ON .at-panel-top. It was -4px, pulling the card below up under the
+    //     button so they looked joined — and it became four measured pixels of a button drawn over
+    //     a heading the moment that heading stopped being hidden.
+    const top = (tree.match(/\.at-panel-top\s*\{[^}]*\}/) || [""])[0];
+    if (/margin\s*:[^;]*-\d/.test(top))
+      bad("the Access panel's Preview button is pulled up by a negative margin",
+          "components/admin/AccessTree.tsx → .at-panel-top\n         That is what put it on top of the 'Kitchen ticket printing' heading. Space them, don't overlap them.");
+    else ok("the Access panel's Preview button is spaced from the card, not pulled onto it");
+
+    // 2 · THE DUPLICATE HEADING IS HIDDEN VIA THE BODY WRAPPER, not :first-child of the panel.
+    //     Keyed on :first-child of the PANEL it stopped matching the day a button was put above it.
+    if (/\.at-panel-body > \.adm-card:first-child > h2\s*\{\s*display:\s*none/.test(tree))
+      ok("…and the first card's duplicate heading is hidden by the body wrapper, whatever sits above it");
+    else
+      bad("the Access panel's duplicate heading rule is keyed on the panel's first child again",
+          "components/admin/AccessTree.tsx\n         Anything added above the card makes :first-child stop matching, the repeated heading\n         reappears, and the Preview button lands on it. Key it on .at-panel-body.");
+
+    // 3 · NO HARD-CODED SKIN COLOURS ON IT. It was rgba(99,102,241,.16) / #c7d2fe — dark-mode
+    //     values, so on the light skin it was a pale ghost of a button.
+    const btn = (tree.match(/\.at-preview-btn[^{]*\{[^}]*\}/) || [""])[0];
+    if (/#[0-9a-f]{3,6}|rgba?\(/i.test(btn))
+      bad("the Access panel's Preview button carries hard-coded colours",
+          "components/admin/AccessTree.tsx → .at-preview-btn\n         Those were dark-skin values, and on the light skin the button was almost invisible.\n         Build it from --accent / --card / --text so each skin gets its own.");
+    else ok("…and it is built from the console's own tokens, so it exists in the light skin too");
+  }
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
