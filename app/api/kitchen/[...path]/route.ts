@@ -220,7 +220,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // kitchen shows it on the ticket AND prints it on the KOT — a cook/waiter must read the
         // SAME table label the floor uses, not the raw number (owner 2026-07-29). Small JSONB,
         // one row, table-agnostic — the targeted ?table=N slice never re-reads it.
-        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, kot_print_target, platform_channels, table_names").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels, table_names").eq("restaurant_id", rid).maybeSingle(),
         // THIS restaurant's identity, so the kitchen header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
@@ -264,15 +264,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // (verify:panel-cache / docs: "Staff can run a WEEKS-OLD panel"), so this has to be safe by
       // construction rather than by everyone updating at once.
       const autoJobs = new URL(req.url).searchParams.get("autojobs") === "1";
-      // ── AND WHETHER THIS ROOM IS THE ONE THAT PRINTS (mig 336) ────────────────────────────
-      // `kot_print_target` says which screen may claim an AUTOMATIC ticket: kitchen | counter | both.
-      // Set to 'counter' — a kitchen with no computer in it, the printer at the till — a kitchen
-      // screen must NOT also print, or the same ticket comes out in two rooms (measured: a kitchen
-      // panel left open on the same restaurant printed every ticket the counter was set to print).
+      // ── AND WHETHER THIS ROOM IS THE ONE THAT PRINTS ──────────────────────────────────────
+      // The Kitchen slips ROUTE decides it, and nothing else does (mig 369). Until then this read
+      // ALSO consulted mig 336's coarse `kot_print_target`, and the two could disagree — the sweep
+      // caught the older one winning, so an owner who named the manager screen was refused by a
+      // setting an admin had touched months before. One question, one answer.
+      //
+      // Why it matters that this room can be told NO: with the printer at the till, a kitchen screen
+      // that also printed would put the same ticket in two rooms — measured, with a kitchen panel
+      // left open on the same restaurant printing every ticket the counter was set to print.
       // A MANUAL REPRINT IS DIFFERENT and always reaches the kitchen: the manager pressing "Reprint
       // in kitchen" is naming this printer on purpose, whatever the automatic routing says.
-      const kotTarget = String((must(settings) || {} as { kot_print_target?: string }).kot_print_target || "kitchen");
-      let kitchenMayAuto = kotTarget === "kitchen" || kotTarget === "both";
+      let kitchenMayAuto = true;
       // …AND WHETHER A COMPUTER HAS THE JOB AT ALL. With a helper named for kitchen slips, this
       // screen goes back to being an ordinary display: it stops being offered tickets, stops
       // healing, and says on its own printer sheet where the paper is coming out instead.
@@ -286,7 +289,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // old coarse kitchen|counter|both target only speaks when no route does. Without this a route
       // saying "the kitchen screen prints" was still vetoed by an admin who had set "counter" months
       // ago — two settings, opposite answers, and the newer one losing (printing sweep, 2026-08-26).
-      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
+      // A screen route names the room. `backupPanel` counts too: the retired 'both' is now
+      // "kitchen prints, the counter picks up what it leaves", and the room named as the backup must
+      // still be allowed to ask (the AGE window is what holds it back, not a flat refusal).
+      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen" || target.backupPanel === "kitchen";
+      else if (target.kind === "off" || target.kind === "computer") kitchenMayAuto = false;
       const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
       const screenPrints = kitchenMayAuto && mayI.ok;
       const printJobs = await pendingKotJobs(rid, { includeAuto: autoJobs && screenPrints });
@@ -327,7 +334,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // one the admin chose to print (mig 336). The panel uses it for the printer heartbeat too —
         // a kitchen screen that isn't printing goes back to being an ordinary display.
         autoPrintKot: autoOn && screenPrints,
-        kotPrintTarget: kotTarget,
+        // Kept for the 🖨 sheet's plain-words line, but DERIVED from the route now — never stored.
+        // A panel that is weeks old still reads this key, so it keeps its name and its three values.
+        kotPrintTarget: target.kind === "screen"
+          ? (target.backupPanel ? "both" : target.panel === "manager" ? "counter" : "kitchen")
+          : "kitchen",
         // Who really prints, so the sheet can say "Kitchen slips print at: Shop's computer →
         // Printer_POS_80" instead of leaving a cook to guess why this screen is quiet.
         helper,
@@ -632,9 +643,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // was a coin flip. The gate also TAKES the station when nobody holds it (so a kitchen that has
       // always just printed keeps doing exactly that) and refuses when a live screen elsewhere holds
       // it, telling this one where the paper is coming out.
-      const st = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle()) as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
-      const target = String(st?.kot_print_target || "kitchen");
+      const st = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle()) as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
       // A COMPUTER OWNS IT — a screen may not take it (mig 341). Checked here as well as on the
       // board read, because a panel that was open BEFORE the route was set still holds tickets it
       // believes are its to print: a gate that lives only in the board read is a gate a stale tab
@@ -651,7 +661,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const gate = await mayClaim(rid, {
         deviceId: dev, panel: "kitchen", label: "Kitchen screen",
         auto: st?.auto_print_kot === true && st?.auto_print_kot_allowed === true,
-        roomAllowed: target === "kitchen" || target === "both",
+        // screenMayPrint above has already answered this for the route (mig 369) — including the
+        // backup case — so by the time we reach here the room IS allowed. Passing the answer rather
+        // than re-deriving it from a retired column is what stops the two drifting apart again.
+        roomAllowed: true,
         by: g.user?.name || g.user?.username || null,
       });
       if (!gate.ok) return ok({ won: [], refused: gate.reason, station: gate.station });
@@ -665,11 +678,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // taken over automatically after a few minutes).
     if (a === "print-station" && b === "take") {
       if (!dev) return err("This browser has no device id yet — reload the panel and try again.", 409);
-      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle()) as
-        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+      const st2 = must(await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle()) as
+        { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
       if (!(st2?.auto_print_kot === true && st2?.auto_print_kot_allowed === true)) return err("Automatic printing is switched off for this restaurant.", 409);
-      const tg = String(st2?.kot_print_target || "kitchen");
-      if (!(tg === "kitchen" || tg === "both")) return err("Your admin has set kitchen tickets to print on the counter screen.", 409);
+      // The ROUTE decides whether this room may hold printing at all (mig 369), asked through the one
+      // resolver every other path uses — with the person and device from the REQUEST, so a narrowed
+      // route ("only Rishi's counter PC") refuses a kitchen screen here too.
+      const tgTake = await targetFor(rid, "kot");
+      const mayTake = screenMayPrint(tgTake, { panel: "kitchen", personId: g.user?.id || null, deviceId: dev });
+      if (!mayTake.ok) return err(
+        tgTake.kind === "computer" ? "A computer prints this restaurant's kitchen slips — no screen needs to."
+        : tgTake.kind === "off" ? "Kitchen slips are switched off for this restaurant."
+        : "Kitchen slips are set to print on another screen.", 409);
       const view = await takeStation(rid, { deviceId: dev, label: "Kitchen screen", panel: "kitchen", by: g.user?.name || g.user?.username || null });
       await logAction("kitchen", "print_station_take", { ...adminMark, device_id: dev, restaurant_id: rid, detail: "this kitchen screen is now the printer" });
       return ok({ ok: true, station: view });

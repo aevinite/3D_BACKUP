@@ -46,7 +46,6 @@ const SETTINGS_COLS = [
   // WHICH screen may print a kitchen ticket (mig 336): kitchen | counter | both. Admin-owned for the
   // same reason the KOT entitlement above it is — the manager panel's Kitchen-printing section is
   // hidden from everyone there by the owner's 2026-07-31 decision.
-  "kot_print_target",
 ] as const;
 const SELECT = SETTINGS_COLS.join(", ");
 
@@ -120,10 +119,10 @@ function sanitize(body: Patch): Patch {
   // Only the three the queue understands (mig 336 has the same CHECK constraint). Anything else
   // falls back to 'kitchen' — the setup every restaurant starts on — rather than to an error, so a
   // stale panel can never take a restaurant's printing away.
-  if ("kot_print_target" in body) {
-    const t = String(body.kot_print_target || "kitchen");
-    out.kot_print_target = ["kitchen", "counter", "both"].includes(t) ? t : "kitchen";
-  }
+  // `kot_print_target` CANNOT BE WRITTEN ANY MORE (mig 369). It asked the same question as the
+  // Kitchen slips route and could contradict it; the column is retired and nothing reads it. Leaving
+  // the writer here would let a stale screen quietly set a value that then misleads the next person
+  // reading the database — which is exactly how two settings for one question survive a cleanup.
   if ("table_seats" in body) {
     const raw = body.table_seats;
     const clean: Record<string, number> = {};

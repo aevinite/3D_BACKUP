@@ -59,31 +59,48 @@ import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
 const BACKUP_PRINTER_MS = 30000;
 // May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
-// Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
-// mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
+//
+// It asks ONE thing now: the Kitchen slips route (mig 369). It used to ask two — the route AND
+// mig 336's coarse `kot_print_target` — and the printing sweep caught them disagreeing, with the
+// OLDER one winning: a route saying "the manager screen prints the kitchen slips" was refused
+// because an admin had once set "kitchen" months before. Two settings for one question is how the
+// owner's own choice ended up doing nothing, so there is one left.
+//
+// `backup` is no longer a separate setting either: it is `backupPanel` on the route, which is where
+// the retired 'both' went. Both rungs of mig 107 still gate everything (the admin allowed auto-print
+// AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
-  const [stQ, helper] = await Promise.all([
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
+  const [stQ, helper, route] = await Promise.all([
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
+    targetFor(rid, "kot"),
   ]);
-  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
   const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
-  const target = String(st?.kot_print_target || "kitchen");
+  // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
+  // plain words. It is derived from the route now, never stored.
+  const target = route.kind === "screen"
+    ? (route.backupPanel ? "both" : route.panel === "manager" ? "counter" : "kitchen")
+    : "kitchen";
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
   if (helper.owned) return { mayPrint: false, backup: false, target, helper };
-  // ── THE NEWER ANSWER WINS OVER THE OLDER ONE (found by the printing sweep, 2026-08-26) ────────
-  // mig 336's kot_print_target is the OLD, coarse question: kitchen | counter | both. mig 341's route
-  // can now name this very panel — and the sweep caught the two disagreeing: with a route saying
-  // "the manager screen prints the kitchen slips" and the old target still saying "kitchen", the
-  // manager screen was refused by the older setting and the owner's own choice did nothing.
-  // A route that names a panel IS the decision; the coarse target only speaks when no route does.
-  const screenRoute = await targetFor(rid, "kot");
-  if (screenRoute.kind === "screen") {
-    return { mayPrint: on && screenRoute.panel === "manager", backup: false, target, helper };
-  }
-  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
+  const may = screenMayPrint(route, { panel: "manager", personId: null, deviceId: null });
+  // A person/device narrowing is checked per-request elsewhere (this helper has no request in hand),
+  // so "may a manager screen print at all" is the panel-level answer only.
+  // WITH NO ROUTE AT ALL, THE DEFAULT ROOM IS THE KITCHEN — so a manager screen does NOT auto-print.
+  // That is exactly what the retired kot_print_target defaulted to ('kitchen'), and it matters: a
+  // manager panel left open on a restaurant that has never touched the Printing board would
+  // otherwise start pulling kitchen tickets it never used to. Caught by verify:printing-sweep phase
+  // 22 before this shipped; my first version returned true here.
+  // (After mig 369 every existing restaurant HAS a kitchen-slip route, so this branch is only a
+  // brand-new one — where "the kitchen prints" is the right thing to assume.)
+  const panelOk = route.kind === "screen"
+    ? (route.panel === "manager" || route.backupPanel === "manager")
+    : false;
+  return { mayPrint: on && panelOk, backup: !!may.backup, target, helper };
 }
+
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
