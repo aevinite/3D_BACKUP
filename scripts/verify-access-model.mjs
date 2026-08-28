@@ -992,6 +992,29 @@ else ok("the read/write route derives every allow-list from the model");
   }
 }
 
+// ── 54 · CLAUDE.md's COUNT OF OUTSTANDING OWNER ASKS MUST BE THE REAL ONE ──
+// CLAUDE.md is loaded into EVERY session before any work starts, and its Access rule states how
+// many of the owner's requests in docs/ACCESS-REDESIGN-SPEC.md are still unbuilt. On 2026-08-27
+// it said 12 and the spec's own command said 9 — three had been built and ticked and nobody
+// moved the number, so every session began hunting three things that do not exist. The spec
+// itself has been wrong this way before: its header records that it "claimed 13 until
+// 2026-08-11, and there were only ever 12". A number nothing checks is a number that drifts.
+//
+// The count uses the spec's OWN command (`grep -c '^- ☐'`), so the two can never disagree about
+// what they are counting: only a line that starts a top-level checklist item. Indented sub-notes
+// and the legend line carry the same glyph and are deliberately not counted. (sweep #7 T15,
+// 2026-08-28)
+{
+  const spec = read("docs/ACCESS-REDESIGN-SPEC.md");
+  const real = spec.split("\n").filter((l) => l.startsWith("- \u2610")).length;
+  const claude = read("CLAUDE.md");
+  const m = claude.match(/ACCESS-REDESIGN-SPEC\.md`?\s*\n?\s*\((\d+) open/);
+  if (!m) fail("CLAUDE.md's Access rule no longer states how many owner asks are still open — put the count back, or delete check 54 with a reason");
+  else if (Number(m[1]) !== real)
+    fail(`CLAUDE.md says ${m[1]} outstanding owner asks on the Access screen and docs/ACCESS-REDESIGN-SPEC.md really has ${real} — every session starts from that number, so it sends them hunting for work that is already done (or hides work that is not)`);
+  else ok(`CLAUDE.md's count of outstanding owner asks is right (${real})`);
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
