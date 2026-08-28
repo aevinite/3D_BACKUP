@@ -682,6 +682,46 @@ for (const [what, ts] of INSTANTS) {
       "one setting, one default — resolve it in billIdentity and read bi.taxLabel everywhere else");
 }
 
+// ── 3m. THE NUMBER ROW IS NAMED AFTER THE DOCUMENT IT IS ON ───────────────────────────────────
+// A composition restaurant's sheet was headed BILL OF SUPPLY and then labelled its number row
+// "INVOICE" — the sheet arguing with itself on the one document that kind of business hands over.
+// A composition dealer may not issue a tax invoice; CGST Rule 49 asks that sheet for "a consecutive
+// serial number". Nothing about the NUMBER changes — same number, same restaurant-chosen prefix.
+{
+  const SET = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }],
+    gstin: "24ABCDE1234F1Z5" };
+  const row = (extra, cancelled) => {
+    const html = BILLDOC.billDocHtml(BILLDOC.billData({ settings: { ...SET, ...extra }, restaurant: {},
+      autoPrint: false, session: { bill_no: 41, invoice_no: 118, invoice_at: "2026-08-16T16:01:00Z" },
+      orders: [{ status: cancelled ? "cancelled" : "served", subtotal: 880, taxable_base: 880,
+        nontax_amount: 0, discount: 0, tax_rate: extra.price_tax_mode === "composition" ? 0 : 0.05,
+        items: [{ title: "Thali", qty: 4, price: 220 }] }] }));
+    const m = html.match(/<div class="kv"><span>([^<]*)<\/span><b>([^<]*)<\/b>/);
+    return { kind: (html.match(/<div class="kind">([^<]*)/) || [])[1], label: m && m[1], value: m && m[2] };
+  };
+  const cases = [
+    ["an ordinary tax invoice", {}, false, "Tax Invoice", "Invoice"],
+    ["a composition Bill of Supply", { price_tax_mode: "composition" }, false, "Bill of Supply", "Serial no"],
+    ["a cancelled sale", {}, true, "Cancelled Bill", "Invoice"],
+    ["a composition sheet with its own prefix", { price_tax_mode: "composition", invoice_prefix: "BOS" }, false, "Bill of Supply", "Serial no"],
+  ];
+  const bads = [];
+  for (const [what, extra, cancelled, kind, label] of cases) {
+    const r = row(extra, cancelled);
+    if (r.kind !== kind) bads.push(`${what}: headed "${r.kind}"`);
+    if (r.label !== label) bads.push(`${what}: the number row is labelled "${r.label}", not "${label}"`);
+  }
+  // the NUMBER itself, and the restaurant's chosen prefix, must be untouched
+  const own = row({ price_tax_mode: "composition", invoice_prefix: "BOS" }, false);
+  if (!/^BOS\/\d{4}-\d{2}\/000118$/.test(own.value || "")) bads.push(`the chosen prefix did not reach the number: ${own.value}`);
+  const plain = row({}, false);
+  if (!/^INV\/\d{4}-\d{2}\/000118$/.test(plain.value || "")) bads.push(`the default prefix changed: ${plain.value}`);
+  bads.length === 0
+    ? ok("the number row is named after the document it sits on, and the number itself never moves")
+    : bad(`the sheet argues with itself: ${bads.join(" · ")}`,
+      "a Bill of Supply may not call its number an Invoice — but the NUMBER, and the restaurant's own prefix, stay exactly as they are");
+}
+
 // ── 3l. AN ALL-MRP BILL IS JUST A BILL ────────────────────────────────────────────────────────
 // A shop whose whole sale is sealed products printed "Food subtotal ₹0" over "MRP items ₹42". The
 // split says nothing when there is no food, and a zero in a labelled money box reads as a mistake

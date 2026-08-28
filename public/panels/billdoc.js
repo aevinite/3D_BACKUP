@@ -623,7 +623,17 @@
    The cancelled band below is unrelated and stays: it changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
-+ (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
+/* THE ROW IS NAMED AFTER THE DOCUMENT IT IS ON (owner, 2026-08-28 — item 18).
+   A composition-scheme restaurant's sheet is headed BILL OF SUPPLY and then, three lines below,
+   labelled its number row "INVOICE" — the sheet arguing with itself on the one document that kind
+   of business hands over. A composition dealer may not issue a tax invoice at all; what CGST
+   Rule 49 asks that sheet to carry is "a consecutive serial number", so that is what the row is
+   called there. Nothing about the NUMBER changes — it is the same number, drawn the same way, with
+   the same restaurant-chosen prefix (Settings › Billing → "Invoice prefix", default INV). Only the
+   word to the left of it moves, and only on a Bill of Supply.
+   A cancelled sheet keeps "Invoice", because it names the invoice number it RETIRED. */
++ (d.invNo ? '<div class="kv"><span>' + ((composition && !d.cancelled) ? "Serial no" : "Invoice")
+   + '</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 /* THE INTERNAL BILL NUMBER IS NOT THE CUSTOMER'S BUSINESS WHEN THERE IS A REAL INVOICE NUMBER
    (owner, 2026-08-21). This app hands out THREE numbers where a POS normally has two: the KOT
    number for the kitchen, the INVOICE number (the tax record — drawn only when an invoice is
