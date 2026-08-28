@@ -177,7 +177,15 @@ const tname = (t) => (((state.tableNames || {})[String(t)]) || "").trim();
 // if the owner renamed table 1 to "A1", the ticket and the printed KOT must say "A1",
 // because that is what is written on the table (owner 2026-07-29). No name → the plain
 // number. Display only — every id/bill still uses the number.
-const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket header)
+// GUARDED THE SAME WAY tlong IS (T6 sweep #7, 2026-08-22). This was `tname(t) || \`T${t}\``, so an
+// order with no table — a banquet bill with the table left blank, which `orders` allows and the
+// live-board query does not exclude — put the literal **"Tnull"** in the ticket header a cook reads.
+// "Tundefined" and a bare "T" were reachable the same way. tlong() was hardened for exactly this
+// case and says "T?"; tshort() was not, so the SCREEN and the PAPER disagreed about the same ticket
+// — and the title attribute on that very span is already guarded against it, so half this line was
+// fixed and half was missed. A raw `null` on a staff screen is on verify:live's own leaked-value
+// list. Same answer as tlong now: "T?".
+const tshort = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`));   // tight spots (ticket header)
 // T7, never "Table 7" (owner, 2026-08-05: "it should always be T7"). A table with a NAME set
 // shows the name instead. One short form everywhere — panels, tickets and the printed bill.
 const tlong = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`)); // prints, toasts
@@ -516,8 +524,8 @@ function platTicketHtml(p) {
 // Advance a platform order (accept/ready/handed_over), then refresh.
 function platAct(id, status) {
   api("POST", `/platform/${id}/status`, { status })
-    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } freshLoad(); })
-    .catch((e) => { toast("Failed: " + e.message); freshLoad(); });
+    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } refreshQuietly(); })
+    .catch((e) => { toast("Failed: " + e.message); refreshQuietly(); });
 }
 
 // INCREMENTAL tile patcher. Given a container and the DESIRED ordered list of tickets
@@ -798,7 +806,7 @@ function markItemReady(id, btn) {
     // says" and repaints it from the truth. Cheap, and it cannot make anything else stale.
     forgetCardHtml(o ? o.id : it.order_id);
     toast("Failed: " + e.message);
-    freshLoad();
+    refreshQuietly();
   });
 }
 
@@ -808,16 +816,31 @@ function markItemReady(id, btn) {
 // load() at the end (instead of surgical patching) is fine and keeps state honest.
 async function undoReady(snap, orderId) {
   if (orderId != null) pendingReadyOrders.delete(orderId);
+  // Every ticket this take-back touches, so its card can be told to forget what it thinks it says.
+  const touched = new Set(orderId != null ? [orderId] : []);
   snap.forEach((s) => {
     pendingReady.delete(s.id);
     const it = (state.items || []).find((x) => x.id === s.id);
-    if (it && it.status !== "served") it.status = s.prev;
+    if (it && it.status !== "served") { it.status = s.prev; if (it.order_id != null) touched.add(it.order_id); }
   });
-  // (The take-back does NOT need forgetCardHtml. It looks like it should — the tap patched the card
-  // in place, so the stamp is stale here too — but it was measured both ways, tapping UNDO the
-  // instant the bar appears, and the board behaves identically: the freshLoad() at the end of this
-  // function is what puts the ✓ back, in about the same moment either way. Adding the call changed
-  // nothing a cook could see, so it is not here. T6 re-check, 2026-08-19.)
+  // THE TAKE-BACK NEEDS forgetCardHtml TOO — and the note that used to sit here said the opposite.
+  //
+  // It said the call changed nothing a cook could see, "measured both ways, 2026-08-19". That
+  // measurement can only have been taken on a SINGLE-dish ticket, where finishing the dish moves the
+  // card to the Ready lane and moveCardToReady() rebuilds it (re-stamping __kdsHtml) on the way over
+  // and again on the way back. On a ticket with MORE THAN ONE cooking dish the card never changes
+  // lane, so nothing rebuilds it — and then this is the exact fault the refused ✓ above was fixed
+  // for: the ✓ tap edited one line in place (btn.outerHTML), which does not touch __kdsHtml, so once
+  // the status is restored the desired html matches that stale stamp exactly, reconcileList concludes
+  // "unchanged, reuse the node", and the node it reuses is the one with no ✓ on it.
+  //
+  // Watched happening on the running board (T6 sweep #7, 2026-08-22), two-dish ticket, UNDO tapped
+  // 450ms after the bar appeared: the write landed and the server read `preparing` within a second,
+  // and the screen still said "1× Pink Pineapple Smoothie READY" with no ✓ ten seconds later and
+  // after a forced whole-board read. A cook is told the dish was put back and cannot re-send it; the
+  // waiter's tablet and the manager's floor show the truth, so the two screens disagree. It only
+  // heals when something ELSE changes that ticket's html — the age text, once an hour on an old one.
+  for (const id of touched) forgetCardHtml(id);
   render();
   try {
     // ONE REQUEST FOR THE WHOLE TICKET (owner-picked improvement, 2026-08-07). This used to be
@@ -840,7 +863,7 @@ async function undoReady(snap, orderId) {
   } catch (e) {
     toast("Undo failed: " + e.message);
   }
-  freshLoad();   // a write just landed — do not accept a read that predates it
+  refreshQuietly();   // a write just landed — do not accept a read that predates it
 }
 // Move ONE fully-ready ticket into the Ready column without a whole-board rebuild:
 // re-render just that card (now shows "ready — waiter serving", no buttons), drop it
@@ -913,7 +936,7 @@ function markOrderReady(orderId) {
     pendingReadyOrders.delete(orderId);
     snap.forEach((s) => pendingReady.delete(s.id));
     toast("Failed: " + e.message);
-    freshLoad();
+    refreshQuietly();
   });
 }
 
@@ -1795,6 +1818,24 @@ let markFullRead = () => {};
 function freshLoad() {
   return loadInFlight ? loadInFlight.catch(() => {}).then(() => loadImpl()) : loadImpl();
 }
+// refreshQuietly(): freshLoad() for the five callers that fire one and walk away.
+//
+// load() and freshLoad() REJECT when the read fails — deliberately, because backoffPoll and
+// LFH_RT.catchUp back off on exactly that. Every timer and listener in this file therefore writes
+// `load().catch(() => {})`. Five post-write refreshes did not: platAct's two branches, the refused ✓,
+// the refused ALL READY, and the trailing read at the end of a take-back. Nothing awaited them, so a
+// read that failed became an UNHANDLED PROMISE REJECTION — and public/panels/errlog.js reports every
+// one of those into the owner's Everything Log.
+//
+// Watched happening (T6 sweep #7, 2026-08-22): with the board answering 503 "the database is very
+// busy", a cook tapping UNDO produced `REJECTION: the database is very busy` in the log and NOTHING
+// on screen. On a busy evening that is one unactionable row per take-back, in the log the owner reads
+// — which is the "don't cry wolf" rule and the rush rule pointing the same way. The person has
+// already been told what they need: the refusal toast fired, and the offline/busy bar owns "the
+// system is very busy". The read simply tries again on the next breadcrumb or the 60s backstop.
+//
+// It swallows the READ, never a write: every write on this screen still reports its own outcome.
+const refreshQuietly = () => freshLoad().catch(() => {});
 function load() {
   if (loadInFlight) { loadQueued = true; return loadInFlight; }
   const p = loadImpl();

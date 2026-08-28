@@ -229,6 +229,68 @@ const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? read
     check("kitchen: a refused ✓ lets its card redraw",
       /\.catch\(\([^)]*\)\s*=>\s*\{[\s\S]{0,2600}?forgetCardHtml\(/.test(mi),
       "otherwise the dish is restored in the data and the ✓ never comes back on screen.");
+    // …AND SO DOES A TAKE-BACK (T6 sweep #7, 2026-08-22). Same fault, different door: the ✓ tap
+    // edits one line in place, so once undoReady() restores the status the desired html matches the
+    // card's stale __kdsHtml stamp and reconcileList reuses the node that has no ✓ on it. Watched on
+    // a TWO-dish ticket: the write landed, the server read `preparing` inside a second, and the
+    // screen still said READY with no ✓ ten seconds later and after a forced whole-board read. A
+    // single-dish ticket hides it, because finishing it moves the card to Ready and that rebuild
+    // re-stamps — which is why the old note in that function claimed the call was unnecessary.
+    const ur = (js.match(/async function undoReady\([\s\S]*?\n\}/) || [])[0] || "";
+    check("kitchen: undoReady() collects every ticket the take-back touches",
+      /const touched = new Set\(/.test(ur) && /touched\.add\(it\.order_id\)/.test(ur),
+      "a per-dish take-back carries no order id, so the ticket has to be found from the dish's own row.");
+    check("kitchen: a take-back lets its card redraw",
+      /for \(const id of touched\) forgetCardHtml\(id\);/.test(ur),
+      "otherwise the dish is put back in the data and the screen keeps showing READY with no ✓.");
+    // ── A POST-WRITE REFRESH MUST NOT BECOME A ROW IN THE OWNER'S LOG ─────────────────────────
+    // load() and freshLoad() REJECT when the read fails (backoffPoll and LFH_RT.catchUp back off on
+    // exactly that), so every timer and listener in the panel writes `load().catch(() => {})`. Five
+    // post-write refreshes did not, and nothing awaited them — so a failed read became an unhandled
+    // rejection, and public/panels/errlog.js reports every one of those into the Everything Log.
+    // Watched with the board answering 503: `REJECTION: the database is very busy` in the log and
+    // nothing on screen. refreshQuietly() is freshLoad() with the file's own convention applied.
+    check("kitchen: there is one quiet post-write refresh helper",
+      /const refreshQuietly = \(\) => freshLoad\(\)\.catch\(\(\) => \{\}\);/.test(js),
+      "the five fire-and-forget refreshes go through it, so a failed read cannot reject into nothing.");
+    {
+      // `await freshLoad();` inside a try/catch is handled — only a fire-and-forget one is bare
+      const bare = (js.match(/(?<!await )(?<!return )(?<![.\w])freshLoad\(\);/g) || []).length;
+      check("kitchen: no post-write refresh is left bare",
+        bare === 0,
+        `found ${bare} bare freshLoad(); call(s) — each one is an unhandled rejection when the board read fails, and errlog.js files it in the owner's Everything Log. Use refreshQuietly().`);
+    }
+    check("kitchen: refreshQuietly swallows only the READ, never a write",
+      /toast\("Failed: " \+ e\.message\);\s*\n?\s*refreshQuietly\(\);/.test(js),
+      "every refused write still says so to the person before the quiet refresh.");
+    check("kitchen: the take-back forgets the stamp BEFORE it repaints",
+      ur.indexOf("forgetCardHtml") >= 0 && ur.indexOf("forgetCardHtml") < ur.indexOf("render()"),
+      "render() is what reads the stamp — clearing it afterwards would be a paint too late.");
+    // ── THE SCREEN AND THE PAPER MUST AGREE ABOUT A TICKET WITH NO TABLE ──────────────────────
+    // `orders.table_number` may be null (a banquet bill with the table left blank) and the
+    // live-board query does not exclude it. tlong() has always answered "T?" for that; tshort(),
+    // which is what the TICKET HEADER a cook reads goes through, used to answer the literal
+    // "Tnull" — and "Tundefined", and a bare "T". The title attribute on that same span was
+    // already guarded, so half the line was fixed and half was missed. Run both helpers, don't
+    // read them: a raw null on a staff screen is on verify:live's own leaked-value list.
+    {
+      // stop at the semicolon even when a trailing // comment follows it — otherwise the lazy
+      // match runs on and swallows the NEXT declaration, which is a syntax error, not a failure
+      const pick = (n) => { const m = js.match(new RegExp("^const " + n + " = [\\s\\S]*?;(?=[ \\t]*(?://[^\\n]*)?$)", "m")); return m ? m[0] : null; };
+      const parts = ["tname", "tshort", "tlong"].map(pick);
+      check("kitchen: the three table-label helpers are still where this guard can run them", parts.every(Boolean));
+      if (parts.every(Boolean)) {
+        const { tshort, tlong } = new Function("state", parts.join("\n") + "\nreturn { tshort, tlong };")({ tableNames: {} });
+        for (const [label, v] of [["null", null], ["an empty string", ""], ["undefined", undefined]]) {
+          check(`kitchen: a ticket whose table is ${label} shows "T?" on SCREEN, never a raw value`,
+            tshort(v) === "T?", `tshort(${label}) answered "${tshort(v)}" — that goes straight into the ticket header.`);
+          check(`kitchen: …and the PAPER says the same thing for ${label}`,
+            tlong(v) === "T?", `tlong(${label}) answered "${tlong(v)}".`);
+        }
+        check("kitchen: a real table number is still shown as T<n>", tshort(7) === "T7" && tlong(7) === "T7");
+        check("kitchen: table 0 is still shown, not swallowed by a falsy test", tshort(0) === "T0" && tlong(0) === "T0");
+      }
+    }
     // the marks, as the panel actually ships them
     const m = js.match(/TAG_BADGE = \{ vip: \["[^"]*", "(#[0-9a-f]{6})"\], family: \["[^"]*", "(#[0-9a-f]{6})"\], guest: \["[^"]*", "(#[0-9a-f]{6})"\] \}/i);
     check("kitchen: the three table marks are still declared where this guard can read them", !!m);
