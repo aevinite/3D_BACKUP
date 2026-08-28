@@ -171,6 +171,49 @@ chopped mid-word with the count pills still glowing beside them. It now has a **
 blurs**; a dim alone was measured at rgb(16,20,27) → rgb(10,15,23) on the dark skin, which is a real
 change and invisible to a human.
 
+## 2026-08-28 — the coarse "which screen prints" setting is retired (mig 369)
+
+> Owner: *"right now I don't understand three options — 'With no answer on the Kitchen slips line
+> below, which screen prints them?' — what do you mean by this option?"* Then: *"do what's left."*
+
+`settings.kot_print_target` (mig 336, `kitchen | counter | both`) asked **the same question** as the
+Kitchen slips line, in older and vaguer words, and the two could contradict each other — the printing
+sweep caught the older one winning on 2026-08-26. It is gone from every screen and every code path.
+
+**It was not a deleted dropdown.** On the dev stack **2 of 17** restaurants — French House and Aangan,
+the two he tests with — were on **`both`** with the Kitchen slips line unanswered. Deleting the
+setting would have silently removed their safety net. So the meaning moved first:
+
+| old value | the route it became |
+|---|---|
+| `kitchen` | `{ via:"screen", panel:"kitchen" }` |
+| `counter` | `{ via:"screen", panel:"manager" }` |
+| `both` | `{ via:"screen", panel:"kitchen", backupPanel:"manager", backupAfterMs:30000 }` |
+
+**`backupPanel` is new** — a screen route can now name a second screen that may take a slip the first
+has left sitting, which is the mirror of `backupAgent` on a computer route. `screenMayPrint` answers
+`{ ok:true, backup:true, afterMs }` for it, and the **age** window is what holds the second screen
+back, not a refusal. A screen cannot be its own backup (an age window nothing can satisfy looks like a
+rule and is not one).
+
+Migration 369 is **idempotent** and only touches restaurants that have **not** answered the Kitchen
+slips line — a newer decision is never overwritten. **The column stays** (schema changes here are
+additive, one folder feeds two databases) with a `COMMENT` saying it is retired; nothing reads or
+writes it, and `verify:print-queue` now fails if any of seven files touches it again.
+
+### Two faults found before shipping, one mine and one the sweep's own
+
+1. **With no route at all my first version let the MANAGER screen auto-print.** The retired column
+   defaulted to `kitchen`, so a manager panel left open on a restaurant that had never touched the
+   Printing board would have started pulling kitchen tickets it never used to. Sweep phase 22.
+2. **The sweep's "a DIFFERENT person" shape read an owner with no restaurant filter**, so it could
+   pick another restaurant's owner — the server correctly refused the shape and three phases blamed
+   the product. A sweep that cannot tell its own bad data from a real fault is worse than no sweep.
+   (And my new self-backup phase wrote the jsonb straight to the database, which never runs the
+   validator it was testing. It goes through `/api/admin/printing/routes` now.)
+
+`verify:printing-sweep` **112 → 118 phases**, 0 failed.
+
 ## Why the browser can never do this
 
 A web page cannot choose a printer. `window.print()` under Chrome's `--kiosk-printing` always

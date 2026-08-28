@@ -27,14 +27,16 @@ type Agent = {
   connected: boolean; secondsAgo: number | null; fingerprintClash: boolean;
 };
 type Route = { agent: string | null; printer: string | null; backupAgent?: string | null; backupPrinter?: string | null; paper?: Paper;
-  via?: "computer" | "screen" | "off"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null };
+  via?: "computer" | "screen" | "off"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null;
+  /** The second screen allowed to take what the first leaves sitting — the retired "both" (mig 369). */
+  backupPanel?: string | null };
 type Person = { id: string; name: string; role: string; panels: string[] };
 type Device = { device_id: string; label?: string | null; panel?: string | null; last_seen_at?: string | null };
 type Job = { id: string; kind: string; status: string; printer: string | null; printed_by: string | null; attempts: number; error: string | null; created_at: string; done_at: string | null };
 type Stuck = { n: number; oldestMs: number | null; afterMs: number };
 type State = {
   agents: Agent[]; routes: Record<string, Route>; waiting: number; stuck?: Stuck; recent: Job[];
-  kinds: string[]; printing: { allowed: boolean; on: boolean; target: string };
+  kinds: string[]; printing: { allowed: boolean; on: boolean };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
   files?: Record<string, { filename: string; autostart: string; text: string }>;
 };
@@ -208,7 +210,7 @@ export default function AdminPrinting() {
     const d = await post("routes", { routes: { [kind]: {
       via: r.via || (r.agent ? "computer" : undefined),
       agent: r.agent, printer: r.printer, backupAgent: r.backupAgent, backupPrinter: r.backupPrinter, paper: r.paper,
-      panel: r.panel, person: r.person, device: r.device,
+      panel: r.panel, person: r.person, device: r.device, backupPanel: r.backupPanel,
     } } });
     if (d) { toast(`${KIND_LABEL[kind] || kind} saved.`, "ok"); void load(); }
   };
@@ -467,21 +469,17 @@ export default function AdminPrinting() {
               One line each. A line left empty says so on their screens — it never goes quietly. The backup
               takes over only if the first printer has printed nothing for a minute.
             </p>
-            {/* THE FALLBACK, for a restaurant that names no route at all (mig 336). It moved here from the
-                Access card, because printing belongs to one board — and it is a SELECT, not three radio
-                cards, because it is the answer that matters least: a route overrules it the moment one
-                exists, and most restaurants will have one. */}
-            {whoOf(draft.kot) === "" ? (
-            <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
-              <span className="lbl">With <b>no answer on the Kitchen slips line below</b>, which screen prints them?</span>
-              <select className="adm-input" style={{ minWidth: 210, marginLeft: "auto" }} value={st.printing.target || "kitchen"}
-                onChange={async (e) => { const d = await post("switch", { target: e.target.value }); if (d) void load(); }}>
-                <option value="kitchen">The kitchen screen</option>
-                <option value="counter">The counter (manager) screen</option>
-                <option value="both">Both — the counter is the backup</option>
-              </select>
-            </div>
-            ) : null}
+            {/* THE COARSE FALLBACK IS GONE (mig 369, owner 2026-08-28: "right now I don't understand
+                three options — 'With no answer on the Kitchen slips line below, which screen prints
+                them?' — what do you mean by this option?").
+                He was right that it was clutter: it asked the SAME question as the Kitchen slips line
+                below it, in older and vaguer words, and it could CONTRADICT it — the printing sweep
+                caught the older one winning. Its three answers now live in the line itself:
+                  kitchen → A screen · Kitchen screen
+                  counter → A screen · Manager screen
+                  both    → A screen · Kitchen screen, with the Manager screen as the 30-second backup
+                Migration 369 wrote every restaurant's old value into that line first, so nothing
+                changed for the two that were on "both". */}
             {/* WHERE THE OTHER HALF OF THIS LIVES. The same shape as the Access card's pointer, so the
                 two boards read as one system rather than two products. */}
             <div className="adm-elsewhere" style={{ marginBottom: 12 }}>
@@ -556,7 +554,21 @@ export default function AdminPrinting() {
                         <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
                       </div>
                       <details className="adm-more" style={{ marginTop: 8 }}>
-                        <summary>Narrow it further — one person, one PC</summary>
+                        <summary>More — a backup screen, one person, one PC</summary>
+                        {/* THE BACKUP SCREEN IS WHERE THE OLD "both" WENT (mig 369). It reads the same
+                            way a computer route's backup printer does, which is the point: a screen
+                            route and a computer route now describe a fallback in one shape. */}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                          <span className="adm-muted" style={{ fontSize: 12 }}>If that screen leaves a slip for 30 seconds:</span>
+                          <select className="adm-input" style={{ minWidth: 180, fontSize: 12 }} value={r.backupPanel || ""}
+                            onChange={(e) => setR(kind, { backupPanel: e.target.value || null })}>
+                            <option value="">— no backup screen —</option>
+                            {(st.panels || ["kitchen", "manager", "owner", "tablet"]).filter((pn) => pn !== r.panel).map((pn) => (
+                              <option key={pn} value={pn}>{pn === "kitchen" ? "The kitchen screen" : pn === "manager" ? "The manager screen" : pn === "owner" ? "The owner screen" : "A waiter tablet"}</option>
+                            ))}
+                          </select>
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={busy === "routes"} onClick={() => void saveRoute(kind)}>Save</button>
+                        </div>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
                           <select className="adm-input" style={{ minWidth: 190 }} value={r.person || ""}
                             onChange={(e) => {
@@ -579,7 +591,8 @@ export default function AdminPrinting() {
                         </div>
                         <p className="adm-muted" style={{ fontSize: 12, margin: "7px 0 0" }}>
                           That screen prints it on whatever printer that machine is set to. Leave both blank
-                          and anybody allowed on that screen prints it.
+                          and anybody allowed on that screen prints it. A <b>backup screen</b> may take a slip
+                          the first one has left for 30 seconds — the first screen always gets first refusal.
                           {st.managerMayPrint === false ? " No manager is offered because “May be the printer” is switched off for managers on Access & permissions." : ""}
                         </p>
                       </details>
