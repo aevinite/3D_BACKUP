@@ -48,6 +48,8 @@ again. Read those before reporting anything.
 > | T4 · working offline, and in every language | `P16601`–`P17100` | ✅ 500 written, 500 executed (497 ✅ · 3 ❌→✅ fixed on the branch) — plus all 500 of `P01501`–`P02000` re-run: **no regression**, 4 expectations moved, and one row (`P01936`) found to have been **filed green on a claim that was never true** |
 > | T17 · the admin's health, logs, issues & limits | `P23101`–`P23600` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌, and that one is a single line in a file this territory does not own) — plus all 500 of `P08001`–`P08500` re-run: **ONE REGRESSION** (`P08095` — the server moved to the shared `errorSig()` group and the Logs page was left comparing message text letter-for-letter, so "Mark resolved" cleared 9 rows server-side and struck through 1), 1 row newly red (`P08201`), 4 ⏭ unchanged, and 11 expectations moved because System health was rebuilt. **6 problems fixed, one commit each.** |
 >
+> | T26 · THE LOOK | `P27601`–`P28100` | ✅ 500 written, 500 executed (401 ✅ · 24 ❌→✅ fixed on the branch · 65 ⚠️ measured-and-offered · 10 ⏭) — plus all 500 of `P12501`–`P13000` re-run: **NO REGRESSION**, 4 expectations moved, and `P12751`–`P12800` found to hold **no check at all** (their whole text is one letter each — a sweep-#6 generator fault, 50 ids spent on nothing). **7 problems found, 7 fixed, one commit each**, plus 2 guard commits. Six of the seven were on the skin the surface OPENS in. |
+>
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
 > deliberately small so it does not collide with that rebuild.
