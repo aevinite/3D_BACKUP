@@ -54,7 +54,7 @@ export function hasBrandMarkers(input: string): boolean {
 // browser can neither join Arabic letters nor order them right-to-left across two atomic boxes,
 // so every letter falls back to its isolated form and the word reads backwards. Measured with a
 // screenshot (T15, 2026-08-13) and PARKED — *"don’t suggest that improvement right now"*. Do not
-// fix it here, do not add a script check, do not file it as new. Full note: the R23 block in lib/i18n.ts. (Pointer added by T27, 2026-08-27, which re-found it and had to revert.)
+// fix it here, do not add a script check, do not file it as new. Full note: lib/i18n.ts → useTranslation. (Pointer added by T27, 2026-08-27, which re-found it and had to revert.)
 //
 // Falls back to the old behaviour on any runtime without Segmenter (all current browsers and
 // Node 18+ have it); a fallback that splits Latin correctly is better than throwing.

@@ -124,7 +124,7 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl, scopeKey }
           (app/globals.css), and a browser can neither join Arabic letters nor order them
           right-to-left ACROSS two atomic boxes. It is measured, screenshotted and PARKED — the
           owner asked not to be offered it — so do not helpfully fix it, and do not file it as new.
-          The full note is at the R23 block in lib/i18n.ts. (Pointer added by the T27 sweep,
+          The full note is at lib/i18n.ts → useTranslation. (Pointer added by the T27 sweep,
           2026-08-27, which re-found the fault, fixed it, and had to revert: the decision was three
           files away.) */}
       {/* The wordmark, split into one <span> per letter-as-a-reader-sees-it so each can pop in

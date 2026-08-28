@@ -610,7 +610,7 @@ body.menu-scrolling .chef-call {
    browser cannot join the letters or order them right-to-left, and the word reads backwards.
    It is measured and PARKED — do not switch these to `inline` to "fix" it, and do not report it.
    (The tagline below IS `inline`, which is why only one of the two hero lines is affected.)
-   Full note: the R23 block in lib/i18n.ts. Pointer added by T27, 2026-08-27. */
+   Full note: lib/i18n.ts → useTranslation. Pointer added by T27, 2026-08-27. */
 .hero-title-wrap .greet-badge span { display: inline-block; white-space: pre; }
 /* THE TAGLINE MUST NOT BREAK IN THE MIDDLE OF A WORD (T4 sweep, 2026-08-17).
  *
