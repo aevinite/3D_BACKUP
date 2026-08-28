@@ -286,6 +286,19 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 .drawer-head .sub { color: var(--muted); font-weight: 500; font-size: 13px; }
 .dish-search { padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 15px; margin-bottom: 10px; }
 .dish-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+/* "Sold out only" — one tap to answer "what have we 86'd tonight?" instead of scrolling the menu
+   hunting for red (owner, 2026-08-26). Full width and 44px, because it is pressed with a wet hand
+   like everything else here. It reads as a switch, not a dish row: pill shape, and it fills in when
+   it is on so a cook can never wonder which way round it is. The count is shown either way, so the
+   question can often be answered without pressing it at all. */
+.outfilter { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; margin: 0 0 10px;
+  padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); font-size: 14px; font-weight: 700; cursor: pointer; text-align: left; }
+.outfilter:hover { border-color: var(--red, #ef4444); }
+.outfilter.on { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .55); color: #b91c1c; }
+html:not([data-theme="light"]) .outfilter.on { color: #fca5a5; }
+.outfilter .oc { margin-left: auto; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: var(--panel-2, rgba(127,127,127,.14)); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
 .dish-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; }
 .dish-row.is-out { border-color: rgba(239,68,68,0.45); }
 /* ── FINGER-SIZED IN THE 86 BOARD (T14 tablet sweep, 2026-08-05) ──────────────────────────────

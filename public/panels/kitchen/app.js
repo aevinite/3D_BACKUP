@@ -1005,7 +1005,17 @@ function renderDishes() {
   // Trim so a stray space / spaces-only search isn't treated as a real query that matches
   // nothing (it used to blank the whole drawer).
   const q = ($("#dishSearch").value || "").trim().toLowerCase();
-  const list = state.dishes.filter((d) => !q || (d.title || "").toLowerCase().includes(q));
+  // ── "JUST SHOW ME WHAT IS SOLD OUT" (owner, 2026-08-26) ────────────────────────────────────────
+  // To answer "what have we 86'd tonight?" a cook used to scroll every dish on the menu hunting for
+  // red. This is one tap. It is deliberately NOT remembered: a filter that survives the drawer
+  // closing is a filter a cook forgets is on, and then mid-rush the drawer looks nearly empty and
+  // the dish they came to mark is missing. It resets every time the drawer opens (see openDrawer).
+  const outOnly = !!state.dishOutOnly;
+  const isOut = (d) => (d.tags || []).includes("sold-out");
+  const list = state.dishes
+    .filter((d) => !q || (d.title || "").toLowerCase().includes(q))
+    .filter((d) => !outOnly || isOut(d));
+  const outCount = state.dishes.filter(isOut).length;
   const rows = list.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     return `<div class="dish-row ${out ? "is-out" : ""}">
@@ -1015,7 +1025,12 @@ function renderDishes() {
   }).join("");
   // Never show a blank drawer: an empty result gets an honest message (a cook who mistypes
   // couldn't tell if the board broke), otherwise nothing seeded yet.
-  const html = rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet"}</div>`;
+  // The toggle says the COUNT, so a cook can answer "how many are off?" without opening it at all.
+  const toggle = `<button class="outfilter${outOnly ? " on" : ""}" id="outOnlyBtn" type="button" aria-pressed="${outOnly ? "true" : "false"}">${outOnly ? "◉" : "○"} Sold out only <span class="oc">${outCount}</span></button>`;
+  const empty = outOnly
+    ? (q ? `No sold-out dish matches “${esc(q)}”` : "Nothing is sold out right now")
+    : (q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet");
+  const html = toggle + (rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${empty}</div>`);
   // Skip the rebuild when nothing changed (audit 2026-07-07): a poll while the drawer is
   // open used to blow away #dishList on EVERY refresh, which (a) lost the search box's focus/
   // caret mid-type and (b) orphaned the button node the optimistic toggle + UNDO closure hold,
@@ -1042,6 +1057,8 @@ function renderDishes() {
     btn.classList.toggle("danger", out);
     btn.closest(".dish-row")?.classList.toggle("is-out", out);
   };
+  { const ob = document.getElementById("outOnlyBtn");
+    if (ob) ob.onclick = () => { state.dishOutOnly = !state.dishOutOnly; renderDishes(); }; }
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
     if (b.disabled) return;
     const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
@@ -2020,6 +2037,7 @@ $("#muteBtn").onclick = () => {
 // drawer (via LFH_BACK) instead of leaving the kitchen panel.
 let drawerOff = null;
 function openDrawer() {
+  state.dishOutOnly = false;   // never inherited from last time — see the note in renderDishes
   $("#drawerOverlay").hidden = false; renderDishes();
   drawerOff = window.LFH_BACK ? LFH_BACK.layer("86-board", closeDrawer) : null;
 }
