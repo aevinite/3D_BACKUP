@@ -81,7 +81,19 @@ function EmbeddedPanel({ what, preview }: { what: NonNullable<Node["panel"]>; pr
           </button>
         </div>
       ) : null}
-      <RestaurantSettings restaurant={rest} only={[section]} />
+      {/* WHY THIS WRAPPER EXISTS (owner, 2026-08-28, with a photo of his screen: "whenever the blue
+          colour thing is coming, it is crossing the kitchen written thing").
+          The first card's <h2> is meant to be HIDDEN — it repeats the tree row you just opened
+          ("Auto-print kitchen tickets" → "Kitchen ticket printing"). The rule that hid it was
+          `.at-panel .adm-card:first-child > h2`, and adding the Preview button above made the card
+          the SECOND child, so the rule stopped matching, the heading came back — and the button,
+          which is pulled up by a negative margin to sit exactly where that heading used to be,
+          landed on top of it. Measured: 4px of real overlap.
+          The wrapper makes the card first-child of something that is always there, so the heading is
+          hidden whether or not a preview button exists. */}
+      <div className="at-panel-body">
+        <RestaurantSettings restaurant={rest} only={[section]} />
+      </div>
     </div>
   );
 }
@@ -1484,13 +1496,33 @@ export function TreeStyle() {
   /* The first card's own heading repeats the row you just opened ("Dining sessions" inside
      Dining sessions › Session rules). Later cards keep theirs — they're the only thing telling
      the four Tables cards apart. */
-  .at-panel .adm-card:first-child > h2 { display:none; }
+  .at-panel-body > .adm-card:first-child > h2 { display:none; }
   .at-panel-wait { margin-top:12px; font-size:12.5px; color:var(--muted); }
   /* "Preview / Print" on a format screen — top right of the editor, above its first card. */
-  .at-panel-top { display:flex; justify-content:flex-end; margin:10px 0 -4px; }
-  .at-preview-btn { font:inherit; font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:9px; cursor:pointer;
-    background:rgba(99,102,241,.16); border:1px solid rgba(129,140,248,.55); color:#c7d2fe; }
-  .at-preview-btn:hover { background:rgba(99,102,241,.28); border-color:#818cf8; color:#e0e7ff; }
+  /* NO NEGATIVE MARGIN. It was -4px, pulling the card up under this button so the two looked
+     attached — and when the heading below stopped being hidden (see .at-panel-body above) that
+     -4px became four pixels of one control drawn over another's text. Spacing, not overlap. */
+  /* The button sits in the panel's own top padding, so it needs no margin of its own above — a
+     10px margin ON TOP of 12px of padding is the 70px of empty band, with two faint rules in it,
+     that made this look unfinished. It is the row the hidden heading would have been. */
+  .at-panel-top { display:flex; justify-content:flex-end; margin:0 0 8px; }
+  /* BUILT FROM THE CONSOLE'S OWN TOKENS, so it exists in the light skin too (owner, same report:
+     "that blue colour is not coming in the light mode"). It was three hard-coded dark-mode values —
+     a 16% indigo tint and #c7d2fe text — which on a white card is a pale ghost of a button. */
+  /* SELECTOR CARRIES TWO CLASSES ON PURPOSE. The rule ".adm button { color: inherit }" is (0,1,1) and
+     beats a bare .at-preview-btn (0,1,0), so a colour set here on its own is a declaration that does
+     nothing — worse than no declaration, because the next person reads it and believes it.
+     (No back-ticks in this comment: the whole stylesheet lives inside a JS template literal, and one
+     back-tick ends it — the build then fails to parse the file at all. Measured, twice.)
+     The text is --text rather than --accent: on the light skin's pale tint an accent-coloured label
+     measures far worse, and the accent already speaks through the fill and the border. */
+  .at-panel-top .at-preview-btn { font:inherit; font-size:12.5px; font-weight:700; padding:7px 14px;
+    border-radius:9px; cursor:pointer; min-height:36px;
+    background:color-mix(in srgb, var(--accent) 15%, var(--card));
+    border:1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+    color:var(--text); transition:background .14s, border-color .14s; }
+  .at-panel-top .at-preview-btn:hover { background:color-mix(in srgb, var(--accent) 26%, var(--card)); border-color:var(--accent); }
+  .at-panel-top .at-preview-btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   /* ── The banquet card, given some structure ────────────────────────────────────────────────
      It was one long single-column scroll: eleven tick rows, then numbering, then tax, then paper,
      with nothing marking where one ended and the next began. Each heading is a labelled band now
