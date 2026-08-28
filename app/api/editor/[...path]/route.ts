@@ -504,6 +504,14 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
     }
   }
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   return rid;
 }

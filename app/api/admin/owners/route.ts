@@ -385,7 +385,7 @@ export async function POST(req: NextRequest) {
     // hardDeleteOwner hands back the database's sentence for the SERVER's benefit; the console gets
     // plain words and the raw text goes to the log, same as every other failure on this page.
     if (res.error) { console.error("[admin/owners] purge failed:", res.error); return bad("Couldn't remove that owner permanently — nothing was changed. Please try again.", 500); }
-    await logAction("admin", "owner_purge", { actor: "admin", restaurant_id: null, detail: `PERMANENTLY purged owner "${who}" (${ownerId}) · ${res.released} restaurant(s) released` });
+    await logAction("admin", "owner_purge", { actor: "admin", restaurant_id: null, detail: `PERMANENTLY removed owner "${who}" (${ownerId}) · ${res.released} restaurant(s) released` });
     return ok({ ok: true, purged: true });
   }
 

@@ -22,9 +22,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "IN=$(cat); rc=0; D=\"$CLAUDE_PROJECT_DIR/scripts\"; MISSING=\"\"; for g in verify-tap-guard.mjs verify-panel-cache.mjs verify-test-safety.mjs verify-ui-integrity.mjs verify-audit-coverage.mjs verify-order-retry.mjs verify-guest-doors.mjs verify-no-ask-before-delete.mjs verify-bill-reprint-is-silent.mjs; do if [ ! -f \"$D/$g\" ]; then MISSING=\"$MISSING $g\"; continue; fi; printf '%s' \"$IN\" | node \"$D/$g\" --hook || rc=2; done; [ -n \"$MISSING\" ] && echo \"note: guard(s) not in this checkout, so they did NOT run:$MISSING\" >&2; exit $rc",
+            "command": "IN=$(cat); rc=0; D=\"$CLAUDE_PROJECT_DIR/scripts\"; MISSING=\"\"; for g in verify-tap-guard.mjs verify-panel-cache.mjs verify-test-safety.mjs verify-ui-integrity.mjs verify-audit-coverage.mjs verify-order-retry.mjs verify-guest-doors.mjs verify-no-ask-before-delete.mjs verify-bill-reprint-is-silent.mjs verify-wording.mjs; do if [ ! -f \"$D/$g\" ]; then MISSING=\"$MISSING $g\"; continue; fi; printf '%s' \"$IN\" | node \"$D/$g\" --hook || rc=2; done; [ -n \"$MISSING\" ] && echo \"note: guard(s) not in this checkout, so they did NOT run:$MISSING\" >&2; exit $rc",
             "timeout": 45,
-            "statusMessage": "Checking taps, test safety, UI integrity, audit coverage, ordering/offline + the no-ask-before-delete order..."
+            "statusMessage": "Checking taps, test safety, UI integrity, audit coverage, ordering/offline, the words on the screens + the no-ask-before-delete order..."
           }
         ]
       }

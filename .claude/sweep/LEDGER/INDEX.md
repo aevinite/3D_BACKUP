@@ -50,6 +50,8 @@ again. Read those before reporting anything.
 > | T15 · the admin's access tree and people | `P22101`–`P22600` | ✅ 500 written, 500 executed, 500 ✅ (5 of them recorded a real fault) — plus all 500 of `P07001`–`P07500` re-run: **no regression**, 6 expectations moved, and one row (`P07441`) found to have been **filed green on a claim that was never true** |
 > | T15 · the owner's own follow-up ("do all except 1") | `P35201`–`P35236` | ✅ 36 rows for items 7, 8, 9 and 10, all green. Item 1 dropped on his word. Three faults found by the guards written for the picked items: a fourth ACTIONS row unnamed by its folder (one day after the guard landed), and khata + payroll INHERITED from restaurant #1 by every new restaurant. |
 >
+> | T27 · every word on every screen | `P28101`–`P28600` | ✅ 500 written, 500 executed (484 ✅ · 10 ✅ deliberate · 6 ❌→✅ fixed) — plus **the T27 ledger itself landed on main at last**, and all 500 of `P13001`–`P13500` re-run: **ONE REGRESSION** (`P13140` — the Bills-screen rework replaced \"No bills match that search.\" with an empty string inside a box that carries 120px of padding, so a search matching today but not yesterday printed blank nothing under a \"0 bills\" heading), 2 more rows newly red, **42 of the 59 reserved rows CLOSED**, and sweep #6’s biggest ⏭ answered: all six languages photographed, and Arabic right-to-left found to be a written decision rather than a gap. **7 problems fixed, one commit each**, and a new `verify:wording` guard — this territory had none of its own. Owner reviewed 2026-08-28: kept 1/2/4/5/7, **reverted 3** (recorded as R48 — the sentence is unreachable for every role but the admin), **widened 6** to every place "removed" is read, and approved the `verify:rejected` fix (a rejection note could satisfy the "is it beside the code?" check against itself). |
+>
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
 > deliberately small so it does not collide with that rebuild.
@@ -65,7 +67,7 @@ again. Read those before reporting anything.
 | Terminals planned | **30** |
 | ID space allocated | **P00001 – P15000** (30 blocks of 500) |
 | Ledgers **filed** | **27** — T1–T25, T29, T30 |
-| Ledgers **never filed** | **3** — T26, T27, T28 |
+| Ledgers **never filed** | **1** — T28. *(T27 was filed 2026-08-27 by sweep #7. The rest of this block is sweep-#6 arithmetic and terminal 40 owns the honest recount — these two words are corrected only because a line claiming a ledger does not exist, sitting in the same folder as that ledger, is how a stale number becomes a fact.)* |
 | Phase rows on record | **13,518** |
 | Rows passing | **12,893** |
 | Rows recording a problem | **281** — most already fixed in that terminal's own PR |
@@ -73,8 +75,10 @@ again. Read those before reporting anything.
 
 **T26 filed its ledger but it is not in this folder yet** — it lives on
 `origin/sweep6/t26-the-look` (the LOOK: 577 rows). Read it from there until the merge terminal lands
-it. **T27 (every word on every screen, `P13001`–`P13500`) and T28 (the repo's own guards,
-`P13501`–`P14000`) have never been filed at all** — 1,000 checks never executed once.
+it. **T27 (every word on every screen) was filed on 2026-08-27.** Sweep #7 pulled its 500 rows off
+PR #1101, re-ran every one — finding one regression — and added 500 more; see its row in the
+sweep-#7 table above. **T28 (the repo’s own guards, `P13501`–`P14000`) has still never been filed**
+— 500 checks never executed once, and now the most expensive gap left on this page.
 
 T28's absence is the expensive one, so T30 audited the guards' own health as a stand-in. That
 section is at the bottom of this file. It found the guards are alive — but two were red, and both
@@ -112,7 +116,7 @@ were **stale allowances**, not dead checks.
 | 24 | P11501–P12000 | **The money and safety libraries** — `lib/{clash,paySplit,tax,taxFiling,idempotency,idempotencyRule,logTrail,userAuth,rateLimit}.ts`, `docs/COMPLIANCE-GUARDRAILS.md`, `docs/SAAS-EFFICIENCY-PLAYBOOK.md` | ✅ | 500 | 499 | 0 | 1 |
 | 25 | P12001–P12500 | **Every other shared library file** — the ~108 files in `lib/` no other terminal owns | ✅ | 500 | 500 | 0 | 0 |
 | 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ⚠️ filed on `origin/sweep6/t26-the-look`, not yet merged | 577 | — | — | — |
-| 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ❌ **NEVER FILED** | 0 | — | — | — |
+| 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ✅ **filed 2026-08-27 (sweep #7)** — written by T30, landed and re-run by T27 | 1000 | 966 | 9 | 25 |
 | 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the 130 `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ❌ **NEVER FILED** | 0 | — | — | — |
 | 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ✅ | 500 | — | — | — |
 | 30 | P14501–P15000 | **Cross-panel truth, and this ledger** — `LEDGER/INDEX.md`, `docs/QA-500-PHASES.md`, `.claude/skills/terminal-test-improve/**` | ✅ | 500 | 342 | 59 | 99 |
