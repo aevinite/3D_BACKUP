@@ -503,6 +503,33 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 11 · A MONEY FIGURE A FINGER TYPES GETS NO SPINNER ARROWS (owner picked, 2026-08-28) ─────
+// The discount screen's three boxes are `type="number"`, so a browser draws its own ▲▼ pair inside
+// each one — measured on the A35 at dpr 3, about 7px per arrow inside a 41px box, and inside the
+// gold "They pay" field they were eating room from the one figure a manager reads and retypes.
+// `type="number"` and `inputmode="decimal"` STAY (that is what gives a phone the numeric keypad);
+// only the arrows go, and a spinner is a pseudo-element so it has to be done in the stylesheet.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const boxes = ["disc-pct-input", "disc-amt-input", "disc-pay-input"];
+  for (const b of boxes) {
+    check(
+      `tablet: .${b} hides the browser's spinner arrows`,
+      new RegExp(`\\.${b}::-webkit-(?:outer|inner)-spin-button`).test(css)
+        && new RegExp(`\\.${b}[^{]*\\{[^}]*appearance: textfield`).test(css),
+      `${CSS}: the box needs BOTH halves — the WebKit pseudo-element rule and \`appearance: textfield\`\n    ` +
+      `for Firefox, which draws the arrows from the input itself. One without the other leaves them\n    ` +
+      `on half the devices in a restaurant.`,
+    );
+  }
+  check(
+    "tablet: …and those boxes keep type=number + inputmode=decimal (the numeric keypad)",
+    boxes.every((b) => new RegExp(`type="number"[^>]*inputmode="decimal"[^>]*class="${b}"|class="${b}"[^>]*type="number"|type="number" inputmode="decimal"[^>]*${b}`).test(src)),
+    `${TABLET}: dropping the arrows must not drop the keypad. A waiter on a phone typing a discount\n    ` +
+    `into a plain text box gets the full QWERTY keyboard.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

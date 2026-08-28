@@ -1350,3 +1350,21 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
 .tile.t-tag > *:not(.t-ribbon) { position: relative; z-index: 1; }
 
 /* (Parcel left the tablet on 2026-08-03 — its cart styles went with it.) */
+
+/* ── A MONEY FIGURE A FINGER TYPES GETS NO SPINNER ARROWS (owner picked, 2026-08-28) ──────────
+   The discount screen's three boxes — Discount %, Discount amount (₹) and the gold "They pay" —
+   are `type="number"`, so the browser draws its own ▲▼ pair inside each one. Measured on the A35
+   at dpr 3: each arrow is about 7px tall inside a 41px box, and in "They pay" they sit inside a
+   7ch field, so they eat room from the one figure a manager reads and retypes ("make it 800").
+   Nobody can hit a 7px target with a thumb, and nobody needs to: every one of these boxes is
+   typed, and each has its own live-linked partner plus the quick-percentage chips beside it.
+   `type="number"` STAYS — it is what gives a phone the numeric keypad, and `inputmode="decimal"`
+   rides on it. Only the arrows go. Written here rather than inline because a spinner is a
+   pseudo-element and an inline style cannot reach one. */
+.disc-pct-input::-webkit-outer-spin-button, .disc-pct-input::-webkit-inner-spin-button,
+.disc-amt-input::-webkit-outer-spin-button, .disc-amt-input::-webkit-inner-spin-button,
+.disc-pay-input::-webkit-outer-spin-button, .disc-pay-input::-webkit-inner-spin-button {
+  -webkit-appearance: none; appearance: none; margin: 0; }
+/* Firefox draws them from the input itself, not a pseudo-element. `textfield` keeps the numeric
+   keypad on mobile and drops only the arrows. */
+.disc-pct-input, .disc-amt-input, .disc-pay-input { -moz-appearance: textfield; appearance: textfield; }
