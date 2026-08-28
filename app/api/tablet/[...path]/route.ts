@@ -786,9 +786,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!own.owned) return ok({ noRoute: true });
       const sid = String((body as Record<string, unknown>)?.sessionId || "");
       if (!sid) return err("Which bill?", 400);
-      // `table_number` rides along for the section check below — one read, not two.
-      const sess = (await sb.from("sessions").select("id, table_number").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
-        { id: string; table_number: unknown } | null;
+      // `table_number` rides along for the section check below, and `bill_no` so the diary line
+      // can NAME the bill — one read, not three.
+      const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; table_number: unknown; bill_no: unknown } | null;
       if (!sess) return err("That table's bill is not this restaurant's.", 404);
       // WAITER SECTIONS (mig 222) — the same answer every other table-scoped write on this route
       // gives, asked here because the shared gate below cannot resolve this verb (see above).
@@ -819,10 +820,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const q = await queueJob(rid, "bill", { sessionId: sid, ...((body as Record<string, unknown>)?.parcel ? { parcel: true } : {}) },
         { requestedBy: g.user?.name || g.user?.username || "Aevidine admin" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      // ── THE DIARY LINE NAMES *WHICH* BILL (owner, 2026-08-28: "make log do that") ─────────────
+      // Asked for "say who printed a bill, on the bill itself", he answered: let the LOG answer it.
+      // It could not. The row said `bill sent to Printer_POS_80 on Shop's computer` — which
+      // answers WHERE the paper came out and never WHICH bill came out of it, so on a night with
+      // forty prints the log could not tell them apart. `table_number` was available and unused,
+      // and the bill number was one column away on a read this branch already makes.
+      const billLabel = `bill${sess.bill_no != null ? ` #${sess.bill_no}` : ""}`
+        + `${sess.table_number != null ? ` for table ${sess.table_number}` : ""}`;
       await logAction("tablet", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
+        // Filterable as well as readable: the Audit & logs tab groups by table, so a print now
+        // sits with the rest of that table's story instead of floating loose.
+        table_number: sess.table_number != null ? String(sess.table_number) : null,
         ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-        detail: `bill sent to ${own.printer} on ${own.agent}`
+        detail: `${billLabel} sent to ${own.printer} on ${own.agent}`
           + (g.user ? "" : " — sent deliberately from the admin console"),
       });
       return ok({ queued: true, id: q.id, printer: own.printer, agent: own.agent, connected: !!own.connected,

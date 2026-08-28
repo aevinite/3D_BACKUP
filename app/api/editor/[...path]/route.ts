@@ -2771,28 +2771,51 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ adminView: true, printer: own.printer, agent: own.agent });
       }
       const payload: Record<string, unknown> = {};
+      // What the diary line will call this piece of paper, filled in by whichever branch below
+      // resolves it — so the log says "bill #218 for table 6", not just "bill".
+      let printedWhat = kind === "bill" ? "bill" : "banquet sheet";
+      let printedTable: string | null = null;
       if (kind === "bill") {
         const sid = String((body as Record<string, unknown>)?.sessionId || "");
         if (!sid) return err("Which bill?", 400);
         // The session must be this restaurant's — the route handler never trusts the panel's word
         // for whose row it is (every other write here does the same).
-        const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        // `table_number` and `bill_no` ride along so the diary line can NAME the bill — see the
+        // note on logAction below. Same read, two more small columns.
+        const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; table_number: unknown; bill_no: unknown } | null;
         if (!sess) return err("That table's bill is not this restaurant's.", 404);
         payload.sessionId = sid;
         if ((body as Record<string, unknown>)?.parcel) payload.parcel = true;
+        printedTable = sess.table_number != null ? String(sess.table_number) : null;
+        printedWhat = `bill${sess.bill_no != null ? ` #${sess.bill_no}` : ""}`
+          + `${sess.table_number != null ? ` for table ${sess.table_number}` : ""}`;
       } else {
         const bid = String((body as Record<string, unknown>)?.billId || "");
         if (!bid) return err("Which banquet bill?", 400);
-        const bill = (await sb.from("banquet_bills").select("id").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; bill_no: unknown } | null;
         if (!bill) return err("That banquet bill is not this restaurant's.", 404);
         payload.billId = bid;
+        printedWhat = `banquet sheet${bill.bill_no != null ? ` #${bill.bill_no}` : ""}`;
       }
       const q = await queueJob(rid, kind, payload, { requestedBy: g.user?.name || g.user?.username || "manager" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      // ── THE DIARY LINE NAMES *WHICH* BILL (owner, 2026-08-28: "make log do that") ─────────────
+      // Asked for "say who printed a bill, on the bill itself", he answered: let the LOG answer it.
+      // It could not. The row read `bill sent to Printer_POS_80 on Shop's computer` — which says
+      // WHERE the paper came out and never WHICH bill came out of it, so on a night with forty
+      // prints no two rows could be told apart. Both facts were already in reach: `table_number`
+      // is a column logAction has always accepted and nothing here passed, and the bill number is
+      // one extra column on a read this branch already makes.
       await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
+        // Filterable as well as readable: the Audit & logs tab groups by table, so a bill print
+        // now sits with the rest of that table's story instead of floating loose. A banquet sheet
+        // has no table, and stays null rather than being given a pretend one.
+        table_number: printedTable,
         ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`
+        detail: `${printedWhat} sent to ${own.printer} on ${own.agent}`
           + (g.user ? "" : " — sent deliberately from the admin console"),
       });
       // What the person is told, in the words they need: where it went, and — honestly — that it is

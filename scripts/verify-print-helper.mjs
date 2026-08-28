@@ -205,6 +205,44 @@ check(/waiterTables\(actor, rid\)/.test(code(troute).split('a === "print" && b =
   "…and a waiter with a section can only send their OWN tables' bills to the printer",
   "the tablet's print/send has lost its section check — a waiter holding tables 1-5 can print table 20's bill");
 
+// ── 5b · THE LOG ANSWERS "WHICH BILL?", NOT JUST "WHICH PRINTER?" (owner, 2026-08-28) ─────────
+// He was offered a line on the bill card and answered "make log do that". The log could not: the
+// row said `bill sent to Printer_POS_80 on Shop's computer`, which names WHERE the paper came out
+// and never WHICH bill came out of it — so on a busy night no two of forty rows could be told
+// apart. Both routes now name the bill and carry table_number (a field logAction has always
+// accepted and neither passed).
+for (const [name, src] of [["the manager panel", eroute], ["the waiter tablet", troute]]) {
+  if (!/a === "print" && b === "send"/.test(code(src))) continue;
+  check(/select\("id, table_number, bill_no"\)/.test(src),
+    `${name}: the print/send session read fetches the bill number and the table, so the diary line can name them`,
+    `${name}: print/send no longer reads bill_no/table_number — the log goes back to "a bill was sent", which is every row on the page`);
+  check(/table_number: (printedTable|sess\.table_number)/.test(code(src)),
+    `${name}: …and the print row carries table_number, so it files with the rest of that table's story`,
+    `${name}: the print row dropped table_number again — the Audit tab groups by table and this one floats loose`);
+  check(/detail: `\$\{(printedWhat|billLabel)\} sent to/.test(src),
+    `${name}: …and the sentence itself names the bill ("bill #218 for table 6 sent to …")`,
+    `${name}: the print row's sentence stopped naming the bill`);
+}
+// A bill print is not a kitchen ticket. These two codes are written in exactly two places and BOTH
+// are the bill/banquet door — a kitchen ticket is kot_reprint_sent / kot_printed. Filing them under
+// "Kitchen tickets" put every bill print in the wrong drawer twice: nothing under Bills, and bills
+// under a filter that promised tickets.
+{
+  const trail = read("lib/logTrail.ts");
+  check(/print_sent: \{ area: "Orders & bills", screen: "Print the bill" \}/.test(trail)
+     && /print_sent_by_admin: \{ area: "Orders & bills", screen: "Print the bill" \}/.test(trail),
+    "a bill print is filed under 'Print the bill', not under 'Kitchen tickets'",
+    "print_sent is filed as a kitchen ticket again — it is only ever a bill or a banquet sheet, so the Bills drawer goes empty and the Kitchen-tickets filter fills with bills");
+  // code(), not the raw file: the comment ABOVE the fix explains what "Kitchen tickets" got wrong,
+  // and a guard that trips on its own explanation is a guard the next person deletes. (This one
+  // did exactly that on its first run — the note at the top of this file, learned again.)
+  // The boundary matters: `kot_reprint_sent` CONTAINS "print_sent", and that one genuinely IS a
+  // kitchen ticket. Without the lookbehind this check condemns a correct line.
+  check(!/(?<![a-z_])print_sent(_by_admin)?: \{[^}]*screen: "Kitchen tickets"/.test(code(trail)),
+    "…and neither code has drifted back to the kitchen drawer",
+    "one of the two print codes is back under Kitchen tickets");
+}
+
 // ── 6 · the helper program itself ─────────────────────────────────────────────────────────────
 check(/HELPER_FILENAME/.test(script) && /print-helper\.command/.test(script) && /print-helper\.bat/.test(script) && /print-helper\.sh/.test(script),
   "all three operating systems get a helper, by hand",
