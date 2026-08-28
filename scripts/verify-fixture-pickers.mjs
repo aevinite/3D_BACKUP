@@ -133,8 +133,14 @@ for (const f of files) {
     const usedAsTable = new RegExp(`table=\\$\\{${v}\\}|\\btable\\s*:\\s*\\$?\\{?${v}\\b|String\\(\\s*${v}\\s*\\)`).test(body);
     if (usedAsTable) suspects.push({ what: `a for-loop using \`${v}\` as the table number`, at: src.slice(0, m.index).split("\n").length, idx: m.index, body });
   }
-  // Shape 2 — a generated range of table keys.
-  for (const m of src.matchAll(/Array\.from\(\s*\{\s*length:\s*[\w.()]+\s*\}[^;\n]*\)/g)) {
+  // Shape 2 — a generated range of table keys, either spelling.
+  //
+  // `[...Array(n).keys()]` WAS MISSED, and it cost a real collision (item 23, 2026-08-29).
+  // verify-table-lifecycle.mjs builds its candidate list that way and ranges over the whole floor,
+  // so it could land on 27/28 — verify-void-on-joined-party's reserved pair. Run at the same time,
+  // each destroyed the other's fixture and each blamed the product. This detector only knew
+  // `Array.from({ length: n })`, which is the OTHER way of writing exactly the same thing.
+  for (const m of src.matchAll(/Array\.from\(\s*\{\s*length:\s*[\w.()]+\s*\}[^;\n]*\)|\[\s*\.\.\.Array\(\s*[\w.()]+\s*\)\s*\.keys\(\s*\)\s*\]/g)) {
     const line = src.slice(src.lastIndexOf("\n", m.index) + 1, src.indexOf("\n", m.index));
     if (/key|table/i.test(line)) suspects.push({ what: "a generated range of table keys", at: src.slice(0, m.index).split("\n").length, idx: m.index });
   }
@@ -151,7 +157,24 @@ for (const f of files) {
   // fixed when somebody noticed. Judged over the enclosing function, per lesson 2 above.
   // The fence counts wherever it really applies: inside the loop (a `continue` on a claimed
   // number) or anywhere in the enclosing function (a `.filter()` on the candidate list).
-  const unfenced = suspects.filter((s) => !FENCED.test(s.body || "") && !FENCED.test(enclosingFn(src, s.idx)));
+  // …and a THIRD place, which the widened detector immediately proved was missing (item 23,
+  // 2026-08-29). The commonest real shape in this repo is a `busy` Set built at MODULE TOP LEVEL,
+  // with `...claimedTables()` spread into it, and the picker filtering on that Set a line or two
+  // later. There is no enclosing function to slice, so `enclosingFn` walked backwards to some
+  // unrelated arrow function and missed the fence entirely — and this check reported FOUR correctly
+  // fenced guards as offenders on its first run. Four of four. A guard that invents a failure
+  // protects nothing, and it took its own medicine here.
+  //
+  // So the fence also counts if it appears in the 60 lines BEFORE the picker, which is the
+  // direction it has to be in to feed it. It never counts if it only appears after.
+  const linesUpTo = (idx) => {
+    const start = src.lastIndexOf("\n", idx);
+    let from = start;
+    for (let k = 0; k < 60 && from > 0; k++) from = src.lastIndexOf("\n", from - 1);
+    return src.slice(Math.max(0, from), idx);
+  };
+  const unfenced = suspects.filter((s) =>
+    !FENCED.test(s.body || "") && !FENCED.test(enclosingFn(src, s.idx)) && !FENCED.test(linesUpTo(s.idx)));
   unfenced.length === 0
     ? ok(`${rel}: all ${suspects.length} table picker(s) skip the tables other guards own`)
     : bad(`${rel} has a table picker that skips the claimed list and one that does not`,

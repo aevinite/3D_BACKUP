@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { dismissTicketsFor } from "./sweep/tickets.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
@@ -60,6 +61,21 @@ const busy = new Set([
 // one dev DB) both "reserved" the SAME pair and stomped on each other's fixture. That is what
 // produced "the surviving table has 0 order(s) across 0 session(s)": the other run had already
 // cleaned it. Random picks make concurrent runs diverge instead of collide. (2026-07-31)
+// AND THE TABLES ANOTHER GUARD OWNS ARE BUSY TOO, EVEN WHEN THEY ARE EMPTY (item 23, 2026-08-29).
+//
+// The shuffle above stops two copies of THIS file taking the same pair. It does nothing about a
+// DIFFERENT guard's reserved tables, and this picker ranges over the whole floor — so it can and
+// does land on 27/28, which belong to verify-void-on-joined-party (the joined party whose food must
+// survive a void).
+//
+// Found by running the floor guards two at a time on purpose: alone, both are green; together,
+// verify:void-party reported "both tables carry live food — {}" and "they are ONE party — open" and
+// this file reported "the new table shows 2 order(s) / ₹0 due". Two guards destroying each other's
+// fixture, and both blaming the product. That is worse than a flake, because it is not reproducible
+// on its own and it reads exactly like a real fault.
+//
+// scripts/sweep/fixtureTables.mjs is the one place that says which table belongs to which guard.
+for (const t of claimedTables()) busy.add(String(t));
 const free = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n))
   .map((t) => [Math.random(), t]).sort((a, b) => a[0] - b[0]).map(([, t]) => t);
 if (free.length < 2) { console.error("need two completely free tables; the floor is busy right now"); process.exit(1); }
