@@ -1542,7 +1542,7 @@ function bindFloorDelegation() {
   // replicates the old stopPropagation so a quick button never ALSO selects the tile), then the
   // tile-select. Every data-attr handled here lives on a node the PATCH path may replace, which
   // is exactly why they MUST be delegated. The accept/pay branches inline their original
-  // ensureTableSlice + filter logic verbatim (NOT flattened) so behaviour is unchanged.
+  // party-slice + filter logic verbatim (NOT flattened) so behaviour is unchanged.
   const tilesEl = $("#tiles");
   if (tilesEl) tilesEl.addEventListener("click", async (e) => {
     let q;
@@ -2532,9 +2532,9 @@ function flipOrders(orderIds, { from, to, orderStatus }) {
 // little green ✓ on a tile "doing nothing and saying nothing"). The three bulk actions below are
 // each handed a list built a moment earlier from the table's cached slice, and that list can come
 // back EMPTY for reasons the waiter cannot see:
-//   · the forced `ensurePartySlices` read failed — ensureTableSlice swallows a fetch blip on
-//     purpose ("the action then no-ops rather than throwing"), which is precisely how the tap
-//     became invisible;
+//   · the forced `ensurePartySlices` read failed — it swallows a fetch blip on purpose (each
+//     member's read is caught, and the action then no-ops rather than throwing), which is
+//     precisely how the tap became invisible;
 //   · someone else (the kitchen screen, the manager panel, another waiter's tablet) accepted or
 //     served it in the seconds between the tile being painted and the finger landing.
 // The tile still shows ✓ / 🍽️ in both cases, so the person taps a control that is visibly there
@@ -3017,43 +3017,19 @@ function bumpItemQty(itemId, delta) {
   qtyReconcileTimer = setTimeout(() => load().catch(() => {}), 700);
 }
 
-// ensureTableSlice(t): make sure table t's FULL slice (sessions/orders/items/calls/…) is in the
-// local cache before a tile QUICK-ACTION on a NON-selected table runs. The grid renders from the
-// slim summary, so an unselected table has NO order rows cached — and Accept/Mark-paid need them
-// (the ids to act on, the due/billNo to confirm). Mirrors the editor's ensureTableSlice. The
-// SELECTED table's slice is already kept fresh by load(); best-effort (a fetch blip just no-ops).
-async function ensureTableSlice(t, force) {
-  // Already have this table's rows cached (orders OR an open session)? Nothing to fetch —
-  // UNLESS `force` (bug M10, 2026-07-05): when OPENING a table's detail we must always
-  // re-pull its slice, because a live update to a DIFFERENT table only refreshes the
-  // selected table's slice, so a previously-viewed table's cached rows can be up to 60s
-  // stale. selectTable passes force=true so re-opening a table never shows stale detail.
-  if (!force && ((state.data.orders || []).some((o) => String(o.table_number) === String(t))
-      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t)))) return true;
-  try {
-    const slice = await api("GET", "/state?table=" + encodeURIComponent(t));
-    const tset = String(t);
-    const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
-    const d = state.data || {};
-    const freshSessions = slice.sessions || [];
-    const purgeSids = new Set();
-    for (const s of (d.sessions || [])) if (String(s.table_number) === tset) purgeSids.add(s.id);
-    for (const s of freshSessions) purgeSids.add(s.id);
-    const freshOrders = slice.orders || [];
-    const purgeOids = new Set();
-    for (const o of (d.orders || [])) if (String(o.table_number) === tset) purgeOids.add(o.id);
-    for (const o of freshOrders) purgeOids.add(o.id);
-    state.data = Object.assign({}, d, {
-      sessions: dedupeById((d.sessions || []).filter((s) => String(s.table_number) !== tset).concat(freshSessions)),
-      orders: dedupeById((d.orders || []).filter((o) => String(o.table_number) !== tset).concat(freshOrders)),
-      members: dedupeById((d.members || []).filter((m) => !purgeSids.has(m.session_id)).concat(slice.members || [])),
-      items: dedupeById((d.items || []).filter((it) => !purgeOids.has(it.order_id)).concat(slice.items || [])),
-      calls: dedupeById((d.calls || []).filter((c) => String(c.table_number) !== tset).concat(slice.calls || [])),
-      requests: dedupeById((d.requests || []).filter((r) => String(r.table_number) !== tset).concat(slice.requests || [])),
-    });
-    return true;
-  } catch { return false; /* leave cache as-is; the action then no-ops rather than throwing */ }
-}
+// (ensureTableSlice() WAS HERE, and it is gone — T7 sweep #7, 2026-08-28.)
+//
+// It fetched ONE table's slice with a cache short-circuit, and it was the right shape while a tile
+// quick-action only ever touched one table. Then merged parties arrived (mig 249): every whole-party
+// read has to have EVERY member's slice or partyOrders() silently sees half the bill, so
+// ensurePartySlices() below took over — it fetches the party together, merges in a loop through
+// mergeSelectedSlice(), and answers whether every member really landed. Nothing has called
+// ensureTableSlice since, on this panel or anywhere else, so the ~35 lines were deleted rather than
+// left to be found and reused: a caller that reached for it would refresh one table of a party and
+// under-count the bill, which is exactly the fault ensurePartySlices exists to prevent.
+//
+// The MANAGER panel has its own ensureTableSlice and it is LIVE there (public/panels/editor/app.js).
+// Do not read this note as permission to remove that one.
 // A merged party spans SEVERAL tables' slices — any whole-party read or action must have them
 // all cached, or partyOrders() silently sees half the bill. Forced on purpose, same reasoning
 // as the manager's ensurePartySlices: a whole-party action can fire the instant a detail opens.
@@ -3072,7 +3048,7 @@ async function ensureTableSlice(t, force) {
 // under-count the BILL.
 //
 // WHAT I DID NOT PROVE: the mechanism. The obvious suspect — a lost update from running the members
-// concurrently — does NOT hold up: ensureTableSlice captures `state.data` and re-assigns it in one
+// concurrently — does NOT hold up: mergeSelectedSlice captures `state.data` and re-assigns it in one
 // synchronous block with no await between, so two concurrent calls cannot interleave there. I could
 // not pin down the real cause before this change made the symptom go away, so this comment says what
 // was observed rather than inventing a story. If you touch this, re-run a THREE-table party and open
@@ -4815,7 +4791,8 @@ function setRestName(r) {
 // items/calls/requests) into state.data, so the helpers the DETAIL panel reads (ordersOf /
 // dishRowsOf / membersOf / callsOf …) return real rows for table t. The grid never needs this —
 // it renders from the slim summary; only the selected table (and a quick-action target via
-// ensureTableSlice) pulls full rows. Drops the table's old rows + adds the fresh, dedup'd by id.
+// a quick-action target via ensurePartySlices) pulls full rows. Drops the table's old rows + adds
+// the fresh, dedup'd by id.
 function mergeSelectedSlice(t, slice) {
   const tset = String(t);
   const d = state.data || {};

@@ -530,6 +530,59 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 12 · NO FUNCTION IN THIS PANEL IS DECLARED AND NEVER USED (T7 sweep #7, 2026-08-28) ──────
+// `ensureTableSlice()` sat here for weeks after `ensurePartySlices()` replaced it: ~35 lines with
+// no caller, and THREE comments still sending the next reader to it. That is worse than clutter in
+// the part of the panel that handles money — a caller who reached for it would have refreshed one
+// table of a merged party and under-counted the bill, which is the exact fault its replacement
+// exists to prevent. The ledger rows that check such a function's LOGIC keep passing while it is
+// dead, so nothing else catches this.
+//
+// Counting rule: a function is USED if it is called `name(` OR passed by reference (`setTimeout(fn,
+// 0)`, `.map(fn)`, `onclick = fn`, `LFH_BACK.layer("x", fn)`). Missing the reference case is what
+// made the first version of this check flag four healthy functions — a guard that cries wolf is
+// worse than no guard.
+{
+  const bare = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+  const declared = [...bare.matchAll(/^(?:async )?function ([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+  // KNOWN AND WRITTEN DOWN, not silently skipped. Both are dead in THIS panel today; both are
+  // pending the owner's word (raised 2026-08-28) because each is a deliberate MIRROR of a rule
+  // that lives in two other places, and a mirror is not obviously clutter:
+  //   · resolveTaxMode  — mirrors lib/tax.ts + lfh_resolve_tax_mode "case for case, in the same
+  //     order". The manager panel's own copy IS live; this one is called by nothing since
+  //     orderTaxSplit() reads each line's already-resolved mode off the frozen ticket.
+  //   · taxableBaseOf   — one line wrapping orderTaxSplit(o).base, which every caller now uses
+  //     directly.
+  // Remove a name from this list the moment it is deleted or given a caller.
+  const ALLOWED_DEAD = new Set(["resolveTaxMode", "taxableBaseOf"]);
+  const orphans = [];
+  for (const n of new Set(declared)) {
+    if (ALLOWED_DEAD.has(n)) continue;
+    const calls = (bare.match(new RegExp(String.raw`(?<![\w$.])` + n + String.raw`\s*\(`, "g")) || []).length;
+    const refs = (bare.match(new RegExp(String.raw`(?<![\w$.])` + n + String.raw`(?!\s*\()(?![\w$])`, "g")) || []).length;
+    if (calls <= 1 && refs === 0) orphans.push(n);
+  }
+  check(
+    "tablet: no function is declared here and never called or referenced",
+    orphans.length === 0,
+    `${TABLET}: ${orphans.join(", ")} — declared and used nowhere.\n    ` +
+    `Delete it, or give it a caller. If it is a deliberate mirror of a rule that lives elsewhere,\n    ` +
+    `add it to ALLOWED_DEAD above WITH the reason, so the next reader is not sent to dead code.`,
+  );
+  check(
+    "tablet: …and the allowance list has not quietly grown",
+    ALLOWED_DEAD.size <= 2,
+    `scripts/verify-tablet-taps.mjs: ALLOWED_DEAD is up to ${ALLOWED_DEAD.size} entries. It is an\n    ` +
+    `admission, not a bin — every entry is dead code somebody decided to keep.`,
+  );
+  check(
+    "tablet: ensureTableSlice specifically has not come back",
+    !/^(?:async )?function ensureTableSlice\s*\(/m.test(src),
+    `${TABLET}: ensureTableSlice() is back. It refreshes ONE table; a merged party needs every\n    ` +
+    `member's slice or partyOrders() sees half the bill. Use ensurePartySlices().`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
