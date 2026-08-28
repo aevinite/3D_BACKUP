@@ -386,8 +386,13 @@
     /* The note only claims tax is inside the price when tax genuinely IS inside it — i.e.
        when the restaurant treats MRP as tax-inclusive. Saying it otherwise would be a
        statement on a tax invoice that the accounts do not support. */
+    /* OPTION B (owner chose it, 2026-08-28, after looking at both side by side). The note used to
+       carry its own top rule, which landed about 1.5mm under the TOTAL row's own 2px bottom border
+       — two rules that close together read as a printer stutter on thermal paper rather than as a
+       divider. TOTAL is already fenced above and below; the note does not need a third line to be
+       separated from it, only a little air. Nothing about the words or the money changed. */
     var mrpNote = (nontax > 0 && d.mrpNote)
-      ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">' + esc(d.mrpNote) + "</div>"
+      ? '<div class="mini" style="margin-top:7px">' + esc(d.mrpNote) + "</div>"
       : "";
 
     var custBlock = (d.cust || d.custPhone)
@@ -623,17 +628,18 @@
    The cancelled band below is unrelated and stays: it changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
-/* THE ROW IS NAMED AFTER THE DOCUMENT IT IS ON (owner, 2026-08-28 — item 18).
-   A composition-scheme restaurant's sheet is headed BILL OF SUPPLY and then, three lines below,
-   labelled its number row "INVOICE" — the sheet arguing with itself on the one document that kind
-   of business hands over. A composition dealer may not issue a tax invoice at all; what CGST
-   Rule 49 asks that sheet to carry is "a consecutive serial number", so that is what the row is
-   called there. Nothing about the NUMBER changes — it is the same number, drawn the same way, with
-   the same restaurant-chosen prefix (Settings › Billing → "Invoice prefix", default INV). Only the
-   word to the left of it moves, and only on a Bill of Supply.
-   A cancelled sheet keeps "Invoice", because it names the invoice number it RETIRED. */
-+ (d.invNo ? '<div class="kv"><span>' + ((composition && !d.cancelled) ? "Serial no" : "Invoice")
-   + '</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
+/* REJECTED (owner, 2026-08-28): the number row is ALWAYS labelled "Invoice" — on every document
+   this file prints, a composition-scheme Bill of Supply included. His word: "KEEP INVOICE".
+   It was changed to "Serial no" on a Bill of Supply earlier the same day, on the reasoning that a
+   composition dealer may not issue a tax invoice and that CGST Rule 49 calls that number a serial
+   number. He looked at it and said no. Everyone at the restaurant, and every other screen in this
+   product, calls it the invoice number; a second name for the same number on one document teaches
+   staff there are two things when there is one.
+   Do NOT re-introduce "Serial no", "Bill of supply no", "Document no", or any per-document label
+   here. R49 in docs/REJECTED-IDEAS.md; verify:print-paper §3m fails the build if it changes.
+   (The PREFIX is a different thing and is his to set — Settings › Billing → "Invoice prefix",
+   default INV — so a composition restaurant that wants BOS/2026-27/000118 can already have it.) */
++ (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 /* THE INTERNAL BILL NUMBER IS NOT THE CUSTOMER'S BUSINESS WHEN THERE IS A REAL INVOICE NUMBER
    (owner, 2026-08-21). This app hands out THREE numbers where a POS normally has two: the KOT
    number for the kitchen, the INVOICE number (the tax record — drawn only when an invoice is
