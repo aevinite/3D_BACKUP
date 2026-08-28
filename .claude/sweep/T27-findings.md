@@ -2,7 +2,7 @@
 
 Branch `sweep7/t27-every-word`, against `origin/main` c005b3d3, 2026-08-27/28.
 Ledger: `.claude/sweep/LEDGER/T27.md` — 500 sweep-#6 rows re-run in place, 500 new rows
-`P28101`–`P28600`. The four-part report went to the terminal, not here.
+`P28101`–`P28603`. The four-part report went to the terminal, not here.
 
 ## 7 problems, 7 commits
 
@@ -10,10 +10,10 @@ Ledger: `.claude/sweep/LEDGER/T27.md` — 500 sweep-#6 rows re-run in place, 500
 |---|---|---|---|
 | 1 | R23's "no" was recorded once, at `lib/i18n.ts`, while the code someone edits is in four other files | nothing on screen — it is why this run wasted an hour re-fixing a parked fault | `e76f43d7` |
 | 2 | a bill search that matched one day and not the other printed **120px of blank box**, no words | manager panel → Bills, with Yesterday showing | `3e9f81ec` |
-| 3 | eight refusals said **"No restaurant scope"**; two said it with no next step at all | manager / waiter / kitchen / inventory panels, as a red message | `7a598a3c` |
+| ~~3~~ | eight refusals said "No restaurant scope" — **reverted by the owner on 2026-08-28** and recorded as **R48**: `panelRestaurantId` returns a restaurant for any signed-in staff member, so only the ADMIN can reach these, and he knows the word | — | reverted in `f018a95d` |
 | 4 | a **36-character machine id** sat inside an English log line | owner → Activity, and admin → Logs, in the list | `a016ddc6` |
 | 5 | the line explaining "On the house" said **"Comped deliberately."** | manager panel → Bills → a bill settled free | `4c7eb7c7` |
-| 6 | the one screen saying **"purged"** where every other word on it says "removed" | admin → Recycle bin | `f86c5354` |
+| 6 | the one screen saying **"purged"** where every other word says "removed" — then widened on his instruction to **every** place a person can read it, which caught the owner-removal LOG line too | admin → Recycle bin, and owner → Activity / admin → Logs | `f86c5354` + `8401f1fe` |
 | 7 | a refusal offered a person the word **null** | owner → Staff → Access, saving a permission | `31ad770e` |
 
 ## The regression, and why nothing caught it
@@ -34,7 +34,7 @@ render empty. That is the whole difference.
 
 ## The guard this territory did not have
 
-`npm run verify:wording` — `scripts/verify-wording.mjs`, 4 checks over **1,165 refusal and toast
+`npm run verify:wording` — `scripts/verify-wording.mjs`, 5 checks over **1,165 refusal and toast
 sentences**. Nothing previously read a single one of them: `verify:i18n-scope` watches the 67-key
 guest dictionary, `verify:audit` watches that every action code has a label.
 
@@ -68,6 +68,22 @@ Three files is far enough to miss. **Item 1 is that gap closed** — the NO now 
 2. **"Arabic doesn't read right-to-left."** `lib/format.ts → applyDirection` pins `dir=ltr`
    deliberately, with the reasoning beside it. A decision, not a gap — and this closes sweep #6's
    own biggest `⏭`.
+
+## What the owner decided, 2026-08-28
+
+Shown the four-part report, he kept **1, 2, 4, 5, 7**, dropped **3**, widened **6** ("keep removed
+everywhere"), kept **8**, and approved **11** on condition it was totally safe. **10** he left to my
+judgement on cost — measured at 0.13s and not required, so it was left. **9, 12 and 13** dropped.
+
+Two follow-ups came out of that:
+
+- **R48** records the item-3 revert in the doc and on the exact line in all five route files. The
+  word "scope" stays WATCHED by `verify:wording` — the allowance names those eight sentences, not
+  the word, so a new one still fails.
+- **Item 11 was NOT safe on the first attempt.** Masking single-line comments left the interior of
+  `/* … */` and `{/* … */}` blocks matching itself, and picking the first anchor failed a note that
+  was correctly placed. Both fixed; all 47 rejections pass on real code anchors, and the exact hole
+  — a note naming its anchors from far away — now fails where it was green.
 
 ## Green at the end
 
