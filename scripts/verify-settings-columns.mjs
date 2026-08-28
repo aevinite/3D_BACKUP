@@ -169,6 +169,53 @@ else for (const n of strayTabs) {
   }
 }
 
+// 3c. AND NOBODY READS THE WHOLE `settings` TABLE (T25, sweep #7, 2026-08-28).
+//
+// lib/aggregators.ts → resolveWebhookRestaurant() did: `select("restaurant_id, platform_channels")`
+// with no filter and no limit, on the PUBLIC webhook path, with the reasoning written beside it —
+// "Small: it is an opt-in integration." It was true (17 rows, 2.3 KB, measured) and it fails in two
+// directions that both get worse quietly: PostgREST caps an unlimited select at 1,000 rows with NO
+// error, so past a thousand restaurants an inbound order's own restaurant is simply missing from the
+// answer; and `platform_channels` holds the per-channel connection KEYS, which is why it is on
+// PRIVATE_SETTINGS_COLUMNS in the first place.
+//
+// A read of `settings` must therefore carry a filter or a limit. One row per restaurant is the
+// widest row in this database and it only ever grows.
+{
+  const libDir = join(root, "lib");
+  const bad = [];
+  for (const f of readdirSync(libDir).filter((n) => /\.tsx?$/.test(n))) {
+    const rel = `lib/${f}`;
+    const src = readFileSync(join(libDir, f), "utf8");
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+    // Walk each statement by brackets, not by a regex lookahead — a fluent chain wraps over lines,
+    // and a lookahead that stops at the first newline accuses correctly-filtered reads. (That is the
+    // same mistake bodyOf() in verify-id-chunks.mjs records at length.)
+    let i = 0;
+    const needle = 'from("settings")';
+    while ((i = code.indexOf(needle, i)) !== -1) {
+      let j = i, depth = 0, inStr = null;
+      for (; j < code.length; j++) {
+        const c = code[j];
+        if (inStr) { if (c === "\\") j++; else if (c === inStr) inStr = null; continue; }
+        if (c === '"' || c === "'" || c === "`") { inStr = c; continue; }
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") { depth--; if (depth < 0) break; }
+        else if (c === ";" && depth === 0) break;
+      }
+      const chain = code.slice(i, j);
+      i += needle.length;
+      if (/\.(update|insert|upsert|delete)\(/.test(chain)) continue;         // a write, narrowed elsewhere
+      if (/\.eq\(|\.in\(|\.limit\(|\.range\(|maybeSingle|head: true/.test(chain)) continue;
+      bad.push(`${rel}: ${chain.replace(/\s+/g, " ").slice(0, 90)}…`);
+    }
+  }
+  if (!bad.length) pass("no lib/ file reads the whole settings table — every read carries a filter or a limit");
+  else for (const b of bad) {
+    fail(`${b}\n         → settings is one row per restaurant and holds the delivery-platform keys. PostgREST silently caps an unlimited select at 1,000 rows, so this comes back SHORT with no error. Push the test into Postgres (lib/aggregators.ts uses .eq("platform_channels->zomato->>on","true"), verified against the database to return the identical set) and add a .limit().`);
+  }
+}
+
 // 4. the declaration side: nothing may quietly claim to be bag-backed AND own columns
 const model = readFileSync(join(root, "lib/accessModel.ts"), "utf8");
 // Count real DECLARATIONS only — a line starting with * or // is documentation, and counting the
