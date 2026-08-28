@@ -12,12 +12,12 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
   agentsView, createAgent, readRoutes, writeRoutes, mintAgentToken,
-  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch,
+  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, writeMode, isPrintMode,
 } from "@/lib/printHelpers";
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
 // not identical"). lib/printBoard.ts is the single copy.
-import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { STUCK_AFTER_MS } from "@/lib/printQueue";
 import { managerHasFlag } from "@/lib/managerCan";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
@@ -183,6 +183,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // not need a "shown only once" ceremony any more — that whole dance existed because the old
       // file carried a token (mig 368).
       files: helperFiles(originOf(req)),
+      // MODE B's launcher, sent alongside. Both are plain text with nothing secret in them, so the
+      // board can show whichever one the mode calls for without a second round trip.
+      stationFiles: stationFiles(originOf(req)),
       staleMs: HELPER_STALE_MS,
       panels: ROUTE_PANELS, people, devices,
       // Stated so the screen can say it rather than implying it: a manager whose permission is off is
@@ -292,6 +295,29 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (up.error) return err("Could not save that.");
     await logAction("admin", "print_switch", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(" ") });
     return NextResponse.json({ ok: true });
+  }
+
+  // ── WHICH OF THE TWO WAYS THIS RESTAURANT PRINTS ──────────────────────────────────────────
+  // One toggle, and the three paper lines come with it (lib/printHelpers → writeMode). If the mode
+  // moved on its own, a restaurant switched to Chrome would still have three routes pointing at a
+  // computer: the board would show the Chrome setup while the paper kept coming out of the helper.
+  if (seg[0] === "mode") {
+    if (!isPrintMode(body.mode)) return err("There are two ways to print: a computer, or a screen.");
+    const person = body.person ? String(body.person) : null;
+    if (person) {
+      // A named person must be this restaurant's, and must be able to stand at the panel — the same
+      // check writeRoutes makes, asked here too so the toggle cannot store an impossible pair.
+      const u = (await sb.from("staff_users").select("id, active").eq("id", person).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; active?: boolean | null } | null;
+      if (!u || u.active === false) return err("That person is not one of this restaurant's active staff.");
+    }
+    const done = await writeMode(rid, body.mode, { person });
+    if ("error" in done) return err(done.error);
+    await logAction("admin", "print_switch", {
+      restaurant_id: rid,
+      detail: `printing mode → ${done.mode === "screen" ? "a screen (the restaurant's own Chrome)" : "a computer (the helper)"}`,
+    });
+    return NextResponse.json(done);
   }
 
   // ── send one page to a printer ────────────────────────────────────────────────────────────

@@ -4211,6 +4211,24 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   .adm-over-row .what { flex: 1 1 100%; }
 }
 
+/* ── THE ONE TOGGLE (owner, 2026-08-28: "I want a simple toggle… you only see the option you have
+   selected"). Two big targets, each carrying its own one-line explanation, because the choice is a
+   MECHANISM and the names alone ("a computer" / "a screen") do not tell you what you get.
+   The chosen one is not marked by colour alone — a tick, a ring, a filled panel and bold weight
+   (WCAG 1.4.1). 64px minimum, because this is the most consequential control on the screen. */
+.adm-mode { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
+  flex: 1 1 260px; min-height: 64px; padding: 12px 15px; border-radius: 12px; border: var(--border);
+  background: var(--card); color: var(--muted); font: inherit; cursor: pointer;
+  transition: background .15s, box-shadow .15s; }
+.adm-mode b { font-size: 14px; font-weight: 650; color: var(--text); }
+.adm-mode small { font-size: 12px; line-height: 1.45; }
+.adm-mode:hover:not(.on) { background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.adm-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.adm-mode:disabled { opacity: .6; cursor: progress; }
+.adm-mode.on { background: color-mix(in srgb, var(--accent) 14%, var(--card));
+  box-shadow: inset 0 0 0 2px var(--accent); }
+.adm-mode.on b::before { content: "✓ "; color: var(--accent); font-weight: 800; }
+
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── New-restaurant create card (owner 2026-07-24): sectioned form + access setup ── */
 .nr-card { max-width: 760px; }

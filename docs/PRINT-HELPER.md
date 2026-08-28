@@ -1,7 +1,7 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (100 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (132 checks, in `verify:static`) and `npm run verify:printing-sweep` (125 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -213,6 +213,59 @@ writes it, and `verify:print-queue` now fails if any of seven files touches it a
    validator it was testing. It goes through `/api/admin/printing/routes` now.)
 
 `verify:printing-sweep` **112 → 118 phases**, 0 failed.
+
+## 2026-08-28 — TWO MODES behind one toggle, and only the chosen one on screen
+
+> Owner: *"I want both A and B — I want the toggle AND the simplified UI, and do one thing: you only
+> see the option you have selected, only the setting for that option will be shown."* And on mode B:
+> *"if we run that .bat or .command file it will open that Chrome which runs minimised and doesn't
+> auto-open when printing required, doesn't affect other tabs while print. Test all that by yourself."*
+
+### The two modes
+| | **A computer** (default) | **A screen (Chrome)** |
+|---|---|---|
+| what runs | the helper program | a Chrome of its own, out of the way |
+| anything open? | nothing | that Chrome stays running |
+| more than one printer? | **yes**, one per kind of paper | no — the machine's default printer |
+| someone signs in? | no | **once**, in the window it opens |
+
+`settings.modules.printing.mode` (module bag — mig 326, no new column). It is **stored, not derived**:
+the board must show ONE setup before any paper has been answered, and a derived mode has no answer
+then. `writeMode()` **rewrites the three paper lines** into the new mode's shape — a `nobody` line is
+left alone (the decision outlives the mechanism), a computer route going back to "not answered"
+rather than inventing a printer, and `syncKotSwitch` re-asserted so a mode change can never silently
+stop printing.
+
+### `lib/printStationScript.ts` — mode B's launcher, and four things it took
+1. **"runs minimised / doesn't auto-open"** — running the Chrome binary steals focus, and **so does
+   `open -g -j -n` with a real URL**: measured, frontmost went `Finder → Google Chrome`. An
+   `about:blank` test had said otherwise — the kind of easy test that ships a false promise. The mac
+   launcher now **remembers who had the screen and hands it back**; measured after that,
+   `Finder → Chrome → Finder`. Windows uses `start /min`.
+2. **"doesn't affect other tabs"** — its own `--user-data-dir`, i.e. a separate Chrome instance. Their
+   ordinary Chrome, tabs, history and logins are untouched, and quitting one does not quit the other.
+3. **"doesn't auto-open when printing"** — `--kiosk-printing`. Deliberately **not** `--kiosk`, which is
+   fullscreen kiosk — the opposite — and is what the old setup guide told people to use for this.
+4. **The one nobody would guess: a hidden Chrome must still run its timers.** Chrome throttles
+   background and occluded windows hard, and a throttled panel stops polling — the tickets simply
+   queue while everything looks fine. The three `--disable-*throttling/backgrounding` flags are
+   load-bearing: a hidden instance carrying them **beaconed 13 times in 14 seconds** against a local
+   counter, i.e. full rate.
+
+No password in it, like the helper: the person signs in once and that Chrome profile remembers.
+
+### The screens, on both sides
+Card 3 was three papers × (two shape buttons + computer + printer + paper + screen + person + device
++ two backup pickers) with **five** Save buttons — about twenty controls, all on screen whether they
+applied or not. Now: **one toggle → only that mode's setup → the three papers**, each just
+*On / Nobody* plus a printer in computer mode. Measured on screen: **22 controls in computer mode, 14
+in screen mode** on the console, and **14** on the manager panel. Refinements behind **More**. The two
+launcher cards share ONE component on each side, because two copies of that markup is how the boards
+became "not identical" the first time.
+
+Guarded by 16 new `verify:print-helper` checks (**132** total) and 7 new sweep phases (**125** total,
+0 failed) — including that a `nobody` line survives a mode change and that a mode change re-asserts
+auto-print.
 
 ## Why the browser can never do this
 

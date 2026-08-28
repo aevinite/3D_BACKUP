@@ -306,6 +306,74 @@ export async function readRoutes(rid: string): Promise<PrintRoutes> {
   return out;
 }
 
+// ── WHICH OF THE TWO MODES THIS RESTAURANT IS ON ─────────────────────────────────────────────
+//
+// Owner, 2026-08-28: *"there will be 2 mode… I want a toggle and the simplified UI — like you only
+// see the option you have selected, only the setting for that option will be shown."*
+//
+//   · "computer" — a HELPER program prints, silently, with no browser and no login. Each kind of
+//     paper can go to a different printer, which is the thing a browser can never do.
+//   · "screen"   — the restaurant's own CHROME prints, opened by a launcher file, running out of the
+//     way, signed in as ONE named person (lib/printStationScript.ts).
+//
+// WHY IT IS STORED AND NOT DERIVED. It could be read off the routes — a route naming an agent means
+// "computer", one naming a panel means "screen". But the screen has to show ONE setup before any
+// paper has been answered at all, and a derived mode has no answer then. Storing it is what lets the
+// board show the helper's setup OR the Chrome setup and never both.
+//
+// It lives in the module bag (mig 326: a new module adds no column to settings — there are 110).
+export type PrintMode = "computer" | "screen";
+export const isPrintMode = (v: unknown): v is PrintMode => v === "computer" || v === "screen";
+
+/** The default is "computer" because the helper is the better answer: no browser, no login, and one
+ *  printer per kind of paper. A restaurant that has never chosen is shown the helper's setup. */
+export async function readMode(rid: string): Promise<PrintMode> {
+  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as
+    { modules?: unknown } | null;
+  const raw = bagOf(s?.modules)["printing"];
+  return isPrintMode(raw?.mode) ? raw.mode : "computer";
+}
+
+/**
+ * Change the mode — and bring the three paper lines WITH it.
+ *
+ * This is the part that makes one toggle honest. If the mode moved on its own, a restaurant switched
+ * to Chrome would still have three routes pointing at a computer, the board would show the Chrome
+ * setup, and the paper would keep coming out of the helper. One toggle, one truth: every line that
+ * was answered is rewritten into the new mode's shape, and a line set to "nobody" is left alone —
+ * "we do not print this" survives a change of mechanism.
+ */
+export async function writeMode(
+  rid: string,
+  mode: PrintMode,
+  opts?: { person?: string | null; personName?: string | null; panel?: RoutePanel },
+): Promise<{ mode: PrintMode; routes: PrintRoutes } | { error: string }> {
+  const current = await readRoutes(rid);
+  const patch: Record<string, unknown> = {};
+  for (const k of ROUTABLE_KINDS) {
+    const r = current[k];
+    if (r.via === "off") continue;                       // a deliberate no outlives the mechanism
+    if (!r.via) continue;                                // never answered — leave it unanswered
+    patch[k] = mode === "screen"
+      ? { via: "screen", panel: opts?.panel || "manager", person: opts?.person ?? null }
+      // Going back to the helper cannot invent a printer, so the line returns to "not answered
+      // yet" — which the board says out loud rather than pointing at a printer nobody chose.
+      : null;
+  }
+  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: unknown } | null;
+  const bag = { ...bagOf(s?.modules) };
+  bag["printing"] = { ...(bag["printing"] || {}), mode };
+  const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+  if (up.error) return { error: "Could not save which way this restaurant prints." };
+  const after = Object.keys(patch).length ? await writeRoutes(rid, patch) : { routes: current };
+  if ("error" in after) return { error: after.error };
+  // Kitchen slips and auto_print_kot are one decision (syncKotSwitch) — a mode change must not
+  // silently switch printing off, so it is re-asserted from the line's new state.
+  const kot = after.routes.kot;
+  await syncKotSwitch(rid, kot.via !== "off");
+  return { mode, routes: after.routes };
+}
+
 /** Is this line pointing at a SCREEN (a panel/person/device) rather than a helper on a computer? */
 export const isScreenRoute = (r: PrintRoute | undefined): boolean => !!(r && r.via === "screen" && r.panel);
 

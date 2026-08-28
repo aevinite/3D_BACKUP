@@ -644,6 +644,58 @@ await phase("…and a print on ITS printer closes it", async () => {
   });
 }
 
+// ══ 6d · THE ONE TOGGLE, AND THE ROUTES IT MOVES (owner, 2026-08-28) ═════════════════════════
+// "I want the toggle AND the simplified UI — you only see the option you have selected." The part a
+// screenshot cannot check is that the toggle MOVES the three paper lines: if the mode changed alone,
+// a restaurant switched to Chrome would keep three routes pointing at a computer, the board would say
+// one thing and the paper would do another.
+{
+  const setMode = (mode, person) => api("/api/admin/printing/mode", { method: "POST",
+    body: JSON.stringify({ rid: RID, mode, ...(person ? { person } : {}) }) });
+  const kotRoute = async () => {
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules,auto_print_kot`);
+    return { kot: st.modules?.printing?.routes?.kot || {}, mode: st.modules?.printing?.mode, auto: st.auto_print_kot };
+  };
+
+  await phase("the mode is stored, and defaults to a computer", async () => {
+    const r = await setMode("computer");
+    const a = await kotRoute();
+    return (r.ok && a.mode === "computer") || `status ${r.status} · mode ${a.mode}`;
+  });
+  await phase("switching to A SCREEN moves the paper lines with it", async () => {
+    // give it a computer route first, so there is something to move
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID,
+      routes: { kot: { via: "computer", agent: AGENT.id, printer: VIRT.kitchen } } }) });
+    const r = await setMode("screen", mgr.id);
+    const a = await kotRoute();
+    return (r.ok && a.mode === "screen" && a.kot.via === "screen" && a.kot.person === mgr.id)
+      || `status ${r.status} · ${JSON.stringify(a)}`;
+  });
+  await phase("…and auto-print is re-asserted, so a mode change never silently stops printing", async () => {
+    const a = await kotRoute();
+    return a.auto === true || `auto_print_kot is ${a.auto} after a mode change`;
+  });
+  await phase("a line set to NOBODY survives a mode change — the decision outlives the mechanism", async () => {
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { bill: { via: "off" } } }) });
+    await setMode("computer");
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
+    const bill = st.modules?.printing?.routes?.bill || {};
+    return bill.via === "off" || `the bill line became ${JSON.stringify(bill)} — "we do not print this" was thrown away by a mechanism change`;
+  });
+  await phase("…and going back to a computer does NOT invent a printer nobody chose", async () => {
+    const a = await kotRoute();
+    return (!a.kot.printer && !a.kot.agent) || `it kept ${JSON.stringify(a.kot)} — the board would point at a printer nobody picked`;
+  });
+  await phase("a mode that is not one of the two is refused", async () => {
+    const r = await setMode("carrier-pigeon");
+    return r.status >= 400 || `it answered ${r.status}`;
+  });
+  await phase("…and a person who is not this restaurant's staff is refused", async () => {
+    const r = await setMode("screen", "00000000-0000-0000-0000-0000000000ff");
+    return r.status >= 400 || `it answered ${r.status} — a screen route could name somebody else's staff`;
+  });
+}
+
 // ══ 7 · THE GUARDS THEMSELVES ════════════════════════════════════════════════════════════════
 for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-format", "verify:print-paper", "verify:access", "verify:taps"]) {
   await phase(`the ${g} guard passes`, () => {
