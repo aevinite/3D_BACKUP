@@ -25,7 +25,7 @@ const {
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
   waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
-  nodeExpect, expectHeader,
+  nodeExpect, expectHeader, MODULE_ALLOWED_DEFAULTS,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -1013,6 +1013,51 @@ else ok("the read/write route derives every allow-list from the model");
   else if (Number(m[1]) !== real)
     fail(`CLAUDE.md says ${m[1]} outstanding owner asks on the Access screen and docs/ACCESS-REDESIGN-SPEC.md really has ${real} — every session starts from that number, so it sends them hunting for work that is already done (or hides work that is not)`);
   else ok(`CLAUDE.md's count of outstanding owner asks is right (${real})`);
+}
+
+// ── 55 · A NEW RESTAURANT MUST BE BORN THE WAY THE SCREEN SAYS IT IS ───────
+// Every module row on Access & permissions carries a `def` — what the ⓘ promises a brand-new
+// restaurant starts with — and lib/settingsClone.ts is what a new row ACTUALLY gets. Two places,
+// one fact, and nothing was comparing them. Check 18 already does this for the three delivery
+// channels and the eight waiter columns; the MODULES, which are the biggest switches on the
+// screen, were the gap.
+//
+// It bit for real in the other direction first: table_ops and table_tags were seeded false and
+// the row's own words admitted it ("A NEW restaurant starts with it OFF, which is why most of
+// them have it off today") — a product describing its own accident. Both ends moved to ON on
+// 2026-08-28 on the owner's word, and this exists so they can only ever move together: change one
+// and the screen describes a restaurant the database disagrees with. (sweep #7 T15, 2026-08-28)
+{
+  const clone = read("lib/settingsClone.ts").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const modules = ALL_NODES.filter((n) => n.bind.t === "module");
+  if (!modules.length) fail("check 55 found no module rows on the Access screen — if they moved, update this guard");
+  else {
+    // Two ways to be right: seeded from the DERIVED map (the good one — a module added to the
+    // screen is then carried automatically), or written by hand with the matching value.
+    const derived = /for \(const \[col, on\] of Object\.entries\(MODULE_ALLOWED_DEFAULTS\)\) base\[col\] = on;/.test(clone);
+    // A HAND-TYPED LINE IS CHECKED EVEN WHEN THE DERIVED LOOP IS PRESENT, because it runs AFTER
+    // the loop and therefore WINS. The first draft of this check returned early on "derived and
+    // the map agrees" and so missed exactly that — a stray `base.table_ops_allowed = false;`
+    // underneath the loop passed clean. Found by re-injecting the fault, which is the only reason
+    // this paragraph exists.
+    const bad = [], unseeded = [];
+    for (const n of modules) {
+      const col = `${n.bind.key}_allowed`;
+      const m = clone.match(new RegExp(`base\\.${col}\\s*=\\s*(true|false)\\s*;`));
+      if (m) {
+        if ((m[1] === "true") !== (n.def === true))
+          bad.push(`"${n.name}": the screen says a new restaurant starts ${n.def === true ? "ON" : "OFF"}, lib/settingsClone writes ${m[1] === "true" ? "ON" : "OFF"}`);
+        continue;                                            // written by hand, and it agrees
+      }
+      if (derived && MODULE_ALLOWED_DEFAULTS[col] === (n.def === true)) continue;   // carried by the loop
+      unseeded.push(col);
+    }
+    // `base` is a COPY of restaurant #1's row, so a module column nobody resets is INHERITED from
+    // the flagship — that is how khata and payroll came to be on for every new restaurant.
+    if (unseeded.length) fail(`lib/settingsClone.ts never resets ${unseeded.join(", ")} — and it clones restaurant #1's row, so a new restaurant INHERITS the flagship's value for those instead of what the Access screen promises`);
+    else if (bad.length) fail(`a new restaurant is not born the way the Access screen says: ${bad.join("; ")}`);
+    else ok(`all ${modules.length} module rows: what a new restaurant is seeded with is what the screen promises${derived ? " (derived, so a new module is carried automatically)" : ""}`);
+  }
 }
 
 // ── report ─────────────────────────────────────────────────────────────────
