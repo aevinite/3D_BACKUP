@@ -243,6 +243,11 @@ export async function ingestIncoming(source: AggSource, payload: Record<string, 
   return Array.isArray(data) ? data[0] : data;
 }
 
+/** How long a status ping to Zomato/Swiggy may take before we give up on it. Deliberately shorter
+ *  than the platform's own function ceiling, and the same order as lib/alerts.ts's 4s: a ping
+ *  nobody is waiting for must never be the thing that holds an instance open. */
+const NOTIFY_TIMEOUT_MS = 6000;
+
 // Push a status change back to the platform. No-op while the provider has no keys
 // (today). Best-effort: a notify failure must never break the local status update.
 export async function notifyAggregator(source: string, externalId: string | null | undefined, status: string): Promise<void> {
@@ -253,8 +258,29 @@ export async function notifyAggregator(source: string, externalId: string | null
   const verb = MAP[status];
   if (!verb) return;
   try {
+    // A DEADLINE, because this is an OUTBOUND call to somebody else's server (T25, sweep #7,
+    // 2026-08-28). lib/alerts.ts learned this on 2026-07-31 and wrote it down: "Both pushes are
+    // outbound HTTP to someone else's server, and they used to be awaited with no upper bound — so
+    // on a restaurant's flaky wifi a staff action could sit there waiting… Caught 2026-07-31: an
+    // invoice POST took 30s." Its answer was ALERT_TIMEOUT_MS = 4000.
+    //
+    // Both callers here already say `void notifyAggregator(...)`, so nothing on the floor WAITS for
+    // it — but an un-awaited fetch with no ceiling still holds the serverless instance open until
+    // the platform's own timeout, on the one path that talks to Zomato/Swiggy. 6 seconds is
+    // generous for a status ping and short enough that it cannot become a hang.
+    //
+    // Feature-guarded exactly like every other deadline in this repo: READING AbortSignal.timeout
+    // throws on a browser that has not got it (five files record that lesson, and
+    // npm run verify:abort-guard exists because lib/supabase.ts did it unguarded anyway). This is a
+    // server path today, so the guard is belt and braces — and it is what the guard asks for.
+    let signal: AbortSignal | undefined;
+    try {
+      signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(NOTIFY_TIMEOUT_MS) : undefined;
+    } catch { signal = undefined; }
     await fetch(`${url.replace(/\/$/, "")}/orders/${encodeURIComponent(externalId)}/${verb}`, {
       method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: "{}",
+      ...(signal ? { signal } : {}),
     });
   } catch { /* best-effort: the local status already moved */ }
 }
