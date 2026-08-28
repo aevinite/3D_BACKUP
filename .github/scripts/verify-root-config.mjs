@@ -132,6 +132,20 @@ want(/key:\s*"Content-Security-Policy-Report-Only"/.test(NEXT) && !/key:\s*"Cont
     "A grant nobody uses is a permission nobody remembers giving. Remove it, or say in a comment what uses it.");
 }
 
+// …and the other direction: an outside host the app DOES load from must be granted.
+{
+  const hosts = [...NEXT.matchAll(/hostname:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const menu = existsSync(R("public/content/starter-menu.json")) ? read("public/content/starter-menu.json") : "";
+  const used = [...new Set([...menu.matchAll(/https:\/\/([^/"]+)/g)].map((m) => m[1]))];
+  const ungranted = used.filter((h) => !hosts.includes(h));
+  want(ungranted.length === 0,
+    `all ${used.length} outside host(s) the starter menu loads from are granted`,
+    `${ungranted.length} host(s) the starter menu loads from are NOT in images.remotePatterns: ${ungranted.join(", ")}`,
+    "public/content/starter-menu.json is the ready-made menu a BRAND-NEW restaurant starts with. An ungranted\n      " +
+    "host costs nothing while dish cards render a plain <img> — and breaks the moment one moves to next/image,\n      " +
+    "for brand-new restaurants only, which is the hardest case to notice. 62 of 72 photos were ungranted.");
+}
+
 want(/turbopack:\s*\{[\s\S]{0,200}root:/.test(NEXT),
   "the workspace root is still pinned to this folder",
   "next.config.ts no longer pins turbopack.root",
