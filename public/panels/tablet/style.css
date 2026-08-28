@@ -277,8 +277,23 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    the owner's A35 the tile's content box is 82px — just over the 80px line, so the word stayed —
    while the button itself was squeezed to 58px for 65px of content, and `.t-take` is
    overflow:hidden, so the label rendered as "＋ Take orde" on exactly the tiles that need action
-   (T12 phone sweep, 2026-08-05). Whenever the row is SHARED, drop the word earlier. */
-@container (max-width: 150px) {
+   (T12 phone sweep, 2026-08-05). Whenever the row is SHARED, drop the word earlier.
+   ── 96px, NOT 150px (owner, 2026-08-28, shown the measurements) ─────────────────────────────
+   150 was calibrated when a PHONE drew 3–4 tiles per row and a shared row really did leave the
+   button 58px. Since 2026-08-15 a phone draws 2, so the same tile hands the button ~112px — and
+   the threshold went on firing on every device he owns. Two tiles of the SAME size sat side by
+   side, the quiet one reading "＋ Take order" and the busy one reading a bare "＋", which is the
+   opposite of the rule R31 sets out: the words while they FIT, a bare ＋ when they do not.
+   MEASURED with the rule disabled, at every density, on a tile that also carries a ✓ — button
+   width against what the label needs:
+     4/row 221px · 5/row 161 · 6/row 128 · 7/row 108 · 8/row 92 · 9/row 79  → 0px clipped
+     10/row 68px → 3px clipped · 11/row 60 → 12px · 12/row 52 → 19px
+   So the words genuinely fit down to 9 per row (content 103.8px) and start being cut at 10
+   (content 93.8px). 96px sits between the two measurements: the label comes back on his desktop
+   at 7, his iPad at 6 and his phone at 2, and a bare ＋ still takes over on a dense floor, where
+   R31 asks for it. Do NOT raise this number back without re-measuring — and do not add a third,
+   worded face (R31 refuses one). */
+@container (max-width: 96px) {
   .t-act:has(.tacc) .t-take-t,
   .t-act:has(.tpay) .t-take-t,
   .t-act:has(.tclose) .t-take-t { display: none; }
