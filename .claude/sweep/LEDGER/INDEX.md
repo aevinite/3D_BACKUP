@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P35201`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P35237`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
 > **SWEEP #7 took `P15101`–`P35100`** — 40 terminals × 500, contiguous and in terminal order, so
 > T1 is `P15101`–`P15600`, T5 is `P17101`–`P17600`, and T40 is `P34601`–`P35100`. Each terminal
@@ -47,7 +47,8 @@ again. Read those before reporting anything.
 > | T5 · the owner's own follow-up run | `P35101`–`P35200` | ✅ 100 new rows for the thirteen things he asked for 2026-08-23→26, all green, plus P17101–P17600 re-run (399 ✅ · 1 expectation moved · **no regression**). Taken from the next-free mark, past every sweep-#7 block. |
 > | T4 · working offline, and in every language | `P16601`–`P17100` | ✅ 500 written, 500 executed (497 ✅ · 3 ❌→✅ fixed on the branch) — plus all 500 of `P01501`–`P02000` re-run: **no regression**, 4 expectations moved, and one row (`P01936`) found to have been **filed green on a claim that was never true** |
 > | T17 · the admin's health, logs, issues & limits | `P23101`–`P23600` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌, and that one is a single line in a file this territory does not own) — plus all 500 of `P08001`–`P08500` re-run: **ONE REGRESSION** (`P08095` — the server moved to the shared `errorSig()` group and the Logs page was left comparing message text letter-for-letter, so "Mark resolved" cleared 9 rows server-side and struck through 1), 1 row newly red (`P08201`), 4 ⏭ unchanged, and 11 expectations moved because System health was rebuilt. **6 problems fixed, one commit each.** |
-> | T15 · the admin's access tree and people | `P22101`–`P22600` | ✅ 500 written, 500 executed, 500 ✅ (5 of them recorded a real fault, all fixed on the branch with a guard each) — plus all 500 of `P07001`–`P07500` re-run: **no regression**, 6 expectations moved, and one row (`P07441`) found to have been **filed green on a claim that was never true** |
+> | T15 · the admin's access tree and people | `P22101`–`P22600` | ✅ 500 written, 500 executed, 500 ✅ (5 of them recorded a real fault) — plus all 500 of `P07001`–`P07500` re-run: **no regression**, 6 expectations moved, and one row (`P07441`) found to have been **filed green on a claim that was never true** |
+> | T15 · the owner's own follow-up ("do all except 1") | `P35201`–`P35236` | ✅ 36 rows for items 7, 8, 9 and 10, all green. Item 1 dropped on his word. Three faults found by the guards written for the picked items: a fourth ACTIONS row unnamed by its folder (one day after the guard landed), and khata + payroll INHERITED from restaurant #1 by every new restaurant. |
 >
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
