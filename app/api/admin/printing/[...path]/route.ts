@@ -19,7 +19,7 @@ import {
 // not identical"). lib/printBoard.ts is the single copy.
 import { printBoardState, helperFiles } from "@/lib/printBoard";
 import { STUCK_AFTER_MS } from "@/lib/printQueue";
-import { managerGrantValue } from "@/lib/accessTree";
+import { managerHasFlag } from "@/lib/managerCan";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
 
@@ -140,21 +140,37 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     //     A person switched off is not offered, which is what makes that permission mean something.
     //   · devices — the screens that have actually been the printer before (print_stations), so "that
     //     same PC" is a thing he recognises rather than a hex id he has to guess at.
-    const staff = ((await sb.from("staff_users").select("id, name, username, role, active")
+    const staff = ((await sb.from("staff_users").select("id, name, username, role, active, permissions")
       // A CEILING, so PostgREST's own default cannot silently shorten this picker (T17 sweep #7,
       // 2026-08-27). One restaurant's staff, and every other read in this file already states one.
       .eq("restaurant_id", rid).order("role").limit(500)).data || []) as
-      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null }[];
-    // The manager side of that permission, read the way every other route reads one: the stored value
-    // if the admin set it, else what the Access screen shows as the default (managerGrantValue).
-    const perms = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as
-      { manager_permissions?: Record<string, unknown> | null } | null;
-    const mgrPerm = managerGrantValue("print_here", (perms?.manager_permissions || {})["print_here"]);
+      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null;
+        permissions?: Record<string, string> | null }[];
+    // ── PER PERSON, NOT PER RESTAURANT (owner's review, 2026-08-28) ───────────────────────────
+    // This resolved "may be the printer" from the restaurant-wide grant ALONE, while the comment
+    // above claimed it was each person's own permission. So a manager switched off INDIVIDUALLY was
+    // still offered here — pick them, the board says their screen is the printer, and their screen
+    // is refused by managerCan: the kitchen never gets the paper and neither screen says why. It
+    // failed the other way too — a manager allowed individually could not be picked at all while the
+    // restaurant default was off.
+    //
+    // Both sides call managerHasFlag() now, so the picker and the gate cannot disagree. `access_config`
+    // is read as well because it is the CAP: switched off there, nobody may, whatever their own
+    // setting says. Still ONE extra column on a query already being made.
+    const perms = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+      { manager_permissions?: Record<string, unknown> | null; access_config?: Record<string, { on?: boolean }> | null } | null;
+    const mayBePrinter = (u: { role?: string | null; permissions?: Record<string, string> | null }) =>
+      managerHasFlag("print_here", {
+        accessConfig: perms?.access_config,
+        managerPermissions: perms?.manager_permissions,
+        ownOverride: u.permissions?.["print_here"],
+      });
     const people = staff.filter((u) => u.active !== false).map((u) => {
       const role = String(u.role || "");
       const panels = role === "kitchen" ? ["kitchen"]
-        : role === "manager" ? (mgrPerm ? ["manager"] : [])
-        : role === "owner" ? ["owner", "manager"]
+        // An OWNER standing at the manager panel is gated by the same row, for the same reason.
+        : role === "manager" ? (mayBePrinter(u) ? ["manager"] : [])
+        : role === "owner" ? (mayBePrinter(u) ? ["owner", "manager"] : ["owner"])
         : role === "tablet" || role === "waiter" ? ["tablet"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
@@ -171,7 +187,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       panels: ROUTE_PANELS, people, devices,
       // Stated so the screen can say it rather than implying it: a manager whose permission is off is
       // missing from `people` on purpose, and this is the link that explains where to switch it on.
-      managerMayPrint: mgrPerm,
+      // "Is ANY manager offered?" — used only to explain an empty picker. Per person now, so a
+      // restaurant where the default is off but one manager is allowed no longer says "nobody".
+      managerMayPrint: staff.some((u) => u.active !== false && String(u.role || "") === "manager" && mayBePrinter(u)),
       // `target` has left this payload (mig 369). It was the coarse kitchen|counter|both answer, it
       // asked the same question as the Kitchen slips line in older and vaguer words, and the two
       // could contradict each other — the printing sweep caught the OLDER one winning, so an owner

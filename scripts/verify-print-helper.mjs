@@ -503,6 +503,41 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "the after-install section is gone from /print-setup.html");
 }
 
+// ── 8e · THREE THINGS A REVIEW CAUGHT (owner relayed them, 2026-08-28) ────────────────────────
+{
+  const mcan = read("lib/managerCan.ts");
+  const printApi = code(adminR);
+  const pairPage = read("app/pair/page.tsx");   // its own read — the 8d block's copy is scoped to it
+
+  // 1 · THE PICKER AND THE GATE MUST RESOLVE THE SAME RULE. The Printing board offered a manager
+  // whose own page said no — it read the restaurant-wide grant alone, so a person switched off
+  // individually was still offered, their screen was then refused, and the kitchen got no paper with
+  // nothing on either screen saying why. It failed the other way too.
+  check(/export function managerHasFlag/.test(mcan) && /accessConfig\?\.\[flag\]\?\.on === false/.test(mcan),
+    "one resolver answers 'may this person be the printer' — cap, then their own override, then the default",
+    "managerHasFlag is gone from lib/managerCan.ts: the picker and the gate are two copies of one permission rule again, and they WILL disagree");
+  check(/managerHasFlag\(/.test(printApi) && !/managerGrantValue\("print_here"/.test(printApi),
+    "…and the Printing board's people picker calls it, per person",
+    "the Printing board resolved print_here from the restaurant-wide grant again — a manager switched off individually is offered, picked, and then refused, and nothing says why");
+  check(/permissions/.test(printApi) && /access_config/.test(printApi),
+    "…reading the person's own override AND the feature cap, not just the restaurant default",
+    "the picker stopped reading staff_users.permissions or access_config, so one of the three rungs is missing from its answer");
+
+  // 2 · THE ALLOW PAGE MUST NOT SEND A MANAGER TO OUR PASSWORD WALL. The printing board lives in two
+  // places, and the person standing at the printer is usually the manager.
+  check(/who === "admin"/.test(pairPage) && /href="\/manager"/.test(pairPage),
+    "after linking a computer, a manager is sent to their OWN panel, not to the Aevidine console",
+    "the Allow page's last button goes to /aevinite for everybody again — a manager hits a staff-password screen at the exact moment the guide says to go and choose printers, which reads like their own login just failed");
+  check(/Settings → Printing/.test(pairPage),
+    "…and is told in words where to find it",
+    "the Allow page no longer says WHERE the printing board is on the manager's own panel");
+
+  // 3 · THE GUIDE OPENS BESIDE THE WORK, like the four other places that offer it.
+  check(/print-setup\.html" target="_blank"/.test(page),
+    "the Printing header's guide link opens in a NEW TAB, like the other four",
+    "the guide replaced the Printing screen again — it is read WHILE setting a printer up, and the guide has no way back to the screen you were halfway through");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",

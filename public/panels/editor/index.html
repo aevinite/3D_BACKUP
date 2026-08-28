@@ -159,7 +159,7 @@
   <script src="/panels/swipehint.js?v=77850684"></script>
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
-  <script src="/panels/billcustomer.js?v=eb941f4b"></script>
+  <script src="/panels/billcustomer.js?v=14297fb7"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=3bf875b3" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
@@ -168,10 +168,10 @@
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
-  <script src="/panels/billdoc.js?v=e8eadd05"></script>
+  <script src="/panels/billdoc.js?v=08d11c7c"></script>
   <script src="/panels/auditsort.js?v=3503e514"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=e5f54e7e"></script>
+  <script src="/panels/editor/app.js?v=74382f73"></script>
 </body>
 </html>
