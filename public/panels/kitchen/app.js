@@ -169,6 +169,33 @@ const api = async (method, path, body, opts) => {
   }
   return j;
 };
+// ── DID A MEMBER OF STAFF PUNCH THIS ORDER, OR DID THE GUEST? (owner, 2026-08-26) ───────────────
+//
+// The chime used to key on `member_id`, and that was the fault: a guest who scans the QR and orders
+// WITHOUT joining the table's session has no member id — which is exactly what a waiter-placed order
+// looks like — so it landed on the pass in about two seconds and rang NOTHING. A cook facing away
+// from the board had no way to know food had come in. (Recorded as H1 by the T6 sweep since
+// 2026-08-17; it was thought to need a new column on `orders`. It does not.)
+//
+// `placed_by_id` / `placed_by` have been on `orders` since migration 220 and the manager route says
+// what they mean in its own words: *"NULL keeps meaning the guest ordered it themselves."* Staff
+// panels stamp them when a waiter or manager punches an order; the guest path (lfh_place_order)
+// never touches them. So "did a person standing at the table place this?" is already answered.
+//
+// The change is deliberately additive: everything that rings today still rings. The only case that
+// changes is the silent one — `preparing`, no member id, and nobody stamped on it — which is a guest
+// order and now rings. A waiter's own order stays silent, because the waiter is at the table.
+// The board sends `guest: 1` and NOTHING else — the raw `placed_by_id` / `placed_by` never leave the
+// server (lib/liveBoard.ts → stripPlacedBy), because one is a person's name and together they are
+// ~77 bytes on every order of every board read to answer a yes/no question. The flag is only
+// present when it is TRUE, so a floor of waiter-punched tickets costs nothing at all.
+//
+// One honest edge: on the waiter tablet the stamp is `actor?.id ?? null` with a matching name, so an
+// ADMIN placing an order while acting as nobody leaves both empty and this reads it as a guest's.
+// That way round is the safe one — a chime that should not have rung, rather than food arriving in
+// silence — and an admin punching an order into a live kitchen is not a thing that happens in service.
+const guestPlaced = (o) => !!o && o.guest === 1;
+
 // ── table naming (mig 131) ───────────────────────────────────────────────────
 // The restaurant's OWN name for a table ("A1", "Patio"), from settings.table_names.
 // Empty string when that table has no name, so callers fall back to the number.
@@ -381,12 +408,46 @@ const rowsOf = (o, dbRowsOpt) => {
   return (Array.isArray(o.items) ? o.items : []).map((i) => ({ id: null, title: i.title, qty: i.qty || 1, status: i.status || o.status, note: i.note, options: i.options, removed: i.removed, fromDb: false }));
 };
 
+// ── ONE NOTE FOR THE WHOLE TABLE IS SHOWN ONCE, NOT UNDER EVERY DISH (owner, 2026-08-26) ────────
+//
+// "the note is for particular or for the whole order" — and the honest answer is that the DATABASE
+// cannot tell you. `orders` has no note column at all: when a waiter types one instruction for the
+// table, lfh_staff_place_order copies that same text onto EVERY order_items.note. A per-dish note is
+// a genuinely separate thing (lfh_staff_edit_item_note, from the tablet and the manager panel) and
+// it lands in the very same column. So the two are indistinguishable by field — but not by shape.
+//
+// THE RULE, and it is deliberately the cautious one: a note is treated as belonging to the whole
+// order ONLY when EVERY dish on the ticket carries the IDENTICAL non-empty note, and there is more
+// than one dish. Anything else — one dish edited to say something different, some dishes with a
+// note and some without, a single-dish ticket — and every note stays exactly where it is today, on
+// its own line. That way the only case that changes is the one that is provably one instruction
+// repeated, and a dish with its own instruction can never lose it or inherit somebody else's.
+//
+// Measured before the change: a six-dish order with one note rendered that sentence six times and
+// made the ticket six screens tall on a phone, nearly all of it the same words.
+//
+// This is NOT the allergy rule and does not touch it. The order-wide "avoid" stays DISTRIBUTED onto
+// every dish line (owner, 2026-06-14) because a cook plating one dish must see the restriction on
+// that dish. Only the free-text note collapses.
+function sharedOrderNote(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return "";
+  const first = (rows[0] && rows[0].note != null ? String(rows[0].note) : "").trim();
+  if (!first) return "";
+  for (const r of rows) {
+    const n = (r && r.note != null ? String(r.note) : "").trim();
+    if (n !== first) return "";
+  }
+  return first;
+}
+
 function ticketHtml(o, rows) {
   rows = rows || rowsOf(o);
   // NO common allergy banner anywhere (owner, 2026-06-14). The order-wide "avoid" is
   // DISTRIBUTED onto every item, so each dish shows its own "NO x" — matching the
   // manager and tablet. Each item = its own removals ∪ the order-wide allergens.
   const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
+  // One instruction for the whole table is drawn ONCE, above the dishes (see sharedOrderNote).
+  const orderNote = sharedOrderNote(rows);
   const lines = rows.map((r) => {
     const lineRemoved = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
     // Allergens render as HTML so a staff-ADDED one carries a green "＋"; options/note
@@ -394,8 +455,12 @@ function ticketHtml(o, rows) {
     const added = new Set((Array.isArray(r.added_allergens) ? r.added_allergens : []).map((x) => String(x).toLowerCase()));
     const segs = [];
     if (Array.isArray(r.options) && r.options.length) segs.push(esc(r.options.map((op) => `+ ${op.label || op}`).join(" · ")));
-    if (lineRemoved.length) segs.push(lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", "));
-    if (r.note) segs.push(esc(`✎ ${r.note}`));
+    // WRAPPED ON ITS OWN (redesign, owner 2026-08-28). Options, allergens and the note used to share
+    // one grey <small>, so the one line a cook must never miss looked exactly like "+ extra cheese".
+    // The wrapper is what lets the stylesheet colour ONLY the allergens as a warning.
+    if (lineRemoved.length) segs.push(`<span class="alg">${lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", ")}</span>`);
+    // …unless it IS the whole-table note, which is drawn once above instead of once per dish
+    if (r.note && !(orderNote && String(r.note).trim() === orderNote)) segs.push(esc(`✎ ${r.note}`));
     const small = segs.length ? `<small>${segs.join(" · ")}</small>` : "";
     const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
@@ -440,12 +505,21 @@ function ticketHtml(o, rows) {
   // once drawn and a cook had no way to see that table 6 was the owner's guest. The board now
   // ships `tableTags` ({ "6": "vip" }) the same way it ships `tableNames`, and the ticket looks
   // its own table up. A parcel has no table, so it has no mark either.
+  // The whole-table instruction, once, where a cook reads it before starting anything. It sits
+  // ABOVE the dishes on purpose: it applies to all of them, so reading it after the food would be
+  // reading it too late.
+  const orderNoteHtml = orderNote ? `<div class="onote" title="This note is for the whole table">✎ ${esc(orderNote)}</div>` : "";
   const ttag = (state.tableTags || {})[String(o.table_number)] || "";
   const tb = TAG_BADGE[ttag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
-  return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
+  // The LANE this ticket is in, as a class. `st-<status>` cannot say it: an order sitting in Ready
+  // and one still Cooking are both `preparing`. The coloured left edge (see the stylesheet) is what
+  // lets a cook tell the lanes apart from across the kitchen without reading the headings — the same
+  // device platform tickets have always used for their channel.
+  const phase = orderPhase(o, rows);
+  return `<div class="ticket st-${esc(o.status)} ph-${esc(phase)}" data-ticket="${esc(o.id)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
-    ${lines}${action}</div>`;
+    ${orderNoteHtml}${lines}${action}</div>`;
 }
 
 // A kitchen ticket's column comes from its DISHES, not the coarse order status:
@@ -611,9 +685,17 @@ function renderColumns() {
   });
   const pb = { new: [], cooking: [], ready: [] };
   (state.platform || []).forEach((p) => { const c = platPhase(p.status); if (pb[c]) pb[c].push(p); });
+  // ── ONE QUEUE INSIDE EACH LANE, NOT TWO (owner, 2026-08-26) ──────────────────────────────────
+  // The WALL board was made first-come-first-served in the T6 sweep of 2026-08-17; the columns were
+  // not. Dine-in tickets were listed first and platform tickets glued on after, so in a busy Cooking
+  // lane an hour-old Zomato order sat below a one-minute table order — and a late delivery order is
+  // the one an aggregator penalises the restaurant for. Both channels are now sorted in ONE pass on
+  // created_at, through the same NaN-safe comparator the wall uses: a platform ticket's created_at
+  // comes from a webhook, so it is exactly the value that must not be subtracted blind.
   const draw = (key, list, plist) => {
-    const desired = list.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
-      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
+    const desired = list.map(({ o, rows }) => ({ id: String(o.id), at: o.created_at, html: ticketHtml(o, rows) }))
+      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, at: p.created_at, html: platTicketHtml(p) })));
+    desired.sort((a, b) => cmpTime(a.at, b.at));
     reconcileList($("#list-" + key), desired);
     $("#count-" + key).textContent = String(list.length + (plist ? plist.length : 0)); // show "0", not a blank pill, when a column is empty (2026-07-05)
   };
@@ -966,7 +1048,17 @@ function renderDishes() {
   // Trim so a stray space / spaces-only search isn't treated as a real query that matches
   // nothing (it used to blank the whole drawer).
   const q = ($("#dishSearch").value || "").trim().toLowerCase();
-  const list = state.dishes.filter((d) => !q || (d.title || "").toLowerCase().includes(q));
+  // ── "JUST SHOW ME WHAT IS SOLD OUT" (owner, 2026-08-26) ────────────────────────────────────────
+  // To answer "what have we 86'd tonight?" a cook used to scroll every dish on the menu hunting for
+  // red. This is one tap. It is deliberately NOT remembered: a filter that survives the drawer
+  // closing is a filter a cook forgets is on, and then mid-rush the drawer looks nearly empty and
+  // the dish they came to mark is missing. It resets every time the drawer opens (see openDrawer).
+  const outOnly = !!state.dishOutOnly;
+  const isOut = (d) => (d.tags || []).includes("sold-out");
+  const list = state.dishes
+    .filter((d) => !q || (d.title || "").toLowerCase().includes(q))
+    .filter((d) => !outOnly || isOut(d));
+  const outCount = state.dishes.filter(isOut).length;
   const rows = list.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     return `<div class="dish-row ${out ? "is-out" : ""}">
@@ -976,7 +1068,12 @@ function renderDishes() {
   }).join("");
   // Never show a blank drawer: an empty result gets an honest message (a cook who mistypes
   // couldn't tell if the board broke), otherwise nothing seeded yet.
-  const html = rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet"}</div>`;
+  // The toggle says the COUNT, so a cook can answer "how many are off?" without opening it at all.
+  const toggle = `<button class="outfilter${outOnly ? " on" : ""}" id="outOnlyBtn" type="button" aria-pressed="${outOnly ? "true" : "false"}">${outOnly ? "◉" : "○"} Sold out only <span class="oc">${outCount}</span></button>`;
+  const empty = outOnly
+    ? (q ? `No sold-out dish matches “${esc(q)}”` : "Nothing is sold out right now")
+    : (q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet");
+  const html = toggle + (rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${empty}</div>`);
   // Skip the rebuild when nothing changed (audit 2026-07-07): a poll while the drawer is
   // open used to blow away #dishList on EVERY refresh, which (a) lost the search box's focus/
   // caret mid-type and (b) orphaned the button node the optimistic toggle + UNDO closure hold,
@@ -1003,6 +1100,8 @@ function renderDishes() {
     btn.classList.toggle("danger", out);
     btn.closest(".dish-row")?.classList.toggle("is-out", out);
   };
+  { const ob = document.getElementById("outOnlyBtn");
+    if (ob) ob.onclick = () => { state.dishOutOnly = !state.dishOutOnly; renderDishes(); }; }
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
     if (b.disabled) return;
     const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
@@ -1150,7 +1249,7 @@ async function loadTables(tables) {
   // land on the pass silently. Waiter orders (member_id null) stay chime-free: the
   // waiter is standing at the table. An accepted first order can't double-chime — its
   // id entered knownIds while it was still 'received'.
-  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
+  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && guestPlaced(o))) && !state.knownIds.has(o.id));
   if (newReceived.length) chime();
   // The targeted slice never carries `queuedFor` (it is a whole-board answer), so the net stays out
   // of it on purpose — the queue prints these, and the next full read runs the net if it must.
@@ -1865,7 +1964,7 @@ async function loadImpl() {
   // brand-new platform order.
   const ids = new Set([...data.orders.map((o) => o.id), ...((data.platform || []).map((p) => p.id))]);
   if (state.knownIds) {
-    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
+    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && guestPlaced(o))) && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
     if (newReceived.length || freshPlat) chime();
     // The QUEUE prints new orders now (processPrintJobs, below — mig 335). This is only the net
@@ -1981,6 +2080,7 @@ $("#muteBtn").onclick = () => {
 // drawer (via LFH_BACK) instead of leaving the kitchen panel.
 let drawerOff = null;
 function openDrawer() {
+  state.dishOutOnly = false;   // never inherited from last time — see the note in renderDishes
   $("#drawerOverlay").hidden = false; renderDishes();
   drawerOff = window.LFH_BACK ? LFH_BACK.layer("86-board", closeDrawer) : null;
 }

@@ -785,14 +785,15 @@
     return day + " " + mon + " " + time;
   }
 
-  function kotLineHtml(r) {
+  function kotLineHtml(r, sharedNote) {
     r = r || {};   // one bad line must not cost the whole ticket — see the note in billDocHtml
     var opts = Array.isArray(r.options) ? r.options.map(function (x) { return typeof x === "string" ? x : ((x && x.label) || ""); }).filter(Boolean).join(", ") : "";
     var rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
     return '<div class="kl"><span class="q">' + (r.qty || 1) + '×</span><span class="n">' + esc(r.title || "")
       + (opts ? " <i>(" + esc(opts) + ")</i>" : "")
       + (rem ? " <i>— no " + esc(rem) + "</i>" : "")
-      + (r.note ? "<br><small>&raquo; " + esc(r.note) + "</small>" : "")
+      /* the whole-table note prints once, above the dishes — see sharedKotNote */
+      + (r.note && !(sharedNote && String(r.note).trim() === sharedNote) ? "<br><small>&raquo; " + esc(r.note) + "</small>" : "")
       + "</span></div>";
   }
 
@@ -809,9 +810,36 @@
   // 58mm overflow as a bug. If a client ever turns up with 58mm hardware he will say so, and it
   // becomes a real piece of work with a real printer to test against.
   // (The BILL is a separate document and is already clean at both widths — nothing to do there.)
+  /* ONE INSTRUCTION FOR THE WHOLE TABLE PRINTS ONCE, NOT UNDER EVERY DISH (owner, 2026-08-26).
+     `orders` has no note column: a waiter typing one note for the table has that same text copied
+     onto EVERY order_items.note at placement, so a six-dish order printed the same sentence six
+     times down a thermal roll — real paper, and a longer ticket to read on a rushed pass.
+     The rule is the cautious one and it matches the kitchen screen exactly: a note is treated as
+     belonging to the whole order ONLY when EVERY line carries the IDENTICAL non-empty note and
+     there is more than one line. One dish edited to say something different, or a single-line
+     ticket, and every note prints exactly where it does today.
+     The ⚠ AVOID box already worked this way — allergies have always printed once at the foot of
+     the ticket — so this simply gives the note the same treatment. */
+  function sharedKotNote(lines) {
+    if (!Array.isArray(lines) || lines.length < 2) return "";
+    var first = (lines[0] && lines[0].note != null ? String(lines[0].note) : "").trim();
+    if (!first) return "";
+    for (var i = 0; i < lines.length; i++) {
+      var r = lines[i];
+      var n = (r && r.note != null ? String(r.note) : "").trim();
+      if (n !== first) return "";
+    }
+    return first;
+  }
+
   function kotDocHtml(o) {
     o = o || {};
-    var linesHtml = o.linesHtml != null ? o.linesHtml : (o.lines || []).filter(Boolean).map(kotLineHtml).join("");
+    /* Only ever computed from `lines`. A caller that hands over ready-made `linesHtml` (the admin's
+       sample) is untouched — its markup is already whatever it wanted. */
+    var shared = o.linesHtml != null ? "" : sharedKotNote(o.lines || []);
+    var linesHtml = o.linesHtml != null ? o.linesHtml
+      : (o.lines || []).filter(Boolean).map(function (r) { return kotLineHtml(r, shared); }).join("");
+    var sharedHtml = shared ? '<div class="on">&raquo; ' + esc(shared) + "</div>" : "";
     var allergHtml = o.allergHtml != null ? o.allergHtml
       : (Array.isArray(o.allergies) && o.allergies.length ? '<div class="al">⚠ AVOID: ' + esc(o.allergies.join(", ")) + "</div>" : "");
     return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(o.title || "KOT") + "</title><style>\n"
@@ -832,6 +860,10 @@
 // rushed pass, and it was the smallest text on the paper. Pinned like every other size here.
 + "      .kl small{font-size:12px}\n"
 + "      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
+/* The whole-table note. Bordered like the ⚠ AVOID box, because it is the same KIND of thing — one
+   instruction that applies to every dish below it — and printed ABOVE the dishes, since reading it
+   after the food would be reading it too late. 13px, one ink, same 66mm discipline as the rest. */
++ "      .on{margin:0 0 6px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
 // The duplicate banner (owner, 2026-08-04: "reprint … like duplicate in big words on top").
 // Big, bordered, uppercase — a reprinted ticket must be impossible to mistake for a fresh
 // order on a rushed pass. One ink, one weight family, same 66mm discipline as everything else.
@@ -851,6 +883,7 @@
 + '      <div class="h">' + esc(o.rname || "Kitchen") + "<br>" + esc(o.head || "KITCHEN TICKET") + "</div>\n"
 + '      <div class="meta"><span>KOT #' + esc(String(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
 + '      <div class="meta"><span>' + esc(o.when || "") + "</span></div>\n"
++ "      " + sharedHtml + "\n"
 + "      " + (linesHtml || "<div>(no items)</div>") + "\n"
 + "      " + allergHtml + "\n"
 + "      " + (o.extraHtml || "") + "\n"
