@@ -72,6 +72,7 @@
     "verify:recycle-bin": "node scripts/verify-recycle-bin.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:admin-restaurants": "node scripts/verify-admin-restaurants.mjs",
+    "verify:guest-address": "node scripts/verify-guest-address.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "verify:owner-money": "node scripts/verify-owner-money-screens.mjs",
     "check:current": "node scripts/check-folder-current.mjs",
