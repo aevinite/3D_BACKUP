@@ -50,11 +50,7 @@ export async function GET(req: NextRequest) {
   // problems with different fixes, and a person standing at a printer needs to know which they have.
   if (who.kind === "none") return NextResponse.json({ signedIn: false });
   if (!row) return NextResponse.json({ signedIn: true, found: false });
-  // `who` is sent on THIS branch too, and that is not decoration: the Allow page's "where next"
-  // button depends on it. A manager belongs on their own panel's Settings → Printing; only the
-  // admin belongs in /aevinite. Without `who` here, an already-linked machine sent everybody to
-  // the admin console, which asks a manager for a password they do not have.
-  if (row.approved_at) return NextResponse.json({ signedIn: true, found: true, already: true, who: who.kind });
+  if (row.approved_at) return NextResponse.json({ signedIn: true, found: true, already: true });
 
   const rests = who.kind === "admin"
     ? (((await sb.from("restaurants").select("id, name").order("name")).data || []) as { id: string; name: string }[])

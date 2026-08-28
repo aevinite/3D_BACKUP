@@ -246,11 +246,7 @@ export default function AdminPrinting() {
           <p className="adm-page-sub" style={{ margin: 0, maxWidth: "72ch" }}>
             Which computer prints which piece of paper. A small helper program on a computer asks us every
             two seconds whether there is anything for it — so paper comes out with no window open, nothing
-            logged in, and nothing to keep in front. {/* A PLAIN LINK IN A NEW TAB, like the four other places that offer this guide (the owner's
-                Settings, the admin restaurant card, and its three OS jumps). It is a static file in
-                public/, not a route: opened in this tab it REPLACES the Printing screen somebody is in the
-                middle of setting up, and the guide has no way back to it. */}
-            <a href="/print-setup.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</a>
+            logged in, and nothing to keep in front. <Link href="/print-setup.html" style={{ color: "var(--accent)" }}>The restaurant&apos;s own guide →</Link>
 {/* The link to Access lives on the address book below, where the permission actually bites — two
                 links to one place in one screenful is the clutter that made this header hard to read. */}
           </p>

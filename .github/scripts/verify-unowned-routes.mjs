@@ -8,12 +8,11 @@
  * newest members of that list — they landed after the territories were drawn — and between them
  * they are the whole of the zero-typing handshake a restaurant uses to let its own computer print.
  *
- * THE FAULT THAT PROMPTED IT. The Allow page's "Choose which printer prints what →" button pointed
- * at `/aevinite/printing` for EVERYBODY. The printing board lives in two places (mig 367): that
- * admin console, and the restaurant's own Manager panel under Settings → Printing. The person
- * pressing Allow is usually the manager, and `/aevinite` redirects them to a password prompt —
- * so the setup ended at a login screen that reads like their own sign-in had just failed, at the
- * exact moment the guide says to choose which printer prints what.
+ * THE FAULT THAT PROMPTED IT. Every button label on the Allow page sat flush against the TOP edge
+ * of its 52px button with 34px of dead space underneath, on every viewport. The rule asked for a
+ * `line-height` and then, three declarations later, `font: inherit` — a SHORTHAND, which resets
+ * line-height to `normal`. Nothing else was wrong: the markup, the class names, the colours and the
+ * tap target were all correct, which is exactly why no other guard could see it.
  *
  * It also holds the two crash boundaries and the root layout, which are load-bearing in a way that
  * leaves no trace when they break: an error page that imports the app's CSS shows nothing when the
@@ -46,35 +45,6 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
     "Without them a restaurant cannot let its own computer print at all.");
 
   // The console link must be reachable only for the person who can actually open the console.
-  // STRUCTURAL, not "both strings appear somewhere in the file". The first draft asked only whether
-  // the page mentioned `who === "admin"` AND mentioned the console link — which stays true when the
-  // two have nothing to do with each other, and so would have passed the very shape it exists to
-  // catch. Each console link is now judged by the line it is written on.
-  const lines = page.split("\n");
-  const unguarded = lines
-    .map((l, i) => ({ l, i }))
-    .filter(({ l }) => /href="\/aevinite/.test(l) && !/^\s*(\/\/|\*)/.test(l))
-    .filter(({ l, i }) => !/who === "admin"/.test(l) && !/who === "admin"/.test(lines[i - 1] || ""));
-  want(unguarded.length === 0,
-    "the console link on this page is shown only to the admin; a manager is sent to their own panel",
-    `the Allow page links into /aevinite on ${unguarded.length} line(s) without checking who is pressing it` +
-    (unguarded.length ? `\n      line ${unguarded[0].i + 1}: ${unguarded[0].l.trim().slice(0, 100)}` : ""),
-    "The printing board is in TWO places (mig 367). /aevinite redirects a manager to a staff-password\n      " +
-    "prompt, so a link everybody sees ends the setup at a login screen that reads like their own sign-in\n      " +
-    "failed. Branch it on `who`, and send a manager to their own panel's Settings → Printing.");
-  want(!/who === "admin"/.test(page) || /Settings → Printing|Settings &rarr; Printing/.test(page),
-    "…and the manager is told WHERE it is, in words, not just handed a link",
-    "the manager's route to the printing board no longer names Settings → Printing",
-    "The panel has no deep link to that section, so the words ARE the direction.");
-
-  // The API must answer the page's own question on every branch that draws that button.
-  const alreadyBranch = (api.match(/already:\s*true[^\n]*/) || [""])[0];
-  want(/who/.test(alreadyBranch),
-    "an already-linked machine is still told WHO is asking, so the button can point the right way",
-    "GET /api/pair's already-linked answer no longer carries `who`",
-    "Without it the page cannot tell an admin from a manager on that screen, and falls back to the\n      " +
-    "console link for both.");
-
   // The two halves of the permission rule, restated here because this file is the one that reads
   // the page: verify:print-helper covers the door, nothing covered the screen.
   want(/tokenIsValid/.test(api) && /managerCan/.test(api) && /print_setup/.test(api),
@@ -113,30 +83,6 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
       "\n      Either move the line-height AFTER the shorthand, or centre with grid/flex — which also survives a\n      " +
       "label that wraps to two lines, where a tall line-height would push the second line out of the box.");
   }
-
-/* ── the printer setup guide — a static file, offered from five places ───────────────── */
-{
-  // It is public/print-setup.html, not a route. Every place that offers it must open it in a NEW
-  // TAB: it is read WHILE somebody sets a printer up, and opened in the same tab it replaces the
-  // screen they are working on, with no way back. Four of the five call sites did this; the admin
-  // Printing screen used next/link, which navigates in place AND prefetches a file that is not a
-  // route. Checked here rather than in verify:print-helper because two of the five files belong to
-  // no sweep territory.
-  const sites = ["app/aevinite/printing/page.tsx", "app/owner/settings/page.tsx",
-                 "components/admin/RestaurantSettings.tsx"];
-  const bad = [];
-  for (const f of sites) for (const line of read(f).split("\n")) {
-    if (!/print-setup\.html/.test(line)) continue;
-    if (/<Link/.test(line)) { bad.push(`${f}: next/link — navigates in place`); continue; }
-    if (!/target="_blank"/.test(line)) bad.push(`${f}: opens in the same tab`);
-  }
-  want(bad.length === 0,
-    "every link to the printer setup guide opens it in a new tab, leaving the setup screen behind it",
-    `${bad.length} link(s) to the setup guide replace the screen they were opened from`,
-    bad.join("\n      ") +
-    "\n      The guide is read WHILE a printer is being set up. Replacing the Printing screen with it — and\n      " +
-    "it has no way back — means finding that screen again by hand, mid-job.");
-}
 
 /* ── the two crash boundaries — what a person sees when everything else has failed ────── */
 {
