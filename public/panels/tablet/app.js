@@ -645,24 +645,26 @@ const preTax = (gross) => (Number(gross) || 0) / (1 + effRate());
 // MRP bottle). This mirrors lib/tax.ts resolveTaxMode() and SQL lfh_resolve_tax_mode(),
 // case for case and in the same order. If you change one, change all three — four screens
 // quoting four numbers for one meal is the bug this rule exists to prevent.
-function priceTaxMode() {
-  const v = String((state.data.settings || {}).price_tax_mode || "excl");
-  return v === "incl" || v === "composition" ? v : "excl";
-}
+// (priceTaxMode() went with resolveTaxMode() — it had no other caller, and the guard below caught
+// that the moment resolveTaxMode was deleted. billdoc.js has its own, for the printed bill.)
 function itemTaxModesOn() {
   return (state.data.settings || {}).item_tax_modes_allowed === true;
 }
-function resolveTaxMode(dishMode) {
-  // A composition-scheme restaurant may not pass GST to the diner at all.
-  if (priceTaxMode() === "composition") return "exempt";
-  const restaurant = priceTaxMode() === "incl" ? "incl" : "excl";
-  if (!itemTaxModesOn()) return restaurant;   // master switch off → the dish's own answer is ignored
-  const m = String(dishMode == null ? "default" : dishMode);
-  if (m === "excl" || m === "incl") return m;
-  if (m === "none") return "exempt";
-  if (m === "mrp") return String((state.data.settings || {}).mrp_tax_treatment) === "inclusive" ? "incl" : "exempt";
-  return restaurant;
-}
+// (resolveTaxMode() WAS HERE, and it is gone — owner's word, 2026-08-28.)
+//
+// It mirrored lib/tax.ts + lfh_resolve_tax_mode case for case, and NOTHING on this panel called it.
+// It could not: a resolved mode is written onto each line of the frozen ticket by lfh_price_order
+// when the order is placed, so orderTaxSplit() below reads `ln.tax_mode` straight off the ticket
+// rather than deciding it again — which is the right way round, because the mode that priced a bill
+// last week must not be re-derived from today's settings.
+//
+// A mirror nothing calls is worse than no mirror: it looks like the authority on a money rule while
+// drifting from the two places that really decide it. The rule itself is unchanged and still lives
+// in lib/tax.ts (resolveTaxMode) and SQL (lfh_resolve_tax_mode); the MANAGER panel keeps its own
+// copy and that one IS live (public/panels/editor/app.js) — this note is not permission to touch it.
+// itemTaxModesOn() STAYS — dishIsMrp() uses it to decide whether a dish wears the MRP stamp.
+// priceTaxMode() did NOT: resolveTaxMode was its only caller, so it went too (I wrote the opposite
+// here first and verify:tablet-taps §12 caught it on its very first run — which is the point of it).
 /** Does this MENU dish wear the "MRP" stamp? Presentational only — the money comes from
  *  resolveTaxMode(). Same rule as lib/tax.ts isMrpDish(). */
 function dishIsMrp(d) {
@@ -706,8 +708,9 @@ function orderTaxSplit(o) {
   // bill, which then appears in the refusal wording as a reason nobody can act on.
   return { base: Math.round(base * 100) / 100, nontax: Math.round(nontax * 100) / 100 };
 }
-/** Just the taxable half — the most a discount may ever be measured against. */
-function taxableBaseOf(o) { return orderTaxSplit(o).base; }
+// (taxableBaseOf() WAS HERE — one line wrapping orderTaxSplit(o).base, and gone with it,
+// owner's word 2026-08-28. Every caller reads `orderTaxSplit(o).base` directly, which is the same
+// number by the same maths and says out loud which half of the split it is taking.)
 
 function effRate() {
   const s = state.data.settings || {};

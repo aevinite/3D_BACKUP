@@ -545,16 +545,11 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
 {
   const bare = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
   const declared = [...bare.matchAll(/^(?:async )?function ([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
-  // KNOWN AND WRITTEN DOWN, not silently skipped. Both are dead in THIS panel today; both are
-  // pending the owner's word (raised 2026-08-28) because each is a deliberate MIRROR of a rule
-  // that lives in two other places, and a mirror is not obviously clutter:
-  //   · resolveTaxMode  — mirrors lib/tax.ts + lfh_resolve_tax_mode "case for case, in the same
-  //     order". The manager panel's own copy IS live; this one is called by nothing since
-  //     orderTaxSplit() reads each line's already-resolved mode off the frozen ticket.
-  //   · taxableBaseOf   — one line wrapping orderTaxSplit(o).base, which every caller now uses
-  //     directly.
-  // Remove a name from this list the moment it is deleted or given a caller.
-  const ALLOWED_DEAD = new Set(["resolveTaxMode", "taxableBaseOf"]);
+  // EMPTY, AND IT SHOULD STAY EMPTY. It briefly held resolveTaxMode and taxableBaseOf, raised with
+  // the owner on 2026-08-28 because each was a deliberate MIRROR of a rule living in two other
+  // places; he said delete them, and they are gone. An entry here is an admission that dead code
+  // was kept on purpose — add one only with the reason, and only when somebody decided it.
+  const ALLOWED_DEAD = new Set([]);
   const orphans = [];
   for (const n of new Set(declared)) {
     if (ALLOWED_DEAD.has(n)) continue;
@@ -571,9 +566,10 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
   check(
     "tablet: …and the allowance list has not quietly grown",
-    ALLOWED_DEAD.size <= 2,
-    `scripts/verify-tablet-taps.mjs: ALLOWED_DEAD is up to ${ALLOWED_DEAD.size} entries. It is an\n    ` +
-    `admission, not a bin — every entry is dead code somebody decided to keep.`,
+    ALLOWED_DEAD.size === 0,
+    `scripts/verify-tablet-taps.mjs: ALLOWED_DEAD holds ${ALLOWED_DEAD.size} entr(ies). It was emptied\n    ` +
+    `on 2026-08-28 and should stay empty — every entry is dead code somebody decided to keep, so a\n    ` +
+    `new one needs a written reason and the owner's word, not a quiet addition to get green.`,
   );
   check(
     "tablet: ensureTableSlice specifically has not come back",
