@@ -14,8 +14,8 @@
  *      prefix-anchored on the (restaurant_id, phone) index.
  *
  * ⚠ THAT ROW CAP IS NOT ENFORCED TODAY, and this comment used to claim it was (T8 sweep #7,
- * 2026-08-22). `lfh_customer_phone_search` (migration 227) ends `... LIMIT GREATEST(1, LEAST(
- * COALESCE(p_limit, 6), 20))` AFTER a `json_agg`, and in SQL a LIMIT applies once the aggregate
+ * 2026-08-22). "lfh_customer_phone_search" (migration 227) ends "... LIMIT GREATEST(1, LEAST(
+ * COALESCE(p_limit, 6), 20))" AFTER a "json_agg", and in SQL a LIMIT applies once the aggregate
  * has already collapsed to one row — so it caps the one row and the array inside it is unbounded.
  * Measured on the dev database: p_limit=1 came back with 3 rows. On a mature restaurant a
  * four-digit prefix would download every matching customer, on the till's hot path, while a
@@ -36,7 +36,7 @@
      suggestions, and the server asks the database for more than that on purpose: an answer is only
      reusable for LONGER numbers when it was not truncated (see narrowLocally), so a small answer is
      a truncated answer is another request. One slightly bigger answer replaces several small ones.
-     This side deliberately holds NO number for that cap. It reads the server's own `whole` flag,
+     This side deliberately holds NO number for that cap. It reads the server's own "whole" flag,
      because a constant here and a constant there drift the moment either moves — and the failure
      that causes is silent and expensive: the sheet would narrow from a truncated list and tell a
      waiter "New customer" about a regular. Measured while building this, with the two out of step
@@ -161,7 +161,7 @@
       phoneEl.addEventListener("input", paintCount);
       paintCount();
       /* THE COUNTER MUST NEVER CONTRADICT THE BOX BESIDE IT (T8 sweep #7, 2026-08-22).
-         paintCount() only ran on the `input` event, and assigning `.value` from script does not
+         paintCount() only ran on the "input" event, and assigning ".value" from script does not
          fire one — so on the two paths where the number arrives WITHOUT being typed the counter
          kept whatever it last said. Measured on a 360px phone:
 

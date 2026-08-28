@@ -101,7 +101,7 @@
     };
     /* A FIELD OF SPACES IS AN EMPTY FIELD (T8 sweep #7, 2026-08-22).
        Every rule below says "empty prints NO line at all", and every one of them was defeated by a
-       single typed space, because `s.x || fallback` treats "  " as a real value. A restaurant whose
+       single typed space, because "s.x || fallback" treats "  " as a real value. A restaurant whose
        Billing card held a space in each box printed a letterhead reading
 
            <blank>            ← the h2, where the biggest text on a customer's bill goes
@@ -140,11 +140,11 @@
          Only the fallback differs, which is the whole point — an unconfigured restaurant gets the
          right word in each place instead of the same word in the wrong one.
 
-         Nothing may write either default back INTO `settings.tax_label`. That is what caused the
+         Nothing may write either default back INTO "settings.tax_label". That is what caused the
          split this replaces: the Settings form prefilled the setting with the screen's word, so the
          PAPER then printed "Tax" on the manager's copy and "GST" everywhere else. Both prefills are
          now hints, exactly as the GSTIN two lines above already is — nothing fake is saved unless
-         someone types a real value. `verify:print-paper` §3j pins all four cases. */
+         someone types a real value. "verify:print-paper" §3j pins all four cases. */
       taxLabel: pick(s.tax_label) || "GST",
       taxLabelScreen: pick(s.tax_label) || "Tax",
     };
@@ -178,10 +178,10 @@
     var disc = Number(d.discount) || 0;
     var inclusive = !!d.taxIncluded;
     /* THE UNTAXED PILE IS A PART OF THIS BILL, SO IT CANNOT BE BIGGER THAN IT (T8 sweep #7,
-       2026-08-22). `nontax` is the MRP slice OF the subtotal, and the split is only meaningful while
+       2026-08-22). "nontax" is the MRP slice OF the subtotal, and the split is only meaningful while
        that is true. With nontax 400 against a subtotal of 100 the paper read "Food subtotal ₹-300"
        beside "MRP items ₹400" — a negative figure in a labelled money box, which is what the
-       2026-08-06 rule forbids. `mrpPart()` already reasons exactly this way for a composition
+       2026-08-06 rule forbids. "mrpPart()" already reasons exactly this way for a composition
        restaurant ("splitting into food and MRP says nothing and reads as broken"), so the same
        answer is right here: when the pile is not a genuine part of the subtotal, drop the split and
        print the plain single Subtotal the caller handed us. Unreachable through billData, which
@@ -192,7 +192,7 @@
     /* AN ALL-MRP BILL IS JUST A BILL (owner, 2026-08-28 — item 15). A shop whose whole sale is
        sealed products printed "Food subtotal ₹0" over "MRP items ₹42": the split into food and
        sealed goods says nothing when there is no food, and a zero in a labelled money box reads as
-       a mistake even though the column adds up. `mrpPart()` already reasons exactly this way for a
+       a mistake even though the column adds up. "mrpPart()" already reasons exactly this way for a
        composition restaurant ("splitting into food and MRP says nothing and reads as broken"), so
        the same answer is right here — drop the split and print the plain single Subtotal.
        A bill with ANY food in it is untouched. */
@@ -208,7 +208,7 @@
     /* THE SAME TWO FLOORS billMoney ALREADY HAS (T8 sweep #7, 2026-08-22). The clamp above stops a
        discount BIGGER than its row; it did not stop a NEGATIVE one, and the taxable value was not
        floored at all — while billMoney, thirty lines away in this same file, has always ended
-       `taxable: Math.max(0, ...)`. Two money functions on one document disagreeing about whether a
+       "taxable: Math.max(0, ...)". Two money functions on one document disagreeing about whether a
        figure can go below zero is how the 2026-08-06 rule ("THE PAPER NEVER PRINTS A NEGATIVE
        TAXABLE VALUE") gets quietly re-broken. Measured before this: a discount of -50 on a ₹100 row
        printed no Discount row at all and a phantom "Round off + ₹5"; nontax of 400 against a
@@ -268,7 +268,7 @@
        into a window.open or a hidden iframe, so a throw here is a BLANK WINDOW: the kitchen gets no
        ticket, or the guest gets no bill, with nothing on screen saying why. That is the worst
        possible shape of "a tap must never vanish in silence", at the till, mid-rush.
-       Every line list this file reads now drops empty entries instead. `items` is JSONB in this
+       Every line list this file reads now drops empty entries instead. "items" is JSONB in this
        product, so a null element is a database write away, and printing the other nine dishes is
        strictly better than printing nothing. */
     var rows = (d.lines || []).filter(Boolean).map(function (i) {
@@ -933,9 +933,9 @@
 + "    return v == null ? localStorage.getItem(ZKEY_OLD) : v; }catch(e){ return null; } }\n"
 + "function zSet(v){ try{ localStorage.setItem(zKey(), v); }catch(e){} }\n"
 /* THE ROOM RESERVED FOR THE TOOLBAR HAS TO BE IN THE TOOLBAR'S OWN UNITS (T8 sweep #7,
-   2026-08-22). The bar is `position:fixed` and wound back to life-size with the INVERSE zoom, so
-   its height on screen is constant — but the space kept clear for it is `body{padding-top:calc(2mm
-   + 34px)}`, which sits INSIDE the zoomed body and therefore shrinks with the zoom. The two scale
+   2026-08-22). The bar is "position:fixed" and wound back to life-size with the INVERSE zoom, so
+   its height on screen is constant — but the space kept clear for it is "body{padding-top:calc(2mm
+   + 34px)}", which sits INSIDE the zoomed body and therefore shrinks with the zoom. The two scale
    in opposite directions, so the moment the fit lands at or below about 1.0 the bar starts eating
    the restaurant name — the biggest thing on a customer's bill. Measured:
 
@@ -951,8 +951,8 @@
 
    So the allowance is now MEASURED from the bar and divided by the zoom, which converts it into
    the body's own coordinates. It is screen-only: the print rule
-   `@media print{body{...padding:2mm 0 !important}}` carries !important and beats an inline style,
-   so nothing here can reach the paper. The CSS `calc(2mm + 34px)` stays as the fallback for a
+   "@media print{body{...padding:2mm 0 !important}}" carries !important and beats an inline style,
+   so nothing here can reach the paper. The CSS "calc(2mm + 34px)" stays as the fallback for a
    frame where scripts cannot run. */
 + "function zBarH(){ try{ var b = document.querySelector(\".bar\");\n"
 + "    return b ? b.getBoundingClientRect().height : 0; }catch(e){ return 0; } }\n"
@@ -1095,7 +1095,7 @@
      invoice after 1 April must keep its issued year, or one sale ends up with two identities and
      the reprint collides with the real invoice of that number. */
   /* THE FINANCIAL YEAR IS INDIA'S, NOT THE PRINTING DEVICE'S (T8 sweep #7, 2026-08-22).
-     This read `getFullYear()`/`getMonth()` — the machine's own time zone — so the FY inside the
+     This read "getFullYear()"/"getMonth()" — the machine's own time zone — so the FY inside the
      invoice number was the last thing on this document still decided by whichever tablet held the
      paper. Measured on one invoice issued at 2026-04-01 01:00 IST, the first hour of the new
      Indian financial year:
@@ -1110,15 +1110,15 @@
      the banquet sheet's (2026-08-06) and the kitchen ticket's (2026-08-17); this is the fourth and
      last place, and it is the worst of them, because the FY is part of the number that IDENTIFIES
      the tax document. Two devices in one restaurant quoting two numbers for one sale is precisely
-     what `financialYear` was written to prevent when it chose the invoice's own date over "today".
+     what "financialYear" was written to prevent when it chose the invoice's own date over "today".
 
      31 March / 1 April is the single most consequential date in Indian accounting and IST runs
      +05:30, so every device behind India — the whole of Europe and the Americas — reads the
      previous FY for the first five and a half hours of it.
 
-     Pinned the same way `kotWhen` derives its business day: shift by +05:30 and read the UTC
+     Pinned the same way "kotWhen" derives its business day: shift by +05:30 and read the UTC
      parts, which is India's calendar date with no imports (this file is loaded by the panels, the
-     Next server and React alike). `verify:print-paper` pins it at the boundary in both directions. */
+     Next server and React alike). "verify:print-paper" pins it at the boundary in both directions. */
   function financialYear(when) {
     var d = when ? new Date(when) : new Date();
     var t = d.getTime();
@@ -1503,7 +1503,7 @@
       composition: !!m.composition,
       nontax: mrpPart(m), mrpLabel: "MRP items",
       /* ONE WORD FOR THE TAX, DECIDED ONCE (T8 sweep #7, 2026-08-22). This and two other lines read
-         `s.tax_label || "GST"` inline, while billIdentity — thirty lines away, in the function whose
+         "s.tax_label || "GST"" inline, while billIdentity — thirty lines away, in the function whose
          whole job is resolving exactly this kind of value — defaults it to "Tax". A restaurant that
          has never set the word (the default state) then got a DIFFERENT one depending on which panel
          printed the bill, because the manager panel copies billIdentity's answer into its own
@@ -1632,18 +1632,18 @@ function banquetDocHtml(a) {
   const isA4 = P.size === "a4";
   const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
   /* NO DOCUMENT IN THIS FILE PRINTS "Invalid Date" — INCLUDING THIS ONE (T8 sweep #7, 2026-08-22).
-     The kitchen ticket has refused since it was written (`kotWhen` returns "" on an unparseable
-     value) and the thermal bill since 2026-08-05 (`stampAt`'s isNaN fallback). The banquet sheet —
+     The kitchen ticket has refused since it was written ("kotWhen" returns "" on an unparseable
+     value) and the thermal bill since 2026-08-05 ("stampAt"'s isNaN fallback). The banquet sheet —
      the product's largest-value document — guarded none of its THREE date fields, so it printed:
 
          Dated                Invalid Date        ← the field that decides the GST period
          Function: Reception · Invalid Date
          UPI PAY DT.Invalid Date — 500/-
 
-     REACHABLE, and not only through the admin's hand-built preview. `banquet_bills.advances` is
-     JSONB and migrations 237/239 store the date with NO cast — `'date', COALESCE(NULLIF(
-     v_a->>'date',''), to_char(v_now,'YYYY-MM-DD'))` — so any non-empty text the client sends is
-     kept verbatim and comes straight out here. (`fn_date` IS a real `date` column and `issued_at`
+     REACHABLE, and not only through the admin's hand-built preview. "banquet_bills.advances" is
+     JSONB and migrations 237/239 store the date with NO cast — "'date', COALESCE(NULLIF(
+     v_a->>'date',''), to_char(v_now,'YYYY-MM-DD'))" — so any non-empty text the client sends is
+     kept verbatim and comes straight out here. ("fn_date" IS a real "date" column and "issued_at"
      a timestamptz, so those two are protected by the database; the document is still the last
      thing between a bad value and a customer's hands, which is the same reasoning that put the
      guard on the other two documents.)
