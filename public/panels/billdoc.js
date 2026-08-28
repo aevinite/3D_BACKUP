@@ -370,8 +370,11 @@
     // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
     var R = billRows(d);
     /* The tip, and what it works out to as a percentage of the bill it sits on. Read from the data
-       (billData derives it from the orders); a caller building `d` by hand — lib/billPreview.ts and
-       the admin previews do — simply passes no tip and nothing prints. */
+       (billData derives it from the orders); a caller building 'd' by hand — lib/billPreview.ts and
+       the admin previews do — simply passes no tip and nothing prints.
+       (Plain quotes, not backticks: this is a panel script, and a backtick in a block comment here
+       is what ended the injected stylesheet's template literal and took /manager down three times
+       on 2026-08-01. verify:ui-integrity keeps that blunt rule, and it is right to.) */
     var tipShown = Math.max(0, Math.round(Number(d.tip) || 0));
     var tipPctLabel = tipPct(R.total, tipShown);
     /* THE PERCENTAGE MUST DESCRIBE THE RUPEES PRINTED BESIDE IT (T8 sweep, 2026-08-17).
