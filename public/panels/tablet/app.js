@@ -3427,6 +3427,25 @@ function openPaymentMethodModal(due, label, opts = {}) {
       <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${esc(label)}</h3><button class="pay-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:12px"><span>Amount collected</span><b style="color:var(--text);font-size:15px">${inr(due)}</b></div>
+        ${opts.methodOnly || opts.noTip ? "" : `
+        <div class="pay-tip" style="margin:0 0 14px;padding-bottom:14px;border-bottom:1px dashed var(--line)">
+          <div style="font-size:13px;font-weight:700;margin:0 0 3px">Add a tip? <span style="color:var(--muted);font-weight:400">— optional, extra for staff on top of the bill</span></div>
+          <div style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Change any one of the three — the other two follow.</div>
+          <div style="display:flex;align-items:flex-end;gap:8px;margin:0 0 8px">
+            <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip %</span>
+              <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-pct" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+            <span style="font-weight:800;color:var(--muted);padding-bottom:11px">=</span>
+            <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip amount (₹)</span>
+              <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-amt" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${[0, 5, 10, 15].map((p) => `<button type="button" class="btn pay-tip-pick" data-tip-pct="${p}" style="min-height:44px;padding:0 14px;font-weight:700">${p ? p + "%" : "None"}</button>`).join("")}</div>
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">
+            <b style="font-size:13.5px">They paid</b>
+            <span style="display:inline-flex;align-items:center;gap:2px;color:var(--gold-strong);font-weight:800;font-size:15px">₹
+              <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-paid" aria-label="Total the customer paid" style="width:8ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none"></span>
+          </label>
+          <div class="pay-tip-msg" role="status" style="display:none;font-size:12px;font-weight:600;color:#f59e0b;margin:8px 0 0"></div>
+        </div>`}
         <div style="font-size:13px;font-weight:700;margin:0 0 8px">How did they pay? <span style="color:var(--muted);font-weight:400">— only pick one if the money's actually in hand</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <button type="button" class="pay-method-btn" data-method="UPI" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📱</span>UPI</button>
@@ -3496,7 +3515,59 @@ function openPaymentMethodModal(due, label, opts = {}) {
       if (!phone || !(ce && ce.checked)) return null;
       return { phone, name: (ne?.value || "").trim(), consent: true };
     };
-    const finish = (method, note) => { resolved = true; const cust = readCust(); close(); resolve({ method, note, cust }); };
+    // THE TIP — the same three linked boxes the manager panel has (owner, 2026-08-28). This panel
+    // had NO tip control at all, so every tip a waiter collected was invisible to the tips report
+    // while the manager's screen could record one. `tip` rides out on the resolved object exactly
+    // as `cust` does, and payBillWithMethod posts it after the bill is marked paid.
+    let tip = 0;
+    const BD = window.LFH_BILLDOC || {};
+    const TIP_MAX = Number(BD.TIP_MAX) || 100000;
+    {
+      const pctIn = ov.querySelector(".pay-tip-pct");
+      const amtIn = ov.querySelector(".pay-tip-amt");
+      const paidIn = ov.querySelector(".pay-tip-paid");
+      const msgEl = ov.querySelector(".pay-tip-msg");
+      const r2t = (n) => Math.round((Number(n) || 0) * 100) / 100;
+      if (pctIn && amtIn && paidIn) {
+        const say = (m) => { if (!msgEl) return; msgEl.textContent = m || ""; msgEl.style.display = m ? "" : "none"; };
+        const paintTip = (typing) => {
+          const pct = due > 0 ? Math.round((tip / due) * 1000) / 10 : 0;
+          if (typing !== "pct") pctIn.value = tip ? String(pct) : "";
+          if (typing !== "amt") amtIn.value = tip ? String(r2t(tip)) : "";
+          if (typing !== "paid") paidIn.value = String(Math.round(due + tip));
+          ov.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("primary", Number(x.dataset.tipPct) === pct));
+        };
+        const setTip = (v, typing) => {
+          const want = Math.max(0, Number(v) || 0);
+          if (want > TIP_MAX) say(`The most a tip can be is ${inr(TIP_MAX)} — check that figure.`);
+          else if (want > due && due > 0) say(`That is a tip bigger than the bill (${inr(due)}). Fine if they meant it.`);
+          else say("");
+          tip = Math.min(want, TIP_MAX);
+          paintTip(typing);
+        };
+        ov.querySelectorAll(".pay-tip-pick").forEach((b) => (b.onclick = () => setTip(r2t(due * (Number(b.dataset.tipPct) || 0) / 100))));
+        pctIn.oninput = () => setTip(r2t(due * (parseFloat(pctIn.value) || 0) / 100), "pct");
+        amtIn.oninput = () => setTip(parseFloat(amtIn.value), "amt");
+        // A blank box is "I am about to type", never "they paid ₹0" — the guard the discount's
+        // own pay box carries on this panel. The tip already entered stands until a real number.
+        paidIn.oninput = () => {
+          const raw = paidIn.value.trim(), p = parseFloat(raw);
+          if (raw === "" || !(p >= 0)) return;
+          setTip(BD.tipFromPaid ? BD.tipFromPaid(due, p) : Math.max(0, r2t(p - due)), "paid");
+          // AFTER setTip, not before — setTip clears the message when the figure it lands on is
+          // unremarkable, and a tip of 0 is unremarkable, so saying this first said it into a box
+          // that was wiped a line later. Measured on the real sheet: nothing was shown at all.
+          if (p < due) say(`That is less than the bill (${inr(due)}) — this box is the TOTAL they handed over, tip included.`);
+        };
+        // A refused figure must not be left on screen: the box being typed in is not rewritten
+        // mid-keystroke, so a figure past the ceiling sat reading 9,999,999 while the tip actually
+        // kept was 1,00,000. On blur every box snaps back to what was really kept.
+        [pctIn, amtIn, paidIn].forEach((b) => { b.onblur = () => paintTip(); });
+        paidIn.onfocus = () => { try { paidIn.select(); } catch (e) {} };
+        paintTip();
+      }
+    }
+    const finish = (method, note) => { resolved = true; const cust = readCust(); close(); resolve({ method, note, cust, tip }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
     ov.querySelector(".pay-close").onclick = cancel;
     ov.querySelector(".pay-cancel-btn").onclick = cancel;
@@ -3506,7 +3577,10 @@ function openPaymentMethodModal(due, label, opts = {}) {
       // dedicated flow (person picker / no-charge settle); no payment method involved.
       // "Split payment" opens the parts panel right here — it was two taps deep under "Other",
       // which is why nobody used it (owner, 2026-08-21).
-      if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
+      // The tip rides along here too. A bill settled on the house or put on a tab can still have
+      // had cash handed over for the staff, and dropping it because the BILL was free would lose
+      // real money belonging to a real person.
+      if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special, tip }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
         // Straight to the box. This used to open a chooser of two — "type another way" or
@@ -3618,16 +3692,46 @@ async function payBillWithMethod(t, a) {
   // "Split this bill →" — the sheet's second door to the ONE split screen. Coming back from it
   // returns to the TABLE, not to a half-answered payment sheet: the sheet was closed by the tap,
   // and re-opening it behind the split screen would leave two money screens stacked.
-  if (picked.special === "split") { renderSplitBill(t, { onBack: renderPanel }); return; }
+  // The tip is recorded BEFORE we leave: it was typed on the sheet that is about to close, and a
+  // split bill can be tipped like any other.
+  if (picked.special === "split") { await recordTip(t, picked.tip); renderSplitBill(t, { onBack: renderPanel }); return; }
+  // Whatever way the bill closed, the tip goes with it.
   if (picked.special === "onhouse") {
+    await recordTip(t, picked.tip);
     // actGated handles BOTH modes: direct when 'on', and the PIN round-trip when the
     // server answers "manager pin" ('pin' mode) — same as every other gated action.
     actGated("POST", `/tables/${t}/on-the-house`, {}, { message: "Enter a manager PIN to settle this bill on the house.", onSuccess: () => offerPayUndo(t, { message: "On the house — settled free", icon: "🏠" }) });
     return;
   }
-  if (picked.special === "khata") { await tabletKhataFlow(t, a.due); return; }
+  if (picked.special === "khata") { await recordTip(t, picked.tip); await tabletKhataFlow(t, a.due); return; }
   payBill(t, picked.method, picked.note);
+  await recordTip(t, picked.tip);
   if (picked.cust) captureCustomer(t, picked.cust);
+}
+
+// A TIP IS SOMEBODY'S MONEY — IT DOES NOT GET A SILENT catch{} (owner, 2026-08-28).
+//
+// The manager panel posts its tip with `catch { /* tip is non-critical */ }`. It is not
+// non-critical: it is cash a customer handed over for the staff, and a write that fails with
+// nobody told means it is simply gone from the tips report. So this SAYS so, and the write goes
+// through the panel's own api(), which means it also survives a dead connection: the outbox keeps
+// it and replays it, exactly like every other staff write.
+//
+// The whole tip goes on the FIRST non-cancelled order of the table — migration 154's own rule
+// ("for a multi-order table bill the whole tip is stored on the FIRST paid order"), and the same
+// order the manager panel picks. Tips are never split or clamped by a trigger, so one row is safe.
+async function recordTip(t, tip) {
+  const amt = Math.round((Number(tip) || 0) * 100) / 100;
+  if (!(amt > 0)) return;
+  const first = ordersOf(t).filter((o) => o.status !== "cancelled")[0];
+  if (!first) { toast("The tip could not be recorded — this bill has no ticket to put it on.", false); return; }
+  try {
+    await api("POST", `/orders/${first.id}/tip`, { amount: amt });
+  } catch (e) {
+    // false = the error styling on this panel (toast(msg, ok)) — a failure dressed as a success is
+    // the same fault in a different coat.
+    toast(`Bill is paid, but the ${inr(amt)} tip was not recorded — ${(e && e.message) || "the system refused it"}. Add it from the manager panel.`, false);
+  }
 }
 
 // Save the guest's consented name+number after the bill is settled (Customer CRM).

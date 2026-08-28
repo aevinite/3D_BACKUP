@@ -707,8 +707,12 @@ for (const [what, ts] of INSTANTS) {
       : bad(`${iface} is missing ${missing.join(", ")}`,
         "the .d.ts is what TypeScript callers can pass — an undeclared field is a document they cannot render");
   }
-  // And every runtime export is declared.
-  const undeclared = Object.keys(BILLDOC).filter((k) => !new RegExp(`export function ${k}\\b`).test(dts));
+  // And every runtime export is declared — as a function OR as a value. This only looked for
+  // `export function`, so a plain constant entry point (TIP_MAX, 2026-08-28) read as undeclared
+  // while it was declared one line below discPct. The rule is "a caller can reach it by name",
+  // not "it is a function"; anything the module exports and the .d.ts does not name still fails.
+  const undeclared = Object.keys(BILLDOC).filter((k) =>
+    !new RegExp(`export (?:function|const|let|var) ${k}\\b`).test(dts));
   undeclared.length === 0
     ? ok(`all ${Object.keys(BILLDOC).length} entry points are declared`)
     : bad(`undeclared entry points: ${undeclared.join(", ")}`, "a caller cannot reach what the types do not name");

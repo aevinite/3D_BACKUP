@@ -4601,14 +4601,34 @@ function openPaymentMethodModal(due, label, opts = {}) {
         <div class="disc-bill-row"><span>Bill</span><b>${inr(due)}</b></div>
         ${opts.methodOnly ? "" : `
         <div class="dish-edit-lbl" style="margin-top:6px">Add a tip? <span class="muted small">(optional — extra for staff, on top of the bill)</span></div>
-        <div class="chips pay-tip-chips" style="margin:4px 0 6px">
-          <span class="chip pay-tip-pick" data-tip-amt="0">None</span>
-          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.05)}">5%</span>
-          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.10)}">10%</span>
-          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.15)}">15%</span>
+        <div class="disc-linked-row">
+          <div class="disc-field">
+            <label class="dish-edit-lbl">Tip %</label>
+            <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="payTipPct" placeholder="0">
+          </div>
+          <div class="disc-linked-eq">=</div>
+          <div class="disc-field">
+            <label class="dish-edit-lbl">Tip amount (₹)</label>
+            <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="payTipInput" placeholder="0">
+          </div>
         </div>
-        <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput" id="payTipInput" placeholder="Custom tip ₹" style="margin-bottom:8px">
-        <div class="disc-bill-row"><span><b>Total collected</b></span><b id="payTotal">${inr(due)}</b></div>`}
+        <div class="chips pay-tip-chips" style="margin:4px 0 6px">
+          <span class="chip pay-tip-pick" data-tip-pct="0">None</span>
+          <span class="chip pay-tip-pick" data-tip-pct="5">5%</span>
+          <span class="chip pay-tip-pick" data-tip-pct="10">10%</span>
+          <span class="chip pay-tip-pick" data-tip-pct="15">15%</span>
+        </div>
+        <div class="disc-preview">
+          <div class="disc-prev-row grand">
+            <span><b>They paid</b></span>
+            <label class="disc-pay-edit" title="Type the total the customer actually handed over — the tip works itself out">
+              <span class="disc-pay-cur">₹</span>
+              <input type="number" inputmode="decimal" min="0" step="1" id="payPaidInput" class="disc-pay-input" aria-label="Total the customer paid">
+            </label>
+          </div>
+        </div>
+        <div class="disc-cap-msg" id="payTipMsg" role="status" hidden></div>
+        <div class="disc-hint muted small">Change any one of the three — the other two follow. A tip is on TOP of the bill; it never changes the bill, the tax or the discount.</div>`}
         <div class="dish-edit-lbl">How did they pay? <span class="muted small">— only pick one if the money's actually in hand</span></div>
         <div class="pay-method-grid">
           <button type="button" class="pay-method-btn" data-method="UPI"><span class="pmi">📱</span>UPI</button>
@@ -4726,11 +4746,73 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // affected: the floor's parcel tile "💰 Mark paid" (since 2026-08-04), the Platform board's
     // 💰 Collect and the parcel "Pay now & print" sheet. The sheet OPENING was never proof that
     // it works — only a settled row is.
+    // THREE LINKED BOXES, LIKE THE DISCOUNT (owner, 2026-08-28: "just like the discount, one for
+    // the tip one also"). Tip % · Tip ₹ · They paid — all three are views of the same `tip`, so no
+    // two of them can disagree. The third is the one he actually asked for: a counter conversation
+    // is "they gave me 3200", not "give them 6.7%", so you type the total handed over and the tip
+    // falls out of it. Mirrors openDiscountModal box for box, and reuses its classes so it looks
+    // like the screen staff already know rather than a second dialect of the same idea.
     const tipInput = wrap.querySelector("#payTipInput");
-    const updTotal = () => { const el2 = wrap.querySelector("#payTotal"); if (el2) el2.textContent = inr(due + (Number(tip) || 0)); };
-    if (tipInput) {
-      wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tipAmt) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
-      tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
+    const tipPctIn = wrap.querySelector("#payTipPct");
+    const paidIn = wrap.querySelector("#payPaidInput");
+    const tipMsg = wrap.querySelector("#payTipMsg");
+    const BD = window.LFH_BILLDOC || {};
+    const TIP_MAX = Number(BD.TIP_MAX) || 100000;
+    // A refusal is SHOWN, never a silent trim — the same rule the discount modal follows. A tip
+    // has no legal ceiling, so the only thing refused outright is a figure past the server's own
+    // typo guard; a tip merely LARGER than the bill is allowed and simply asked about, because a
+    // generous tip is a real thing and refusing one would be the app arguing with a customer.
+    let tipNudgeT = null;
+    const sayTip = (msg) => {
+      if (!tipMsg) return;
+      if (!msg) { tipMsg.hidden = true; tipMsg.textContent = ""; return; }
+      tipMsg.textContent = msg; tipMsg.hidden = false;
+      wrap.classList.remove("disc-nudge"); void wrap.offsetWidth; wrap.classList.add("disc-nudge");
+      clearTimeout(tipNudgeT); tipNudgeT = setTimeout(() => wrap.classList.remove("disc-nudge"), 320);
+    };
+    if (tipInput && tipPctIn && paidIn) {
+      // Refresh every box EXCEPT the one being typed in, so a half-typed number is never clobbered
+      // mid-keystroke. "They paid" is written in whole rupees — the figure inr() puts on the paper.
+      const paintTip = (typing) => {
+        const pct = due > 0 ? Math.round((tip / due) * 1000) / 10 : 0;
+        if (typing !== "pct") tipPctIn.value = tip ? String(pct) : "";
+        if (typing !== "amt") tipInput.value = tip ? String(r2(tip)) : "";
+        if (typing !== "paid") paidIn.value = String(Math.round(due + tip));
+        wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", Number(x.dataset.tipPct) === pct));
+        // (There is no separate "Total collected" row any more — "They paid" IS that figure, and
+        // it is editable, which is the whole point. Two rows quoting the same number is how they
+        // start disagreeing.)
+      };
+      const setTip = (v, typing) => {
+        const want = Math.max(0, Number(v) || 0);
+        if (want > TIP_MAX) sayTip(`The most a tip can be is ${inr(TIP_MAX)} — check that figure.`);
+        else if (want > due && due > 0) sayTip(`That is a tip bigger than the bill (${inr(due)}). Fine if they meant it.`);
+        else sayTip("");
+        tip = Math.min(want, TIP_MAX);
+        paintTip(typing);
+      };
+      wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => setTip(r2(due * (Number(c.dataset.tipPct) || 0) / 100))));
+      tipPctIn.oninput = () => setTip(r2(due * (parseFloat(tipPctIn.value) || 0) / 100), "pct");
+      tipInput.oninput = () => setTip(parseFloat(tipInput.value), "amt");
+      // A BLANK BOX IS "I AM ABOUT TO TYPE", NEVER "they paid ₹0" — the guard the discount's pay box
+      // carries. Deleting three characters must not silently wipe a tip that was already entered.
+      paidIn.oninput = () => {
+        const raw = paidIn.value.trim(), p = parseFloat(raw);
+        if (raw === "" || !(p >= 0)) return;                 // leave the tip exactly as it was
+        setTip(BD.tipFromPaid ? BD.tipFromPaid(due, p) : Math.max(0, r2(p - due)), "paid");
+        // AFTER setTip, not before: setTip ends by clearing the message when the figure it lands on
+        // is unremarkable — and a tip of 0 is unremarkable — so saying this first meant saying it
+        // into a box that was wiped a line later. Measured on the real sheet: the tip correctly went
+        // to zero and the person was told nothing at all about why.
+        if (p < due) sayTip(`That is less than the bill (${inr(due)}) — this box is the TOTAL they handed over, tip included.`);
+      };
+      // A REFUSED FIGURE MUST NOT BE LEFT ON SCREEN. The box being typed in is deliberately not
+      // rewritten mid-keystroke, so a figure past the ceiling sat there reading 9,999,999 while the
+      // tip actually kept was 1,00,000 — the two boxes disagreeing, which is the one thing three
+      // linked boxes may never do. On blur every box snaps back to the value that was really kept.
+      [tipPctIn, tipInput, paidIn].forEach((b) => { b.onblur = () => paintTip(); });
+      paidIn.onfocus = () => { try { paidIn.select(); } catch (e) {} };
+      paintTip();
     }
     // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
     // Split payment is its own button on the grid now (owner, 2026-08-21 — it was two taps deep
@@ -5121,7 +5203,21 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // it went to payable[0] unconditionally — if that specific order failed to settle, the tip was
   // written to an unpaid order and the Z-report (which sums tips over PAID orders only) dropped it.
   // Best-effort — a tip failing to save must not undo a completed payment.
-  if (paidIds.length && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
+  // A TIP IS SOMEBODY'S MONEY — IT DOES NOT GET A SILENT catch{} (owner, 2026-08-28).
+  //
+  // This read `catch { /* tip is non-critical */ }`. It is not non-critical: it is cash a customer
+  // handed over for the staff, and a write that fails with nobody told means it is simply gone from
+  // the tips report — the bill settles, the screen looks finished, and the money is not anywhere.
+  // (A dead connection is already covered: api() routes through the outbox, which keeps the write
+  // and replays it. This is for the case where it comes back refused.)
+  if (paidIds.length && Number(picked.tip) > 0) {
+    const tipAmt = Number(picked.tip);
+    try {
+      await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: tipAmt });
+    } catch (e) {
+      toast(`Bill is paid, but the ${inr(tipAmt)} tip was not recorded — ${(e && e.message) || "the system refused it"}. Try adding it again.`, "err");
+    }
+  }
   // Save the guest's consented name+number after the bill settles (Customer CRM). The
   // server stores nothing without consent + records one visit per session; fire-and-forget
   // so it never undoes a completed payment. Table comes from the orders we just settled.
