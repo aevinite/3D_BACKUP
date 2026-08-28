@@ -202,6 +202,37 @@ function sentences(src, path) {
   }
 }
 
+// ── 5 · a stored LOG DETAIL is read on a screen too, so it obeys the same words ───────────────
+//
+// Checks 1–4 deliberately skip `detail:` templates, because a log detail is a RECORD first. But it
+// is also rendered — on the owner's Activity log and the admin's Logs list — so a word that would
+// be wrong in a refusal is wrong here too, just later.
+//
+// Found: every audit LABEL already said "Permanently removed a restaurant" / "…an owner", and the
+// restaurant's own detail line said "permanently removed restaurant …" — but the owner's said
+// "PERMANENTLY purged owner …". One line, on one screen, using a word the screen beside it had
+// already stopped using. Owner, 2026-08-28: keep "removed" everywhere.
+{
+  const WRONG = [
+    [/\bpurged?\b/i, "say \"removed\" — that is the word the audit label and the button both use"],
+    [/\bcomped\b/i, "say \"given free\""],
+    [/\bentitlements?\b/i, "say what the person can DO"],
+  ];
+  const hits = [];
+  for (const f of files) {
+    const src = codeOf(read(f));
+    for (const m of src.matchAll(/detail: *`([^`]{4,300})`/g)) {
+      for (const [re, say] of WRONG) if (re.test(m[1])) hits.push({ f, t: m[1].slice(0, 90), say });
+    }
+  }
+  if (!hits.length) ok(`no stored log detail uses a word the screens have stopped using (${WRONG.length} watched)`);
+  else {
+    fail(`${hits.length} log detail template(s) use a word the screens no longer use:`);
+    for (const h of hits) console.log(`         ${h.f}\n           ${JSON.stringify(h.t)}\n           → ${h.say}`);
+  }
+}
+
+
 console.log("");
 if (failed) {
   console.log(`${failed} check(s) failed — see above.`);

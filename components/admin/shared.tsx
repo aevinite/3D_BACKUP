@@ -296,8 +296,14 @@ export function formatActionDetail(action: string, detail: string | null | undef
 // formatActionDetail, not this. A TRAILING fragment only — a "· id …" in the middle of a sentence
 // is left alone, because that is a sentence whose shape we do not know. (T27 sweep, 2026-08-27.)
 const ID_TAIL = / · (?:id|owner|user)\s+[0-9a-fA-F-]{8,}\s*$/;
+// The OTHER shape the same id takes in these lines: `permanently removed restaurant "X" (uuid) —`
+// and `PERMANENTLY removed owner "X" (uuid) · 2 restaurant(s) released`. A bare uuid in brackets
+// mid-sentence is the same machine string in the same place, so it goes the same way — and unlike
+// the trailing form it has to be matched by SHAPE, because there is no word in front of it. Only a
+// real uuid (8-4-4-4-12) qualifies, so "(2 restaurants)" and "(no name)" are untouched.
+const ID_PAREN = / \((?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)/g;
 export function detailForList(action: string, detail: string | null | undefined): string {
-  return formatActionDetail(action, detail).replace(ID_TAIL, "");
+  return formatActionDetail(action, detail).replace(ID_TAIL, "").replace(ID_PAREN, "");
 }
 
 
