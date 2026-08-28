@@ -455,7 +455,10 @@ function ticketHtml(o, rows) {
     const added = new Set((Array.isArray(r.added_allergens) ? r.added_allergens : []).map((x) => String(x).toLowerCase()));
     const segs = [];
     if (Array.isArray(r.options) && r.options.length) segs.push(esc(r.options.map((op) => `+ ${op.label || op}`).join(" · ")));
-    if (lineRemoved.length) segs.push(lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", "));
+    // WRAPPED ON ITS OWN (redesign, owner 2026-08-28). Options, allergens and the note used to share
+    // one grey <small>, so the one line a cook must never miss looked exactly like "+ extra cheese".
+    // The wrapper is what lets the stylesheet colour ONLY the allergens as a warning.
+    if (lineRemoved.length) segs.push(`<span class="alg">${lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", ")}</span>`);
     // …unless it IS the whole-table note, which is drawn once above instead of once per dish
     if (r.note && !(orderNote && String(r.note).trim() === orderNote)) segs.push(esc(`✎ ${r.note}`));
     const small = segs.length ? `<small>${segs.join(" · ")}</small>` : "";
@@ -509,7 +512,12 @@ function ticketHtml(o, rows) {
   const ttag = (state.tableTags || {})[String(o.table_number)] || "";
   const tb = TAG_BADGE[ttag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
-  return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
+  // The LANE this ticket is in, as a class. `st-<status>` cannot say it: an order sitting in Ready
+  // and one still Cooking are both `preparing`. The coloured left edge (see the stylesheet) is what
+  // lets a cook tell the lanes apart from across the kitchen without reading the headings — the same
+  // device platform tickets have always used for their channel.
+  const phase = orderPhase(o, rows);
+  return `<div class="ticket st-${esc(o.status)} ph-${esc(phase)}" data-ticket="${esc(o.id)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${orderNoteHtml}${lines}${action}</div>`;
 }

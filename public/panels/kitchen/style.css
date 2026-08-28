@@ -166,11 +166,22 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
   .wall { overflow-y: auto; overscroll-behavior: contain; }
 }
 /* one chip = label + count together (same look as the tablet header's .cchip) */
-.col h2 { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; margin: 0 0 10px; color: var(--muted); letter-spacing: 0.4px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 6px 12px; }
-.col .count { font-size: 14.5px; font-weight: 700; color: var(--text); }
-#col-new h2 { color: var(--amber); }
-#col-cooking h2 { color: var(--blue); }
-#col-ready h2 { color: var(--green); }
+/* ===== THE BOARD, CALMED (redesign, owner 2026-08-28: "you can redesign somewhat kitchen panel") =====
+   Three ambers were on screen at once — the lane heading, the table label and the age — competing with
+   each other and with the states that actually mean something. The rule applied here is the one the
+   design guidance and this board's own history agree on: HIERARCHY BY SIZE AND SPACE, NOT BY COLOUR.
+   So the KOT number grows and everything beside it steps back to muted, and colour is spent only where
+   it carries meaning: the lane edge, the allergy line, the ready/served states.
+   Nothing moves position, nothing shrinks below 44px, and no rejected idea is reopened — the three
+   columns still always show (R3), Ready still has no ageing signal (R5), and the top bar's buttons and
+   the connection pill are untouched (R40, R41). ===== */
+.col h2 { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; margin: 0 0 10px;
+  color: var(--muted); letter-spacing: .09em; text-transform: uppercase; background: transparent; border: 0; padding: 2px 2px 0; }
+.col .count { font-size: 12.5px; font-weight: 800; color: var(--text); background: var(--panel-2, rgba(127,127,127,.14));
+  border-radius: 999px; padding: 1px 9px; font-variant-numeric: tabular-nums; }
+/* the lane colours moved OFF the headings and ONTO the tickets' left edge (see .ph-*): a colour on a
+   heading you read once is decoration; the same colour on every ticket is how a cook tells the lanes
+   apart from across the kitchen without reading anything. */
 .tickets { display: flex; flex-direction: column; gap: 12px; }
 .empty { color: var(--muted); font-size: 13px; padding: 18px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
 
@@ -194,14 +205,32 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 @media (prefers-reduced-motion: reduce) { .skel-line { animation: none; } }
 
 /* one KOT ticket */
-.ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
-.ticket.st-received { border-color: rgba(251,191,36,0.55); box-shadow: 0 0 0 1px rgba(251,191,36,0.25); }
-.ticket.st-preparing { border-color: rgba(216,166,87,0.55); }
+.ticket { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--line);
+  border-radius: 12px; padding: 12px 14px; }
+/* WHICH LANE, WITHOUT READING — and COLOUR ONLY WHERE IT MEANS SOMETHING.
+   The first attempt gave Cooking var(--blue), which on this panel is the house GOLD (#d4a574, the
+   name was kept when blue was retired) — measured against New's amber it came out nearly the same
+   colour, so the two lanes a cook most needs to tell apart looked identical. Sampled: rgb(217,119,6)
+   against rgb(201,143,63).
+   COOKING therefore gets NO colour at all. It is the state most of the board is in, so it is the
+   baseline, and the eye is spent on the two that are exceptions: a ticket you cannot start yet, and
+   one that is finished. Amber / plain / green is three unmistakable answers instead of two similar
+   ones, and it adds no hue this panel did not already own.
+   Never the ONLY signal: the lane heading, the ticket's own words ("waiting for the waiter to
+   accept" / "ready — waiter serving") and the buttons all say it too. */
+.ticket.ph-new { border-left-color: var(--amber); border-left-width: 6px; }
+.ticket.ph-cooking { border-left-color: var(--line); }
+.ticket.ph-ready { border-left-color: var(--green); }
+/* the outline glow is gone: the left edge carries the lane now, and two signals for one fact is what
+   made every ticket on the board look equally urgent. */
 .ticket.st-served { opacity: 0.75; }
 .thead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-.kot { font-size: 24px; font-weight: 900; letter-spacing: 0.5px; }           /* the shoutable number */
-.tbl { font-size: 15px; font-weight: 700; color: var(--blue); }
-.age { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* THE ONE LOUD THING. Bigger and tighter than before, in tabular figures so a board full of numbers
+   never jitters as the ages tick over. */
+.kot { font-size: 26px; font-weight: 900; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+/* the table and the age STEP BACK — they are context for the number, not competitors to it */
+.tbl { font-size: 14px; font-weight: 700; color: var(--muted); }
+.age { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* A TICKET THAT HAS BEEN SITTING SAYS SO (T4 sweep, 2026-08-04). A 44-hour-old Cooking ticket
    rendered in the same small grey text as "5m", so nothing on the board flagged a stuck order.
    Amber past 30 min, red-and-bold past 2 h. Both skins get a value — the light skin's --muted is
@@ -239,21 +268,29 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
    board's toggles, which were 37px for exactly the same reason: "applies at every width — a phone
    is touch too, and nothing here was ever mouse-only". The button LOOKS the same; the padding does
    the growing, so the ticket header is unchanged to the eye. */
-.reprint { margin-left: 8px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 3px 9px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto;
+/* STILL A 44px TARGET (the T6 sweep measured it at 38x22 and fixed it) — only quieter: no box until
+   you reach for it. Do not put a width below 44px here. */
+.reprint { margin-left: 8px; background: transparent; border: 1px solid transparent; color: var(--muted); border-radius: 10px; padding: 3px 9px; font-size: 15px; line-height: 1; cursor: pointer; flex: 0 0 auto;
   min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
-.reprint:hover { border-color: var(--blue); color: var(--text); }
+.reprint:hover { border-color: var(--line); background: var(--panel-2, rgba(127,127,127,.1)); color: var(--text); }
 .reprint:active { transform: scale(0.92); }
 /* Per-dish edit markers: green "＋" on a staff-ADDED allergen; amber "✎−" on the dish
    name when an allergen was REMOVED after the order — so the line cook re-checks it. */
 .alg-add { color: #4ade80; font-weight: 900; vertical-align: super; font-size: .8em; }
 .ltitle .alg-removed { color: #f5b042; font-weight: 800; font-size: 13px; margin-left: 4px; white-space: nowrap; }
 .allergy { background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.5); color: #fca5a5; font-weight: 800; font-size: 13px; border-radius: 9px; padding: 7px 10px; margin-bottom: 8px; }
-.line { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line); font-size: 16px; }
+/* a solid hairline rather than a dashed one: at arm's length a dashed rule reads as texture */
+.line { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 16px; }
 .line:first-of-type { border-top: none; }
 .line-done .ltitle { text-decoration: line-through; color: var(--muted); }
-.qty { font-weight: 800; min-width: 34px; }
+.qty { font-weight: 800; min-width: 34px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ltitle { flex: 1; min-width: 0; }
-.ltitle small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.ltitle small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 3px; line-height: 1.45; }
+/* THE ONE LINE A COOK MUST NEVER MISS. It used to share a grey <small> with "+ extra cheese" and the
+   note, so a restriction read exactly like a preference. Warning amber, and bold — never colour
+   alone: it still begins with the word NO, which survives a black-and-white screen. */
+.ltitle small .alg { color: #b45309; font-weight: 800; }
+html:not([data-theme="light"]) .ltitle small .alg { color: #fbbf24; }
 .tick { width: 44px; height: 44px; border-radius: 12px; border: 1px solid rgba(74,222,128,0.5); background: rgba(74,222,128,0.12); color: var(--green); font-size: 20px; font-weight: 900; cursor: pointer; flex: 0 0 auto; }
 .tick:active { transform: scale(0.94); }
 .done { color: var(--green); font-weight: 900; font-size: 18px; }
@@ -268,7 +305,10 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 .onote { margin: 8px 0 2px; padding: 8px 10px; border-radius: 10px; font-size: 13.5px; font-weight: 700; line-height: 1.4;
   color: #92400e; background: rgba(245, 158, 11, .13); border: 1px solid rgba(245, 158, 11, .45); }
 .awaiting { width: 100%; margin-top: 10px; padding: 11px; border-radius: 12px; text-align: center; font-weight: 800; font-size: 13.5px; color: #f9a8d4; background: rgba(236,72,153,.12); border: 1px solid rgba(236,72,153,.4); }
-.big { width: 100%; margin-top: 10px; padding: 13px; border-radius: 12px; border: 0; font-size: 16px; font-weight: 900; letter-spacing: 0.6px; cursor: pointer; }
+/* FULL-BLEED at the foot of the card: the next action reads as part of the ticket rather than as a
+   pill floating on it. Still one action, still well over 44px (15px padding on a 16px/900 line). */
+.big { width: calc(100% + 28px); margin: 10px -14px -12px; padding: 15px; border-radius: 0 0 7px 7px; border: 0;
+  font-size: 16px; font-weight: 900; letter-spacing: 0.6px; cursor: pointer; }
 .big.accept { background: var(--amber); color: #201500; }
 .big.ready { background: var(--green); color: #06270f; }
 .big:active { transform: scale(0.98); }
