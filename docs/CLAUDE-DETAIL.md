@@ -479,9 +479,10 @@ The panels are routes inside it:
 The editor/kitchen/tablet UIs are the original vanilla files served from
 `public/panels/<name>/` (embedded full-screen); their old Express APIs are ported
 to Next route handlers at `app/api/<name>/[...path]/route.ts` (service-role via
-`lib/supabaseAdmin.ts`). The admin-only floating switcher (`components/AdminSwitcher`)
-hops between panels. The old standalone folders + the separate editor repo were deleted
-(`docs/PROJECT-HISTORY.md` §12).
+`lib/supabaseAdmin.ts`). There is **no** floating panel switcher: `components/AdminSwitcher.tsx`
+was DELETED on 2026-06-26 (commit `2b9d3933`, "kill dead AdminSwitcher") and the admin reaches any
+restaurant's panels from `/aevinite` instead — do not re-create it. The old standalone folders +
+the separate editor repo were deleted (`docs/PROJECT-HISTORY.md` §12).
 
 ## Security gate (2026-06-13)
 
@@ -729,6 +730,38 @@ silence. And never use a shorthand he cannot place: "history file" is banned; wr
 | Owner panel | `/owner/*` (16 pages) | `app/owner/*`, `components/owner/*` | `app/api/owner/*`, `lfh_owner_*`, `lib/ownerCache.ts` |
 | Admin console | `/aevinite/*` (23 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |
 | Printed paper | — | `public/panels/billdoc.js` | the one print document (bill + KOT) |
+
+## Never ask permission to delete — the full text, and what the guard actually checks
+
+Owner, 2026-08-06, STANDING. The rule itself lives at owner level in `~/.claude/CLAUDE.md`; this is
+the part `CLAUDE.md` used to carry inline and no longer has room for. Nothing here is new — it was
+moved out of the index on 2026-08-28 (T29 sweep #7) so the index could go back to being an index.
+
+**"Anything" means anything.** Files, folders, branches, worktrees, screenshots, temp scripts, dev
+rows, stale doc sections, dead code paths. None of it gets a question first.
+
+**It holds in every permission mode, and especially in bypass-permissions** — where a question
+defeats the whole point of the mode he chose. So: don't hedge it with "shall I remove…", don't offer
+removal as an option in a question, and don't leave junk lying around "to be safe". Report what you
+removed in the reply instead.
+
+**The four carve-outs are HIS rules, not caution anyone invented** — the AV-live stack · the Brain
+vault (`~/Brain`, where a deleted note is not recoverable from git) · another live session's
+uncommitted work in this shared folder · force-pushing `main`. The last two destroy work that is not
+yours to throw away.
+
+**`npm run verify:no-ask`** (auto-runs after any settings or CLAUDE.md edit) fails on three things,
+and the third is the one that matters most:
+
+1. an `ask` permission rule reappearing in any settings file;
+2. the standing order going missing from `~/.claude/CLAUDE.md`, or no longer naming
+   bypass-permissions mode;
+3. **the AV-live `deny` rules being removed in the name of "stop asking me".** "Stop asking me
+   about deletions" must never be implemented by taking the guards off the paying-client stack.
+
+Those denies live in `.claude/settings.local.json`, which is gitignored — so a worktree or a fresh
+clone legitimately has none, and the guard says so rather than crying wolf. Checked on the owner's
+own folder 2026-08-28: 30 deny rules present, both live-stack protections intact.
 
 ## Operational rules — one line each; open the detail/doc BEFORE working in that area
 
@@ -1270,14 +1303,19 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
     unconditional dark default** — the older wording here said tenants default dark full stop, and a
     "both skins" test written from that line expects dark and gets light. Checked 2026-08-22 (T29):
     neither restaurant on the dev database has it set, so both tenant doors open LIGHT today.
-    ⚠️ **AND THE DISH PAGE DOES NOT REPEAT IT.** `app/r/[restaurant]/item/[slug]/page.tsx` renders
-    outside `AppShell`, which is why the maintenance switch, the menu switch and the accent each had
-    to be repeated there. The tenant default-skin boot script is a FOURTH thing of exactly that
-    shape and it is missing: for a dark-default restaurant, a **full page load** of a dish URL (a
-    shared link, a refresh, a QR pointing at a dish) renders in the LIGHT skin while the menu is
-    dark. A client-side tap through from the menu is fine — `data-theme` survives the navigation —
-    so this only shows on a cold load. Reported by the T29 sweep; the file belongs to another
-    terminal's territory, so the code fix was handed off rather than made there.
+    ✅ **AND THE DISH PAGE NOW REPEATS IT — fixed 2026-08-28 (T29 sweep #7, on the owner's word).**
+    `app/r/[restaurant]/item/[slug]/page.tsx` renders outside `AppShell`, which is why the
+    maintenance switch, the menu switch and the accent each had to be repeated there. The tenant
+    default-skin boot script is a **FOURTH thing of exactly that shape**, and it was missing: for a
+    dark-default restaurant, a **full page load** of a dish URL (a shared link, a refresh, a QR
+    pointing at a dish) rendered LIGHT while the menu was dark. A tap through from the menu was
+    fine — `data-theme` survives the navigation — so it only ever showed on a cold load, which is
+    why it went unreported for months. The dish page now emits the byte-identical line behind the
+    same condition. Driven end to end: with `spice-route` flipped to dark, a cold load of its dish
+    URL came back `data-theme="dark"` on a dark canvas, and a guest who had chosen light kept light;
+    the setting was restored in the same run. **Guarded** — `.github/scripts/verify-unowned-routes.mjs`
+    fails if either page loses the line. **If you add a FIFTH thing to the menu page's first paint,
+    it has to be repeated here too.**
   - **Manager / kitchen / tablet panels** — their own toggle (`#themeToggle`, wired by
     `public/panels/theme.js`), stored as `lfh_panel_theme`, default **LIGHT** (owner 2026-06-26).
     **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back

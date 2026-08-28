@@ -100,6 +100,24 @@ export default async function RestaurantItemPage({
       : "";
   return (
     <>
+      {/* THE FOURTH THING THIS PAGE HAS TO REPEAT. It renders OUTSIDE AppShell, so everything the
+          shell does for the menu has to be done again here: maintenance mode (above), the menu
+          switch (above), the accent (below) — and the restaurant's DEFAULT light/dark, which was
+          the one still missing. app/layout.tsx stamps <html> 'light' globally and cannot know WHICH
+          restaurant is opening; the menu page emits this same line behind the same condition. Tap
+          through from the menu and the choice is already in localStorage, so nothing showed — but a
+          FULL page load of a dish (a shared link, a refresh, a QR straight to a dish) opened LIGHT
+          on a restaurant whose admin had chosen dark. Byte-identical to the menu page's on purpose:
+          it runs as the parser reaches it, before the dish paints, and it only acts when the guest
+          has saved nothing of their own. (T29 sweep #7, 2026-08-28, on the owner's word — the fault
+          was handed off by sweep #6 as P14317/P14460/P14462 and had stayed open.) */}
+      {settings.menuDefaultMode === "dark" && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "(function(){try{if(!localStorage.getItem('lfh_theme'))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();",
+          }}
+        />
+      )}
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
       {/* r.slug, not the address-bar text — the same reason as the menu page: this prop namespaces
           the cart/favourites and builds the back-to-menu link, so a capitalised URL must land in

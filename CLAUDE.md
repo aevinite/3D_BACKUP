@@ -224,14 +224,10 @@ update the detail doc's section in the same commit.
 - **🧱 A new MODULE adds no column to `settings`** (110 already): declare `moduleBag: true` in
   `lib/accessModel.ts`, ladder goes in `settings.modules` (mig 326). `verify:settings-columns`.
 - **📍 EVERY problem / bug / improvement / idea you list MUST say WHERE IT LIVES** (owner,
-  2026-08-12, STANDING — he was left "completely lost" by a list that named files only). Each item
-  gets, in this order: **the panel** (guest menu / manager / kitchen / tablet / owner / admin /
-  none-it's-backend-only) → **the exact screen or tab** ("Bills tab", "Tables floor", "Reports →
-  Sales", "Recycle bin") → **what the person would SEE** → only then the file. If it has no screen,
-  say "backend only, nothing on screen" in those words — never leave him guessing which log, which
-  audit, which history. "History file" style shorthand is banned: name it as
-  `supabase/migrations/099…` AND say it is a migration file, not a log or an audit screen. Full text
-  + the panel→file map: `docs/CLAUDE-DETAIL.md` → "Where it lives".
+  2026-08-12, STANDING — he was left "completely lost" by a list that named files only): **panel →
+  exact screen or tab → what he would SEE → only then the file**, and **"backend only, nothing on
+  screen"** in those words when there is none. The four fields in full, the banned shorthands and
+  the panel→file map: `docs/CLAUDE-DETAIL.md` → "Where it lives".
 - **📋 Any list he must CHOOSE from uses the decision format** (owner, 2026-08-13, STANDING): per item
   — Where (panel→screen→what he'd SEE) · What it is · If yes · If no · Effort · Risk — numbered, grouped
   *can-do-now* / *needs-you*, ending with your recommendation. `docs/CLAUDE-DETAIL.md` → "The decision format".
@@ -250,15 +246,11 @@ update the detail doc's section in the same commit.
   every deploy; AV-live verification is READ-ONLY.
 - **Charts/data/egress feature work** → invoke the `data-cost-guard` skill BEFORE writing queries.
 - **🗑 NEVER ask permission to delete or remove anything here — just do it and report it** (owner,
-  2026-08-06, STANDING; full text in `~/.claude/CLAUDE.md`). Files, folders, branches, worktrees,
-  screenshots, temp scripts, dev rows, stale doc sections, dead code. Holds in **every** permission
-  mode and **especially bypass-permissions**, where a question defeats the mode he chose. Don't offer
-  removal as a question, don't leave junk "to be safe". **Ask-first survives for four things only,
-  and they are HIS rules:** the AV-live stack · the Brain vault (`~/Brain`) · another live session's
-  uncommitted work in this shared folder · force-pushing `main`. Guarded by
-  `npm run verify:no-ask` (auto-runs after any settings/CLAUDE.md edit) — it fails if an `ask`
-  permission rule reappears, if the standing order goes missing, **or if the AV-live `deny` rules are
-  ever removed in the name of "stop asking me"**.
+  2026-08-06, STANDING; full text in `~/.claude/CLAUDE.md`). Holds in **every** permission mode.
+  **Ask-first survives for four things only, and they are HIS rules:** the AV-live stack · the Brain
+  vault (`~/Brain`) · another live session's uncommitted work in this shared folder · force-pushing
+  `main`. Guarded by `npm run verify:no-ask`. What counts as "anything", and the three ways that
+  guard fails: `docs/CLAUDE-DETAIL.md` → "Never ask permission to delete".
 
 ## 🚦 Deploying & the folder ladder (pointer — invoke `ship-safety` AT the moment of deploying)
 
