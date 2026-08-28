@@ -381,12 +381,46 @@ const rowsOf = (o, dbRowsOpt) => {
   return (Array.isArray(o.items) ? o.items : []).map((i) => ({ id: null, title: i.title, qty: i.qty || 1, status: i.status || o.status, note: i.note, options: i.options, removed: i.removed, fromDb: false }));
 };
 
+// ── ONE NOTE FOR THE WHOLE TABLE IS SHOWN ONCE, NOT UNDER EVERY DISH (owner, 2026-08-26) ────────
+//
+// "the note is for particular or for the whole order" — and the honest answer is that the DATABASE
+// cannot tell you. `orders` has no note column at all: when a waiter types one instruction for the
+// table, lfh_staff_place_order copies that same text onto EVERY order_items.note. A per-dish note is
+// a genuinely separate thing (lfh_staff_edit_item_note, from the tablet and the manager panel) and
+// it lands in the very same column. So the two are indistinguishable by field — but not by shape.
+//
+// THE RULE, and it is deliberately the cautious one: a note is treated as belonging to the whole
+// order ONLY when EVERY dish on the ticket carries the IDENTICAL non-empty note, and there is more
+// than one dish. Anything else — one dish edited to say something different, some dishes with a
+// note and some without, a single-dish ticket — and every note stays exactly where it is today, on
+// its own line. That way the only case that changes is the one that is provably one instruction
+// repeated, and a dish with its own instruction can never lose it or inherit somebody else's.
+//
+// Measured before the change: a six-dish order with one note rendered that sentence six times and
+// made the ticket six screens tall on a phone, nearly all of it the same words.
+//
+// This is NOT the allergy rule and does not touch it. The order-wide "avoid" stays DISTRIBUTED onto
+// every dish line (owner, 2026-06-14) because a cook plating one dish must see the restriction on
+// that dish. Only the free-text note collapses.
+function sharedOrderNote(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return "";
+  const first = (rows[0] && rows[0].note != null ? String(rows[0].note) : "").trim();
+  if (!first) return "";
+  for (const r of rows) {
+    const n = (r && r.note != null ? String(r.note) : "").trim();
+    if (n !== first) return "";
+  }
+  return first;
+}
+
 function ticketHtml(o, rows) {
   rows = rows || rowsOf(o);
   // NO common allergy banner anywhere (owner, 2026-06-14). The order-wide "avoid" is
   // DISTRIBUTED onto every item, so each dish shows its own "NO x" — matching the
   // manager and tablet. Each item = its own removals ∪ the order-wide allergens.
   const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
+  // One instruction for the whole table is drawn ONCE, above the dishes (see sharedOrderNote).
+  const orderNote = sharedOrderNote(rows);
   const lines = rows.map((r) => {
     const lineRemoved = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
     // Allergens render as HTML so a staff-ADDED one carries a green "＋"; options/note
@@ -395,7 +429,8 @@ function ticketHtml(o, rows) {
     const segs = [];
     if (Array.isArray(r.options) && r.options.length) segs.push(esc(r.options.map((op) => `+ ${op.label || op}`).join(" · ")));
     if (lineRemoved.length) segs.push(lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", "));
-    if (r.note) segs.push(esc(`✎ ${r.note}`));
+    // …unless it IS the whole-table note, which is drawn once above instead of once per dish
+    if (r.note && !(orderNote && String(r.note).trim() === orderNote)) segs.push(esc(`✎ ${r.note}`));
     const small = segs.length ? `<small>${segs.join(" · ")}</small>` : "";
     const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
@@ -440,12 +475,16 @@ function ticketHtml(o, rows) {
   // once drawn and a cook had no way to see that table 6 was the owner's guest. The board now
   // ships `tableTags` ({ "6": "vip" }) the same way it ships `tableNames`, and the ticket looks
   // its own table up. A parcel has no table, so it has no mark either.
+  // The whole-table instruction, once, where a cook reads it before starting anything. It sits
+  // ABOVE the dishes on purpose: it applies to all of them, so reading it after the food would be
+  // reading it too late.
+  const orderNoteHtml = orderNote ? `<div class="onote" title="This note is for the whole table">✎ ${esc(orderNote)}</div>` : "";
   const ttag = (state.tableTags || {})[String(o.table_number)] || "";
   const tb = TAG_BADGE[ttag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
-    ${lines}${action}</div>`;
+    ${orderNoteHtml}${lines}${action}</div>`;
 }
 
 // A kitchen ticket's column comes from its DISHES, not the coarse order status:

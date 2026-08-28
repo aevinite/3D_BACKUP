@@ -260,6 +260,13 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 /* a dish the kitchen has finished but the waiter hasn't carried out yet */
 .done.rdy { color: #f472b6; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
 .line-ready .ltitle { color: #f9a8d4; }
+/* ONE INSTRUCTION FOR THE WHOLE TABLE, drawn once above the dishes (owner, 2026-08-26). It reads as
+   a bordered strip rather than as another dish line, because it is not a dish — it applies to every
+   line under it. Same amber family the New state already uses on this board, so it registers as
+   "read me first" without being a fourth new colour. 13.5px/700 clears the 4.5:1 line in both skins
+   against the ticket surface. */
+.onote { margin: 8px 0 2px; padding: 8px 10px; border-radius: 10px; font-size: 13.5px; font-weight: 700; line-height: 1.4;
+  color: #92400e; background: rgba(245, 158, 11, .13); border: 1px solid rgba(245, 158, 11, .45); }
 .awaiting { width: 100%; margin-top: 10px; padding: 11px; border-radius: 12px; text-align: center; font-weight: 800; font-size: 13.5px; color: #f9a8d4; background: rgba(236,72,153,.12); border: 1px solid rgba(236,72,153,.4); }
 .big { width: 100%; margin-top: 10px; padding: 13px; border-radius: 12px; border: 0; font-size: 16px; font-weight: 900; letter-spacing: 0.6px; cursor: pointer; }
 .big.accept { background: var(--amber); color: #201500; }
@@ -414,6 +421,9 @@ html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
 /* Deepen the "new — waiting for the waiter" footer text in light mode: the dark-theme
    pink (#f9a8d4) is too faint on the pale-pink pill against a white board (audit 2026-07-07). */
 html[data-theme="light"] .awaiting{ color:#9d174d; }
+/* the note strip: the dark skin needs the lighter amber, the light skin keeps the deep one above */
+:root .onote, html:not([data-theme="light"]) .onote { color: #fbbf24; }
+html[data-theme="light"] .onote { color: #92400e; }
 html[data-theme="light"] .alg-removed, html[data-theme="light"] .ltitle .alg-removed{ color:#b45309; }
 html[data-theme="light"] .alg-add{ color:#15803d; }
 
