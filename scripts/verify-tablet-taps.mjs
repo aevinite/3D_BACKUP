@@ -635,6 +635,48 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 13 · ONE SWITCH, EVERY DOOR TO SPLITTING ─────────────────────────────────────────────────
+//
+// Splitting a bill is a per-restaurant switch that starts OFF (mig 248). It has TWO doors on this
+// panel — 🧾 KOT ▾ → "Split the bill", and the small line at the bottom of the payment sheet —
+// and on 2026-08-30 only the first one asked the switch: a restaurant with splitting off still had
+// a waiter one tap from the whole split screen, and nothing on the server refuses a /pay-split, so
+// the panel is the only gate there is. Both doors and the screen itself now read one splitBillOn().
+{
+  check(
+    "tablet: the split switch is read through ONE splitBillOn(), not re-derived",
+    /function splitBillOn\s*\(\)/.test(src),
+    `${TABLET}: splitBillOn() is gone. Every door to splitting must ask the SAME function —\n    ` +
+    `re-deriving state.data.settings.split_bill_enabled at each door is how one of them was missed.`,
+  );
+  const rederived = (src.match(/settings\s*\|\|\s*\{\}\)\.split_bill_enabled/g) || []).length;
+  check(
+    "tablet: …and only that function reads the raw setting",
+    rederived <= 1,
+    `${TABLET}: split_bill_enabled is read raw in ${rederived} places. Read it once, inside\n    ` +
+    `splitBillOn(), and call that everywhere — a door that asks the setting itself is a door that\n    ` +
+    `can be added without asking it at all.`,
+  );
+  check(
+    "tablet: the KOT menu's split row asks the switch",
+    /\(splitBillOn\(\)\s*\n?\s*\?\s*row\("split"/.test(src),
+    `${TABLET}: the 🧾 KOT ▾ split row no longer asks splitBillOn().`,
+  );
+  check(
+    "tablet: the payment sheet's split line asks the same switch",
+    /split:\s*splitBillOn\(\)/.test(src),
+    `${TABLET}: payBillWithMethod() passes split: true. The small line at the bottom of the\n    ` +
+    `payment sheet is the SECOND door to the same screen — it must obey the same switch as the\n    ` +
+    `first, or turning splitting off does nothing for the waiter who uses that door.`,
+  );
+  check(
+    "tablet: and the split screen refuses to open when the switch is off",
+    /if \(!splitBillOn\(\)\) \{ toast\(/.test(src),
+    `${TABLET}: renderSplitBill() opens without asking splitBillOn(). Every door checks, and the\n    ` +
+    `screen checks too — a third door added later must not be able to reopen this hole.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
