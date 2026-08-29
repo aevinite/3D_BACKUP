@@ -5183,11 +5183,21 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // Paid in PARTS (owner, 2026-08-02) — ₹200 UPI + ₹200 cash + … The whole bill is settled in
   // ONE server call: it recomputes the due itself and refuses parts that don't add up, so this
   // can never under- or over-collect. The legs land in session_payments for the money trail.
+  let splitQueued = false;                 // did the split write only reach this device?
   if (picked.splitLegs) {
     const tnum = payable[0] && payable[0].table_number;
     if (tnum == null) { toast("A split payment needs a table's bill.", "err"); return false; }
     try {
       const rs = await api("POST", `/tables/${tnum}/pay-split`, { splits: picked.splitLegs });
+      // ASK THE QUEUE BEFORE CLAIMING THE MONEY ARRIVED (T28, 2026-08-30). Every other settle on
+      // this screen does — on-the-house and khata both say "Saved on this device ✓ … the moment
+      // you're back online" — and this one did not, since the original split feature shipped.
+      // `verify:queued-truth` exists to catch exactly that and could not: it was anchored on an
+      // older spelling of this call, so it reported "the write is no longer written this way" and
+      // never reached its own queue check. Offline, the screen announced "Marked paid in 3 parts
+      // (₹161 UPI + ₹161 Cash + ₹161 Card) 💳" over a bill the server had not seen — the worst
+      // sentence this panel can say, because the table frees and the money is counted as taken.
+      splitQueued = wasQueued(rs);
       okCount = Number(rs && rs.count) || payable.length;
       paidIds.push(...payable.map((o) => o.id));
       await pollTables([String(tnum)]);
@@ -5237,7 +5247,8 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
     const msg = skipped ? `Paid ${how} — ${skipped} new order still to accept` : `Marked paid ${how}`;
     // Same here: no undo bar. See the note on the single-order path above — reopening a settled
     // bill is Access → Manager → Manager menu → Bill → Reopen a bill, which is recorded.
-    toast(msg + " 💳", "ok");
+    if (splitQueued) toast(`Saved on this device ✓ — ${msg.replace(/^Marked paid /, "the bill will be settled ")} the moment you're back online.`, "ok");
+    else toast(msg + " 💳", "ok");
   }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
   else toast("Couldn't settle the payment — check the order.", "err");

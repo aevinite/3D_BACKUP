@@ -41,6 +41,11 @@ again. Read those before reporting anything.
 > ABOVE the highest id actually on disk (`P40500`) rather than from the mark, which read `P37358`
 > while rows already existed past it. Trust the disk, not the mark. (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
+> **THE REPO'S OWN SAFETY NET — 500 on the guards themselves** at `P37358`–`P37857` (2026-08-30).
+> T28's own territory, asked for by the owner: "check everything is working fine as it should or
+> not". Does each of the 153 `verify:*` / `test:*` entries actually run, actually bite when the
+> thing it names is broken, still have a subject, obey the house rules, and earn its runtime.
+>
 > **THE SPLIT BILL — a whole 500 on one feature** at `P36858`–`P37357` (2026-08-29). Asked for
 > after three faults he found on that screen were fixed and made live. Not a territory sweep: one
 > feature, followed from the button that opens it to the row it writes and the money the book is

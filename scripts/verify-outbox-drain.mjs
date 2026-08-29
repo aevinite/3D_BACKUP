@@ -96,6 +96,19 @@ await new Promise((r, j) => { server.once("error", j); server.listen(0, "127.0.0
 const PORT = server.address().port;
 const BASE = "http://127.0.0.1:" + PORT;
 
+// A --base HANDED TO THIS GUARD IS NOT THE APP'S ADDRESS, AND SAYING SO BEATS SWALLOWING IT
+// (T28, sweep #7, 2026-08-30). This guard stands up its OWN tiny server on the port below and
+// drives a page there — the real app is never involved, which is exactly why it can run with
+// nothing else up. That is fine, and deliberate. What is not fine is accepting `--base
+// http://localhost:4228` in silence: every sweep lane passes that flag to every guard, and a
+// silent accept lets the lane record "I checked port 4228" when this guard never went near it.
+// Found by pointing all 153 guards at a DEAD port and asking which still said "33 passed".
+// `verify:panel-cache` already had the right answer — say it out loud — so this copies its manner.
+if (process.argv.some((a) => a === "--base" || a.startsWith("--base="))) {
+  console.log(`verify-outbox-drain: --base does not apply here — this guard runs its own server on ${BASE} and never touches the app. Running anyway; nothing about your --base was checked.`);
+}
+
+
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
