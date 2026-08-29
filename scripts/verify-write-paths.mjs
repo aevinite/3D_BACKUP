@@ -84,12 +84,19 @@ const freeTable = (n) => {
   // NEVER return null quietly. A null table turns every assertion below into nonsense
   // ("both simultaneous orders landed at table null — 0/2") and blames the product for a floor
   // that is simply full. Say what is actually wrong, and say what to do about it.
-  throw new Error(
+// A FULL FLOOR IS "COULD NOT RUN", NOT "RAN AND FOUND A FAULT" — SO IT IS EXIT 2 (item 23,
+// 2026-08-29). This repo's most useful convention is that 1 means a fault and 2 means the check
+// never happened; verify:guards-alive enforces it for a stopped server, and four entries came
+// back 2 in this sweep with not one of them being a fault. A busy floor is exactly that case:
+// nothing about the product is wrong, there is simply nowhere to seat a test party. Exiting 1
+// made it read as a red in every summary, which is how a suite trains people to scroll past it.
+  console.error(
     `verify-write-paths: no free table on this restaurant — all ${st.table_count} are occupied, caught in a live merge,\n` +
     `  or claimed by another guard (${claimedTables().filter((t) => /^\d+$/.test(t) && Number(t) <= st.table_count).map((t) => `${t}→${ownerOf(t)}`).join(", ") || "none on this floor"}).\n` +
     `  This is the DEV database's state, not a product fault. Close the stale parties (an OPEN session\n` +
     `  with no live orders on it is a state no screen can show — owner, 2026-08-01) and run again.`
   );
+  process.exit(2);
 };
 const cleanup = [];
 

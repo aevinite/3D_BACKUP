@@ -78,7 +78,17 @@ const busy = new Set([
 for (const t of claimedTables()) busy.add(String(t));
 const free = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n))
   .map((t) => [Math.random(), t]).sort((a, b) => a[0] - b[0]).map(([, t]) => t);
-if (free.length < 2) { console.error("need two completely free tables; the floor is busy right now"); process.exit(1); }
+// A FULL FLOOR IS "COULD NOT RUN", NOT "RAN AND FOUND A FAULT" — SO IT IS EXIT 2 (item 23,
+// 2026-08-29). This repo's most useful convention is that 1 means a fault and 2 means the check
+// never happened; verify:guards-alive enforces it for a stopped server, and four entries came
+// back 2 in this sweep with not one of them being a fault. A busy floor is exactly that case:
+// nothing about the product is wrong, there is simply nowhere to seat a test party. Exiting 1
+// made it read as a red in every summary, which is how a suite trains people to scroll past it.
+if (free.length < 2) {
+  console.error(`need two completely free tables; the floor is busy right now (${count} tables, ${busy.size} carrying a live session, an order, or another guard's claim).`);
+  console.error("Nothing is wrong with the app — close the stale parties, or run this when the other lanes are idle.");
+  process.exit(2);
+}
 const [TA, TB] = free;
 
 const openTable = async (t) => {
