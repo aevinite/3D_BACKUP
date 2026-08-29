@@ -242,10 +242,26 @@ const ownerSettings = read("app/owner/settings/page.tsx");
 // The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
 // rather than the literal — asserting the spelling of code that legitimately changed shape is how
 // this repo's guards have gone red twice (see verify-static's header).
-const managerReaches = /PRINT_SETUP_URL = "\/print-setup\.html"/.test(epanel) && /href="\$\{PRINT_SETUP_URL\}"/.test(epanel);
-check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel) && managerReaches && /print-setup\.html/.test(ownerSettings),
-  "it is reachable from ALL FOUR: admin console · kitchen 🖨 sheet · manager Settings → Printing · owner Settings",
-  "the guide has lost one of its four doors (owner, 2026-08-18: it must be visible in the kitchen panel, the manager settings AND the owner panel) — the first attempt put it in the manager panel's hidden Kitchen section, which is how being reachable stopped being obvious");
+// ── THE FOUR DOORS ARE DOWN TO ONE, AND THAT IS THE POINT NOW ────────────────────────────────
+// This used to demand the guide be reachable from all four — admin console, kitchen 🖨 sheet,
+// manager Settings, owner Settings — from 2026-08-18: "it should be shown in kitchen panel… manager
+// also and owner."
+//
+// He reversed it on 2026-08-29, having watched a restaurant use it: *"inside the kitchen panel there
+// is how to print, and in the manager and the owner inside the setting how to print a whole setup
+// guide, which was from previous — so remove that completely."* Setting a printer up is the ADMIN's
+// job on the Printing screen; three more copies of "how to print" sat in panels that can no longer
+// perform that setup, saying it in different words from the board that can. That is the same
+// two-things-for-one-job fault as the retired print-here banner, and the standing rule now in
+// CLAUDE.md ("a new way replaces the old one") says the old copies go.
+//
+// So the rule is INVERTED, not deleted: the guide lives where the setup lives, and nowhere else.
+check(/print-setup\.html/.test(admin),
+  "the guide is reachable from the admin console, where the printer is actually set up",
+  "the setup guide has no door at all — the admin console is the one place that must always reach it");
+check(!/print-setup\.html/.test(kpanel),
+  "…and the kitchen panel does NOT carry a second copy of it",
+  "the kitchen panel links the setup guide again: a cook cannot set a printer up, so it is an instruction to do something they cannot do");
 check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
   "the manager panel has its own VISIBLE Printing section (the admin-only Kitchen one stays hidden)",
   "the manager panel's Printing section is gone — the printing status and the device answer would be unreachable there again");

@@ -4254,6 +4254,13 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-confirm .txt b { font-size: 13.5px; color: var(--text); }
 .adm-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
 .adm-confirm .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* A SWITCHED-OFF FEATURE'S SETUP IS STILL READABLE, JUST NOT TOUCHABLE (owner, 2026-08-29: "if the
+   printing is off, grey out the stuff which is at the bottom"). Dimmed rather than hidden, because
+   somebody deciding WHETHER to switch printing on needs to see what it involves first. `fieldset
+   [disabled]` already blocks every control inside; this is only how that reads. */
+.adm-offblock { opacity: .45; filter: saturate(.4); transition: opacity .15s; }
+.adm-offblock .adm-card { pointer-events: none; }
 @media (max-width: 640px) { .adm-confirm .acts { width: 100%; } .adm-confirm .acts .adm-btn { flex: 1 1 auto; } }
 .adm-mode.on { background: color-mix(in srgb, var(--accent) 14%, var(--card));
   box-shadow: inset 0 0 0 2px var(--accent); }
