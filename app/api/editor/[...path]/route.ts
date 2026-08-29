@@ -1557,7 +1557,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip")
+        // ── payment_method IS READ FOUR TIMES BELOW, SO IT HAS TO BE ASKED FOR (T11 sweep #7, 2026-08-30)
+        // It was missing from this column list while the code underneath read `o.payment_method` four
+        // times, so every one of those reads was `undefined`:
+        //   · the till breakdown labelled EVERY bill not settled in parts "Not recorded" — measured on
+        //     2026-08-26, this report said "Not recorded ₹1,932 / 4 bills" for the same business day and
+        //     the same window (05:00 IST) where the owner's day sheet said "Cash ₹1,932 / 4 bills". The
+        //     money and the bill count were right; only the NAME was wrong — and at day close "nobody
+        //     wrote down how this was paid" is an action item that was not real.
+        //   · `onHouseCount` / `onHouseNet` could never be anything but zero, so an on-the-house bill
+        //     fell into paidCount/paidNet instead — counted as money collected when nothing was.
+        // One column, and it is a short string on a query that already pages the day's orders.
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip,payment_method")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
