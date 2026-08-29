@@ -2141,20 +2141,52 @@ export default function OwnerDashboard() {
               <span className="hq-nm" style={{ fontSize: 15 }}><span className="sw" style={{ background: drawer.row?.accent || GREEN }} aria-hidden="true" />{drawer.r.name}</span>
               <button className="x" onClick={() => setDrawerRid(null)} aria-label="Close">✕</button>
             </header>
+            {/* ── THE DRAWER NEVER LEARNED ABOUT reportsOff (T12 sweep round 2, 2026-08-29) ─────────
+                When Aevidine has taken Reports away from one restaurant on an estate,
+                /api/owner/overview sends ZERO for its money and flags it, and
+                /api/owner/analytics leaves it out of the group payload altogether. The table row,
+                the sidebar and the top switcher were all taught to say "figures hidden" instead of
+                printing that zero — on 2026-08-04, for exactly this reason: "Rendering that zero as
+                a real figure made a trading restaurant look dead."
+
+                This drawer was never taught. Measured by replaying BOTH of the server's own
+                answers: the table row said "figures hidden", and tapping that same row opened
+
+                    Today                  ₹0     0 orders
+                    Revenue · last 30 days ₹0     0 orders
+                    Avg / order            ₹0
+                    0 orders all-time · ₹0 all-time
+
+                over a restaurant that is trading — plus a drawn trend chart of nothing. One inch
+                apart, two answers. So the drawer says what its own row says, and draws no chart of
+                a series it was never given. `openTables` and Active/Off stay: they are not money,
+                they come from the overview for every restaurant, and they are the reason to open
+                this drawer at all when the takings are hidden. */}
             <div className="bd">
+              {drawer.r.reportsOff ? (
+                <div className="dhidden">
+                  <i className="fas fa-eye-slash" aria-hidden="true" />
+                  <span><b>Figures aren&rsquo;t shown for this restaurant.</b>
+                    <i>Aevidine has switched its Reports section off, so its takings are hidden here — it is still open and trading.</i></span>
+                </div>
+              ) : null}
               <div className="dstats">
-                <div><small>Today</small><b><AnimatedNumber value={drawer.r.revenueToday} money /></b><i>{drawer.r.ordersToday} orders</i></div>
-                <div><small>Revenue · {RANGE_LABEL[globalRange]}</small><b><AnimatedNumber value={drawer.row?.revenue ?? 0} money /></b><i>{drawer.row?.orders ?? 0} orders</i></div>
-                <div><small>Avg / order</small><b><AnimatedNumber value={drawer.row?.avg ?? 0} money /></b><i>all orders, paid or open</i></div>
+                {!drawer.r.reportsOff && <>
+                  <div><small>Today</small><b><AnimatedNumber value={drawer.r.revenueToday} money /></b><i>{drawer.r.ordersToday} orders</i></div>
+                  <div><small>Revenue · {RANGE_LABEL[globalRange]}</small><b><AnimatedNumber value={drawer.row?.revenue ?? 0} money /></b><i>{drawer.row?.orders ?? 0} orders</i></div>
+                  <div><small>Avg / order</small><b><AnimatedNumber value={drawer.row?.avg ?? 0} money /></b><i>all orders, paid or open</i></div>
+                </>}
                 <div><small>Open tables</small><b><AnimatedNumber value={drawer.r.openTables} /></b><i>right now</i></div>
               </div>
-              {drawerTrend.length >= 2 && (
+              {!drawer.r.reportsOff && drawerTrend.length >= 2 && (
                 <div className="dspark"><small>Trend · {RANGE_LABEL[globalRange]}</small>
                   <AreaTrend data={drawerTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} height={170} /></div>
               )}
               <div className="dall">
-                <span><i className="fas fa-receipt" aria-hidden="true" /> {drawer.r.ordersAll.toLocaleString("en-IN")} orders all-time</span>
-                <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> {inr(drawer.r.revenueAll)} all-time</span>
+                {!drawer.r.reportsOff && <>
+                  <span><i className="fas fa-receipt" aria-hidden="true" /> {drawer.r.ordersAll.toLocaleString("en-IN")} orders all-time</span>
+                  <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> {inr(drawer.r.revenueAll)} all-time</span>
+                </>}
                 <span className={`own-pill ${drawer.r.active ? "on" : "off"}`}>{drawer.r.active ? "Active" : "Off"}</span>
               </div>
             </div>
@@ -2297,6 +2329,11 @@ export default function OwnerDashboard() {
         .dspark { border: var(--border); border-radius: 11px; padding: 11px 13px; }
         .dspark small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
         .dall { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--muted); }
+        /* the same calm, muted note the dashboard uses for a switched-off section — never the red one */
+        .dhidden { display: flex; gap: 10px; align-items: flex-start; border: var(--border); border-radius: 11px; padding: 11px 13px; }
+        .dhidden > i { color: var(--muted); margin-top: 2px; }
+        .dhidden b { display: block; font-size: 13px; }
+        .dhidden span i { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
         .dall i { opacity: .7; margin-right: 4px; }
         /* ── the KPI tile popup (owner, 2026-08-18) ────────────────────────────────────────────
            A centred sheet rather than the side drawer: this is a figure being explained, not a

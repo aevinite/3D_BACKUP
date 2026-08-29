@@ -561,6 +561,17 @@ check("paging moves the real scroller, not the window",
     "scripts/sweep/make-multi-owner.mjs dropped its Aangan guard. Aangan is the read-only control at\n       factory defaults — giving it a second owner would destroy what it is for.");
 }
 
+// 27 — the estate DRAWER hides a restaurant's takings when its Reports are off (round 2, 2026-08-29)
+check("the drawer knows about reportsOff, like the table row it opens from",
+  /drawer\.r\.reportsOff \? \(/.test(homeC) && /Figures aren&rsquo;t shown for this restaurant/.test(homeC),
+  "app/owner/page.tsx: the estate drawer prints money again for a restaurant whose Reports the admin\n       switched off. /api/owner/overview zeroes that restaurant on purpose and analytics leaves it out,\n       so the drawer showed 'Today ₹0 · Revenue ₹0 · Avg ₹0 · 0 orders all-time' over a trading\n       restaurant — one inch from a table cell reading 'figures hidden'. That is the exact fault the\n       reportsOff flag was added for on 2026-08-04.");
+check("…and draws no trend chart of a series it was never given",
+  /!drawer\.r\.reportsOff && drawerTrend\.length >= 2/.test(homeC),
+  "app/owner/page.tsx: the drawer draws a trend for a reports-off restaurant — a flat line of zeros\n       presented as its business.");
+check("…while open tables and Active/Off stay, because they are not money",
+  /<div><small>Open tables<\/small>/.test(homeC) && /own-pill \$\{drawer\.r\.active/.test(homeC),
+  "app/owner/page.tsx: the drawer now hides the two things that are still true and still useful when\n       the takings are hidden — they come from the overview for every restaurant.");
+
 // …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
 // It is a note because the words live in public/panels/auditsort.js, which the owner console only
 // READS — a guard that goes red over a file its own territory cannot edit is a guard that gets
