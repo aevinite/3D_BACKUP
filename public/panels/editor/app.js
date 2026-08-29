@@ -4592,6 +4592,10 @@ async function setOrderPayment(id, paid, opts = {}) {
 function openPaymentMethodModal(due, label, opts = {}) {
   return new Promise((resolve) => {
     const r2 = (n) => Math.round(n * 100) / 100; let tip = 0;
+    // THE TICKETS ON THIS BILL, read once, so the split can offer By kitchen ticket and know
+    // whether there is anything to divide by. Un-accepted orders are dropped for the same reason
+    // the settle itself drops them: nobody is charged for food the kitchen has not taken yet.
+    const splitTickets = (opts.orders || []).filter((o) => o.status !== "received");
     document.querySelector(".pay-overlay")?.remove();
     const wrap = el(`<div class="sx-modal-overlay pay-overlay"><div class="sx-modal pay-modal">
       <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(label)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -4628,9 +4632,20 @@ function openPaymentMethodModal(due, label, opts = {}) {
           </div>
           <div class="pay-other-split" style="display:none">
             <div class="dish-edit-lbl">Split payment</div>
-            <div class="muted small" style="margin:-2px 0 8px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
+            <div class="muted small" style="margin:-2px 0 8px">Pick how to divide it, then how many are paying — the amounts fill in for you and every box stays editable. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
+            <!-- THE SAME FOUR WAYS TO DIVIDE AS THE TABLET, IN THE SAME ORDER, WITH THE SAME WORDS
+                 (owner, 2026-08-29: "I want all the options for both the interface should be
+                 similar"). Before this the manager offered two ways here (an even split, and a
+                 🧾 By order button) and a SECOND split screen elsewhere offered a third (By dish),
+                 while the tablet offered all four on one screen. Three screens, three answers to
+                 "how do I split this?". Now there is one screen per panel and it is this one.
+                 By kitchen ticket is shown greyed rather than hidden when the bill is a single
+                 ticket, so the option never appears to have gone missing. -->
+            <div class="pay-split-tabs">${[["equal", "Equal"], ["custom", "Custom"], ["dish", "By dish"], ["ticket", "By kitchen ticket"]]
+              .map(([m, label]) => `<button type="button" class="btn pay-split-tab${m === "ticket" && splitTickets.length < 2 ? " pay-split-tab-off" : ""}" data-mode="${m}"${m === "ticket" && splitTickets.length < 2 ? ` title="This bill is one kitchen ticket — there is nothing to divide by"` : ""}>${label}</button>`).join("")}</div>
             <div class="muted small pay-split-nlbl">How many are paying?</div>
-            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}${(opts.orders || []).filter((o) => o.status !== "received").length > 1 ? `<button type="button" class="btn pay-split-byorder">🧾 By order</button>` : ""}</div>
+            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}</div>
+            <div class="pay-split-dishes"></div>
             <div class="pay-split-rows"></div>
             <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
             <div class="pay-split-sum small" style="margin:9px 0 8px;font-weight:700"></div>
@@ -4691,14 +4706,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
       // dedicated flow (person picker / no-charge settle); no payment method involved.
       // "Split payment" is not a settle of its own — it opens the parts panel right here (owner,
       // 2026-08-21: it was buried two taps deep under "Other", which is why nobody used it).
-      if (b.dataset.special === "split") {
-        wrap.querySelector(".pay-method-grid").style.display = "none";
-        wrap.querySelector(".pay-other-field").style.display = "";
-        wrap.querySelector(".pay-other-pick").style.display = "none";
-        wrap.querySelector(".pay-other-split").style.display = "";
-        splitTo(2);
-        return;
-      }
+      if (b.dataset.special === "split") { showSplitPanel(); return; }
       if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
@@ -4760,9 +4768,77 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const legLeft = () => Math.round((due - legSum()) * 100) / 100;
     const rowsEl = wrap.querySelector(".pay-split-rows");
     const sumEl = wrap.querySelector(".pay-split-sum");
+    const dishesEl = wrap.querySelector(".pay-split-dishes");
+
+    // ── THE FOUR WAYS TO DIVIDE, identical to the tablet's (owner, 2026-08-29) ─────────────────
+    // equal  · everyone the same, the last part carrying the odd paise
+    // custom · the same starting point, but the boxes are yours to type in
+    // dish   · hand each dish to a person; their share scales to the real due, so tax and any
+    //          discount ride along proportionally instead of being argued about
+    // ticket · one part per kitchen ticket, at what that ticket cost — for the table where four
+    //          friends ordered separately and nobody wants to work out who had what
+    const MAX_PARTS = 12;                     // what the server will take (lib/paySplit.ts)
+    let splitMode = "equal", splitN = 2;
+    const dishes = [];
+    splitTickets.forEach((o) => orderItemRows(o).forEach((r) =>
+      dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
+    const dishSubtotal = dishes.reduce((sum, d) => sum + d.amt, 0) || 1;
+    const canTicket = () => splitTickets.length >= 2;
+    // The LAST part absorbs the remainder: a bill's tax is rounded ONCE over the whole bill while
+    // a per-ticket figure is rounded per ticket, so summing them drifts by up to half a paisa each.
+    const ticketAmounts = () => {
+      const raw = splitTickets.map((o) => Math.round((billMath([o]).total || 0) * 100) / 100);
+      const head = raw.slice(0, -1);
+      return head.concat([Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100]);
+    };
+    const dishAmounts = () => {
+      const per = Array.from({ length: splitN }, () => 0);
+      dishes.forEach((d) => { per[Math.min(d.person, splitN) - 1] += d.amt; });
+      const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100);
+      const drift = Math.round((due - scaled.reduce((sum, x) => sum + x, 0)) * 100) / 100;
+      scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100;
+      return scaled;
+    };
     // An EVEN starting point that adds up exactly: everyone gets the rounded-down share and the
     // last part absorbs the odd paise, the same rule the printed bill splits its tax lines by.
     // A method already chosen on a row is kept, so changing "how many" never loses a pick.
+    // ONE seeder for all four ways, so they cannot disagree about what a part is. A way to pay
+    // already chosen on a row is KEPT — changing how the bill is divided must never silently
+    // reset how somebody is paying.
+    function seedSplit() {
+      if (splitMode === "ticket") {
+        const amts = ticketAmounts();
+        const kept = legs.slice();
+        legs.length = 0;
+        splitTickets.forEach((o, i) => legs.push({
+          amount: String(amts[i]), method: (kept[i] || {}).method || (i === 0 ? "UPI" : "Cash"),
+          note: (kept[i] || {}).note || "", khata: (kept[i] || {}).khata || null,
+          label: o.kot_no != null ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
+        }));
+        splitN = legs.length;
+        renderSplit();
+        return;
+      }
+      splitTo(splitN);
+    }
+    // Switching the way to divide clamps the count FIRST: `ticket` sets it from how many tickets
+    // there are, which can be 1, and carrying that 1 into Equal would draw a "split" of one part.
+    function setSplitMode(m) {
+      if (m === "ticket" && !canTicket()) {
+        toast("This bill is one kitchen ticket — there is nothing to divide by. Split it by amount instead.", "err");
+        return;
+      }
+      // A LONG BILL HAS MORE TICKETS THAN A SPLIT HAS PARTS. Thirteen tickets would seed thirteen
+      // parts and the server would refuse the lot at the last tap, with the money already counted
+      // out on the counter. Say it here instead, while there is still a choice.
+      if (m === "ticket" && splitTickets.length > MAX_PARTS) {
+        toast(`This bill has ${splitTickets.length} tickets — a bill can be split into at most ${MAX_PARTS} parts. Split it by amount instead.`, "err");
+        return;
+      }
+      splitMode = m;
+      if (m !== "ticket") splitN = Math.max(2, Math.min(MAX_PARTS, splitN));
+      seedSplit();
+    }
     function splitTo(n) {
       // A PAISA NUDGE BEFORE ROUNDING DOWN, or one person quietly pays the others' rounding
       // (split-bill 500, 2026-08-29). ₹555.55 ÷ 5 is ₹111.11 exactly in money, but in binary it is
@@ -4771,18 +4847,23 @@ function openPaymentMethodModal(due, label, opts = {}) {
       // ÷ 9 the last person paid 9 paise more than everyone else, on a screen whose whole promise
       // is "same amount each". The nudge is far smaller than a paisa, so it can only rescue a
       // value that was already a hair under a whole paisa; a genuine 111.109 still floors to 111.10.
+      splitN = n;
       const each = Math.floor((due / n) * 100 + 1e-6) / 100;
+      // By dish, a person's share is their own dishes scaled to the real due; otherwise everyone
+      // gets the rounded-down share and the last part carries the odd paise.
+      const amts = splitMode === "dish"
+        ? dishAmounts()
+        : Array.from({ length: n }, (_, i) => (i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each));
       const kept = legs.slice(0, n);
       legs.length = 0;
       for (let i = 0; i < n; i++) {
         const was = kept[i] || {};
         legs.push({
-          amount: String(i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each),
+          amount: String(amts[i]),
           method: was.method || (i === 0 ? "UPI" : "Cash"), note: was.note || "",
-          khata: was.khata || null,
+          khata: was.khata || null, label: "",
         });
       }
-      const bo0 = wrap.querySelector(".pay-split-byorder"); if (bo0) bo0.classList.remove("sel");
       renderSplit();
     }
     // THE COUNT ON THE CHIPS IS THE NUMBER OF PARTS ON SCREEN — always (owner, 2026-08-29, with a
@@ -4799,41 +4880,46 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // it without anybody remembering to.
     function syncSplitCount() {
       wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === legs.length));
+      wrap.querySelectorAll(".pay-split-tab").forEach((b) => b.classList.toggle("sel", b.dataset.mode === splitMode));
+      // By kitchen ticket decides the count for you, so asking "how many are paying?" underneath it
+      // would be a question with no answer. Everything else keeps the chips.
+      const nlbl = wrap.querySelector(".pay-split-nlbl"), nrow = wrap.querySelector(".pay-split-nrow");
+      const showN = splitMode !== "ticket";
+      if (nlbl) nlbl.style.display = showN ? "" : "none";
+      if (nrow) nrow.style.display = showN ? "" : "none";
+      // The dish list only exists in By dish — tap a dish to hand it to the next person.
+      if (dishesEl) {
+        dishesEl.style.display = splitMode === "dish" ? "" : "none";
+        if (splitMode === "dish") {
+          dishesEl.innerHTML = `<div class="muted small" style="margin:2px 0 6px">Tap a dish to hand it to the next person:</div>`
+            + dishes.map((d, i) => `<button type="button" class="btn pay-split-dish" data-dish="${i}"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span class="muted small">Person ${d.person} · ${inr(d.amt)}</span></button>`).join("");
+          dishesEl.querySelectorAll(".pay-split-dish").forEach((b) => (b.onclick = () => {
+            const d = dishes[Number(b.dataset.dish)];
+            d.person = d.person >= splitN ? 1 : d.person + 1;
+            seedSplit();
+          }));
+        } else dishesEl.innerHTML = "";
+      }
     }
     wrap.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
-
-    // ── SPLIT BY ORDER (owner, 2026-08-21: "i could able to do it by order or amount") ────────
-    // One part per KITCHEN TICKET, each at what that ticket actually cost — so when four friends
-    // ordered separately, nobody has to work out who had what. The amounts stay editable like any
-    // other split; this only fills them in.
-    //
-    // The LAST part absorbs the remainder, because a bill's tax is rounded ONCE over the whole
-    // bill while a per-ticket figure is rounded per ticket — summing them drifts by up to half a
-    // paisa each (see lib/paySplit.ts's own note). Without this the parts would miss the due by a
-    // paisa or two on a long bill and the server would rightly refuse them.
-    function splitByOrder() {
-      const os = (opts.orders || []).filter((o) => o.status !== "received");
-      if (os.length < 2) { toast("This bill is one ticket — split it by amount instead.", "err"); return; }
-      if (os.length > 12) { toast(`This bill has ${os.length} tickets — a split can hold 12 parts. Split it by amount instead.`, "err"); return; }
-      const raw = os.map((o) => Math.round((billMath([o]).total || 0) * 100) / 100);
-      const head = raw.slice(0, -1);
-      const last = Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100;
-      legs.length = 0;
-      os.forEach((o, i) => legs.push({
-        amount: String(i === os.length - 1 ? last : raw[i]),
-        method: i === 0 ? "UPI" : "Cash", note: "", khata: null,
-        label: o.kot_no ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
-      }));
-      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.remove("sel"));
-      const bo = wrap.querySelector(".pay-split-byorder"); if (bo) bo.classList.add("sel");
-      renderSplit();
+    wrap.querySelectorAll(".pay-split-tab").forEach((b) => (b.onclick = () => setSplitMode(b.dataset.mode)));
+    // ONE way in, used by the "Split payment" button and by arriving with openSplit already set.
+    function showSplitPanel() {
+      wrap.querySelector(".pay-method-grid").style.display = "none";
+      wrap.querySelector(".pay-other-field").style.display = "";
+      wrap.querySelector(".pay-other-pick").style.display = "none";
+      wrap.querySelector(".pay-other-split").style.display = "";
+      splitTo(2);
     }
-    const byOrderBtn = wrap.querySelector(".pay-split-byorder");
-    if (byOrderBtn) byOrderBtn.onclick = splitByOrder;
+    if (opts.openSplit && opts.split !== false) showSplitPanel();
+
+    // The 🧾 "By order" button that used to live here IS the "By kitchen ticket" tab now — same
+    // arithmetic, same last-part-carries-the-remainder rule, moved up beside the other three ways
+    // so a person sees all four at once (owner, 2026-08-29). See ticketAmounts() above.
     function renderSplit() {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}">
-          ${l.label ? `<div class="psr-label muted small">${esc(l.label)}</div>` : ""}
+          <div class="psr-label muted small">${l.label ? esc(l.label) : `Person ${i + 1}`}</div>
           <!-- step="0.01", NOT "1" (owner, 2026-08-29, with the browser's own tooltip in the shot:
                "Please enter a valid value. The two nearest valid values are 9 and 10." on 9.9).
                Every split amount is money with paise, and THIS SCREEN FILLS THEM IN ITSELF — an even
@@ -4875,6 +4961,18 @@ function openPaymentMethodModal(due, label, opts = {}) {
     }
     function refreshSplitSum() {
       if (!sumEl) return;
+      // THE LINE MUST AGREE WITH THE BUTTON UNDER IT (the tablet learned this on 2026-08-29;
+      // brought here on 2026-08-29 when the two screens were made to match). An EMPTY part
+      // contributes 0, so the arithmetic still balanced and this line went green — while Take
+      // payment refused with "Every part needs an amount above zero". One tap reaches it:
+      // ＋ Add another part seeds the new box with the remainder, which is "" on a covered bill.
+      // So the empty part is named FIRST, before the arithmetic.
+      const blank = legs.filter((l) => !(Number(l.amount) > 0)).length;
+      if (blank) {
+        sumEl.textContent = blank === 1 ? "One part still needs an amount" : `${blank} parts still need an amount`;
+        sumEl.style.color = "var(--red)";
+        return;
+      }
       const left = legLeft();
       sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
         : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
@@ -4882,7 +4980,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
     }
     const addBtn = wrap.querySelector(".pay-split-add");
     if (addBtn) addBtn.onclick = () => {
-      if (legs.length >= 12) { toast("A bill can be split into at most 12 parts.", "err"); return; }
+      if (legs.length >= MAX_PARTS) { toast(`A bill can be split into at most ${MAX_PARTS} parts.`, "err"); return; }
       const left = legLeft();
       legs.push({ amount: left > 0 ? String(left) : "", method: "Cash", note: "" });
       renderSplit();
@@ -5078,6 +5176,10 @@ async function markTablePaid(t, mtpOpts = {}) {
     // A whole table's bill can be paid in parts ("Split payment"). Single-order and khata-collect
     // settles can't — there is no pay-split endpoint for those.
     split: true,
+    // ARRIVING STRAIGHT ON THE SPLIT (owner, 2026-08-29). 🍴 Split on the table sheet, and the
+    // table-ops menu, used to open a screen of their own; they now open THIS sheet already on its
+    // split panel, so there is one split screen and two doors to it rather than two screens.
+    openSplit: !!mtpOpts.openSplit,
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
     // The TICKETS on this bill, so the split can be filled in BY ORDER as well as by an even
@@ -12910,7 +13012,7 @@ function openKotColumns(t, sess) {
     // panel 1: pick an operation (split hands over to its form — it's a form, not a drill-down)
     colsEl.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => {
       const op = b.dataset.op;
-      if (op === "split") { closeM(); openSplitSettle(t); return; }
+      if (op === "split") { closeM(); markTablePaid(t, { openSplit: true }); return; }
       // Table type is its own little picker (VIP / Family / Owner's guest), not a drill-down —
       // same hand-over as split.
       if (op === "type") { closeM(); openTagModal(t); return; }
@@ -13125,7 +13227,7 @@ function openKotMenu(t, sess) {
     if (op === "merge" && sess) openMergePicker(t, sess);
     if (op === "movekot") openMoveKotPicker(t);
     if (op === "moveitem") openMoveItemPicker(t);
-    if (op === "split") openSplitSettle(t);
+    if (op === "split") markTablePaid(t, { openSplit: true });
     if (op === "reprint") openReprintKotPicker(t);
   }));
 }
@@ -13970,94 +14072,19 @@ function notePrintTroubleHere() {
   toast("A kitchen ticket wouldn't print on this screen — check the printer.", "err");
 }
 
-// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
-// it: equal N-way, custom amounts, or by dish (assign each dish line to a person; each
-// person's share scales to the real due, so tax + discount split proportionally). The
-// server re-computes the due and refuses shares that don't add up — this UI can't
-// under- or over-collect. Replaces the old share CALCULATOR when the KOT ladder is on.
-async function openSplitSettle(t) {
-  document.querySelector(".splitsettle-overlay")?.remove();
-  // A merged party splits ITS WHOLE BILL — one table's own orders would quietly settle half
-  // a joint bill (the same class of bug as the half-party bill preview, owner 2026-08-03).
-  await ensurePartySlices(t); // every member table's orders, current, before money is divided
-  const payable = partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received");
-  if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", "err"); return; }
-  const due = billMath(payable).total;
-  const METHODS = ["UPI", "Cash", "Card", "Other"];
-  let mode = "equal", n = 2;
-  // By-dish state: every dish line (qty-priced) starts on person 1; tapping cycles 1→2→…→N.
-  const dishes = [];
-  payable.forEach((o) => orderItemRows(o).forEach((r) => dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
-  const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
-  const methodSel = (i, v) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === (v || "Cash") ? " selected" : ""}>${m}</option>`).join("")}</select>`;
-  const wrap = el(`<div class="sx-modal-overlay splitsettle-overlay"><div class="sx-modal" style="max-width:460px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split ${esc(tileFace(t))}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body" style="padding:12px 14px 14px">
-      <div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
-        <button class="btn ss-tab" data-mode="equal">Equal</button>
-        <button class="btn ss-tab" data-mode="custom">Custom</button>
-        <button class="btn ss-tab" data-mode="dish">By dish</button>
-      </div>
-      <div class="ss-body"></div>
-      <div class="ss-sum muted small" style="margin:10px 0 8px"></div>
-      <button class="btn primary ss-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>
-    </div></div></div>`);
-  document.body.appendChild(wrap);
-  const closeM = () => wrap.remove();
-  wrap.querySelector(".tbl-modal-close").onclick = closeM;
-  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
-  const bodyEl = wrap.querySelector(".ss-body"), sumEl = wrap.querySelector(".ss-sum");
-  // Equal shares that sum EXACTLY to the due (last share absorbs the rounding).
-  // The same paisa nudge as the pay-sheet split above, for the same reason — see the note there.
-  const equalLegs = () => { const base = Math.floor((due / n) * 100 + 1e-6) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
-  const personAmounts = () => { const per = Array.from({ length: n }, () => 0); dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; }); const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100); const drift = Math.round((due - scaled.reduce((s, x) => s + x, 0)) * 100) / 100; scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100; return scaled; };
-  const legRow = (i, amount, editable, label) => `<div class="ss-leg" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <span class="muted" style="min-width:64px">${label || `Person ${i + 1}`}</span>
-      <input type="number" step="0.01" min="0" class="ss-amt" data-leg="${i}" value="${amount.toFixed(2)}" ${editable ? "" : "readonly"} style="width:100px;padding:8px;border-radius:8px">
-      ${methodSel(i)}
-    </div>`;
-  const nStepper = () => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span class="muted small">Split between</span>
-      <button class="btn ss-n" data-d="-1">−</button><b class="ss-nval">${n}</b><button class="btn ss-n" data-d="1">＋</button><span class="muted small">people</span></div>`;
-  const refreshSum = () => {
-    const amts = [...bodyEl.querySelectorAll(".ss-amt")].map((x) => Number(x.value) || 0);
-    const s = amts.reduce((a, b) => a + b, 0);
-    const diff = Math.round((s - due) * 100) / 100;
-    sumEl.innerHTML = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
-    sumEl.style.color = diff === 0 ? "var(--green)" : "var(--red)";
-  };
-  const render = () => {
-    wrap.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
-    if (mode === "equal") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, false)).join("");
-    else if (mode === "custom") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, true)).join("");
-    else bodyEl.innerHTML = nStepper() +
-      `<div class="muted small" style="margin-bottom:6px">Tap a dish to hand it to the next person:</div>` +
-      dishes.map((d, i) => `<button class="btn ss-dish" data-dish="${i}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:4px"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("") +
-      `<div style="margin-top:10px">${personAmounts().map((a, i) => legRow(i, a, false)).join("")}</div>`;
-    bodyEl.querySelectorAll(".ss-n").forEach((b) => (b.onclick = () => { n = Math.max(2, Math.min(12, n + Number(b.dataset.d))); dishes.forEach((d) => { if (d.person > n) d.person = 1; }); render(); }));
-    bodyEl.querySelectorAll(".ss-dish").forEach((b) => (b.onclick = () => { const d = dishes[Number(b.dataset.dish)]; d.person = d.person >= n ? 1 : d.person + 1; render(); }));
-    bodyEl.querySelectorAll(".ss-amt").forEach((x) => (x.oninput = refreshSum));
-    refreshSum();
-  };
-  wrap.querySelectorAll(".ss-tab").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; render(); }));
-  render();
-  wrap.querySelector(".ss-go").onclick = async () => {
-    const amts = [...bodyEl.querySelectorAll(".ss-amt")];
-    const splits = amts.map((x) => ({ amount: Number(x.value) || 0, method: bodyEl.querySelector(`.ss-method[data-leg="${x.dataset.leg}"]`).value }));
-    const s = splits.reduce((a, b) => a + b.amount, 0);
-    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inr(due), "err"); return; }
-    if (splits.some((x) => !(x.amount > 0))) { toast("Every share needs an amount above zero.", "err"); return; }
-    closeM();
-    try {
-      const r = await api("POST", `/tables/${t}/pay-split`, { splits });
-      // A QUEUED WRITE HAS NO COUNT (T5 sweep #7, 2026-08-22) — this said "Paid in 3 parts 💳 —
-      // undefined orders settled" with no signal. The sibling split path a few hundred lines
-      // below already checks `r.queued`; this one was the odd one out.
-      if (wasQueued(r)) { toast(`Saved on this device ✓ — the ${splits.length} parts will settle the moment you're back online.`, "ok"); await pollTables([String(t)]); return; }
-      toast(`Paid in ${splits.length} parts 💳 — ${r.count} order${r.count === 1 ? "" : "s"} settled`, "ok");
-      await pollTables([String(t)]);
-    } catch (e) { toast("Couldn't split-settle: " + e.message, "err"); }
-  };
-}
+// SPLIT-SETTLE'S SECOND SCREEN IS GONE (owner, 2026-08-29: "I want all the options for both the
+// interface should be similar", and "it should not look like a mess").
+//
+// openSplitSettle() used to open a SEPARATE overlay here — Equal / Custom / By dish — while the
+// pay sheet's own split offered an even share and 🧾 By order, and the tablet offered all four on
+// one screen. Three screens, three different answers to "how do I split this bill?", and the two
+// manager ones could not even be reached from each other. The pay sheet's split now carries all
+// four ways (see openPaymentMethodModal), so this one was a strictly smaller copy of it.
+//
+// Everything that used to open it — the table-ops menu, the ⋯ drill-down and the 🍴 Split button
+// on the table sheet — opens the ONE split screen instead, via markTablePaid(t, { openSplit: true }).
+// Do not reintroduce a second split screen in this panel: `verify:split-payment` already refuses
+// one on the tablet, and now refuses one here too.
 
 // Move ONE dish line to another table — two steps in one modal: pick the dish
 // (grouped under its KOT), then pick the target table. The dish lands under a fresh
@@ -14558,7 +14585,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
   // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
   // legs, mig 176); with it off it stays the old even-share calculator — no regression.
-  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? openSplitSettle(t) : openSplitBill(parseFloat(b.dataset.split) || 0))));
+  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? markTablePaid(t, { openSplit: true }) : openSplitBill(parseFloat(b.dataset.split) || 0))));
   // MERGED CHILD: jump to the table that holds the bill, or split them apart.
   root.querySelectorAll("[data-goto-parent]").forEach((b) => (b.onclick = () => {
     const parent = b.dataset.gotoParent;

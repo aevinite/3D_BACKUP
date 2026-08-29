@@ -1443,3 +1443,7 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
    tapped (T7, 2026-08-29). Never `disabled` — a disabled tab on a touch panel swallows the tap,
    which is the fault #payBill was fixed for. */
 .sb-tabs .sb-tab-off { opacity: .55; }
+/* The count chips, the manager's geometry to the pixel (owner, 2026-08-29). Wraps rather than
+   scrolling sideways: a row that scrolls sideways is a row whose last option is invisible. */
+.sb-nrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.sb-nrow .sb-nb { min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums; }

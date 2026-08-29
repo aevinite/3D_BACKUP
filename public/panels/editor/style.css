@@ -2932,10 +2932,27 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
 .pay-split-n.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
-/* "By order" sits in the same row as the counts and highlights the same way, so it reads as one
-   choice: fill the amounts evenly, or fill them from the tickets. */
-.pay-split-byorder { min-height: 44px; padding: 0 12px; font-weight: 700; }
-.pay-split-byorder.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+/* ── THE FOUR WAYS TO DIVIDE (owner, 2026-08-29: "all the options for both the interface should
+   be similar"). Deliberately the tablet's own .sb-tabs geometry, so the two panels read as one
+   screen: a wrapping row of equal-width buttons, each a full 44px tap target, two per line once
+   the sheet is narrower than a phone's width. The 🧾 "By order" button that used to sit in the
+   COUNT row is now the fourth tab — it was a way of dividing sitting among a row of quantities,
+   which is why it read as a fifth "how many". */
+.pay-split-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.pay-split-tabs .pay-split-tab { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 10px; white-space: nowrap; font-weight: 700; }
+.pay-split-tabs .pay-split-tab.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+/* Greyed, not hidden: a one-ticket bill cannot be divided by ticket, and an option that VANISHES
+   reads as a missing feature, while an option that dims reads as "not for this bill". It still
+   answers when tapped — see setSplitMode's sentence. */
+.pay-split-tabs .pay-split-tab-off { opacity: .55; }
+@media (max-width: 420px) { .pay-split-tabs .pay-split-tab { flex: 1 1 45%; } }
+/* By dish: one tappable line per dish, the name on the left and whose it is on the right — the
+   tablet's .sb-dish, to the pixel. */
+.pay-split-dishes { margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.pay-split-dish { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  width: 100%; min-height: 44px; padding: 0 12px; text-align: left; }
+.pay-split-dish span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pay-split-dish span:last-child { flex: 0 0 auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* Which ticket a part is for. Full width above the amount: a KOT number cannot share the row with
    an amount box and a dropdown at 360px. */
 .pay-split-row .psr-label { grid-column: 1 / -1; margin: 0 0 -2px; font-weight: 700; }

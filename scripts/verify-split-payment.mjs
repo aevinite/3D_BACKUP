@@ -236,29 +236,34 @@ const RULES = [
     /openKhataPersonSheet\(Number\(legs\[i\]\.amount\) \|\| 0, t\)/],
 
   ["the split can also be filled in BY KITCHEN TICKET — one part per ticket",
-    /function splitByOrder\(\)/,
+    // Both panels now spell it the same way — one tab called By kitchen ticket, fed by
+    // ticketAmounts(). The manager's old 🧾 "By order" button is gone (owner, 2026-08-29).
+    // The manager builds its four tabs from a list, the tablet writes them out — so the proof is
+    // that the ticket way is OFFERED and fed by ticketAmounts(), not one panel's spelling of it.
+    (t) => /\["ticket", "By kitchen ticket"\]/.test(t) && /const ticketAmounts = \(\)/.test(t),
     (t) => /data-mode="ticket"/.test(t) && /const ticketAmounts = \(\)/.test(t)],
 
   ["…and a ONE-ticket bill is told why it cannot be divided that way, rather than being offered it",
-    (t) => /pay-split-byorder/.test(t) && /length > 1 \?/.test(t),
+    (t) => /pay-split-tab-off/.test(t) && /there is nothing to divide by/.test(t),
     // the tablet leaves the tab visible and DISABLED with the reason on it, which is the better half
     // of this rule: a button that vanishes teaches nobody anything.
     (t) => /sb-tab-off/.test(t) && /This bill is one kitchen ticket — there is nothing to divide by/.test(t)],
 
   ["the last ticket absorbs the remainder, because a bill's tax rounds once and a ticket's rounds per ticket",
-    /const last = Math\.round\(\(due - head\.reduce\(\(a, x\) => a \+ x, 0\)\) \* 100\) \/ 100;/,
+    /return head\.concat\(\[Math\.round\(\(due - head\.reduce\(\(a, x\) => a \+ x, 0\)\) \* 100\) \/ 100\]\);/,
     /return head\.concat\(\[round2\(due - head\.reduce\(\(a, x\) => a \+ x, 0\)\)\]\);/],
 
   ["a bill cannot be split into more parts than the server will take, and it says so",
-    /os\.length > 12/,
+    (t) => /const MAX_PARTS = 12;/.test(t) && /A bill can be split into at most \$\{MAX_PARTS\} parts\./.test(t)
+        && /tickets — a bill can be split into at most \$\{MAX_PARTS\} parts/.test(t),
     (t) => /const MAX_PARTS = 12;/.test(t) && /A bill can be split into at most \$\{MAX_PARTS\} parts\./.test(t)],
 
   ["each part is labelled with the ticket it is for",
-    /label: o\.kot_no \? `KOT #\$\{o\.kot_no\}`/,
+    /label: o\.kot_no != null \? `KOT #\$\{o\.kot_no\}`/,
     /label: o\.kot_no != null \? `KOT #\$\{o\.kot_no\}`/],
 
   ["…and the row prints that label",
-    /l\.label \? `<div/,
+    /l\.label \? esc\(l\.label\) : `Person \$\{i \+ 1\}`/,
     /l\.label \? esc\(l\.label\) : `Person \$\{i \+ 1\}`/],
 
   ["the tickets it divides are the PAYABLE ones — nothing un-accepted, nothing already paid",
