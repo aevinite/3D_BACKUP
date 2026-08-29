@@ -721,6 +721,59 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 15 · A MONEY BOX MUST ACCEPT THE NUMBER THE SCREEN PUTS IN IT ────────────────────────────
+//
+// The owner ruled on this for the split screen's amount box (2026-08-29) and it holds wherever the
+// panel fills a number box in itself: `step="1"` on a box the code writes 12.5 or 153.29 into is a
+// box refusing its own contents — a hardware ↑/↓ snaps it to a whole number and a waiter correcting
+// a figure by hand is pushed to whole rupees on a bill that carries paise. The discount sheet had
+// all three (2026-08-30): paint() writes the percent to one decimal and the amount with round2.
+{
+  for (const cls of ["disc-pct-input", "disc-amt-input", "disc-pay-input", "sb-amt"]) {
+    const line = (src.split("\n").find((l) => l.includes(`class="${cls}"`)) || "");
+    check(
+      `tablet: .${cls} steps in paise, not whole rupees`,
+      /step="0\.01"/.test(line),
+      `${TABLET}: .${cls} declares ${(line.match(/step="[^"]*"/) || ["no step"])[0]}. This screen writes\n    ` +
+      `fractional figures into that box itself, so step="1" makes it refuse its own contents.`,
+    );
+    check(
+      `tablet: .${cls} still asks for the numeric keypad`,
+      /inputmode="decimal"/.test(line) && /type="number"/.test(line),
+      `${TABLET}: .${cls} lost type="number" / inputmode="decimal" — a waiter on a tablet gets the\n    ` +
+      `letter keyboard for a money field.`,
+    );
+  }
+}
+
+// ── 16 · A MOVE THAT WORKED SAYS SO ──────────────────────────────────────────────────────────
+//
+// Moving a dish has always ended with "Dish moved to table N (new KOT)". Moving a KOT ended with
+// nothing at all (found 2026-08-30): the picker closed and the waiter was left to spot one missing
+// ticket on a bill that may have four. The manager panel's twin says "KOT moved to <table>", so
+// this was also two panels answering the same tap two different ways.
+{
+  const target = fnBody("renderMoveOrderTarget");
+  check(
+    "tablet: moving a kitchen ticket tells the waiter it happened",
+    /toast\(`KOT moved to \$\{tableLabel\(to\)\}`\)/.test(target),
+    `${TABLET}: renderMoveOrderTarget()'s runOptimistic has no success hook. A move that only\n    ` +
+    `repaints is indistinguishable from a tap that did nothing — its sibling (move a dish) and the\n    ` +
+    `manager panel both say it out loud.`,
+  );
+  check(
+    "tablet: …and names the table the way the waiter knows it",
+    /tableLabel\(to\)/.test(target) && !/moved to T\$\{to\}/.test(target),
+    `${TABLET}: that message names a bare table number. A renamed table (mig 131) must read by its\n    ` +
+    `name here, exactly as it does on the tile and on the paper.`,
+  );
+  check(
+    "tablet: moving a dish still says so too",
+    /toast: `Dish moved to table \$\{to\} \(new KOT\)`/.test(src),
+    `${TABLET}: the dish move lost its success message.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

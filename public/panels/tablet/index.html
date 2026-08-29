@@ -30,9 +30,7 @@
   <main class="layout">
     <!-- LEFT: the live floor — one tile per table, tap to work that table. -->
     <section class="floor">
-      <!-- data-swipe-hint only: these are FILTERS, and "→ 3 more" beside a filter reads as a
-           count of tables rather than of chips. The fade alone says "keep going". -->
-      <div class="floor-nav" id="floorNav" data-swipe-hint></div>
+      <div class="floor-nav" id="floorNav"></div>
       <!-- Compact ONE-LINE legend (manager style — the old two-row block ate floor space).
            Filled by renderFloor() so it can adapt to this restaurant's features. -->
       <div class="floor-legend" id="floorLegend"></div>
@@ -107,12 +105,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=a9bcde2a"></script>
-  <!-- "There is more this way" on a row that scrolls sideways. The manager panel has had this
-       since 2026-08-13; this panel has FOUR such rows and never loaded it, so at 390px the next
-       category was sliced off with a hard straight edge and nothing said there was more.
-       BEFORE app.js, like every other shared module here: app.js marks its own rows and the
-       module has to exist by then. -->
-  <script src="/panels/swipehint.js?v=da7e0a29"></script>
-  <script src="app.js?v=cccbd5fa"></script>
+  <script src="app.js?v=3420569a"></script>
 </body>
 </html>
