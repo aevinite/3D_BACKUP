@@ -23,13 +23,18 @@
 //
 // Add a check here whenever you add a dialog/overlay that answers a user's tap.
 import fs from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import path from "node:path";
 
 const HOOK = process.argv.includes("--hook");
 const PANEL_FILE = /[/\\]public[/\\]panels[/\\][^/\\]+[/\\](app\.js|style\.css|index\.html)$/;
 
 // In --hook mode: read stdin, bail out quietly unless a panel file was edited.
-let ROOT = process.argv[2] && process.argv[2] !== "--hook" ? process.argv[2] : process.cwd();
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be a bare `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in seven more guards.)
+let ROOT = repoRootFrom(import.meta.url);
 if (HOOK) {
   let raw = "";
   try { raw = fs.readFileSync(0, "utf8"); } catch { process.exit(0); }

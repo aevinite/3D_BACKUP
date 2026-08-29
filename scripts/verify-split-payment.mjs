@@ -22,11 +22,16 @@
 // up.   node scripts/verify-split-payment.mjs
 
 import { readFileSync, existsSync } from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { registerHooks } from "node:module";
 
-const ROOT = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), "..");
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be plain `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in eight more guards.)
+const ROOT = repoRootFrom(import.meta.url);
 const read = (p) => { try { return readFileSync(join(ROOT, p), "utf8"); } catch { return ""; } };
 // `@/x` → <ROOT>/x, so the real lib/paySplit.ts can be imported and CALLED. A guard that
 // re-implements the rule it checks proves nothing about the rule that ships.

@@ -146,11 +146,47 @@ asserting a property of the ENTIRE shared database, on a database it shares.**
 **Checked all:** the branch was rebased onto today's main, both conflicts INTEGRATED not overwritten,
 dependencies reinstalled, and all 73 static guards re-run — every one green.
 
+### 2026-08-29 — the last red fixed, everything merged and LIVE, and a 500-phase run around it
+
+**24 · verify:split-payment was defending a screen he replaced yesterday · confirmed · HIGH**
+Red on clean main with 14 failures, every one about the waiter tablet, and NOT ONE a fault in the
+tablet. The section ran the MANAGER's literal source patterns over both panels. On 2026-08-28 he
+said *"you can only split with the kot option or small written… both have same interface as the kot
+one"*, the tablet's duplicate panel was deleted, and it now has ONE split screen. Every rule still
+holds and several hold better — it divides by dish as well as by ticket, takes each ticket's figure
+from billdoc.js, offers Pay later only when the waiter may use it, and disables "By kitchen ticket"
+with a reason on a one-ticket bill. Rewritten as one table of RULES with a pattern per panel: 18
+rules × 2 panels, plus a new one — the tablet must not grow a second split screen again.
+
+**25 · NINE guards broke on an argument they do not use · confirmed · HIGH**
+Found by the 500-phase run, four entries in. Every lane hands every guard `-- --base <url>`; nine
+took a bare `process.argv[2]` as the repo folder, scanned a folder called "--base" and exited 1.
+One shelled `cd --`. New `scripts/sweep/repoRoot.mjs` asks the disk which argument is a repo.
+Guarded by a new check 12 in verify:test-safety.
+
+### MERGED AND LIVE — PR #1148, main `ae042f61`, backup deployment READY
+Verified on the deployed site, not just locally: a mistyped menu link reaches the real menu (59
+dishes), a stray address gets the guest screen, staff addresses keep the staff screen. The deploy
+followed the lock ritual — another session held it, I waited, took it in a command that can fail,
+and released it. Both rebase conflicts were INTEGRATED: T7's tablet fix kept over mine, T8's disk
+stash kept alongside my interrupt handler.
+
+### THE 500-PHASE RUN — `P36358`–`P36857`, 483 ✅ · 17 ⏭ · 0 ❌
+Run after the fix and after the merge, as asked. The two things worth carrying forward:
+· **Mutation testing (block C): 40 of 49 guards demonstrably go red when the thing they name is
+  broken.** Before today not one had ever been proved to have teeth. Worth extending to the other
+  hundred — it is the only technique here that tells a real green from a lucky one.
+· **My own harness produced three false accusations in a row** before it was right — appending
+  instead of replacing, replacing only the first occurrence, and a needle I guessed rather than took
+  from the guard. Each one manufactured blind guards that were not blind. The tool that says "no
+  fault here" is the tool most worth doubting.
+
 ---
 
 ### OPEN — for the owner
 
-Nothing. All eight were answered on 2026-08-28 and all eight are built — see the section above.
+Nothing. All eight were answered on 2026-08-28 and built; the last red (item 24) was fixed on
+2026-08-29 and everything is merged and live on backup.
 
 The one honest limit left: two of the three colliding pairs could not be proven green TOGETHER,
 because the shared 30-table floor stayed full of other terminals' live parties for the rest of the

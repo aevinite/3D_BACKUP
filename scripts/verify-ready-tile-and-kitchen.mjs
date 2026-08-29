@@ -97,11 +97,14 @@ const kitchenMerge = (serverItems, pendingReady) =>
 // (the same reasoning as scripts/verify-board-sig.mjs: a model that passes proves the design is
 // sound and proves nothing about the product).
 import { readFileSync, existsSync } from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-const ROOT = process.argv[2] && !process.argv[2].startsWith("-")
-  ? process.argv[2]
-  : join(dirname(fileURLToPath(import.meta.url)), "..");
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be a bare `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in seven more guards.)
+const ROOT = repoRootFrom(import.meta.url);
 const readIf = (rel) => { const f = join(ROOT, rel); return existsSync(f) ? readFileSync(f, "utf8") : null; };
 
 {
