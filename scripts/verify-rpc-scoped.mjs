@@ -94,6 +94,15 @@ for (const p of files) {
   }
 }
 
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (takesRid.size < 20 || checked < 20) {
+  console.log(`\n✗ verify:rpc-scoped read ${takesRid.size} restaurant-scoped RPC(s) out of the migrations and found ${checked} call site(s) — there are dozens of each. Nothing was checked.`);
+  process.exit(1);
+}
 console.log("\nEvery call to a restaurant-scoped RPC names its restaurant");
 console.log(`  ${takesRid.size} RPCs take a restaurant (${hasDefault.size} of them still default it to #1); ${checked} call sites checked`);
 if (offenders.length) {

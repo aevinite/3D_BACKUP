@@ -133,4 +133,13 @@ existed — a slow read, not a dead one. A protection must never be the thing th
   process.exit(1);
 }
 
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (files.length < 200) {
+  console.log(`\n✗ verify:abort-guard scanned only ${files.length} file(s) — it should see hundreds. Its walk found nothing, so nothing was checked.`);
+  process.exit(1);
+}
 console.log(`✓ verify:abort-guard — ${scanned} file(s) use AbortSignal.timeout; every browser-reachable one (${guardedFiles}) feature-tests it first`);

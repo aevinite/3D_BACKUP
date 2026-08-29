@@ -141,7 +141,7 @@ Code: `app/owner/*`, `components/owner/*`, `app/api/owner/*`, `lib/ownerCache.ts
 |---|---|---|---|
 | any report, chart or dashboard tile | `verify:owner-reports` | nothing | no |
 | a chart's shape (must never be a lonely 1-bar plot) | `verify:owner-reports` + read `components/owner/Charts.tsx` header | nothing | no |
-| the busiest-times heatmap | `verify:heatmap-parity` | `.env.local` | no |
+| the busiest-times heatmap still answers, and inside the 8s statement limit | `verify:heatmap` | `.env.local` | no |
 | revenue anywhere | `verify:one-number` ← one revenue number, checked against the database | `.env.local` | no |
 | light / dark skin, or any colour | `verify:css-tokens`, `verify:skin-ink`, `verify:dead-css` | nothing / app running | no |
 | two owners editing the same value | `verify:owner-clash` | app running | no |

@@ -652,6 +652,8 @@ if (READ_ONLY) {
     // …and PROVE it landed, instead of finding out thirty seconds later at a disabled button.
     const inCart = await F.evaluate(() => (typeof state !== "undefined" ? state.cart.length : 0));
     if (!inCart) { soft(`tapping the plain dish (${plainDish}) put nothing in the cart`); continue; }
+    // (T28 found this same fault independently on 2026-08-27 and wrote a tile-by-tile version;
+    // T7's landed on main first and asks the menu directly, which is simpler. Theirs kept.)
     // TWO LAYOUTS, AND ONLY A TOUCH DEVICE SEES THE SECOND ONE. On a touchscreen held sideways the
     // ⚡ Quick order screen is TWO PANES — dishes on the left, the order on the right — so the
     // bottom "View order" pill has nothing to do and the stylesheet hides it

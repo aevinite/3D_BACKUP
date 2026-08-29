@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P36237`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P36358`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
 > **T7 · the waiter tablet — a SECOND, freshly planned 500** at `P35237`–`P35736` (2026-08-29).
 > Not a re-run: the owner asked for the whole test to be **planned again from scratch** after his
@@ -41,6 +41,7 @@ again. Read those before reporting anything.
 > brand-new split screen, a payment sheet with a panel removed, four functions deleted, a tile
 > threshold moved and a repaint newly guarded. Run against the DEPLOYED backup site, not a dev
 > server, since "after making it live" is the point of it.
+**Next free ID: `P35358`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
 > **SWEEP #7 took `P15101`–`P35100`** — 40 terminals × 500, contiguous and in terminal order, so
 > T1 is `P15101`–`P15600`, T5 is `P17101`–`P17600`, and T40 is `P34601`–`P35100`. Each terminal
@@ -54,6 +55,9 @@ again. Read those before reporting anything.
 > | T5 · the owner's own follow-up run | `P35101`–`P35200` | ✅ 100 new rows for the thirteen things he asked for 2026-08-23→26, all green, plus P17101–P17600 re-run (399 ✅ · 1 expectation moved · **no regression**). Taken from the next-free mark, past every sweep-#7 block. |
 > | T4 · working offline, and in every language | `P16601`–`P17100` | ✅ 500 written, 500 executed (497 ✅ · 3 ❌→✅ fixed on the branch) — plus all 500 of `P01501`–`P02000` re-run: **no regression**, 4 expectations moved, and one row (`P01936`) found to have been **filed green on a claim that was never true** |
 > | T16 · the admin's restaurants, owners, settings, billing, bin & platform floor | `P22601`–`P23100` **+ `P35737`–`P36236`** | ✅ **1,500 rows on record, all green.** First 500 (`P22601`–`P23100`) 500 ✅; the 500 old rows `P07501`–`P08000` re-run 500 ✅ — **ONE REGRESSION** by drift (`P07771`, the delete cards promising a 90-day protection the owner removed on 2026-08-20), 9 expectations moved, and two sweep-#6 rows found **filed green on wording that was wrong** (`P07950`, `P07924`). A SECOND 500 (`P35737`–`P36236`, 2026-08-29) was then planned from scratch against ground the first 1,000 do not cover — a lifecycle truth table, the web address in depth, the 14 routes these screens call, the money arithmetic, the new printing world (migs 366–369), extreme data, keyboard, measured egress, and two tabs at once: 500 ✅. **17 problems fixed in all, one commit each**, incl. `lfh_guest_restaurant` answering a 404 on a live restaurant's own menu (**mig 370**), and a typo in the Billing Amount box being stored as a real plan amount. New guards `verify:guest-address` and `verify:admin-restaurants` +38 checks (sections 11–26). Also fixed `verify:ui-integrity`, which was red on main and, running as a hook, was blocking **every session's Write and Edit tool** (PR #1159). | **NOTE:** this block was first taken at `P35237`–`P35736` and RENUMBERED to `P35737`–`P36236` when T7's own second 500 merged first and had claimed the same range. T7's claim stands; nothing of theirs was renumbered.
+> | T16 · the admin's restaurants, owners, settings, billing, bin & platform floor | `P22601`–`P23100` | ✅ 500 written, 500 executed — **500 ✅ after the second pass** (first pass 496 ✅ · 4 ❌) — plus all 500 of `P07501`–`P08000` re-run: **500 ✅** (first pass 499 ✅ · 1 ❌). **ONE REGRESSION** by drift: `P07771`, the delete cards still promising a 90-day protection the owner removed on 2026-08-20 (mig 342). 9 expectations moved with their reason in the row, and two sweep-#6 rows found to have been **filed green on wording that was wrong or loose** (`P07950` — suspending does NOT stop staff signing in; `P07924`). **15 problems fixed, one commit each.** The biggest was `P07967`: `lfh_guest_restaurant` (mig 282) resolved a slug with an unordered `LIMIT 1`, and since mig 309 a removed restaurant keeps its row AND its slug — so a restaurant created on a reused web address could serve a **404 on its own guest menu**, intermittently, while the console showed it Active. **Migration 370** orders the live row first; proved over ten rounds. New guard `verify:guest-address`; `verify:admin-restaurants` +34 checks (sections 11–24). |
+> | T28 · his decisions on T28's eight open items | `P36237`–`P36357` | ✅ 121 rows, all executed 2026-08-28/29. He answered all eight in one message; every one was built. Item 14 decided on his instruction (a stray address belongs to the DINER), item 15 settled by him and written in three places, and all fifteen earlier items re-run on a branch rebased onto today's main. **Three of the ten guard PAIRS collided** — an unfenced table picker, a whole-floor leak scan and a whole-stream breadcrumb scan, all three the same class: a guard asserting a property of the ENTIRE shared database on a database it shares. |
+> | T28 · the repo's own tests | `P28601`–`P29100` | ✅ 500 written, 500 executed (486 ✅ · 10 ⏭ · 4 ❌ — two of the ❌ are ONE open question for the owner, and two are honest judgment answers about the state this run found) — plus all 500 of `P13501`–`P14000` re-run: **490 ✅ · 10 ⏭ · 0 ❌, NO REGRESSION**, and **13 of sweep #6's 23 skips CLOSED** (five guards that were red on shared-database drift are green today). **Nine guards were red or crashing on clean main; three of the nine were the app and six were the guard. All fixed, one commit each.** The most valuable: a redirect the owner asked for on 2026-08-26 was built the same day and LOST three days later when the two 404 screens he picked replaced the file. |
 > | T17 · the admin's health, logs, issues & limits | `P23101`–`P23600` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌, and that one is a single line in a file this territory does not own) — plus all 500 of `P08001`–`P08500` re-run: **ONE REGRESSION** (`P08095` — the server moved to the shared `errorSig()` group and the Logs page was left comparing message text letter-for-letter, so "Mark resolved" cleared 9 rows server-side and struck through 1), 1 row newly red (`P08201`), 4 ⏭ unchanged, and 11 expectations moved because System health was rebuilt. **6 problems fixed, one commit each.** |
 > | T15 · the admin's access tree and people | `P22101`–`P22600` | ✅ 500 written, 500 executed, 500 ✅ (5 of them recorded a real fault) — plus all 500 of `P07001`–`P07500` re-run: **no regression**, 6 expectations moved, and one row (`P07441`) found to have been **filed green on a claim that was never true** |
 > | T15 · the owner's own follow-up ("do all except 1") | `P35201`–`P35236` | ✅ 36 rows for items 7, 8, 9 and 10, all green. Item 1 dropped on his word. Three faults found by the guards written for the picked items: a fourth ACTIONS row unnamed by its folder (one day after the guard landed), and khata + payroll INHERITED from restaurant #1 by every new restaurant. |
@@ -131,7 +135,7 @@ were **stale allowances**, not dead checks.
 | 25 | P12001–P12500 | **Every other shared library file** — the ~108 files in `lib/` no other terminal owns | ✅ | 500 | 500 | 0 | 0 |
 | 26 | P12501–P13000 | **THE LOOK** — `app/globals.css`, `public/panels/**/style.css`, and every Tailwind/styled-jsx block. Layout, spacing, colour, size, fit. Desktop, Samsung A35, iPad both ways up, both skins | ⚠️ filed on `origin/sweep6/t26-the-look`, not yet merged | 577 | — | — | — |
 | 27 | P13001–P13500 | **EVERY WORD ON EVERY SCREEN** — `lib/i18n.ts` dictionary values, and every user-visible string in `app/`, `components/`, `public/panels/`. Labels, buttons, errors, empty states | ✅ **filed 2026-08-27 (sweep #7)** — written by T30, landed and re-run by T27 | 1000 | 966 | 9 | 25 |
-| 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the 130 `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ❌ **NEVER FILED** | 0 | — | — | — |
+| 28 | P13501–P14000 | **THE REPO'S OWN TESTS** — `scripts/**`, `tests/**`, and the `verify:*` entries in `package.json`. Is each guard alive, honest, and cleaning up after itself? | ✅ **FILED** — this page said "never filed" and was wrong; `T28.md` has held 500 rows since sweep #6 and all 500 were re-run in sweep #7 | 500 | 490 | 0 | 10 |
 | 29 | P14001–P14500 | **Docs, tooling, root config AND THE REMAINDER** — `docs/**`, `package.json`, `next.config.ts`, `tsconfig*.json`, `.github/**`, plus every file no other territory names | ✅ | 500 | — | — | — |
 | 30 | P14501–P15000 | **Cross-panel truth, and this ledger** — `LEDGER/INDEX.md`, `docs/QA-500-PHASES.md`, `.claude/skills/terminal-test-improve/**` | ✅ | 500 | 342 | 59 | 99 |
 
@@ -171,9 +175,21 @@ all resolving.
 
 ### The ID repair block
 
-**`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are now
-**allocated to T9**. `P15019`–`P15100` remain free for the next repair. **A new sweep starts at
-`P15101`.**
+**`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are
+**allocated to T9**; `P15019`–`P15022` are **allocated to T27** (sweep #7 — it wrote 504 rows into
+a block of 500 and its last four sat inside T28's block; renumbered by T28, 2026-08-28, with a
+banner on `T27.md` saying so). `P15023`–`P15100` remain free for the next repair. **A new sweep
+starts at `P15101`.**
+
+**AND A THIRD SHAPE, seen 2026-08-29:** two terminals read the same *Next free ID* out of this file
+in the same minute and both took it (T7 and T28, at `P35237`). An overrun is one terminal writing
+past its own block; this is two terminals allocating the same block, and nothing in the file
+prevents it. **Claim your block by editing *Next free ID* FIRST, before you write a single row** —
+then re-run `verify:ledger-index` before filing, not after.
+
+**Two overruns in two sweeps, both the same shape:** a terminal writes a few more rows than its
+block holds and quietly lands in its neighbour's. Both were found by `npm run verify:ledger-index`
+and neither was noticed by the terminal that caused it — so run that guard before filing, not after.
 
 ## Coverage — is every part of this product owned by some ID range?
 
@@ -273,6 +289,7 @@ Every sweep re-discovers these. They are **not** findings. Each is sourced, not 
 | the owner's revenue **includes soft-deleted (binned) bills** | **REQUIRED.** `docs/COMPLIANCE-GUARDRAILS.md` §4: "Z-report / dashboards must include voids and deleted bills". Migration 309's header states the asymmetry: what is **owed** drops a deleted bill, what was **collected** keeps it. Measured on French House: the owner's August figure is ₹3,76,788 all-in, not the ₹2,08,231.50 excluding-deleted one. **Do not "fix" this** — it is the feature that put PetPooja's founders under summons, inverted. |
 | the kitchen has **no profile** | Ruled three times by the owner (2026-07-29, re-confirmed 2026-08-05). `lib/staffProfileShared.ts` → `PROFILE_ROLES`. |
 | Aangan differs from French House | Aangan is the **read-only control** at factory permission defaults. Differences are the point. |
+| a guard places real ORDERS on Aangan (`verify:live-rush`) | **ALLOWED, and asked twice.** Owner, 2026-08-28: *"you can do it on backup you can do anything you want on backup it's the test site only"*. The read-only rule is about Aangan's **permission and feature switches** — the only part of a control restaurant that carries information — never about orders, tables or bills. And the second restaurant is half of what that guard proves: "does one restaurant's rush bleed onto another" cannot be answered with one. Do not re-raise it. |
 | a **reprint** leaves no trace | The owner's decision: a bill reprint is not an event. No band, no audit row, no question. |
 | the manager's **Audit & logs** updates on the 60-second poll, not instantly | Migration 267 moved `staff_actions` onto its own `audit` topic so the oplog stops waking every staff panel. No floor tile renders from it. |
 | `cart`, `cart_updated_at` and `last_activity_at` are **absent** from the sessions breadcrumb watch-list | Stated in migration 299's own header: `cart` has its own trigger (mig 109), and `last_activity_at` is a heartbeat — watching it would wake every device on the floor. |
