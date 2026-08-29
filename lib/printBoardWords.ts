@@ -17,11 +17,18 @@ export type PaperSize = { name?: string; wMm: number; hMm: number };
 
 /** The four questions, in the order a person asks them. Both screens print these verbatim as their
  *  card headings — that is the whole point of them living in one file. */
+/**
+ * The steps, in the order a person walks them.
+ *
+ * The LAST one is numbered by the caller, not here: choosing "a computer" adds a step (the machine,
+ * then its printers) that choosing "a screen" does not, so the log is step 5 one way and step 4 the
+ * other. Hard-coding "4 ·" put two cards called 4 on the same screen (2026-08-29).
+ */
 export const STEPS = {
   one:   "1 · Is printing switched on",
-  two:   "2 · The computers that can print",
+  two:   "2 · How does the paper come out?",
   three: "3 · Which printer gets which paper",
-  four:  "4 · What has printed",
+  four:  "What has printed",
 } as const;
 
 /** The restaurant's words, never ours. "kot" means nothing to anybody outside this codebase. */

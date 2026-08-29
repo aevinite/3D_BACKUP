@@ -4239,6 +4239,22 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-mode:hover:not(.on) { background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
 .adm-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .adm-mode:disabled { opacity: .6; cursor: progress; }
+
+/* ── THE CONFIRMATION, IN THE PAGE ──────────────────────────────────────────────────────────────
+   Owner, 2026-08-29: "whenever you switch, there is no UI for confirmation or stuff like that."
+   It was a browser confirm() — a grey box with no room to say what the switch actually costs, and
+   on a phone it covers the screen you are trying to read. This strip appears under the two mode
+   buttons, says what will change in the same words the screen uses, and puts Cancel first so the
+   safe answer is the one nearest the thumb. */
+.adm-confirm { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
+  margin-top: 11px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-c, #888));
+  background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+.adm-confirm .txt { flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px; }
+.adm-confirm .txt b { font-size: 13.5px; color: var(--text); }
+.adm-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.adm-confirm .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 640px) { .adm-confirm .acts { width: 100%; } .adm-confirm .acts .adm-btn { flex: 1 1 auto; } }
 .adm-mode.on { background: color-mix(in srgb, var(--accent) 14%, var(--card));
   box-shadow: inset 0 0 0 2px var(--accent); }
 .adm-mode.on b::before { content: "✓ "; color: var(--accent); font-weight: 800; }

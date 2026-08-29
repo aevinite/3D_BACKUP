@@ -343,23 +343,79 @@ export async function readMode(rid: string): Promise<PrintMode> {
  * was answered is rewritten into the new mode's shape, and a line set to "nobody" is left alone —
  * "we do not print this" survives a change of mechanism.
  */
+/**
+ * Which panel a person actually stands at.
+ *
+ * The screen that prints is THEIR screen, so the panel FOLLOWS the person — it is never a second
+ * thing to choose. Hard-coding "manager" here is what kept every kitchen user out of the picker
+ * (owner, 2026-08-29: "choosing a person, there is not kitchen panel available"), because
+ * writeRoutes then refused a cook for not being a manager and the screen simply offered nobody.
+ */
+export function panelForRole(role: string | null | undefined): RoutePanel {
+  const r = String(role || "");
+  if (r === "kitchen") return "kitchen";
+  if (r === "waiter" || r === "tablet") return "tablet";
+  return "manager";                       // a manager, and an owner working the manager panel
+}
+
+/**
+ * The one toggle, and what it means.
+ *
+ * ── A COMPUTER ──  the helper owns the paper. Each of the three lines can name a machine and one
+ *                   of its printers. Nothing prints on anybody's screen.
+ *
+ * ── A SCREEN ──    ONE person's screen prints the KITCHEN TICKETS, and nothing else. Owner,
+ *                   2026-08-29, in his own words: *"the person will be only choose for KOT… other
+ *                   user will work as they work — from the manager panel you can print the bill."*
+ *                   So bills and banquet sheets are put back to "whoever presses Print", which is
+ *                   what every restaurant without a helper has always done. Before this they were
+ *                   dragged onto the named person's screen too, and every ticket, bill and banquet
+ *                   sheet in the restaurant popped up in front of one person.
+ *
+ * A deliberate "no, do not print this" (via:"off") outlives the mechanism either way.
+ */
 export async function writeMode(
   rid: string,
   mode: PrintMode,
-  opts?: { person?: string | null; personName?: string | null; panel?: RoutePanel },
+  opts?: { person?: string | null },
 ): Promise<{ mode: PrintMode; routes: PrintRoutes } | { error: string }> {
   const current = await readRoutes(rid);
   const patch: Record<string, unknown> = {};
+
+  // WHOSE SCREEN. The panel comes from their role, so a cook, a waiter and a manager are all
+  // choosable and none of them has to know what a "panel" is.
+  let personId: string | null = null, personPanel: RoutePanel = "manager";
+  if (mode === "screen" && opts?.person) {
+    const u = (await sb.from("staff_users").select("id, name, username, role, active")
+      .eq("id", String(opts.person)).eq("restaurant_id", rid).maybeSingle()).data as
+      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null } | null;
+    if (!u) return { error: "That person is not one of this restaurant's staff." };
+    if (u.active === false) return { error: `${u.name || u.username} is switched off, so their screen cannot be the printer.` };
+    personId = u.id;
+    personPanel = panelForRole(u.role);
+  }
+
   for (const k of ROUTABLE_KINDS) {
     const r = current[k];
-    if (r.via === "off") continue;                       // a deliberate no outlives the mechanism
-    if (!r.via) continue;                                // never answered — leave it unanswered
-    patch[k] = mode === "screen"
-      ? { via: "screen", panel: opts?.panel || "manager", person: opts?.person ?? null }
-      // Going back to the helper cannot invent a printer, so the line returns to "not answered
-      // yet" — which the board says out loud rather than pointing at a printer nobody chose.
-      : null;
+    // NAMING A PERSON *IS* SWITCHING IT BACK ON. Everywhere else a deliberate "no" outlives the
+    // mechanism, but choosing whose screen prints the kitchen tickets is not a change of mechanism —
+    // it is an answer to the very question "off" was answering, and it is the same one dropdown.
+    // Without this, picking a person after choosing "Nobody" saved nothing and the screen silently
+    // snapped back.
+    const namedNow = mode === "screen" && k === "kot" && !!personId;
+    if (r.via === "off" && !namedNow) continue;          // a deliberate no outlives the mechanism
+    if (mode === "screen") {
+      // Only the kitchen ticket can belong to a screen. The other two go back to the window.
+      if (k !== "kot") { if (r.via) patch[k] = null; continue; }
+      patch[k] = personId ? { via: "screen", panel: personPanel, person: personId } : (r.via ? null : undefined);
+      if (patch[k] === undefined) delete patch[k];
+      continue;
+    }
+    // Going back to the helper cannot invent a printer, so the line returns to "not answered yet"
+    // — which the board says out loud rather than pointing at a printer nobody chose.
+    if (r.via) patch[k] = null;
   }
+
   const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: unknown } | null;
   const bag = { ...bagOf(s?.modules) };
   bag["printing"] = { ...(bag["printing"] || {}), mode };

@@ -109,13 +109,26 @@ echo $$ > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT INT TERM
 
 # ── HOW THIS AVOIDS TAKING OVER THE SCREEN, and what actually had to be done ─────────────────
-# Running the Chrome binary directly steals focus outright. open -g -j -n (-g don't raise,
-# -j hidden, -n own instance) was NOT enough either: measured on 2026-08-28 with a real URL, the
-# frontmost app still went Finder → Google Chrome. An about:blank test had said otherwise, which is
-# exactly the kind of easy test that ships a false promise.
-# So the launcher REMEMBERS who had the screen and hands it straight back. Measured after that:
-# Finder → Chrome → Finder. It is two extra lines and it is the difference between "a window
-# appeared over my work" and "nothing happened".
+# Running the Chrome binary directly steals focus outright. \`open -g -j -n\` (-g don't raise,
+# -j hidden, -n own instance) was NOT enough either: measured on 2026-08-28 AND again on 2026-08-29,
+# the frontmost app still went Terminal → Google Chrome. An about:blank test had said otherwise,
+# which is exactly the kind of easy test that ships a false promise.
+#
+# The first fix waited three seconds and handed focus back. That is still three seconds of Chrome
+# sitting on top of somebody's work, and it is what the owner saw. So it now HIDES the window
+# instead — the macOS equivalent of ⌘H — the moment it appears.
+#
+# BY PROCESS ID, NEVER BY NAME. \`set visible of process "Google Chrome" to false\` would hide the
+# restaurant's OWN Chrome as well: same app, same name, and hiding an app hides all of its windows.
+# The station runs with its own --user-data-dir, so that is what identifies it.
+#
+# IN A LOOP, because Chrome raises itself when the window is ready — which is after this script has
+# already moved on. Four seconds of retries, then it stops and never interferes again.
+#
+# AND A HIDDEN CHROME STILL PRINTS. Measured: a hidden window with these flags fired 30 timers in
+# 29 seconds — dead on one a second, no throttling at all. That is what the three
+# --disable-*backgrounding* flags above are for; without them macOS would slow a hidden tab to a
+# crawl and a ticket would print minutes late.
 WASFRONT="$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null)"
 open -g -j -n -a "Google Chrome" --args \\
   --user-data-dir="$PROFILE" \\
@@ -123,11 +136,20 @@ open -g -j -n -a "Google Chrome" --args \\
 ${CHROME_FLAGS.map((f) => `  ${f} \\`).join("\n")}
   "$SITE/$PANEL"
 
-# …and give the screen back to whoever had it.
-if [ -n "$WASFRONT" ] && [ "$WASFRONT" != "Google Chrome" ]; then
-  sleep 3
-  osascript -e "tell application \\"$WASFRONT\\" to activate" >/dev/null 2>&1
-fi
+# …and put it out of the way, targeting THIS Chrome and no other.
+(
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    CPID="$(pgrep -f "user-data-dir=$PROFILE" 2>/dev/null | head -1)"
+    if [ -n "$CPID" ]; then
+      osascript -e "tell application \\"System Events\\" to set visible of (first process whose unix id is $CPID) to false" >/dev/null 2>&1
+    fi
+    sleep 0.4
+  done
+  # Belt and braces: if anything above failed, give the screen back to whoever had it.
+  if [ -n "$WASFRONT" ] && [ "$WASFRONT" != "Google Chrome" ]; then
+    osascript -e "tell application \\"$WASFRONT\\" to activate" >/dev/null 2>&1
+  fi
+) &
 
 echo "    Chrome is running out of the way. It will print without ever coming to the front." | tee -a "$LOG"
 echo ""

@@ -238,6 +238,11 @@ const state = {
   // "settings should be organized": General / Tables / Users / Access / Billing /
   // Dining sessions instead of one long scroll). See SETTINGS_SECTIONS.
   settingsSection: "tables",   // "general" was removed — see SETTINGS_SECTIONS
+  // Printing: which mode the in-page confirmation strip is asking about, or null when it is not
+  // asking. Declared here rather than sprung into life on first click, because a field this file
+  // READS in formPrinting and only ever assigns in a handler is exactly how `state.helper` sat dead
+  // for a week (2026-08-20).
+  printAsk: null,
 };
 
 // ---------- tiny helpers ----------
@@ -1595,6 +1600,19 @@ function bindPrintingBoard(ed) {
   };
   ed.querySelectorAll('[data-pw]').forEach((el) => {
     const what = el.dataset.pw;
+    // ONE DROPDOWN, WHOSE OPTIONS ARE THE ANSWERS. "off", "" (not chosen), or "<agent>|<printer>".
+    if (what === "printerpick") {
+      el.onchange = async () => {
+        const kind = el.dataset.kind, v = el.value;
+        if (v === "off") { const d = await post("route", { kind, who: "off" }); if (d) { toast("Saved."); await loadPrintBoard(); } return; }
+        if (!v) { const d = await post("route", { kind, who: "none" }); if (d) { toast("Saved."); await loadPrintBoard(); } return; }
+        const cut = v.indexOf("|");
+        const agent = v.slice(0, cut), printer = v.slice(cut + 1);
+        const d = await post("route", { kind, who: "computer", agent, printer });
+        if (d) { toast("Saved."); await loadPrintBoard(); }
+      };
+      return;
+    }
     if (what === "printer" || what === "paper") {
       // A dropdown SAVES on change — there is no second Save button to forget to press.
       el.onchange = async () => {
@@ -1646,13 +1664,25 @@ function bindPrintingBoard(ed) {
         if (d) { toast(d.note || "Test page sent."); await loadPrintBoard(); }
         return;
       }
+      // THE CONFIRMATION IS PART OF THE SCREEN (owner, 2026-08-29: "whenever you switch, there is
+      // no UI for confirmation"). A browser confirm() is a grey box with no room to say what the
+      // switch costs, and on a phone it covers the very screen you are reading.
       if (what === "mode") {
         const m = el.dataset.mode;
         if (m === (B().mode === "screen" ? "screen" : "computer")) return;
-        const label = m === "screen" ? "A screen (Chrome)" : "A computer";
-        if (!confirm("Switch this restaurant to \u201c" + label + "\u201d?\n\nThe three paper lines below move with it — anything chosen for the other way is cleared, and a line set to \u201cnobody\u201d stays that way.")) return;
+        state.printAsk = m; renderEditor(); return;
+      }
+      if (what === "mode-cancel") { state.printAsk = null; renderEditor(); return; }
+      if (what === "mode-yes") {
+        const m = state.printAsk; state.printAsk = null;
         const d = await post("mode", { mode: m });
-        if (d) { toast("Saved."); await loadPrintBoard(); }
+        if (d) { toast("Saved."); await loadPrintBoard(); } else { renderEditor(); }
+        return;
+      }
+      // "Print them on this screen" — screen mode's one action, and it names THIS person.
+      if (what === "mine") {
+        const d = await post("mode", { mode: "screen", mine: true });
+        if (d) { toast("Kitchen tickets print here now."); await loadPrintBoard(); }
         return;
       }
       if (what === "off") {
@@ -13552,7 +13582,7 @@ function formPrinting(s) {
   const others = (B.agents || []).filter((a) => !mine || a.id !== mine.id);
   // NO NUMBER ON THIS ONE. It is not a step any more — it is what card 2's toggle reveals when the
   // answer is "a computer", and two cards both numbered "2 ·" is worse than neither being numbered.
-  const step2 = `<div class="card"><h3>The computers that can print</h3>
+  const step2 = `<div class="card"><h3>3 · The computer that prints</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       A computer prints by running one small program — the <b>helper</b>. It asks us every two seconds
       whether there is anything to print, and prints it. No window has to be open, nobody has to stay
@@ -13616,7 +13646,7 @@ function formPrinting(s) {
     ["computer", "A computer", "A small program prints silently. No window, nobody logged in. Each paper can have its own printer."],
     ["screen", "A screen (Chrome)", "This restaurant's own Chrome prints, out of the way, signed in as one person. Nothing to install."],
   ];
-  const step2mode = `<div class="card"><h3>2 · How this restaurant prints</h3>
+  const step2mode = `<div class="card"><h3>2 · How does the paper come out?</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       ${may
         ? "Pick one. Everything below changes to match it, and nothing from the other way stays on screen."
@@ -13628,6 +13658,19 @@ function formPrinting(s) {
           <b>${esc(label)}</b><small>${esc(what)}</small>
         </button>`).join("")}
     </div>
+    ${(may && state.printAsk) ? `
+    <div class="pw-confirm" role="alertdialog" aria-label="Confirm the change">
+      <div class="txt">
+        <b>Switch to “${esc((MODES.find(([m]) => m === state.printAsk) || [])[1] || "")}”?</b>
+        <span>${state.printAsk === "screen"
+          ? "The printers chosen for each paper are cleared. Kitchen tickets will print from one person's screen; bills and banquet sheets go back to whoever presses Print."
+          : "The person chosen is cleared. Each paper then needs a printer choosing on a computer running the helper."} A line set to <b>Nobody</b> stays that way.</span>
+      </div>
+      <div class="acts">
+        <button type="button" class="btn" data-pw="mode-cancel">Cancel</button>
+        <button type="button" class="btn primary" data-pw="mode-yes">Yes, switch</button>
+      </div>
+    </div>` : ""}
   </div>`;
 
   // ── the chosen mode's SETUP — one of these two, never both ──────────────────────────────────
@@ -13672,13 +13715,22 @@ function formPrinting(s) {
           `A page opens. Press <b>Allow</b>. That is the whole setup.`,
         ],
         (k, f) => `<b>After a shutdown:</b> ${esc(f.autostart)}`)
-    : `<div class="card"><h3>Whose screen prints</h3>
+    : `<div class="card"><h3>3 · Whose screen prints the kitchen tickets</h3>
         <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
-          ${may
-            ? `The launcher below opens a Chrome signed in as <b>you</b>, out of the way, and that Chrome does
-               the printing — on whatever printer this machine is set to. Aevidine can name somebody else instead.`
-            : `A screen prints this restaurant's paper${(B.routes && B.routes.kot && B.routes.kot.personName) ? ` — <b>${esc(B.routes.kot.personName)}</b>` : ""}, on whatever printer that machine is set to.`}
+          One person. When an order comes in, the ticket prints from <b>their</b> screen. Bills and banquet
+          sheets are not affected — whoever presses Print gets the window, exactly as now.
         </p>
+        ${(() => {
+          const kot = (B.routes || {}).kot || {};
+          const nm = kot.personName || "";
+          const meIsIt = kot.person && B.person && kot.person === B.person.id;
+          if (kot.via === "off") return `<p class="what"><b>Nobody</b> — kitchen slips do not print by themselves.</p>`;
+          if (!kot.person) return `<p class="what">Nobody is chosen yet, so no kitchen slip prints by itself.${may ? " Press below to make it this screen." : " Aevidine chooses who."}</p>`;
+          return `<p class="what"${meIsIt ? ' style="color:var(--green)"' : ""}>${meIsIt
+            ? "Kitchen tickets print on <b>this</b> screen."
+            : `Kitchen tickets print on <b>${esc(nm || "another person")}</b>'s screen.`}</p>`;
+        })()}
+        ${may ? `<div style="margin-top:10px"><button type="button" class="btn primary" data-pw="mine">Print them on this screen</button></div>` : ""}
       </div>` + fileCard(
         "The print-station file",
         `It opens a <b>separate</b> Chrome with its own profile, <b>out of the way</b>, with silent printing
@@ -13699,61 +13751,60 @@ function formPrinting(s) {
   // person and the device. The MODE answers "who" now, so a paper is simply on, or nobody — plus, in
   // computer mode, which printer.
   const agentName = (id) => ((B.agents || []).find((a) => a.id === id) || {}).name || "another computer";
+
+  // ── ONE CONTROL PER PAPER ──────────────────────────────────────────────────────────────────
+  // The same shape as the admin console's board, on purpose: two screens describing one setup in
+  // two visual languages is what made a person learn each separately. A line used to be an On
+  // button, a Nobody button, a printer picker and a paper picker; the options ARE the answers now,
+  // grouped by machine, saved on change.
+  //
+  // The value is "<agent uuid>|<printer name>" — a uuid can never contain a pipe, so splitting on
+  // the FIRST one is safe even for a printer called "Front|Desk".
+  const anyPrinters = (B.agents || []).some((a) => (a.printers || []).length);
   const line = (kind) => {
     const r = (B.routes || {})[kind] || {};
     const off = r.via === "off";
     const answered = !!r.via;
-    const here = mode === "computer" && mine && r.agent === mine.id;
+    const val = off ? "off" : (r.agent && r.printer ? r.agent + "|" + r.printer : "");
+    if (!may) {
+      return `<div class="pw-line">
+        <h4>${esc(L.kind[kind] || kind)}</h4>
+        <p class="what">${esc(L.what[kind] || "")}</p>
+        <p class="what" style="margin-top:8px"><b>${esc(
+          off ? (L.off[kind] || "Nobody")
+          : r.printer ? `${r.printer} on ${agentName(r.agent)}`
+          : "No printer chosen yet")}</b> — set by Aevidine.</p>
+      </div>`;
+    }
     return `<div class="pw-line">
       <h4>${esc(L.kind[kind] || kind)}</h4>
       <p class="what">${esc(L.what[kind] || "")}</p>
-      ${!may ? `<p class="what" style="margin-top:8px"><b>${esc(
-          off ? (L.off[kind] || "Nobody")
-          : mode === "screen" ? "On — printed by that screen"
-          : r.printer ? `${r.printer} on ${agentName(r.agent)}`
-          : "No printer chosen yet")}</b> — set by Aevidine.</p>`
-      : `
-      <div class="pw-who" role="group" aria-label="${esc(L.kind[kind] || kind)}">
-        <button type="button" class="pw-opt${off ? "" : " on"}" aria-pressed="${off ? "false" : "true"}"
-          data-pw="on" data-kind="${esc(kind)}">${off ? "Switch on" : "On"}</button>
-        <button type="button" class="pw-opt${off ? " on" : ""}" aria-pressed="${off ? "true" : "false"}"
-          data-pw="off" data-kind="${esc(kind)}">${esc(L.off[kind] || "Nobody")}</button>
+      <div class="pw-row" style="margin-top:9px">
+        <select data-pw="printerpick" data-kind="${esc(kind)}" style="min-width:250px"${anyPrinters ? "" : ` disabled title="Set this computer up above first — the printers come from it."`}>
+          <option value="off"${off ? " selected" : ""}>${esc(L.off[kind] || "Nobody")}</option>
+          <option value=""${!off && !answered ? " selected" : ""}>— no printer chosen yet —</option>
+          ${(B.agents || []).map((a) => `<optgroup label="${esc(a.name)}">${(a.printers || []).map((pr) => {
+            const v = a.id + "|" + pr.name;
+            return `<option value="${esc(v)}"${v === val ? " selected" : ""}>${esc(pr.name)}</option>`;
+          }).join("")}</optgroup>`).join("")}
+        </select>
+        ${(!off && r.agent && r.printer) ? `<button type="button" class="btn" style="padding:4px 9px;min-height:34px" data-pw="test" data-printer="${esc(r.printer)}">Test page</button>` : ""}
       </div>
-      ${(!off && mode === "computer" && here) ? `
-        <div class="pw-row">
-          <label class="muted" style="font-size:12.5px">Printer</label>
-          <select data-pw="printer" data-kind="${esc(kind)}" style="min-width:210px">
-            ${(mine.printers || []).map((p) => `<option value="${esc(p.name)}"${p.name === r.printer ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
-          </select>
-        </div>
-        ${((B.papersByKind || {})[kind] || B.papers || []).length === 0 ? `
-        <p class="what" style="margin-top:8px">${esc((B.paperElsewhere || {})[kind] || "")}</p>` : `
-        <details class="pw-more"><summary>More — paper size</summary>
-          <div class="pw-row">
-            <select data-pw="paper" data-kind="${esc(kind)}" style="min-width:200px">
-              ${((B.papersByKind || {})[kind] || B.papers || []).map((pp) => {
-                const chosen = pp.paper ? (r.paper && r.paper.wMm === pp.paper.wMm && r.paper.hMm === pp.paper.hMm) : !r.paper;
-                return `<option value="${esc(pp.id)}"${chosen ? " selected" : ""}>${esc(pp.label)}</option>`;
-              }).join("")}
-            </select>
-          </div>
-          <p class="what">The paper size is what stops a printer turning a slip sideways or shrinking it
-          to half. Leave it on <b>as the printer says</b> unless you know the roll is different.</p>
-        </details>`}` : ""}
-      ${(!off && mode === "computer" && !here && answered) ? `<p class="what" style="margin-top:8px">It prints on <b>${esc(r.printer || "a printer")}</b> at <b>${esc(agentName(r.agent))}</b>. Press <b>On</b> to move it to this computer.</p>` : ""}
-      ${(!off && mode === "computer" && !answered) ? `<p class="what" style="margin-top:8px">Nobody has chosen a printer for this yet — their screens say <b>“no printer chosen”</b> rather than going quiet.</p>` : ""}
-      ${(!off && mode === "screen") ? `<p class="what" style="margin-top:8px">Printed by that screen, on whatever printer the machine is set to.</p>` : ""}
+      ${!anyPrinters ? `<p class="what" style="margin-top:8px">Set this computer up above first — the printers in this list come from it.</p>` : ""}
       ${off ? `<p class="what" style="margin-top:8px">${esc(kind === "kot"
           ? "No slip comes out by itself. Orders still appear on the kitchen screen, and this is the same switch as “Kitchen slips print by themselves” at the top."
           : "No printer does it silently — the ordinary print window opens for whoever presses Print.")}</p>` : ""}
-      `}
     </div>`;
   };
-  const step3 = `<div class="card"><h3>3 · The three papers</h3>
+
+  // THE THREE PAPERS EXIST ONLY IN COMPUTER MODE.
+  // In screen mode there is nothing to answer here: one person's screen prints the KITCHEN TICKETS
+  // and the other two papers are printed by whoever presses Print, which is what a restaurant with
+  // no helper has always done (owner, 2026-08-29). Three lines saying "on" would be three controls
+  // that change nothing.
+  const step3 = mode !== "computer" ? "" : `<div class="card"><h3>4 · Which printer prints what</h3>
     <p class="muted" style="font-size:13px;margin:0 0 4px;line-height:1.5">
-      ${mode === "computer"
-        ? "Three lines, because this app prints three pieces of paper. Each one just needs a printer — or “nobody”."
-        : "Three lines, because this app prints three pieces of paper. Each one is simply on, or “nobody”."}
+      One line per piece of paper this app prints. Pick the printer it comes out of — or nobody.
     </p>
     ${(B.kinds || ["kot", "bill", "banquet"]).map(line).join("")}
   </div>`;
@@ -13772,7 +13823,10 @@ function formPrinting(s) {
   const skAge = !sk.oldestMs ? "" : Number(sk.oldestMs) < 60000 ? "under a minute"
     : Number(sk.oldestMs) < 3600000 ? Math.round(Number(sk.oldestMs) / 60000) + " minutes"
     : Math.round(Number(sk.oldestMs) / 3600000) + " hours";
-  const step4 = `<div class="card"><h3>${esc(STEP.four || "4 · What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
+  // Numbered by what came BEFORE it: choosing a computer adds a step that choosing a screen does not,
+  // so this is 5 one way and 4 the other. The admin console numbers it the same way, from the same
+  // rule, because two boards that number one setup differently are two setups to learn.
+  const step4 = `<div class="card"><h3>${mode === "computer" ? "5" : "4"} · ${esc(STEP.four || "What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px">
       Nothing here is a guess: a job says <b>printed</b> only after the printer confirmed it.
     </p>
