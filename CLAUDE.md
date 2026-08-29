@@ -223,6 +223,11 @@ update the detail doc's section in the same commit.
   `LFH_BACK.layer(...)` (panels) the moment it's built — never hand-roll pushState/popstate.
 - **🧱 A new MODULE adds no column to `settings`** (110 already): declare `moduleBag: true` in
   `lib/accessModel.ts`, ladder goes in `settings.modules` (mig 326). `verify:settings-columns`.
+- **♻️ A NEW WAY REPLACES THE OLD ONE — never leave both** (owner, 2026-08-29, STANDING): adding a
+  thing REMOVES the thing that did that job, in the same change; changing how a feature works removes
+  the previous way. *"There is two printing things, one is working and one is just showing."* Delete
+  the old path, its buttons, its storage keys and its duplicate guides; leave an obituary comment.
+  Full text: `docs/CLAUDE-DETAIL.md` → "A new way replaces the old one".
 - **📍 EVERY problem / bug / improvement / idea you list MUST say WHERE IT LIVES** (owner,
   2026-08-12, STANDING — he was left "completely lost" by a list that named files only): **panel →
   exact screen or tab → what he would SEE → only then the file**, and **"backend only, nothing on

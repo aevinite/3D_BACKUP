@@ -333,6 +333,49 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // ── send one page to a printer ────────────────────────────────────────────────────────────
   // A REAL job on the real road (kind='test'), because a test that takes a different path can pass
   // while the path that matters is broken.
+  // ── THE QUEUE'S OWN CONTROLS (owner, 2026-08-29) ──────────────────────────────────────────
+  // "Make a button also in the printing queue — you can delete one of the prints from the queue, or
+  // maybe you can stop the queue, restart the queue."
+  //
+  // A TICKET IS NEVER DELETED, it is DISMISSED: the row and its reason stay, so "why did table 6's
+  // slip never come out" has an answer months later. This is the same rule the bills live under and
+  // it costs nothing to keep.
+  if (seg[0] === "job" && seg[1] && seg[2] === "cancel") {
+    const upd = await sb.from("print_jobs")
+      .update({ status: "dismissed", done_at: new Date().toISOString(), error: "cancelled by Aevidine from the printing queue" })
+      .eq("id", seg[1]).eq("restaurant_id", rid).in("status", ["queued", "printing", "failed"])
+      .select("id, kind").maybeSingle();
+    if (upd.error) return err("Could not take that one out of the queue.");
+    if (!upd.data) return err("That ticket has already printed or is not this restaurant's.", 404);
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: `cancelled a ${(upd.data as { kind?: string }).kind || "print"} from the queue` });
+    return NextResponse.json({ ok: true });
+  }
+  // PUT IT BACK IN THE QUEUE — for one that gave up after five tries. Its attempt count resets,
+  // because the thing that was wrong (paper, power, a cable) has presumably been fixed.
+  if (seg[0] === "job" && seg[1] && seg[2] === "retry") {
+    const upd = await sb.from("print_jobs")
+      .update({ status: "queued", attempts: 0, claimed_at: null, error: null })
+      .eq("id", seg[1]).eq("restaurant_id", rid).in("status", ["failed", "dismissed"])
+      .select("id").maybeSingle();
+    if (upd.error) return err("Could not put that one back in the queue.");
+    if (!upd.data) return err("Only a ticket that failed or was cancelled can go back in.", 404);
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: "put a ticket back in the printing queue" });
+    return NextResponse.json({ ok: true });
+  }
+  // STOP / RESTART THE WHOLE QUEUE. Deliberately NOT the same as switching printing off: tickets go
+  // on being made and go on waiting, and the moment it restarts they come out. Switching printing
+  // off instead would stop them being made at all, and the paper for those orders would never exist.
+  if (seg[0] === "queue") {
+    const paused = body.paused === true;
+    const cur = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: Record<string, Record<string, unknown>> } | null;
+    const bag = { ...(cur?.modules || {}) };
+    bag["printing"] = { ...(bag["printing"] || {}), paused };
+    const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    if (up.error) return err("Could not change the queue.");
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: paused ? "printing queue STOPPED — tickets wait" : "printing queue restarted" });
+    return NextResponse.json({ ok: true, paused });
+  }
+
   if (seg[0] === "test") {
     const agentId = String(body.agentId || ""), printer = String(body.printer || "");
     if (!agentId || !printer) return err("Pick a computer and one of its printers.");

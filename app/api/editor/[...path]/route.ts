@@ -72,12 +72,15 @@ const BACKUP_PRINTER_MS = 30000;
 // AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
   const [stQ, helper, route] = await Promise.all([
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
     targetFor(rid, "kot"),
   ]);
-  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
-  const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // A STOPPED QUEUE holds every screen too, not just the helper — otherwise "stop the queue" would
+  // stop the computer and let a screen carry on printing, which is not stopping anything.
+  const paused = st?.modules?.printing?.paused === true;
+  const on = !paused && st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
   // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
   // plain words. It is derived from the route now, never stored.
   const target = route.kind === "screen"

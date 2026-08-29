@@ -50,8 +50,13 @@ async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
  *  auto-print must be on. When either is off the helper is told "nothing to print" and idles — it
  *  is not an error, and a restaurant that pauses printing must not fill a log with refusals. */
 async function printingOn(rid: string): Promise<boolean> {
-  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle())
-    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle())
+    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // …AND THE QUEUE MUST NOT BE STOPPED (owner, 2026-08-29: "you can stop the queue, restart the
+  // queue"). Stopping is deliberately NOT the same as switching printing off: the tickets go on
+  // being made and go on waiting, so the moment it restarts they all come out. Switching printing
+  // off instead stops them being made at all, and that paper would never exist.
+  if (s?.modules?.printing?.paused === true) return false;
   return s?.auto_print_kot === true && s?.auto_print_kot_allowed === true;
 }
 

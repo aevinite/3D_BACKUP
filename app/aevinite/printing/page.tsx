@@ -39,6 +39,9 @@ type State = {
   kinds: string[]; printing: { allowed: boolean; on: boolean };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
   mode?: "computer" | "screen";
+  /** The queue is STOPPED: tickets keep being made and keep waiting until it is restarted. Not the
+   *  same as printing being switched off, which stops them being made at all. */
+  paused?: boolean;
   files?: Record<string, { filename: string; autostart: string; text: string }>;
   stationFiles?: Record<string, { filename: string; firstRun: string; text: string }>;
 };
@@ -473,6 +476,22 @@ const PANEL_GROUPS: [ string, string ][] = [
 
               The toggle is not cosmetic: writeMode() rewrites the three paper lines into the new
               mode's shape, so the board and the paper can never say different things. */}
+          {/* ── PRINTING IS OFF: everything below is dead, and it LOOKS dead ─────────────────
+              Owner, 2026-08-29: "if the printing is off, grey out the stuff which is at the bottom.
+              This is the basic thing I don't have to tell you." Right — a screen that lets you set a
+              printer up for a feature that is switched off is a screen that lies about what it does.
+              The cards stay VISIBLE (so the setup can be read and understood before switching it on)
+              but nothing in them can be touched, and one line says why. */}
+          <fieldset disabled={!st.printing.allowed} className={st.printing.allowed ? "" : "adm-offblock"}
+            style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+          {!st.printing.allowed ? (
+            <p className="adm-muted" style={{ margin: "14px 0 0", fontSize: 13 }}>
+              <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 7 }} />
+              Printing is switched <b>off</b> for this restaurant, so none of the setup below does
+              anything yet. Switch it on above to use it.
+            </p>
+          ) : null}
+
           {/* ═══════════════════════════════════════════════════════════════════════════════════
               2 · THE ONE QUESTION, AND ONLY THE CHOSEN ANSWER'S SETUP
               ═══════════════════════════════════════════════════════════════════════════════════
@@ -620,11 +639,18 @@ const PANEL_GROUPS: [ string, string ][] = [
                           onChange={(e) => void pickPrinter(kind, e.target.value)}>
                           <option value="off">{KIND_OFF_LABEL[kind] || "Nobody"}</option>
                           <option value="">— not decided yet —</option>
+                          {/* THE COMPUTER IS THE GROUP, AND IT SAYS HOW IT IS (owner, 2026-08-29:
+                              "there should be a dropdown that how many printers it has and how many
+                              are connected… if the PC is disconnected, both printers will be
+                              disconnected only"). A printer is only reachable through its machine,
+                              so a sleeping machine's printers are not offerable — they are shown,
+                              greyed, under a group that says the computer is asleep. */}
                           {agents.map((a) => (
-                            <optgroup key={a.id} label={a.name}>
+                            <optgroup key={a.id}
+                              label={`${a.name} · ${a.printers.length} printer${a.printers.length === 1 ? "" : "s"} · ${a.connected ? "connected" : "asleep — its printers cannot be used"}`}>
                               {a.printers.map((pr) => (
-                                <option key={pr.name} value={`${a.id}\u0000${pr.name}`}>
-                                  {pr.name}{pr.paper ? ` · ${paperLabel(pr.paper)}` : ""}
+                                <option key={pr.name} value={`${a.id}\u0000${pr.name}`} disabled={!a.connected}>
+                                  {pr.name}{pr.paper ? ` · ${paperLabel(pr.paper)}` : ""}{a.connected ? "" : " (asleep)"}
                                 </option>
                               ))}
                             </optgroup>
@@ -729,6 +755,8 @@ const PANEL_GROUPS: [ string, string ][] = [
             </>
           )}
 
+          </fieldset>
+
           {/* ── 4 · what has happened ───────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14, marginBottom: 30 }}>
             <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>
@@ -738,6 +766,29 @@ const PANEL_GROUPS: [ string, string ][] = [
               The last few pieces of paper, and what became of them. Nothing here is a guess: a job says
               “done” only after the printer confirmed it.
             </p>
+            {/* ── STOP / RESTART THE QUEUE (owner, 2026-08-29) ────────────────────────────────
+                Deliberately NOT the same as switching printing off in step 1. Stopped, the tickets
+                go on being MADE and go on waiting — restart it and they all come out, in order.
+                Switching printing off stops them being made at all, and that paper never exists. */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", margin: "0 0 12px" }}>
+              {st.paused ? (
+                <>
+                  <span style={{ fontSize: 12.5, color: "var(--adm-warn, #f5a524)", fontWeight: 700 }}>
+                    <i className="fas fa-circle-pause" aria-hidden="true" style={{ marginRight: 6 }} />
+                    The queue is stopped — tickets are piling up, nothing is printing
+                  </span>
+                  <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={!!busy}
+                    onClick={async () => { const d = await post("queue", { paused: false }); if (d) { toast("The queue is running again.", "ok"); void load(); } }}>
+                    Restart the queue
+                  </button>
+                </>
+              ) : (
+                <button className="adm-btn" style={{ fontSize: 12 }} disabled={!!busy}
+                  onClick={async () => { const d = await post("queue", { paused: true }); if (d) { toast("The queue is stopped — tickets will wait.", "ok"); void load(); } }}>
+                  Stop the queue
+                </button>
+              )}
+            </div>
             {/* HOW FAR BEHIND, not just how many (owner, 2026-08-27: "'the printer is off' and 'the
                 printer is off and eleven orders are stacked up' stop looking the same"). The same
                 field, the same words and the same threshold as the kitchen's own 🖨 sheet and the
@@ -773,6 +824,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                   <thead><tr style={{ textAlign: "left", color: "var(--muted)" }}>
                     <th style={{ padding: "6px 8px" }}>What</th><th style={{ padding: "6px 8px" }}>Where</th>
                     <th style={{ padding: "6px 8px" }}>Result</th><th style={{ padding: "6px 8px" }}>When</th>
+                    <th style={{ padding: "6px 8px" }} />
                   </tr></thead>
                   <tbody>
                     {st.recent.map((j) => (
@@ -787,6 +839,22 @@ const PANEL_GROUPS: [ string, string ][] = [
                           {j.error ? <div className="adm-muted" style={{ fontSize: 11.5 }}>{j.error}</div> : null}
                         </td>
                         <td style={{ padding: "6px 8px" }} className="adm-muted">{new Date(j.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</td>
+                        {/* ONE TICKET AT A TIME. "Take it out" DISMISSES it — the row and its reason
+                            stay, so "why did table 6's slip never come out" still has an answer
+                            months later. Nothing here deletes anything. */}
+                        <td style={{ padding: "6px 8px", textAlign: "right", whiteSpace: "nowrap" }}>
+                          {j.status === "queued" || j.status === "printing" ? (
+                            <button className="adm-btn" style={{ fontSize: 11.5, padding: "3px 8px" }} disabled={!!busy}
+                              onClick={async () => { const d = await post(`job/${j.id}/cancel`, {}); if (d) { toast("Taken out of the queue.", "ok"); void load(); } }}>
+                              Take it out
+                            </button>
+                          ) : j.status === "failed" || j.status === "dismissed" ? (
+                            <button className="adm-btn" style={{ fontSize: 11.5, padding: "3px 8px" }} disabled={!!busy}
+                              onClick={async () => { const d = await post(`job/${j.id}/retry`, {}); if (d) { toast("Back in the queue.", "ok"); void load(); } }}>
+                              Print it again
+                            </button>
+                          ) : null}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

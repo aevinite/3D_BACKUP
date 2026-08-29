@@ -1541,7 +1541,6 @@ function openKitchenMenu() {
     <button class="dw-row" type="button" data-kdw="settings">⚙️ Settings</button>
     <button class="dw-row" type="button" data-kdw="printer">🖨 Printer</button>
     <button class="dw-row" type="button" data-kdw="issue">🚩 Report an issue</button>
-    <a class="dw-row" href="/print-setup.html" target="_blank" rel="noopener">📖 Printer setup guide</a>
     <div class="dw-foot" id="kdsBuild"></div>`;
   document.body.appendChild(back); document.body.appendChild(dw);
   const close = () => { back.remove(); dw.remove(); if (kdsDrawerOff) { const o = kdsDrawerOff; kdsDrawerOff = null; o(); } };
@@ -1599,6 +1598,14 @@ function renderKitchenSettings() {
   // PRINTING IS ABSENT, NOT GREYED, WHEN IT IS OFF FOR THE RESTAURANT (owner's rule). `auto` is
   // already "on AND this room prints", so a counter-only restaurant sees the explanation once, not a
   // set of controls it can never use.
+  // ── FACTS ONLY (owner, 2026-08-29) ────────────────────────────────────────────────────────
+  // This used to carry the same "take the printer over / stop printing here / setup guide" controls
+  // as the manager panel's strip — the model from BEFORE the Printing board, where a restaurant
+  // worked out who printed by tapping around its own screens. Keeping it alongside the new one meant
+  // two printing systems on one restaurant: "right now there is two printing things, one is working
+  // and one is just showing."
+  //
+  // The admin names one person on Printing. This screen states where the paper comes out and stops.
   const printSection = (!auto && tgt !== "counter") ? "" : `
     <div class="kset-sec">
       <h4>🖨 Printing</h4>
@@ -1606,17 +1613,11 @@ function renderKitchenSettings() {
       <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>
       <div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
       <div class="kset-line"><span>Printing right now</span><b>${printingHere ? "THIS screen" : st && st.active ? (st.stale ? holder + " (gone quiet)" : holder) : "no screen yet"}</b></div>
-      ${printingHere
-        ? `<p class="kset-note">Tickets are coming out of this screen's printer. It keeps working when this window is minimised or covered — that is what the setup guide's launcher is for.</p>
-           <div class="kset-btns"><button class="btn" type="button" data-kstation="release">Stop printing on this screen</button>
-           <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`
+      <p class="kset-note">${printingHere
+        ? "Tickets are coming out of this screen's printer, and they keep coming when this window is minimised or covered."
         : heldByOther
-          ? `<p class="kset-note">Tickets are coming out at <b>${holder}</b>. If the printer is actually here, take it over — the other screen stops printing straight away.</p>
-             <div class="kset-btns"><button class="btn primary" type="button" data-kstation="take">🖨 Print here instead</button>
-             <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`
-          : `<p class="kset-note">No screen is printing yet. Turn it on here, on the computer the printer is attached to.</p>
-             <div class="kset-btns"><button class="btn primary" type="button" data-kstation="take">🖨 Print on this screen</button>
-             <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`}
+          ? `Tickets are coming out at <b>${holder}</b>.`
+          : "No screen has taken the printer yet. Aevidine chooses which screen prints, on the Printing screen."}</p>
       `}
     </div>`;
   box.innerHTML = `
@@ -1654,21 +1655,9 @@ function renderKitchenSettings() {
     if (el) el.click();
     renderKitchenSettings();
   }));
-  box.querySelectorAll("[data-kstation]").forEach((b) => (b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    const take = b.dataset.kstation === "take";
-    try {
-      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
-      if (r && r.station) state.station = r.station;
-      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
-      renderKitchenSettings();
-      if (take) load().catch(() => {});     // anything already waiting prints straight away
-    } catch (e) {
-      b.disabled = false;
-      toast("Couldn't change that: " + (e.message || "try again"));
-    }
-  }));
+  // [data-kstation] is gone with the buttons it bound — taking the printer off another screen was
+  // the old model's answer to a question the Printing board answers now. The named screen claims it
+  // by itself (public/panels/editor/app.js → managerPrintPass), so there is nothing to tap.
 }
 
 // ── One-tap printer problem report (owner, 2026-08-04) ──────────────────────────────
@@ -1786,13 +1775,13 @@ function openPrinterSheet() {
     ${status}
     <p class="prsheet-sub">Something wrong? One tap — the manager is told right away.</p>
     ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}
-    <!-- THE SETUP GUIDE LIVES HERE ON THIS SCREEN (owner, 2026-08-18: "where is this setup in the app").
-         The kitchen panel has no settings screen and its top bar is deliberately fought over to the pixel
-         (see buildMoreMenu) — so the guide goes where somebody standing at a misbehaving printer already
-         reaches: the 🖨❗ sheet. A link, not a button that does something, so a cook cannot mistake it for a
-         report. The full switches live in the manager panel's Settings → Kitchen printing. -->
-    <button class="btn prsheet-row prsheet-help" type="button" data-prsettings><span>⚙️</span> Printer settings on this screen</button>
-    <a class="btn prsheet-row prsheet-help" href="/print-setup.html" target="_blank" rel="noopener"><span>📖</span> How to set this printer up (full guide)</a></div>`;
+    <!-- THE SETUP GUIDE HAS LEFT THIS SHEET (owner, 2026-08-29). It was put here on 2026-08-18
+         ("where is this setup in the app") when a cook's screen could still be talked through
+         becoming the printer. It cannot any more — the admin names one person on the Printing board
+         — so a link telling a cook how to set a printer up is an instruction to do something this
+         screen will not let them do. Reporting a problem, which IS this sheet's job, stays.
+         The guide lives with the setup, in the admin console, and nowhere else. -->
+    <button class="btn prsheet-row prsheet-help" type="button" data-prsettings><span>⚙️</span> Where printing stands</button></div>`;
   document.body.appendChild(ov);
   const close = () => { ov.remove(); if (prSheetOff) { const off = prSheetOff; prSheetOff = null; off(); } };
   prSheetOff = window.LFH_BACK ? LFH_BACK.layer("printer-problem", close) : null;

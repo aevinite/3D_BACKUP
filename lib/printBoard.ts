@@ -57,6 +57,8 @@ export type BoardState = {
   /** WHICH OF THE TWO MODES this restaurant is on — the one toggle the whole card 3 hangs off
    *  (owner, 2026-08-28: "you only see the option you have selected"). */
   mode: PrintMode;
+  /** The queue is stopped: tickets keep being made and keep waiting until it is restarted. */
+  paused: boolean;
   /** The helper this browser set up, when a restaurant set itself up (mig 367). Null on the admin's
    *  screen and on any device that has not registered itself. */
   thisComputer: AgentView | null;
@@ -99,7 +101,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     sb.from("print_jobs").select(JOB_COLS).eq("restaurant_id", rid)
       .order("created_at", { ascending: false }).limit(Math.min(30, Math.max(5, opts?.recent ?? 12))),
     // Kitchen slips only: they are the paper with a person standing over it, and a bill waiting two
@@ -122,6 +124,12 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     stuck: { ...stuck, afterMs: STUCK_AFTER_MS },
     recent: (jobs.data || []) as BoardJob[],
     mode,
+    // STOPPED, not switched off — the two are different answers and the board says which. Tickets go
+    // on being made while it is stopped; restart it and they come out (owner, 2026-08-29).
+    paused: (() => {
+      const m = (setRow.data as { modules?: Record<string, { paused?: boolean }> } | null)?.modules;
+      return !!(m && m.printing && m.printing.paused === true);
+    })(),
     printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true },
     thisComputer: dv ? agents.find((a) => a.owner_device === dv) || null : null,
   };

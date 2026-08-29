@@ -1697,7 +1697,6 @@ function bindPrintingBoard(ed) {
         const kind = el.dataset.kind;
         const md = B().mode === "screen" ? "screen" : "computer";
         if (md === "screen") {
-          lsSet(PRINT_HERE_KEY, "on");   // naming this screen IS this device agreeing to print
           const d = await post("route", { kind, who: "screen" });
           if (d) { toast("Saved."); await loadPrintBoard(); }
           return;
@@ -1727,7 +1726,6 @@ function bindPrintingBoard(ed) {
         // screen print?" — without it the route would point at a browser that has never agreed to
         // print anything, and the paper would simply never come. Answering "nobody" or "a computer"
         // does not switch the device off: another kind of paper may still be its job.
-        if (who === "screen") lsSet(PRINT_HERE_KEY, "on");
         const d = await post("route", body);
         if (d) { toast("Saved."); await loadPrintBoard(); }
         return;
@@ -13512,8 +13510,9 @@ async function printJobHere(id, btn) {
 // referencing a name that no longer existed — a ReferenceError on every floor render. verify:print-queue
 // caught it; that is what the check is for.)
 const PRINT_SETUP_URL = "/print-setup.html";
-const PRINT_HERE_KEY = "lfh_print_here";        // "on" | "off" — this device's answer, this browser
-const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v === "on" || v === "off" ? v : ""; };
+// PRINT_HERE_KEY / printHereAnswer are GONE (owner, 2026-08-29). They stored, per browser, this
+// device's answer to "should this screen print?" — a second place where the question could be
+// answered differently from the Printing board. One question, one answer, one place.
 // What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
 // read, so the strip only ever asks a question the admin has actually opened.
 let printTargetSays = null;
@@ -13524,99 +13523,62 @@ let printOwners = {};
 const printOwner = (kind) => { const o = printOwners && printOwners[kind]; return o && o.owned ? o : null; };
 let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
 
-// The one-question strip, above the floor grid, in the same visual grammar as the printer-problem
-// strip that already lives there (mig 269) — a restaurant should not have to learn a second one.
+// ── THE STRIP SAYS WHAT IS HAPPENING. IT DOES NOT ASK. ───────────────────────────────────────
+//
+// Owner, 2026-08-29, on seeing the old one still there: *"why this is coming, the old logic of
+// printing… I told you to remove old logic, keep only one logic which we have build right now."*
+//
+// It used to ask every screen "should THIS screen print the kitchen tickets?", keep that answer in
+// this browser's localStorage, and offer to take the printer off whichever screen held it. That was
+// the model BEFORE the Printing board: a restaurant worked out who printed by tapping around its own
+// screens. It is not the model any more — the admin names one person on Printing, and this screen's
+// job is to do it, not to re-open the question in a second place with a different answer.
+//
+// So: no question, no buttons, no per-device opt-in. Three facts and silence otherwise. The station
+// is claimed automatically by the named screen (see managerPrintPass), because the decision was
+// already made and a screen that waits to be tapped is a printer that never prints.
 function printStationStripHtml() {
-  // A COMPUTER OWNS THE PAPER (mig 341). There is nothing to ask this screen — but there IS something
-  // to say, because a manager who used to see "printing here" and now sees nothing would reasonably
-  // think printing had broken. One quiet line, no buttons: a fact, not a question.
+  // A COMPUTER OWNS THE PAPER (mig 341) — nothing for a screen to do, but a manager who used to see
+  // "printing here" and now sees nothing would reasonably think printing had broken.
   const hlpS = printTargetSays && printTargetSays.helper && printTargetSays.helper.owned ? printTargetSays.helper : null;
   if (hlpS) {
     return `<div class="prstrip"><div class="prstrip-row">
       <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">Kitchen tickets print on <b>${esc(hlpS.printer)}</b> from <b>${esc(hlpS.agent)}</b>${hlpS.connected ? "" : " — that computer is asleep, tickets are waiting"}<small>No screen needs to be open for this, and this screen cannot take it over.</small></span>
+      <span class="prstrip-txt">Kitchen tickets print on <b>${esc(hlpS.printer)}</b> from <b>${esc(hlpS.agent)}</b>${hlpS.connected ? "" : " — that computer is asleep, tickets are waiting"}<small>No screen needs to be open for this.</small></span>
     </div></div>`;
   }
   if (!printTargetSays || !printTargetSays.mayPrint) return "";
-  const ans = printHereAnswer();
-  if (ans === "off") return "";                       // answered no: never ask again on this device
   const stnS = printTargetSays.station || null;
-  // ANOTHER SCREEN HOLDS IT — shown whatever this device answered. The first version only told a
-  // screen that had said "no", which left the confusing case out: a counter screen switched ON but
-  // NOT holding the station showed "this screen is printing" while the paper came out elsewhere.
+  // ANOTHER SCREEN IS THE ONE — a fact, not an offer. Moving it is done on the Printing board, by
+  // naming somebody else; a "take it over" button here is a second way to answer one question.
   if (stnS && stnS.active && !stnS.mine && !stnS.stale) {
-    // Another screen holds printing: say so once, with the one tap that moves it here. Not a warning —
-    // this is the normal state on every screen that is not the printer.
-    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"));
+    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "the kitchen screen" : "the counter screen"));
     return `<div class="prstrip"><div class="prstrip-row">
       <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">Kitchen tickets are printing on <b>${who}</b><small>If the printer is actually at this screen, take it over — one tap, and that screen stops.</small></span>
-      <button class="btn" data-station-set="take">Print here instead</button>
-      <button class="btn" data-printhere-set="off">Not this screen</button>
+      <span class="prstrip-txt">Kitchen tickets print on <b>${who}</b><small>Aevidine chooses which screen — this one is not it.</small></span>
     </div></div>`;
   }
-  if (ans === "on" && stnS && stnS.mine) {
+  if (stnS && stnS.mine) {
     const last = lastPrintedHere
       ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
-      : (printTargetSays.target === "both"
-          ? "Waiting — it prints anything the kitchen hasn't within 30 seconds."
-          : "Waiting for the next order.");
+      : "Waiting for the next order.";
     return `<div class="prstrip"><div class="prstrip-row">
       <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">This screen is printing the kitchen tickets<small>${last}</small></span>
-      <a class="btn" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Guide</a>
-      <button class="btn" data-printhere-set="off">Stop printing here</button>
+      <span class="prstrip-txt">This screen prints the kitchen tickets<small>${last}</small></span>
     </div></div>`;
   }
-  if (ans === "on") {
-    // Said yes, holds nothing (nobody does): one tap to actually become the printer. Without this the
-    // screen sat saying "yes" with no station and no explanation of why nothing printed.
-    return `<div class="prstrip"><div class="prstrip-row">
-      <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">This screen is ready to print — nothing has taken the printer yet<small>Press once on the computer the printer is attached to.</small></span>
-      <button class="btn primary" data-station-set="take">🖨 Print on this screen</button>
-      <button class="btn" data-printhere-set="off">Not this screen</button>
-    </div></div>`;
-  }
-  return `<div class="prstrip"><div class="prstrip-row">
-    <span class="prstrip-ico">🖨</span>
-    <span class="prstrip-txt">Should <b>this screen</b> print the kitchen tickets?<small>${
-      printTargetSays.target === "both"
-        ? "Your admin has set the counter screen as the BACKUP printer — it prints anything the kitchen hasn't within 30 seconds. Say yes only on the computer the printer is attached to."
-        : "Your admin has set kitchen tickets to print on the counter screen. Say yes only on the computer the printer is attached to — never on a phone."
-    }</small></span>
-    <button class="btn primary" data-printhere-set="on">Yes, print here</button>
-    <button class="btn" data-printhere-set="off">No</button>
-  </div></div>`;
+  return "";
 }
 // Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
 // a yes prints anything already waiting straight away — so answering IS the test that it works.
 function bindPrintStationStrip(root) {
   // 🖨 take over / stop — the server decides and answers with the new state, so the screen never
-  // shows itself as the printer on the strength of its own click (mig 338).
-  (root || document).querySelectorAll("[data-station-set]").forEach((b) => (b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    const take = b.dataset.stationSet === "take";
-    try {
-      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
-      if (r && r.station && printTargetSays) printTargetSays.station = r.station;
-      if (take) lsSet(PRINT_HERE_KEY, "on");     // taking it IS the answer to "should this screen print?"
-      okToast(r, take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
-      if (state.tab === "tables") renderEditor(); else if (state.tab === "general") renderEditor();
-      if (take) managerPrintPass();              // anything already waiting prints straight away
-    } catch (e) {
-      b.disabled = false;
-      toast("Couldn't change that: " + (e.message || "try again"), "err");
-    }
-  }));
-  (root || document).querySelectorAll("[data-printhere-set]").forEach((b) => (b.onclick = () => {
-    const v = b.dataset.printhereSet === "on" ? "on" : "off";
-    lsSet(PRINT_HERE_KEY, v);
-    if (v === "on") { toast("This screen will print the kitchen tickets ✓", "ok"); managerPrintPass(); }
-    else toast("This screen will not print kitchen tickets.", "ok");
-    if (state.tab === "tables") renderEditor();   // repaint the strip in place (there is no renderTables)
-  }));
+  // The strip has no buttons any more (see printStationStripHtml). Both binders are gone with them:
+  //   · [data-station-set]   — "take the printer off that screen" / "stop printing here". Moving the
+  //                            printer is done by naming somebody else on the Printing board.
+  //   · [data-printhere-set] — the per-browser yes/no to "should this screen print?", which was a
+  //                            second answer to a question the admin had already answered.
+  // The claim is automatic now, in managerPrintPass, for the screen the admin actually named.
 }
 
 // ── SETTINGS → PRINTING: where printing stands, and how to set a printer up ──────────────────────
@@ -13965,19 +13927,11 @@ function formPrinting(s) {
     <div style="margin-top:10px"><button type="button" class="btn" data-pw="reload">Refresh</button></div>
   </div>`;
 
-  const guide = `<div class="card"><h3>📖 The written guide, with pictures of every step</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
-      Opens as its own page — every step for <b>Windows</b>, a <b>Mac</b> and <b>Linux</b>: plugging the
-      printer in, the paper settings, what each setting does, a what-went-wrong table, and which devices
-      can never be the printer. It has a button to save it as a PDF and take it to the shop.
-    </p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a class="btn primary" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Open the guide</a>
-      <a class="btn" href="${PRINT_SETUP_URL}#windows" target="_blank" rel="noopener">🪟 Windows</a>
-      <a class="btn" href="${PRINT_SETUP_URL}#mac" target="_blank" rel="noopener">🍎 Mac</a>
-      <a class="btn" href="${PRINT_SETUP_URL}#linux" target="_blank" rel="noopener">🐧 Linux</a>
-    </div>
-  </div>`;
+  // THE GUIDE CARD IS GONE (owner, 2026-08-29). Setting a printer up is the admin's job on the
+  // Printing screen, which carries the file and the five steps beside the thing they apply to. A
+  // second copy of "how to print" in the restaurant's own settings was the old model's leftover:
+  // it explained a setup this panel can no longer perform, in different words from the board above.
+  const guide = "";
 
   return step1 + step2mode + step2setup + step3 + step4 + guide;
 }
@@ -13989,16 +13943,15 @@ function formPrinting(s) {
 // by another window is exactly the situation the owner reported, and a print that does not happen is
 // reported failed and requeued rather than lost.
 let printPassBusy = false;
+// One automatic claim per page load. A screen that cannot take the printer (another live screen has
+// it) must not hammer the endpoint every poll.
+let stationClaimTried = false;
 async function managerPrintPass() {
   if (printPassBusy) return;
-  // A device that has said NO never asks the server anything. A device that has not answered yet asks
-  // ONCE (so the strip can appear at all) and prints nothing until it is answered.
-  const ans = printHereAnswer();
-  // A device that has said NO never PRINTS — but it still has to be able to SAY where the paper
-  // comes out, or the Printing screen on the counter machine would show the old "which screen
-  // prints?" question while a computer was quietly doing the job (mig 341). So it asks ONCE, keeps
-  // the answer for the display, and then stops asking. One request, not a poll.
-  if (ans === "off" && printTargetSays) return;
+  // NO PER-DEVICE OPT-IN ANY MORE. This used to read a localStorage answer to "should this screen
+  // print?" and stay silent until somebody tapped yes. That question belongs to the Printing board
+  // now — the admin names one person — so a screen that waits to be tapped is simply a printer that
+  // never prints. The server's `off` is the only gate.
   printPassBusy = true;
   try {
     const r = await api("GET", "/print-jobs/pending");
@@ -14010,6 +13963,14 @@ async function managerPrintPass() {
     // printBanquetBill() read this to decide whether to send the job to a computer or to open the
     // window as they always have.
     printOwners = (r && r.helpers) || printOwners;
+    // CLAIM IT, DO NOT ASK FOR IT. The admin named this screen on the Printing board; if no live
+    // station holds the printer, this one takes it silently. Only when the server says this screen
+    // may print (`!r.off`) — every other screen leaves it alone, so two screens never race.
+    if (r && !r.off && r.station && !r.station.mine && (!r.station.active || r.station.stale) && !stationClaimTried) {
+      stationClaimTried = true;                       // once per load: a failed claim must not loop
+      try { const t = await api("POST", "/print-station/take", {}); if (t && t.station) says.station = t.station; }
+      catch { /* the next pass tries again after a reload — never a retry storm */ }
+    }
     const stationKey = (v) => v && v.station && v.station.active ? `${v.station.active.device_id}:${v.station.mine}:${v.station.stale}` : String(!!(v && v.station));
     // A helper appearing or going quiet must repaint too, or the floor strip keeps yesterday's answer.
     const helperKey = (v) => v && v.helper && v.helper.owned ? `${v.helper.agent}:${v.helper.printer}:${v.helper.connected}` : "none";
