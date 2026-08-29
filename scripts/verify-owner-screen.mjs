@@ -542,6 +542,11 @@ check("…and there is one tap to see the rest",
   /setAllChips\(true\)/.test(auditC) && /\+ \{hiddenChipCount\} more/.test(auditC),
   "app/owner/activity/page.tsx: the folded chips have no way to be shown — that is hiding, not folding.");
 
+// 25 — the pager scrolls the element that actually scrolls (owner, 2026-08-29)
+check("paging moves the real scroller, not the window",
+  /for \(const sel of \[".adm-main", ".adm"\]\)/.test(auditC) && !/window\.scrollTo/.test(auditC),
+  "app/owner/activity/page.tsx: the Pager is back on window.scrollTo. The window NEVER scrolls on the\n       owner console — above 900px .adm-main is the scroller, below it .adm is — so that line moves\n       nothing, and 'page 2 opens at the top' is left resting on the list collapsing while it loads.");
+
 // …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
 // It is a note because the words live in public/panels/auditsort.js, which the owner console only
 // READS — a guard that goes red over a file its own territory cannot edit is a guard that gets

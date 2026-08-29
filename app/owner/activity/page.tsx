@@ -876,8 +876,29 @@ function Pager({ page, pages, total, onGo }: { page: number; pages: number; tota
   if (pages <= 1) return null;
   const go = (p: number) => {
     onGo(Math.min(Math.max(1, p), pages));
-    // Back to the top: paging keeps the scroll position otherwise, so page 2 opens half way down.
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+    // ── BACK TO THE TOP, ON THE ELEMENT THAT ACTUALLY SCROLLS (T12 sweep, 2026-08-29) ────────────
+    // This used to be `window.scrollTo`, and the window NEVER scrolls on the owner console: above
+    // 900px the pane `.adm-main` is the scroller, at or below it globals.css makes `.adm-main`
+    // overflow-y:visible and `.adm` the 100dvh scroller instead. Measured at 1280x800 the document
+    // is 800/800; at 360x780 it is 780/780. So the line had never moved anything, on any width,
+    // since it was written.
+    //
+    // Paging DID still land you at the top, by a second route: changing the page re-runs the fetch
+    // effect, which sets the rows to null first, so the list collapses to "Loading…" and the
+    // scroller has nowhere left to be. That is real but accidental — the day someone keeps the old
+    // rows on screen while the next page loads (a perfectly reasonable change) the top-of-page
+    // behaviour would vanish with it and nobody would connect the two.
+    //
+    // Same shape as scrollPort() in app/owner/page.tsx and port() in
+    // app/aevinite/restaurants/page.tsx, which both solved this first: ask which element is really
+    // scrolling, then move THAT one. Verified after the change with the collapse still in place
+    // (22,483 -> 0) and with it defeated by holding the rows (also -> 0, which is the half that
+    // never worked before).
+    if (typeof document === "undefined") return;
+    for (const sel of [".adm-main", ".adm"]) {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (el && el.scrollHeight > el.clientHeight + 2) { el.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    }
   };
   // Which numbers to draw: always the first and last, plus a window around the current page.
   const nums: (number | "…")[] = [];
