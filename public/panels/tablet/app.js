@@ -2816,7 +2816,14 @@ function renderSplitBill(t, opts = {}) {
           return scaled;
         })()
       : (() => {                                   // equal, and the starting point for custom
-          const each = Math.floor((due / n) * 100) / 100;
+          // A PAISA NUDGE BEFORE ROUNDING DOWN, or one person quietly pays the others' rounding
+          // (split-bill 500, 2026-08-29). ₹555.55 ÷ 5 is ₹111.11 exactly in money, but in binary it is
+          // 111.10999999999999, so (due/n)*100 lands on 11110.999999999998 and Math.floor takes it to
+          // 11110 — a whole paisa short, five times over, and the LAST part absorbs all 5. On ₹9999.99
+          // ÷ 9 the last person paid 9 paise more than everyone else, on a screen whose whole promise
+          // is "same amount each". The nudge is far smaller than a paisa, so it can only rescue a
+          // value that was already a hair under a whole paisa; a genuine 111.109 still floors to 111.10.
+          const each = Math.floor((due / n) * 100 + 1e-6) / 100;
           const out = Array.from({ length: n }, () => each);
           out[n - 1] = round2(due - each * (n - 1));
           return out;

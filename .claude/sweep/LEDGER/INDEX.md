@@ -33,15 +33,19 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P36858`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P37358`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
+> **THE SPLIT BILL — a whole 500 on one feature** at `P36858`–`P37357` (2026-08-29). Asked for
+> after three faults he found on that screen were fixed and made live. Not a territory sweep: one
+> feature, followed from the button that opens it to the row it writes and the money the book is
+> left owing — across BOTH panels, because they are two screens holding one set of rules.
+>
 > **T7 · the waiter tablet — a SECOND, freshly planned 500** at `P35237`–`P35736` (2026-08-29).
 > Not a re-run: the owner asked for the whole test to be **planned again from scratch** after his
 > ten items were merged and made live, because the territory had changed under the old plan — a
 > brand-new split screen, a payment sheet with a panel removed, four functions deleted, a tile
 > threshold moved and a repaint newly guarded. Run against the DEPLOYED backup site, not a dev
 > server, since "after making it live" is the point of it.
-**Next free ID: `P35358`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
 > **SWEEP #7 took `P15101`–`P35100`** — 40 terminals × 500, contiguous and in terminal order, so
 > T1 is `P15101`–`P15600`, T5 is `P17101`–`P17600`, and T40 is `P34601`–`P35100`. Each terminal
