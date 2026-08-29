@@ -2878,7 +2878,12 @@ function renderSplitBill(t, opts = {}) {
   const partRows = () => legs.map((l, i) => `
     <div class="sb-row" data-i="${i}">
       <div class="sb-who">${l.label ? esc(l.label) : `Person ${i + 1}`}</div>
-      <input type="number" inputmode="decimal" min="0" step="1" class="sb-amt" value="${esc(l.amount)}"
+      <!-- step="0.01", NOT "1" (owner, 2026-08-29, on the manager's copy of this box; the tablet had
+           it too). Every split amount is money with paise, and THIS SCREEN FILLS THEM IN ITSELF —
+           an even split of ₹459.90 three ways writes 153.29 / 153.29 / 153.32 into these boxes. The
+           box was refusing the numbers the app had just put in it, and a waiter correcting one by
+           hand was forced to round to whole rupees. -->
+      <input type="number" inputmode="decimal" min="0" step="0.01" class="sb-amt" value="${esc(l.amount)}"
         placeholder="₹ amount"${mode === "equal" ? " readonly" : ""}>
       <select class="sb-way">${WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
       ${legs.length > 2 && mode !== "ticket" ? `<button type="button" class="sb-del" aria-label="Remove this part">✕</button>` : `<span></span>`}
@@ -3397,7 +3402,15 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
           </div>
         </div>
-        ${opts.crm === false ? "" : `
+        ${opts.crm === false ? "" : (opts.knownCust && opts.knownCust.phone ? `
+        <!-- ALREADY ASKED, SO DO NOT ASK AGAIN (owner, 2026-08-29). The number was taken earlier in
+             this same visit; asking a second time on the way out reads as though the first answer
+             was thrown away, and an empty box invites a DIFFERENT number onto one bill. -->
+        <div class="pay-cust pay-cust-known" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+          <div style="font-size:13px;font-weight:700;margin:0 0 3px">📱 Customer <span style="color:var(--muted);font-weight:400">— already saved for this table</span></div>
+          <div class="pay-cust-have" style="font-size:13px;font-weight:700;margin:0 0 8px">${esc(opts.knownCust.name ? `${opts.knownCust.name} · ${opts.knownCust.phone}` : opts.knownCust.phone)}</div>
+          <button type="button" class="btn small pay-cust-change">Change</button>
+        </div>` : `
         <div class="pay-cust" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
           <div style="font-size:13px;font-weight:700;margin:0 0 3px">📱 Save customer <span style="color:var(--muted);font-weight:400">— optional, only if they agree</span></div>
           <div style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Lets you spot regulars and greet them by name next time.</div>
@@ -3408,7 +3421,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none">
             <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
           </label>
-        </div>`}
+        </div>`)}
         <!-- SPLITTING LIVES UNDER 🧾 KOT ▾, AND THIS IS ITS SECOND DOOR (owner, 2026-08-28):
              "you can only split with the kot option or small written if you want split on billing
              at bottom and both have same interface as the kot one". So it is a small written line,
@@ -3474,6 +3487,28 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // screen is how the two drifted apart in the first place.)
     // Repeat-customer recognition: as the waiter types a known number, show a chip and
     // pre-fill the name. Read-only lookup (stores nothing); debounced to one call.
+    // "Change" — the one way out of the already-saved line, and it opens PRE-FILLED, because the
+    // second half of his instruction was "if it is asked, it should be autofill because I have
+    // already filled it previously". (owner, 2026-08-29.)
+    {
+      const chBtn = ov.querySelector(".pay-cust-change");
+      if (chBtn) chBtn.onclick = () => {
+        const box = ov.querySelector(".pay-cust-known");
+        const k = opts.knownCust || {};
+        const inp = "width:100%;box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:8px";
+        box.classList.remove("pay-cust-known");
+        box.innerHTML = `
+          <div style="font-size:13px;font-weight:700;margin:0 0 3px">📱 Save customer <span style="color:var(--muted);font-weight:400">— optional, only if they agree</span></div>
+          <input type="tel" inputmode="numeric" class="pay-cust-phone" maxlength="20" placeholder="Mobile number" style="${inp}" value="${esc(k.phone || "")}">
+          <input type="text" class="pay-cust-name" maxlength="80" placeholder="Name (optional)" style="${inp}" value="${esc(k.name || "")}">
+          <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 8px"></div>
+          <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;color:var(--text);cursor:pointer">
+            <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none" checked>
+            <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
+          </label>`;
+      };
+    }
+
     const phoneEl = ov.querySelector(".pay-cust-phone");
     if (phoneEl) {
       const nameEl = ov.querySelector(".pay-cust-name");
@@ -3516,6 +3551,16 @@ async function payBillWithMethod(t, a) {
     split: true,
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
+    // WHO THIS TABLE'S CUSTOMER ALREADY IS, if anybody has been asked once (owner, 2026-08-29:
+    // "you have asked for a mobile number and that already, then why are you asking right now
+    // again?"). Read the way the bill-customer sheet reads it further down this file, so the two
+    // can never disagree: this SESSION's own customer, scoped to its session id.
+    knownCust: (() => {
+      const sess = (state.data.sessions || []).find((x) => String(x.table_number) === String(t) && x.status !== "closed");
+      if (sess && sess.cust_phone) return { phone: sess.cust_phone, name: sess.cust_name || "" };
+      const row = partyOrders(t).find((o) => o.bill_cust_phone || o.bill_cust_name);
+      return row ? { phone: row.bill_cust_phone || "", name: row.bill_cust_name || "" } : null;
+    })(),
   };
   const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`, opts);
   if (!picked) return;

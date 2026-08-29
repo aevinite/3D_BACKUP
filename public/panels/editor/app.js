@@ -4607,7 +4607,17 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <button type="button" class="btn primary pay-split-go" style="width:100%">Take payment</button>
           </div>
         </div>
-        ${opts.crm === false ? "" : `
+        ${opts.crm === false ? "" : (opts.knownCust && opts.knownCust.phone ? `
+        <!-- ALREADY ASKED, SO DO NOT ASK AGAIN (owner, 2026-08-29). Somebody took this customer's
+             number earlier in this same visit — at the bill-customer step — and being asked for it
+             a second time on the way out reads as though the first answer was thrown away. Worse,
+             an empty box invites a DIFFERENT number to be typed for one bill.
+             So the number that was given is shown, as a fact, with one way to change it. -->
+        <div class="pay-cust pay-cust-known" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)">
+          <label class="dish-edit-lbl">📱 Customer <span class="muted small">— already saved for this table</span></label>
+          <div class="pay-cust-have small" style="margin:-2px 0 6px;font-weight:700">${esc(opts.knownCust.name ? `${opts.knownCust.name} · ${opts.knownCust.phone}` : opts.knownCust.phone)}</div>
+          <button type="button" class="btn small pay-cust-change">Change</button>
+        </div>` : `
         <div class="pay-cust" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)">
           <label class="dish-edit-lbl">📱 Save customer <span class="muted small">— optional, only if they agree</span></label>
           <div class="muted small" style="margin:-2px 0 6px">Lets you spot regulars and greet them by name next time.</div>
@@ -4618,7 +4628,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none">
             <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
           </label>
-        </div>`}
+        </div>`)}
       </div>
       <div class="dish-edit-foot"><button type="button" class="btn dish-edit-cancel">Cancel</button></div>
     </div></div>`);
@@ -4627,6 +4637,9 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const close = () => wrap.remove();
     // Read the optional customer fields at finish time (DPDP: only sent if consented).
     const readCust = () => {
+      // Already saved for this table → the boxes are not on screen and there is nothing new to
+      // send. Returning null is right: the settle does not need to re-save a customer the session
+      // already carries, and it must not blank one either. (owner, 2026-08-29.)
       const pe = wrap.querySelector(".pay-cust-phone");
       if (!pe) return null;
       const ne = wrap.querySelector(".pay-cust-name"), ce = wrap.querySelector(".pay-cust-consent");
@@ -4732,9 +4745,23 @@ function openPaymentMethodModal(due, label, opts = {}) {
           khata: was.khata || null,
         });
       }
-      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === n));
       const bo0 = wrap.querySelector(".pay-split-byorder"); if (bo0) bo0.classList.remove("sel");
       renderSplit();
+    }
+    // THE COUNT ON THE CHIPS IS THE NUMBER OF PARTS ON SCREEN — always (owner, 2026-08-29, with a
+    // screenshot: three rows filled in and "2" still highlighted).
+    //
+    // It used to be set inside splitTo() only, so it followed the CHIP you tapped and nothing else.
+    // "＋ Add another part" and the ✕ on a row both change how many parts there are and neither
+    // touched it, so after one tap of Add the header said 2 while the screen showed 3. A number
+    // that contradicts what is under it is worse than no number: the waiter has to decide which of
+    // the two to believe, mid-service, with the customer waiting.
+    //
+    // So it is worked out from `legs.length` in ONE place, called by renderSplit() — which every
+    // path that changes the parts already goes through. A future fourth way to add a part inherits
+    // it without anybody remembering to.
+    function syncSplitCount() {
+      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === legs.length));
     }
     wrap.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
 
@@ -4770,12 +4797,19 @@ function openPaymentMethodModal(due, label, opts = {}) {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}">
           ${l.label ? `<div class="psr-label muted small">${esc(l.label)}</div>` : ""}
-          <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
+          <!-- step="0.01", NOT "1" (owner, 2026-08-29, with the browser's own tooltip in the shot:
+               "Please enter a valid value. The two nearest valid values are 9 and 10." on 9.9).
+               Every split amount is money with paise, and THIS SCREEN FILLS THEM IN ITSELF — an even
+               split of ₹459.90 three ways puts 153.29 / 153.29 / 153.32 in these very boxes. So the
+               box was refusing the numbers the app had just written into it, and the waiter could
+               not correct one by hand without rounding it to whole rupees. -->
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
           <select class="psr-method">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
           ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part">✕</button>` : `<span class="psr-del-gap"></span>`}
           ${l.method === "Other" ? `<input type="text" class="dish-edit-custominput psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque">` : ""}
           ${l.method === PAY_LATER ? `<button type="button" class="btn psr-who">${l.khata ? "📒 " + esc(l.khata.label) + " — change" : "📒 Who owes this? — pick a person"}</button>` : ""}
         </div>`).join("");
+      syncSplitCount();          // the chips follow the rows, whatever changed them
       rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
         const i = Number(row.dataset.i);
         // Typing an amount must NOT re-render — that would blur the box mid-keystroke. Only the
@@ -4846,7 +4880,34 @@ function openPaymentMethodModal(due, label, opts = {}) {
       });
     };
 
+    // "Change" — the one way out of the already-saved line. It swaps the fact for the ordinary
+    // boxes, PRE-FILLED with what is already there, because the second half of his instruction was
+    // "if it is asked, it should be autofill because I have already filled it previously". An empty
+    // box here is how one bill ends up with a different number from the one the guest gave.
+    {
+      const chBtn = wrap.querySelector(".pay-cust-change");
+      if (chBtn) chBtn.onclick = () => {
+        const box = wrap.querySelector(".pay-cust-known");
+        const k = opts.knownCust || {};
+        box.classList.remove("pay-cust-known");
+        box.innerHTML = `
+          <label class="dish-edit-lbl">📱 Save customer <span class="muted small">— optional, only if they agree</span></label>
+          <div class="muted small" style="margin:-2px 0 6px">Lets you spot regulars and greet them by name next time.</div>
+          <input type="tel" inputmode="numeric" class="dish-edit-custominput pay-cust-phone" maxlength="20" placeholder="Mobile number" style="margin-bottom:6px" value="${esc(k.phone || "")}">
+          <input type="text" class="dish-edit-custominput pay-cust-name" maxlength="80" placeholder="Name (optional)" style="margin-bottom:6px" value="${esc(k.name || "")}">
+          <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 6px"></div>
+          <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none" checked>
+            <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
+          </label>`;
+        wireCustRecognise();
+      };
+    }
+
     // Repeat-customer recognition: known number → chip + pre-fill name. Read-only, debounced.
+    // A FUNCTION, not a one-shot, because "Change" above rebuilds these boxes and they have to be
+    // wired again. Two copies of this would be two behaviours within a week.
+    function wireCustRecognise() {
     const phoneEl = wrap.querySelector(".pay-cust-phone");
     if (phoneEl) {
       const nameEl = wrap.querySelector(".pay-cust-name");
@@ -4869,6 +4930,8 @@ function openPaymentMethodModal(due, label, opts = {}) {
         }, 400);
       });
     }
+    }
+    wireCustRecognise();
   });
 }
 
@@ -4984,6 +5047,19 @@ async function markTablePaid(t, mtpOpts = {}) {
     // share (owner, 2026-08-21: "i could able to do it by order or amount"). Un-accepted orders
     // are dropped for the same reason they are dropped from the settle itself.
     orders: os.filter((o) => o.status !== "received"),
+    // WHO THIS TABLE'S CUSTOMER ALREADY IS, if anybody has been asked once (owner, 2026-08-29:
+    // "you have asked for a mobile number and that already, then why are you asking right now
+    // again? … If it is asked, it should be autofill because I have already filled it previously").
+    //
+    // Read exactly the way the bill-customer sheet reads it, so the two can never disagree: this
+    // SESSION's own customer first, else the one already printed on this session's bill. Scoped to
+    // this session_id — one table's customer can never appear on another's screen.
+    knownCust: (() => {
+      const sess = openSessionForTable(mergeParentOf(t) || t) || openSessionForTable(t);
+      if (sess && sess.cust_phone) return { phone: sess.cust_phone, name: sess.cust_name || "" };
+      const row = os.find((o) => o.bill_cust_phone || o.bill_cust_name);
+      return row ? { phone: row.bill_cust_phone || "", name: row.bill_cust_name || "" } : null;
+    })(),
   };
   const r = await payOrdersWithMethod(os, `Mark table ${t} paid`, opts);
   if (r && r.special === "khata") { await khataParkFlow(t, os); return; }
