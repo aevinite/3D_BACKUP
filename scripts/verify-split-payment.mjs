@@ -194,7 +194,7 @@ const RULES = [
     (t) => /pay-split-open/.test(t) && /kotop === "split"/.test(t) && /renderSplitBill\(/.test(t)],
 
   ["choosing how many parts fills the amounts in EVENLY",
-    /function splitTo\(n\)/, /Math\.floor\(\(due \/ n\) \* 100\) \/ 100/],
+    /function splitTo\(n\)/, /Math\.floor\(\(due \/ n\) \* 100 \+ 1e-6\) \/ 100/],
 
   ["…with the last part absorbing the odd paise, so they add up exactly",
     /i === n - 1 \? Math\.round\(\(due - each \* \(n - 1\)\) \* 100\) \/ 100/,
@@ -319,6 +319,134 @@ for (const [rule, mgrPat, tabPat] of RULES) {
 // And the thing the merge was FOR: the tablet must not grow a second split screen again.
 want(!/function openSplitPay\b/.test(TAB) && (TAB.match(/pay-split-nrow/g) || []).length === 0,
   "tablet: there is ONE split screen, not a copy inside the pay sheet as well (owner, 2026-08-28)");
+
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 7 · EVERY SHAPE A BROWSER COULD SEND, judged by the REAL rule (split-bill 500, 2026-08-29)
+//
+// The sections above check that the rule is WRITTEN. This one CALLS it, once per shape, so a
+// rewrite of badSplitShape that still reads right but behaves differently is caught. Only the
+// failures print — a wall of ninety ticks buries the one line that matters.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+head("7 · every shape a browser could send, judged by the real rule");
+{
+  let quiet = 0, loud = failed;
+  const q = (c, m, got) => { if (c) quiet++; else bad(m, got); };
+  const leg = (amount, method = "Cash") => ({ amount, method });
+  const named = (m) => (m === ps.PAY_LATER ? { amount: 50, method: m, khataName: "Ravi" } : leg(50, m));
+  const good = (a) => shape(a) === null;
+  const refused = (a) => typeof shape(a) === "string";
+
+  for (const m of ps.SPLIT_METHODS.filter((x) => x !== ps.PAY_LATER))
+    q(good([leg(100, m), leg(100, m)]), `two parts both paid by ${m} are accepted`);
+  for (const mix of [["Cash", "UPI"], ["UPI", "Card"], ["Card", "Other"], ["Other", ps.PAY_LATER],
+                     [ps.PAY_LATER, "Cash"], ["UPI", ps.PAY_LATER], ["Cash", "Cash"], ["Card", "Card"],
+                     ["Other", "UPI"], ["UPI", "UPI"]])
+    q(good([named(mix[0]), named(mix[1])]), `a bill paid ${mix[0]} + ${mix[1]} is accepted`);
+  for (let n = 2; n <= 12; n++) q(good(Array.from({ length: n }, () => leg(10))), `${n} parts are accepted`);
+  for (const n of [13, 16, 20, 50, 400])
+    q(refused(Array.from({ length: n }, () => leg(10))), `${n} parts is refused — twelve is the most a bill can be cut into`);
+  for (const a of [0.01, 0.05, 0.5, 1, 9.9, 99.99, 100, 1234.56, 99999.99])
+    q(good([leg(a), leg(a)]), `a part of ₹${a} is accepted`);
+
+  // Each of these is a different way a browser, a retry or a bad connection could send nonsense.
+  const REFUSE = [
+    ["nothing at all", undefined], ["null", null], ["a plain number", 5], ["a word", "two"],
+    ["an object, not a list", { a: 1 }], ["an empty list", []], ["one part only — that is not a split", [leg(100)]],
+    ["a part with no amount", [{ method: "Cash" }, leg(100)]], ["a part with no way to pay", [{ amount: 100 }, leg(100)]],
+    ["a part that is not an object", ["100", leg(100)]], ["a null part", [null, leg(100)]],
+    ["an amount of zero", [leg(0), leg(100)]], ["a negative amount", [leg(-10), leg(110)]],
+    ["an amount typed as a word", [leg("abc"), leg(100)]], ["an amount that is Not a Number", [leg(NaN), leg(100)]],
+    ["a negatively endless amount", [leg(-Infinity), leg(100)]], ["an amount as an empty string", [leg(""), leg(100)]],
+    ["an amount as an object", [leg({ v: 100 }), leg(100)]],
+    ["a way to pay nobody offers", [leg(50, "Bitcoin"), leg(50)]], ["a way to pay that is empty", [leg(50, ""), leg(50)]],
+    ["a way to pay that is a number", [leg(50, 7), leg(50)]], ["a way to pay that is null", [leg(50, null), leg(50)]],
+    ["a way to pay in the wrong case", [leg(50, "cash"), leg(50)]],
+    ["a way to pay with spaces round it", [leg(50, " Cash "), leg(50)]],
+    ["a note longer than any real note", [{ amount: 50, method: "Cash", note: "x".repeat(300) }, leg(50)]],
+  ];
+  for (const [label, sh] of REFUSE) q(refused(sh), `refused: ${label}`);
+  // A refusal nobody can read is a refusal nobody can act on.
+  for (const [label, sh] of REFUSE) {
+    const msg = shape(sh);
+    q(typeof msg === "string" && msg.length > 8 && /[a-z] [a-z]/.test(msg),
+      `…and "${label}" is refused in a sentence, not a code`, msg);
+  }
+  // The tab rules, called rather than read.
+  q(/needs a person/.test(shape([leg(50, ps.PAY_LATER), leg(50)]) || ""),
+    "a tab with nobody's name on it is refused — a debt cannot belong to no one");
+  q(good([{ amount: 50, method: ps.PAY_LATER, khataName: "Ravi" }, leg(50)]), "…and the same tab WITH a name is accepted");
+  q(good([{ amount: 50, method: ps.PAY_LATER, khataCustomerId: "abc" }, leg(50)]), "…or with someone already in the book");
+  q(/Only one part/.test(shape([{ amount: 50, method: ps.PAY_LATER, khataName: "A" },
+                                { amount: 30, method: ps.PAY_LATER, khataName: "B" }, leg(20)]) || ""),
+    "only ONE part may be a tab, so a debt cannot be recorded against the wrong person");
+  q(refused([leg(100, ps.PAY_LATER), leg(100, ps.PAY_LATER)]),
+    "a bill cannot be ENTIRELY on a tab — that is the whole-bill Pay Later button, not a split");
+  // Same question, same answer, every time: no hidden state between calls.
+  for (let i = 0; i < 10; i++)
+    q(shape([leg(50), leg(50)]) === shape([leg(50), leg(50)]) && shape([leg(0)]) === shape([leg(0)]),
+      `the same shape judged twice gives the same answer (${i + 1})`);
+  // WHAT IS DELIBERATELY *NOT* REFUSED HERE, and why that is safe. JavaScript turns `[100]` into
+  // 100 and `true` into 1, and a huge or over-precise amount is a perfectly good number. None of
+  // them can change what is collected: the parts still have to equal the due the SERVER worked out,
+  // and that gate is two lines below badSplitShape's caller. Refusing them here would only move
+  // the same "no" one layer earlier — so this records the reasoning instead of pretending.
+  q(good([leg([100]), leg(100)]) && Number([100]) === 100,
+    "an amount written as a one-item list becomes a definite number, and still has to match the bill");
+  q(good([leg(true), leg(100)]) && Number(true) === 1, "an amount written as true becomes ₹1, and still has to match the bill");
+  q(good([leg(1e15), leg(1)]), "an amount bigger than any real bill passes the shape check and is stopped by the total");
+  q(good([leg(10.005), leg(10)]), "an amount finer than paise passes the shape check and is rounded before anything is written");
+  q(good([leg(Infinity), leg(100)]) && /Number\.isFinite\(sum\)/.test(PS),
+    "an endless amount is stopped by the TOTAL gate, not the shape gate — and that line exists");
+  if (failed === loud) ok(`${quiet} shapes judged, every one as it should be`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 8 · AN EVEN SPLIT ALWAYS ADDS BACK UP TO THE BILL (split-bill 500, 2026-08-29)
+//
+// The panel fills the boxes in evenly, and the server refuses parts that miss the due by more than
+// two paise. So the fill formula and the gate have to agree on EVERY bill, not just round ones —
+// ₹483 ÷ 7 does not divide, and neither does ₹0.05 ÷ 6.
+//
+// The formula is READ OUT OF THE PANEL rather than retyped here, because a guard that re-implements
+// the rule it checks proves nothing about the rule that ships. If the panel's line changes, the
+// first check below goes red and the property below it is re-derived from the new line.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+head("8 · an even split of any bill adds back up to that bill");
+{
+  let quiet = 0, loud = failed;
+  const q = (c, m, got) => { if (c) quiet++; else bad(m, got); };
+  const MGRSRC = read("public/panels/editor/app.js");
+  // The nudge is part of the formula, not an optional extra — without it ₹555.55 ÷ 5 fills in as
+  // 111.10 × 4 + 111.15, and one person pays the other four's rounding. See the panel's own note.
+  const floorEach = /const each = Math\.floor\(\(due \/ n\) \* 100 \+ 1e-6\) \/ 100;/.test(MGRSRC);
+  const lastCarries = /Math\.round\(\(due - each \* \(n - 1\)\) \* 100\) \/ 100 : each/.test(MGRSRC);
+  want(floorEach, "the panel fills each part by rounding down to the paisa, with the nudge that stops a binary hair short of a paisa becoming a whole paisa short");
+  want(lastCarries, "…and the LAST part carries the remainder, which is what makes the parts equal the bill exactly");
+  if (floorEach && lastCarries) {
+    // byte-for-byte the panel's two lines
+    const evenSplit = (due, n) => {
+      const each = Math.floor((due / n) * 100 + 1e-6) / 100;
+      return Array.from({ length: n }, (_, i) => (i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each));
+    };
+    const DUES = [0.05, 1, 1.01, 2, 3, 5, 7, 9.99, 10, 10.01, 12.34, 20, 33.33, 49.5, 50, 66.67, 75, 99.99, 100,
+      100.01, 101, 123.45, 150, 199.99, 200, 222.22, 250, 299.99, 300, 333.33, 350, 400, 449.5, 483, 500, 555.55,
+      600, 666.66, 700, 777.77, 800, 850.5, 900, 999.99, 1000, 1001, 1234.56, 1500, 1999.99, 2000, 2500, 3333.33,
+      5000, 7777.77, 9999.99, 10000, 12345.67, 20000, 50000, 99999.99, 123456.78];
+    for (const due of DUES) for (let n = 2; n <= 12; n++) {
+      const parts = evenSplit(due, n);
+      const sum = Math.round(parts.reduce((a, x) => a + x, 0) * 100) / 100;
+      // the server's own tolerance, from lib/paySplit.ts
+      q(Math.abs(sum - due) <= 0.02, `₹${due} split ${n} ways adds back up to ₹${due} — the server would accept it`, sum);
+      if (due >= n * 0.01) {
+        q(parts.every((x) => x > 0), `₹${due} split ${n} ways gives ${n} parts, none of them zero or negative`, parts);
+        q(Math.max(...parts) - Math.min(...parts) <= n * 0.01,
+          `₹${due} split ${n} ways is fair — no part is more than a few paise off the others`, parts);
+      }
+    }
+    if (failed === loud) ok(`${quiet} even splits proved — ${DUES.length} different bills, every part count from 2 to 12`);
+  }
+}
 
 console.log(failed
   ? `\n✗ ${failed} check(s) failed — split payment does not hold its rules\n`

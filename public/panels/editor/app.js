@@ -4734,7 +4734,14 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // last part absorbs the odd paise, the same rule the printed bill splits its tax lines by.
     // A method already chosen on a row is kept, so changing "how many" never loses a pick.
     function splitTo(n) {
-      const each = Math.floor((due / n) * 100) / 100;
+      // A PAISA NUDGE BEFORE ROUNDING DOWN, or one person quietly pays the others' rounding
+      // (split-bill 500, 2026-08-29). ₹555.55 ÷ 5 is ₹111.11 exactly in money, but in binary it is
+      // 111.10999999999999, so (due/n)*100 lands on 11110.999999999998 and Math.floor takes it to
+      // 11110 — a whole paisa short, five times over, and the LAST part absorbs all 5. On ₹9999.99
+      // ÷ 9 the last person paid 9 paise more than everyone else, on a screen whose whole promise
+      // is "same amount each". The nudge is far smaller than a paisa, so it can only rescue a
+      // value that was already a hair under a whole paisa; a genuine 111.109 still floors to 111.10.
+      const each = Math.floor((due / n) * 100 + 1e-6) / 100;
       const kept = legs.slice(0, n);
       legs.length = 0;
       for (let i = 0; i < n; i++) {
@@ -13937,7 +13944,8 @@ async function openSplitSettle(t) {
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
   const bodyEl = wrap.querySelector(".ss-body"), sumEl = wrap.querySelector(".ss-sum");
   // Equal shares that sum EXACTLY to the due (last share absorbs the rounding).
-  const equalLegs = () => { const base = Math.floor((due / n) * 100) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
+  // The same paisa nudge as the pay-sheet split above, for the same reason — see the note there.
+  const equalLegs = () => { const base = Math.floor((due / n) * 100 + 1e-6) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
   const personAmounts = () => { const per = Array.from({ length: n }, () => 0); dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; }); const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100); const drift = Math.round((due - scaled.reduce((s, x) => s + x, 0)) * 100) / 100; scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100; return scaled; };
   const legRow = (i, amount, editable, label) => `<div class="ss-leg" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
       <span class="muted" style="min-width:64px">${label || `Person ${i + 1}`}</span>
