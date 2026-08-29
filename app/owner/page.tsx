@@ -1767,26 +1767,28 @@ export default function OwnerDashboard() {
                           the whole "figures hidden" explanation vanished and every remaining cell
                           slid under the wrong heading (T5 sweep, 2026-08-06). Same shape, same
                           hide-s classes, message in the always-visible Revenue column. */}
+                      {/* data-l is what the PHONE layout prints as each figure's label — on a stacked
+                          row there is no header above it to read. See the <=760px block below. */}
                       {r.reportsOff ? (
                         <>
-                          <td className="mut hide-s">—</td>
-                          <td className="mut" title="Reports are switched off for this restaurant, so its figures aren't shown here.">
+                          <td className="mut hide-s" data-l="Today">—</td>
+                          <td className="mut" data-l="Figures" title="Reports are switched off for this restaurant, so its figures aren't shown here.">
                             <span style={{ opacity: .7 }}><i className="fas fa-eye-slash" style={{ marginRight: 6, fontSize: 10 }} aria-hidden="true" />figures hidden</span>
                           </td>
-                          <td className="mut">—</td>
-                          <td className="mut hide-s">—</td>
+                          <td className="mut" data-l="Orders">—</td>
+                          <td className="mut hide-s" data-l="Avg / order">—</td>
                         </>
                       ) : (
                         <>
-                          <td className="mut hide-s"><AnimatedNumber value={r.today} money /></td>
-                          <td><b><AnimatedNumber value={r.revenue} money /></b></td>
-                          <td className="mut"><AnimatedNumber value={r.orders} /></td>
-                          <td className="mut hide-s"><AnimatedNumber value={r.avg} money /></td>
+                          <td className="mut hide-s" data-l="Today"><AnimatedNumber value={r.today} money /></td>
+                          <td data-l={`Revenue · ${RANGE_LABEL[globalRange]}`}><b><AnimatedNumber value={r.revenue} money /></b></td>
+                          <td className="mut" data-l="Orders"><AnimatedNumber value={r.orders} /></td>
+                          <td className="mut hide-s" data-l="Avg / order"><AnimatedNumber value={r.avg} money /></td>
                         </>
                       )}
-                      <td className="hide-m">{!r.reportsOff && r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={GREEN} width={84} height={22} /> : <span className="mut">—</span>}</td>
-                      <td className="hide-m">{r.reportsOff ? <span className="mut">—</span> : <><span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round(r.share * 100)}%`, background: r.accent }} /></span><span style={{ fontSize: 11 }}>{Math.round(r.share * 100)}%</span></>}</td>
-                      <td className="mut"><AnimatedNumber value={r.openTables} /></td>
+                      <td className="hide-m" data-l="Trend">{!r.reportsOff && r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={GREEN} width={84} height={22} /> : <span className="mut">—</span>}</td>
+                      <td className="hide-m" data-l="Share">{r.reportsOff ? <span className="mut">—</span> : <><span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round(r.share * 100)}%`, background: r.accent }} /></span><span style={{ fontSize: 11 }}>{Math.round(r.share * 100)}%</span></>}</td>
+                      <td className="mut" data-l="Open tables"><AnimatedNumber value={r.openTables} /></td>
                       <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
                     </tr>
                   ))}
@@ -2386,6 +2388,41 @@ export default function OwnerDashboard() {
              above) — without it only the BODY cells hid and the header kept 8 columns over 6.
              (T5 sweep, 2026-08-06.) */
           .hq-table :global(.hide-m), .hq-table :global(.hide-s) { display: none; }
+          /* ── AND THE REST OF IT STACKS (T12 sweep round 2, 2026-08-29) ────────────────────────
+             Hiding four columns was not enough. Measured on a 360px phone with a real two-restaurant
+             owner: the six remaining columns still came to a 561px table inside a 330px scroller, so
+             FOUR of the six sat off the right edge — Revenue, Orders, Open and the chevron — behind a
+             sideways swipe with no scrollbar, no shadow and no hint of any kind. What he actually saw
+             was a list of restaurant NAMES, the revenue heading chopped mid-word at "REVENUE (LAST 3",
+             a stray currency mark at the edge, and not one figure. The table that exists to compare
+             his restaurants showed him nothing to compare, on the device he carries.
+
+             This is the same fault the busy heatmap had on the same phone (2026-08-04) and the same
+             cure the Audit rows already use (aud-stack in globals.css): stop being a table on a
+             narrow screen and become one block per restaurant, each figure labelled by the header it
+             lost. The data-l attribute on every cell carries that label, so nothing is printed
+             without a name. NO BACKTICKS IN THIS COMMENT — this block is a template literal and a
+             backtick closes it; the file says so twice above and I did it anyway.
+             It stays a real <table> for a screen reader and is untouched above 760px. */
+          .hq-scroll { overflow: visible; max-height: none; }
+          .hq-table :global(thead) { display: none; }
+          .hq-table, .hq-table :global(tbody), .hq-table :global(tr), .hq-table :global(td) { display: block; width: auto; }
+          .hq-table :global(tr.hq-row) { border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 10px 12px; margin: 0 12px 10px; }
+          .hq-table :global(tr.hq-row:hover) :global(td) { background: none; }
+          /* label on the left, figure on the right — the shape a person reads a list of numbers in,
+             and the one the tile popups on this same page already use. */
+          .hq-table :global(td) { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+            border-bottom: none; padding: 4px 0; text-align: right; white-space: normal; }
+          /* the name line reads as the heading of its own block */
+          .hq-table :global(td.l) { display: block; font-size: 15px; font-weight: 800; padding: 0 0 6px; text-align: left; }
+          .hq-table :global(td.l) :global(.hq-nm) { max-width: 100%; }
+          .hq-table :global(td.rk) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+          .hq-table :global(td.go) { display: none; }
+          /* every figure says what it is — there is no header above it any more */
+          .hq-table :global(td[data-l])::before { content: attr(data-l); flex: 0 1 auto; text-align: left;
+            color: var(--muted); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+          .hq-table :global(td.l)::before { content: none; }
+          .hq-table :global(.hq-empty) { padding: 22px 12px !important; text-align: center !important; }
           .ow2-act .who { display: none; }
         }
       `}</style>
