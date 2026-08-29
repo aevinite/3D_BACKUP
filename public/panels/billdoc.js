@@ -811,7 +811,7 @@
   // becomes a real piece of work with a real printer to test against.
   // (The BILL is a separate document and is already clean at both widths — nothing to do there.)
   /* ONE INSTRUCTION FOR THE WHOLE TABLE PRINTS ONCE, NOT UNDER EVERY DISH (owner, 2026-08-26).
-     `orders` has no note column: a waiter typing one note for the table has that same text copied
+     'orders' has no note column: a waiter typing one note for the table has that same text copied
      onto EVERY order_items.note at placement, so a six-dish order printed the same sentence six
      times down a thermal roll — real paper, and a longer ticket to read on a rushed pass.
      The rule is the cautious one and it matches the kitchen screen exactly: a note is treated as
@@ -834,7 +834,7 @@
 
   function kotDocHtml(o) {
     o = o || {};
-    /* Only ever computed from `lines`. A caller that hands over ready-made `linesHtml` (the admin's
+    /* Only ever computed from 'lines'. A caller that hands over ready-made 'linesHtml' (the admin's
        sample) is untouched — its markup is already whatever it wanted. */
     var shared = o.linesHtml != null ? "" : sharedKotNote(o.lines || []);
     var linesHtml = o.linesHtml != null ? o.linesHtml

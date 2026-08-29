@@ -455,6 +455,19 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `"₹0 of the bill is still uncovered"). If either side starts rounding, that comes back.`,
   );
   check(
+    "tablet: the split's running line names an EMPTY part before it talks about the arithmetic",
+    /const refreshSum = \(\) => \{\s*\n\s*const blank = legs\.filter\(\(l\) => !\(Number\(l\.amount\) > 0\)\)\.length;\s*\n\s*if \(blank\)/.test(src),
+    `${TABLET}: an empty part contributes 0, so the arithmetic still balances and the line goes GREEN\n    ` +
+    `while Take payment refuses "Every part needs an amount above zero". One tap reaches it —\n    ` +
+    `＋ Add another part seeds "" when the bill is already covered. The line and the button under it\n    ` +
+    `must never disagree about the same state; that is the ₹0-shortfall fault wearing a different hat.`,
+  );
+  check(
+    "tablet: …and that check runs BEFORE the shortfall arithmetic, not after it",
+    src.indexOf("const blank = legs.filter") < src.indexOf("const left = legLeft();\n    sumEl.textContent = left === 0"),
+    `${TABLET}: if the arithmetic answers first, a balanced-but-empty split still reports ✓.`,
+  );
+  check(
     "tablet: there is exactly ONE split screen, and both doors open it",
     (src.match(/function renderSplitBill\(/g) || []).length === 1
       && !/function renderSplitSettle\(/.test(src)

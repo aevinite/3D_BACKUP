@@ -2854,7 +2854,21 @@ function renderSplitBill(t, opts = {}) {
   const p = $("#panel");
   const bodyEl = p.querySelector(".sb-body"), sumEl = p.querySelector(".sb-sum");
 
+  // THE LINE MUST AGREE WITH THE BUTTON UNDER IT (T7, 2026-08-29 — found by the fresh 500-phase
+  // plan, and inherited from the payment sheet's old split panel rather than introduced here).
+  // An EMPTY part contributes 0, so the arithmetic still balanced and the line went green — while
+  // Take payment refused with "Every part needs an amount above zero". Reachable in one tap:
+  // ＋ Add another part seeds the new box with the remainder, which is "" when the bill is already
+  // fully covered. So the waiter saw a green tick, pressed the button, and was told no.
+  // That is the same fault as the ₹0 shortfall fixed a week earlier — two halves of one screen
+  // disagreeing about the same state — so the empty part is named FIRST, before the arithmetic.
   const refreshSum = () => {
+    const blank = legs.filter((l) => !(Number(l.amount) > 0)).length;
+    if (blank) {
+      sumEl.textContent = blank === 1 ? "One part still needs an amount" : `${blank} parts still need an amount`;
+      sumEl.style.color = "#e11d48";
+      return;
+    }
     const left = legLeft();
     sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
       : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
