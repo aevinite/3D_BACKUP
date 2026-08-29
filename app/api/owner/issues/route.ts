@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScopeOr503, inScope, type OwnerScope, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, dbFail, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
@@ -121,7 +121,7 @@ export async function PATCH(req: NextRequest) {
   // Record WHO resolved it: "admin" for the super-user OR an admin act-as session, else the
   // concrete owner id (traceable when several co-own a restaurant). Keying off scope.admin
   // (not just scope.all) stops an admin act-as being logged as the borrowed owner (audit 2026-07-07).
-  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
+  const who = ownerActorName(scope);
   const patch = status === "resolved"
     ? { status, resolved_at: new Date().toISOString(), resolved_by: who }
     : { status, resolved_at: null, resolved_by: null };
@@ -161,12 +161,12 @@ async function postImpl(req: NextRequest) {
   // owner — the act-as branch has scope.all=false, so key off scope.admin too (audit 2026-07-07).
   const { error } = await sb.from("issues").insert({
     restaurant_id: rid, subject, body: String(body?.body || "").trim().slice(0, 4000),
-    raised_by: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
+    raised_by: ownerActorName(scope),
     raised_role: (scope.all || scope.admin) ? "admin" : "owner",
   });
   if (error) return dbFail("owner/issues.raise", error, { message: "Couldn't raise that complaint — please try again." });
   await logAction(ownerLogPanel(scope), "issue_raised", {
-    restaurant_id: rid, actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
+    restaurant_id: rid, actor: ownerActorName(scope),
     detail: `raised: ${subject.slice(0, 80)}`,
   });
   return NextResponse.json({ ok: true });

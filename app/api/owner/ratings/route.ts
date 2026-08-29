@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -125,7 +125,7 @@ export async function PATCH(req: NextRequest) {
   // Record WHO handled it: "admin" for the super-user OR an admin act-as session, else the
   // concrete owner id (traceable when several co-own a restaurant) — matches issues.route,
   // and no longer logs the generic "owner" for a specific co-owner (audit 2026-07-07).
-  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
+  const who = ownerActorName(scope);
   const patch: Record<string, unknown> = {};
   if (hasAck) {
     patch.acknowledged = body.acknowledged;

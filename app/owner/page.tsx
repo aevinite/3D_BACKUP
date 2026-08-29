@@ -33,6 +33,7 @@ import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
+import { actorLabel, actorTitle } from "@/lib/ownerActor";
 import { useBackClose } from "@/lib/backStack";
 import { type ReportData } from "@/components/owner/ownerReportDoc";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
@@ -88,12 +89,15 @@ type Prev = { revenue: number; orders: number } | null;
 // The "we couldn't read part of this" strip a chart card shows when the group total is incomplete.
 // Deliberately INSIDE the affected card rather than a page-level banner: the owner needs to know
 // WHICH chart is short, not merely that something somewhere failed.
-function PartialStrip({ keys }: { keys?: string[] }) {
+function PartialStrip({ keys, msg }: { keys?: string[]; msg?: string }) {
   if (!keys || !keys.length) return null;
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "0 0 8px", fontSize: 12.5, color: "var(--adm-warn)" }}>
       <i className="fas fa-triangle-exclamation" aria-hidden="true" />
-      <span>Some restaurants didn&rsquo;t answer, so this total is incomplete. Tap Refresh to try again.</span>
+      {/* `msg` because not every partial read is about several restaurants: the all-time records
+          read is one restaurant's, so the group wording would have been simply untrue there
+          (T12 sweep, 2026-08-27). Everything else keeps the original sentence. */}
+      <span>{msg ?? "Some restaurants didn\u2019t answer, so this total is incomplete. Tap Refresh to try again."}</span>
     </div>
   );
 }
@@ -579,6 +583,8 @@ export default function OwnerDashboard() {
   const [cache, setCache] = useState<Record<string, Payload>>({});
   const [moneyCache, setMoneyCache] = useState<Record<string, MoneyTotals | "err">>({});
   const [recs, setRecs] = useState<Record<string, Records>>({});
+  /** Per restaurant: the server told us it could not read the all-time records. See fetchPayload. */
+  const [recsUnread, setRecsUnread] = useState<Record<string, boolean>>({});
   const [acts, setActs] = useState<Act[] | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   // WHEN each payload was computed, per cache key. The single page-level "updated X ago" was set
@@ -726,7 +732,20 @@ export default function OwnerDashboard() {
     try {
       const rid = sk === "group" ? null : sk;
       // records ride ONCE per restaurant (unbounded scan — not worth re-running per range).
-      const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
+      // ── AND "ONCE" HAS TO MEAN ONCE (T12 sweep, 2026-08-27) ──────────────────────────────────
+      // The guard read `recsRef`, which is only filled after a request has ANSWERED. Every
+      // dashboard open dispatches the main-range payload and the month payload in the SAME effect
+      // pass, so neither had answered when the second one built its query and BOTH carried
+      // `records=1`. Measured on one cold open of French House:
+      //   analytics?range=30d …&records=1
+      //   analytics?range=month…&records=1     ← the same all-time scan, again
+      // `lfh_owner_records` is the one read on this route the server deliberately keeps OUTSIDE the
+      // snapshot cache because it is unbounded, so this was the most expensive request on the page,
+      // paid for twice per open, per restaurant, for a payload only one of them can use. A ref set
+      // SYNCHRONOUSLY at ask-time is the fix; it is cleared when the answer says the read failed,
+      // so a retry can still happen (see the records handling below).
+      const recQ = rid && !(rid in ((recsRef.current) || {})) && !recsAsked.current.has(rid) ? "&records=1" : "";
+      if (recQ) recsAsked.current.add(rid!);
       const refQ = opts?.refresh ? "&refresh=1" : "";
       const a = await fetch(`/api/owner/analytics?${opts?.qs ?? `range=${range}`}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
       // A deliberate "Reports aren't enabled for this restaurant" (403, `disabled: true`) is a
@@ -747,7 +766,21 @@ export default function OwnerDashboard() {
       setCache((c) => ({ ...c, [key]: a }));
       setLanded(true);
       if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
-      if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
+      // ── AND REMEMBER WHEN IT COULD NOT BE READ (T12 sweep, 2026-08-27) ────────────────────────
+      // /api/owner/analytics already sends `partial: ["records"]` when the all-time records RPC
+      // fails — its own comment calls that improvement I5, "A TILE THAT VANISHES SAYS SO". Only the
+      // server half was ever built: nothing on this page read the key, so the "Your records" card
+      // simply disappeared and the screen said nothing at all. Measured by replaying the server's
+      // own answer. Held per RESTAURANT rather than read off the current payload, because
+      // `records=1` rides on ONE request per restaurant, so the flag would otherwise come and go
+      // with the range dropdown. A later successful read clears it.
+      if (rid) {
+        if (a.records) { setRecs((m) => ({ ...m, [rid]: a.records })); setRecsUnread((m) => (m[rid] ? { ...m, [rid]: false } : m)); }
+        else if (Array.isArray(a.partial) && a.partial.includes("records")) {
+          setRecsUnread((m) => ({ ...m, [rid]: true }));
+          recsAsked.current.delete(rid);   // it failed, so the next fetch may ask again
+        }
+      }
       setErr(null);
       reportRealtime("online");
     } catch (e) {
@@ -758,6 +791,8 @@ export default function OwnerDashboard() {
     }
   }, [scp]);
   const recsRef = useRef(recs); recsRef.current = recs;
+  /** Restaurants whose all-time records have been ASKED for this visit — see the note in fetchPayload. */
+  const recsAsked = useRef<Set<string>>(new Set());
   const cacheRef = useRef(cache); cacheRef.current = cache;
   const moneyRef = useRef(moneyCache); moneyRef.current = moneyCache;
 
@@ -820,13 +855,24 @@ export default function OwnerDashboard() {
   // Module checklist point 6: render nothing when the flag is off. So the refusal gets its own
   // state and the whole card is left out.
   const [actsOff, setActsOff] = useState(false);
+  // ── …AND NEITHER IS A FAILED READ (T12 sweep, 2026-08-27) ────────────────────────────────────
+  // The 2026-08-17 fix above taught this card the difference between "switched off" and "still
+  // loading". It left the third case alone: a read that simply FAILS — the server 500s, the phone
+  // drops the connection — also lands on `setActs(null)`, and `null` is what the card renders as
+  // "Loading…". Measured by aborting /api/owner/oplog: the card on the home screen an owner opens
+  // every day sat on "Loading…" with no end and no way to retry. It is the identical fault the
+  // 403 branch was fixed for, one branch over.
+  const [actsErr, setActsErr] = useState(false);
   const fetchActs = useCallback(async (rid: string) => {
     try {
       const j = await fetch(`/api/owner/oplog?limit=6&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((r) => r.json());
-      if (j.disabled) { setActsOff(true); setActs([]); return; }
+      if (j.disabled) { setActsOff(true); setActs([]); setActsErr(false); return; }
       setActsOff(false);
-      setActs(Array.isArray(j.actions) ? j.actions : null);
-    } catch { setActs(null); }
+      // An answer that is not a list is a failure, not an empty log — the same distinction
+      // `actsOff` draws for a refusal.
+      if (Array.isArray(j.actions)) { setActs(j.actions); setActsErr(false); }
+      else { setActs(null); setActsErr(true); }
+    } catch { setActs(null); setActsErr(true); }
   }, [scopePin]);
 
   // The distinct (scope, range) keys the CURRENT view's cards need. That is the MAIN range and
@@ -860,7 +906,7 @@ export default function OwnerDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ov, scopeKey, neededRanges, globalRange]);
 
-  useEffect(() => { if (activeRid) { setActs(null); fetchActs(activeRid); } }, [activeRid, fetchActs]);
+  useEffect(() => { if (activeRid) { setActs(null); setActsErr(false); fetchActs(activeRid); } }, [activeRid, fetchActs]);
 
   // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
   // are compute-on-view cached server-side (mig 196), so this stays cheap.
@@ -1200,7 +1246,9 @@ export default function OwnerDashboard() {
       if (money && money !== "err" && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
     }
     return out.slice(0, 4);
-  }, [pl, globalRange, globalRange, moneyCache, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    // `globalRange` was listed twice here — harmless, but a duplicated dependency is the shape of a
+    // half-finished edit and it invites the next reader to guess (T12 sweep, 2026-08-27).
+  }, [pl, globalRange, moneyCache, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dishView = useMemo(() => {
     if (view.level !== "dish") return null;
@@ -1294,11 +1342,17 @@ export default function OwnerDashboard() {
   //     authorisation pin and must keep meaning that, or a tab could re-scope its own permissions.
   //   • `range=<the dropdown's value>` — "if I'm at thirty days all restaurant and I open the detail
   //     view of orders then it should be also open in thirty days and all restaurant."
+  //   • …EXCEPT for the one tile that does not follow the dropdown (T12 sweep, 2026-08-27). The
+  //     "Today so far" popup says so in its own words — "This one does not follow the period above
+  //     — it is always today" — and then its "See the full detail" link carried `range=30d` and
+  //     opened a thirty-day report. Measured: on Last 30 days the Today popup's footer link was
+  //     `…&range=30d&open=daysummary`. One screen, two answers, one tap apart. The link now carries
+  //     the period the popup is actually about.
   const detailHref = (t: string) => {
     const q = new URLSearchParams();
     if (scopePin) { q.set("rid", scopePin); const a = asValue(); if (a) q.set("as", a); }
     q.set("view", activeRid ?? "all");
-    q.set("range", globalRange);
+    q.set("range", t === "daysummary" ? "today" : globalRange);
     q.set("open", t);
     return `/owner/reports?${q.toString()}`;
   };
@@ -1337,6 +1391,7 @@ export default function OwnerDashboard() {
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
   const records = activeRid ? recs[activeRid] : null;
+  const recordsUnread = !!(activeRid && recsUnread[activeRid]);
 
   // Highlights live at the BOTTOM of the page now (owner round-3: "we don't require
   // this information at the top"). Callouts only exist for 4+ restaurants.
@@ -1448,12 +1503,29 @@ export default function OwnerDashboard() {
         sub={offNote ? offSub : kMain ? `${inr(kMain.avg)} per paid order` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Today so far" onOpen={() => setTileOpen("today")} v={todayRev} money compact loading={!ov} pill="● live"
-        sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
+      {/* ── AND THAT INCLUDES TODAY (T12 sweep, 2026-08-27) ───────────────────────────────────
+          This tile reads the OVERVIEW payload, not analytics, so `offNote` did not reach it and it
+          stayed a live figure while its four neighbours printed an em dash. But /api/owner/overview
+          ZEROES revenueToday and ordersToday for a restaurant whose Reports the admin has taken
+          away (its own route says so, and the estate table renders that same zero as "figures
+          hidden"). So the one tile still printing a number printed a FALSE one: measured by
+          replaying both of the server's own answers, the row read
+          "— · — · ₹0, 0 orders today · — · —". A confident zero beside four honest dashes reads as
+          "you took nothing today", which is the opposite of what is true. It says what the others
+          say, and the "live" pill goes with it — there is nothing live to point at. */}
+      <Kpi k="Today so far" onOpen={offNote ? undefined : () => setTileOpen("today")} v={offNote ? "—" : todayRev} money compact
+        loading={!offNote && !ov} pill={offNote ? undefined : "● live"}
+        sub={offNote ? offSub : `${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
       <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub
           : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"
           : foodLost > 0 ? `${foodLostRows} cancellation${foodLostRows === 1 ? "" : "s"} where food was made`
+          // A FAILED FOOD-LOSS READ IS NOT A ZERO (T12 sweep, 2026-08-27). The route returns null
+          // when it could not read the expenses rows, and says in its own comment that a silent 0
+          // "would tell him he wasted nothing, which is the wrong way for this to fail". The popup
+          // said so; the tile face fell through to the staff-pay wording and said nothing at all,
+          // so a total that is too low looked complete.
+          : kMain && kMain.foodLoss == null ? "staff pay only — we couldn\u2019t read the food figure"
           : hasPayroll ? `${kMain!.staffPay!.entries} staff payment${kMain!.staffPay!.entries === 1 ? "" : "s"}` : "nothing recorded yet"} />
       <Kpi k="On hand" onOpen={offNote ? undefined : () => setTileOpen("onhand")} v={offNote ? "—" : onHand} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub : "revenue minus expenses"} />
@@ -1542,17 +1614,26 @@ export default function OwnerDashboard() {
         audit: true,
         open: "team",
       };
-      case "onhand": return {
+      case "onhand": {
+        // ── AND THIS POPUP HAS TO ADMIT IT AS WELL (T12 sweep, 2026-08-27) ──────────────────────
+        // `foodLoss === null` means the server could not READ that figure, not that it was zero.
+        // The Expenses popup one tap away has always said so on its own row; this one printed a
+        // flat "− ₹0" and then called the result "Money on hand" as if it were settled — the one
+        // line on the page where an unread cost makes the ANSWER too big. Measured by replaying
+        // the server's own answer: "Less food made then binned − ₹0 · Money on hand ₹13,41,642".
+        const foodUnread = !!kMain && kMain.foodLoss == null;
+        return {
         title: "On hand", sub: `what is left of the period · ${per}`,
         rows: [
           ["Revenue", inr(kMain?.revenue ?? 0)],
           ["Less staff pay", "− " + inr(staffOut)],
-          ["Less food made then binned", "− " + inr(foodLost)],
-          ["Money on hand", inr(onHand), undefined, true],
+          ["Less food made then binned", "− " + inr(foodLost),
+            foodUnread ? "we couldn\u2019t read this — any food you lost is missing from the sum below" : undefined],
+          ["Money on hand", inr(onHand), foodUnread ? "this may be too high, for the reason above" : undefined, true],
         ],
         note: "Takings minus what the period cost you. It is not a bank balance — rent, bills and any stock you have not recorded here are not in it, and food is counted when it is used rather than when it was bought.",
         open: "team",
-      };
+      }; }
       default: return null;
     }
   };
@@ -1837,10 +1918,13 @@ export default function OwnerDashboard() {
           </div>
 
           {/* Records strip — the numbers worth bragging about */}
-          {records && (records.bestDay || records.starDish) && (
+          {(recordsUnread || (records && (records.bestDay || records.starDish))) && (
             <div className="adm-card" style={{ marginTop: 12 }}>
               <div className="ow2-ct"><span>Your records <span className="mut">· the numbers worth bragging about</span></span></div>
-              <div className="rv-recs">
+              {/* A CARD THAT VANISHES SAYS SO — the client half of the route's improvement I5. */}
+              <PartialStrip keys={recordsUnread ? ["records"] : undefined}
+                msg="We couldn&rsquo;t read your all-time records just now, so this card is short. Tap Refresh to try again." />
+              {records && <div className="rv-recs">
                 {records.bestDay && (
                   <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={records.bestDay.revenue} money /></b>
                     <i>{new Date(records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
@@ -1867,7 +1951,7 @@ export default function OwnerDashboard() {
                   <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · LAST 30 DAYS (ROLLING)</small><b><AnimatedNumber value={records.regulars ?? 0} /> returning guests</b>
                     <i>same name, 2+ visits</i></span></div>
                 )}
-              </div>
+              </div>}
             </div>
           )}
 
@@ -1905,7 +1989,10 @@ export default function OwnerDashboard() {
                     offered a link into a page that refuses him (T12 sweep, 2026-08-17). */}
                 <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>
               </div>
-              {!acts ? <div className="adm-empty">Loading…</div>
+              {!acts ? (actsErr
+                  ? <div className="adm-empty">Couldn&rsquo;t load this just now — it tries again by itself every minute.{" "}
+                      <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => activeRid && fetchActs(activeRid)}>Try again</button></div>
+                  : <div className="adm-empty">Loading…</div>)
                 : acts.length === 0 ? <div className="adm-empty">Nothing yet — your team&rsquo;s work shows up here as it happens.</div>
                 : (
                   <div className="ow2-acts">
@@ -1920,7 +2007,12 @@ export default function OwnerDashboard() {
                       <div key={a.id} className="ow2-act">
                         <span className={`pn pn-${a.panel}`}>{panelLabel(a.panel)}</span>
                         <span className="tx">{actLabel(a.action)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
-                        <span className="who">{a.actor || "—"}</span>
+                        {/* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES (T12 sweep, 2026-08-27).
+                            Two owner-panel writers log the owner's uuid as the actor, and this cell
+                            printed it verbatim — measured on the home screen:
+                            "Handled a rating · c0af7b5b-…-f475e48bab53". lib/ownerActor.ts carries
+                            the whole story and the two routes that need the real fix. */}
+                        <span className="who" title={actorTitle(a.actor)}>{actorLabel(a.actor)}</span>
                         <span className="when">{timeAgo(a.created_at)}</span>
                       </div>
                     ))}
@@ -1942,7 +2034,7 @@ export default function OwnerDashboard() {
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
               <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => viewTo({ level: "restaurant", rid: view.rid })}>
-                <i className="fas fa-arrow-left" aria-hidden="true" /> Back to restaurant
+                <i className="fas fa-arrow-left" style={{ marginRight: 6 }} aria-hidden="true" /> Back to restaurant
               </button>
             </div>
           ) : (<>
