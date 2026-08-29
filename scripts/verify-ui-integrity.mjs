@@ -237,15 +237,59 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
   };
   walk("public/panels");
   const offenders = [];
+  // ── ONLY A COMMENT THAT IS ACTUALLY INSIDE A TEMPLATE LITERAL (T16 sweep #7, 2026-08-29) ──────
+  // This used to flag EVERY backtick in EVERY /* … */ comment anywhere under public/panels. The
+  // fault it is built for is real and specific: a backtick inside a comment that sits INSIDE the
+  // injected `<style>` template literal ends that string and the panel stops parsing. A backtick
+  // in an ordinary code comment — quoting a column name, say — cannot do that, and check 7b below
+  // already says so in its own words: "scoped to the style block so ordinary JSDoc elsewhere is
+  // untouched". The panels half was left blunt.
+  //
+  // It went red on main when a bill-document comment quoted `lines` and `linesHtml`, and because
+  // this guard runs as a PostToolUse hook, a false positive here blocks EVERY session's Write and
+  // Edit tool across the whole repo. Two ordinary comments stopped all editing.
+  //
+  // So the file is walked once, tracking which of the four states each character is in — code,
+  // line comment, block comment, quoted string, template literal — and a block comment is reported
+  // only when it opened while a template literal was open.
+  const commentsInsideTemplate = (src) => {
+    const hits = [];
+    let inLine = false, inBlock = false, inStr = null, inTpl = false;
+    let blockStart = -1, blockOpenedInTpl = false;
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i], nx = src[i + 1];
+      if (inLine) { if (ch === "\n") inLine = false; continue; }
+      if (inBlock) {
+        if (ch === "*" && nx === "/") {
+          const body = src.slice(blockStart, i + 2);
+          if (blockOpenedInTpl && body.includes("`")) hits.push({ index: blockStart, body });
+          inBlock = false; i++;
+        }
+        continue;
+      }
+      if (inStr) { if (ch === "\\") { i++; continue; } if (ch === inStr) inStr = null; continue; }
+      if (inTpl) {
+        if (ch === "\\") { i++; continue; }
+        if (ch === "`") { inTpl = false; continue; }
+        // a comment can open inside ${ … } too, and that is still inside the literal
+        if (ch === "/" && nx === "*") { inBlock = true; blockStart = i; blockOpenedInTpl = true; i++; }
+        continue;
+      }
+      if (ch === "/" && nx === "*") { inBlock = true; blockStart = i; blockOpenedInTpl = false; i++; continue; }
+      if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
+      if (ch === '"' || ch === "'") { inStr = ch; continue; }
+      if (ch === "`") { inTpl = true; continue; }
+    }
+    return hits;
+  };
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
-    for (const m of src.matchAll(/\/\*[\s\S]*?\*\//g)) {
-      if (!m[0].includes("`")) continue;
+    for (const m of commentsInsideTemplate(src)) {
       const line = src.slice(0, m.index).split("\n").length;
-      offenders.push(`${f}:${line}  ${m[0].replace(/\s+/g, " ").slice(0, 70)}…`);
+      offenders.push(`${f}:${line}  ${m.body.replace(/\s+/g, " ").slice(0, 70)}…`);
     }
   }
-  if (offenders.length === 0) ok(`${files.length} panel script(s): no backtick inside a /* … */ comment`);
+  if (offenders.length === 0) ok(`${files.length} panel script(s): no backtick inside a /* … */ comment that sits INSIDE a template literal`);
   else bad(
     `${offenders.length} block comment(s) in a panel script contain a backtick — inside the injected stylesheet that ENDS the template literal and takes the panel down`,
     offenders.join("\n         ") + "\n         Quote code with 'single quotes' or nothing at all.",
