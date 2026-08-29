@@ -264,6 +264,15 @@ for (const f of ["maint.js", "outbox.js"]) {
     "goes to /login without moving the whole window — the sign-in page loads inside the panel frame");
   hasNot(f, /(?<!window\.)\blocation\.href = "\/login"/,
     "has a bare location.href = \"/login\" again, which navigates only the panel's iframe");
+  // …AND BACK MAY NOT WALK STRAIGHT BACK IN (owner, 2026-08-28: "how sign out works in Netflix?
+  // I wanted to work like that"). `.replace()` swaps the panel's history entry instead of stacking
+  // a new one on top, so the panel is not in the back list and cannot be restored from the
+  // browser's own cache. With `.href` it was still one Back press away — dead, but on screen,
+  // which is the half-signed-out look. Driven: window leaves, Back lands elsewhere, session gone.
+  has(f, /window\.top\.location\.replace\(url\)/,
+    "leaves for /login with .href instead of .replace, so Back walks straight back into the panel");
+  hasNot(f, /window\.location\.href = url;/,
+    "the same-window fallback is back on .href, so Back returns to a panel whose session is gone");
 }
 
 // ── the standing rules these files must keep ──────────────────────────────────────────────────

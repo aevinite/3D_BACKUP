@@ -165,10 +165,13 @@
   // GOING TO /login MEANS THE WHOLE WINDOW. The staff panels are rendered inside an iframe
   // (components/PanelFrame.tsx), and a bare location.href navigates only the frame — see the note
   // at the 401 branch of send(). Same helper as maint.js's leaveTo().
+  // `.replace()`, not `.href` — the panel's history entry is REPLACED rather than stacked on, so
+  // Back cannot walk into a panel whose session has just gone (owner, 2026-08-28: sign out the way
+  // Netflix does it). Same helper and same reasoning as maint.js's; see the long note there.
   function leaveTo(url) {
-    try { if (window.top && window.top !== window.self) { window.top.location.href = url; return; } }
+    try { if (window.top && window.top !== window.self) { window.top.location.replace(url); return; } }
     catch (e) { /* not readable — fall through to this frame */ }
-    window.location.href = url;
+    window.location.replace(url);
   }
 
   const uuid = () => (self.crypto && self.crypto.randomUUID)

@@ -134,10 +134,25 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   // missed — the twin-panel drift shape, a fix that landed in two copies and not in the one place
   // that serves all of them. `window.top` is same-origin here (our own page frames our own panel),
   // so it is readable; the catch is for the day it is not.
+  // …AND BACK MUST NOT WALK STRAIGHT BACK IN (owner, 2026-08-28: "how sign out works in Netflix?
+  // I wanted to work like that").
+  //
+  // Signing out of Netflix leaves you on the sign-in screen and pressing Back does not return you
+  // to the app. `.replace()` is what does that: it REPLACES the panel's history entry instead of
+  // stacking a new one on top, so the panel is no longer anywhere in the back list and the browser
+  // cannot restore it from its own cache either. With `.href` the panel was still one Back press
+  // away — dead (the session is gone, so anything it touched would bounce to /login) but on screen,
+  // which is the half-signed-out look he is describing.
+  //
+  // Two things have to happen for a sign-out to be real, and this helper is only the second:
+  //   1. the SESSION ends — the POST to /api/panel-logout, which clears the cookie server-side;
+  //   2. the WINDOW leaves — the whole window, not the iframe the panel lives in, and with no way
+  //      back to it.
   const leaveTo = (url) => {
-    try { if (window.top && window.top !== window.self) { window.top.location.href = url; return; } }
-    catch (e) { /* not readable — fall through to this frame, which is still better than nothing */ }
-    window.location.href = url;
+    try {
+      if (window.top && window.top !== window.self) { window.top.location.replace(url); return; }
+    } catch (e) { /* not readable — fall through to this frame, which is still better than nothing */ }
+    window.location.replace(url);
   };
 
   // SIGN OUT — a POST, then go to /login (T9 improvement 13, 2026-08-06).
