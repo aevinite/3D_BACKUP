@@ -523,15 +523,6 @@ export const SECTIONS: Section[] = [
           },
         ],
       },
-      // THE TWO BOARDS SAY THE SAME THING (owner, 2026-08-26: "board should be sync. Right now it's
-      // not"). This row used to be the ONLY printing row on this screen, while the whole of
-      // who-prints-what lived on the Printing menu and appeared nowhere here. Its child now opens that
-      // menu inside this row, so one screen answers both questions — is printing allowed, and where
-      // does the paper actually come out.
-      { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
-        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", preview: "kot",
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. This is only whether the feature exists for them — WHERE the paper comes out, which computer or whose screen, and which printer gets which paper, is the whole of the Printing menu. Preview at the top right shows the ticket itself, the very same one the manager panel and the kitchen board print.",
-      },
       // THE PRINTING SETUP IS NOT HERE ANY MORE (owner, 2026-08-29): *"in the middle of thing, you
       // tell me to go to the access and permission… remove it completely from the access and
       // permission. Now printing has a new menu, so all the settings of the printing will be there."*

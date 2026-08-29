@@ -199,7 +199,7 @@ const HELP_SHOTS: Record<string, string[]> = {
   menu_languages: ["languages"],
   menu_currencies: ["currency"],
   // ── modules ──
-  khata: ["khata"], banquet: ["banquet"], auto_print_kot: ["auto-print-kot"], payroll: ["owner-staff"],
+  khata: ["khata"], banquet: ["banquet"], payroll: ["owner-staff"],
   // ── panel menus ──
   // ONE ENTRY PER ROW THAT REALLY EXISTS. Seven keys here named rows that had been renamed away —
   // `own_logs` / `d_own_logs` / `d_mgr_logs` (the row is `own_audit` since 2026-08-02),

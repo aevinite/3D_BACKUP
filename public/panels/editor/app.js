@@ -5953,11 +5953,20 @@ function printBill(t, sess, os, opts = {}) {
   // the counter keeps the screen they were on. Sent fire-and-forget on purpose: the paper is the
   // server's job now, and if the send fails we fall straight back to the window below rather than
   // leaving a guest waiting while we retry.
-  const billOwner = printOwner("bill");
-  if (billOwner && printedSid) {
+  // ASK THE SERVER, ALWAYS — never a cached answer (owner, 2026-08-29: "when the helper has been
+  // selected… it will not pop up that print option. It will just directly sent to the helper").
+  //
+  // This used to check `printOwner("bill")` first, which reads a copy of the answer left behind by a
+  // DIFFERENT poll (/print-jobs/pending). If that poll had not landed yet — a fresh tab, the Bills
+  // tab opened straight from a link, a manager whose screen is not the printing one — the copy was
+  // empty, the panel decided nobody owned the bill, and the print window opened on top of somebody's
+  // work while the helper sat idle. The server always knows; one round trip is cheaper than a window
+  // nobody asked for, and `noRoute` is still the honest fallback that keeps every restaurant without
+  // a helper working exactly as it always did.
+  if (printedSid) {
     api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
       .then((r) => {
-        if (r && r.queued) { toast(r.note || ("Sent to " + billOwner.printer), "ok"); return; }
+        if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         // Viewing as the admin: their printer stays quiet and the bill opens here instead, so nothing
         // comes out of a paying client's roll because we looked at their screen.
         if (r && r.adminView) toast("Admin view — showing the bill here, not printing at the restaurant.", "ok");
@@ -13782,7 +13791,7 @@ function formPrinting(s) {
       <div class="pw-row" style="margin-top:9px">
         <select data-pw="printerpick" data-kind="${esc(kind)}" style="min-width:250px"${anyPrinters ? "" : ` disabled title="Set this computer up above first — the printers come from it."`}>
           <option value="off"${off ? " selected" : ""}>${esc(L.off[kind] || "Nobody")}</option>
-          <option value=""${!off && !answered ? " selected" : ""}>— no printer chosen yet —</option>
+          <option value=""${!off && !answered ? " selected" : ""}>— not decided yet —</option>
           ${(B.agents || []).map((a) => `<optgroup label="${esc(a.name)}">${(a.printers || []).map((pr) => {
             const v = a.id + "|" + pr.name;
             return `<option value="${esc(v)}"${v === val ? " selected" : ""}>${esc(pr.name)}</option>`;
@@ -13802,9 +13811,10 @@ function formPrinting(s) {
   // and the other two papers are printed by whoever presses Print, which is what a restaurant with
   // no helper has always done (owner, 2026-08-29). Three lines saying "on" would be three controls
   // that change nothing.
-  const step3 = mode !== "computer" ? "" : `<div class="card"><h3>4 · Which printer prints what</h3>
+  const step3 = mode !== "computer" ? "" : `<div class="card"><h3>4 · What does the helper print?</h3>
     <p class="muted" style="font-size:13px;margin:0 0 4px;line-height:1.5">
-      One line per piece of paper this app prints. Pick the printer it comes out of — or nobody.
+      The papers the helper takes come out on their own, with no window. Anything left on <b>normal</b>
+      prints the way it always has: a window opens when somebody taps Print.
     </p>
     ${(B.kinds || ["kot", "bill", "banquet"]).map(line).join("")}
   </div>`;
@@ -17317,11 +17327,12 @@ function bindBanquet() {
 function printBanquetBill(b, lines) {
   // A computer may own the banquet sheets too — usually the big paper printer, which is exactly the
   // one nobody wants to pick out of a print dialog every time (mig 341).
-  const bqOwner = printOwner("banquet");
-  if (bqOwner && b && b.id) {
+  // The same rule as the bill above: the SERVER decides whether a computer owns this paper, not a
+  // cached copy of an answer from another poll.
+  if (b && b.id) {
     api("POST", "/print/send", { kind: "banquet", billId: b.id })
       .then((r) => {
-        if (r && r.queued) { toast(r.note || ("Sent to " + bqOwner.printer), "ok"); return; }
+        if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         if (r && r.adminView) toast("Admin view — showing the sheet here, not printing at the restaurant.", "ok");
         openBanquetWindow(b, lines);
       })
