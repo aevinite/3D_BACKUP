@@ -1447,3 +1447,27 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
    scrolling sideways: a row that scrolls sideways is a row whose last option is invisible. */
 .sb-nrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
 .sb-nrow .sb-nb { min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* ── "THERE IS MORE THIS WAY" (owner, 2026-08-28) ────────────────────────────────────────────
+   The manager panel has had this since 2026-08-13 and this one never did, though it has more
+   sideways rows than the manager does: at 390px the next category was sliced off with a hard
+   straight edge, which reads as a rendering fault rather than an invitation to swipe.
+   public/panels/swipehint.js measures the row and sets data-more="start|end|both"; everything
+   visible is here, so a row is opted in with one attribute in the markup and nothing else.
+   The fade is a mask, written UNPREFIXED on a single line — this build DROPS a hand-added
+   -webkit- twin and takes the property with it (the frosted-glass lesson). */
+[data-swipe-hint][data-more="end"] { mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 44px), transparent 100%); }
+[data-swipe-hint][data-more="start"] { mask-image: linear-gradient(90deg, transparent 0, #000 44px, #000 100%); }
+[data-swipe-hint][data-more="both"] { mask-image: linear-gradient(90deg, transparent 0, #000 44px, #000 calc(100% - 44px), transparent 100%); }
+/* The count chip — a SIBLING of the row (inside it, it would scroll away with the content), so
+   its parent is the positioning context; swipehint.js sets that when the parent is static.
+   Sized for a finger like everything else on this panel, not for a mouse. */
+.lfh-swipe-more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  z-index: 2; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 6px 12px;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+  background: var(--panel); color: var(--muted); font: inherit; font-size: 12px; font-weight: 700;
+  white-space: nowrap; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28); }
+.lfh-swipe-more b { color: var(--text); font-variant-numeric: tabular-nums; }
+.lfh-swipe-more[hidden] { display: none; }
+/* The rail needs room for the chip to sit over, exactly as the manager's does. Keyed on the bare
+   presence of data-more, which the script sets only when the row can really scroll. */
+.om-nav[data-more] { margin-right: 84px; }

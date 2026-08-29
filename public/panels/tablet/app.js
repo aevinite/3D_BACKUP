@@ -4704,7 +4704,10 @@ function renderOrderMode() {
         <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? `✓ Done${state._addedThisVisit ? ` (${state._addedThisVisit} added)` : ""}` : "← back"}</button>
       </div>
       <div class="om-body ${addMode ? "no-cart" : ""}">
-        <nav class="om-nav" id="omNav">${orderNavHtml()}</nav>
+        <!-- The category rail. On a phone this scrolls sideways, so it gets the fade AND the
+             count chip — the same pair the manager's take-order rail carries, because it is the
+             same question ("how many categories am I not seeing?"). -->
+        <nav class="om-nav" id="omNav" data-swipe-hint data-swipe-count>${orderNavHtml()}</nav>
         <div class="om-scroll" id="omScroll">${addMode ? `<div class="muted small om-hint">Tap a dish to add it to this order — the bill updates automatically.</div>` : ""}${orderSectionsHtml()}</div>
         ${addMode ? "" : `<aside class="om-cart" id="omCart"></aside>`}
       </div>
@@ -5618,6 +5621,14 @@ window.addEventListener("online", () => load().catch(() => {}));
     // all to flag a spill or a broken card machine. The theme toggle is hidden at the same width and
     // has always had a row here; that is the pattern, and 🚩 was the one thing missing from it.
     '<div class="dw-row"><span>Report an issue</span><button class="btn small" id="dwIssue" type="button">🚩 Open</button></div>' +
+    // 🔔 FROM THE GUEST MENU — and it belongs HERE for the same reason 🚩 does (owner, 2026-08-28).
+    // This drawer's own pattern, written into the comment above: anything the top bar hides on a
+    // phone gets a row here. The theme toggle has always had one; 🚩 was given one on 2026-08-06
+    // when the same fault was found. The bell arrived a week after that and nobody joined the two
+    // up, so on a phone it was the one control with no second way in. It is back on the bar now
+    // (the bell re-states its own display), and this is the belt to that pair of braces — a
+    // notification is the last thing that should have exactly one route to it.
+    '<div class="dw-row"><span>From the guest menu</span><button class="btn small" id="dwBell" type="button">🔔 Open</button></div>' +
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
@@ -5665,6 +5676,15 @@ window.addEventListener("online", () => load().catch(() => {}));
   // Close the drawer first, then open the issue sheet — it registers its own back layer, and
   // leaving the drawer open underneath would stack two layers for one hardware Back press.
   { const isb = drawer.querySelector("#dwIssue"); if (isb) isb.onclick = () => { closeDrawer(); if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m, true) }); }; }
+  // The bell's own sheet. If the guest menu is switched off the module has unmounted itself and
+  // there is nothing to open — say so rather than letting the tap land on nothing, which is the
+  // one thing this codebase does not allow a tap to do.
+  { const blb = drawer.querySelector("#dwBell");
+    if (blb) blb.onclick = () => {
+      closeDrawer();
+      if (window.LFH_BELL && typeof LFH_BELL.open === "function") LFH_BELL.open();
+      else toast("The guest menu is switched off, so there is nothing waiting.", false);
+    }; }
   { const meBtn = drawer.querySelector("#dwMe"); if (meBtn) meBtn.onclick = () => { closeDrawer(); if (window.LFH_ME) window.LFH_ME.open(); }; }
   const bqDrawerBtn = drawer.querySelector("#dwBanquet");
   if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
