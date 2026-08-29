@@ -110,9 +110,21 @@ check(/screenMayPrint\(/.test(code(kroute)) && /screenMayPrint\(/.test(code(read
 check(/print_here/.test(read("lib/accessTree.ts")) && /managerCan\(g, rid, "print_here"\)/.test(code(read("app/api/editor/[...path]/route.ts"))),
   "…a person's own 'May be the printer' permission exists AND is enforced server-side",
   "'May be the printer' is a row that reads nowhere — exactly what mark_paid and print_invoice did");
-check(/panel: "printing"/.test(read("lib/accessTree.ts")) && /what === "printing"/.test(read("components/admin/AccessTree.tsx")) && /aevinite\/access/.test(read("app/aevinite/printing/page.tsx")),
-  "…and the two boards point at each other (Access ↔ Printing), so neither reads as the whole answer",
-  "Access & permissions and the Printing menu no longer refer to each other — the owner asked for these two boards to be in sync");
+// ── THIS CHECK IS RETIRED, AND ON PURPOSE ────────────────────────────────────────────────────
+// It used to demand that Access & permissions and the Printing menu point at each other, from
+// 2026-08-26: "board should be sync. Right now it's not." The two boards did drift, and the answer
+// then was to embed one in the other.
+//
+// He reversed it on 2026-08-29, having lived with the result: *"in the middle of thing, you tell me
+// to go to the access and permission and all that stuff. Remove it completely… now printing has a
+// new menu, so all the settings of the printing will be there."* Cross-referencing was not sync, it
+// was the same setup in two places and a detour out of a job half-done.
+//
+// So the rule is now the OPPOSITE, and it is asserted rather than left as an absence: the Printing
+// menu must not send anybody to Access to finish setting a printer up.
+check(!/aevinite\/access/.test(read("app/aevinite/printing/page.tsx")),
+  "the Printing menu finishes its own job — it never sends a person to Access mid-setup",
+  "the Printing menu links to Access & permissions again: he asked for one place, and being sent away halfway through is the complaint that produced this rule");
 check(/helper\.owned\) return \{ mayPrint: false/.test(eroute) || /if \(helper\.owned\) return \{ mayPrint: false/.test(eroute),
   "the manager screen stands down as well, backup path included",
   "the counter screen can still print a helper-owned ticket");

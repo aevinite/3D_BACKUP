@@ -169,13 +169,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         managerPermissions: perms?.manager_permissions,
         ownOverride: u.permissions?.["print_here"],
       });
+    // EVERY ACTIVE PERSON IS OFFERED, and the panel is simply the screen they stand at.
+    //
+    // It used to hide any manager whose "May be the printer" permission was off, which is how the
+    // owner ended up being sent to Access & permissions in the middle of setting a printer up —
+    // and, when the kitchen was the only role never gated, why he found "there is not kitchen panel
+    // available" for the people he most wanted to name. Naming somebody here IS the permission now
+    // (the pending gate honours an explicit choice), so the picker's job is only to list who exists.
     const people = staff.filter((u) => u.active !== false).map((u) => {
       const role = String(u.role || "");
       const panels = role === "kitchen" ? ["kitchen"]
-        // An OWNER standing at the manager panel is gated by the same row, for the same reason.
-        : role === "manager" ? (mayBePrinter(u) ? ["manager"] : [])
-        : role === "owner" ? (mayBePrinter(u) ? ["owner", "manager"] : ["owner"])
-        : role === "tablet" || role === "waiter" ? ["tablet"] : [];
+        : role === "owner" ? ["manager", "owner"]
+        : role === "tablet" || role === "waiter" ? ["tablet"]
+        : role === "manager" ? ["manager"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
     const devices = ((await sb.from("print_stations").select("device_id, label, panel, last_seen_at")

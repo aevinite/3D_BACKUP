@@ -4623,6 +4623,16 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
 .pw-state-row.no  .pw-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
 .pw-val { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
 .pw-state-row.yes .pw-val { color: var(--green, #30a46c); }
+/* THE CONFIRMATION, IN THE PAGE — the panel's copy of the admin board's strip, same shape and same
+   words, so the two screens do not teach a person two different things (owner, 2026-08-29). */
+.pw-confirm { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
+  margin-top: 11px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--gold, #d4a574); background: color-mix(in srgb, var(--gold, #d4a574) 8%, var(--card)); }
+.pw-confirm .txt { flex: 1 1 300px; display: flex; flex-direction: column; gap: 4px; }
+.pw-confirm .txt b { font-size: 13.5px; color: var(--ink, var(--text)); }
+.pw-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.pw-confirm .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 640px) { .pw-confirm .acts { width: 100%; } .pw-confirm .acts .btn { flex: 1 1 auto; } }
 /* THE "YES" measured 4.43:1 on the light panel's cream card — a hair under the 4.5:1 a 12.5px label
    needs (printing sweep §15, 2026-08-29). One step deeper, and only in the light skin: the dark
    skin's green already reads clean on its own card, and --green is shared with other panels. */
