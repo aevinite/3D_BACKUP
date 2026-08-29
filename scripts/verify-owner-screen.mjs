@@ -494,6 +494,40 @@ check("…and the CHIP strip, the search and the money line read from that same 
     && /kindLabel: KINDS/.test(auditC) && /KINDS\[activeKind\]/.test(auditC),
   "app/owner/activity/page.tsx: a chip, the search or the '· <kind>' line is back on the bare\n       KIND_LABEL. AUDITSORT.kindCountsFrom falls back to the raw kind itself, which is how the strip\n       came to print '• customer_erased 2' beside ten properly-named chips.");
 
+// 22 — the guest-erasure row has REAL words in the one map all four surfaces read (owner, 2026-08-29)
+{
+  const as = read("public/panels/auditsort.js");
+  check("customer_erased is named in the shared map, not just floored locally",
+    /customer_erased: "Guest record erased"/.test(as) && /customer_erased: "\\uD83E\\uDDF9"/.test(as),
+    "public/panels/auditsort.js lost its customer_erased label or glyph. Then the owner panel falls back\n       to humanKind, and the manager panel, the admin console and the removal-detail card go back to\n       printing the column value.");
+}
+
+// 23 — every owner-panel write records a PERSON, never a database id (owner, 2026-08-29)
+{
+  const sc = read("lib/ownerScope.ts");
+  check("there is ONE definition of who an owner write is recorded as",
+    /export function ownerActorName\(scope: OwnerScope\): string/.test(sc) && /ownerName\?: string/.test(sc),
+    "lib/ownerScope.ts: ownerActorName has gone. Five routes used to build this by hand and all five\n       wrote scope.ownerId — a uuid — into columns the panels PRINT.");
+  check("…and the owner's login name is carried on the scope to feed it",
+    /ownerName: owner\.username \|\| undefined/.test(sc),
+    "lib/ownerScope.ts: the scope stopped carrying the owner's login name, so ownerActorName falls back\n       to the uuid again.");
+  let raw = 0;
+  for (const f of ["app/api/owner/ratings/route.ts", "app/api/owner/customers/route.ts", "app/api/owner/issues/route.ts"]) {
+    const t = read(f);
+    if (/scope\.ownerId \|\| "owner"/.test(t)) raw++;
+    check(`${f.split("/").slice(-2)[0]} records the person through ownerActorName`,
+      /ownerActorName\(scope\)/.test(t) && !/scope\.ownerId \|\| "owner"/.test(t),
+      `${f}: it is back to building the actor by hand from scope.ownerId, which is a uuid. That value\n       lands in staff_actions.actor, deletion_audit.actor, feedback.acknowledged_by or issues.raised_by —\n       all four are columns a screen prints.`);
+  }
+  check("no owner route builds that expression by hand any more",
+    raw === 0,
+    `${raw} route(s) still build the actor from scope.ownerId. One definition, or they drift again.`);
+  const iss = read("app/owner/issues/page.tsx");
+  check("the Feedback screen guards the ids already written before that fix",
+    /actorLabel\(r\.acknowledged_by\)/.test(iss) && /actorLabel\(i\.raised_by\)/.test(iss),
+    "app/owner/issues/page.tsx: 'handled by' and 'Raised by' print their column raw again. Rows written\n       before 2026-08-29 still hold a uuid there.");
+}
+
 // …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
 // It is a note because the words live in public/panels/auditsort.js, which the owner console only
 // READS — a guard that goes red over a file its own territory cannot edit is a guard that gets

@@ -5,7 +5,7 @@
 // columns, .in(restaurant_id), .limit, one cheap head-count for the true total.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
@@ -347,7 +347,7 @@ export async function DELETE(req: NextRequest) {
   // guest vanishing from the list is indistinguishable from a bug — and with several co-owners
   // nobody could say who did it. Only the last 4 digits are recorded: the log must not become a
   // second copy of the number the owner just asked us to erase.
-  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
+  const who = ownerActorName(scope);
   const last4 = phone.slice(-4);
   await logAction(ownerLogPanel(scope), "customer_erase", {
     restaurant_id: restaurantId,

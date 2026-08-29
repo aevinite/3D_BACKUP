@@ -22,7 +22,11 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 // deliberately borrows the real owner's id whenever the restaurant has one, so that
 // sentinel almost never fires (work-checker, 2026-07-06 — the admin was getting
 // wrongly locked out of the very sections it had switched off).
-export type OwnerScope = { all: true; admin?: true } | { all: false; ids: string[]; ownerId: string; admin?: true };
+// `ownerName` is the signed-in owner's LOGIN NAME, carried for one purpose only: writing a
+// readable person into the `actor` columns the panels display (see ownerActorName below). It is
+// absent on the admin branches, which record "admin" anyway, and it is never used for a permission
+// decision — `ownerId` remains the identity.
+export type OwnerScope = { all: true; admin?: true } | { all: false; ids: string[]; ownerId: string; ownerName?: string; admin?: true };
 
 /**
  * "We could not work out what you are allowed to see."
@@ -88,7 +92,9 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
     // 30s cache TTL instead of the 7-day cookie life (audit 2026-07-07). Empty set → no access.
     const ids = await enabledOwnedRestaurantIds(owner.id);
     if (!ids.length) return null;
-    return { all: false, ids, ownerId: owner.id };
+    // The login name rides along free — `userFromCookie` already read the whole row. See
+    // ownerActorName below for why it is needed.
+    return { all: false, ids, ownerId: owner.id, ownerName: owner.username || undefined };
   }
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
     // Admin who has DELIBERATELY entered one restaurant is scoped to JUST that
@@ -184,6 +190,34 @@ export function inScope(scope: OwnerScope, restaurantId: string): boolean {
  */
 export function ownerLogPanel(scope: OwnerScope): "owner" | "admin" {
   return (scope.all || scope.admin) ? "admin" : "owner";
+}
+
+/**
+ * WHO TO RECORD AS THE PERSON — one definition, for every owner-panel write.
+ *
+ * These routes each built this by hand as
+ *     (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner")
+ * and `scope.ownerId` is a UUID. Five call sites did it — ratings, customers, and three in issues —
+ * and the value goes into columns the panels PRINT: `staff_actions.actor`, `deletion_audit.actor`,
+ * `feedback.acknowledged_by` and `issues.raised_by`. So a real owner acknowledging a rating or
+ * erasing a guest appeared on his own screens as, verbatim:
+ *
+ *     Handled a rating   c0af7b5b-c0d8-40f6-b831-f475e48bab53   2m ago
+ *
+ * measured on French House (T12 sweep, 2026-08-27). Every other row in those columns holds a login
+ * name — "diagm1", "diagt1" — because every other writer records one, so this was the odd one out
+ * rather than the convention.
+ *
+ * The login name is what goes in, matching the rest of the record. The admin still records as
+ * "admin" (the standing "admin = top power, invisibly" rule), and the uuid remains the fallback for
+ * the case that cannot happen in practice — an owner scope with no name on it — so nothing is ever
+ * recorded as nobody.
+ *
+ * This does NOT change any authorisation: `ownerId` is still the identity everywhere it matters.
+ */
+export function ownerActorName(scope: OwnerScope): string {
+  if (scope.all || scope.admin) return "admin";
+  return scope.ownerName || scope.ownerId || "owner";
 }
 
 // The CONCRETE restaurant-id list for a scope. A real owner already has one; the admin's
