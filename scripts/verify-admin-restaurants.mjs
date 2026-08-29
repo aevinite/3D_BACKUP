@@ -579,6 +579,60 @@ console.log("\n24. The health chips clear when the lit one is tapped again");
     "…and the Owners KPI tiles, the pattern this follows, still toggle back too");
 }
 
+
+console.log("\n25. Billing: a typed amount is a NUMBER or it is refused — never invented");
+{
+  // The old parser stripped every character that was not a digit, a dot or a minus and took what
+  // was left: "abc" and "₹" became 0, and "x1y2" became 12. None reached the route's own refusal,
+  // because that only fires when the parse returns null — so a typo was stored as a ₹0 (comped)
+  // or ₹12 plan and the screen said "Saved." (item 16.)
+  const BAPI = read("app/api/admin/billing/route.ts");
+  want(/const cleaned = String\(v\)\.trim\(\)\.replace\(\/\[\\s,\]\/g, ""\)\.replace\(\/\^\[₹\$€£\]\/, ""\);/.test(BAPI),
+    "the route strips only what is typed AROUND a number — spaces, thousands separators, a currency symbol");
+  want(/if \(!\/\^-\?\\d\+\(\\\.\\d\+\)\?\$\/\.test\(cleaned\)\) return null;/.test(BAPI),
+    "…and then requires what is left to BE a number, instead of taking whatever survived");
+  want(!/Number\(String\(v\)\.replace\(\/\[\^0-9\.-\]\/g, ""\)\)/.test(BAPI),
+    "…and the strip-everything-else parse is gone");
+  want(/Amount isn't a valid number/.test(BAPI),
+    "…so the refusal it was always meant to reach can actually fire");
+  want(/A plan can be 0 \(free\/comped\)/.test(BAPI),
+    "…while a DELIBERATE 0 is still allowed, which is why a typo landing on 0 was invisible");
+  // the same rule on the payment box, which had the same shape
+  const BPAGE = read("app/aevinite/billing/page.tsx");
+  want(/const cleaned = String\(payAmount\)\.trim\(\)\.replace\(\/\[\\s,\]\/g, ""\)/.test(BPAGE),
+    "…and the Add-a-payment box parses by the same rule, so it cannot record a ₹12 typo either");
+  want(!/Number\(String\(payAmount\)\.replace\(\/\[\^0-9\.-\]\/g, ""\)\)/.test(BPAGE),
+    "…and its strip-everything-else parse is gone too");
+}
+
+console.log("\n26. Every platform-wide read behind these screens has a ceiling");
+{
+  // The sibling billing route was bounded on 2026-08-04 with the reasoning "one row per restaurant
+  // makes it small today, but it grows with exactly the number this product is built to increase".
+  // Four reads in the restaurants route were left without one. Egress is this product's cost.
+  // (item 17.)
+  const unbounded = [];
+  for (const f of [
+    "app/api/admin/restaurants/route.ts", "app/api/admin/restaurants/settings/route.ts",
+    "app/api/admin/restaurants/export/route.ts", "app/api/admin/owners/route.ts",
+    "app/api/admin/cancelled-today/route.ts", "app/api/admin/maintenance/route.ts",
+    "app/api/admin/billing/route.ts", "app/api/admin/floor/route.ts",
+  ]) {
+    const src = read(f);
+    for (const m of src.matchAll(/\.from\("([a-z_]+)"\)([\s\S]{0,400}?)(?=;|\n\s*(?:const|let|if|return|await|\}))/g)) {
+      const q = m[2];
+      if (!/\.select\(/.test(q)) continue;
+      if (/\.limit\(|maybeSingle\(\)|\.single\(\)|count:|head: true/.test(q)) continue;
+      if (/\.update\(|\.insert\(|\.upsert\(|\.delete\(/.test(q)) continue;
+      unbounded.push(f.split("/").slice(-2).join("/") + " · " + m[1]);
+    }
+  }
+  want(unbounded.length === 0,
+    unbounded.length === 0
+      ? "every list read behind the admin's restaurants, owners, billing, bin and floor is bounded"
+      : "unbounded list read(s): " + unbounded.join(", "));
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");

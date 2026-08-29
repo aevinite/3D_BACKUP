@@ -26,9 +26,28 @@ const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 // Parse a money amount tolerantly: strip thousands separators / stray symbols so
 // "12,000" or "₹12,000" becomes 12000. Returns null when no valid number remains, so a
 // comma-formatted amount no longer silently saves as blank (audit 2026-07-08).
+//
+// ── "TOLERANTLY" WAS TOO TOLERANT (T16 sweep #7, 2026-08-29) ───────────────────────────────────
+// It stripped EVERY character that was not a digit, a dot or a minus, and then took whatever was
+// left. That is not tolerance, it is invention:
+//
+//     "abc"    →  ""     → Number("")  →  0        stored as a ₹0 plan
+//     "₹"      →  ""     → Number("")  →  0        stored as a ₹0 plan
+//     "x1y2"   →  "12"                 →  12       stored as a ₹12 plan
+//
+// and none of those reached the refusal below, because it only fires when this returns null. A
+// plan amount of 0 is allowed on purpose (free / comped), so a typo did not even look wrong —
+// the screen said "Saved." and the restaurant was on a comped plan. This is the platform's own
+// subscription money.
+//
+// So: strip only what a person legitimately types AROUND a number — spaces, thousands separators
+// and a leading currency symbol — and then require what is left to BE a number. Everything the
+// old one accepted for good reasons still works ("12,000", "₹12,000", "12000.50", " 12000 ").
 const parseAmount = (v: unknown): number | null => {
   if (v === "" || v == null) return null;
-  const n = Number(String(v).replace(/[^0-9.-]/g, ""));
+  const cleaned = String(v).trim().replace(/[\s,]/g, "").replace(/^[₹$€£]/, "");
+  if (!/^-?\d+(\.\d+)?$/.test(cleaned)) return null;
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 };
 
