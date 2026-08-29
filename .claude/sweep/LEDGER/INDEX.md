@@ -33,7 +33,13 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P37358`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P41001`.**
+
+> **T7 claims `P40501`–`P41000`** for a THIRD freshly planned 500 (2026-08-30, the owner's word:
+> *"plan again 500 phases test within the boundary that you have given and rerun the test"*).
+> Claimed BEFORE a single row was written, per the rule three lines below — and deliberately taken
+> ABOVE the highest id actually on disk (`P40500`) rather than from the mark, which read `P37358`
+> while rows already existed past it. Trust the disk, not the mark. (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
 > **THE SPLIT BILL — a whole 500 on one feature** at `P36858`–`P37357` (2026-08-29). Asked for
 > after three faults he found on that screen were fixed and made live. Not a territory sweep: one

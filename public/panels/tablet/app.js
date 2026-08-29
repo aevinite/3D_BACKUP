@@ -2672,6 +2672,17 @@ function kotOpsOn() {
   const set = state.data.settings || {};
   return !!set.table_ops_tablet_allowed && tperm("tablet_table_ops") !== "off";
 }
+// Is splitting a bill offered at all? A per-restaurant switch, OFF by default (owner, 2026-08-01,
+// mig 248 — manager panel → Settings → Bill). Read it HERE, never re-derive it: splitting has TWO
+// doors on this panel now (🧾 KOT ▾ → Split the bill, and the small line at the bottom of the
+// payment sheet), and a switch that reaches only one of them is worse than no switch. That is
+// exactly what happened: the KOT row was gated, the payment-sheet line added on 2026-08-28 was
+// not, so a restaurant with splitting OFF still had a waiter one tap from the whole split screen —
+// and there is no server-side check to catch it (T7 sweep #7 third pass, 2026-08-30). The manager
+// panel learned the same lesson first and its splitBillOn() carries the same note.
+function splitBillOn() {
+  return !!(state.data.settings || {}).split_bill_enabled;
+}
 function renderKotMenu(t, s) {
   // `movable` is THIS TABLE'S OWN tickets — right for "move a KOT" / "move a dish", because a
   // ticket belongs to the table it was rung at.
@@ -2704,7 +2715,7 @@ function renderKotMenu(t, s) {
     // Splitting is a per-restaurant switch and it starts OFF (owner, 2026-08-01, mig 248 —
     // Settings → Bill in the manager panel). It also sits LAST, matching the manager's list: the
     // waiter and the manager must not be offered a different set of operations for one table.
-    (!!(state.data.settings || {}).split_bill_enabled
+    (splitBillOn()
       ? row("split", "🍴", "Split the bill", "Equal, a custom amount, by dish or by kitchen ticket — each part pays its own way", tshow("tablet_mark_paid") && splittable.length > 0)
       : "");
   const { dropLayer } = renderPickerShell(`T${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
@@ -2747,6 +2758,10 @@ function renderKotMenu(t, s) {
 // names nothing and repeats forever (T7 sweep #7, 2026-08-22 — that fault was fixed in both screens
 // the week before this merged them, and the rule survives here).
 function renderSplitBill(t, opts = {}) {
+  // The switch is checked at every door AND here. A screen a restaurant turned off must not open
+  // because some future third door forgot to ask — and nothing on the server refuses a /pay-split
+  // for a restaurant with splitting off, so this is the last gate there is.
+  if (!splitBillOn()) { toast("Splitting a bill is turned off for this restaurant.", false); return; }
   const payable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received"); // a merged party splits its WHOLE bill
   if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", false); return; }
   const round2 = (n) => Math.round(n * 100) / 100;
@@ -2853,9 +2868,16 @@ function renderSplitBill(t, opts = {}) {
     </div>
     <div class="sb-body"></div>
     <div class="sb-sum"></div>
-    <button class="btn primary big sb-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>`;
+    <!-- inrExact, NOT inr, on BOTH the title and this button (T7 sweep #7 third pass, 2026-08-30).
+         They are the figure the waiter reads while typing custom amounts, so they are figures a
+         person must MATCH — the whole reason inrExact exists. On a ₹1,065.75 bill the title and
+         the button said "₹1,066": type 500 + 566 to reach it and the screen refuses with "₹0.25
+         more than the bill", and the true total appears nowhere on screen until the parts already
+         balance. inrExact prints whole rupees when the bill has no paise, so a tidy bill looks
+         exactly as it did. -->
+    <button class="btn primary big sb-go" style="width:100%">💳 Collect ${inrExact(due)} in parts</button>`;
   const { dropLayer } = renderPickerShell(
-    `Split ${esc(tableLabel(t))}'s bill · ${inr(due)}`, shell, "tablet-split-bill",
+    `Split ${esc(tableLabel(t))}'s bill · ${inrExact(due)}`, shell, "tablet-split-bill",
     typeof opts.onBack === "function" ? opts.onBack : renderPanel,
   );
   const p = $("#panel");
@@ -3567,8 +3589,10 @@ async function payBillWithMethod(t, a) {
     // Splitting is offered as a small LINE at the bottom of that sheet, not a payment tile —
     // it is how the bill is divided, not a way the money came in (owner, 2026-08-28). Tapping it
     // closes the sheet and opens the ONE split screen. The tickets it needs it works out itself
-    // from partyOrders(), so nothing has to be handed across.
-    split: true,
+    // from partyOrders(), so nothing has to be handed across. It obeys the SAME switch as the KOT
+    // row — one splitBillOn(), both doors — so a restaurant that turned splitting off is not
+    // offered it here (T7 sweep #7, 2026-08-30).
+    split: splitBillOn(),
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
     // WHO THIS TABLE'S CUSTOMER ALREADY IS, if anybody has been asked once (owner, 2026-08-29:

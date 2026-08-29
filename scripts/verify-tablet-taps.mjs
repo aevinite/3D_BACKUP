@@ -442,9 +442,17 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     ["the split screen's shortfall refusal", /of the bill is still uncovered/],
     ["the split screen's over-collect refusal", /more than the bill/],
   ];
+  // Searched in the CODE, not in the comments (2026-08-30). The first version searched raw `src`
+  // and took the FIRST match — so writing a comment that QUOTES the refusal ("…refused with '₹0.25
+  // more than the bill'") pointed the check at a sentence in English and failed it. A guard must
+  // accuse the line that runs, never the line that explains it.
+  const codeSrc = src
+    .replace(/<!--[\s\S]*?-->/g, "")            // HTML comments inside the template literals
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
   for (const [what, re] of shortfall) {
-    const at = src.search(re);
-    const line = at < 0 ? "" : src.slice(src.lastIndexOf("\n", at) + 1, src.indexOf("\n", at));
+    const at = codeSrc.search(re);
+    const line = at < 0 ? "" : codeSrc.slice(codeSrc.lastIndexOf("\n", at) + 1, codeSrc.indexOf("\n", at));
     check(
       `tablet: ${what} quotes the gap to the PAISE (inrExact, never inr)`,
       at >= 0 && /inrExact\(/.test(line) && !/[^a-zA-Z]inr\(/.test(line),
@@ -632,6 +640,84 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     !/^(?:async )?function ensureTableSlice\s*\(/m.test(src),
     `${TABLET}: ensureTableSlice() is back. It refreshes ONE table; a merged party needs every\n    ` +
     `member's slice or partyOrders() sees half the bill. Use ensurePartySlices().`,
+  );
+}
+
+// ── 13 · ONE SWITCH, EVERY DOOR TO SPLITTING ─────────────────────────────────────────────────
+//
+// Splitting a bill is a per-restaurant switch that starts OFF (mig 248). It has TWO doors on this
+// panel — 🧾 KOT ▾ → "Split the bill", and the small line at the bottom of the payment sheet —
+// and on 2026-08-30 only the first one asked the switch: a restaurant with splitting off still had
+// a waiter one tap from the whole split screen, and nothing on the server refuses a /pay-split, so
+// the panel is the only gate there is. Both doors and the screen itself now read one splitBillOn().
+{
+  check(
+    "tablet: the split switch is read through ONE splitBillOn(), not re-derived",
+    /function splitBillOn\s*\(\)/.test(src),
+    `${TABLET}: splitBillOn() is gone. Every door to splitting must ask the SAME function —\n    ` +
+    `re-deriving state.data.settings.split_bill_enabled at each door is how one of them was missed.`,
+  );
+  const rederived = (src.match(/settings\s*\|\|\s*\{\}\)\.split_bill_enabled/g) || []).length;
+  check(
+    "tablet: …and only that function reads the raw setting",
+    rederived <= 1,
+    `${TABLET}: split_bill_enabled is read raw in ${rederived} places. Read it once, inside\n    ` +
+    `splitBillOn(), and call that everywhere — a door that asks the setting itself is a door that\n    ` +
+    `can be added without asking it at all.`,
+  );
+  check(
+    "tablet: the KOT menu's split row asks the switch",
+    /\(splitBillOn\(\)\s*\n?\s*\?\s*row\("split"/.test(src),
+    `${TABLET}: the 🧾 KOT ▾ split row no longer asks splitBillOn().`,
+  );
+  check(
+    "tablet: the payment sheet's split line asks the same switch",
+    /split:\s*splitBillOn\(\)/.test(src),
+    `${TABLET}: payBillWithMethod() passes split: true. The small line at the bottom of the\n    ` +
+    `payment sheet is the SECOND door to the same screen — it must obey the same switch as the\n    ` +
+    `first, or turning splitting off does nothing for the waiter who uses that door.`,
+  );
+  check(
+    "tablet: and the split screen refuses to open when the switch is off",
+    /if \(!splitBillOn\(\)\) \{ toast\(/.test(src),
+    `${TABLET}: renderSplitBill() opens without asking splitBillOn(). Every door checks, and the\n    ` +
+    `screen checks too — a third door added later must not be able to reopen this hole.`,
+  );
+}
+
+// ── 14 · THE SPLIT SCREEN'S OWN TOTAL IS A FIGURE SOMEBODY MUST MATCH ────────────────────────
+//
+// inr() rounds to whole rupees; inrExact() keeps the paise and prints whole rupees when there are
+// none. The rule (2026-08-22) is that every figure a person has to MATCH uses inrExact — and on
+// 2026-08-30 the split screen was obeying it in its running line and its refusals while its own
+// TITLE and its Collect button still rounded. On a ₹1,065.75 bill both said ₹1,066, so a waiter
+// typing custom amounts to reach the number in front of them was refused by 25 paise they could
+// not see anywhere.
+{
+  // The WHOLE function, not a fixed number of characters: the first version of this check sliced
+  // 12,000 chars and stopped two lines before the Take-payment refusal, so it counted five figures
+  // and demanded six. A guard that measures an arbitrary window is a guard that will lie later.
+  const sbStart = src.indexOf("function renderSplitBill");
+  const sbEnd = src.indexOf("\nfunction ", sbStart + 10);
+  const sb = src.slice(sbStart, sbEnd > 0 ? sbEnd : src.length);
+  check(
+    "tablet: the split screen's Collect button names the bill to the paise",
+    /class="btn primary big sb-go"[^`]*\$\{inrExact\(due\)\}/.test(sb),
+    `${TABLET}: the split screen's Collect button uses inr(due). It is the figure the waiter types\n    ` +
+    `custom amounts to match, so it must be inrExact(due) — a rounded total refuses by paise that\n    ` +
+    `appear nowhere on screen.`,
+  );
+  check(
+    "tablet: …and so does its title",
+    /Split \$\{esc\(tableLabel\(t\)\)\}'s bill · \$\{inrExact\(due\)\}/.test(sb),
+    `${TABLET}: the split screen's title rounds the bill. Title, button and running line are three\n    ` +
+    `views of ONE number — if they disagree the waiter is asked to match a total that is not the total.`,
+  );
+  check(
+    "tablet: the split screen's running line and refusals still keep their paise",
+    (sb.match(/inrExact\(/g) || []).length >= 6,
+    `${TABLET}: renderSplitBill now has fewer than six inrExact() figures — something that a person\n    ` +
+    `must match has gone back to whole rupees.`,
   );
 }
 
