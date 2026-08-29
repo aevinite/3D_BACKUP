@@ -1093,6 +1093,15 @@ function renderDishes() {
   const set86 = (id, out) => {
     const dish = state.dishes.find((d) => d.id === id);
     if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
+    // KEEP THE COUNT ON THE SWITCH HONEST (found by the 500-phase run, 2026-08-29). Marking a dish
+    // sold out flips its button optimistically and deliberately does NOT re-render the drawer — a
+    // rebuild loses the search caret mid-type and orphans the UNDO's button. But the "Sold out only"
+    // switch carries a COUNT, and without this it kept saying 0 while a cook marked three dishes off.
+    // So the one number is patched in place, exactly like the button beside it.
+    // The LIST is deliberately left alone: a dish put back on the menu stays visible while the filter
+    // is on, so the row the UNDO bar is talking about is still there to look at.
+    { const oc = document.querySelector("#outOnlyBtn .oc");
+      if (oc) oc.textContent = String(state.dishes.filter(isOut).length); }
     const btn = document.querySelector(`[data-86="${window.CSS && CSS.escape ? CSS.escape(id) : id}"]`);
     if (!btn) return;
     btn.dataset.out = out ? "1" : "0";
