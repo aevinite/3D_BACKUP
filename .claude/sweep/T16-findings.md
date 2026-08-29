@@ -6,7 +6,7 @@ plans · Recycle bin · Live floor**, plus the settings card those screens embed
 
 Branch `sweep7/t16-admin-restaurants`, worktree `../wt-s7-t16`, dev port **4216**.
 Ledger: `.claude/sweep/LEDGER/T16.md` — **1,500 rows on record, all green.** 500 existing rows
-re-run in place, 500 new rows `P22601`–`P23100`, and then a SECOND 500 (`P35237`–`P35736`, planned
+re-run in place, 500 new rows `P22601`–`P23100`, and then a SECOND 500 (`P35737`–`P36236`, planned
 from scratch on 2026-08-29 against ground the first 1,000 do not cover).
 
 Every temporary row this run created was a `zzt16s7…` row and was removed **by its own id** in a
