@@ -122,6 +122,7 @@ were **stale allowances**, not dead checks.
 | 7 | P03001–P03500 | **The waiter tablet** — `app/tablet/**`, `public/panels/tablet/**` | ✅ | 500 | 480 | 16 | 4 |
 | 8 | P03501–P04000 | **Printing, the bill document and the numbers on it** — `billdoc.js`, `billcustomer.js`, `docs/NUMBERING.md` | ✅ | 500 | 468 | 26 | 3 |
 | 9 | P04001–P04518 | **Shared panel plumbing** — the 15 `public/panels/*.js` helpers, `editor/inventory.js`, `public/panels/vendor/**` | ✅ | 518 | 501 | 17 | 0 |
+| 12 | P05501–P06000 · **+ P20601–P21100 (sweep #7)** · **+ P40001–P40500 (sweep #7 round 2)** | **Owner home screen, Audit & logs, who's online, marketing** — `app/owner/page.tsx`, `app/owner/activity/**`, `app/owner/online/**`, `app/owner/marketing/**`, `components/owner/OwnerShell.tsx` | ✅ | **1500** | **1500** | 0 | 0 |
 | 10 | P04501–P05000 · **+ P19601–P20100 (sweep #7)** | **Guest and staff-panel API routes** — `app/api/{guest,r,editor,kitchen,tablet,inventory,…}/**`, `app/login/**`, `app/staff-login/**` | ✅ | **1000** | **1000** | 0 | 0 |
 | 11 | P05001–P05500 | **The owner's reports and charts** — `app/owner/{reports,report,sales}/**`, `components/owner/Charts.tsx`, `lib/ownerCache.ts` | ✅ | 500 | 455 | 34 | 10 |
 | 12 | P05501–P06000 | **Owner home, activity log, who's online, marketing** — `app/owner/page.tsx`, `activity`, `online`, `marketing`, `OwnerShell.tsx` | ✅ | 500 | 497 | 0 | 1 |

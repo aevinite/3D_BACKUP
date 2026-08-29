@@ -59,3 +59,49 @@ own fix is reverted. Green alongside it: `verify:audit` (87), `verify:xray` (10)
 `npm run lint` both pass (lint exit 0; the two warnings in `app/owner/page.tsx` are pre-existing).
 
 **Nothing was written to the database in this run.**
+
+
+---
+
+# ROUND 2 — 2026-08-29/30
+
+The owner read round 1's report, picked items **13, 14, 15, 16, 18 and 19**, parked 17, and asked
+for the lot merged and made live. Then he asked for another 500 phases inside the same territory.
+
+**Round 1 (items 1–19) is MERGED and LIVE on backup** — PR #1130, merge commit `324f485a`, Vercel
+READY, and all 18 changes re-verified on `https://3-d-backup.vercel.app` (13 live checks, 0 fails).
+
+## From his list
+
+| # | what happened |
+|---|---|
+| 13 | `customer_erased` now has words and a glyph in `public/panels/auditsort.js` — fixes the owner panel, the manager panel, the admin console AND the removal-detail card in one place |
+| 14 | **five** call sites, not two. `ratings`, `customers` and three in `issues` each built the person from `scope.ownerId`, a uuid, and wrote it into four columns the panels PRINT. One definition now (`lib/ownerScope → ownerActorName`). Driven end to end; the fixture restored |
+| 15 | the removals chip strip folds on a phone — 530px → 169px, search box back above the fold |
+| 16 | the pager's "back to the top" now moves the element that really scrolls; verified with the accidental collapse-to-Loading deliberately defeated |
+| 18 | `diagmulti` exists, with `scripts/sweep/make-multi-owner.mjs` and an `ownerMulti` login |
+| 19 | **already fixed** by another terminal in the 215 commits that landed meanwhile; `verify:guards-alive` is 8 of 8 |
+| 17 | parked by the owner |
+
+## What the new 500 phases found
+
+Two problems, both fixed, **both invisible before item 18**:
+
+| # | where it lives | what was wrong |
+|---|---|---|
+| 20 | owner → Dashboard (multi) → the estate table → tap a restaurant whose Reports are switched off | the row says "figures hidden"; the drawer it opens showed `Today ₹0 · Revenue ₹0 · Avg ₹0 · 0 orders all-time · ₹0 all-time` over a trading restaurant, with a drawn trend chart of nothing. The table, sidebar, switcher and captions were all taught this on 2026-08-04; the drawer never was |
+| 21 | owner → Dashboard (multi), on a phone | the estate table showed his restaurant NAMES and not one figure. Four of the six remaining columns sat off the right edge — a 561px table in a 330px scroller — behind a sideways swipe with no scrollbar and no hint. It now stacks into one labelled block per restaurant |
+
+## Eleven of my own assertions were wrong rather than the code
+
+Recorded in the ledger rows so the next sweep does not re-discover them as faults: recharts draws
+bars as `<path>` not `<rect>`; a `fa-triangle-exclamation` probe also catches the sidebar's Feedback
+icon; `AnimatedNumber` counts up from 0, so a fast sample reads "0"; the instant-paint snapshot is
+per TAB (sessionStorage), so a new tab correctly starts cold; a tile TOTAL and a per-day AXIS may
+legitimately differ in unit; `fullPage: true` pads a `100dvh` shell with the dark body background;
+a downscaled screenshot is not evidence about a colour — sample the pixel.
+
+## Still open in this territory
+
+One thing, and it is the owner's own decision: the owner console has no offline queue, so its single
+write (the food-made answer) is refused rather than saved when there is no signal. Parked as item 17.
