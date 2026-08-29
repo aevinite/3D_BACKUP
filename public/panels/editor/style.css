@@ -662,11 +662,14 @@ input:disabled { opacity: .55; cursor: not-allowed; }
    780px screen on four screens. body[data-tab] is set by setTab, survives any re-render and
    cannot be lost with the node. The JS stays as the first line of defence. */
 body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
-/* A TOAST MUST NOT LAND ON THE UNDO BAR (same sweep). Both are centred at the bottom ~8px apart
-   (undobar.js sits at 16px + --sab, this at 24px), so on a 360px screen a "1 new order" toast
-   covered the "Undo serve" card — and the undo is the one with a deadline. undobar.js adds
-   .lfh-undobar-up to <body> while it is showing and publishes its measured height. */
-body.lfh-undobar-up .toast { bottom: calc(24px + var(--sab) + var(--lfh-undobar-h, 56px) + 8px); }
+/* A TOAST MUST NOT LAND ON THE UNDO BAR (T12 phone sweep). Both are centred at the bottom ~8px
+   apart, so on a 360px screen a "1 new order" toast covered the "Undo serve" card — and the undo
+   is the one with a deadline.
+   THE RULE ITSELF NOW SHIPS FROM undobar.js (T9 sweep #7, 2026-08-17), so all four panels get it
+   from one place instead of a copy per stylesheet. This panel's copy was left behind and was dead
+   — undobar.js injects its sheet at runtime, after this <link>, at equal specificity, so its rule
+   won every time. Dead code that looks live is worse than no code: the next person to change one
+   of the two would have had no way to know about the other. Removed 2026-08-28. */
 .toast.ok { border-color: var(--green); }
 .toast.err { border-color: var(--red); }
 .toast .toast-x {

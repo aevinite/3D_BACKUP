@@ -125,6 +125,22 @@
       // The button borrows the panel's own top-bar button shape (.theme-toggle exists in both
       // panels' stylesheets) so it can never look like a bolted-on third-party thing.
       ".lfh-bell{position:relative}",
+      // …BUT BORROWING THE CLASS MUST NOT MEAN BORROWING ITS HIDING (T9 sweep #7, 2026-08-22).
+      //
+      // The waiter tablet hides `.top-actions .theme-toggle` below 760px — a rule written for the
+      // sun/moon in August, before this bell existed. The bell wears that class for its shape, so on
+      // a phone it vanished with it: measured at 390px, the tablet's top bar had the connection pill
+      // and Quick order and nothing else, and the 🔔 the owner asked for on this panel specifically
+      // ("manager [and] tablet panel, both") could not be reached at all — it is not in the ☰ drawer
+      // either. The 🚩 had exactly this fault and was fixed on 2026-08-06 by giving it a drawer row;
+      // the bell arrived a week later and nobody joined the two up.
+      //
+      // A count is not a preference. The theme toggle is fine in a drawer because it is a setting you
+      // change once; a notification badge is only any use where a waiter can see it without opening
+      // anything. So it keeps its place on the bar. Same specificity as the panel's rule, injected
+      // after the stylesheet, so it wins on document order without an !important — and it re-states
+      // only `display`, so every other borrowed property still comes from the panel.
+      ".top-actions .lfh-bell,.topbar .lfh-bell{display:inline-flex}",
       ".lfh-bell-n{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;",
       "  border-radius:999px;background:#dc2626;color:#fff;font:800 10.5px/17px system-ui,sans-serif;",
       "  text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);pointer-events:none}",
@@ -145,8 +161,13 @@
       ".lfh-bell-hd{display:flex;align-items:flex-start;gap:10px}",
       ".lfh-bell-hd h3{margin:0;font-size:16.5px;font-weight:800;flex:1}",
       ".lfh-bell-hd p{margin:6px 0 0;font-size:12.5px;opacity:.75;font-weight:500}",
+      // 40px, not 32 (T9 sweep #7, 2026-08-22). The owner grew the top bar's ✕-sized controls to 44
+      // on 2026-08-22 for exactly this reason, and this one was missed because it lives inside the
+      // sheet rather than on the bar. It matters MORE here than on the bar: a miss beside the pill
+      // costs nothing (R40's reasoning), but a miss beside this ✕ lands on a row — and a row OPENS
+      // THAT TABLE. A harmless mis-tap and a harmful one should not be the same size.
       ".lfh-bell-x{border:0;background:rgba(127,127,127,.18);color:inherit;border-radius:10px;",
-      "  width:32px;height:32px;font-size:16px;cursor:pointer;flex:0 0 auto}",
+      "  width:40px;height:40px;font-size:16px;cursor:pointer;flex:0 0 auto}",
       // A row is a doorway to the table, so it looks and behaves like a button.
       ".lfh-bell-row{display:flex;align-items:center;gap:11px;width:100%;margin-top:10px;",
       "  padding:12px 13px;border-radius:13px;text-align:left;cursor:pointer;",

@@ -723,7 +723,24 @@
     });
     $("#ccDiscard").onclick = async () => {
       if (!confirm("Throw this draft count away?")) return;
-      try { await inv("POST", `/counts/${S.count.id}/discard`); } catch {}
+      // A REFUSED DISCARD MUST NOT LOOK LIKE A DONE ONE (T9 sweep #7, 2026-08-22).
+      //
+      // This swallowed every error and cleared the sheet anyway. So if the server refused — the
+      // draft had already been submitted from another device, the count no longer existed — the
+      // sheet closed with nothing said, and then came straight back: refreshView() re-reads
+      // /counts, finds the draft still open, and resumes it with every figure still in it. A tap
+      // that produces no result and no sentence is a dropped tap, which this codebase does not
+      // allow. (There is nothing to catch when there is simply no signal: the queue keeps the
+      // discard and answers ok:true, and the resume is then correct rather than confusing.)
+      const btn = $("#ccDiscard");
+      if (btn) btn.disabled = true;
+      try {
+        await inv("POST", `/counts/${S.count.id}/discard`);
+      } catch (e) {
+        if (btn) btn.disabled = false;
+        toastMsg("⚠️ Couldn't throw the count away: " + ((e && e.message) || "the system didn't answer"));
+        return;                       // the sheet stays exactly as it was, with the figures in it
+      }
       S.count = null;
       refreshView();
     };
