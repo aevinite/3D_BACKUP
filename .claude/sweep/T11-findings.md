@@ -151,3 +151,51 @@ One line to fix. It belongs to whoever owns `app/api/editor/**`.
 - **"Browser Back does not close the Cancellations overlay."** It does. A **deep link** opens the
   report and the overlay in one commit, so one Back closes both — and the person-path (Payments →
   the Cancellations box → Back) closes the overlay and leaves the report open, verified.
+
+---
+
+# THE OWNER'S FOLLOW-UP — 2026-08-30
+
+He read the report and answered: *"for the fifth with no internet, you can just say there is no
+internet or if it was loaded previously you can show the previously and write a note on the top. The
+internet is not available. This is not the current data. You can do number seven, you can do number
+nine and I give you permission for number 10."*
+
+**Item 5 — reshaped to his sentence.** The note is now the first element on the Reports page and says
+which of the two situations he is in: *"The internet is not available. This is not the current data —
+these are the figures saved on this device, from 3 min ago."* or *"…Nothing has been saved on this
+device for this period yet, so there is nothing to show."* With nothing saved every figure is a DASH,
+not a ₹0, and the chart draws nothing rather than saying "Not enough data yet — come back once there's
+a bit more", which is a sentence about the restaurant and was untrue. **I had got this wrong the first
+time**: I removed my own note because the app's bar at the bottom already said something similar. His
+correction was right — that bar is about SAVING work, not about the figures, and it is at the bottom.
+
+**Item 7 — done.** The Bar/Line pill (22px) and the Items By-revenue/By-quantity pill (38px) are 44px
+on a phone. Exactly one tappable is left under 44px anywhere on Reports: the dish search box at 36px,
+a text field whose height is set in another component's own styles.
+
+**Item 9 — done, with his permission to touch the manager panel's file.** One column added to the
+Z-report's day-close query. The till list names Cash / UPI / Card / Pay later where it previously said
+only "Not recorded", and bills settled in parts are now correctly left to their own payment legs.
+
+**Item 10 — both tests run, and both of this ledger's long-standing `⏭` rows are closed.**
+Each writes to French House and restores the exact prior value in a `finally` **and** on
+`SIGINT`/`SIGTERM`, then re-reads the row to prove it. Aangan untouched.
+- **Composition scheme (`P05191`)**: the Tax report shows the sentence and two tiles only — no
+  Effective-rate tile, no Taxable-sales tile, no zero-value CGST/SGST table.
+- **Entitlement flip (`P05482`)**: the Inventory card is absent → present → absent, and with the
+  module off the deep link refuses honestly (API 403, a plain sentence on screen, zero tiles, zero ₹,
+  zero rows).
+
+## Two things I found while doing them, and did NOT fix
+
+1. **The manager's till list can total more than the day's takings.** Same block as item 9, a
+   different bug. Measured in one moment: the till list totalled ₹14,301 while the day's takings were
+   ₹12,369. The legs loop adds every non-reversed payment leg with no check that the bill is PAID, so
+   a table that has part-paid and is still open is counted as money collected — I watched one do it
+   (session `7e261230`, three legs on an unpaid bill). Item 9's fix does not touch this and does not
+   make it worse: before the fix the skip could never fire at all. It needs its own decision.
+2. **`verify:ledger-index` is RED on `origin/main`, and it is not mine.** `T12.md` uses `P05992` and
+   `P40435` on two phase rows each. Proven pre-existing by re-running the guard with T11's file
+   replaced by `origin/main`'s copy. Not repaired here — this project's own rule is "never renumber
+   anyone else's". Noted in `INDEX.md` so the next terminal that sees it red does not lose an hour.
