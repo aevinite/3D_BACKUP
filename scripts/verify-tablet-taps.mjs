@@ -196,10 +196,13 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `before returning. Without it the marker above is decoration and the tap is silent again.`,
   );
   check(
-    "tablet: the split-payment button it copies still refuses out loud too",
-    /goBtn\.onclick[\s\S]{0,600}?toast\(/.test(src),
-    `In ${TABLET}, the split "Take payment" button is the pattern #payBill now follows — if it ever\n    ` +
-    `goes back to being disabled, the two controls disagree about the same situation again.`,
+    "tablet: the one split screen's Take-payment button refuses out loud too",
+    /p\.querySelector\("\.sb-go"\)\.onclick = \(\) => \{/.test(src)
+      && /Every part needs an amount above zero/.test(src)
+      && !/sb-go[^>]*disabled/.test(src),
+    `${TABLET}: the pattern the money buttons on this panel all copy — stay ENABLED and say WHY it\n    ` +
+    `will not go. A disabled button that swallows the tap is indistinguishable from a broken one, and\n    ` +
+    `this is the most repeated money control in a service.`,
   );
 }
 
@@ -411,6 +414,206 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     /\.t-act \{[^}]*min-height: clamp\(26px, 44cqw, 40px\)/.test(css),
     `${CSS}: .t-act's min-height IS the tap target (T14 sweep, 2026-08-05 — it was raised from 19px\n    ` +
     `precisely because a waiter could not hit it). Take the space from the wording, never from this.`,
+  );
+}
+
+// ── 9 · A FIGURE THE WAITER HAS TO MATCH IS NEVER ROUNDED (T7 sweep #7, 2026-08-22) ─────────
+// Measured on the running panel: a 40-paise shortfall in the split-payment panel came out of the
+// refusal as "₹0 of the bill is still uncovered." — a refusal that names nothing, on a button that
+// then refuses again, and again, with no way to tell from the screen what is wrong. The running
+// line twelve pixels above it already used inrExact and said "₹0.40 still to cover", so the two
+// halves of the same sentence disagreed about the same number.
+//
+// This panel declares BOTH helpers on purpose (see the note above inrExact): `inr` rounds to whole
+// rupees and is right for a heading, `inrExact` keeps the paise and is the only correct one for a
+// figure a person has to MATCH, because the server recomputes the due to the paise. So the rule is
+// narrow and checkable: inside the two split screens, every refusal that quotes a gap or a target
+// uses inrExact.
+{
+  // ONE SCREEN NOW (owner, 2026-08-28) — the KOT-menu split and the payment-sheet split were
+  // merged into renderSplitBill(), so its two refusals are the whole list. The third entry that
+  // used to be here ("the shares must add up to exactly …") belonged to the screen that is gone.
+  const shortfall = [
+    ["the split screen's shortfall refusal", /of the bill is still uncovered/],
+    ["the split screen's over-collect refusal", /more than the bill/],
+  ];
+  for (const [what, re] of shortfall) {
+    const at = src.search(re);
+    const line = at < 0 ? "" : src.slice(src.lastIndexOf("\n", at) + 1, src.indexOf("\n", at));
+    check(
+      `tablet: ${what} quotes the gap to the PAISE (inrExact, never inr)`,
+      at >= 0 && /inrExact\(/.test(line) && !/[^a-zA-Z]inr\(/.test(line),
+      `${TABLET}: ${at < 0 ? "the refusal is gone — if it moved, move this check with it." : `this line rounds a figure the waiter must match:\n    ${line.trim().slice(0, 160)}`}\n    ` +
+      `inr() turns a 40-paise gap into "₹0", which refuses forever and names nothing. Use inrExact.`,
+    );
+  }
+  check(
+    "tablet: the split screen's running total line still uses inrExact too",
+    /const refreshSum = \(\) => \{[\s\S]{0,420}?inrExact\(left\)/.test(src),
+    `${TABLET}: the running total is the line the refusal has to AGREE with — the original fault was\n    ` +
+    `the two halves of one sentence quoting the same number differently ("₹0.40 still to cover" over\n    ` +
+    `"₹0 of the bill is still uncovered"). If either side starts rounding, that comes back.`,
+  );
+  check(
+    "tablet: there is exactly ONE split screen, and both doors open it",
+    (src.match(/function renderSplitBill\(/g) || []).length === 1
+      && !/function renderSplitSettle\(/.test(src)
+      && /kotop === "split"\) renderSplitBill\(/.test(src)
+      && /picked\.special === "split"\) \{ renderSplitBill\(/.test(src),
+    `${TABLET}: splitting a bill must exist ONCE (owner, 2026-08-28: "both have same interface as the\n    ` +
+    `kot one"). It used to exist twice, with different abilities and different endpoints, so a waiter\n    ` +
+    `learned one and met the other. Both 🧾 KOT ▾ and the payment sheet's bottom line must call\n    ` +
+    `renderSplitBill(), and renderSplitSettle must not come back.`,
+  );
+  check(
+    "tablet: the one split screen offers all four ways to divide a bill",
+    ["equal", "custom", "dish", "ticket"].every((m) => new RegExp(`data-mode="${m}"`).test(src)),
+    `${TABLET}: he asked for "equally split custom amount by dish by Kitchen ticket" — all four tabs,\n    ` +
+    `on the one screen. Dropping one silently takes a way of dividing a bill away from a restaurant.`,
+  );
+  check(
+    "tablet: …and every part still pays its own way, pay-later included",
+    /const WAYS = \["UPI", "Cash", "Card", "Other"\]\.concat\(tabletKhataOn\(\) && tshow\("tablet_khata"\) \? \[PAY_LATER\] : \[\]\)/.test(src)
+      && /khataCustomerId: l\.khata\.customer_id/.test(src),
+    `${TABLET}: "by each part, pays its own way. One part on somebody's tab pay later like everything"\n    ` +
+    `(owner, 2026-08-28). Pay later is offered only where the restaurant HAS it and this waiter may\n    ` +
+    `use it — otherwise the screen offers a part the server will refuse.`,
+  );
+  check(
+    "tablet: the split posts to /pay-split, never the older /pay+splits",
+    /actGated\("POST", `\/tables\/\$\{t\}\/pay-split`/.test(src) && !/\/pay`, \{ splits \}/.test(src),
+    `${TABLET}: only /pay-split carries a pay-later part (mig 352 — it checks the khata module and\n    ` +
+    `tablet_khata on top of mark_paid, and parks the tab). The older /pay+splits route refuses one,\n    ` +
+    `so sending there would make "one part on somebody's tab" fail at the server.`,
+  );
+}
+
+// ── 10 · ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22 — completed T7 sweep #7) ───
+// `--scrim` was added to this panel's stylesheet on 2026-08-22 so that "every full-screen overlay
+// dims the page by the same amount", because two overlays on one screen dimming differently is what
+// makes one product feel like several. It reached the four overlays written in CSS and none of the
+// ten built in app.js, nor the table-detail backdrop — so, measured on the running panel, opening a
+// table (rgba(4,8,18,.5)) then its Discount (rgba(4,8,18,.66)) then a confirm (the token's
+// rgba(3,7,16,.6)) dimmed the floor by THREE different amounts inside one action.
+//
+// Every overlay this panel builds by hand sets its dim in an inline style, so the check is exact:
+// no hardcoded rgba() may sit in a `background:` beside `position: "fixed"`. The BLUR is deliberately
+// NOT unified — a heavier blur is how a stacked layer says it is on top.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  check(
+    "tablet: the --scrim token is declared",
+    /--scrim:\s*rgba\([\d\s,.]+\)/.test(css),
+    `${CSS}: the one dim every overlay reads. Do not inline it back into each overlay.`,
+  );
+  const inline = [...src.matchAll(/position: "fixed"[^}]*?background: "(rgba\([^"]+\))"/g)].map((m) => m[1]);
+  check(
+    "tablet: no hand-built overlay hardcodes its own dim",
+    inline.length === 0,
+    `${TABLET}: ${inline.length} overlay(s) still set their own dim (${[...new Set(inline)].join(", ")}).\n    ` +
+    `Use background: "var(--scrim)" so a sheet opened over another sheet dims by the same amount.`,
+  );
+  // Read the whole declaration BLOCK, never a fixed character window: these rules carry long
+  // explanatory comments between the selector and the declaration, so a window is a guard that
+  // fails on a comment someone added rather than on the thing it is watching.
+  const ruleBlock = (sel) => {
+    const at = css.indexOf(sel + " {");
+    if (at < 0) return null;
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    return close < 0 ? null : css.slice(open + 1, close);
+  };
+  const backdrop = ruleBlock("#panel:has(.detail-pop)");
+  check(
+    "tablet: the table-detail backdrop reads the token, not a value of its own",
+    !!backdrop && /background:\s*var\(--scrim\)/.test(backdrop),
+    `${CSS}: #panel:has(.detail-pop) is the backdrop a waiter sees more than any other. It read\n    ` +
+    `rgba(4,8,18,.5) while the sheets above it read something else.` +
+    (backdrop === null ? "\n    (the rule itself was not found — if the selector moved, move this check with it.)" : ""),
+  );
+  const cssDims = [...css.matchAll(/^\.(confirm-overlay|opt-overlay|qdest-overlay|tbl-drawer-backdrop)[^{]*\{[^}]*background:\s*([^;]+);/gm)].map((m) => [m[1], m[2].trim()]);
+  const strays = cssDims.filter(([, v]) => v !== "var(--scrim)");
+  check(
+    "tablet: the four CSS overlays still read the token",
+    strays.length === 0,
+    `${CSS}: ${strays.map(([k, v]) => `.${k} = ${v}`).join(", ")} — these were the ones the token\n    ` +
+    `already covered; a regression here undoes the whole point of it.`,
+  );
+}
+
+// ── 11 · A MONEY FIGURE A FINGER TYPES GETS NO SPINNER ARROWS (owner picked, 2026-08-28) ─────
+// The discount screen's three boxes are `type="number"`, so a browser draws its own ▲▼ pair inside
+// each one — measured on the A35 at dpr 3, about 7px per arrow inside a 41px box, and inside the
+// gold "They pay" field they were eating room from the one figure a manager reads and retypes.
+// `type="number"` and `inputmode="decimal"` STAY (that is what gives a phone the numeric keypad);
+// only the arrows go, and a spinner is a pseudo-element so it has to be done in the stylesheet.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const boxes = ["disc-pct-input", "disc-amt-input", "disc-pay-input"];
+  for (const b of boxes) {
+    check(
+      `tablet: .${b} hides the browser's spinner arrows`,
+      new RegExp(`\\.${b}::-webkit-(?:outer|inner)-spin-button`).test(css)
+        && new RegExp(`\\.${b}[^{]*\\{[^}]*appearance: textfield`).test(css),
+      `${CSS}: the box needs BOTH halves — the WebKit pseudo-element rule and \`appearance: textfield\`\n    ` +
+      `for Firefox, which draws the arrows from the input itself. One without the other leaves them\n    ` +
+      `on half the devices in a restaurant.`,
+    );
+  }
+  check(
+    "tablet: …and those boxes keep type=number + inputmode=decimal (the numeric keypad)",
+    boxes.every((b) => new RegExp(`type="number"[^>]*inputmode="decimal"[^>]*class="${b}"|class="${b}"[^>]*type="number"|type="number" inputmode="decimal"[^>]*${b}`).test(src)),
+    `${TABLET}: dropping the arrows must not drop the keypad. A waiter on a phone typing a discount\n    ` +
+    `into a plain text box gets the full QWERTY keyboard.`,
+  );
+}
+
+// ── 12 · NO FUNCTION IN THIS PANEL IS DECLARED AND NEVER USED (T7 sweep #7, 2026-08-28) ──────
+// `ensureTableSlice()` sat here for weeks after `ensurePartySlices()` replaced it: ~35 lines with
+// no caller, and THREE comments still sending the next reader to it. That is worse than clutter in
+// the part of the panel that handles money — a caller who reached for it would have refreshed one
+// table of a merged party and under-counted the bill, which is the exact fault its replacement
+// exists to prevent. The ledger rows that check such a function's LOGIC keep passing while it is
+// dead, so nothing else catches this.
+//
+// Counting rule: a function is USED if it is called `name(` OR passed by reference (`setTimeout(fn,
+// 0)`, `.map(fn)`, `onclick = fn`, `LFH_BACK.layer("x", fn)`). Missing the reference case is what
+// made the first version of this check flag four healthy functions — a guard that cries wolf is
+// worse than no guard.
+{
+  const bare = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+  const declared = [...bare.matchAll(/^(?:async )?function ([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+  // EMPTY, AND IT SHOULD STAY EMPTY. It briefly held resolveTaxMode and taxableBaseOf, raised with
+  // the owner on 2026-08-28 because each was a deliberate MIRROR of a rule living in two other
+  // places; he said delete them, and they are gone. An entry here is an admission that dead code
+  // was kept on purpose — add one only with the reason, and only when somebody decided it.
+  const ALLOWED_DEAD = new Set([]);
+  const orphans = [];
+  for (const n of new Set(declared)) {
+    if (ALLOWED_DEAD.has(n)) continue;
+    const calls = (bare.match(new RegExp(String.raw`(?<![\w$.])` + n + String.raw`\s*\(`, "g")) || []).length;
+    const refs = (bare.match(new RegExp(String.raw`(?<![\w$.])` + n + String.raw`(?!\s*\()(?![\w$])`, "g")) || []).length;
+    if (calls <= 1 && refs === 0) orphans.push(n);
+  }
+  check(
+    "tablet: no function is declared here and never called or referenced",
+    orphans.length === 0,
+    `${TABLET}: ${orphans.join(", ")} — declared and used nowhere.\n    ` +
+    `Delete it, or give it a caller. If it is a deliberate mirror of a rule that lives elsewhere,\n    ` +
+    `add it to ALLOWED_DEAD above WITH the reason, so the next reader is not sent to dead code.`,
+  );
+  check(
+    "tablet: …and the allowance list has not quietly grown",
+    ALLOWED_DEAD.size === 0,
+    `scripts/verify-tablet-taps.mjs: ALLOWED_DEAD holds ${ALLOWED_DEAD.size} entr(ies). It was emptied\n    ` +
+    `on 2026-08-28 and should stay empty — every entry is dead code somebody decided to keep, so a\n    ` +
+    `new one needs a written reason and the owner's word, not a quiet addition to get green.`,
+  );
+  check(
+    "tablet: ensureTableSlice specifically has not come back",
+    !/^(?:async )?function ensureTableSlice\s*\(/m.test(src),
+    `${TABLET}: ensureTableSlice() is back. It refreshes ONE table; a merged party needs every\n    ` +
+    `member's slice or partyOrders() sees half the bill. Use ensurePartySlices().`,
   );
 }
 

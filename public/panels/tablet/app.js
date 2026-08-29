@@ -296,7 +296,7 @@ const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve)
 // (ban, discount, closing/restarting a busy table) are unlocked by a manager's PIN.
 const pinPrompt = (message, errText) => new Promise((resolve) => {
   const ov = document.createElement("div");
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
   Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
@@ -331,7 +331,7 @@ const pinPrompt = (message, errText) => new Promise((resolve) => {
 // Resolves the trimmed reason, or null if cancelled / left blank.
 const reasonPrompt = (message, placeholder) => new Promise((resolve) => {
   const ov = document.createElement("div");
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
   Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
@@ -366,7 +366,7 @@ const reasonPrompt = (message, placeholder) => new Promise((resolve) => {
 // (rupees), or null if cancelled. The server re-validates + clamps; this is just the entry.
 const pricePrompt = (title, current) => new Promise((resolve) => {
   const ov = document.createElement("div");
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
   Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
@@ -410,7 +410,7 @@ const pricePrompt = (title, current) => new Promise((resolve) => {
 // `already` is the set this row holds, so a repeat is refused OUT LOUD rather than silently.
 const allergyPrompt = (already) => new Promise((resolve) => {
   const ov = document.createElement("div");
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
   Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
@@ -645,24 +645,26 @@ const preTax = (gross) => (Number(gross) || 0) / (1 + effRate());
 // MRP bottle). This mirrors lib/tax.ts resolveTaxMode() and SQL lfh_resolve_tax_mode(),
 // case for case and in the same order. If you change one, change all three — four screens
 // quoting four numbers for one meal is the bug this rule exists to prevent.
-function priceTaxMode() {
-  const v = String((state.data.settings || {}).price_tax_mode || "excl");
-  return v === "incl" || v === "composition" ? v : "excl";
-}
+// (priceTaxMode() went with resolveTaxMode() — it had no other caller, and the guard below caught
+// that the moment resolveTaxMode was deleted. billdoc.js has its own, for the printed bill.)
 function itemTaxModesOn() {
   return (state.data.settings || {}).item_tax_modes_allowed === true;
 }
-function resolveTaxMode(dishMode) {
-  // A composition-scheme restaurant may not pass GST to the diner at all.
-  if (priceTaxMode() === "composition") return "exempt";
-  const restaurant = priceTaxMode() === "incl" ? "incl" : "excl";
-  if (!itemTaxModesOn()) return restaurant;   // master switch off → the dish's own answer is ignored
-  const m = String(dishMode == null ? "default" : dishMode);
-  if (m === "excl" || m === "incl") return m;
-  if (m === "none") return "exempt";
-  if (m === "mrp") return String((state.data.settings || {}).mrp_tax_treatment) === "inclusive" ? "incl" : "exempt";
-  return restaurant;
-}
+// (resolveTaxMode() WAS HERE, and it is gone — owner's word, 2026-08-28.)
+//
+// It mirrored lib/tax.ts + lfh_resolve_tax_mode case for case, and NOTHING on this panel called it.
+// It could not: a resolved mode is written onto each line of the frozen ticket by lfh_price_order
+// when the order is placed, so orderTaxSplit() below reads `ln.tax_mode` straight off the ticket
+// rather than deciding it again — which is the right way round, because the mode that priced a bill
+// last week must not be re-derived from today's settings.
+//
+// A mirror nothing calls is worse than no mirror: it looks like the authority on a money rule while
+// drifting from the two places that really decide it. The rule itself is unchanged and still lives
+// in lib/tax.ts (resolveTaxMode) and SQL (lfh_resolve_tax_mode); the MANAGER panel keeps its own
+// copy and that one IS live (public/panels/editor/app.js) — this note is not permission to touch it.
+// itemTaxModesOn() STAYS — dishIsMrp() uses it to decide whether a dish wears the MRP stamp.
+// priceTaxMode() did NOT: resolveTaxMode was its only caller, so it went too (I wrote the opposite
+// here first and verify:tablet-taps §12 caught it on its very first run — which is the point of it).
 /** Does this MENU dish wear the "MRP" stamp? Presentational only — the money comes from
  *  resolveTaxMode(). Same rule as lib/tax.ts isMrpDish(). */
 function dishIsMrp(d) {
@@ -706,8 +708,9 @@ function orderTaxSplit(o) {
   // bill, which then appears in the refusal wording as a reason nobody can act on.
   return { base: Math.round(base * 100) / 100, nontax: Math.round(nontax * 100) / 100 };
 }
-/** Just the taxable half — the most a discount may ever be measured against. */
-function taxableBaseOf(o) { return orderTaxSplit(o).base; }
+// (taxableBaseOf() WAS HERE — one line wrapping orderTaxSplit(o).base, and gone with it,
+// owner's word 2026-08-28. Every caller reads `orderTaxSplit(o).base` directly, which is the same
+// number by the same maths and says out loud which half of the split it is taking.)
 
 function effRate() {
   const s = state.data.settings || {};
@@ -1169,7 +1172,18 @@ async function selectTable(t) {
   if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
   lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
   renderFloor();
-  if (!state.ordering) renderPanel();
+  // …AND NOT WHILE A PICKER IS OPEN (#U1's rule, applied to the one place that was missing it —
+  // T7 sweep #7, 2026-08-28). This repaint lands AFTER an awaited network read, and in that window
+  // the waiter can already have opened 🧾 KOT ▾ and tapped a row: tap a table, tap KOT ▾, tap
+  // "Change table" / "Merge" / "Move a KOT" / "Move a dish" / "Split the bill", and the screen you
+  // just opened is wiped straight back to the table detail as the slice lands. On restaurant wifi
+  // that read takes well over the time it takes to press two buttons, so it is not a narrow race.
+  // Every other automatic repaint — load(), loadTables(), refreshWhoami(), the outbox event — has
+  // carried `&& !state.pickerOpen` since #U1; selectTable was the one that never got it, because it
+  // is the path a person triggers and nobody thought of it as automatic. The half of it that fires
+  // BEFORE the await is deliberately left alone: at that moment no picker can be open yet, and it
+  // is what gives the tap its instant feedback.
+  if (!state.ordering && !state.pickerOpen) renderPanel();
 }
 
 // ── the floor ────────────────────────────────────────────────────────────────
@@ -1542,7 +1556,7 @@ function bindFloorDelegation() {
   // replicates the old stopPropagation so a quick button never ALSO selects the tile), then the
   // tile-select. Every data-attr handled here lives on a node the PATCH path may replace, which
   // is exactly why they MUST be delegated. The accept/pay branches inline their original
-  // ensureTableSlice + filter logic verbatim (NOT flattened) so behaviour is unchanged.
+  // party-slice + filter logic verbatim (NOT flattened) so behaviour is unchanged.
   const tilesEl = $("#tiles");
   if (tilesEl) tilesEl.addEventListener("click", async (e) => {
     let q;
@@ -1655,7 +1669,7 @@ function openDishEditModal(itemId) {
   };
   const ov = document.createElement("div");
   ov.className = "dish-edit-overlay";
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   ov.innerHTML = `<div class="dish-edit-box" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Edit dish · ${esc(item.title)}</h3><button class="dish-edit-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
@@ -2532,9 +2546,9 @@ function flipOrders(orderIds, { from, to, orderStatus }) {
 // little green ✓ on a tile "doing nothing and saying nothing"). The three bulk actions below are
 // each handed a list built a moment earlier from the table's cached slice, and that list can come
 // back EMPTY for reasons the waiter cannot see:
-//   · the forced `ensurePartySlices` read failed — ensureTableSlice swallows a fetch blip on
-//     purpose ("the action then no-ops rather than throwing"), which is precisely how the tap
-//     became invisible;
+//   · the forced `ensurePartySlices` read failed — it swallows a fetch blip on purpose (each
+//     member's read is caught, and the action then no-ops rather than throwing), which is
+//     precisely how the tap became invisible;
 //   · someone else (the kitchen screen, the manager panel, another waiter's tablet) accepted or
 //     served it in the seconds between the tile being painted and the finger landing.
 // The tile still shows ✓ / 🍽️ in both cases, so the person taps a control that is visibly there
@@ -2663,9 +2677,9 @@ function renderKotMenu(t, s) {
   // ticket belongs to the table it was rung at.
   const movable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
   // …but SPLITTING IS A WHOLE-BILL ACTION, so it must be gated on the whole PARTY's bill — the
-  // exact rows renderSplitSettle() actually works on (T4 sweep, 2026-08-04). Gating it on
+  // exact rows renderSplitBill() actually works on (T4 sweep, 2026-08-04). Gating it on
   // ordersOf(t) greyed "Split the bill" out on a merged CHILD whose party bill was listed in the
-  // popup right behind the menu, with its ₹ due on the tile. Same filter as renderSplitSettle,
+  // popup right behind the menu, with its ₹ due on the tile. Same filter as renderSplitBill,
   // deliberately duplicated rather than approximated, so the row and the screen it opens agree.
   const splittable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received");
   const row = (id, icon, label, sub, on) => `<button class="kotm-row" data-kotop="${id}" ${on ? "" : "disabled"}>
@@ -2691,7 +2705,7 @@ function renderKotMenu(t, s) {
     // Settings → Bill in the manager panel). It also sits LAST, matching the manager's list: the
     // waiter and the manager must not be offered a different set of operations for one table.
     (!!(state.data.settings || {}).split_bill_enabled
-      ? row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && splittable.length > 0)
+      ? row("split", "🍴", "Split the bill", "Equal, a custom amount, by dish or by kitchen ticket — each part pays its own way", tshow("tablet_mark_paid") && splittable.length > 0)
       : "");
   const { dropLayer } = renderPickerShell(`T${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
   document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
@@ -2700,63 +2714,254 @@ function renderKotMenu(t, s) {
     if (b.dataset.kotop === "merge" && s) renderMergePicker(t, s);
     if (b.dataset.kotop === "movekot") renderMoveOrderPicker(t);
     if (b.dataset.kotop === "moveitem") renderMoveItemPicker(t);
-    if (b.dataset.kotop === "split") renderSplitSettle(t);
+    if (b.dataset.kotop === "split") renderSplitBill(t);
   }));
 }
 
-// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs (equal / custom /
-// by dish). Mirrors the manager's flow; the server re-computes the due and refuses
-// shares that don't add up, and the ladder + tablet_mark_paid gates apply server-side.
-function renderSplitSettle(t) {
+// ── THE ONE SPLIT SCREEN (owner, 2026-08-28) ─────────────────────────────────────────────────
+//
+// HIS WORDS: "make you can only split with the kot option or small written if you want split on
+// billing at bottom and both have same interface as the kot one" — and, asked what that interface
+// must hold: "it should have equally split custom amount by dish by Kitchen ticket by each part,
+// pays its own way. One part on somebody's tab pay later like everything. It should contain
+// everything."
+//
+// WHAT THIS REPLACED. Splitting a bill existed TWICE on this panel, and the two were not the same
+// screen — they had different layouts, different abilities and different endpoints:
+//
+//   · 🧾 KOT ▾ → Split the bill  had Equal / Custom / By dish, ONE payment method for the whole
+//     split, no pay-later, and posted to /tables/:t/pay.
+//   · 💳 Mark bill paid → Split payment  had a people-count row and By order, each part with its
+//     OWN method including Pay later, and posted to /tables/:t/pay-split.
+//
+// So a waiter learned one and then met the other, and the one they were most likely to find could
+// not do the thing they most want — put one person's share on a tab. Now there is ONE screen with
+// all four ways to divide and all of the per-part abilities, reached from both doors.
+//
+// IT POSTS TO /pay-split, never the older /pay+splits. That is the route that carries a pay-later
+// part (mig 352 — it checks the khata module and tablet_khata on top of tablet_mark_paid, and parks
+// the tab), and both go through the same lib/paySplit.ts, which recomputes the due server-side and
+// refuses parts that do not add up. The screen's own refusals exist so the waiter hears it first.
+//
+// EVERY FIGURE A PERSON MUST MATCH USES inrExact. A 40-paise gap reported as "₹0" is a refusal that
+// names nothing and repeats forever (T7 sweep #7, 2026-08-22 — that fault was fixed in both screens
+// the week before this merged them, and the rule survives here).
+function renderSplitBill(t, opts = {}) {
   const payable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received"); // a merged party splits its WHOLE bill
   if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", false); return; }
+  const round2 = (n) => Math.round(n * 100) / 100;
   const rate = effRate();
-  const due = Math.round(payable.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate), 0) * 100) / 100;
-  const METHODS = ["UPI", "Cash", "Card", "Other"];
+  const due = round2(payable.reduce((sum, o) => sum + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate), 0));
+  const PAY_LATER = "Pay later";
+  // Pay later only appears when the restaurant HAS it and this waiter may use it — otherwise the
+  // server would refuse a part the screen offered, which is a button that exists only to fail.
+  const WAYS = ["UPI", "Cash", "Card", "Other"].concat(tabletKhataOn() && tshow("tablet_khata") ? [PAY_LATER] : []);
+  const MAX_PARTS = 12;
+
   let mode = "equal", n = 2;
+  const legs = [];                 // { amount:String, method, note, khata, label }
+  // By dish: every dish on the party's bill, each handed to a person. Money is the LINE's own
+  // money, then scaled to the real due so tax and any discount ride along proportionally.
   const dishes = [];
   payable.forEach((o) => dishRowsOf(o).forEach((r) => dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
-  const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
-  const bodyShell = `<div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
-      <button class="btn ss-tab" data-mode="equal">Equal</button><button class="btn ss-tab" data-mode="custom">Custom</button><button class="btn ss-tab" data-mode="dish">By dish</button>
-    </div><div class="ss-body"></div><div class="ss-sum muted small" style="margin:10px 0 8px"></div>
-    <button class="btn primary ss-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>`;
-  const { dropLayer } = renderPickerShell(`Split T${esc(t)}'s bill · ${inr(due)}`, bodyShell, "tablet-split-settle", renderPanel);
-  const p = $("#panel");
-  const bodyEl = p.querySelector(".ss-body"), sumEl = p.querySelector(".ss-sum");
-  const methodSel = (i) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === "Cash" ? " selected" : ""}>${m}</option>`).join("")}</select>`;
-  const equalLegs = () => { const base = Math.floor((due / n) * 100) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
-  const personAmounts = () => { const per = Array.from({ length: n }, () => 0); dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; }); const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100); const drift = Math.round((due - scaled.reduce((s, x) => s + x, 0)) * 100) / 100; scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100; return scaled; };
-  const legRow = (i, amount, editable) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span class="muted" style="min-width:60px">Person ${i + 1}</span><input type="number" step="0.01" min="0" class="ss-amt" data-leg="${i}" value="${amount.toFixed(2)}" ${editable ? "" : "readonly"} style="width:96px;padding:8px;border-radius:8px">${methodSel(i)}</div>`;
-  const nStepper = () => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span class="muted small">Split between</span><button class="btn ss-n" data-d="-1">−</button><b>${n}</b><button class="btn ss-n" data-d="1">＋</button><span class="muted small">people</span></div>`;
-  const refreshSum = () => {
-    const s = [...bodyEl.querySelectorAll(".ss-amt")].reduce((a, x) => a + (Number(x.value) || 0), 0);
-    const diff = Math.round((s - due) * 100) / 100;
-    sumEl.textContent = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
+  const dishSubtotal = dishes.reduce((sum, d) => sum + d.amt, 0) || 1;
+  // By kitchen ticket: one part per KOT, at what that ticket cost. The LAST part absorbs the
+  // remainder because a bill's tax rounds ONCE over the whole bill while a per-ticket figure
+  // rounds per ticket.
+  const ticketAmounts = () => {
+    // billdoc.js is THE money assembler — the same one the printed bill and the manager use. If it
+    // somehow has not loaded, a ticket's own figure is unknowable, so this way of dividing simply
+    // seeds zeros and the waiter is told by the running total rather than shown a wrong number.
+    const oneTicket = (o) => {
+      if (typeof LFH_BILLDOC === "undefined" || !LFH_BILLDOC.billMoney) return 0;
+      const m = LFH_BILLDOC.billMoney([o], state.data.settings || {}) || {};
+      return round2(Number(m.total) || 0);
+    };
+    const raw = payable.map(oneTicket);
+    const head = raw.slice(0, -1);
+    return head.concat([round2(due - head.reduce((a, x) => a + x, 0))]);
   };
+
+  const legSum = () => round2(legs.reduce((sum, l) => sum + (Number(l.amount) || 0), 0));
+  const legLeft = () => round2(due - legSum());
+  const keepWay = (i) => (legs[i] && legs[i].method) || (i === 0 ? "UPI" : "Cash");
+
+  // Seed the parts for whichever way of dividing is chosen. A method already picked on a row is
+  // KEPT — changing how the bill is divided must not silently reset how someone is paying.
+  // A ONE-TICKET BILL CANNOT BE SPLIT BY TICKET (the old By-order button said so and the sentence
+  // was lost when the two screens were merged — T7, 2026-08-29). Without this the tab produced a
+  // SINGLE part, which is not a split: Take payment then refused "a split needs at least two parts"
+  // with nothing on screen explaining why, and the one-ticket bill is the common case.
+  const canTicket = () => payable.length >= 2;
+  const seed = () => {
+    if (mode === "ticket") {
+      const amts = ticketAmounts();
+      const kept = legs.slice();
+      legs.length = 0;
+      payable.forEach((o, i) => legs.push({
+        amount: String(amts[i]), method: (kept[i] || {}).method || keepWay(i), note: (kept[i] || {}).note || "",
+        khata: (kept[i] || {}).khata || null,
+        label: o.kot_no != null ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
+      }));
+      n = legs.length;
+      return;
+    }
+    const amts = mode === "dish"
+      ? (() => {
+          const per = Array.from({ length: n }, () => 0);
+          dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; });
+          const scaled = per.map((a) => round2((a / dishSubtotal) * due));
+          const drift = round2(due - scaled.reduce((sum, x) => sum + x, 0));
+          scaled[scaled.length - 1] = round2(scaled[scaled.length - 1] + drift);
+          return scaled;
+        })()
+      : (() => {                                   // equal, and the starting point for custom
+          const each = Math.floor((due / n) * 100) / 100;
+          const out = Array.from({ length: n }, () => each);
+          out[n - 1] = round2(due - each * (n - 1));
+          return out;
+        })();
+    const kept = legs.slice();
+    legs.length = 0;
+    for (let i = 0; i < n; i++) legs.push({
+      amount: String(amts[i]), method: (kept[i] || {}).method || keepWay(i),
+      note: (kept[i] || {}).note || "", khata: (kept[i] || {}).khata || null, label: "",
+    });
+  };
+  // …and the count itself is clamped BEFORE any of them seed. `ticket` sets n from how many tickets
+  // there are, which can be 1 — so leaving ticket for Equal/Custom/By dish once carried that 1 over
+  // and drew a "split" with a single part.
+  const seedFrom = (m) => {
+    mode = m;
+    if (mode !== "ticket") n = Math.max(2, Math.min(MAX_PARTS, n));
+    seed();
+  };
+
+  const shell = `
+    <div class="sb-tabs">
+      <button class="btn small sb-tab" data-mode="equal">Equal</button>
+      <button class="btn small sb-tab" data-mode="custom">Custom amount</button>
+      <button class="btn small sb-tab" data-mode="dish">By dish</button>
+      <button class="btn small sb-tab${payable.length >= 2 ? "" : " sb-tab-off"}" data-mode="ticket"${payable.length >= 2 ? "" : ` title="This bill is one kitchen ticket — there is nothing to divide by"`}>By kitchen ticket</button>
+    </div>
+    <div class="sb-body"></div>
+    <div class="sb-sum"></div>
+    <button class="btn primary big sb-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>`;
+  const { dropLayer } = renderPickerShell(
+    `Split ${esc(tableLabel(t))}'s bill · ${inr(due)}`, shell, "tablet-split-bill",
+    typeof opts.onBack === "function" ? opts.onBack : renderPanel,
+  );
+  const p = $("#panel");
+  const bodyEl = p.querySelector(".sb-body"), sumEl = p.querySelector(".sb-sum");
+
+  const refreshSum = () => {
+    const left = legLeft();
+    sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
+      : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
+    sumEl.style.color = left === 0 ? "#16a34a" : "#e11d48";
+  };
+
+  const partRows = () => legs.map((l, i) => `
+    <div class="sb-row" data-i="${i}">
+      <div class="sb-who">${l.label ? esc(l.label) : `Person ${i + 1}`}</div>
+      <input type="number" inputmode="decimal" min="0" step="1" class="sb-amt" value="${esc(l.amount)}"
+        placeholder="₹ amount"${mode === "equal" ? " readonly" : ""}>
+      <select class="sb-way">${WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
+      ${legs.length > 2 && mode !== "ticket" ? `<button type="button" class="sb-del" aria-label="Remove this part">✕</button>` : `<span></span>`}
+      ${l.method === "Other" ? `<input type="text" class="sb-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque">` : ""}
+      ${l.method === PAY_LATER ? `<button type="button" class="btn small sb-who-btn">${l.khata ? "📒 " + esc(l.khata.label) + " — change" : "📒 Who owes this? — pick a person"}</button>` : ""}
+    </div>`).join("");
+
   const render = () => {
-    p.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
-    if (mode === "equal") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, false)).join("");
-    else if (mode === "custom") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, true)).join("");
-    else bodyEl.innerHTML = nStepper() + `<div class="muted small" style="margin-bottom:6px">Tap a dish to hand it to the next person:</div>` +
-      dishes.map((d, i) => `<button class="btn" data-dish="${i}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:4px"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("") +
-      `<div style="margin-top:10px">${personAmounts().map((a, i) => legRow(i, a, false)).join("")}</div>`;
-    bodyEl.querySelectorAll(".ss-n").forEach((b) => (b.onclick = () => { n = Math.max(2, Math.min(12, n + Number(b.dataset.d))); dishes.forEach((d) => { if (d.person > n) d.person = 1; }); render(); }));
-    bodyEl.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => { const d = dishes[Number(b.dataset.dish)]; d.person = d.person >= n ? 1 : d.person + 1; render(); }));
-    bodyEl.querySelectorAll(".ss-amt").forEach((x) => (x.oninput = refreshSum));
+    p.querySelectorAll(".sb-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
+    const stepper = mode === "ticket" ? "" : `
+      <div class="sb-n"><span class="muted small">Split between</span>
+        <button type="button" class="btn small sb-nb" data-d="-1">−</button><b>${n}</b>
+        <button type="button" class="btn small sb-nb" data-d="1">＋</button><span class="muted small">people</span></div>`;
+    const dishList = mode !== "dish" ? "" : `
+      <div class="muted small" style="margin:0 0 6px">Tap a dish to hand it to the next person:</div>
+      ${dishes.map((d, i) => `<button type="button" class="btn small sb-dish" data-dish="${i}"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("")}`;
+    const ticketNote = mode !== "ticket" ? "" : `<div class="muted small" style="margin:0 0 6px">One part per kitchen ticket, at what that ticket cost. Change any amount if you need to.</div>`;
+    bodyEl.innerHTML = stepper + dishList + ticketNote + partRows()
+      + (mode === "ticket" ? "" : `<button type="button" class="btn small sb-add" style="width:100%;margin-top:2px">＋ Add another part</button>`);
+
+    bodyEl.querySelectorAll(".sb-nb").forEach((b) => (b.onclick = () => {
+      n = Math.max(2, Math.min(MAX_PARTS, n + Number(b.dataset.d)));
+      dishes.forEach((d) => { if (d.person > n) d.person = 1; });
+      seed(); render();
+    }));
+    bodyEl.querySelectorAll(".sb-dish").forEach((b) => (b.onclick = () => {
+      const d = dishes[Number(b.dataset.dish)];
+      d.person = d.person >= n ? 1 : d.person + 1;
+      seed(); render();
+    }));
+    bodyEl.querySelectorAll(".sb-row").forEach((row) => {
+      const i = Number(row.dataset.i);
+      // Typing must not re-render — that would blur the box mid-keystroke.
+      row.querySelector(".sb-amt").oninput = (e) => { legs[i].amount = e.target.value; refreshSum(); };
+      row.querySelector(".sb-way").onchange = (e) => {
+        legs[i].method = e.target.value;
+        if (legs[i].method !== PAY_LATER) legs[i].khata = null;
+        render();
+      };
+      const nEl = row.querySelector(".sb-note"); if (nEl) nEl.oninput = (e) => { legs[i].note = e.target.value; };
+      const dEl = row.querySelector(".sb-del"); if (dEl) dEl.onclick = () => { legs.splice(i, 1); n = legs.length; render(); };
+      // The SAME person sheet the whole-bill Pay Later button opens, so there is one picker.
+      const wEl = row.querySelector(".sb-who-btn");
+      if (wEl) wEl.onclick = async () => {
+        const picked = await openKhataPersonSheet(Number(legs[i].amount) || 0, t);
+        if (!picked) return;
+        legs[i].khata = picked.customer_id
+          ? { customer_id: picked.customer_id, label: picked.name || "that person" }
+          : { name: picked.name, phone: picked.phone || "", label: picked.name };
+        render();
+      };
+    });
+    const addBtn = bodyEl.querySelector(".sb-add");
+    if (addBtn) addBtn.onclick = () => {
+      if (legs.length >= MAX_PARTS) { toast(`A bill can be split into at most ${MAX_PARTS} parts.`, false); return; }
+      const left = legLeft();
+      legs.push({ amount: left > 0 ? String(left) : "", method: "Cash", note: "", khata: null, label: "" });
+      n = legs.length;
+      if (mode === "equal") mode = "custom";     // an added part means the amounts are no longer even
+      render();
+    };
     refreshSum();
   };
-  p.querySelectorAll(".ss-tab").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; render(); }));
-  render();
-  p.querySelector(".ss-go").onclick = () => {
-    const splits = [...bodyEl.querySelectorAll(".ss-amt")].map((x) => ({ amount: Number(x.value) || 0, method: bodyEl.querySelector(`.ss-method[data-leg="${x.dataset.leg}"]`).value }));
-    const s = splits.reduce((a, b2) => a + b2.amount, 0);
-    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inr(due), false); return; }
-    if (splits.some((x) => !(x.amount > 0))) { toast("Every share needs an amount above zero.", false); return; }
+
+  p.querySelectorAll(".sb-tab").forEach((b) => (b.onclick = () => {
+    const want = b.dataset.mode;
+    if (want === "ticket" && !canTicket()) {
+      toast(`This bill is one kitchen ticket — split it equally, by a custom amount, or by dish.`, false);
+      return;                                  // stay on the way of dividing that is already chosen
+    }
+    seedFrom(want); render();
+  }));
+  seedFrom(mode); render();
+
+  // STAYS ENABLED AND SAYS WHY IT WON'T GO — a disabled button that swallows the tap is
+  // indistinguishable from a broken one, and this is the most repeated money control in a service.
+  p.querySelector(".sb-go").onclick = () => {
+    const left = legLeft();
+    if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one.", false); return; }
+    if (legs.length < 2) { toast("A split needs at least two parts.", false); return; }
+    if (left !== 0) { toast(left > 0 ? `${inrExact(left)} of the bill is still uncovered.` : `The parts are ${inrExact(-left)} more than the bill.`, false); return; }
+    const later = legs.filter((l) => l.method === PAY_LATER);
+    if (later.some((l) => !l.khata)) { toast("Tap “Who owes this?” on the pay-later part and pick a person.", false); return; }
+    if (later.length > 1) { toast("Only one part can be pay-later — put the rest on cash, card or UPI.", false); return; }
+    const splits = legs.map((l) => ({
+      amount: round2(Number(l.amount)),
+      method: l.method,
+      note: (l.note || "").trim().slice(0, 200) || null,
+      ...(l.method === PAY_LATER && l.khata
+        ? { khataCustomerId: l.khata.customer_id || null, khataName: l.khata.name || null, khataPhone: l.khata.phone || null }
+        : {}),
+    }));
+    const how = splits.map((l) => `${inr(l.amount)} ${l.method}`).join(" + ");
     dropLayer();
-    actGated("POST", `/tables/${t}/pay`, { splits }, {
-      message: "Enter a manager PIN to split-settle this bill.",
-      onSuccess: () => offerPayUndo(t, { message: `Paid in ${splits.length} parts` }),
+    actGated("POST", `/tables/${t}/pay-split`, { splits }, {
+      message: "Enter a manager PIN to mark this bill paid.",
+      onSuccess: () => offerPayUndo(t, { message: `Bill paid in ${splits.length} parts — ${how}` }),
     });
   };
 }
@@ -3012,43 +3217,19 @@ function bumpItemQty(itemId, delta) {
   qtyReconcileTimer = setTimeout(() => load().catch(() => {}), 700);
 }
 
-// ensureTableSlice(t): make sure table t's FULL slice (sessions/orders/items/calls/…) is in the
-// local cache before a tile QUICK-ACTION on a NON-selected table runs. The grid renders from the
-// slim summary, so an unselected table has NO order rows cached — and Accept/Mark-paid need them
-// (the ids to act on, the due/billNo to confirm). Mirrors the editor's ensureTableSlice. The
-// SELECTED table's slice is already kept fresh by load(); best-effort (a fetch blip just no-ops).
-async function ensureTableSlice(t, force) {
-  // Already have this table's rows cached (orders OR an open session)? Nothing to fetch —
-  // UNLESS `force` (bug M10, 2026-07-05): when OPENING a table's detail we must always
-  // re-pull its slice, because a live update to a DIFFERENT table only refreshes the
-  // selected table's slice, so a previously-viewed table's cached rows can be up to 60s
-  // stale. selectTable passes force=true so re-opening a table never shows stale detail.
-  if (!force && ((state.data.orders || []).some((o) => String(o.table_number) === String(t))
-      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t)))) return true;
-  try {
-    const slice = await api("GET", "/state?table=" + encodeURIComponent(t));
-    const tset = String(t);
-    const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
-    const d = state.data || {};
-    const freshSessions = slice.sessions || [];
-    const purgeSids = new Set();
-    for (const s of (d.sessions || [])) if (String(s.table_number) === tset) purgeSids.add(s.id);
-    for (const s of freshSessions) purgeSids.add(s.id);
-    const freshOrders = slice.orders || [];
-    const purgeOids = new Set();
-    for (const o of (d.orders || [])) if (String(o.table_number) === tset) purgeOids.add(o.id);
-    for (const o of freshOrders) purgeOids.add(o.id);
-    state.data = Object.assign({}, d, {
-      sessions: dedupeById((d.sessions || []).filter((s) => String(s.table_number) !== tset).concat(freshSessions)),
-      orders: dedupeById((d.orders || []).filter((o) => String(o.table_number) !== tset).concat(freshOrders)),
-      members: dedupeById((d.members || []).filter((m) => !purgeSids.has(m.session_id)).concat(slice.members || [])),
-      items: dedupeById((d.items || []).filter((it) => !purgeOids.has(it.order_id)).concat(slice.items || [])),
-      calls: dedupeById((d.calls || []).filter((c) => String(c.table_number) !== tset).concat(slice.calls || [])),
-      requests: dedupeById((d.requests || []).filter((r) => String(r.table_number) !== tset).concat(slice.requests || [])),
-    });
-    return true;
-  } catch { return false; /* leave cache as-is; the action then no-ops rather than throwing */ }
-}
+// (ensureTableSlice() WAS HERE, and it is gone — T7 sweep #7, 2026-08-28.)
+//
+// It fetched ONE table's slice with a cache short-circuit, and it was the right shape while a tile
+// quick-action only ever touched one table. Then merged parties arrived (mig 249): every whole-party
+// read has to have EVERY member's slice or partyOrders() silently sees half the bill, so
+// ensurePartySlices() below took over — it fetches the party together, merges in a loop through
+// mergeSelectedSlice(), and answers whether every member really landed. Nothing has called
+// ensureTableSlice since, on this panel or anywhere else, so the ~35 lines were deleted rather than
+// left to be found and reused: a caller that reached for it would refresh one table of a party and
+// under-count the bill, which is exactly the fault ensurePartySlices exists to prevent.
+//
+// The MANAGER panel has its own ensureTableSlice and it is LIVE there (public/panels/editor/app.js).
+// Do not read this note as permission to remove that one.
 // A merged party spans SEVERAL tables' slices — any whole-party read or action must have them
 // all cached, or partyOrders() silently sees half the bill. Forced on purpose, same reasoning
 // as the manager's ensurePartySlices: a whole-party action can fire the instant a detail opens.
@@ -3067,7 +3248,7 @@ async function ensureTableSlice(t, force) {
 // under-count the BILL.
 //
 // WHAT I DID NOT PROVE: the mechanism. The obvious suspect — a lost update from running the members
-// concurrently — does NOT hold up: ensureTableSlice captures `state.data` and re-assigns it in one
+// concurrently — does NOT hold up: mergeSelectedSlice captures `state.data` and re-assigns it in one
 // synchronous block with no await between, so two concurrent calls cannot interleave there. I could
 // not pin down the real cause before this change made the symptom go away, so this comment says what
 // was observed rather than inventing a story. If you touch this, re-run a THREE-table party and open
@@ -3178,7 +3359,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
     document.querySelector(".pay-overlay")?.remove();
     const ov = document.createElement("div");
     ov.className = "pay-overlay";
-    Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+    Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     ov.innerHTML = `<div class="pay-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${esc(label)}</h3><button class="pay-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
@@ -3190,7 +3371,6 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
           ${opts.onHouse ? `<button type="button" class="pay-method-btn" data-special="onhouse" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #e11d48;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">🏠</span>On the house</button>` : ""}
-          ${opts.split ? `<button type="button" class="pay-method-btn" data-special="split" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⇄</span>Split payment</button>` : ""}
           ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
@@ -3201,16 +3381,6 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
             <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
             <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
-          </div>
-          <div class="pay-other-split" style="display:none">
-            <div style="font-size:13px;font-weight:700;margin:0 0 3px">Split payment</div>
-            <div style="font-size:11.5px;color:var(--muted);margin:0 0 10px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
-            <div style="font-size:11.5px;color:var(--muted);margin:0 0 5px">How many are paying?</div>
-            <div class="pay-split-nrow" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}" style="min-width:44px;min-height:44px;padding:0 12px;font-weight:700">${n}</button>`).join("")}${(opts.orders || []).length > 1 ? `<button type="button" class="btn pay-split-byorder" style="min-height:44px;padding:0 12px;font-weight:700">🧾 By order</button>` : ""}</div>
-            <div class="pay-split-rows"></div>
-            <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
-            <div class="pay-split-sum" style="margin:9px 0 8px;font-size:12.5px;font-weight:700"></div>
-            <button type="button" class="btn primary pay-split-go" style="width:100%">Take payment</button>
           </div>
         </div>
         ${opts.crm === false ? "" : `
@@ -3225,6 +3395,15 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
           </label>
         </div>`}
+        <!-- SPLITTING LIVES UNDER 🧾 KOT ▾, AND THIS IS ITS SECOND DOOR (owner, 2026-08-28):
+             "you can only split with the kot option or small written if you want split on billing
+             at bottom and both have same interface as the kot one". So it is a small written line,
+             not one of the payment tiles — splitting is not a WAY to pay, it is how the bill is
+             divided, and every tile above it answers "how did the money come in?".
+             This replaces the ⇄ Split payment tile added on 2026-08-21. That change was about
+             DISCOVERABILITY — split used to be two taps deep under "Other", "which is why nobody
+             used it" — and this keeps it one tap from here, so the point of it survives. -->
+        ${opts.split ? `<div class="pay-splitline"><button type="button" class="pay-split-open">Splitting between people? <b>Split this bill →</b></button></div>` : ""}
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)"><button class="btn pay-cancel-btn">Cancel</button></div>
     </div>`;
@@ -3251,13 +3430,6 @@ function openPaymentMethodModal(due, label, opts = {}) {
       // dedicated flow (person picker / no-charge settle); no payment method involved.
       // "Split payment" opens the parts panel right here — it was two taps deep under "Other",
       // which is why nobody used it (owner, 2026-08-21).
-      if (b.dataset.special === "split") {
-        ov.querySelector(".pay-other-field").style.display = "";
-        ov.querySelector(".pay-other-pick").style.display = "none";
-        ov.querySelector(".pay-other-split").style.display = "";
-        splitTo(2);
-        return;
-      }
       if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
@@ -3274,151 +3446,18 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // The old "Other → write or split" chooser is gone: Split payment is its own button on the
     // grid now (owner, 2026-08-21 — it was two taps deep, which is why nobody used it), and
     // "Other" goes straight to its text box above.
+    // The small line at the bottom resolves the SAME marker the old tile did, so the caller's
+    // handling is unchanged — it just opens the one split screen instead of a panel in here.
+    { const so = ov.querySelector(".pay-split-open"); if (so) so.onclick = () => { resolved = true; close(); resolve({ special: "split" }); }; }
     const otherInput = ov.querySelector(".pay-other-input");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     ov.querySelector(".pay-other-confirm").onclick = confirmOther;
     otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
 
-    // ── Split across ways to pay ────────────────────────────────────────────────────
-    // The parts must add up to the bill EXACTLY — the server recomputes the due and refuses
-    // anything else (lib/paySplit.ts), so this can neither under- nor over-collect.
-    // SPLIT PAYMENT (owner, 2026-08-21) — kept identical to the manager panel's drawer on purpose:
-    // a money screen that exists twice and differs is how the two panels drifted before.
-    // Tap how many are paying → even amounts as a STARTING point, every box editable, and each part
-    // picks its own way to pay including Pay later, which puts that slice on a tab (mig 352).
-    const PAY_LATER = "Pay later";
-    const SPLIT_WAYS = ["UPI", "Cash", "Card", "Other", PAY_LATER];
-    const legs = [];
-    const legSum = () => Math.round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;
-    const legLeft = () => Math.round((due - legSum()) * 100) / 100;
-    const rowsEl = ov.querySelector(".pay-split-rows");
-    const sumEl = ov.querySelector(".pay-split-sum");
-    const inpCss = "box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
-    // Even to the paise: everyone gets the rounded-down share and the last part absorbs the odd
-    // paise, so the parts always add up exactly. A method already picked on a row is kept.
-    function splitTo(n) {
-      const each = Math.floor((due / n) * 100) / 100;
-      const kept = legs.slice(0, n);
-      legs.length = 0;
-      for (let i = 0; i < n; i++) {
-        const was = kept[i] || {};
-        legs.push({
-          amount: String(i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each),
-          method: was.method || (i === 0 ? "UPI" : "Cash"), note: was.note || "", khata: was.khata || null,
-        });
-      }
-      paint(n);
-      renderSplit();
-    }
-    ov.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
-
-    // SPLIT BY ORDER — one part per kitchen ticket at what that ticket cost. Identical to the
-    // manager panel's, deliberately: a money screen that exists twice and differs is how the two
-    // panels drifted before. The last part absorbs the remainder because a bill's tax rounds ONCE
-    // over the whole bill while a per-ticket figure rounds per ticket.
-    const paint = (which) => {
-      ov.querySelectorAll(".pay-split-n").forEach((b) => {
-        const on = which !== "order" && Number(b.dataset.n) === which;
-        b.style.background = on ? "var(--gold, #d4a574)" : "";
-        b.style.color = on ? "#2a1d0c" : "";
-      });
-      const bo = ov.querySelector(".pay-split-byorder");
-      if (bo) { bo.style.background = which === "order" ? "var(--gold, #d4a574)" : ""; bo.style.color = which === "order" ? "#2a1d0c" : ""; }
-    };
-    function splitByOrder() {
-      const os = opts.orders || [];
-      if (os.length < 2) { toast("This bill is one ticket — split it by amount instead."); return; }
-      if (os.length > 12) { toast(`This bill has ${os.length} tickets — a split can hold 12 parts. Split it by amount instead.`); return; }
-      const raw = os.map((o) => Math.round(((LFH_BILLDOC.billMoney([o], state.data.settings || {}) || {}).total || 0) * 100) / 100);
-      const head = raw.slice(0, -1);
-      const last = Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100;
-      legs.length = 0;
-      os.forEach((o, i) => legs.push({
-        amount: String(i === os.length - 1 ? last : raw[i]),
-        method: i === 0 ? "UPI" : "Cash", note: "", khata: null,
-        label: o.kot_no ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
-      }));
-      paint("order");
-      renderSplit();
-    }
-    const byOrderBtn = ov.querySelector(".pay-split-byorder");
-    if (byOrderBtn) byOrderBtn.onclick = splitByOrder;
-    function renderSplit() {
-      if (!rowsEl) return;
-      rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}" style="display:grid;grid-template-columns:1fr auto 30px;gap:8px;align-items:center;margin-bottom:8px">
-          ${l.label ? `<div style="grid-column:1 / -1;font-size:11.5px;color:var(--muted);font-weight:700;margin-bottom:-2px">${esc(l.label)}</div>` : ""}
-          <input type="number" inputmode="decimal" min="0" step="1" class="psr-amt" value="${l.amount}" placeholder="₹ amount" style="${inpCss};width:100%">
-          <select class="psr-method" style="${inpCss};font-weight:600">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
-          ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part" style="width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px;cursor:pointer">✕</button>` : `<span></span>`}
-          ${l.method === "Other" ? `<input type="text" class="psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque" style="${inpCss};grid-column:1 / -1;width:100%">` : ""}
-          ${l.method === PAY_LATER ? `<button type="button" class="btn psr-who" style="grid-column:1 / -1;min-height:44px;text-align:left;font-weight:600;padding:0 12px">${l.khata ? "📒 " + esc(l.khata.label) + " — change" : "📒 Who owes this? — pick a person"}</button>` : ""}
-        </div>`).join("");
-      rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
-        const i = Number(row.dataset.i);
-        // Typing must not re-render — that would blur the box mid-keystroke.
-        row.querySelector(".psr-amt").oninput = (e) => { legs[i].amount = e.target.value; refreshSplitSum(); };
-        row.querySelector(".psr-method").onchange = (e) => {
-          legs[i].method = e.target.value;
-          if (legs[i].method !== PAY_LATER) legs[i].khata = null;
-          renderSplit();
-        };
-        const nEl = row.querySelector(".psr-note"); if (nEl) nEl.oninput = (e) => { legs[i].note = e.target.value; };
-        const dEl = row.querySelector(".psr-del"); if (dEl) dEl.onclick = () => { legs.splice(i, 1); renderSplit(); };
-        // The SAME person sheet the whole-bill Pay Later button opens, so there is one picker.
-        const wEl = row.querySelector(".psr-who");
-        if (wEl) wEl.onclick = async () => {
-          const picked = await openKhataPersonSheet(Number(legs[i].amount) || 0, opts.table);
-          if (!picked) return;
-          legs[i].khata = picked.customer_id
-            ? { customer_id: picked.customer_id, label: picked.name || "that person" }
-            : { name: picked.name, phone: picked.phone || "", label: picked.name };
-          renderSplit();
-        };
-      });
-      refreshSplitSum();
-    }
-    function refreshSplitSum() {
-      if (!sumEl) return;
-      const left = legLeft();
-      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
-        : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
-      sumEl.style.color = left === 0 ? "#16a34a" : "#e11d48";
-    }
-    const addBtn = ov.querySelector(".pay-split-add");
-    if (addBtn) addBtn.onclick = () => {
-      if (legs.length >= 12) { toast("A bill can be split into at most 12 parts."); return; }
-      const left = legLeft();
-      legs.push({ amount: left > 0 ? String(left) : "", method: "Cash", note: "" });
-      renderSplit();
-    };
-    const goBtn = ov.querySelector(".pay-split-go");
-    // Stays ENABLED and says WHY it won't go — a disabled button that swallows the tap is
-    // indistinguishable from a broken one (owner rule: never drop a tap in silence).
-    if (goBtn) goBtn.onclick = () => {
-      const left = legLeft();
-      if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one."); return; }
-      if (left !== 0) { toast(left > 0 ? `${inr(left)} of the bill is still uncovered.` : `The parts are ${inr(-left)} more than the bill.`); return; }
-      if (legs.length < 2) { toast("A split needs at least two parts."); return; }
-      // The three tab rules, said in words before the server has to refuse them.
-      const later = legs.filter((l) => l.method === PAY_LATER);
-      if (later.some((l) => !l.khata)) { toast("Tap “Who owes this?” on the pay-later part and pick a person."); return; }
-      if (later.length > 1) { toast("Only one part can be pay-later — put the rest on cash, card or UPI."); return; }
-      resolved = true;
-      const cust = readCust();
-      close();
-      resolve({
-        method: "Split", note: null, cust,
-        splitLegs: legs.map((l) => ({
-          amount: Math.round(Number(l.amount) * 100) / 100,
-          method: l.method,
-          note: (l.note || "").trim().slice(0, 200) || null,
-          ...(l.method === PAY_LATER && l.khata
-            ? { khataCustomerId: l.khata.customer_id || null, khataName: l.khata.name || null, khataPhone: l.khata.phone || null }
-            : {}),
-        })),
-      });
-    };
-
+    // (The split panel that used to live in here is gone — there is ONE split screen now,
+    // renderSplitBill(), reached from 🧾 KOT ▾ and from the small line at the bottom of this sheet.
+    // Owner, 2026-08-28: "both have same interface as the kot one". Keeping a second copy of a money
+    // screen is how the two drifted apart in the first place.)
     // Repeat-customer recognition: as the waiter types a known number, show a chip and
     // pre-fill the name. Read-only lookup (stores nothing); debounced to one call.
     const phoneEl = ov.querySelector(".pay-cust-phone");
@@ -3456,26 +3495,20 @@ async function payBillWithMethod(t, a) {
   const opts = {
     onHouse: ["family", "guest"].includes(ttagOf(t)),
     khata: tabletKhataOn() && tshow("tablet_khata"),
-    // A whole table's bill can be collected in parts ("Split payment").
+    // Splitting is offered as a small LINE at the bottom of that sheet, not a payment tile —
+    // it is how the bill is divided, not a way the money came in (owner, 2026-08-28). Tapping it
+    // closes the sheet and opens the ONE split screen. The tickets it needs it works out itself
+    // from partyOrders(), so nothing has to be handed across.
     split: true,
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
-    // The TICKETS on this bill, so the split can be filled in BY ORDER as well as by an even
-    // share (owner, 2026-08-21: "i could able to do it by order or amount").
-    orders: ordersOf(t).filter((o) => o.status !== "received" && o.payment_status !== "paid"),
   };
   const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`, opts);
   if (!picked) return;
-  // Paid in PARTS — one server call settles the whole bill and records each part
-  // (owner, 2026-08-02). actGated covers both modes: straight through when the waiter's
-  // mark-paid is 'on', and the manager-PIN round-trip when it's 'pin'.
-  if (picked.splitLegs) {
-    const how = picked.splitLegs.map((l) => `${inr(l.amount)} ${l.method}`).join(" + ");
-    await actGated("POST", `/tables/${t}/pay-split`, { splits: picked.splitLegs },
-      { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, { message: `Bill paid in ${picked.splitLegs.length} parts — ${how}` }) });
-    if (picked.cust) captureCustomer(t, picked.cust);
-    return;
-  }
+  // "Split this bill →" — the sheet's second door to the ONE split screen. Coming back from it
+  // returns to the TABLE, not to a half-answered payment sheet: the sheet was closed by the tap,
+  // and re-opening it behind the split screen would leave two money screens stacked.
+  if (picked.special === "split") { renderSplitBill(t, { onBack: renderPanel }); return; }
   if (picked.special === "onhouse") {
     // actGated handles BOTH modes: direct when 'on', and the PIN round-trip when the
     // server answers "manager pin" ('pin' mode) — same as every other gated action.
@@ -3514,7 +3547,7 @@ function openKhataPersonSheet(due, t) {
     document.querySelector(".khata-overlay")?.remove();
     const ov = document.createElement("div");
     ov.className = "khata-overlay";
-    Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+    Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     const inputCss = "width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
     ov.innerHTML = `<div style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Pay Later — who's this bill on?</h3><button class="kp-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
@@ -3583,7 +3616,7 @@ function openTagSheet(t) {
   const subs = { vip: "Priority service · pays normally", family: `"On the house" offered at billing`, guest: `"On the house" offered at billing` };
   const ov = document.createElement("div");
   ov.className = "tag-overlay";
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const opt = (tag) => `<button type="button" class="tag-pick" data-tag="${tag}" style="display:flex;align-items:center;gap:12px;width:100%;padding:12px;margin-bottom:8px;border-radius:12px;border:1.5px solid ${colors[tag]};background:linear-gradient(120deg, color-mix(in srgb, ${colors[tag]} 18%, var(--panel)), var(--panel));color:var(--text);font-size:14px;font-weight:600;text-align:left;cursor:pointer${cur === tag ? ";outline:2px solid var(--gold, #d4a574)" : ""}"><span style="font-size:19px">${TABLE_TAG_INFO[tag].emoji}</span><span>${TABLE_TAG_INFO[tag].label}<small style="display:block;font-weight:400;font-size:11.5px;color:var(--muted)">${subs[tag]}</small></span></button>`;
   ov.innerHTML = `<div style="width:min(94vw,380px);background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Mark table ${esc(t)}</h3><button class="tg-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
@@ -3709,7 +3742,7 @@ function openDiscountModal(order, opts = {}) {
 
   const ov = document.createElement("div");
   ov.className = "disc-overlay";
-  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   ov.innerHTML = `<div class="disc-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${opts.bill ? "Discount whole bill" : "Apply discount"}</h3><button class="disc-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
@@ -4799,7 +4832,8 @@ function setRestName(r) {
 // items/calls/requests) into state.data, so the helpers the DETAIL panel reads (ordersOf /
 // dishRowsOf / membersOf / callsOf …) return real rows for table t. The grid never needs this —
 // it renders from the slim summary; only the selected table (and a quick-action target via
-// ensureTableSlice) pulls full rows. Drops the table's old rows + adds the fresh, dedup'd by id.
+// a quick-action target via ensurePartySlices) pulls full rows. Drops the table's old rows + adds
+// the fresh, dedup'd by id.
 function mergeSelectedSlice(t, slice) {
   const tset = String(t);
   const d = state.data || {};
@@ -5539,7 +5573,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     document.querySelector(".set-overlay")?.remove();
     const ov = document.createElement("div");
     ov.className = "set-overlay";
-    Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+    Object.assign(ov.style, { position: "fixed", inset: "0", background: "var(--scrim)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     ov.innerHTML = `<div style="width:min(92vw,360px);background:var(--panel);color:var(--text);border-radius:16px;padding:18px 18px calc(18px + var(--sab));box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;margin:0 0 14px"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">⚙️ Settings</h3><button class="set-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;width:40px;height:40px;font-size:16px;cursor:pointer">✕</button></div>
       <!-- A FORM, not a link (T9 improvement 13, 2026-08-06): /api/panel-logout is POST-only now,
