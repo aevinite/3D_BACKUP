@@ -231,7 +231,11 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   };
 
   const addPayment = async () => {
-    const amt = Number(String(payAmount).replace(/[^0-9.-]/g, "")); // tolerate "12,000" / stray symbols (audit 2026-07-08)
+    // Same rule as the route's parseAmount, and for the same reason (T16 sweep #7, 2026-08-29):
+    // stripping every non-digit turned "x1y2" into 12 and recorded a ₹12 payment. Strip only what
+    // is legitimately typed AROUND a number, then require what is left to BE one.
+    const cleaned = String(payAmount).trim().replace(/[\s,]/g, "").replace(/^[₹$€£]/, "");
+    const amt = /^-?\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : NaN;
     if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0 (e.g. 12000)."); return; }
     if (!payDate) { setPayMsg("Pick a payment date."); return; }
     if (payingRef.current) return;
