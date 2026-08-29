@@ -58,6 +58,31 @@ export const PAPER_PRESETS: { id: string; label: string; paper: PaperSize | null
   { id: "a6", label: "A6 · 105 × 148 (quarter of A4)", paper: { wMm: 105, hMm: 148 } },
 ];
 
+/**
+ * The paper sizes a given kind can ACTUALLY be told to use — and for the banquet sheet there are
+ * none, which is the honest answer rather than a missing one.
+ *
+ * A kitchen slip and a bill are laid out TO the width they are given: `withPaper` sets the page size
+ * and narrows and centres the column on the print head, so every size in the list does something.
+ *
+ * A banquet sheet is not. `banquetDocHtml` draws it at exactly two sizes, A4 or A5, and it chooses
+ * between them from the RESTAURANT'S OWN setting — `settings.banquet_paper_size`, set on the Banquet
+ * screen next to the margins and the signature line. Because it declares that page size itself,
+ * `withPaper` returns it untouched. So the paper dropdown on the Banquet line of the Printing screen
+ * reached no code at all: whatever was chosen, the sheet came out at whatever the Banquet screen
+ * said. Found by the printing sweep, 2026-08-29 — the sweep asked for A6 and measured an A5 sheet.
+ *
+ * Two places to set one thing, one of them a no-op, is worse than one place. So the Printing screen
+ * stops asking, and says where the answer lives instead. Do not "restore" this dropdown without
+ * first making the document able to obey it.
+ */
+export const papersFor = (kind: string) => (kind === "banquet" ? [] : PAPER_PRESETS);
+
+/** Shown where the paper dropdown used to be, for the kind that has no paper to choose here. */
+export const PAPER_ELSEWHERE: Record<string, string> = {
+  banquet: "The banquet sheet's size (A4 or A5) is set on the Banquet screen, with its margins — not here.",
+};
+
 export const paperLabel = (p?: PaperSize | null) => (p ? `${p.wMm} × ${p.hMm} mm` : "as the printer says");
 
 /** WHO PRINTS THIS PAPER — one question, three answers, and that is the whole address book now.

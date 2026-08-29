@@ -17,7 +17,7 @@ import { SkelList } from "@/components/admin/Skeleton";
 // THE WORDS ARE SHARED WITH THE RESTAURANT'S OWN SCREEN (owner, 2026-08-27: "the UI/UX is also not
 // identical"). Four steps, three kinds of paper, one sentence each — declared once in
 // lib/printBoardWords.ts and printed verbatim by both boards, so they cannot drift apart again.
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, papersFor, PAPER_ELSEWHERE, paperLabel } from "@/lib/printBoardWords";
 
 type Rest = { id: string; slug: string; name: string };
 type Paper = { name?: string; wMm: number; hMm: number };
@@ -498,7 +498,7 @@ export default function AdminPrinting() {
                             <i className="fas fa-print" aria-hidden="true" style={{ opacity: 0.6 }} />
                             <b style={{ color: "var(--text)" }}>{pr.name}</b>
                             {pr.paper ? <span>· {paperLabel(pr.paper)}</span> : null}
-                            <button className="adm-btn" style={{ fontSize: 11, padding: "3px 8px" }} disabled={!!busy}
+                            <button className="adm-btn" style={{ fontSize: 12, padding: "4px 9px" }} disabled={!!busy}
                               onClick={async () => { const d = await post("test", { agentId: a.id, printer: pr.name }); if (d) toast(String(d.note || "Sent."), "ok"); }}>
                               Test page
                             </button>
@@ -651,6 +651,9 @@ export default function AdminPrinting() {
                     <details className="adm-more" style={{ marginTop: 8 }}>
                       <summary>More — paper size, and a backup printer</summary>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+                        {papersFor(kind).length === 0 ? (
+                          <span className="adm-muted" style={{ fontSize: 12 }}>{PAPER_ELSEWHERE[kind]}</span>
+                        ) : (<>
                         <span className="adm-muted" style={{ fontSize: 12 }}>Paper:</span>
                         <select className="adm-input" style={{ minWidth: 185 }} value={preset?.id || "custom"}
                           onChange={(e) => {
@@ -663,9 +666,9 @@ export default function AdminPrinting() {
                             }
                             setR(kind, { paper: PAPER_PRESETS.find((pp) => pp.id === id)?.paper || undefined });
                           }}>
-                          {PAPER_PRESETS.map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
+                          {papersFor(kind).map((pp) => <option key={pp.id} value={pp.id}>{pp.label}</option>)}
                           <option value="custom">Type the two numbers…</option>
-                        </select>
+                        </select></>)}
                         <span className="adm-muted" style={{ fontSize: 12 }}>If it prints nothing for a minute:</span>
                         <select className="adm-input" style={{ minWidth: 150, fontSize: 12 }} value={r.backupAgent || ""}
                           onChange={(e) => setR(kind, { backupAgent: e.target.value || null, backupPrinter: null })}>

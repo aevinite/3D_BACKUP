@@ -3865,7 +3865,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   --adm-pop: var(--card);
   --adm-card: var(--card);
   --ow-accent: var(--accent);
-  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
+  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-danger-fill: #d92d20; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
   display: flex; height: 100dvh; width: 100%; overflow: hidden;
   background: var(--bg); color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
@@ -3881,7 +3881,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   --text: #15151d; --muted: #6b7280; --muted2: rgba(24,24,27,0.10);
   --accent: #6d28d9; --accent-dim: rgba(109,40,217,0.6);
   --accent-grad: linear-gradient(135deg,#8b5cf6 0%,#6366f1 100%); --accent-glow: rgba(109,40,217,0.18);
-  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706; --adm-accent: #8f5a0a;
+  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-danger-fill: #dc2626; --adm-warn: #d97706; --adm-accent: #8f5a0a;
   --elev: 0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.30);
   --elev-hi: 0 16px 40px -14px rgba(20,16,50,.34);
   background:
@@ -3894,7 +3894,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   --text: #eaf2ff; --muted: #5b6680; --muted2: rgba(234,242,255,0.12);
   --accent: #22d3ee; --accent-dim: rgba(34,211,238,0.6);
   --accent-grad: linear-gradient(135deg,#22d3ee,#0ea5e9); --accent-glow: rgba(34,211,238,0.40);
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-danger-fill: #d92d20; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.04); --elev-hi: 0 0 0 1px var(--accent-glow), 0 22px 48px -24px #000;
   background:
     linear-gradient(#0a0e1a 1px, transparent 1px) 0 0 / 46px 46px,
@@ -4021,6 +4021,13 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-crumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; flex-wrap: wrap; }
 .adm-crumbs a { color: var(--accent) !important; text-decoration: none; }
 .adm-crumbs a:hover { text-decoration: underline; }
+/* A BREADCRUMB IS STILL A TAP TARGET. On a phone these links measured 77 × 16px — a fingertip is
+   about 9mm across, so 16px is a third of what it needs (printing sweep §14, 2026-08-29). The extra
+   height is given ONLY on small screens: a mouse pointer is one pixel and does not need it, and the
+   crumb row stays tight on a desktop where it belongs. */
+@media (max-width: 640px) {
+  .adm-crumbs a { display: inline-block; padding: 9px 0; }
+}
 .adm-crumbs .sep { font-size: 9px; color: var(--muted); }
 .adm-crumbs .cur { color: var(--text); }
 .adm-adminbar-tag {
@@ -4090,7 +4097,14 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-btn:hover { filter: brightness(1.05); }
 .adm-btn:disabled { opacity: .55; cursor: default; }
 .adm-btn.primary { background: var(--accent-grad); border-color: transparent; color: #fff; box-shadow: 0 8px 18px -8px var(--accent); }
-.adm-btn.danger { background: var(--adm-danger); border-color: transparent; color: #fff; }
+/* A FILLED danger button carries WHITE, so its fill has to be dark enough to carry white — which is
+   a different requirement from --adm-danger itself. In the dark skins that token is #f87171, a LIGHT
+   red, and it is light on purpose: it is read as TEXT on dark backgrounds (.adx-pill.bad,
+   .adx-overdue, .owx-delta.down), where light-on-dark is exactly right. Reused as a FILL it measured
+   2.77:1 for the white label sitting on it — the Unlink button on the admin Printing screen
+   (printing sweep §14, 2026-08-29), under the 4.5:1 a 12px label needs. Same shape, and same answer,
+   as --adm-cta above: give the FILL its own token and leave the text token alone. */
+.adm-btn.danger { background: var(--adm-danger-fill, var(--adm-danger)); border-color: transparent; color: #fff; }
 /* !important because something upstream still wins over BOTH this rule and the inline colour on
    the dashboard's "Fix problems" link: measured rgb(17,24,39) — the light skin's near-black body
    text — on the dark-red fill, i.e. 1.78:1 (2026-08-06). Same shape as the guest card's "+" glyph,
@@ -4437,7 +4451,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
      deeper — already this file's --adm-warn — and takes white to 5.02:1. */
   --adm-cta: #b45309;
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-danger-fill: #d92d20; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
      hard-coded hex from the component, so they could not follow the skin the way --adm-ok /
      -danger / -warn already do. These bright values are for the DARK card, where they measure
@@ -4491,7 +4505,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      Active pill) #15803d came back at 3.69-4.05:1. #106230 is the same hue and reads 5.50-6.02:1
      there. --adm-warn is the same story on the "on pay list · rate not set" chip (3.87:1 -> 4.93:1),
      so it takes the same one step: #9a4708. --adm-danger measured clean on its own tint. */
-  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
+  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-danger-fill: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
   /* The same four one step deeper for the LIGHT card, where the bright values measured
      1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
      5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
@@ -4835,7 +4849,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent-on: #06251a;
   --accent-ink: var(--accent);   /* on a dark tint the bright accent already reads clean — see the light block */
   --own-cta: #b45309;   /* same fix as --adm-cta above: white on it was 3.19:1 */
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-danger-fill: #d92d20; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
      hard-coded hex from the component, so they could not follow the skin the way --adm-ok /
      -danger / -warn already do. These bright values are for the DARK card, where they measure
@@ -4876,7 +4890,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      Active pill) #15803d came back at 3.69-4.05:1. #106230 is the same hue and reads 5.50-6.02:1
      there. --adm-warn is the same story on the "on pay list · rate not set" chip (3.87:1 -> 4.93:1),
      so it takes the same one step: #9a4708. --adm-danger measured clean on its own tint. */
-  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
+  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-danger-fill: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
   /* The same four one step deeper for the LIGHT card, where the bright values measured
      1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
      5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
@@ -5203,7 +5217,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
     --border: 1px solid #cccccc; --border-c: #cccccc;
     --text: #111111; --muted: #555555; --muted2: #f2f2f2;
     --accent: #047857; --accent-dim: #047857; --accent-grad: #047857; --accent-glow: transparent;
-    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
+    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-danger-fill: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
     --elev: none;
     background: #ffffff !important; color: #111111 !important; color-scheme: light !important;
   }

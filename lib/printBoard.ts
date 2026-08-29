@@ -25,7 +25,7 @@ import { stationScript, STATION_FILENAME, STATION_FIRST_RUN, type StationOs } fr
 export {
   STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES,
 } from "@/lib/printBoardWords";
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, papersFor, PAPER_ELSEWHERE } from "@/lib/printBoardWords";
 
 export type BoardJob = {
   id: string; kind: string; status: string; printer: string | null; printed_by: string | null;
@@ -37,6 +37,11 @@ export type BoardState = {
   kinds: readonly RoutableKind[];
   labels: { kind: Record<string, string>; what: Record<string, string>; off: Record<string, string> };
   papers: typeof PAPER_PRESETS;
+  /** The presets each kind can actually be told to use — the banquet sheet's list is empty, and
+   *  `paperElsewhere` says where its size really lives. Sent per kind so the manager panel and the
+   *  admin console cannot drift into offering different choices for the same line. */
+  papersByKind: Record<string, typeof PAPER_PRESETS>;
+  paperElsewhere: Record<string, string>;
   agents: AgentView[];
   routes: PrintRoutes;
   waiting: number;
@@ -109,6 +114,8 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     kinds: ROUTABLE_KINDS,
     labels: { kind: KIND_LABEL, what: KIND_WHAT, off: KIND_OFF_LABEL },
     papers: PAPER_PRESETS,
+    papersByKind: Object.fromEntries(ROUTABLE_KINDS.map((k) => [k, papersFor(k)])) as Record<string, typeof PAPER_PRESETS>,
+    paperElsewhere: PAPER_ELSEWHERE,
     agents,
     routes,
     waiting,
