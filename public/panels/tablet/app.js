@@ -2847,7 +2847,7 @@ function renderSplitBill(t, opts = {}) {
   const shell = `
     <div class="sb-tabs">
       <button class="btn small sb-tab" data-mode="equal">Equal</button>
-      <button class="btn small sb-tab" data-mode="custom">Custom amount</button>
+      <button class="btn small sb-tab" data-mode="custom">Custom</button>
       <button class="btn small sb-tab" data-mode="dish">By dish</button>
       <button class="btn small sb-tab${payable.length >= 2 ? "" : " sb-tab-off"}" data-mode="ticket"${payable.length >= 2 ? "" : ` title="This bill is one kitchen ticket — there is nothing to divide by"`}>By kitchen ticket</button>
     </div>
@@ -2900,10 +2900,13 @@ function renderSplitBill(t, opts = {}) {
 
   const render = () => {
     p.querySelectorAll(".sb-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
+    // THE SAME COUNT CONTROL AS THE MANAGER (owner, 2026-08-29: "for both the interface should be
+    // similar"). It was a − 2 ＋ stepper here and a row of chips there; the chips win on both
+    // because getting to five people is ONE tap instead of three, mid-service, one-handed. The
+    // chips stop at 6 and ＋ Add another part carries on to the twelve the server allows.
     const stepper = mode === "ticket" ? "" : `
-      <div class="sb-n"><span class="muted small">Split between</span>
-        <button type="button" class="btn small sb-nb" data-d="-1">−</button><b>${n}</b>
-        <button type="button" class="btn small sb-nb" data-d="1">＋</button><span class="muted small">people</span></div>`;
+      <div class="muted small sb-nlbl">How many are paying?</div>
+      <div class="sb-nrow">${[2, 3, 4, 5, 6].map((k) => `<button type="button" class="btn small sb-nb" data-n="${k}">${k}</button>`).join("")}</div>`;
     const dishList = mode !== "dish" ? "" : `
       <div class="muted small" style="margin:0 0 6px">Tap a dish to hand it to the next person:</div>
       ${dishes.map((d, i) => `<button type="button" class="btn small sb-dish" data-dish="${i}"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("")}`;
@@ -2911,11 +2914,16 @@ function renderSplitBill(t, opts = {}) {
     bodyEl.innerHTML = stepper + dishList + ticketNote + partRows()
       + (mode === "ticket" ? "" : `<button type="button" class="btn small sb-add" style="width:100%;margin-top:2px">＋ Add another part</button>`);
 
-    bodyEl.querySelectorAll(".sb-nb").forEach((b) => (b.onclick = () => {
-      n = Math.max(2, Math.min(MAX_PARTS, n + Number(b.dataset.d)));
-      dishes.forEach((d) => { if (d.person > n) d.person = 1; });
-      seed(); render();
-    }));
+    // The count shown is the number of parts ON SCREEN — the same rule the manager learned on
+    // 2026-08-29, so ＋ Add another part and a row's ✕ both move it.
+    bodyEl.querySelectorAll(".sb-nb").forEach((b) => {
+      b.classList.toggle("primary", Number(b.dataset.n) === legs.length);
+      b.onclick = () => {
+        n = Math.max(2, Math.min(MAX_PARTS, Number(b.dataset.n)));
+        dishes.forEach((d) => { if (d.person > n) d.person = 1; });
+        seed(); render();
+      };
+    });
     bodyEl.querySelectorAll(".sb-dish").forEach((b) => (b.onclick = () => {
       const d = dishes[Number(b.dataset.dish)];
       d.person = d.person >= n ? 1 : d.person + 1;
