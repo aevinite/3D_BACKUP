@@ -141,7 +141,11 @@ const settles = async (read, want, tries = 5, gapMs = 700) => {
 
 const drain = async () => {
   const cutoff = new Date().toISOString();
-  for (const st of ["queued", "printing"]) {
+  // "failed" TOO. The park-a-ticket phase deliberately fails one five times, and those stayed behind
+  // as red rows on the manager floor — the owner saw one on 2026-08-29 and reasonably read it as a
+  // real fault ("a reprint hasn't printed in the kitchen — it failed 5 times"). A test that leaves
+  // an alarm on somebody's screen is worse than no test.
+  for (const st of ["queued", "printing", "failed"]) {
     try { await db(`print_jobs?restaurant_id=eq.${RID}&status=eq.${st}&created_at=lt.${cutoff}`,
       { method: "PATCH", body: JSON.stringify({ status: "dismissed", done_at: cutoff }) }); } catch {}
   }
