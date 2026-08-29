@@ -442,9 +442,17 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     ["the split screen's shortfall refusal", /of the bill is still uncovered/],
     ["the split screen's over-collect refusal", /more than the bill/],
   ];
+  // Searched in the CODE, not in the comments (2026-08-30). The first version searched raw `src`
+  // and took the FIRST match — so writing a comment that QUOTES the refusal ("…refused with '₹0.25
+  // more than the bill'") pointed the check at a sentence in English and failed it. A guard must
+  // accuse the line that runs, never the line that explains it.
+  const codeSrc = src
+    .replace(/<!--[\s\S]*?-->/g, "")            // HTML comments inside the template literals
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
   for (const [what, re] of shortfall) {
-    const at = src.search(re);
-    const line = at < 0 ? "" : src.slice(src.lastIndexOf("\n", at) + 1, src.indexOf("\n", at));
+    const at = codeSrc.search(re);
+    const line = at < 0 ? "" : codeSrc.slice(codeSrc.lastIndexOf("\n", at) + 1, codeSrc.indexOf("\n", at));
     check(
       `tablet: ${what} quotes the gap to the PAISE (inrExact, never inr)`,
       at >= 0 && /inrExact\(/.test(line) && !/[^a-zA-Z]inr\(/.test(line),
@@ -686,7 +694,12 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
 // typing custom amounts to reach the number in front of them was refused by 25 paise they could
 // not see anywhere.
 {
-  const sb = src.slice(src.indexOf("function renderSplitBill"), src.indexOf("function renderSplitBill") + 12000);
+  // The WHOLE function, not a fixed number of characters: the first version of this check sliced
+  // 12,000 chars and stopped two lines before the Take-payment refusal, so it counted five figures
+  // and demanded six. A guard that measures an arbitrary window is a guard that will lie later.
+  const sbStart = src.indexOf("function renderSplitBill");
+  const sbEnd = src.indexOf("\nfunction ", sbStart + 10);
+  const sb = src.slice(sbStart, sbEnd > 0 ? sbEnd : src.length);
   check(
     "tablet: the split screen's Collect button names the bill to the paise",
     /class="btn primary big sb-go"[^`]*\$\{inrExact\(due\)\}/.test(sb),
