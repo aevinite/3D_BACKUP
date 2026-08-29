@@ -3195,6 +3195,13 @@ function renderMoveOrderTarget(t, orderId) {
     runOptimistic(
       () => { const o = state.data.orders.find((x) => x.id === orderId); if (o) o.table_number = to; },
       () => api("POST", `/orders/${orderId}/move`, { to }),
+      // SAY IT (T7 sweep #7 third pass, 2026-08-30). This was the ONE move on this panel that
+      // succeeded in silence: moving a DISH ends with "Dish moved to table N (new KOT)" forty
+      // lines above, and the manager panel's KOT move says "KOT moved to <table>". Here the
+      // picker just closed and the waiter was left to notice a ticket missing from a bill that
+      // may have four — the same "did that work?" the dish move was given a sentence for.
+      // tableLabel(), so a renamed table is named the way the waiter knows it.
+      () => toast(`KOT moved to ${tableLabel(to)}`),
     );
   }));
 }
