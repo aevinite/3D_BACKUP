@@ -3853,12 +3853,20 @@ function openDiscountModal(order, opts = {}) {
       <div style="display:flex;align-items:flex-end;gap:10px">
         <div style="flex:1">
           <div style="${lblCss}">Discount %</div>
-          <input type="number" inputmode="decimal" min="0" max="100" step="1" class="disc-pct-input" placeholder="0" style="${fieldCss}">
+          <!-- step="0.01" on all three boxes below, NOT "1" (T7 sweep #7 third pass, 2026-08-30).
+               Same fault the owner ruled on for the split screen's amount box on 2026-08-29: THIS
+               SCREEN FILLS THE BOXES IN ITSELF and was declaring they only hold whole numbers.
+               paint() writes a percent to one decimal (₹300 off ₹2,400 is 12.5) and an amount to
+               the paise (round2), so the box refused the number the app had just put in it — a
+               hardware ↑/↓ snapped 12.5 to 13, and a waiter correcting a figure by hand was pushed
+               to whole rupees on a bill that carries paise. Nothing else changes: the arrows are
+               still hidden (item 8) and "They pay" is still WRITTEN in whole rupees. -->
+          <input type="number" inputmode="decimal" min="0" max="100" step="0.01" class="disc-pct-input" placeholder="0" style="${fieldCss}">
         </div>
         <div style="padding-bottom:12px;color:var(--muted);font-weight:800;font-size:16px">=</div>
         <div style="flex:1">
           <div style="${lblCss}">Discount amount (₹)</div>
-          <input type="number" inputmode="decimal" min="0" step="1" class="disc-amt-input" placeholder="0" style="${fieldCss}">
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="disc-amt-input" placeholder="0" style="${fieldCss}">
         </div>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
@@ -3868,7 +3876,7 @@ function openDiscountModal(order, opts = {}) {
           <span style="color:var(--gold-strong);font-weight:800">They pay</span>
           <label style="display:inline-flex;align-items:center;gap:1px;cursor:text;border:1px solid var(--line);border-radius:9px;padding:3px 8px 3px 9px;background:var(--panel)" title="Type what the customer will actually pay — the discount works itself out">
             <span style="color:var(--gold-strong);font-weight:800;font-size:15px">₹</span>
-            <input type="number" inputmode="decimal" min="0" step="1" class="disc-pay-input" aria-label="Amount they pay" style="width:7ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none">
+            <input type="number" inputmode="decimal" min="0" step="0.01" class="disc-pay-input" aria-label="Amount they pay" style="width:7ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none">
           </label>
         </div>
       </div>

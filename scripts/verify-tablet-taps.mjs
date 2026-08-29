@@ -721,6 +721,31 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 15 · A MONEY BOX MUST ACCEPT THE NUMBER THE SCREEN PUTS IN IT ────────────────────────────
+//
+// The owner ruled on this for the split screen's amount box (2026-08-29) and it holds wherever the
+// panel fills a number box in itself: `step="1"` on a box the code writes 12.5 or 153.29 into is a
+// box refusing its own contents — a hardware ↑/↓ snaps it to a whole number and a waiter correcting
+// a figure by hand is pushed to whole rupees on a bill that carries paise. The discount sheet had
+// all three (2026-08-30): paint() writes the percent to one decimal and the amount with round2.
+{
+  for (const cls of ["disc-pct-input", "disc-amt-input", "disc-pay-input", "sb-amt"]) {
+    const line = (src.split("\n").find((l) => l.includes(`class="${cls}"`)) || "");
+    check(
+      `tablet: .${cls} steps in paise, not whole rupees`,
+      /step="0\.01"/.test(line),
+      `${TABLET}: .${cls} declares ${(line.match(/step="[^"]*"/) || ["no step"])[0]}. This screen writes\n    ` +
+      `fractional figures into that box itself, so step="1" makes it refuse its own contents.`,
+    );
+    check(
+      `tablet: .${cls} still asks for the numeric keypad`,
+      /inputmode="decimal"/.test(line) && /type="number"/.test(line),
+      `${TABLET}: .${cls} lost type="number" / inputmode="decimal" — a waiter on a tablet gets the\n    ` +
+      `letter keyboard for a money field.`,
+    );
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
