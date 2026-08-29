@@ -50,19 +50,22 @@ const REMOVAL_KIND: Record<string, [string, string]> = Object.fromEntries(
   Object.keys(KIND_LABEL).map((k) => [k, [KIND_ICON[k] || "•", KIND_LABEL[k]] as [string, string]]),
 );
 // ── AND A KIND NOBODY MAPPED STILL HAS TO READ AS ENGLISH (T12 sweep, 2026-08-27) ──────────────
-// The row below used to fall back to ["•", r.kind] — the raw database word. That is not
+// The row below used to fall back to ["•", r.kind] — the raw database word. That was not
 // hypothetical: app/api/owner/customers/route.ts writes `kind: "customer_erased"` into
-// deletion_audit, and public/panels/auditsort.js has no KIND_LABEL entry for it, so the top row of
+// deletion_audit, public/panels/auditsort.js had no KIND_LABEL entry for it, and the top row of
 // this record on French House read, verbatim:
 //
 //     • customer_erased · Guest ending 1601
 //
-// on the one screen whose whole job is to be the plain-English record. The map knows the row in
-// every other way — lfh_audit_risk calls it `data` and the risk strip already prints
-// "🧹 Guest data erased" — only the WORDS were missing. The real fix is one line in auditsort.js so
-// all three panels (owner, manager, admin) and the removal-detail card say the same thing; that
-// file is outside this sweep's fence, so it is reported. This is the floor underneath it: whatever
-// kind arrives, the screen says something a person can read, never a column value.
+// on the one screen whose whole job is to be the plain-English record.
+//
+// THAT ONE IS NOW PROPERLY NAMED (2026-08-29, the owner said do it): auditsort.js has
+// `customer_erased: "Guest record erased"` with the broom glyph, which fixes the owner panel, the
+// manager panel, the admin console and the removal-detail card in one place. So this function is
+// no longer carrying a live fault — it is the FLOOR under the next one. Every kind arrives here
+// through a map that a route can add to without anyone remembering to add words, and the day that
+// happens the screen should say something a person can read rather than a column value.
+// `npm run verify:owner-screen` prints a note naming any kind in that state.
 function humanKind(kind: string): string {
   const words = String(kind || "").replace(/[_-]+/g, " ").trim();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Something was removed";
@@ -71,7 +74,9 @@ function humanKind(kind: string): string {
  *  The CHIPS need this as much as the rows do: `AUDITSORT.kindCountsFrom` is handed the label map
  *  and falls back to the raw kind itself, so the chip strip printed "• customer_erased 2" beside
  *  ten properly-named chips (seen on a 360px screenshot, T12 sweep 2026-08-27). One map, so the
- *  chip, the row, the search and the "· <kind>" line under it can never say four different things. */
+ *  chip, the row, the search and the "· <kind>" line under it can never say four different things.
+ *  With customer_erased now named in auditsort.js this map is usually just KIND_LABEL — which is
+ *  the point: it costs nothing when nothing is missing. */
 function labelsWith(...sets: (string | null | undefined)[][]): Record<string, string> {
   const out: Record<string, string> = { ...KIND_LABEL };
   for (const set of sets) for (const k of set) if (k && !out[k]) out[k] = humanKind(k);
