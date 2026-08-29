@@ -724,6 +724,28 @@ console.log("\nT11-D · printing, and the phone");
   );
 }
 
+console.log("\nT11-H · the manager's till count names the same methods the owner's does");
+{
+  // ── A COLUMN READ FOUR TIMES HAS TO BE ASKED FOR (owner-approved item 9, 2026-08-30) ───────
+  // The Z-report's day-close query selected the day's orders WITHOUT payment_method and then read
+  // `o.payment_method` four times, so every read was undefined: the till breakdown labelled every
+  // bill not settled in parts "Not recorded", and onHouseCount/onHouseNet could never be anything
+  // but zero. Measured 2026-08-26, same business day and same 05:00 window: the Z-report said
+  // "Not recorded ₹1,932 / 4 bills" where the owner's day sheet said "Cash ₹1,932 / 4 bills".
+  const editor = read("app/api/editor/[...path]/route.ts");
+  const zi = editor.indexOf('if (p === "zreport") {');
+  const zblk = zi < 0 ? "" : editor.slice(zi, zi + 9000);
+  const sel = (zblk.match(/from\("orders"\)\.select\("([^"]*)"\)/) || [])[1] || "";
+  const reads = (zblk.match(/\.payment_method/g) || []).length;
+  check(
+    "the Z-report asks for every order column it reads",
+    !!sel && (reads === 0 || sel.split(",").includes("payment_method")),
+    `app/api/editor/[...path]/route.ts — the day-close block reads .payment_method ${reads} time(s) and its ` +
+      `orders select is "${sel}". A column that is read but never selected is undefined, and undefined ` +
+      "here means every bill is filed as \"nobody wrote down how this was paid\" at day close.",
+  );
+}
+
 console.log("\nT11-G · with no internet, the saved figures can still be found");
 {
   // The scope comes from /api/owner/overview. Offline that read answers `{ error: "offline" }`
@@ -739,7 +761,7 @@ console.log("\nT11-G · with no internet, the saved figures can still be found")
   );
   check(
     "…and falls back to it ONLY when the restaurant list could not be read",
-    /!list\.length && !scopePin && savedRid\.current/.test(reportsPage) &&
+    /!list\.length\)\s*\{\s*setNoSignal\(true\);[\s\S]{0,80}savedRid\.current/.test(reportsPage) &&
     /catch\(\(\) => \{[\s\S]{0,160}savedRid\.current/.test(reportsPage),
     "app/owner/reports/page.tsx — restoring it unconditionally would break the owner's rule that " +
       "Reports always OPENS on All restaurants (2026-07-26). It is a failure fallback, not a memory.",
@@ -750,11 +772,39 @@ console.log("\nT11-G · with no internet, the saved figures can still be found")
     "app/owner/reports/page.tsx — without the name the offline sheet reads \"This restaurant\" while " +
       "showing that restaurant's own figures.",
   );
+  // ── AND IT SAYS SO AT THE TOP, IN HIS OWN WORDS (owner, 2026-08-30) ───────────────────────
+  // "you can just say there is no internet, or if it was loaded previously you can show the
+  // previously and write a note on the top: the internet is not available, this is not the
+  // current data."
   check(
-    "…and the page adds no SECOND offline warning bar",
-    !/Couldn't reach the server, so these are the figures saved/.test(reportsPage),
-    "app/owner/reports/page.tsx — components/OfflineNotice.tsx is already on screen saying \"showing " +
-      "saved figures\". Two bars saying one thing is how a real warning stops being read.",
+    "the page says at the top that the internet is not available",
+    /The internet is not available\./.test(reportsPage) && /rs-offnote/.test(reportsPage) && /\.rs-offnote \{/.test(kit),
+    "app/owner/reports/page.tsx — his words, at the top of the page. A \"— couldn't load\" tacked onto " +
+      "the end of a caption is not a person telling you something.",
+  );
+  check(
+    "…and the note is the FIRST thing on the page, not buried under the controls",
+    reportsPage.indexOf("rs-offnote") < reportsPage.indexOf('className="rs-head"'),
+    "app/owner/reports/page.tsx — he asked for a note ON TOP. Render it above the title strip.",
+  );
+  check(
+    "…and it says WHICH of the two cases he is in",
+    /This is not the current data/.test(reportsPage) && /Nothing has been saved on this device/.test(reportsPage),
+    "app/owner/reports/page.tsx — \"there is no internet\" and \"there is no internet AND nothing saved\" " +
+      "are different situations and he has to act differently in each.",
+  );
+  check(
+    "…and with nothing saved it prints a DASH, never a confident ₹0",
+    /blank\?: boolean/.test(reportsPage) && /blank \? <span className="rs-ov-dash">—<\/span>/.test(reportsPage) &&
+    (reportsPage.match(/\{blank \? "—" :/g) || []).length >= 5,
+    "app/owner/reports/page.tsx — a ₹0 headline with five ₹0 tiles tells the owner his restaurant took " +
+      "nothing. The whole point of the note is that we do not know.",
+  );
+  check(
+    "…and the chart does not explain the silence as a fact about the restaurant",
+    /blank\s*\?\s*<div className="rs-ov-blank"/.test(reportsPage),
+    "app/owner/reports/page.tsx — \"Not enough data yet, come back once there's a bit more\" is a sentence " +
+      "about the RESTAURANT. Draw nothing and let the note speak.",
   );
 }
 
