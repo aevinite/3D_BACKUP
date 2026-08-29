@@ -396,6 +396,23 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
   // when you tap it, and a type must stay reachable once you have narrowed to another one.
   const KINDS = labelsWith((counts || []).map((c) => c.kind), (removals || []).map((r) => r.kind));
   const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KINDS, KIND_ICON);
+  // See the note by the chip strip below. `narrow` matches the 760px step the rest of this console
+  // already uses, and it is re-read on change so rotating a phone stays honest.
+  const [allChips, setAllChips] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 760px)");
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  const CHIP_FOLD = 5;
+  const folding = narrow && !allChips && chips.length > CHIP_FOLD + 1;
+  const shownChips = folding
+    ? chips.filter((c: { kind: string }, i: number) => i < CHIP_FOLD || c.kind === kind)
+    : chips;
+  const hiddenChipCount = chips.length - shownChips.length;
   // NO CLIENT-SIDE FALLBACK HERE, AND THAT IS RIGHT — the comment that used to sit on this line
   // described one that does not exist, which is worse than none (T12 sweep, 2026-08-27). The
   // Activity half below really does need its fallback, because its chips are counted from the page
@@ -462,17 +479,34 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
       )}
       {/* WHAT IS THE LIST OF WHAT — one chip per type present, with its count. Only types that
           actually have rows are offered, so there is never a "0" chip to tap. */}
+      {/* ── AND ON A PHONE THE STRIP FOLDS (owner, 2026-08-29) ────────────────────────────────────
+          Measured on a 360px screenshot: eleven chips over eight lines, ~530px of them, which put
+          the search box below the fold on the screen you search from. Nothing was hidden and
+          nothing was broken — it was simply a lot of thumb before you reach the control you came
+          for. So the strip shows the busiest few and folds the rest behind one more chip.
+            . the chips arrive sorted by COUNT (auditsort's kindCountsFrom), so what folds away is
+              genuinely the rarest — the fold can never hide the type you use every day;
+            . "All" is never folded, so there is always a way back out;
+            . a chip you have SELECTED is never folded either, or narrowing to a rare type would
+              make the chip you are standing on vanish;
+            . once opened it stays open for the visit, and on a desktop — where all eleven fit two
+              lines — the fold is off entirely. This is a phone problem and only a phone problem. */}
       {chips.length > 1 && (
         <div className="own-range aud-chips" style={{ marginBottom: 10, flexWrap: "wrap" }}>
           <button className={activeKind === "" ? "on" : ""} onClick={() => setKind("")}>
             All <i>{(counts ? counts.reduce((a, c) => a + c.n, 0) : (removals || []).length).toLocaleString("en-IN")}</i>
           </button>
-          {chips.map((c) => (
+          {shownChips.map((c) => (
             <button key={c.kind} className={activeKind === c.kind ? "on" : ""} onClick={() => setKind(c.kind)}
               title={`Show only: ${c.label}`}>
               <span aria-hidden="true">{c.icon}</span> {c.label} <i>{c.count}</i>
             </button>
           ))}
+          {hiddenChipCount > 0 && (
+            <button onClick={() => setAllChips(true)} title="Show every type on this record">
+              + {hiddenChipCount} more
+            </button>
+          )}
         </div>
       )}
 

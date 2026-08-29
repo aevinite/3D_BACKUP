@@ -528,6 +528,20 @@ check("…and the CHIP strip, the search and the money line read from that same 
     "app/owner/issues/page.tsx: 'handled by' and 'Raised by' print their column raw again. Rows written\n       before 2026-08-29 still hold a uuid there.");
 }
 
+// 24 — the type-chip strip folds on a PHONE only, and never folds a way out (owner, 2026-08-29)
+check("the removals chip strip folds on a narrow screen",
+  /const CHIP_FOLD = 5/.test(auditC) && /const folding = narrow && !allChips && chips\.length > CHIP_FOLD \+ 1/.test(auditC),
+  "app/owner/activity/page.tsx: the chip strip no longer folds. Eleven chips over eight lines pushed the\n       search box below the fold on the screen you search from — measured at ~530px on a 360px phone.");
+check("…and it is a PHONE rule, keyed to the console's own 760px step",
+  /matchMedia\("\(max-width: 760px\)"\)/.test(auditC),
+  "app/owner/activity/page.tsx: the fold is no longer width-aware, so it hides chips on a desktop where\n       all of them fit two lines.");
+check("…and it never folds 'All', nor the chip you are standing on",
+  /i < CHIP_FOLD \|\| c\.kind === kind/.test(auditC) && /activeKind === "" \? "on"/.test(auditC),
+  "app/owner/activity/page.tsx: the fold can now hide the selected chip or the way back to All — narrowing\n       to a rare type would make the chip you are standing on vanish.");
+check("…and there is one tap to see the rest",
+  /setAllChips\(true\)/.test(auditC) && /\+ \{hiddenChipCount\} more/.test(auditC),
+  "app/owner/activity/page.tsx: the folded chips have no way to be shown — that is hiding, not folding.");
+
 // …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
 // It is a note because the words live in public/panels/auditsort.js, which the owner console only
 // READS — a guard that goes red over a file its own territory cannot edit is a guard that gets
