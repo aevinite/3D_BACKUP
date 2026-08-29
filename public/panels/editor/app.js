@@ -13978,8 +13978,14 @@ async function managerPrintPass() {
       || stationKey(printTargetSays) !== stationKey(says) || helperKey(printTargetSays) !== helperKey(says);
     printTargetSays = says;
     if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
-    if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet (a
-                                                            // helper-owned restaurant lands here)
+    // THE SERVER'S ANSWER IS THE ONLY ONE. `ans` used to be this browser's own yes/no to "should
+    // this screen print?", and when that opt-in was deleted this line was left reading it — an
+    // undeclared name, so the whole pass threw and EVERY screen-mode ticket stayed queued for ever.
+    // Nothing on screen said so: the strip was right, the board was right, the server offered the
+    // job, and the panel silently dropped it. Caught by running two real Chromes and watching a real
+    // order fail to print (owner, 2026-08-29). A deletion is not finished until the things that read
+    // the deleted thing are gone too.
+    if (!says.mayPrint) return;                              // a helper-owned restaurant lands here
     // ONE SCREEN PRINTS (mig 338). A live station elsewhere means this screen shows "printing happens
     // there · print here instead" and takes NOTHING — the server would refuse the claim anyway; not
     // asking is what stops two screens fighting over every ticket.
