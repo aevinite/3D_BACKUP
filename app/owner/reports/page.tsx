@@ -524,13 +524,20 @@ export default function OwnerReports() {
   //   The scope the device last SAW is the only honest answer when the server cannot give one,
   // so it is used ONLY on that failure. On a good connection nothing changes: the overview
   // answers, and the owner's "Reports always opens on All restaurants" rule stands untouched.
-  //   NO SECOND WARNING BAR. The first draft of this fix added one, and the app's own offline
-  // notice was already on screen saying "Connection is struggling — showing saved figures from a
-  // moment ago" — two bars saying one thing is how a real warning stops being read (his rule
-  // about crying wolf). The saved figures now carry the restaurant's own NAME instead of the
-  // generic "This restaurant", which is what makes the existing bar's sentence true.
+  //   AND IT SAYS SO AT THE TOP, IN HIS OWN WORDS (owner, 2026-08-30): "you can just say there is
+  // no internet, or if it was loaded previously you can show the previously and write a note on
+  // the top: the internet is not available, this is not the current data."
+  //   The app's own offline notice sits at the BOTTOM of the window and talks about SAVING work
+  // ("changes you make now may not save"), which is the right sentence for a panel that writes
+  // and the wrong one for a page that only reads. This note is about the FIGURES, it is at the
+  // top where he asked for it, and it says which of the two cases he is in — figures saved
+  // earlier, or nothing saved at all. One line, no icon-shouting, and it is gone the moment the
+  // scope reads normally again.
   const savedRid = useRef<string>("");
   const savedName = useRef<string>("");
+  // Did the scope read come back empty? That is this page's only signal that it could not reach
+  // the server, and it is what the note at the top is driven from (owner, 2026-08-30).
+  const [noSignal, setNoSignal] = useState(false);
   useEffect(() => {
     const s = readSnap<{ rid?: string; restName?: string; entries?: Record<string, Entry> }>(snapKey);
     if (!s) return;
@@ -578,9 +585,11 @@ export default function OwnerReports() {
       if (!scopePin && list.length === 1) setRid(list[0].id);
       // Nothing came back (no internet, or the read failed): fall back to the scope this device
       // last saw, so the figures it already holds can be found and shown — and say so on screen.
-      if (!list.length && !scopePin && savedRid.current) setRid(savedRid.current);
+      if (!list.length) { setNoSignal(true); if (!scopePin && savedRid.current) setRid(savedRid.current); }
+      else setNoSignal(false);
       setReady(true);
     }).catch(() => {
+      setNoSignal(true);
       if (!scopePin && savedRid.current) setRid(savedRid.current);
       setReady(true);
     });
@@ -701,6 +710,9 @@ export default function OwnerReports() {
     return () => clearInterval(t);
   }, []);
   const shownCachedAt = entry?.cachedAt;
+  /** Is there ANY settled payload on this device for what he is looking at? Decides which of the
+   *  two sentences the no-internet note shows — "this is not current" vs "there is nothing yet". */
+  const haveSaved = useMemo(() => Object.values(store).some((e) => !!e?.data), [store]);
   const refreshNow = () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -798,6 +810,23 @@ export default function OwnerReports() {
   return (
     <div className="rs-root">
       <ReportsStyles />
+
+      {/* THE NOTE AT THE TOP (owner, 2026-08-30 — item 5). Two sentences at most, and the second
+          one only when there is really something saved to look at. */}
+      {noSignal && (
+        <div className="rs-offnote" role="status">
+          <i className="fas fa-wifi" aria-hidden />
+          <span>
+            <b>The internet is not available.</b>{" "}
+            {haveSaved
+              ? <>This is not the current data — these are the figures saved on this device{shownCachedAt ? <>, from {timeAgo(shownCachedAt)}</> : null}.</>
+              : <>Nothing has been saved on this device for this period yet, so there is nothing to show.</>}
+          </span>
+          <button className="rs-btn" onClick={refreshNow} disabled={refreshing}>
+            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} aria-hidden /> Try again
+          </button>
+        </div>
+      )}
 
       <div className="rs-head">
         <div>
@@ -935,6 +964,7 @@ export default function OwnerReports() {
       {!sel ? (
         <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport}
           rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll} hasInventory={hasInventory} briefTick={briefTick}
+          blank={noSignal && !entry?.data}
           briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
@@ -948,9 +978,13 @@ export default function OwnerReports() {
 }
 
 // ── The hub: hero snapshot + per-restaurant brief + categorised report cards ──
-function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory, briefTick }: {
+function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory, briefTick, blank }: {
   range: Range; money?: Entry; restName: string; accent: string; onOpen: (k: RKey) => void;
   rests: Rest[]; rid: string; onPickRest: (id: string) => void; briefQs: string;
+  /** No connection AND nothing saved for this period. A dash, never a ₹0 — the owner asked for
+   *  "just say there is no internet", and a confident ₹0 is the opposite of saying that
+   *  (owner, 2026-08-30). The note at the top of the page carries the explanation. */
+  blank?: boolean;
   briefTick: number;   // bumped by Refresh so the per-restaurant brief re-reads too
   hasPayroll: boolean;   // mig 220 — hides the Team & pay card when the module is off
   hasInventory: boolean; // migs 221/224/227 — hides the Inventory & stock card when the module is off
@@ -1010,19 +1044,24 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
           global `.owx-spark{position:absolute}` yanked it to the page corner — the "stray graph"). */}
       <div className="rs-overview">
         <div className="rs-ov-eyebrow">{restName} · {rangeLabel(range)}</div>
-        <div className="rs-ov-val"><AnimatedNumber value={t?.revenue || 0} money loading={loading} /></div>
-        <div className="rs-ov-sub">Total collected this period — GST included{money?.error ? " — couldn't load" : ""}</div>
+        <div className="rs-ov-val">{blank ? <span className="rs-ov-dash">—</span> : <AnimatedNumber value={t?.revenue || 0} money loading={loading} />}</div>
+        <div className="rs-ov-sub">Total collected this period — GST included{money?.error && !blank ? " — couldn't load" : ""}</div>
         <div className="rs-ov-kpis">
-          <div className="k"><span className="lbl">Net sales</span><span className="v"><AnimatedNumber value={Math.max(0, (t?.subtotal || 0) - (t?.discount || 0))} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Paid bills</span><span className="v"><AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Avg bill</span><span className="v"><AnimatedNumber value={avg} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">GST collected</span><span className="v"><AnimatedNumber value={t?.tax || 0} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Discounts</span><span className="v"><AnimatedNumber value={t?.discount || 0} money loading={loading} /></span></div>
+          <div className="k"><span className="lbl">Net sales</span><span className="v">{blank ? "—" : <AnimatedNumber value={Math.max(0, (t?.subtotal || 0) - (t?.discount || 0))} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">Paid bills</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">Avg bill</span><span className="v">{blank ? "—" : <AnimatedNumber value={avg} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">GST collected</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.tax || 0} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">Discounts</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.discount || 0} money loading={loading} />}</span></div>
         </div>
         <div className="rs-ov-chart">
-          {loading
-            ? <div className="rs-ov-skel" aria-hidden />
-            : <ToggleChart data={series} color={accent} money height={210} title="Revenue over the period" />}
+          {/* With no connection and nothing saved, "Not enough data yet — come back once there's a
+              bit more" is a sentence about the RESTAURANT, and it is not true. Draw nothing and let
+              the note at the top of the page be the only thing that speaks (owner, 2026-08-30). */}
+          {blank
+            ? <div className="rs-ov-blank" aria-hidden />
+            : loading
+              ? <div className="rs-ov-skel" aria-hidden />
+              : <ToggleChart data={series} color={accent} money height={210} title="Revenue over the period" />}
         </div>
       </div>
 
