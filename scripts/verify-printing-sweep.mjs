@@ -1235,13 +1235,22 @@ await phase("…and a print on ITS printer closes it", async () => {
   // put the world back before anything else runs
   await db(`restaurants?id=eq.${RID}`, { method: "PATCH", body: JSON.stringify({ manager_permissions: mpWas, access_config: acWas }) });
   await setPerson(mgrU, null);
+  // COMPARE THE CONTENT, NOT THE SPELLING OF THE CONTENT. jsonb does not preserve key order, so the
+  // very same permissions can come back serialised differently and a plain JSON.stringify comparison
+  // calls it a change. This phase went red on a run where nothing had actually moved (2026-08-30).
+  const stable = (v) => JSON.stringify(v, (_k, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]]))
+      : x);
   await phase("permissions · restored exactly as they were", async () => {
     const [now] = await db(`restaurants?select=manager_permissions,access_config&id=eq.${RID}`);
     const [nowU] = await db(`staff_users?select=permissions&id=eq.${mgrU.id}`);
-    return (JSON.stringify(now.manager_permissions) === JSON.stringify(mpWas)
-      && JSON.stringify(now.access_config) === JSON.stringify(acWas)
-      && JSON.stringify(nowU.permissions) === JSON.stringify(permWas))
-      || "the sweep did not put this restaurant's permissions back — a test that leaves the world changed is worse than no test";
+    const diff = [];
+    if (stable(now.manager_permissions) !== stable(mpWas)) diff.push("manager_permissions");
+    if (stable(now.access_config) !== stable(acWas)) diff.push("access_config");
+    if (stable(nowU.permissions) !== stable(permWas)) diff.push(`${mgrU.username}'s own permissions`);
+    return diff.length === 0
+      || `the sweep left ${diff.join(" and ")} changed — a test that leaves the world changed is worse than no test`;
   });
 
   // ── print_setup: the OTHER permission, and it must not be the same one ──────────────────────
@@ -2420,8 +2429,15 @@ if (!browser) {
     }
     return st === "done" || `the ticket is ${st} — a hidden window that cannot print is the whole feature failing quietly`;
   });
-  await phase("…without ever taking the screen from the ordering browser", () =>
-    front() === frontBefore || `the screen moved to ${front()} while printing`);
+  // THE RULE IS THAT THE STATION NEVER COMES TO THE FRONT. Asserting "focus never moved at all" is
+  // asserting something about the whole machine — an editor window, a notification, anything can
+  // take it, and none of that is printing's doing. What must never happen is the hidden Chrome
+  // raising itself, which is the fault this whole mode exists to avoid.
+  await phase("…without the hidden station ever coming to the front", () => {
+    const f = front();
+    return (f !== "Google Chrome" && f !== "Chromium")
+      || `the station Chrome took the screen while printing (frontmost: ${f})`;
+  });
   await phase("…and the station is STILL hidden afterwards", () => {
     let vis = "?"; try { vis = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
     return vis === "false" || `it came back into view (visible=${vis})`;
