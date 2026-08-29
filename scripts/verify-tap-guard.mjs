@@ -307,7 +307,11 @@ for (const [panel, file] of [["manager", EDITOR], ["tablet", TABLET]]) {
       const after = body.slice(m.index);
       const derefs = [...after.matchAll(new RegExp(`(?<![.\\w])${v}\\.(?!\\?)`, "g"))];
       if (!derefs.length) return true;
-      return new RegExp(`if \\(${v}\\)|if \\(!${v}\\)`).test(after.slice(0, derefs[derefs.length - 1].index));
+      // `if (x)`, `if (!x)` — and `if (x && y)`, which is the same null-check with more than one
+      // handle to test. The narrow form rejected the tip block the moment it grew a second and
+      // third input (2026-08-28) even though every one of them was checked. What must still fail
+      // is a dereference with NO if-guard naming the handle at all.
+      return new RegExp(`if \\(\\s*!?${v}\\b`).test(after.slice(0, derefs[derefs.length - 1].index));
     })();
     check(
       `the payment sheet wires ${sel} only when it exists (${why})`,

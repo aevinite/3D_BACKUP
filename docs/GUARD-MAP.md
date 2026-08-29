@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **153** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **154** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 153 names in their head, so in practice a person runs none of them, or reaches for
+can hold 154 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -89,6 +89,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | the printed bill or kitchen ticket | `verify:print-format` (one file does both: `public/panels/billdoc.js`) | nothing | no |
 | ↳ a bill printed a second time | `verify:bill-reprint` ← a reprint is a PRINT, not a new bill: same numbers, same totals, and it says DUPLICATE on the paper (added by another session, 2026-08-19; row added here so the map stays complete) | nothing | no |
 | ↳ a DATE, a TIME or a DAY on any printed document, or the rows that explain a bill's money | `verify:print-paper` ← every document must read the SAME on every device (it re-renders under five time zones), an MRP line is counted once, and a printed percentage describes the rupees beside it | nothing | no |
+| ↳ a TIP — anywhere it is entered, stored or printed | `verify:tip` ← a tip is the only money collected on a bill that is NOT part of the sale, so it stays out of `billMoney`/`billRows` and prints BELOW the TOTAL (above the line it reads as an untaxed sale); the maths is RUN, not read; both panels that take money have all three linked boxes; the tablet's route exists and is gated on `tablet_mark_paid`; neither panel swallows a failed tip write; one tip per bill however it closes | nothing | no |
 | ↳ auto-print itself — WHO prints and WHETHER it prints at all | `verify:print-queue` ← a ticket is a ROW (mig 335), the print path never refuses a hidden/covered window, the targeted slice carries the queue, and one shared claim serves both panels | nothing | no |
 | how long a restaurant's logs are kept, and who may change it | `verify:retention` ← the admin LOCKS it rather than silently capping it, the lock is visible to the restaurant ("🔒 set by Aevidine"), the check sits ABOVE the manager permission gates so a manager is never told it is a permission problem, and the lock is never cached | nothing | no |
 | a table on the floor whose number is outside the plan ("off-plan") | `verify:floor-offplan` ← an off-plan tile is shown while a party is LIVE on it and never hidden while it is, so a seven-digit number reads as odd rather than vanishing with a real party on it | nothing | no |

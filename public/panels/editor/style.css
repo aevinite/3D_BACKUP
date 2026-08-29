@@ -2888,6 +2888,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 }
 /* No spinner arrows: they steal the width this field needs and nobody nudges a bill by ₹1 arrows. */
 .disc-pay-input::-webkit-outer-spin-button, .disc-pay-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* …and the tip's three, for the same reason: same kind of figure, same thumb, same screen. */
+#payTipPct::-webkit-outer-spin-button, #payTipPct::-webkit-inner-spin-button,
+#payTipInput::-webkit-outer-spin-button, #payTipInput::-webkit-inner-spin-button,
+#payPaidInput::-webkit-outer-spin-button, #payPaidInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .disc-pay-input { -moz-appearance: textfield; appearance: textfield; }
 .disc-hint { margin-top: 8px; text-align: center; font-size: 12px; color: var(--muted); }
 .disc-foot-spacer { flex: 1; }

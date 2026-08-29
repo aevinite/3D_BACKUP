@@ -56,6 +56,40 @@
     return (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + "%";
   }
 
+  /* ── THE TIP, decided once (owner, 2026-08-28) ─────────────────────────────────────────────
+     "just like the discount" — three linked boxes: a percentage, a rupee amount, and the TOTAL
+     the customer actually handed over. Bill 3000, they give 3200 -> a 200 tip.
+
+     The maths lives here, beside discPct, for the reason discPct was moved here: two panels and a
+     piece of paper all need it, and each one deriving it privately is how the manager's screen and
+     the waiter's screen start quoting different numbers for the same money.
+
+     A TIP IS NOT A DISCOUNT, and the difference is the whole reason this is short. A discount is
+     stored PRE-tax and has to be worked backward through the tax to find what the customer pays.
+     A tip is money on TOP of a finished bill -- migration 154: "it must not enter subtotal/tax/
+     discount/total" -- so there is no tax in it at all and the sum is one subtraction. Keep it so. */
+
+  /* What is due, what they handed over -> the tip. Never negative: handing over LESS than the bill
+     is not a small tip, it is a part payment, and the app has a separate thing for that. */
+  function tipFromPaid(due, paid) {
+    var d = Number(due) || 0, p = Number(paid) || 0;
+    return Math.max(0, Math.round((p - d) * 100) / 100);
+  }
+  /* A tip written as a percentage of the bill it sits on. Same rounding rule as discPct so the two
+     read alike: whole numbers clean ("10%"), anything else one decimal. "" when there is nothing
+     to say, so a call site can drop it in with no guard of its own. */
+  function tipPct(due, tip) {
+    var d = Number(due) || 0, t = Number(tip) || 0;
+    if (d <= 0 || t <= 0) return "";
+    var pct = Math.round((t / d) * 1000) / 10;
+    if (!pct) return "";
+    return (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + "%";
+  }
+  /* The server's own ceiling (the orders/:id/tip endpoint), repeated here so a panel can refuse a
+     typo BEFORE sending rather than have it silently trimmed on arrival. It is there to catch a
+     mis-typed 500000, not to judge a tip. */
+  var TIP_MAX = 100000;
+
   /* splitTax(taxWhole, comps) — the printed tax lines MUST add up EXACTLY to the tax on the
      total. Every line is rounded to whole rupees, so rounding each component on its own drifts:
      ₹380 @ 5% = ₹19 of tax, but CGST 2.5% + SGST 2.5% each round(9.5) = ₹10 → ₹20, and the
@@ -335,6 +369,14 @@
     // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
     // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
     var R = billRows(d);
+    /* The tip, and what it works out to as a percentage of the bill it sits on. Read from the data
+       (billData derives it from the orders); a caller building 'd' by hand — lib/billPreview.ts and
+       the admin previews do — simply passes no tip and nothing prints.
+       (Plain quotes, not backticks: this is a panel script, and a backtick in a block comment here
+       is what ended the injected stylesheet's template literal and took /manager down three times
+       on 2026-08-01. verify:ui-integrity keeps that blunt rule, and it is right to.) */
+    var tipShown = Math.max(0, Math.round(Number(d.tip) || 0));
+    var tipPctLabel = tipPct(R.total, tipShown);
     /* THE PERCENTAGE MUST DESCRIBE THE RUPEES PRINTED BESIDE IT (T8 sweep, 2026-08-17).
        billRows() clamps a discount larger than the row it comes off — that was added on 2026-08-06
        so no negative "Taxable value" could reach a guest's hands — but the LABEL is the caller's own
@@ -679,6 +721,18 @@
      + '  <div class="g"><span>TOTAL</span><span>' + inr(R.total) + "</span></div>\n"
      + (inclBelow
         ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + inclBelow + "</div>\n"
+        : "")
+     /* THE TIP SITS BELOW THE TOTAL, AND THAT POSITION IS THE WHOLE POINT.
+        Every row above TOTAL has to foot to it — billRows() exists for that one rule, and this
+        repo has already been bitten by a column that did not add up. A tip is not part of the sale:
+        it is untaxed money for the staff (migration 154). Put it above the line and the bill reads
+        as a ₹3,200 sale on which no tax was charged, which is a different and much worse document
+        than the one it is. So TOTAL stays exactly what was charged, and the tip and the cash
+        actually handed over are stated after it, clearly separated.
+        "PAID" is bold like TOTAL because that is the figure the customer recognises. */
+     + (tipShown > 0
+        ? '  <div class="t" style="margin-top:3px"><span>Tip' + (tipPctLabel ? " (" + tipPctLabel + ")" : "") + "</span><span>+ " + inr(tipShown) + "</span></div>\n"
+          + '  <div class="g"><span>PAID</span><span>' + inr(R.total + tipShown) + "</span></div>\n"
         : ""))
 + "</div>\n"
 + mrpNote + "\n"
@@ -1486,10 +1540,22 @@
     var insideWhole = Math.round(m.taxInside);
     var inclRows = (m.composition || !hasInside || insideWhole <= 0) ? [] : splitTax(insideWhole, taxComps);
 
+    /* THE TIP, ON THE PAPER (owner, 2026-08-28: "yes, customer can see the tip").
+       Derived here from the orders this function was already handed, so no call site changes and
+       neither panel can forget to pass it. Summed rather than read off one order because migration
+       154 puts the whole tip on the FIRST paid order and leaves the rest at 0 — summing gets the
+       same answer and survives that rule ever changing.
+       A CANCELLED sheet charges nothing and says so in its own band; a tip line there would be
+       money on a sale that never happened, so it prints nothing. */
+    var tipShown = voidedAll ? 0 : Math.round(orders.reduce(function (t, o) {
+      return t + ((o && o.status !== "cancelled") ? (Number(o.tip) || 0) : 0);
+    }, 0));
+
     return {
       logo: a.logo || "",
       name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
       cancelled: voidedAll,
+      tip: tipShown,
       // A CANCELLED SHEET NAMES THE NUMBER IT RETIRED (2026-08-06). This dropped the Invoice row
       // entirely on a cancelled bill, so the paper could only be tied back by its Bill no. But the
       // compliance rule is that a voided number RETIRES and stays on the record rather than
@@ -2027,6 +2093,10 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     billIdentity: billIdentity,
     splitTax: splitTax,
     discPct: discPct,
+    // The tip, decided once — see the block beside discPct above.
+    tipFromPaid: tipFromPaid,
+    tipPct: tipPct,
+    TIP_MAX: TIP_MAX,
     billRows: billRows,
     taxModel: taxModel,
     orderTaxRate: orderTaxRate,
