@@ -198,6 +198,17 @@ await phase("we are pointed at the DEV database, never AV live", () => /wnsfcizc
 await phase("the diag staff exist to act as people", async () => (await db("staff_users?select=id&username=eq.diagm1")).length === 1 || "diagm1 missing");
 await phase("print_jobs exists and takes every kind", async () => {
   const r = await db("print_jobs?select=kind&limit=1"); return Array.isArray(r) || "cannot read print_jobs"; });
+// ── WARM THE ROUTES FIRST ────────────────────────────────────────────────────────────────────
+// A dev server compiles a route on its first hit. The very first POST to /api/print-agent/pair/start
+// took 16 SECONDS on a freshly started server and came back 500, and the five phases after it failed
+// as a cascade from that one cold start — six red phases about a feature that was working perfectly
+// (measured immediately after: 320ms, 200). A campaign that reports the server's warm-up as a
+// product fault is a campaign nobody believes the third time.
+for (const warmUp of ["/api/print-agent/next", "/api/print-agent/pair/start", `/api/admin/printing/state?rid=${RID}`]) {
+  try { await fetch(BASE + warmUp, { method: warmUp.includes("pair") ? "POST" : "GET", headers: { "content-type": "application/json", cookie: adminCookie }, body: warmUp.includes("pair") ? JSON.stringify({ fingerprint: "warm-up", hostname: "warm-up", os: "mac" }) : undefined }); } catch {}
+}
+try { await db(`print_pairings?hostname=eq.warm-up`, { method: "DELETE" }); } catch {}
+
 await phase("print_agents exists", async () => Array.isArray(await db("print_agents?select=id&limit=1")) || "cannot read print_agents");
 await phase("printer_events carries a printer (mig 351)", async () => {
   const r = await db("printer_events?select=printer&limit=1"); return Array.isArray(r) || "no printer column"; });
@@ -1593,21 +1604,39 @@ await phase("…and a print on ITS printer closes it", async () => {
       oldest: { kitchen: k?.waiting?.oldestMs ?? null, admin: board?.stuck?.oldestMs ?? null },
     };
   };
-  const agree = (o, want) => {
+  const same = (o, want) => {
+    const got = [o.kitchen, o.pending, o.floor, o.admin];
+    return !got.some((v) => v === null) && new Set(got).size === 1 && got[0] === want;
+  };
+  // THE FLOOR READ IS SHARED FOR ~1.5s ON PURPOSE (mig 238, and CLAUDE.md says so in as many
+  // words), so one of these four can honestly be a moment behind the other three. The rule under
+  // test is that they AGREE, not that they agree within one round trip — so this waits out the
+  // shared window before calling a disagreement a fault. Without it the campaign flakes about one
+  // run in four on `floor=2` while the other three say 3, and a suite that cries wolf is one nobody
+  // reads. (Diagnosed once before and lost when its worktree was reset without being committed —
+  // hence the comment: this is not an optimisation, it is the difference between a real fault and
+  // a shared cache doing its job.)
+  const agreeOn = async (want) => {
+    let o = null;
+    for (let i = 0; i < 5; i++) {
+      o = await seen();
+      if (same(o, want)) return true;
+      if (i < 4) await new Promise((r) => setTimeout(r, 700));
+    }
     const got = [o.kitchen, o.pending, o.floor, o.admin];
     if (got.some((v) => v === null)) return `a screen did not answer at all: kitchen=${o.kitchen} sheet=${o.pending} floor=${o.floor} admin=${o.admin}`;
-    if (new Set(got).size !== 1) return `four screens, ${new Set(got).size} different answers: kitchen=${o.kitchen} sheet=${o.pending} floor=${o.floor} admin=${o.admin}`;
-    return got[0] === want || `every screen says ${got[0]}, but ${want} ticket(s) are waiting`;
+    if (new Set(got).size !== 1) return `four screens, ${new Set(got).size} different answers after 3.5s: kitchen=${o.kitchen} sheet=${o.pending} floor=${o.floor} admin=${o.admin}`;
+    return `every screen says ${got[0]}, but ${want} ticket(s) are waiting`;
   };
 
-  await phase("nothing waiting → all four screens say nothing is waiting", async () => agree(await seen(), 0));
+  await phase("nothing waiting → all four screens say nothing is waiting", () => agreeOn(0));
 
   const held = [];
   for (const n of [1, 2, 3]) {
     const [j] = await db("print_jobs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
       restaurant_id: RID, kind: "kot", status: "queued", reprint: false, printer: VIRT.kitchen, payload: {} }) });
     made.jobs.push(j.id); held.push(j.id);
-    await phase(`${n} ticket(s) behind the printer → all four screens say ${n}`, async () => agree(await seen(), n));
+    await phase(`${n} ticket(s) behind the printer → all four screens say ${n}`, () => agreeOn(n));
   }
 
   await phase("the threshold for 'stuck' is ONE number, not four copies", async () => {
@@ -1633,7 +1662,7 @@ await phase("…and a print on ITS printer closes it", async () => {
     for (const id of held) {
       await db(`print_jobs?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: "done", done_at: new Date().toISOString() }) });
     }
-    return agree(await seen(), 0);
+    return agreeOn(0);
   });
 
   await phase("printing switched off by the admin → the kitchen board is told, in the same read", async () => {
@@ -2311,6 +2340,216 @@ if (!browser) {
     });
     await drain();
   }
+}
+
+// ══ 19 · TWO REAL CHROMES, A REAL ORDER, AND A HIDDEN WINDOW ═════════════════════════════════
+// Owner, 2026-08-29: *"you open one Chrome with the thing, then you open another Chrome for
+// ordering, check simultaneously the KOTs are coming; if it is minimised, completely minimise; if
+// it is working… and if you are ordering on one screen, it is going to shifting to another screen."*
+//
+// This is the section that found the worst bug of the campaign. Screen mode printed NOTHING — a
+// deletion had left the line that read the deleted variable, so every pass threw on an undeclared
+// name and every ticket stayed queued for ever, with nothing on any screen to say so. The strip was
+// right, the board was right, the server offered the job. Only two real browsers and a real order
+// showed it. Reading the code would not have.
+if (!browser) {
+  for (const t of ["the station Chrome opens on the named person's panel", "…it is completely hidden", "…and it still prints a real order", "…without taking the screen from the ordering browser"]) await phase(t, () => "skip: no browser");
+} else {
+  const { execSync } = await import("node:child_process");
+  const front = () => { try { return execSync(`osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`, { encoding: "utf8" }).trim(); } catch { return "?"; } };
+  const STATION_FLAGS = ["--kiosk-printing", "--no-first-run", "--no-default-browser-check",
+    "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding", "--disable-features=CalculateNativeWinOcclusion", "--window-size=520,360"];
+
+  await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true });
+  await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: mgr.id }) });
+  // A station row left by a browser that has since closed still holds the printer until it goes
+  // stale — correct behaviour, and nothing to do with what this section asks.
+  await db(`print_stations?restaurant_id=eq.${RID}`, { method: "DELETE" }).catch(() => {});
+
+  const PROFILE = "/tmp/lfh-sweep-station";
+  try { execSync(`rm -rf ${PROFILE}`); } catch {}
+  const wasFront = front();
+  const cookieList = MANAGER_COOKIE.split("; ").filter(Boolean).map((kv) => {
+    const i = kv.indexOf("="); return { name: kv.slice(0, i), value: kv.slice(i + 1), domain: "localhost", path: "/" };
+  }).concat([{ name: "lfh_panel_device", value: "sweep-station-A", domain: "localhost", path: "/" }]);
+
+  let A = null, pa = null, cpid = null;
+  await phase("the station Chrome opens on the named person's panel, with the launcher's own flags", async () => {
+    A = await chromium.launchPersistentContext(PROFILE, { headless: false, args: STATION_FLAGS });
+    await A.addCookies(cookieList);
+    pa = A.pages()[0] || await A.newPage();
+    // NOT "networkidle": this panel polls for ever, so the network is never idle and goto would
+    // simply time out after 30s — which is exactly what it did the first time this section ran.
+    await pa.goto(`${BASE}/panels/editor/index.html`, { waitUntil: "domcontentloaded" });
+    await pa.waitForTimeout(3500);
+    return true;
+  });
+  await phase("…and it takes the printer by itself — nobody taps anything", async () => {
+    const r = await settles(() => pa.evaluate(`(typeof printTargetSays!=="undefined"&&printTargetSays&&printTargetSays.station)?!!printTargetSays.station.mine:false`), (v) => v === true, 8, 800);
+    return r.ok || "it never claimed the printer — the admin already named this screen, so it must not wait to be tapped";
+  });
+  await phase("…and it is COMPLETELY HIDDEN, the way the launcher hides it", async () => {
+    try { cpid = execSync(`pgrep -f "user-data-dir=${PROFILE}" | head -1`, { encoding: "utf8" }).trim(); } catch {}
+    if (!cpid) return "the station Chrome's process could not be found";
+    try { execSync(`osascript -e 'tell application "System Events" to set visible of (first process whose unix id is ${cpid}) to false'`); } catch {}
+    await new Promise((r) => setTimeout(r, 1200));
+    let vis = "?"; try { vis = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
+    return vis === "false" || `visible is ${vis} — it is not out of the way`;
+  });
+  await phase("…and it does not hold the screen", () => front() !== "Google Chrome" || "the station Chrome is frontmost");
+
+  let B = null, order = null;
+  await phase("a SECOND, separate browser is open at the same time", async () => {
+    B = await chromium.launch({ headless: false });
+    const pb = await (await B.newContext()).newPage();
+    await pb.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+    return true;
+  });
+  const frontBefore = front();
+  await phase("…and a REAL order is placed while both are open", async () => {
+    order = await newOrder(58, "Two-Chrome sweep dish");
+    return !!order.order.id;
+  });
+  await phase("…the HIDDEN station prints it, and the ticket says done", async () => {
+    let st = "none";
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const rows = await db(`print_jobs?select=status&restaurant_id=eq.${RID}&order_id=eq.${order.order.id}`);
+      if (rows[0]) { st = rows[0].status; if (st === "done" || st === "failed") break; }
+    }
+    return st === "done" || `the ticket is ${st} — a hidden window that cannot print is the whole feature failing quietly`;
+  });
+  await phase("…without ever taking the screen from the ordering browser", () =>
+    front() === frontBefore || `the screen moved to ${front()} while printing`);
+  await phase("…and the station is STILL hidden afterwards", () => {
+    let vis = "?"; try { vis = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
+    return vis === "false" || `it came back into view (visible=${vis})`;
+  });
+  await phase("…and a SECOND order also prints, so it was not a one-off", async () => {
+    const o2 = await newOrder(59, "Second sweep dish");
+    let st = "none";
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const rows = await db(`print_jobs?select=status&restaurant_id=eq.${RID}&order_id=eq.${o2.order.id}`);
+      if (rows[0]) { st = rows[0].status; if (st === "done" || st === "failed") break; }
+    }
+    return st === "done" || `the second ticket is ${st}`;
+  });
+
+  if (A) await A.close();
+  if (B) await B.close();
+  try { execSync(`rm -rf ${PROFILE}`); } catch {}
+  if (wasFront && wasFront !== "Google Chrome") { try { execSync(`osascript -e 'tell application "${wasFront}" to activate'`); } catch {} }
+}
+
+// ══ 20 · MOVING THE PRINTER BETWEEN SCREENS ══════════════════════════════════════════════════
+// Owner, 2026-08-29: *"if you are ordering on one screen, it is going to shifting to another
+// screen."* The admin changes who prints, and the paper has to follow — without a moment where both
+// screens print, and without a moment where neither does.
+{
+  const [cook] = await db(`staff_users?select=id,name&restaurant_id=eq.${RID}&role=eq.kitchen&order=id.asc&limit=1`);
+  await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true });
+
+  await phase("the manager's screen is named, and it is the one that may print", async () => {
+    await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: mgr.id }) });
+    const r = await settles(() => asManager("/print-jobs/pending"), (d) => !d.off);
+    return r.ok || `the manager screen is refused (${r.last.printRefused})`;
+  });
+  await phase("…and the kitchen screen is not", async () => {
+    const r = await settles(() => asKitchen("/board?autojobs=1"), (b) => b.autoPrintKot === false);
+    return r.ok || "both screens think they print — that is two pieces of paper for one order";
+  });
+  if (!cook) {
+    for (const t of ["the admin moves it to the cook → the cook's screen may print", "…and the manager's screen stops", "…and nothing is stranded in between"]) await phase(t, () => "skip: no kitchen user on this restaurant");
+  } else {
+    await phase("the admin moves it to the cook → the COOK's screen may print", async () => {
+      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: cook.id }) });
+      const r = await settles(() => asKitchen("/board?autojobs=1"), (b) => b.autoPrintKot === true);
+      return r.ok || `the cook's board says ${r.last.autoPrintKot} (${r.last.printRefused})`;
+    });
+    await phase("…and the manager's screen stops at the same moment", async () => {
+      const r = await settles(() => asManager("/print-jobs/pending"), (d) => d.off === true);
+      return r.ok || "the old screen is still printing — for a moment two screens would both take the ticket";
+    });
+    await phase("…and an order placed AFTER the move goes to the new screen only", async () => {
+      await drain();
+      const o = await newOrder(60, "After-the-move dish");
+      const k = await settles(() => asKitchen("/board?autojobs=1"), (b) => (b.printJobs || []).length > 0);
+      const m = await asManager("/print-jobs/pending");
+      return (k.ok && (m.jobs || []).length === 0)
+        || `kitchen was handed ${(k.last.printJobs || []).length}, manager ${(m.jobs || []).length}`;
+    });
+    await phase("…and moving it BACK works the same way round", async () => {
+      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: mgr.id }) });
+      const r = await settles(() => asManager("/print-jobs/pending"), (d) => !d.off);
+      const k = await asKitchen("/board?autojobs=1");
+      return (r.ok && k.autoPrintKot === false) || `manager off=${r.last.off} kitchen=${k.autoPrintKot}`;
+    });
+  }
+
+  // ONE PERSON, TWO SCREENS — the station is what stops both of them printing.
+  await phase("two screens of the SAME person: only one holds the printer", async () => {
+    await db(`print_stations?restaurant_id=eq.${RID}`, { method: "DELETE" }).catch(() => {});
+    const one = await fetch(BASE + "/api/editor/print-station/take", { method: "POST", headers: { "content-type": "application/json", cookie: MANAGER_COOKIE + "; lfh_panel_device=screen-one" }, body: "{}" }).then((r) => r.json());
+    const two = await fetch(BASE + "/api/editor/print-jobs/pending", { headers: { cookie: MANAGER_COOKIE + "; lfh_panel_device=screen-two" } }).then((r) => r.json());
+    return (one.ok && two.station && two.station.mine === false)
+      || `the second screen thinks it holds the printer too: ${JSON.stringify(two.station).slice(0, 90)}`;
+  });
+  await phase("…and the second screen is handed NO tickets while the first holds it", async () => {
+    await drain();
+    await newOrder(61, "One-screen-only dish");
+    const two = await fetch(BASE + "/api/editor/print-jobs/pending", { headers: { cookie: MANAGER_COOKIE + "; lfh_panel_device=screen-two" } }).then((r) => r.json());
+    return (two.jobs || []).length === 0 || `the second screen was handed ${(two.jobs || []).length} — the same ticket would print twice`;
+  });
+  await phase("…and the first one IS handed it", async () => {
+    const r = await settles(() => fetch(BASE + "/api/editor/print-jobs/pending", { headers: { cookie: MANAGER_COOKIE + "; lfh_panel_device=screen-one" } }).then((x) => x.json()), (d) => (d.jobs || []).length > 0);
+    return r.ok || `the holder was handed nothing either — then nobody prints at all`;
+  });
+  await db(`print_stations?restaurant_id=eq.${RID}`, { method: "DELETE" }).catch(() => {});
+  await drain();
+}
+
+// ══ 21 · EVERY SHAPE OF RESTAURANT ═══════════════════════════════════════════════════════════
+// "Every kind of restaurant type." Most of them have no helper and no named screen at all, and that
+// majority must go on working exactly as it did before any of this existed.
+{
+  const shapes = [
+    ["nothing set up at all — the majority", {}, null],
+    ["one computer, one printer", { kot: true }, 1],
+    ["one computer, several printers", { kot: true, bill: true }, 3],
+  ];
+  for (const [label, want, printers] of shapes) {
+    await phase(`shape · ${label}: the board reads without error`, async () => {
+      if (printers) {
+        await db(`print_agents?restaurant_id=eq.${RID}&name=eq.${encodeURIComponent("Shape PC")}`, { method: "DELETE" }).catch(() => {});
+        const t = mint();
+        const [a] = await db("print_agents", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+          restaurant_id: RID, name: "Shape PC", token_hash: t.h, last_seen_at: new Date().toISOString(),
+          printers: Array.from({ length: printers }, (_, i) => ({ name: `Shape-P${i + 1}`, desc: "t", paper: { wMm: 79.7, hMm: 64.2 } })) }) });
+        made.agents.push(a.id);
+        await setRoutes(Object.fromEntries(Object.keys(want).map((k) => [k, { agent: a.id, printer: "Shape-P1" }])));
+      } else {
+        await setRoutes({});
+      }
+      const d = await api(`/api/admin/printing/state?rid=${RID}`).then((r) => r.json());
+      return (!d.error && Array.isArray(d.kinds)) || `the board errored: ${JSON.stringify(d).slice(0, 90)}`;
+    });
+    await phase(`shape · ${label}: a bill still reaches paper one way or the other`, async () => {
+      const res = await fetch(BASE + "/api/editor/print/send", {
+        method: "POST", headers: { "content-type": "application/json", cookie: MANAGER_COOKIE + "; lfh_panel_device=" + DEVICE },
+        body: JSON.stringify({ kind: "bill", sessionId: SESSION.id }),
+      }).then((x) => x.json()).catch(() => ({}));
+      return (res.noRoute === true || res.queued === true)
+        || `it answered ${JSON.stringify(res).slice(0, 110)} — every restaurant must end up either queueing it or opening the window`;
+    });
+  }
+  await phase("shape · printing entitled OFF: the helper idles and no screen prints", async () => {
+    await setSwitches({ auto_print_kot_allowed: false });
+    const b = await settles(() => asKitchen("/board?autojobs=1"), (x) => x.autoPrintKot === false);
+    await setSwitches({ auto_print_kot_allowed: true });
+    return b.ok || "a screen still believes it may auto-print with the feature switched off";
+  });
 }
 
 // ══ 7 · THE GUARDS THEMSELVES ════════════════════════════════════════════════════════════════
