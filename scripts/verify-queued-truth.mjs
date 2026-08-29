@@ -74,7 +74,13 @@ const SITES = [
     "manager panel → Tables → a table → Print bill"],
   ["the banquet bill", 'await api("POST", "/banquet/bill", { table: t, lines: payload, meta })',
     "manager panel → Banquet → Issue bill"],
-  ["the split payment", 'await api("POST", `/tables/${t}/pay-split`, { splits })',
+  // RE-POINTED 2026-08-30 (T28). The call now reads `/tables/${tnum}/pay-split`, { splits:
+  // picked.splitLegs } — the table variable and the argument were renamed when the two split
+  // screens were merged into one. The RULE this row exists for is unchanged and still held: the
+  // write goes through api() and asks the queue before it claims the money arrived. Anchored on
+  // the endpoint rather than the argument spelling, because the argument is exactly the part that
+  // legitimately moves — assert the rule, not the wording.
+  ["the split payment", 'await api("POST", `/tables/${tnum}/pay-split`',
     "manager panel → Tables → Mark paid → Split payment"],
   ["on the house", 'await api("POST", `/tables/${t}/on-the-house`, {})',
     "manager panel → Tables → KOT ▾ → On the house"],

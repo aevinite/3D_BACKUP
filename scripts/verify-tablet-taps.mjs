@@ -485,7 +485,13 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     (src.match(/function renderSplitBill\(/g) || []).length === 1
       && !/function renderSplitSettle\(/.test(src)
       && /kotop === "split"\) renderSplitBill\(/.test(src)
-      && /picked\.special === "split"\) \{ renderSplitBill\(/.test(src),
+      // ANCHORED ON THE RULE, NOT THE PUNCTUATION (T28, 2026-08-30). This read `\) \{
+      // renderSplitBill\(` — the call had to be the very first thing inside the branch. The tip
+      // work landed `await recordTip(t, picked.tip);` in front of it, the door still opened the one
+      // split screen exactly as required, and this guard went red on a space. What the row is
+      // actually promising is that the pay sheet's split door reaches renderSplitBill, so that is
+      // what it now looks for, anywhere in that branch.
+      && /picked\.special === "split"\)[\s\S]{0,160}?renderSplitBill\(/.test(src),
     `${TABLET}: splitting a bill must exist ONCE (owner, 2026-08-28: "both have same interface as the\n    ` +
     `kot one"). It used to exist twice, with different abilities and different endpoints, so a waiter\n    ` +
     `learned one and met the other. Both 🧾 KOT ▾ and the payment sheet's bottom line must call\n    ` +

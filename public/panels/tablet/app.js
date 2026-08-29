@@ -3017,7 +3017,15 @@ function renderSplitBill(t, opts = {}) {
     dropLayer();
     actGated("POST", `/tables/${t}/pay-split`, { splits }, {
       message: "Enter a manager PIN to mark this bill paid.",
-      onSuccess: () => offerPayUndo(t, { message: `Bill paid in ${splits.length} parts — ${how}` }),
+      // ASK THE QUEUE BEFORE CLAIMING THE MONEY ARRIVED (T28, 2026-08-30 — the manager panel had
+      // the same gap, found the same day). actGated hands the server's own answer to onSuccess and
+      // every other write on this screen reads it; this one threw it away, so offline the waiter
+      // was told "Bill paid in 3 parts" and offered an UNDO for a payment the server had never
+      // seen. savedMsg() is the sentence the rest of the panel already uses for exactly this.
+      onSuccess: (r) => {
+        if (isQueued(r)) { toast(savedMsg(r)); return; }
+        offerPayUndo(t, { message: `Bill paid in ${splits.length} parts — ${how}` });
+      },
     });
   };
 }

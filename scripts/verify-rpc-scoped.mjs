@@ -48,7 +48,14 @@ for (const f of readdirSync(MIG).filter((x) => x.endsWith(".sql")).sort()) {
 }
 
 // ── 2. every .rpc() call site in the repo ───────────────────────────────────────────────────
-const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".claude"]);
+// `reference/` is the FROZEN SNAPSHOT of the old single-restaurant app, and it is gitignored — it
+// is not shipped, not imported, and never runs. Every one of its .rpc() calls omits
+// p_restaurant_id because back then there genuinely was only one restaurant, so scanning it made
+// this guard permanently red on any machine that has the snapshot, for three faults that cannot
+// happen. A guard that invents a failure protects nothing: people learn to ignore its red, and the
+// day a REAL unscoped call appears it is one line in a list everybody skips.
+// (T28, sweep #7, 2026-08-30 — found by running all 153 guards and re-running every red alone.)
+const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".claude", "reference"]);
 const files = [];
 (function walk(d) {
   for (const e of readdirSync(d)) {
