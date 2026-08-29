@@ -3444,7 +3444,12 @@ function openPaymentMethodModal(due, label, opts = {}) {
              divided, and every tile above it answers "how did the money come in?".
              This replaces the ⇄ Split payment tile added on 2026-08-21. That change was about
              DISCOVERABILITY — split used to be two taps deep under "Other", "which is why nobody
-             used it" — and this keeps it one tap from here, so the point of it survives. -->
+             used it" — and this keeps it one tap from here, so the point of it survives.
+
+             REJECTED (owner, 2026-08-30): making this a BUTTON or a tile again. I raised it myself,
+             because a small grey line is less eye-catching than the gold tile it replaced and that
+             tile existed for discoverability. Asked directly, with the trade-off named, he said
+             "yes a small line is ok". It stays a line. See docs/REJECTED-IDEAS.md → R51. -->
         ${opts.split ? `<div class="pay-splitline"><button type="button" class="pay-split-open">Splitting between people? <b>Split this bill →</b></button></div>` : ""}
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)"><button class="btn pay-cancel-btn">Cancel</button></div>
