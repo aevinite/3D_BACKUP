@@ -433,6 +433,36 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── 12. A GUARD MUST NOT BREAK ON AN ARGUMENT IT DOES NOT USE ────────────────────────────────
+//
+// Every sweep lane hands EVERY guard its own port: `npm run verify:x -- --base http://localhost:4228`.
+// Nine guards took a bare `process.argv[2]` as the repo folder to scan, so they scanned a folder
+// called "--base", found nothing and exited 1 — and one of them shelled out to `cd --`, which bash
+// reads as a flag ("cd: --: invalid option"). Watched all nine on 2026-08-29.
+//
+// A guard that goes red because of an argument it does not even use is a guard people learn to
+// scroll past, and this suite's whole value is that a red means something. The answer is not to ban
+// the argument — pointing a static guard at another checkout is genuinely useful, and the release
+// script does it. It is to ask the DISK which argument is a repo, which cannot be argued with.
+// scripts/sweep/repoRoot.mjs does that in one line.
+{
+  const bad = [];
+  for (const f of files) {
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // Taking argv[2] as a PATH is the fault. Taking it as a count, a label or a slug is not.
+    if (!/(ROOT|root)\s*=\s*[^;\n]*process\.argv\[2\]/.test(code)) continue;
+    if (/repoRootFrom\(/.test(code)) continue;
+    bad.push(f);
+  }
+  check(
+    "no guard treats a command-line FLAG as the folder to scan (every lane passes `-- --base <url>`)",
+    bad.length === 0,
+    bad.join("\n    ") + '\n    Use:  import { repoRootFrom } from "./sweep/repoRoot.mjs";  const ROOT = repoRootFrom(import.meta.url);',
+  );
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

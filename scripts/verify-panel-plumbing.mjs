@@ -15,9 +15,14 @@
 //
 // Add a check here whenever one of these shared files makes a new promise to a person.
 import fs from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import path from "node:path";
 
-const ROOT = process.argv[2] || process.cwd();
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be plain `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in eight more guards.)
+const ROOT = repoRootFrom(import.meta.url);
 const P = (f) => path.join(ROOT, "public/panels", f);
 
 // A missing file means this checkout predates the panels (or is mid-rebase). A guard must never
