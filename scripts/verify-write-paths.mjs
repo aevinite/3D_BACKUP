@@ -132,7 +132,20 @@ const cleanup = [];
   const before = (await sb.from("realtime_events").select("id").order("id", { ascending: false }).limit(1)).data[0].id;
   const m = await sb.rpc("lfh_staff_merge_tables", { p_session: psess, p_to: child, p_rid: rid });
   chk(`3664 merging ${parent} into ${child} actually happened`, !m.error && m.data && m.data.ok === true, m.error ? m.error.message.slice(0, 60) : JSON.stringify(m.data).slice(0, 70));
-  const crumbs = (await sb.from("realtime_events").select("topic,kind,table_number").gt("id", before).limit(30)).data || [];
+  // OURS, NOT EVERYBODY'S (item 23, 2026-08-29). This used to read EVERY breadcrumb written after
+  // `before` — on a shared dev database that is every other session's traffic too, and a neighbour's
+  // perfectly legitimate whole-restaurant crumb (a `menu` change, an `audit` row) has no
+  // table_number by design. So this reported "an unscopable crumb is present" about somebody else's
+  // work and blamed the merge. Caught by running the floor guards two at a time on purpose: beside
+  // verify:lifecycle, this line failed; alone, it passes.
+  //
+  // A merge's own crumbs all carry an entity_id — the two sessions, and the orders on them. Filter
+  // by those and the check keeps every tooth it had: if a merge ever DOES raise an unscopable
+  // crumb, that crumb is about our session and it is still caught.
+  const ourOrders = (await sb.from("orders").select("id").in("session_id", [psess, ...cleanup.slice(-1)]).limit(50)).data || [];
+  const ourIds = new Set([psess, ...cleanup.slice(-2), ...ourOrders.map((o) => o.id)].filter(Boolean));
+  const allCrumbs = (await sb.from("realtime_events").select("topic,kind,table_number,entity_id").gt("id", before).limit(200)).data || [];
+  const crumbs = allCrumbs.filter((c) => ourIds.has(c.entity_id));
   // MEASURED, and it is a PASS with NO fix needed. A merge raises 16 breadcrumbs and every one of
   // them is table-scoped: 5 × session[parent], 4 × session[child], 2 × order, 2 × order_item.
   // So both tiles already refetch, targeted. I briefly added a dedicated 'merge' emitter and it was
