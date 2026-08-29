@@ -677,6 +677,37 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 14 · THE SPLIT SCREEN'S OWN TOTAL IS A FIGURE SOMEBODY MUST MATCH ────────────────────────
+//
+// inr() rounds to whole rupees; inrExact() keeps the paise and prints whole rupees when there are
+// none. The rule (2026-08-22) is that every figure a person has to MATCH uses inrExact — and on
+// 2026-08-30 the split screen was obeying it in its running line and its refusals while its own
+// TITLE and its Collect button still rounded. On a ₹1,065.75 bill both said ₹1,066, so a waiter
+// typing custom amounts to reach the number in front of them was refused by 25 paise they could
+// not see anywhere.
+{
+  const sb = src.slice(src.indexOf("function renderSplitBill"), src.indexOf("function renderSplitBill") + 12000);
+  check(
+    "tablet: the split screen's Collect button names the bill to the paise",
+    /class="btn primary big sb-go"[^`]*\$\{inrExact\(due\)\}/.test(sb),
+    `${TABLET}: the split screen's Collect button uses inr(due). It is the figure the waiter types\n    ` +
+    `custom amounts to match, so it must be inrExact(due) — a rounded total refuses by paise that\n    ` +
+    `appear nowhere on screen.`,
+  );
+  check(
+    "tablet: …and so does its title",
+    /Split \$\{esc\(tableLabel\(t\)\)\}'s bill · \$\{inrExact\(due\)\}/.test(sb),
+    `${TABLET}: the split screen's title rounds the bill. Title, button and running line are three\n    ` +
+    `views of ONE number — if they disagree the waiter is asked to match a total that is not the total.`,
+  );
+  check(
+    "tablet: the split screen's running line and refusals still keep their paise",
+    (sb.match(/inrExact\(/g) || []).length >= 6,
+    `${TABLET}: renderSplitBill now has fewer than six inrExact() figures — something that a person\n    ` +
+    `must match has gone back to whole rupees.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

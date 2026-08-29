@@ -2868,9 +2868,16 @@ function renderSplitBill(t, opts = {}) {
     </div>
     <div class="sb-body"></div>
     <div class="sb-sum"></div>
-    <button class="btn primary big sb-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>`;
+    <!-- inrExact, NOT inr, on BOTH the title and this button (T7 sweep #7 third pass, 2026-08-30).
+         They are the figure the waiter reads while typing custom amounts, so they are figures a
+         person must MATCH — the whole reason inrExact exists. On a ₹1,065.75 bill the title and
+         the button said "₹1,066": type 500 + 566 to reach it and the screen refuses with "₹0.25
+         more than the bill", and the true total appears nowhere on screen until the parts already
+         balance. inrExact prints whole rupees when the bill has no paise, so a tidy bill looks
+         exactly as it did. -->
+    <button class="btn primary big sb-go" style="width:100%">💳 Collect ${inrExact(due)} in parts</button>`;
   const { dropLayer } = renderPickerShell(
-    `Split ${esc(tableLabel(t))}'s bill · ${inr(due)}`, shell, "tablet-split-bill",
+    `Split ${esc(tableLabel(t))}'s bill · ${inrExact(due)}`, shell, "tablet-split-bill",
     typeof opts.onBack === "function" ? opts.onBack : renderPanel,
   );
   const p = $("#panel");
