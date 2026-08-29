@@ -547,6 +547,20 @@ check("paging moves the real scroller, not the window",
   /for \(const sel of \[".adm-main", ".adm"\]\)/.test(auditC) && !/window\.scrollTo/.test(auditC),
   "app/owner/activity/page.tsx: the Pager is back on window.scrollTo. The window NEVER scrolls on the\n       owner console — above 900px .adm-main is the scroller, below it .adm is — so that line moves\n       nothing, and 'page 2 opens at the top' is left resting on the list collapsing while it loads.");
 
+// 26 — the multi-restaurant test owner exists and is reachable (owner, 2026-08-29)
+{
+  const lg = read("scripts/sweep/login.mjs");
+  check("a sweep can sign in as an owner who owns TWO restaurants",
+    /ownerMulti: \{ username: "diagmulti"/.test(lg),
+    "scripts/sweep/login.mjs lost the ownerMulti entry. Without it, a third of this dashboard — the\n       estate table, the drawer, the callouts, the stacked bars, the picker and the switcher's\n       re-scope — can only be checked by reading, which is how two faults sat for months.");
+  check("…and the script that creates it is still in the repo",
+    /diagmulti/.test(read("scripts/sweep/make-multi-owner.mjs")),
+    "scripts/sweep/make-multi-owner.mjs has gone. It is idempotent and prints its own undo — keep it,\n       or the fixture cannot be rebuilt on a fresh database.");
+  check("…and it is NEVER pointed at Aangan",
+    /refusing: Aangan is in the list/.test(read("scripts/sweep/make-multi-owner.mjs")),
+    "scripts/sweep/make-multi-owner.mjs dropped its Aangan guard. Aangan is the read-only control at\n       factory defaults — giving it a second owner would destroy what it is for.");
+}
+
 // …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
 // It is a note because the words live in public/panels/auditsort.js, which the owner console only
 // READS — a guard that goes red over a file its own territory cannot edit is a guard that gets
