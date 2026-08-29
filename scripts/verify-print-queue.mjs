@@ -201,9 +201,18 @@ check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
 // where the paper comes out when a helper program owns it, so it now asks the server ONCE for the
 // display and still prints nothing. The rule that matters is unchanged and is what is checked:
 // nothing is printed unless this device answered YES.
-check(/ans !== "on"\) return;/.test(epanel) && !/claimJobs|printKot\(/.test(epanel.split(/ans !== "on"\) return;/)[0].split("async function managerPrintPass")[1] || ""),
-  "a device that has not answered YES never prints (the honest default is no)",
-  "the manager panel prints without the device having agreed to be the printer");
+// ── THE RULE SURVIVED ITS MECHANISM (2026-08-29) ─────────────────────────────────────────────
+// This used to require the literal `ans !== "on") return;` — the per-device question every screen
+// asked itself. The owner abolished that question: the admin names ONE person on the Printing board
+// and no screen re-opens the decision ("remove old logic, keep only one logic").
+//
+// But the DANGER it guarded is untouched, and it is his own words on the "May be the printer" row:
+// a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the
+// paper. So the rule is asserted against the new mechanism instead of the old spelling: a coarse
+// pointer — a touch screen with no mouse — never claims the printer.
+check(/pointer: coarse/.test(epanel) && /looksLikeAComputer/.test(epanel),
+  "a phone never claims the printer (a coarse pointer does not auto-claim)",
+  "the manager panel will auto-claim printing on a touch device — a phone that takes a ticket drops it into a dialog nobody looks at while the kitchen waits");
 check(/helper: \(r && r\.helper\) \|\| null/.test(epanel) && /helperKey/.test(epanel),
   "…and it carries the helper's answer, so a screen can say which computer prints instead",
   "the panel dropped the helper field again — every line about it goes invisible while the server is right (mig 341)");

@@ -13966,7 +13966,14 @@ async function managerPrintPass() {
     // CLAIM IT, DO NOT ASK FOR IT. The admin named this screen on the Printing board; if no live
     // station holds the printer, this one takes it silently. Only when the server says this screen
     // may print (`!r.off`) — every other screen leaves it alone, so two screens never race.
-    if (r && !r.off && r.station && !r.station.mine && (!r.station.active || r.station.stale) && !stationClaimTried) {
+    // A PHONE MUST NEVER CLAIM A TICKET. This was the point of the old per-device question, and the
+    // danger did not go away when the question did: the manager panel is opened on phones, and a
+    // phone that claims a ticket drops it into a print dialog nobody looks at while the kitchen gets
+    // no paper. The admin's choice names a PERSON, and that person may well open their phone.
+    // So the mechanism changes and the rule does not: a COARSE pointer (touch, no mouse) never
+    // auto-claims. A real computer with a printer attached does.
+    const looksLikeAComputer = !(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    if (r && !r.off && looksLikeAComputer && r.station && !r.station.mine && (!r.station.active || r.station.stale) && !stationClaimTried) {
       stationClaimTried = true;                       // once per load: a failed claim must not loop
       try { const t = await api("POST", "/print-station/take", {}); if (t && t.station) says.station = t.station; }
       catch { /* the next pass tries again after a reload — never a retry storm */ }
