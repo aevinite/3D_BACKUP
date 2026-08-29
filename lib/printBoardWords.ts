@@ -48,10 +48,19 @@ export const KIND_WHAT: Record<string, string> = {
  *  A bill is printed by a person pressing a button, so switching the route off does not stop the
  *  bill: it stops a PRINTER doing it silently, and the ordinary print window opens instead. Saying
  *  "nobody" on the bill line would be a lie, and a screen that lies once is never trusted again. */
+/**
+ * What "the helper does NOT take this one" means, per paper — in the words the owner used on
+ * 2026-08-29: *"if only KOT selected, other other two will print normally by tabbing on it."*
+ *
+ * They are not the same sentence, and that is the point. A bill or a banquet sheet has somebody
+ * standing there who pressed Print, so "normal" means the window opens for them. A kitchen slip has
+ * nobody — it prints because an order arrived — so the only other answer is that it does not print
+ * by itself at all.
+ */
 export const KIND_OFF_LABEL: Record<string, string> = {
-  kot: "Nobody — do not print kitchen slips",
-  bill: "Whoever presses Print (a window opens)",
-  banquet: "Whoever presses Print (a window opens)",
+  kot: "Nobody — kitchen slips do not print by themselves",
+  bill: "Normal — a window opens when somebody taps Print",
+  banquet: "Normal — a window opens when somebody taps Print",
 };
 
 /** Common sheets, so nobody has to know that A6 is 105 × 148. "As the printer says" is first because

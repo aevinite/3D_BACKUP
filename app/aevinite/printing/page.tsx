@@ -591,9 +591,10 @@ const PANEL_GROUPS: [ string, string ][] = [
                   A line used to be five controls (On, Nobody, computer, printer, Save). It is one:
                   the options ARE the answers, grouped by machine, saved on change. */}
               <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>4 · Which printer prints what</h2>
+                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>4 · What does the helper print?</h2>
                 <p className="adm-muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
-                  One line per piece of paper this app prints. Pick the printer it comes out of — or nobody.
+                  Tick the papers the helper takes — those come out on their own, with no window. Anything
+                  left on <b>normal</b> prints the way it always has: a window opens when somebody taps Print.
                 </p>
                 {agents.length === 0 ? (
                   <p style={{ margin: "0 0 4px", fontSize: 12.5, color: "var(--adm-warn, #f5a524)" }}>
@@ -618,7 +619,7 @@ const PANEL_GROUPS: [ string, string ][] = [
                           aria-describedby={agents.length === 0 ? "no-computer-yet" : undefined}
                           onChange={(e) => void pickPrinter(kind, e.target.value)}>
                           <option value="off">{KIND_OFF_LABEL[kind] || "Nobody"}</option>
-                          <option value="">— no printer chosen yet —</option>
+                          <option value="">— not decided yet —</option>
                           {agents.map((a) => (
                             <optgroup key={a.id} label={a.name}>
                               {a.printers.map((pr) => (
