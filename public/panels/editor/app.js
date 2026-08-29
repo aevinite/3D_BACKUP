@@ -1602,7 +1602,7 @@ function bindPrintingBoard(ed) {
         const r = (B().routes || {})[kind] || {};
         const printer = what === "printer" ? el.value : r.printer;
         const paper = what === "paper"
-          ? ((B().papers || []).find((x) => x.id === el.value) || {}).paper || null
+          ? (((B().papersByKind || {})[el.dataset.kind] || B().papers || []).find((x) => x.id === el.value) || {}).paper || null
           : (r.paper || null);
         const d = await post("route", { kind, who: "computer", printer, paper });
         if (d) { toast("Saved."); await loadPrintBoard(); }
@@ -13643,10 +13643,12 @@ function formPrinting(s) {
             ${(mine.printers || []).map((p) => `<option value="${esc(p.name)}"${p.name === r.printer ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
           </select>
         </div>
+        ${((B.papersByKind || {})[kind] || B.papers || []).length === 0 ? `
+        <p class="what" style="margin-top:8px">${esc((B.paperElsewhere || {})[kind] || "")}</p>` : `
         <details class="pw-more"><summary>More — paper size</summary>
           <div class="pw-row">
             <select data-pw="paper" data-kind="${esc(kind)}" style="min-width:200px">
-              ${(B.papers || []).map((pp) => {
+              ${((B.papersByKind || {})[kind] || B.papers || []).map((pp) => {
                 const chosen = pp.paper ? (r.paper && r.paper.wMm === pp.paper.wMm && r.paper.hMm === pp.paper.hMm) : !r.paper;
                 return `<option value="${esc(pp.id)}"${chosen ? " selected" : ""}>${esc(pp.label)}</option>`;
               }).join("")}
@@ -13654,7 +13656,7 @@ function formPrinting(s) {
           </div>
           <p class="what">The paper size is what stops a printer turning a slip sideways or shrinking it
           to half. Leave it on <b>as the printer says</b> unless you know the roll is different.</p>
-        </details>` : ""}
+        </details>`}` : ""}
       ${(!off && mode === "computer" && !here && answered) ? `<p class="what" style="margin-top:8px">It prints on <b>${esc(r.printer || "a printer")}</b> at <b>${esc(agentName(r.agent))}</b>. Press <b>On</b> to move it to this computer.</p>` : ""}
       ${(!off && mode === "computer" && !answered) ? `<p class="what" style="margin-top:8px">Nobody has chosen a printer for this yet — their screens say <b>“no printer chosen”</b> rather than going quiet.</p>` : ""}
       ${(!off && mode === "screen") ? `<p class="what" style="margin-top:8px">Printed by that screen, on whatever printer the machine is set to.</p>` : ""}
