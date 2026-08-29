@@ -104,14 +104,58 @@ restaurant's TABLE COUNT. A leftover switch looks exactly like a decision somebo
 `verify-customers` was additionally setting two switches to a hard-coded `true` having never read
 what they were. Guarded by a new check 11 in `verify:test-safety`.
 
+### HIS ANSWER, 2026-08-28 — all eight built
+
+He replied: *"do all and what done check all and for 14 do what you think will be better for 15 you
+can do it on backup you can do anything you want on backup it's the test site only add this in thing
+remeber list too and yeaa do 17th too"*.
+
+**14 · A stray address belongs to the DINER · decided by me on his instruction**
+Two of this repo's guards had asserted opposite things about `/signup` for two days, each quoting him
+from 2026-08-26. The tie-breaker is who turns up: this is a restaurant's public web address, and the
+people typing a wrong path into it are diners with a bad link, not waiters. Wrong towards the guest
+costs a worker one extra tap; wrong towards staff costs a diner a PASSWORD PROMPT. So: guest, with
+NO button when we cannot tell which restaurant they meant. Both guards now agree and each says why.
+
+**15 · Writing to Aangan on backup is allowed · his call, recorded three times**
+The read-only rule is about permission and feature SWITCHES, never orders. Written into
+verify-manager-live-rush.mjs beside the crew list, into the LEDGER's Standing pre-empts, and into the
+project memory. All three say "do not re-raise".
+
+**17 · The heatmap check retired and replaced** — the old comparison exited 2 on every run since it
+was written. Replaced with six checks that can be answered on any database, including that revenue
+comes from the stored net_amount and that the tax rate is never resolved per order row.
+
+**19 + 19b · Columns, and a duplicate migration number** — verify:db-parity now compares COLUMNS
+(230 writes across 79 tables), which is how the "Saved ✓ over a 500" fault actually reached a screen.
+Two migrations both numbered 365; the newer moved to 370.
+
+**20 · A failing run prints the command that re-checks only what failed** — in the runner and in the
+500-phase printing sweep. Deliberately NOT added to the other 110 guards.
+
+**21 · `npm start` honours PORT** · **22 · the picker guard reads TypeScript guards too**
+
+**23 · The collision experiment — THREE collisions, not one.** Five floor guards run alone (all
+green), then every pair together. Three pairs went red, and all three are one class: **a guard
+asserting a property of the ENTIRE shared database, on a database it shares.**
+  · an unfenced table picker walking into another guard's reserved pair — fixed, proven green together;
+  · a whole-floor leak scan catching a neighbour mid-teardown — fixed by requiring the leak to PERSIST;
+  · a whole-stream breadcrumb scan reading everyone's traffic — fixed by filtering to its own rows.
+  · and a full floor is now exit 2 ("could not run"), not exit 1 ("the app is broken").
+
+**Checked all:** the branch was rebased onto today's main, both conflicts INTEGRATED not overwritten,
+dependencies reinstalled, and all 73 static guards re-run — every one green.
+
+---
+
 ### OPEN — for the owner
 
-**14 · Two guards disagree about who a stray address belongs to.** `verify:notfound` says `/signup`
-and a switched-off restaurant get the STAFF 404; `verify:guest` says they get the guest advice. Both
-quote him, from the same day. Printed as an open question; not guessed at.
-**15 · Should `verify:manager-live-rush` place orders on Aangan at all?** Unchanged from sweep #6.
-**16 · `verify:void-party` still goes red when another guard overlaps it** — green twice on its own.
-**17 · `verify:heatmap-parity` can never assert anything** — retire it or let it stage its own baseline.
+Nothing. All eight were answered on 2026-08-28 and all eight are built — see the section above.
+
+The one honest limit left: two of the three colliding pairs could not be proven green TOGETHER,
+because the shared 30-table floor stayed full of other terminals' live parties for the rest of the
+run. Each half was proven separately, and neither now blames the product — both refuse in plain
+words with exit 2.
 
 ---
 
