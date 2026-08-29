@@ -274,6 +274,48 @@ for (const [rule, mgrPat, tabPat] of RULES) {
   want(holds(tabPat, TAB), `tablet: ${rule}`);
 }
 
+// ── THREE THINGS HE FOUND ON THE SCREEN, 2026-08-29 ──────────────────────────────────────────
+// Sent with two screenshots of the manager's split sheet. None of them was caught by anything here,
+// because every rule above is about the MONEY and these three are about the SCREEN LYING to the
+// person using it — which is the same kind of wrong.
+{
+  // 1 · "Whenever I do from two part two, add another part. It should switch from 2 to 3. There are
+  //     3 % now, so it is not doing that." The count chips were set inside splitTo() only, so they
+  //     followed the CHIP you tapped and not the number of parts. His screenshot: three rows filled
+  //     in, "2" still highlighted. A number that contradicts what is under it is worse than none.
+  want(/function syncSplitCount\(\)/.test(MGR) && /classList\.toggle\("sel", Number\(b\.dataset\.n\) === legs\.length\)/.test(MGR),
+    "manager: the 'how many are paying' count is worked out from the NUMBER OF PARTS, not from the last chip tapped");
+  want(/syncSplitCount\(\);\s*\/\/ the chips follow the rows/.test(MGR),
+    "manager: …and it is re-run by renderSplit(), so every way of adding or removing a part inherits it");
+  // the tablet already did this — both places it changes legs also set n. Asserted so it stays true.
+  want(/legs\.splice\(i, 1\); n = legs\.length;/.test(TAB) && /n = legs\.length;[\s\S]{0,120}?render\(\);/.test(TAB),
+    "tablet: its own part count follows the rows on both add and remove (it already did — kept true)");
+
+  // 2 · The amount box refused paise. His screenshot carries the browser's own words: "Please enter
+  //     a valid value. The two nearest valid values are 9 and 10." on 9.9. step="1" on a money box
+  //     that THIS SCREEN fills with 153.29 — it was refusing the numbers it had just written.
+  for (const [who, src, cls] of [["manager", MGR, "psr-amt"], ["tablet", TAB, "sb-amt"]]) {
+    want(new RegExp(`step="0\\.01"[^>]*class="[^"]*${cls}`).test(src) || new RegExp(`class="[^"]*${cls}[^"]*"[\\s\\S]{0,120}?step="0\\.01"`).test(src)
+      || new RegExp(`step="0\\.01"[\\s\\S]{0,120}?${cls}`).test(src),
+      `${who}: a split amount box accepts PAISE — an even split of ₹459.90 three ways is 153.29/153.29/153.32, and the box must not refuse what the screen itself wrote`);
+    want(!new RegExp(`step="1"[\\s\\S]{0,120}?${cls}`).test(src),
+      `${who}: …and it is not back to whole rupees`);
+  }
+
+  // 3 · "you have asked for a mobile number and that already, then why are you asking right now
+  //     again? … If it is asked, it should be autofill because I have already filled it previously."
+  for (const [who, src] of [["manager", MGR], ["tablet", TAB]]) {
+    want(/knownCust:/.test(src) && /sess\.cust_phone/.test(src),
+      `${who}: the pay sheet is TOLD who this table's customer already is, read from the session the same way the bill sheet reads it`);
+    want(/opts\.knownCust && opts\.knownCust\.phone \?/.test(src),
+      `${who}: …and when there is one, it shows it as a fact instead of asking for it a second time`);
+    want(/pay-cust-change/.test(src),
+      `${who}: …with one way to change it`);
+    want(/pay-cust-phone[^>]*value="\$\{esc\(k\.phone \|\| ""\)\}"|value="\$\{esc\(k\.phone \|\| ""\)\}"/.test(src),
+      `${who}: …and Change opens PRE-FILLED, never an empty box that invites a different number onto one bill`);
+  }
+}
+
 // And the thing the merge was FOR: the tablet must not grow a second split screen again.
 want(!/function openSplitPay\b/.test(TAB) && (TAB.match(/pay-split-nrow/g) || []).length === 0,
   "tablet: there is ONE split screen, not a copy inside the pay sheet as well (owner, 2026-08-28)");
