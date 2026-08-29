@@ -151,9 +151,28 @@ for (const [name, src] of [["the manager panel", editor], ["the waiter tablet", 
 }
 
 // ── 6 · one tip per bill, asked once ──────────────────────────────────────────────────────────
-check(/method: "Split", note: null, cust, tip,/.test(tablet),
-  "a bill paid in PARTS carries one tip for the whole bill, not a tip per part",
-  "a tip on every part is how you double it (owner, 2026-08-28, option A)");
+// ONE TIP PER BILL, HOWEVER THE BILL CLOSES (owner, 2026-08-28, option A: a tip on every part is
+// how you double it). The tablet's in-sheet split was replaced by the shared split SCREEN on
+// 2026-08-28, so the shape this asserted is gone — the rule is not. What has to be true now is
+// that every way out of the payment sheet records the tip exactly once, including the door to the
+// split screen, where it would otherwise be lost the moment the sheet closes.
+{
+  const flow = tablet.slice(tablet.indexOf("async function payBillWithMethod"),
+    tablet.indexOf("async function captureCustomer"));
+  const calls = (flow.match(/recordTip\(/g) || []).length;
+  const exits = ["special === \"split\"", "special === \"onhouse\"", "special === \"khata\""]
+    .filter((e) => new RegExp(e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(flow));
+  const missed = exits.filter((e) => {
+    const at = flow.search(new RegExp(e.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    return !/recordTip\(/.test(flow.slice(at, at + 320));
+  });
+  check(calls >= 3 && missed.length === 0,
+    "every way out of the payment sheet records the tip once — including the door to the split screen",
+    `recordTip called ${calls}x across ${exits.length} special exits${missed.length ? "; NOT on: " + missed.join(", ") : ""}`);
+  check(!/tip per part|splitLegs[\s\S]{0,120}tip/.test(flow),
+    "…and never once per part",
+    "a tip on every part of a split is how you double it");
+}
 check(/resolve\(\{ special: b\.dataset\.special, tip \}\)/.test(tablet),
   "a bill settled on the house or put on a tab still carries its tip",
   "the BILL being free does not make the cash handed over for the staff disappear");

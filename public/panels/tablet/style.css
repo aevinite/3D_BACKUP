@@ -1376,6 +1376,12 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
    `type="number"` STAYS — it is what gives a phone the numeric keypad, and `inputmode="decimal"`
    rides on it. Only the arrows go. Written here rather than inline because a spinner is a
    pseudo-element and an inline style cannot reach one. */
+/* The TIP's three boxes are the same kind of figure typed by the same thumb (owner, 2026-08-28),
+   so they get the same treatment — otherwise the tip screen would grow back the 7px arrows the
+   discount screen just had removed, on the same panel, two taps apart. */
+.pay-tip-pct::-webkit-outer-spin-button, .pay-tip-pct::-webkit-inner-spin-button,
+.pay-tip-amt::-webkit-outer-spin-button, .pay-tip-amt::-webkit-inner-spin-button,
+.pay-tip-paid::-webkit-outer-spin-button, .pay-tip-paid::-webkit-inner-spin-button,
 .disc-pct-input::-webkit-outer-spin-button, .disc-pct-input::-webkit-inner-spin-button,
 .disc-amt-input::-webkit-outer-spin-button, .disc-amt-input::-webkit-inner-spin-button,
 .disc-pay-input::-webkit-outer-spin-button, .disc-pay-input::-webkit-inner-spin-button {
