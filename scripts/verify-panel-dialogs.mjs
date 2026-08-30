@@ -108,6 +108,19 @@ for (const [needle, what] of [
   else bad(`myprofile.js: ${what} — not found`, String(needle).slice(0, 80));
 }
 
+// ── 6 · the stock sheet's one question prefers a real dialog over the browser's ─────────────
+// editor/inventory.js asks "this ingredient is already on this bill — add another line?" It always
+// preferred the editor's own confirmDialog(), and fell back to window.confirm — which on a device
+// that suppresses dialogs answers NO without showing anything, so the manager was told "Not added"
+// every time and had no way to put a second line on the bill at all. A visible refusal rather than
+// a silent one, but still a dead end. LFH_ASK now sits between the two.
+{
+  const inv = existsSync(join(DIR, "editor/inventory.js")) ? strip(readFileSync(join(DIR, "editor/inventory.js"), "utf8")) : "";
+  if (!inv) console.log("  ok   editor/inventory.js not in this checkout — skipping");
+  else if (/window\.LFH_ASK && window\.LFH_ASK\.confirm/.test(inv)) ok("editor/inventory.js tries the panel's own card before the browser's dialog");
+  else bad("editor/inventory.js falls straight back to window.confirm", "on a device that hides dialogs the answer is always No, and a second line can never be added");
+}
+
 // ── 6 · maint.js is still CRLF ───────────────────────────────────────────────────────────────
 // This file is the one CRLF file in the folder. A whole-file rewrite that "tidies" it turns a
 // six-line change into a 900-line diff nobody can review; it has happened twice in this repo.

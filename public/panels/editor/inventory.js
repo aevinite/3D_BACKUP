@@ -576,9 +576,19 @@
           const it = itemById(item_id) || { name: "this ingredient", purchase_uom: "" };
           const sofar = already.map((l) => `${l.qty} ${it.purchase_uom} × ₹${l.rate}`).join(" and ");
           const ask = `"${it.name}" is already on this bill (${sofar}). Add another line for it?`;
+          // …and LFH_ASK (maint.js, loaded by every panel that loads this one) sits between the
+          // editor's own dialog and the browser's, added T9 second sweep 2026-08-30. window.confirm
+          // is the LAST resort for a reason: a kiosk browser, a webview and Chrome after "prevent
+          // this page from creating additional dialogs" all answer it false without showing it, so
+          // on those devices this question could only ever be answered NO — the manager was told
+          // "Not added" every time and had no way at all to put a second line on the bill. It is
+          // still a visible refusal rather than a silent one, which is why this is the third fault
+          // of its kind and not the first, but a dead end is a dead end.
           const said = (typeof confirmDialog === "function")
             ? await confirmDialog(ask, "Add another line")
-            : window.confirm(ask);
+            : (window.LFH_ASK && window.LFH_ASK.confirm)
+              ? await window.LFH_ASK.confirm(ask, { title: "Already on this bill", yes: "Add another line" })
+              : window.confirm(ask);
           if (!said) { toastMsg("Not added — the line was left as it is"); return; }
         }
         lines.push({ item_id, qty, rate });
