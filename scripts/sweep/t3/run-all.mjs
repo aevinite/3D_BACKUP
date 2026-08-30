@@ -63,6 +63,9 @@ results.push(["sweep 7 block A — the 300 code-reading rows", run("SWEEP 7 BLOC
 // The SECOND pass's 330 code-reading rows, P41001..P41330 — the libraries underneath, the dish
 // popup and all seventeen screens of the table gate.
 results.push(["sweep 7 block A2 — the 330 second-pass code rows", run("SWEEP 7 BLOCK A2 — the second pass's code rows (P41001-P41330)", join(here, "s7b-checks.mjs"), ["--quiet"])]);
+// The THIRD block's 370 code rows, P42001..P42370 — the four improvements the owner picked, what
+// they must not have broken, and the reasoning that makes each one safe.
+results.push(["sweep 7 block A3 — the 370 improvement code rows", run("SWEEP 7 BLOCK A3 — the improvement code rows (P42001-P42370)", join(here, "s7c-checks.mjs"), ["--quiet"])]);
 results.push(["block 3a — the basket, the doors, no signal", run("BLOCK 3a — the basket, the doors, no signal", join(here, "basket-and-doors.mjs"))]);
 await cool("the end-to-end order block");
 results.push(["block 3b — the whole journey, end to end", run("BLOCK 3b — the whole journey, end to end", join(here, "order-end-to-end.mjs"))]);
@@ -73,6 +76,8 @@ results.push(["block 4 — the captures + the bottom-corner hit-test", run("BLOC
 results.push(["sweep 7 block B — the 62 live rows", run("SWEEP 7 BLOCK B — the live rows (P16401-P16460)", join(here, "s7-live.mjs"))]);
 // …and the second pass's 70 live rows, P41331..P41400. Browses and reads only; no order, no cooldown.
 results.push(["sweep 7 block B2 — the 70 second-pass live rows", run("SWEEP 7 BLOCK B2 — the second pass's live rows (P41331-P41400)", join(here, "s7b-live.mjs"))]);
+// …and the third block's 70 live rows, P42371..P42440.
+results.push(["sweep 7 block B3 — the 70 improvement live rows", run("SWEEP 7 BLOCK B3 — the improvement live rows (P42371-P42440)", join(here, "s7c-live.mjs"))]);
 await cool("the cross-panel block — two phones joining and another order, the heaviest of the five", LONG_COOLDOWN_MS);
 results.push(["block 5 — tracing a change across panels", run("BLOCK 5 — tracing a change across panels", join(here, "across-panels.mjs"))]);
 
