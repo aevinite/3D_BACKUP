@@ -56,7 +56,7 @@ for (const f of FILES) {
   // ONE deliberate fallback is allowed, and only in myprofile.js: it is reached solely when
   // LFH_ASK is not on the page at all, and having nothing at all there would be worse than a
   // browser dialog. It is inside tell(), which tries the panel's own card first.
-  const allowed = f === "myprofile.js" ? 1 : 0;
+  const allowed = f === "myprofile.js" ? 1 : 0;   // (editor/inventory.js is checked in its own block below)
   if (hits.length <= allowed) ok(`${f} asks in the panel, not with a browser dialog${allowed && hits.length ? " (one last-resort fallback, as designed)" : ""}`);
   else bad(`${f} raises ${hits.length} browser dialog(s)`, `${hits.join(", ")} — a device that suppresses them answers confirm() false and shows alert() to nobody`);
 }
@@ -108,7 +108,62 @@ for (const [needle, what] of [
   else bad(`myprofile.js: ${what} — not found`, String(needle).slice(0, 80));
 }
 
-// ── 6 · the stock sheet's one question prefers a real dialog over the browser's ─────────────
+// ── 6 · THE STOCK SHEET ASKS FOR ITS REASONS IN THE PANEL (T9 third sweep, 2026-08-31) ──────
+// Four browser dialogs were still in editor/inventory.js after the 2026-08-30 pass fixed one:
+// THREE prompt()s asking why a purchase or a waste line is being struck out, and one confirm()
+// before throwing a draft count away. prompt() answers NULL on a device that hides dialogs and
+// confirm() answers FALSE — both without showing anything — and every one of those call sites
+// reads `if (!answer) return;`. So the manager tapped Void and NOTHING happened and nothing was
+// said: a silent vanished tap, and on an action whose whole point is being explainable later,
+// because the reason is kept on record.
+//
+// Both chains now live in one place each (askWhy / askYesNo), with the browser's own dialog as the
+// genuine last resort. Two copies of a fallback order is how they drift, so the older "add another
+// line" chain was folded into the same helper rather than left beside it.
+{
+  const inv = existsSync(join(DIR, "editor/inventory.js")) ? strip(readFileSync(join(DIR, "editor/inventory.js"), "utf8")) : "";
+  if (!inv) console.log("  ok   editor/inventory.js not in this checkout — skipping");
+  else {
+    const bare = [...inv.replace(/window\.(prompt|confirm)/g, "SAFE_$1")
+      .matchAll(/(?:^|[^.\w$])(alert|confirm|prompt)\s*\(/g)].map((m) => m[1]);
+    if (bare.length === 0) ok("editor/inventory.js raises no bare browser dialog");
+    else bad(`editor/inventory.js raises ${bare.length} bare browser dialog(s)`,
+      `${bare.join(", ")} — on a device that hides them, prompt() answers null and confirm() answers false, and every call site here returns on a falsy answer: the tap vanishes`);
+    for (const [re, what] of [
+      [/async function askWhy/, "one place decides how it asks for a REASON"],
+      [/async function askYesNo/, "…and one place decides how it asks a yes/no question"],
+      [/window\.LFH_ASK && window\.LFH_ASK\.text/, "the reason card is tried before the browser's prompt"],
+      [/window\.LFH_ASK && window\.LFH_ASK\.confirm/, "…and the panel's card before the browser's confirm"],
+    ]) {
+      if (re.test(inv)) ok(`editor/inventory.js: ${what}`);
+      else bad(`editor/inventory.js: ${what} — not found`, String(re).slice(0, 70));
+    }
+    const whys = (inv.match(/await askWhy\(/g) || []).length;
+    const yesNos = (inv.match(/await askYesNo\(/g) || []).length;
+    if (whys >= 3) ok(`all ${whys} "why is this being struck out" questions go through the one helper`);
+    else bad(`only ${whys} of the 3 reason questions go through askWhy()`, "a fourth prompt() would be the fault coming back");
+    if (yesNos >= 2) ok(`…and all ${yesNos} yes/no questions go through the other`);
+    else bad(`only ${yesNos} of the 2 yes/no questions go through askYesNo()`, "");
+    const firstAsk = Math.min(...["LFH_ASK"].map((n) => { const i = inv.indexOf(n); return i < 0 ? Infinity : i; }));
+    const firstNative = Math.min(...["window.prompt", "window.confirm"].map((n) => { const i = inv.indexOf(n); return i < 0 ? Infinity : i; }));
+    if (firstAsk < firstNative) ok("…and the browser's own dialogs are genuinely the LAST resort");
+    else bad("editor/inventory.js falls back to the browser before trying the panel's card", "order of the chain");
+  }
+}
+
+// ── 7 · the card that asks for a sentence ───────────────────────────────────────────────────
+for (const [needle, what] of [
+  [/text:\s*askText/, "LFH_ASK can ask for a REASON, not only yes/no"],
+  [/function askText\(/, "…and it is a card in the panel, like the other two"],
+  [/LFH_BACK\.layer\(\s*["']lfh-ask-text["']/, "…registered with the back-button manager, so BACK closes it"],
+  [/go\.removeAttribute\("disabled"\)/, "…with Save refused until something is typed, said BEFORE the tap"],
+  [/finish\(null\)/, "…and Cancel, the scrim and BACK all answer \"no reason\", never an empty one"],
+]) {
+  if (needle.test(mcode) || needle.test(maint)) ok(what);
+  else bad(`maint.js: ${what} — not found`, String(needle).slice(0, 70));
+}
+
+// ── 8 · the stock sheet's one question prefers a real dialog over the browser's ─────────────
 // editor/inventory.js asks "this ingredient is already on this bill — add another line?" It always
 // preferred the editor's own confirmDialog(), and fell back to window.confirm — which on a device
 // that suppresses dialogs answers NO without showing anything, so the manager was told "Not added"
@@ -121,7 +176,7 @@ for (const [needle, what] of [
   else bad("editor/inventory.js falls straight back to window.confirm", "on a device that hides dialogs the answer is always No, and a second line can never be added");
 }
 
-// ── 6 · maint.js is still CRLF ───────────────────────────────────────────────────────────────
+// ── 9 · maint.js is still CRLF ───────────────────────────────────────────────────────────────
 // This file is the one CRLF file in the folder. A whole-file rewrite that "tidies" it turns a
 // six-line change into a 900-line diff nobody can review; it has happened twice in this repo.
 {
