@@ -3333,8 +3333,14 @@ const act = async (fn) => {
   } catch (e) {
     // Someone else changed the same thing first: say so plainly and refresh, rather than
     // "Failed: clash_changed_elsewhere".
+    // BOTH HALVES OF THE SENTENCE (T7 sweep #7, 2026-08-30). lib/clash.ts sends `plain` (what
+    // happened) AND `todo` (what to do about it — "Your change was NOT saved. Look at what it says
+    // now and redo yours if it's still right."). This showed only the first half, so a waiter was
+    // told another device had changed the order and NOT told that their own change had been
+    // dropped — the half that decides whether they redo it. errText() thirty lines up and the
+    // allergy handler at 1746 have always shown both; these two were the odd ones out.
     const clash = e && e.data && e.data.clash;
-    if (clash) { toast(clash.plain, false, 9000); load().catch(() => {}); return; }
+    if (clash) { toast(clash.plain + (clash.todo ? " " + clash.todo : ""), false, 9000); load().catch(() => {}); return; }
     toast("Failed: " + errText(e), false);
   }
 };
@@ -3366,7 +3372,8 @@ function bumpItemQty(itemId, delta) {
   api("POST", `/items/${itemId}/qty`, { qty: next }, { expect: { table: "order_items", id: itemId, fields: { qty: cur } } })
     .catch((e) => {
       const clash = e && e.data && e.data.clash;
-      toast(clash ? clash.plain : "Failed: " + e.message, false, clash ? 9000 : undefined);
+      // …and the same here: `todo` is the half that says the change was not saved.
+      toast(clash ? clash.plain + (clash.todo ? " " + clash.todo : "") : "Failed: " + e.message, false, clash ? 9000 : undefined);
       load().catch(() => {});
     });
   clearTimeout(qtyReconcileTimer);

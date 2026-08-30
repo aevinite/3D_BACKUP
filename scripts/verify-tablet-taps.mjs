@@ -813,6 +813,60 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 18 · EVERY CONTROL ON THIS PANEL IS 44px, INCLUDING THE ONES THAT ARE NOT `.btn` ─────────
+//
+// style.css line ~960 says `.panel .btn, .floor-nav button { min-height: 44px }`. ✓ Accept is its
+// own class (`.accept`), so the rule never reached it and it rendered 38px — the one control on the
+// table detail below the size the rest of the panel holds itself to, and the one a waiter hits most
+// often with a tray in the other hand (measured on an iPad, 2026-08-30).
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  for (const cls of ["accept", "qo-top"]) {
+    const rule = (css.match(new RegExp(`\\.${cls}\\s*\\{[^}]*\\}`)) || [])[0] || "";
+    check(
+      `tablet: .${cls} is at least 44px tall, like every other control here`,
+      /min-height:\s*44px/.test(rule),
+      `${CSS}: .${cls} declares no min-height of 44px. Every other button on this panel gets one\n    ` +
+      `from \`.panel .btn\`; a control with its own class has to say it itself, or it silently ends\n    ` +
+      `up smaller than the rule the panel holds itself to.`,
+    );
+  }
+  check(
+    "tablet: …and the panel-wide 44px rule is still there for the ones that ARE .btn",
+    /\.panel \.btn[^{]*\{[^}]*min-height:\s*44px/.test(css),
+    `${CSS}: the panel-wide \`min-height: 44px\` for .btn is gone. Every control on this panel is\n    ` +
+    `sized by that one line; without it they each drift on their own.`,
+  );
+}
+
+// ── 19 · A CLASH IS TWO SENTENCES, AND THE SECOND ONE IS THE USEFUL ONE ──────────────────────
+//
+// lib/clash.ts sends `plain` (what happened) and `todo` (what to do about it — "Your change was NOT
+// saved. Look at what it says now and redo yours if it's still right."). Two of the four places
+// this panel handles a clash showed only `plain`, so a waiter learned another device had changed
+// the order and never learned their own change had been dropped. Found 2026-08-30 by replaying the
+// server's own clash payload.
+{
+  // A STATEMENT, NOT A LINE. errText() is written across two lines — the condition tests
+  // `clash.plain` on one and the `+ clash.todo` is on the next — so a per-line regex accused the
+  // one place that has always been right. Read a small window from each mention instead.
+  const shows = [...src.matchAll(/clash\.plain/g)].map((m) => src.slice(m.index, m.index + 160).split("\n").slice(0, 2).join(" "));
+  check(
+    "tablet: every clash message shows the TODO as well as the plain sentence",
+    shows.length > 0 && shows.every((line) => /clash\.todo|\.todo/.test(line)),
+    `${TABLET}: ${shows.filter((l) => !/todo/.test(l)).length} of ${shows.length} clash messages show only\n    ` +
+    `clash.plain:\n    ${(shows.find((l) => !/todo/.test(l)) || "").trim().slice(0, 140)}\n    ` +
+    `\`todo\` is the half that says the change was NOT saved — without it the waiter does not know\n    ` +
+    `whether to do it again.`,
+  );
+  check(
+    "tablet: …and a clash is given longer on screen than an ordinary note",
+    shows.filter((l) => /toast\(/.test(l)).every((l) => /9000|\d{4}/.test(l)),
+    `${TABLET}: a clash message uses the default 2.6s. Two sentences about somebody else's edit\n    ` +
+    `need longer than a glance.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

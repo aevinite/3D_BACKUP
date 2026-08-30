@@ -700,7 +700,12 @@ html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb,
 .serve-all-btn { display: block; width: 100%; margin: 0 0 10px; background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800; font-size: 14px; text-align: center; padding: 11px; border: 0; border-radius: 11px; cursor: pointer; }
 .serve-all-btn:hover { filter: brightness(1.06); }
 .oallergy { margin: 0 12px; margin-top: 10px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff8a8a; font-weight: 800; font-size: 12px; padding: 7px 10px; border-radius: 9px; letter-spacing: .03em; }
-.accept { margin: 10px 12px; display: block; width: calc(100% - 24px); background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
+/* min-height: 44px like every other button on this panel (T7 sweep #7, 2026-08-30). Line 960 says
+   `.panel .btn, .floor-nav button { min-height: 44px }` — and ✓ Accept is not a `.btn`, it is its
+   own class, so it never got the rule and rendered 38px: the one control on the table detail below
+   the size the rest of the panel holds itself to. It is also the control a waiter hits most, with
+   a tray in the other hand. Six pixels taller, nothing else changed. */
+.accept { margin: 10px 12px; display: block; width: calc(100% - 24px); min-height: 44px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
 
 /* actions row: Take order (primary) + Move table / Move an order (secondary) */
 /* The action cluster is PINNED below the scrollable detail body. It needs its own
