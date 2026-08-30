@@ -191,5 +191,65 @@ for (const f of files) {
     : bad("fixtureTables.mjs no longer explains why", "a list with no reason next to it gets 'tidied' away");
 }
 
+
+// ── THE OTHER HALF: A GUARD THAT DOES NOT PICK, BUT SITS ─────────────────────────────────────────
+// (T28, sweep #7, 2026-08-30.)
+//
+// Everything above guards a guard that chooses its table AT RUNTIME. Nothing guarded the far more
+// common shape: a table typed straight into the source. Two guards did exactly that on table 11 —
+// verify-merged-floor as its four-table party's PARENT, verify-edge-cases as its "quiet test table"
+// — and the registry only ever listed 12, 13 and 14 for the party, so 11 read as free to both.
+//
+// What that cost: run together, which is every whole-suite sweep and every day with several
+// terminals in this folder, they re-seated each other's tables mid-walk. verify-merged-floor then
+// reported it as a PRODUCT fault — "the party lost a member", "a table went backwards from
+// preparing to received" — on three separate runs, blaming a different table each time. It was
+// three minutes from being filed as a serious floor bug. Nothing was wrong with the floor.
+//
+// So: every hard-coded table must be IN the registry, and no two guards may name the same one.
+{
+  const claimed = new Map();
+  const REGSRC = readFileSync(join(SCRIPTS, "sweep/fixtureTables.mjs"), "utf8");
+  for (const m of REGSRC.matchAll(/\["([^"]+)",\s*"([^"]+)"\]/g)) claimed.set(m[1], m[2]);
+  const files = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const f = join(d, e.name);
+      if (e.isDirectory()) walk(f); else if (/\.(mjs|ts|js)$/.test(e.name)) files.push(f);
+    }
+  };
+  walk(SCRIPTS);
+  const seats = new Map();                       // table → the files that sit at it
+  for (const f of files) {
+    const src = readFileSync(f, "utf8");
+    const rel = f.replace(ROOT + "/", "");
+    // An identifier that NAMES a table or a set of them, assigned string literals. Deliberately
+    // shape-based rather than a hand-list: PARTY and SOLO are what merged-floor calls its tables,
+    // and a hand-list is exactly how table 11 stayed invisible.
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+\w*(?:TABLE|TABLES|PARTY|SOLO|SEAT)\w*\s*=\s*(\[[^\]]{0,200}\]|"[^"]{1,12}"|'[^']{1,12}')/gi)) {
+      for (const lit of m[1].matchAll(/["'`]([A-Za-z0-9_-]{1,12})["'`]/g)) {
+        const t = lit[1];
+        // a table NUMBER, or an off-plan name like "SPLIT500" — not a stray word
+        if (!/^[0-9]{1,2}$/.test(t) && !/^[A-Z][A-Z0-9_-]{2,}$/.test(t)) continue;
+        if (!seats.has(t)) seats.set(t, new Set());
+        seats.get(t).add(rel);
+      }
+    }
+  }
+  const collisions = [...seats].filter(([, who]) => who.size > 1);
+  collisions.length === 0
+    ? ok(`no two guards sit at the same table (${seats.size} hard-coded tables across the folder)`)
+    : bad("two guards sit at the same table",
+        collisions.map(([t, who]) => `table ${t} ← ${[...who].join(" + ")}`).join("\n       ")
+        + "\n       They will re-seat each other mid-run, and the loser reports it as a fault in the app.");
+  const unclaimed = [...seats].filter(([t, who]) => !claimed.has(t) && who.size === 1);
+  unclaimed.length === 0
+    ? ok("every hard-coded table is written down in fixtureTables.mjs")
+    : bad("a hard-coded table is not in the registry",
+        unclaimed.map(([t, who]) => `table ${t} ← ${[...who][0]}`).join("\n       ")
+        + "\n       A dynamic picker consults that list, so an unlisted table is one a picker may take mid-run.");
+}
+
 console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
