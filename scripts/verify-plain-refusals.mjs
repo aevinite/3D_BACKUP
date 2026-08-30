@@ -114,6 +114,48 @@ for (const [rel, [must, why]] of Object.entries(EXEMPT_STILL_TRUE)) {
   must.test(src) ? ok(`${rel} is exempt, and the reason it was exempted is still true`) : bad(`${rel}: ${why}`);
 }
 
+// ── AND THE PANEL BOUNDARY HAS A PLAIN DEFAULT (T25 round 2, item 25, 2026-08-31) ────────────────
+//
+// Everything above catches a message BUILT by concatenating a caught error. This is the other way the
+// same text reaches a screen: being passed through unchanged. lib/panelFailure.ts is the one answer
+// every staff panel route gives when its handler threw, and its `unknown` sentence was OPTIONAL —
+// 7 of 11 call sites omitted it, so an unclassified failure went to the device verbatim. Measured on
+// the real code: "permission denied for table orders", "Could not find the function public.lfh_x(uuid)
+// in the schema cache", "new row violates row-level security policy for table \"orders\"",
+// "TypeError: Cannot read properties of undefined (reading 'id')", "JWT expired" — and an Error with
+// no message produced an EMPTY toast, which is a tap that answered nothing.
+//
+// Asserted as PROPERTIES of the file, so a rewrite that gets there another way still passes:
+{
+  const rel = "lib/panelFailure.ts";
+  const raw = existsSync(join(ROOT, rel)) ? readFileSync(join(ROOT, rel), "utf8") : "";
+  const src = codeOf(raw);
+  const need = [
+    [/const\s+UNKNOWN_TEXT\s*=\s*["'`][^"'`]{20,}["'`]/, "there is no plain default sentence for an unclassified failure"],
+    [/opts\?\.unknown\s*\?\?\s*UNKNOWN_TEXT/, "the caller's `unknown` no longer FALLS BACK to the plain default — an omitted one goes back to leaking the raw text"],
+    [/if\s*\(!message\s*\|\|\s*!message\.trim\(\)\)/, "an empty sentence is no longer replaced — an Error with no message would show an empty toast"],
+    [/console\.error\(/, "the raw text is no longer logged server-side; it must go somewhere, or a real bug becomes invisible"],
+  ];
+  for (const [re, why] of need) re.test(src) ? ok(`${rel}: ${String(re).slice(0, 46)}…`) : bad(`${rel}: ${why}`);
+  // The raw message must not be reachable from the body at all: no `detail`, and no un-defaulted
+  // refusalMessage() for the unclassified branch.
+  // refusalMessage() belongs in the KNOWN branch and nowhere else. The old shape put it in the
+  // fallback position (`!known && opts?.unknown ? opts.unknown : refusalMessage(e)`), which is what
+  // leaked. Assert both halves — the right position present, the wrong position absent. (The first
+  // cut of this line matched the CORRECT code and accused it, because `known ? refusalMessage(e) :
+  // (opts?.unknown ?? …)` contains the same characters in the same order. Judge a position, not a
+  // substring.)
+  /known\s*\?\s*refusalMessage\(e\)/.test(src)
+    ? ok(`${rel}: refusalMessage() is used for a CLASSIFIED failure`)
+    : bad(`${rel}: refusalMessage() is no longer the answer for a classified refusal — those sentences are the ones a person can act on`);
+  /:\s*refusalMessage\(e\)\s*[;,)]/.test(src)
+    ? bad(`${rel}: refusalMessage() is back in the FALLBACK position — an unclassified failure would leak its raw text again`)
+    : ok(`${rel}: an unclassified failure answers the plain default, not refusalMessage()`);
+  /\bdetail\b/.test(src)
+    ? bad(`${rel}: a \`detail\` field appeared — the panel half must never carry the database's words (that is lib/adminFail.ts's job, and only there)`)
+    : ok(`${rel}: no detail field — a waiter cannot reach the raw text`);
+}
+
 console.log(fails
   ? `\n✗ verify:plain-refusals — ${fails} shared helper(s) hand a person the database's own words`
   : "\n✓ verify:plain-refusals — the detail stays our side, the person gets a sentence they can act on");
