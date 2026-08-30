@@ -867,6 +867,58 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 20 · NOTHING ON A TILE IS SMALLER THAN 9px, AND THE WORDS ARE 10px ───────────────────────
+//
+// The tile's text scales with the TILE (cqw) between a floor and a ceiling. On a 10-inch tablet
+// held upright at 6 per row the tiles come out 116px and the cqw term bottoms out, so what a waiter
+// actually reads is the FLOOR. Thirty-four strings sat at exactly 9px — "Free", "＋", "Take order"
+// (measured on five devices, 2026-08-30). The owner asked for it raised: the floors moved, the
+// scaling and the maxima did not, so nothing changed on a tile that was already big enough.
+// Re-measured at 360, 430, 834, 1024 and 1194px in both skins: nothing clips, nothing overflows.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  // Every clamp() that sets a font-size inside the tile block, with its floor.
+  const tileBlock = css.slice(css.indexOf(".t-top {"), css.indexOf("/* ── SHED DETAIL ON THE WAY DOWN"));
+  const floors = [...tileBlock.matchAll(/font-size:\s*clamp\(\s*([\d.]+)px/g)].map((m) => Number(m[1]));
+  check(
+    "tablet: no text on a floor tile can fall below 9px",
+    floors.length > 0 && floors.every((f) => f >= 9),
+    `${CSS}: ${floors.filter((f) => f < 9).length} tile font-size clamp(s) have a floor under 9px ` +
+    `(${floors.filter((f) => f < 9).join(", ")}).\n    ` +
+    `The floor is what a waiter actually reads on a dense floor — the cqw term has already bottomed ` +
+    `out there.`,
+  );
+  check(
+    "tablet: …and the WORDS on it are at least 10px",
+    /\.t-take \{[\s\S]{0,400}?font-size:\s*clamp\(\s*10px/.test(css) && /\.t-line-plain \.t-linenum \{ font-size: clamp\(10px/.test(css),
+    `${CSS}: ＋ Take order or the served line has dropped below a 10px floor. Those two are the ` +
+    `words on the tile;\n    the served line's two halves share one floor on purpose.`,
+  );
+  check(
+    "tablet: …and the table number keeps its own 10px floor",
+    /\.tnum \{ font-size: clamp\(10px/.test(css),
+    `${CSS}: .tnum's floor is no longer 10px. It is the biggest thing on the tile and the first ` +
+    `thing read.`,
+  );
+  // The destructive control on a dish row is at least as big as the harmless ones beside it.
+  const idel = (css.match(/\.idel \{[^}]*\}/) || [""])[0];
+  const qbtn = (css.match(/\.qbtn \{[^}]*\}/) || [""])[0];
+  const px = (rule, prop) => Number(((rule.match(new RegExp(prop + ":\\s*([\\d.]+)px")) || [])[1]) || 0);
+  check(
+    "tablet: 🗑 is at least as big as the − and + beside it",
+    px(idel, "height") >= px(qbtn, "height") && px(idel, "height") >= 40,
+    `${CSS}: .idel is ${px(idel, "height") || "auto"}px tall against .qbtn's ${px(qbtn, "height")}px. ` +
+    `It was 37px —\n    the smallest control on the panel and the only DESTRUCTIVE one, between two ` +
+    `40px buttons that merely change a number.`,
+  );
+  check(
+    "tablet: …and it is a square, not a padded glyph that shrinks with its font",
+    /width:\s*40px/.test(idel) && /height:\s*40px/.test(idel),
+    `${CSS}: .idel is sized by padding again. A padded glyph changes size with its font; the − and + ` +
+    `beside it are a fixed square, and a delete should not be the odd one out.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {
