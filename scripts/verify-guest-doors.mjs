@@ -101,6 +101,45 @@ check("only the routes that genuinely ARE restaurant #1 start out `ready`",
 check("the pin is read inside an effect, never during render (there is no sessionStorage on the server)",
   !/const\s+\w+\s*=\s*useMemo\([^)]*tenantSlug\(\)/.test(ctx));
 
+// ── AND A FAILED LOOKUP IS NOT ALLOWED TO ANSWER "RESTAURANT #1" EITHER (item 21, 2026-08-30) ──
+//
+// Section 1 above fixed the case where the context did not KNOW about the `/q/<code>` pin. This is
+// the same fault by the other road: the pin is read correctly, the slug is right, and the RESOLVE
+// fails. It used to end
+//
+//     .then((r) => { setId(r?.id || DEFAULT_RESTAURANT_ID); … setReady(true); })
+//     .catch(() => { setReady(true); })                     // ← id left on #1, and declared ready
+//
+// so a refused read produced exactly the symptom in this file's own header. MEASURED on Aangan's
+// real table-1 sticker (`/q/9AAG8YK8`) with only the client-side `lfh_guest_restaurant` call
+// refused, tapping "+" on a dish:
+//
+//     lookup works ......................... basket = lfh_cart:aangan-garden-restaurant [Virgin Mojito]
+//     lookup refused, OLD behaviour ........ basket = (none)          ← the tap did nothing
+//     lookup refused, WITH the fix ......... basket = lfh_cart:aangan-garden-restaurant [Virgin Mojito]
+//
+// The empty id is not a hang: `/api/guest/place-order` and `/api/guest/call-waiter` already refuse
+// a body with no restaurant (`unknown_restaurant`), and lib/guestOutbox.ts already words it for a
+// diner. An unknown restaurant now takes the path that was built for it.
+//
+// lib/tenant.ts is what makes the catch reachable: since 2026-08-03 a failed READ throws instead of
+// folding into `null`, so this is a cold process plus one refused read.
+const resolveTail = ctx.slice(ctx.indexOf("getRestaurantBySlug("));
+check("a FAILED tenant resolve does not fall back to restaurant #1",
+  !/\.catch\([^)]*\)\s*=>\s*\{[^}]*setReady\(true\)/.test(resolveTail) &&
+  /\.catch\(/.test(resolveTail) && /setId\(""\)/.test(resolveTail));
+check("…and it does not declare itself `ready` on the way past",
+  /\.catch\(\(\) => \{[\s\S]{0,400}setReady\(false\)/.test(resolveTail));
+check("…while a lookup that SUCCEEDS with no row still resolves to #1 (a slug nobody owns is a different answer)",
+  /setId\(DEFAULT_RESTAURANT_ID\); setName\(null\); setReady\(true\)/.test(resolveTail));
+check("the server half the empty id relies on is still there — a guest write with no restaurant is REFUSED",
+  ["app/api/guest/place-order/route.ts", "app/api/guest/call-waiter/route.ts"].every((f) => {
+    const s = read(f);
+    return /isUuid\(b\.restaurantId\)/.test(s) && /unknown_restaurant/.test(s);
+  }));
+check("…and a diner is TOLD, in words, rather than watching a tap do nothing",
+  /case "unknown_restaurant": return "We couldn't tell which restaurant/.test(read("lib/guestOutbox.ts")));
+
 say("\n2) A request to staff is only reported as sent when it was");
 check("the gate reads the answer instead of discarding it",
   /const r = await requestAccess\(/.test(gate));
