@@ -156,6 +156,16 @@ for (const [rel, [must, why]] of Object.entries(EXEMPT_STILL_TRUE)) {
     : ok(`${rel}: no detail field — a waiter cannot reach the raw text`);
 }
 
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (T25 round 2, 2026-08-31 — my own guard was missing the
+// floor it asserts in others). This walks lib/ to find its subjects: rename the folder, change the
+// extension convention, or run it from the wrong place and the walk returns an EMPTY list. Every
+// check then "passes" because none of them ran. The floor sits well below today's real count so it
+// never needs editing as the app grows.
+if (files.length < 80) {
+  console.log(`\n✗ verify:plain-refusals scanned only ${files.length} file(s) in lib/ — it should see over a hundred. Its walk found nothing, so nothing was checked.`);
+  process.exit(1);
+}
+
 console.log(fails
   ? `\n✗ verify:plain-refusals — ${fails} shared helper(s) hand a person the database's own words`
   : "\n✓ verify:plain-refusals — the detail stays our side, the person gets a sentence they can act on");

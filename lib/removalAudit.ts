@@ -197,6 +197,8 @@ export async function recordRemoval(a: RecordArgs): Promise<void> {
         restaurant_id: a.rid, level: "error",
         detail: `${a.kind}: ${e instanceof Error ? e.message : String(e)}`,
       });
-    } catch {}
+    } catch { /* the audit write already failed; if TELLING the log about it also fails there is
+                 nothing further to try, and throwing here would replace a recorded action's real
+                 error with a bookkeeping one */ }
   }
 }

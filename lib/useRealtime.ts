@@ -118,7 +118,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     };
     const subscribe = () => {
       if (!sb || disposed) return;
-      channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
+      channels.forEach((c) => { try { sb!.removeChannel(c); } catch { /* a channel already dropped by the client throws here; that is the state we wanted */ } });
       const rid = ridRef.current;
       channels = topics.map((topic) => {
         // GUEST (rid set): filter the socket to THIS restaurant's THIS-topic events
@@ -163,7 +163,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     let torndown = false;
     const teardown = () => {
       if (!sb) return;
-      channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
+      channels.forEach((c) => { try { sb!.removeChannel(c); } catch { /* a channel already dropped by the client throws here; that is the state we wanted */ } });
       channels = [];
       torndown = true;
     };
