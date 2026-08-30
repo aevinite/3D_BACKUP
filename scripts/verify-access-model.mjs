@@ -1061,6 +1061,50 @@ else ok("the read/write route derives every allow-list from the model");
 }
 
 // ── report ─────────────────────────────────────────────────────────────────
+// ── ONE RULE DECIDES A MANAGER'S POWER (owner picked item 23, 2026-08-30) ─────────────────────────
+//
+// lib/managerCan.ts exists because "a permission rule with two copies is the exact bug class the
+// access rebuild exists to remove — one copy drifts, and the screen and the server start disagreeing
+// about who may do what." It was extracted when a SECOND door needed it (/api/pair). A THIRD had its
+// own near-copy all along: app/api/inventory/[...path]/route.ts → invCan(), which agreed on
+// everything except the FEATURE half — it never read `access_config[flag].on`. So the day an Access
+// row is added for inv_stock, the two doors would answer a manager differently.
+//
+// That copy is gone (108 caller shapes across 9 restaurants compared before and after: identical
+// answers, zero differences). This is what stops a fourth appearing.
+//
+// WHAT IT LOOKS FOR, narrowly: the override-then-grant TAIL — reading `permissions[flag]` for "on" /
+// "pin" / "off" and then falling through to managerGrantValue. That shape IS the rule. Reading
+// managerGrantValue on its own is not (lib/accessConfig.ts calls it with `undefined` to derive the
+// model default, and the Access screen itself needs it to draw a tri-state).
+{
+  const walk = (d, out = []) => {
+    for (const e of readdirSync(join(root, d), { withFileTypes: true })) {
+      if (e.name.startsWith(".") || e.name === "node_modules") continue;
+      const rel = `${d}/${e.name}`;
+      if (e.isDirectory()) walk(rel, out);
+      else if (/\.tsx?$/.test(e.name)) out.push(rel);
+    }
+    return out;
+  };
+  const copies = [];
+  for (const rel of [...walk("app"), ...walk("lib")]) {
+    if (rel === "lib/managerCan.ts") continue;                        // the one that is allowed to be it
+    const src = readFileSync(join(root, rel), "utf8");
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+    const tail =
+      /permissions\?\.\[flag\]/.test(code) &&
+      /=== "on" \|\| \w+ === "pin"/.test(code) &&
+      /managerGrantValue\(flag/.test(code);
+    if (tail) copies.push(rel);
+  }
+  if (copies.length) {
+    for (const c of copies) fail(`${c} carries its OWN copy of the manager-power rule (permissions[flag] → managerGrantValue). Ask lib/managerCan.ts instead — it checks the FEATURE half (access_config[flag].on) first, which a hand-written copy always forgets, and that is the half that makes a switch on the Access screen mean something.`);
+  } else {
+    ok("only lib/managerCan.ts decides whether a manager may do something");
+  }
+}
+
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);
 console.log(fails.length
