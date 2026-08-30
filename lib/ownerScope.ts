@@ -160,7 +160,9 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
         // admin who opened a five-restaurant owner's cockpit saw ONE, with nothing to say the other
         // four had been dropped rather than never existed. It never widens wrongly, which is the
         // direction that matters for isolation; but narrowing in silence is still a wrong answer.
-        const owned = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
+        // BOUNDED (T25 round 2, item 31) — the sibling read above already used .limit(1000); this one
+        // did not, and an unbounded read is silently capped at 1,000 anyway. Now it says so.
+        const owned = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(1000);
         if (owned.error) {
           console.error("[ownerScope] could not widen the act-as set:", owned.error.message);
           throw new OwnerScopeUnavailable();

@@ -130,6 +130,85 @@ for (const rel of files) {
   }
 }
 
+// ── AND EVERY READ HAS A CEILING (T25 round 2, item 31, 2026-08-31) ──────────────────────────────
+//
+// The other half of the same rule, and the reason it matters: **a select with no `.limit()` is
+// silently capped at 1,000 rows by PostgREST** — no error, no warning, just a shorter answer. Eleven
+// reads in lib/ had no ceiling of any kind. None of them reaches a thousand rows today, which is
+// exactly why nobody would have noticed the day one did: the orders on a table being printed, the
+// blockers that stop a table being closed, the item lines on a kitchen slip.
+//
+// A read is bounded when its own STATEMENT carries `.limit()`, `.range()`, `.maybeSingle()`,
+// `.single()` or `head: true` — the statement being the whole thing up to the `;`, taken by
+// bracket-matching so a wrapped, multi-line chain counts. When the read is built up in a variable
+// (`let q = sb.from(...)`, bounded three lines later at `await q.order(...).limit(1)`), the check
+// follows that variable to its first `await`.
+//
+// ⚠️ THE FIRST CUT OF THIS CHECK USED A 15-LINE WINDOW AND WAS TOOTHLESS: deleting a real
+// `.limit(500)` from lib/sessionClose.ts still passed, because the NEXT read's limit was inside the
+// window. Judged by sabotage, not by reading — which is the only way that showed up.
+// A BUILDER THAT IS ALWAYS PAGED BY ITS CONSUMER. Named, with the reason, and re-checked below like
+// every other exemption in this file.
+const CEILING_EXEMPT = {
+  "lib/liveBoard.ts": [
+    ["let q = sb.from(\"orders\").select(ORDER_COLS)", "baseOrders() is a FACTORY: every consumer wraps it in pageBoard((from, to) => …range(from, to)), which is the paging this rule asks for — asserted from the other side by verify:board-sig and verify:id-chunks"],
+  ],
+};
+{
+  let selects = 0;
+  const unbounded = [];
+  const usedCeilingExemptions = new Set();
+  const BOUND = /\.limit\(|\.range\(|maybeSingle\(|\.single\(|head:\s*true|pageBoard|pageAll/;
+  for (const rel of files) {
+    const raw = readFileSync(join(ROOT, rel), "utf8");
+    const code = raw.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+    const lines = code.split("\n");
+    for (const m of code.matchAll(/\.from\(\s*["'`](\w+)["'`]\s*\)\s*\.select\(/g)) {
+      selects++;
+      // The statement: from the start of this line to the first `;` at depth 0 (or a `,` that ends an
+      // element inside an array/Promise.all — hence the depth test below allowing a comma at depth 1).
+      const lineStart = code.lastIndexOf("\n", m.index) + 1;
+      let j = m.index, depth = 0, inStr = null, stop = code.length;
+      for (; j < code.length; j++) {
+        const c = code[j];
+        if (inStr) { if (c === "\\") j++; else if (c === inStr) inStr = null; continue; }
+        if (c === '"' || c === "'" || c === "`") { inStr = c; continue; }
+        if ("([{".includes(c)) depth++;
+        else if (")]}".includes(c)) { depth--; if (depth < 0) { stop = j; break; } }
+        else if ((c === ";" || c === ",") && depth === 0) { stop = j; break; }
+      }
+      let statement = code.slice(lineStart, stop);
+      // Follow a builder variable to where it is awaited: `let q = sb.from(...)` … `await q.…limit(1)`
+      const decl = (lines[code.slice(0, m.index).split("\n").length - 1].match(/(?:let|const)\s+(\w+)\s*=/) || [])[1];
+      if (decl) {
+        const rest = code.slice(stop, stop + 1200);
+        const use = rest.match(new RegExp(`await\\s+${decl}[^;]*;`));
+        if (use) statement += use[0];
+        const reassign = rest.match(new RegExp(`${decl}\\s*=\\s*${decl}[^;]*;`, "g"));
+        if (reassign) statement += reassign.join("");
+      }
+      if (BOUND.test(statement)) continue;
+      const line = lines[code.slice(0, m.index).split("\n").length - 1].trim();
+      const allowed = (CEILING_EXEMPT[rel] || []).find(([frag]) => line.includes(frag) || statement.includes(frag));
+      if (allowed) { usedCeilingExemptions.add(`${rel} :: ${allowed[0]}`); continue; }
+      unbounded.push(`${rel} · ${lines[code.slice(0, m.index).split("\n").length - 1].trim().slice(0, 100)}`);
+    }
+  }
+  if (selects < 100) {
+    bad.push(`the ceiling check found only ${selects} select(s) in lib/ — it should see over a hundred, so it checked nothing`);
+  }
+  for (const [rel, list] of Object.entries(CEILING_EXEMPT)) {
+    for (const [frag, why] of list) {
+      if (!usedCeilingExemptions.has(`${rel} :: ${frag}`)) {
+        bad.push(`stale ceiling exemption: ${rel} no longer has an unbounded read matching \`${frag}\` (${why}). Delete it — an exemption nobody re-reads is how the next unbounded read gets in free.`);
+      }
+    }
+  }
+  for (const u of unbounded) {
+    bad.push(`${u}\n         → this read has no ceiling. PostgREST silently caps an unbounded select at 1,000 rows, so the answer just comes back short. Add .limit(N) with N far past anything real (the bounds added on 2026-08-31 are 200 for staff/agents, 500 for one table's orders, 1,000 for an owner's estate).`);
+  }
+}
+
 // A STALE EXEMPTION IS A HOLE. Every allowance must still match a statement, or it is describing code
 // that no longer exists — and the next unscoped read in that file inherits the allowance silently.
 for (const [rel, list] of Object.entries(EXEMPT)) {

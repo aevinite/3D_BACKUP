@@ -249,7 +249,8 @@ export async function agentForDevice(rid: string, deviceId: string | null | unde
 /** Every helper this restaurant has, with the one fact that matters on screen: is it alive. */
 export async function agentsView(rid: string): Promise<AgentView[]> {
   const rows = (await sb.from("print_agents").select(AGENT_COLS)
-    .eq("restaurant_id", rid).is("revoked_at", null).order("created_at", { ascending: true })).data as
+    .eq("restaurant_id", rid).is("revoked_at", null).order("created_at", { ascending: true })
+    .limit(200)).data as
     (Omit<AgentRow, "printers"> & { printers?: unknown; seen_fingerprints?: unknown })[] | null;
   const now = Date.now();
   return (rows || []).map((r) => {

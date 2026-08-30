@@ -313,9 +313,10 @@ export async function reverseSplitLegs(
   opts: { rid: string; sessionId: string; since: string; actor?: string | null; reason?: string | null },
 ): Promise<{ reversed: number; amount: number }> {
   const { rid, sessionId, since } = opts;
+  // BOUNDED below (T25 round 2, item 31): 500 part-payments on one table is far past anything real.
   const live = (await sb.from("session_payments").select("id, amount")
     .eq("session_id", sessionId).eq("restaurant_id", rid)
-    .is("reversed_at", null).gte("created_at", since)).data as { id: string; amount: number }[] | null;
+    .is("reversed_at", null).gte("created_at", since).limit(500)).data as { id: string; amount: number }[] | null;
   const ids = (live || []).map((l) => l.id);
   if (!ids.length) return { reversed: 0, amount: 0 };
   const amount = Math.round((live || []).reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;

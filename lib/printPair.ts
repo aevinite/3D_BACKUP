@@ -123,8 +123,9 @@ export async function approvePairing(
 
   const wanted = clean(by.name, 60) || row.hostname || "This computer";
   let name = wanted;
+  // BOUNDED below (T25 round 2, item 31): the names already in use at ONE restaurant.
   const taken = ((await sb.from("print_agents").select("name")
-    .eq("restaurant_id", by.restaurantId).is("revoked_at", null)).data || []) as { name: string }[];
+    .eq("restaurant_id", by.restaurantId).is("revoked_at", null).limit(200)).data || []) as { name: string }[];
   const names = new Set(taken.map((t) => t.name));
   for (let n = 2; names.has(name) && n < 20; n++) name = `${wanted} (${n})`;
 

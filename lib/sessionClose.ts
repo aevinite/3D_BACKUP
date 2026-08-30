@@ -101,8 +101,11 @@ export async function closeSession(
 
   // Live orders that would block a close: not archived, not cancelled, and either
   // still cooking OR not yet paid. Decision lives in the pure closeBlock() helper.
+  // BOUNDED (T25 round 2, item 31): the orders on ONE table. 500 is far past a real bill, and an
+  // unbounded read is silently capped at 1,000 — which here would mean closing a table while a
+  // blocker sat past the cap, unseen.
   const blockers = must(await sb.from("orders").select("id,status,payment_status")
-    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled"));
+    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").limit(500));
   const block = closeBlock(blockers, force);
   if (block) return { ok: false, status: block.status, message: block.message, reason: block.reason };
 
@@ -113,7 +116,8 @@ export async function closeSession(
   // would silently stop recording walk-outs. Scoped to THIS session, never the bare table
   // number, which could hit a different party that later sat at the same table.
   const owedRows = must(await sb.from("orders").select("id,total,discount,subtotal,tax,khata_at")
-    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
+    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid")
+    .limit(500));
 
   const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", sessionId).select());
   const sess = row[0];
