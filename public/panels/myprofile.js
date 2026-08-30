@@ -68,7 +68,13 @@
     if (window.LFH_PROFILE_GET) {
       me = (await window.LFH_PROFILE_GET()).json;
     } else {
-      var r = await fetch("/api/panel-profile", { cache: "no-store" });
+      // A DEADLINE ON THE FALLBACK READ TOO (T9, second sweep of #7). This path runs only when
+      // maint.js is not on the page to share its single-flight; with no ceiling, a server that
+      // accepts and never answers left "My profile" showing "Loading…" for the whole session.
+      // maint.js owns the shared helper — this file may load without it, so it asks for one and
+      // carries on without if there is none.
+      var sig = (window.LFH_ASK && window.LFH_PANEL_DEADLINE) ? window.LFH_PANEL_DEADLINE() : undefined;
+      var r = await fetch("/api/panel-profile", { cache: "no-store", signal: sig });
       me = await r.json();
     }
     return me;

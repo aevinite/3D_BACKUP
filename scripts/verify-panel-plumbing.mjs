@@ -351,6 +351,42 @@ has("realtime.js", /import\("\/vendor\/supabase\.js"\)/, "the realtime client is
 has("realtime.js", /signal:\s*deadline\(RT_CONFIG_DEADLINE_MS\)/, "the read that boots live updates lost its deadline — a server that hangs parks the panel on \"Connecting…\" for ever, with no retry");
 has("realtime.js", /const RT_CONFIG_DEADLINE_MS = \d+/, "the live-update boot deadline is no longer a named constant");
 has("realtime.js", /AbortSignal\.timeout/, "the boot deadline no longer uses the abort signal the rest of this app uses");
+
+// maint.js — THE SETTINGS DRAWER'S OWN REQUESTS HAVE THE SAME DEADLINE (T9, second sweep of #7).
+// Every fetch in the drawer was open-ended. A server that accepts and never answers left the
+// guest-menu button on "…" for the whole session, and a hung WRITE left the switch pointing the
+// wrong way with nothing said — the silent tap this file had just been fixed for in the other
+// direction. Driven with a route that accepts and never replies: the read now says "Couldn't read
+// the guest menu — tap to check again", and the write says the guest menu has NOT changed.
+has("maint.js", /const PANEL_DEADLINE_MS = \d+/, "the drawer's request deadline is no longer a named constant");
+has("maint.js", /AbortSignal\.timeout/, "the drawer's deadline no longer uses the abort signal the rest of this app uses");
+{
+  // Every fetch in this file carries the signal — a new one added without it is the fault coming back.
+  // Comments stripped first: this file DESCRIBES its old raw fetch()es in prose (deliberately — an
+  // obituary is how the next person learns why they changed), and the first pass counted the word
+  // "fetch()" in a comment as a request with no deadline.
+  const src = (fileFor("maint.js") || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  if (src) {
+    // A fetch call is read to its OWN closing bracket, counting brackets — the first pass used
+    // /fetch\("…"[^)]*\)/ and stopped at the ) inside JSON.stringify({...}), so three calls that
+    // DO carry a deadline were reported as bare. A guard that invents a failure protects nothing.
+    const calls = [];
+    for (let i = src.indexOf("fetch("); i >= 0; i = src.indexOf("fetch(", i + 1)) {
+      let depth = 0, j = i + 5;
+      for (; j < src.length; j++) {
+        if (src[j] === "(") depth++;
+        else if (src[j] === ")") { depth--; if (depth === 0) break; }
+      }
+      calls.push(src.slice(i, j + 1));
+    }
+    const bare = calls.filter((c) => !/signal:\s*deadline\(/.test(c));
+    if (bare.length) fails.push(`maint.js: ${bare.length} of ${calls.length} request(s) have no deadline — a server that hangs leaves the person watching a control that never resolves: ${bare[0].replace(/\s+/g, " ").slice(0, 80)}`);
+  }
+}
+// …and a deadline that fires must speak English. AbortSignal.timeout rejects with a DOMException
+// reading "signal timed out", and the manager saw exactly that on the first pass of this fix.
+has("maint.js", /name === "TimeoutError" \|\| e\.name === "AbortError"/, "a request that ran out of time reports the browser's own words to the manager again (\"signal timed out\")");
+has("myprofile.js", /signal:\s*sig/, "the profile fallback read lost its deadline — \"My profile\" would show Loading… for the whole session");
 has("realtime.js", /topic_rid=eq\./, "the socket is no longer scoped server-side to this restaurant (every tenant's traffic again)");
 has("realtime.js", /worker: true/, "the socket heartbeat left the worker — a backgrounded tablet drops live updates");
 has("realtime.js", /const IDLE_MS = 120000/, "a hidden tab no longer drops its channels");

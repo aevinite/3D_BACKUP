@@ -28,7 +28,7 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
   return function profileGet() {
     if (inflight) return inflight;
     inflight = (async function () {
-      var r = await fetch("/api/panel-profile", { cache: "no-store" });
+      var r = await fetch("/api/panel-profile", { cache: "no-store", signal: deadline() });
       var j = await r.json().catch(function () { return {}; });
       return { ok: r.ok, status: r.status, json: j };
     })();
@@ -68,7 +68,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   }
   var headers = { "Content-Type": "application/json" };
   if (expect) headers["X-LFH-Expect"] = JSON.stringify(expect);
-  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body) });
+  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body), signal: deadline() });
   var d = await r.json().catch(function () { return {}; });
   if (!r.ok) { var e = new Error(d.error || "Couldn't save."); e.status = r.status; e.data = d; throw e; }
   return { ok: true, json: d, queued: false };
@@ -106,15 +106,15 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   let maintOn = false;
   async function fetchMaint() {
     try {
-      const r = await fetch("/api/maintenance", { cache: "no-store" });
+      const r = await fetch("/api/maintenance", { cache: "no-store", signal: deadline() });
       if (!r.ok) { maintOn = null; return maintOn; }
       const j = await r.json();
       maintOn = j.maintenance === true;
-    } catch { maintOn = null; }
+    } catch (e) { maintOn = null; }   // includes the deadline above firing — renderMaint() then says "couldn't read"
     return maintOn;
   }
   async function setMaint(turnOn) {
-    const r = await fetch("/api/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turnOn }) });
+    const r = await fetch("/api/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turnOn }), signal: deadline() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(j.error || "The server wouldn't change it."); e.status = r.status; throw e; }
     maintOn = turnOn;
@@ -169,7 +169,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     // A hard ceiling so a hung request cannot leave the person staring at a button that did nothing.
     const stop = setTimeout(() => { leaveTo("/login"); }, 4000);
     try {
-      await fetch("/api/panel-logout", { method: "POST", cache: "no-store", redirect: "manual" });
+      await fetch("/api/panel-logout", { method: "POST", cache: "no-store", redirect: "manual", signal: deadline(3000) });
     } catch { /* offline / refused — we go to /login regardless */ }
     clearTimeout(stop);
     leaveTo("/login");
@@ -177,6 +177,34 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
 
   // ── small DOM helpers ──────────────────────────────────────────────────────
   const topbar = () => document.querySelector(".topbar .top-actions") || document.querySelector(".topbar");
+  /* A REQUEST A PERSON IS WAITING BEHIND NEEDS A DEADLINE (T9, second sweep of #7, 2026-08-30).
+     Every fetch in this drawer was open-ended, and fetch has no timeout of its own. A server that
+     REFUSES is handled everywhere below; a server that ACCEPTS and never answers — a captive
+     portal, an overloaded box, wifi that goes half-dead mid-shift — left the person watching a
+     control that never resolves:
+
+       · fetchMaint() never returns, so the guest-menu button sits on "…" for the whole session;
+       · setMaint() never returns, so the switch stays where it was with nothing said, which is the
+         silent tap this file was just fixed for in the other direction;
+       · the profile read never returns, so ⚙ Settings opens on nothing.
+
+     8s, the same deadline realtime.js puts on the read that boots live updates, and the same
+     AbortSignal.timeout verify:busy already requires of every write. A timeout REJECTS, so each
+     caller's existing catch does what it always did — says so, instead of waiting for ever.
+     signOut() keeps its own 4s ceiling as well: leaving is the one action that must happen whether
+     or not the server ever answers. */
+  const PANEL_DEADLINE_MS = 8000;
+  // What a person is told when the deadline above fires. AbortSignal.timeout rejects with a
+  // DOMException reading "signal timed out" — the browser's words, and the manager saw them.
+  function whyFailed(e) {
+    if (e && (e.name === "TimeoutError" || e.name === "AbortError")) return "the server didn't answer in time";
+    return (e && e.message) || "the server didn't answer";
+  }
+  function deadline(ms) {
+    try { if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms || PANEL_DEADLINE_MS); } catch (e) { /* fall through */ }
+    try { const c = new AbortController(); setTimeout(() => c.abort(), ms || PANEL_DEADLINE_MS); return c.signal; } catch (e) { return undefined; }
+  }
+
   function el(tag, props, kids) {
     const n = document.createElement(tag);
     if (props) for (const k in props) {
@@ -306,6 +334,9 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     say: function (msg, opts) { return askLayer("say", msg, opts); },
   };
   window.LFH_ASK = window.LFH_ASK || LFH_ASK;
+  // myprofile.js loads beside this file and makes the same fallback read; one deadline, decided
+  // here, rather than a second copy of the helper drifting from this one.
+  window.LFH_PANEL_DEADLINE = window.LFH_PANEL_DEADLINE || deadline;
 
   let profile = null; // {username, role, name, phone, hasPin, needsProfile, canSelfReset}
   let overlay = null;
@@ -446,7 +477,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
             // token_version, ending every session. Delivering that later would re-check a credential
             // against a row that has since moved. So it stays live, and says so if there's no signal.
             if (navigator.onLine === false) { setMsg(pwMsg, "You're offline — a password change needs a connection. Try again when you're back online.", false); return; }
-            const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: curIn.value, newPassword: newIn.value }) });
+            const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: curIn.value, newPassword: newIn.value }), signal: deadline() });
             const j = await r.json().catch(() => ({}));
             if (!r.ok) { setMsg(pwMsg, j.error || "Could not change.", false); return; }
             setMsg(pwMsg, "Password changed — signing you out…", true);
@@ -521,7 +552,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
           }))) return;
           try { await setMaint(turnOn); renderMaint(); }
           catch (e) {
-            LFH_ASK.say("Couldn't change it: " + ((e && e.message) || "the server didn't answer") + " — the guest menu has NOT changed.",
+            LFH_ASK.say("Couldn't change it: " + whyFailed(e) + " — the guest menu has NOT changed.",
               { title: "Nothing changed" });
           }
         });
