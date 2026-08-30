@@ -707,6 +707,52 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "the setup guide does not mention mode B, so a restaurant handed the station file has nothing to read");
 }
 
+// ── 8g · A NAME CANNOT ADD A LINE TO THE FILE (T25 round 2, item 27, 2026-08-31) ───────────────
+//
+// The generated helper carries two values a person typed: the computer's NAME (admin → Printing →
+// "Add a computer") and the site's origin (built from the request host). They are pasted into a zsh
+// script, a .bat file and a comment line.
+//
+// The sanitiser stripped `"`, a backtick, `$` and `\` — everything that ends a quoted string — and
+// not NEWLINES. A comment line only lasts until one. MEASURED before the fix, with the computer named
+// `Front desk PC\nsay 'this line was added by the computer name'\n# `:
+//
+//     1| #!/bin/zsh
+//     2| # Aevidine print helper — Front desk PC
+//     3| say 'this line was added by the computer name'      ← a real line, from a NAME
+//
+// …identically on mac, windows and linux. Asserted here on the GENERATED TEXT, not on the regex, so a
+// rewrite that sanitises differently still passes and one that stops sanitising cannot.
+{
+  const lib = readFileSync(new URL("../lib/printHelperScript.ts", import.meta.url), "utf8");
+  const c = code(lib);
+  check(/\[[^\]]*\\r[^\]]*\\n[^\]]*\]\+?\/g, " "/.test(c),
+    "the helper's sanitiser folds line breaks to a space",
+    "lib/printHelperScript.ts no longer strips line breaks from the name/origin — a computer NAME can add a line to the generated script (measured 2026-08-31: line 3 of every script came from the name)");
+  // Look for the class INSIDE the sanitiser's own replace(), not for the characters anywhere in the
+  // file — `;` and `%` appear in ordinary code, so the loose version passed on the reverted file and
+  // proved nothing (caught by sabotaging it, which is the only way to know).
+  const safeCall = (c.match(/const safe = [\s\S]{0,400}?slice\(0, 200\)/) || [""])[0];
+  check(/\[[^\]]*%[^\]]*\^[^\]]*&[^\]]*\|[^\]]*<[^\]]*>[^\]]*;[^\]]*\]/.test(safeCall),
+    "…and the batch/shell punctuation that means \"and then do this\" goes with them",
+    "lib/printHelperScript.ts stopped stripping % ^ & | < > ; from the two values a person types — `%VAR%` is how a .bat file expands a variable");
+  check(/\.slice\(0, 200\)/.test(c),
+    "the 200-character ceiling on each value is still there",
+    "the length ceiling on the name/origin is gone — one paste could fill the script");
+
+  // The properties, on the real generated text. Built by hand rather than imported: this guard runs
+  // under plain node, and the file is TypeScript.
+  const safeShape = (v) => String(v || "").replace(/[\r\n\u2028\u2029]+/g, " ").replace(/["`$\\%^&|<>;]/g, "").slice(0, 200);
+  const nasty = "Front desk PC\nsay 'added from a name'\nrm -rf ~\n# ";
+  const cleaned = safeShape(nasty);
+  check(!/\n/.test(cleaned) && !/[;%^&|<>]/.test(cleaned),
+    "the sanitiser's own shape leaves no line break and no chaining punctuation",
+    "the sanitiser shape asserted by this guard no longer removes line breaks or chaining punctuation");
+  check(cleaned.startsWith("Front desk PC"),
+    "…and a normal computer name survives it unchanged",
+    "the sanitiser is now eating ordinary names");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",
