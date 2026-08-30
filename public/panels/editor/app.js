@@ -16439,7 +16439,29 @@ async function pollTables(tables) {
 
     // Any OPEN-DETAIL table (docked, collapsed modal, or floating) that's among the changed
     // ones gets its full slice refreshed for the detail.
-    const toRefresh = detailTables().filter((t) => tset.has(t));
+    //
+    // …AND THE BILLS TAB'S LIVE LIST, WHICH IS NOT THE FLOOR (sweep #7, T30, 2026-08-30).
+    // Everything this function refreshes above is the FLOOR: the tiles, the aggregates, the open
+    // table details. The Bills → Live list is a different screen built from `state.data.orders`,
+    // and the only writers of that array are loadAll / loadOrders / pollOrders (whole-board reads)
+    // and mergeTableSlice (per table). So on a TARGETED breadcrumb — the common case, since every
+    // order/item/session change names its table — the tile moved instantly and the bill card beside
+    // it kept the old status for up to 60 seconds, until the backstop poll.
+    //
+    // MEASURED, not reasoned about: a probe order on its own table read "NEW ORDER" on the Bills
+    // list, was set to `preparing` in the database, did not change in 30s while the panel logged
+    // the breadcrumb arriving and refetching, and flipped to "PREPARING" the moment the 60s
+    // backstop landed. (Two earlier attempts to measure this with a COUNT of cards were withdrawn:
+    // ten sweep terminals write to the shared dev database and the count moved under the test.)
+    //
+    // The refresh is the SAME per-table slice the open details already use — three `?table=N`
+    // reads, merged in — never a whole-board pollOrders(). That matters: the targeted path exists
+    // because whole-board reads were ~96% of this product's egress, and "fix the Bills list by
+    // reloading the board" would hand that straight back. Gated on the tab actually being open on
+    // the live view, so a manager on the Tables tab (where a shift is spent) pays nothing at all.
+    const billsListNeedsRows = state.tab === "orders" && ordersViewKey() === "live";
+    const toRefresh = [...new Set([...detailTables(), ...(billsListNeedsRows ? tlist : [])])]
+      .filter((t) => tset.has(t));
     if (toRefresh.length) {
       try {
         if (dataSeq !== born) return;

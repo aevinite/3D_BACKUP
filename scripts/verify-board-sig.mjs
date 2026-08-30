@@ -131,6 +131,49 @@ for (const panel of ["kitchen", "tablet"]) {
   const sigFn = (src.match(/function boardSig\(d\) \{[\s\S]{0,900}?\n\}/) || [])[0] || "";
   check(`${panel}: boardSig is built from stableRow`, /stableRow/.test(sigFn),
     sigFn ? "" : "could not find boardSig() in the panel");
+  // …AND IT STILL COVERS EVERY COLLECTION IT COVERED (sweep #7, T30, 2026-08-30).
+  // The check above passes on ONE mention of stableRow anywhere in the function, so a boardSig
+  // narrowed to `JSON.stringify([(d.orders||[]).map(stableRow)])` — dropping items, dishes and
+  // the rest — would sail through it. That is the SAME regression this whole file exists to
+  // stop, just one level up: not "a hand-picked field list" but "a hand-picked collection list".
+  // This is a FLOOR, not a ceiling: adding a new collection is fine and needs no change here.
+  const COVERS = {
+    kitchen: ["d.orders", "d.items", "d.dishes", "d.platform", "state.autoPrintKot", "state.tableNames", "state.tableTags"],
+    tablet: ["d.summary", "data.sessions", "data.orders", "data.calls", "data.requests", "data.members", "data.items", "data.settings"],
+  };
+  const missing = (COVERS[panel] || []).filter((k) => !sigFn.includes(k));
+  check(`${panel}: boardSig still covers every collection the board draws from`, missing.length === 0,
+    missing.length ? `no longer in the fingerprint: ${missing.join(", ")}` : `${(COVERS[panel] || []).length} collections`);
+}
+
+// ── THE MANAGER PANEL HAS A THIRD FINGERPRINT, AND NOTHING WATCHED IT ────────────────────────
+// public/panels/editor/app.js keeps its own redraw guard (`lastPollSig`) for the Bills tab, in
+// the same shape and for the same reason — and this file only ever knew about kitchen and tablet.
+// It is the busiest panel of the three.
+{
+  const src = (() => { const f = join(ROOT, "public", "panels", "editor", "app.js"); return existsSync(f) ? readFileSync(f, "utf8") : null; })();
+  if (!src) check("editor/app.js found", false);
+  else {
+    check("manager: the Bills fingerprint strips volatile fields instead of listing wanted ones",
+      /const stripVol = \(o\) => \{ const c = \{\}; for \(const k in o\) if \(!RT_VOLATILE_ORDER\.has\(k\)\) c\[k\] = o\[k\]; return c; \};/.test(src));
+    check("manager: it is built from the full order rows, not a field list",
+      /const sig = JSON\.stringify\(\[\s*\n?\s*orders\.map\(stripVol\)/.test(src));
+
+    // AND THE TARGETED REFETCH MUST FEED THE BILLS LIST, NOT ONLY THE FLOOR (the fault this
+    // check was written for, 2026-08-30). pollTables() refreshes tiles, aggregates and open
+    // table details — all floor things. The Bills → Live list is built from `state.data.orders`,
+    // which none of those touch, so a targeted breadcrumb left a bill card showing the old status
+    // until the 60s backstop. MEASURED: a probe order read "NEW ORDER" for 30s after the database
+    // said `preparing`, then flipped the moment the backstop landed; with the fix, ~4s.
+    // The refresh must stay the PER-TABLE slice — reaching for pollOrders() here would hand back
+    // the whole-board read that was ~96% of this product's egress.
+    check("manager: a targeted refetch also refreshes the Bills list's own rows",
+      /billsListNeedsRows[\s\S]{0,220}?const toRefresh = \[\.\.\.new Set\(\[\.\.\.detailTables\(\), \.\.\.\(billsListNeedsRows \? tlist : \[\]\)\]\)\]/.test(src),
+      "pollTables() no longer widens toRefresh to the changed tables when the Bills → Live list is open");
+    check("manager: …and it does it with the per-table slice, never a whole-board read",
+      /const toRefresh = \[[\s\S]{0,200}?\]\s*\n?\s*\.filter\(\(t\) => tset\.has\(t\)\);[\s\S]{0,260}?loadTableSlice\(t\)/.test(src)
+      && !/billsListNeedsRows[\s\S]{0,400}?pollOrders\(/.test(src));
+  }
 }
 
 console.log("\n" + (pass ? "ALL PASS" : "SOME FAILED"));
