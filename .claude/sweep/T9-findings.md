@@ -160,3 +160,153 @@ Recorded as phase rows so they are re-run rather than remembered.
 - **The destination table of a pending move is not held behind it.** Holding it would let one
   table's stuck work stop another's, and the database refuses the move with a sentence rather than
   applying it wrongly. `P19315`.
+
+---
+
+# T9 — SECOND 500 (2026-08-30) · phases `P42501`–`P43000`
+
+Same territory, different question. The first 500 read these files for the correctness of what they
+DO. This run asked **what a person is TOLD when the answer never comes** — and every one of the five
+faults below is the same shape: the app going quiet.
+
+**500 new rows (436 driven/static + 64 judgment) · 1,014 existing rows re-run, none regressed ·
+5 problems, all fixed on this branch, each with a guard proved RED first.**
+
+Run against `origin/main` `b64951ad`+, in `../wt-t9b`, port 4235. Nothing written to the shared
+database. AV live never touched, read or pointed at.
+
+| # | severity | who loses | file | confirmed how |
+|---|---|---|---|---|
+| **3** | **high — the guard itself** | anyone trusting this guard: 16 checks printed a tick while asserting nothing | `verify-panel-plumbing.mjs` | reproduced, then proved awake by sabotage |
+| **2** | **high** | the whole restaurant: live updates stop for ever and the screen still looks current | `realtime.js` | **driven** |
+| **1** | medium-high | the manager: the guest-menu switch sends nothing, moves nothing, says nothing | `maint.js`, `myprofile.js` | **driven** |
+| 4 | medium | the manager: a control that never resolves — the button stuck on "…" all session | `maint.js`, `myprofile.js` | **driven** |
+| 5 | low-med | the manager: a second line can never be added to a purchase bill | `editor/inventory.js` | read + fixed with #1's card |
+
+---
+
+## 1 · the guest-menu switch did nothing, and said nothing
+
+`maint.js` — the settings drawer EVERY staff panel loads — asked "Take the guest menu OFFLINE?"
+with `confirm()`, and reported a refusal with `alert()`. `myprofile.js` used `alert()` for the two
+messages that matter most on that screen: "saved on this device only" and "not saved".
+
+A staff device is the one place those cannot be trusted. A kiosk browser, an embedded webview, and
+Chrome after somebody ticks *"prevent this page from creating additional dialogs"* all answer
+`confirm()` with **false** and return from `alert()` having shown nothing. Driven with dialogs
+suppressed:
+
+```
+the switch reads:               "🟢 Take guest menu offline"
+dialogs raised (and dismissed):  confirm
+POSTs to /api/maintenance:       0
+the switch now reads:           "🟢 Take guest menu offline"
+anything on screen saying why:   NO
+```
+
+Two more reasons the panel's own card wins: a native dialog freezes the page's whole thread, so the
+write queue stops draining while it is up; and hardware BACK cannot close it, because backstack
+never sees it.
+
+`maint.js` now publishes **`LFH_ASK`** — a card in the drawer's own style, on its own scrim,
+registered with the back-button manager. A scrim tap and a BACK press both answer a QUESTION as
+**No**; a stray tap can never take the guest menu offline. Both answers are 46px: Cancel measured
+**30px** on the first pass, because the ghost style is a footnote style and here Cancel is one of
+two answers.
+
+## 2 · live updates could stop for ever, with everything on screen still looking current
+
+`realtime.js` handles a REFUSED boot — the rejection drops the memo and the next wake re-boots. A
+**hang** was different. `fetch` has no timeout of its own, so on a captive portal that promise stays
+pending for the life of the page, and because it is memoised **every later call is handed that same
+pending promise and makes no request at all.**
+
+```
+requests the panel made for its live-update settings: 1
+{ "statusAfter12s": "weak", "everConnected": false, "statusAfterWake": "weak" }
+```
+
+One request in the whole run; still "Connecting…" twelve seconds later; waking the panel changed
+nothing. An 8s `AbortSignal.timeout` now — the deadline this app already uses for a read a person
+waits behind. It REJECTS, which is the point: the existing memo-drop then does its job.
+
+## 3 · …and the guard that was supposed to be watching all of that was asleep
+
+`verify-panel-plumbing.mjs` read a hand-written list of **eight** files and returned SILENTLY for
+anything else, while its checks name **thirteen**. So **sixteen checks asserted nothing**:
+
+- **`realtime.js` was never in the list** — all TEN of its checks were dead. Every promise this
+  guard makes about live updates was a promise it was not checking.
+- **`errlog.js` and `theme.js`** were loaded by an ad-hoc `files[x] = read(x)` further down the
+  file, placed AFTER some of their own checks — four errlog checks and two theme checks ran against
+  `undefined`.
+
+It printed `✓ all checks pass` throughout. Files are read **on demand** now, so a check for a new
+file cannot silently do nothing, and the four ad-hoc top-ups are gone rather than left as an
+invitation to add a fifth. Proved awake by sabotaging each of the three files in turn.
+
+> **This is the finding worth keeping.** Five product fixes are worth having; ten checks that print
+> a tick while asserting nothing would have gone on hiding the next fault too. `verify:guards-alive`
+> missed it because the guard as a WHOLE was alive and only part of it was dead — worth a check of
+> its own, for whoever owns that guard.
+
+## 4 · nothing in the drawer had a deadline
+
+Every `fetch` in the shared drawer was open-ended. A server that hangs left the guest-menu button on
+`…` for the whole session, left a write with the switch pointing the wrong way and nothing said, and
+left ⚙ Settings opening on nothing. 8s, one shared helper, and — because a deadline has to speak
+English — `"the server didn't answer in time"` instead of the browser's own `"signal timed out"`,
+which is what the manager was shown on the first pass of this fix.
+
+## 5 · a second line could never be added to a purchase bill
+
+`editor/inventory.js` fell back to `window.confirm` for "already on this bill — add another line?".
+On a device that hides dialogs the answer is always No, so the manager was told *"Not added"* every
+single time. It is a VISIBLE refusal rather than a silent one — which is why this is the third fault
+of its kind here and not the first — but a dead end is a dead end. `LFH_ASK` now sits between the
+editor's own dialog and the browser's.
+
+---
+
+## Eleven of sixteen red rows were MY CHECK being wrong
+
+Recorded because a sweep that reports only the product's faults is not a record of the sweep. Each
+was re-aimed at what the rule actually protects, not deleted:
+
+- **every empty catch** → only one around a WRITE → finally, the *set* of two that were read and
+  found deliberate (a logger must not throw while reporting a crash; sign-out reaches `/login`
+  either way).
+- **"every file that writes markup needs an escaper"** → the six named files write fixed templates
+  or clear a node; the rule became the *set* of interpolation sites.
+- **"no repeating timer under five seconds"** → all three are scoped and cleared; the rule became
+  "a fast timer you cannot turn off".
+- **"every fetch needs a deadline"** → the crash report is fire-and-forget with `keepalive`, where
+  an abort would defeat the point; the rule became "every AWAITED fetch".
+- **`KIND_LABEL` has no `order_tip`** → that map is the *removals* vocabulary. Adding the tip there
+  would have filed it as a kind of removal. The tip reads correctly in both action maps, and the
+  row now checks those two agree.
+- plus the group counts, the history arithmetic (`history.go` never shortens a history), a 60px
+  box that turned out to fit, a `C()` call missing an argument, a `tax_rate` of 5 meaning 500%,
+  order fixtures with no `subtotal`, and a test page with no viewport tag.
+
+## Looked at and deliberately NOT changed
+
+- **`maint.js` stays CRLF.** Converting it is a 671-line diff that hides whatever ships with it.
+  Both guards now assert the line endings.
+- **`billdoc.js`'s 15 empty catches stay.** Every one wraps a cosmetic side-effect inside the
+  printed document; a bill window that throws is a blank page in front of a guest.
+- **`errlog.js` keeps its deadline-free request.** `keepalive: true` exists so it outlives the page
+  closing; an abort signal would defeat it.
+- **The connection panel still does not say WHY each change is waiting.** Raised by sweep #6, left
+  open by the first 500, still the weakest thing here — and still a feature, not a fault. `P42911`.
+
+## 🔗 HANDOFF
+
+| for | what | row |
+|---|---|---|
+| whoever owns the panels outside `public/panels/*.js` | they still ask with a browser dialog; `LFH_ASK` is now on every panel page and `verify:panel-dialogs` widens in one line | `P42986` |
+| whoever owns `verify:guards-alive` | it cannot see a guard that runs 300 checks and silently skips 16 — the tell is a check naming a file the guard never read | `P42991` |
+| **T7** (waiter tablet) | the 🔔 still has no ☰ drawer row | `P19595`, re-stated `P42987` |
+| **T7** (waiter tablet) | four sideways rows still have no swipe hint — the module is now proven across five layouts, so it is pure wiring | `P19596`, re-stated `P42988` |
+| **T5** (manager panel) | the duplicate undo-toast rule in the panel stylesheet | `P19597`, re-stated `P42989` |
+| **T5** (manager panel) | one unguarded back-layer call | `P19598`, re-stated `P42990` |
