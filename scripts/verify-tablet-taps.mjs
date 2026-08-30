@@ -780,6 +780,39 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   );
 }
 
+// ── 17 · THE ADMIN RIBBON ONLY LISTS CONTROLS THAT ARE ON THIS PANEL ─────────────────────────
+//
+// The ribbon counts "N controls off for waiters" and every one is meant to be a thing the admin can
+// see tinted cyan on the screen in front of them. Two keys have had to be removed for the same
+// reason: tablet_invoice (a waiter can never issue one) and, on 2026-08-30, tablet_parcel — 🥡
+// Parcel left this panel on 2026-08-03, so that switch takes nothing away here. Both inflated the
+// count with an invisible item and deep-linked the admin to a switch that changes nothing.
+{
+  const caps = (src.match(/const XRAY_CAPS = \[([\s\S]*?)\];/) || [])[1] || "";
+  const keys = [...caps.matchAll(/key:\s*"([^"]+)"/g)].map((m) => m[1]);
+  check(
+    "tablet: the admin ribbon lists only waiter controls this panel actually has",
+    keys.length > 0 && keys.every((k) => k === "tablet_table_ops" || (src.match(new RegExp(k, "g")) || []).length >= 2),
+    `${TABLET}: XRAY_CAPS lists ${keys.join(", ")} — one of them is mentioned nowhere else in this\n    ` +
+    `file, so nothing on this panel changes when it is off and the ribbon is counting a control the\n    ` +
+    `admin cannot see.`,
+  );
+  for (const dead of ["tablet_invoice", "tablet_parcel"]) {
+    check(
+      `tablet: …and ${dead} specifically has not come back to it`,
+      !keys.includes(dead),
+      `${TABLET}: XRAY_CAPS lists ${dead} again. ${dead === "tablet_invoice" ? "A waiter can never issue an invoice" : "🥡 Parcel left this panel on 2026-08-03"},\n    ` +
+      `so the row sends the admin to a switch that changes nothing here.`,
+    );
+  }
+  check(
+    "tablet: the ribbon still lists the controls that ARE here",
+    ["tablet_take_orders", "tablet_discount", "tablet_mark_paid", "tablet_table_ops", "tablet_khata"].every((k) => keys.includes(k)),
+    `${TABLET}: XRAY_CAPS has lost a control the panel really has — the admin would see it tinted\n    ` +
+    `with nothing in the list explaining why.`,
+  );
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

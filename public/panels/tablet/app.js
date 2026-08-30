@@ -5336,8 +5336,13 @@ const XRAY_CAPS = [
   { key: "tablet_table_ops", label: "Table & KOT operations" },
   { key: "tablet_table_tags", label: "Mark a table's type" },
   { key: "tablet_khata", label: "Pay later (khata)" },
-  { key: "tablet_parcel", label: "Parcel" },
-];
+]; // …and NOT tablet_parcel. 🥡 Parcel left this panel on 2026-08-03 ("the tablet will not have
+// the parcel option, only quick order"), so there is no control here for that switch to take away:
+// the ribbon counts "controls off for waiters" and every one of them is a thing the admin can see
+// tinted on the screen in front of them. Listing it added an invisible item to the count and sent
+// the admin to a switch that changes nothing on this panel — the same fault tablet_invoice was
+// removed from this list for, one rule up. (T7 sweep #7 third pass, 2026-08-30. The PERMISSION is
+// untouched: /parcel and its cap are the manager's, and the Access row stays.)
 (function injectXrayStyles() {
   const css = `
   /* MARKED CYAN (off for whoever this view measures against — the waiter role's default, or
