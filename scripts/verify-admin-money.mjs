@@ -445,6 +445,38 @@ try {
       "the \"payments in <year>\" label reads the server's own stamp, not the device's clock");
   }
 
+  // ── C6(live) · the Dashboard's stat strip draws no divider that divides nothing ────────────
+  head("C6(live) · no stray hairline down the edge of the Dashboard's stat strip");
+  {
+    // `.cmd-strip` is a WRAPPING flexbox. A `border-right` on a cell is only right when that cell
+    // has a neighbour to its right, so at every width where the cells wrap, the last cell of each
+    // row drew a line down the card's own edge. Measured before the fix at 360x780 in both skins:
+    // 4 cells on 4 rows, 3 still drawing a right border. The separator is a 1px gap now, so it is
+    // correct in every wrap — which is why this is measured at four widths, not one (owner item 7).
+    for (const w of [360, 400, 600, 1280]) for (const skin of ["dark", "light"]) {
+      const c = await ctx(w, 820, w < 500 ? 3 : 1, skin);
+      const p = await c.newPage();
+      await p.goto(BASE + "/aevinite", { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const r = await p.evaluate(() => {
+        const s = document.querySelector(".cmd-strip");
+        if (!s) return { none: true };
+        const cs = [...s.querySelectorAll(".cell")];
+        return {
+          cells: cs.length,
+          rows: new Set(cs.map((e) => Math.round(e.getBoundingClientRect().top))).size,
+          borders: cs.filter((e) => parseFloat(getComputedStyle(e).borderRightWidth) > 0
+            || parseFloat(getComputedStyle(e).borderBottomWidth) > 0).length,
+          pad: getComputedStyle(s).padding,
+        };
+      });
+      if (r.none) { console.log(`⏭ ${w}px ${skin}: the stat strip did not render`); await p.close(); await c.close(); continue; }
+      ok(r.borders === 0 && r.pad === "0px",
+        `${w}px ${skin}: ${r.cells} cells on ${r.rows} row(s), ${r.borders} still drawing a border of their own (must be 0), strip padding ${r.pad} (must be 0px, or the gap paints a ring round the card)`);
+      await p.close(); await c.close();
+    }
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {
