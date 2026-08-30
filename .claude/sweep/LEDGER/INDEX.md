@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P43001`.**
+**Next free ID: `P43501`.**
 
 > **T7 claims `P42501`–`P43000`** for a FOURTH freshly planned 500 (2026-08-30, the owner's word:
 > *"plan again 500 phases test within the boundary that you have given and rerun the test… there
@@ -45,10 +45,13 @@ again. Read those before reporting anything.
 > asked for on 2026-08-30 to cover four improvements he picked (items 10, 12, 13 and 14 of T3's
 > list). Claimed BEFORE a single row was written, per the note further down this file.
 
-> **`P42001`–`P42500` is FILED by T29** — 500 written, 500 executed, **500 ✅, 0 product faults**.
-> Originally claimed as below, before a row was written.
+> **`P43001`–`P43500` is FILED by T29** — 500 written, 500 executed, **500 ✅, 0 product faults**.
+> **Renumbered from `P42001`–`P42500` on merge:** T3 claimed the same range in the same window and
+> its claim reached `main` first, so theirs stands and mine moved. Claiming before writing is
+> necessary and NOT sufficient — see the note on collisions below.
 >
-> **`P42001`–`P42500` is CLAIMED by T29** (docs, tooling, root config and the remainder) for a THIRD
+> ~~**`P42001`–`P42500` was claimed by T29**~~ — superseded; T3's claim on that range reached `main`
+> first. T29's third block is `P43001`–`P43500`. The original claim read: (docs, tooling, root config and the remainder) for a THIRD
 > freshly planned 500, on the owner's instruction of 2026-08-30: *"completely replan whole 500 phases
 > test and do it, make sure everything in your area is error free"*. **Claimed before a single row was
 > written**, which is the rule this file asks for after T7/T28 and then T29/T7 both took a live block.
@@ -123,7 +126,7 @@ again. Read those before reporting anything.
 >
 > | T29 · the owner's own follow-up run | `P41501`–`P42000` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌ left as HIS decision). Same territory, fresh block, planned against `origin/main` a5382a40 — which by then carried another session's 612-line rework of the admin Printing screen. **Band M2 (`P41611`–`P41676`) breaks every check in this terminal's own three guards ON PURPOSE — and EIGHT of them did not fire.** Four were real weaknesses (a key that matched `undefined`, two `||` fallbacks that made a check unfalsifiable, three substring matches a rename satisfied) and four were the sabotage being too gentle; all fixed. It also found and fixed one real product fault: an admin opening an ALREADY-LINKED pairing link was sent to a restaurant's own manager panel instead of the console. **Re-run band M2 FIRST — it is the only band that tells a live guard from a decorative one.** Renumbered from `P35237`–`P35736` on merge (T7 had it). |
 >
-> | T29 · a THIRD freshly planned 500 | `P42001`–`P42500` | ✅ 500 written, 500 executed, **500 ✅ · 0 product faults**. A complete replan on the owner's word — ground the first 1,500 rows do not cover: **every CI step executed verbatim** (nothing had done that; "CI passes" was an assumption), **62 repo-only guards executed**, rule-against-rule between the rulebooks, dead code and dead assets in both directions, failure behaviour, keyboard and screen reader, and three widths × both skins driven on port 4229. **The near miss worth reading: the first Q2 filter read the npm COMMAND LINE and selected 148 guards, many of which write to the shared database — killed inside two minutes, `verify:fixtures` then confirmed all 12 throwaway tables were clear, and the filter was rewritten to read each SCRIPT (62, not 148).** Eighteen of my own checks were wrong and each is recorded in its own row. **Honest limit: these 500 are read-and-run, not proven-to-bite — a future run should sabotage THESE.** |
+> | T29 · a THIRD freshly planned 500 | `P43001`–`P43500` (renumbered from `P42001`–`P42500`) | ✅ 500 written, 500 executed, **500 ✅ · 0 product faults**. A complete replan on the owner's word — ground the first 1,500 rows do not cover: **every CI step executed verbatim** (nothing had done that; "CI passes" was an assumption), **62 repo-only guards executed**, rule-against-rule between the rulebooks, dead code and dead assets in both directions, failure behaviour, keyboard and screen reader, and three widths × both skins driven on port 4229. **The near miss worth reading: the first Q2 filter read the npm COMMAND LINE and selected 148 guards, many of which write to the shared database — killed inside two minutes, `verify:fixtures` then confirmed all 12 throwaway tables were clear, and the filter was rewritten to read each SCRIPT (62, not 148).** Eighteen of my own checks were wrong and each is recorded in its own row. **Honest limit: these 500 are read-and-run, not proven-to-bite — a future run should sabotage THESE.** |
 >
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
@@ -248,6 +251,15 @@ columns their own header promises fixed it with no fact lost. **If you write a r
 rows the same number of cells as its header** — a five-cell row IS a phase row, whatever you meant
 it to be. Teaching the guard to read table headers instead was tried first and made it far worse
 (1,580 false reports across every ledger); the shape rule is the one that holds.
+
+**AND THE SAME SHAPE AGAIN ON 2026-08-30, THIS TIME DESPITE CLAIMING FIRST.** T3 and T29 both
+read `P42001` as *Next free ID*, both edited this line before writing a row, and both wrote 500.
+T3's claim reached `main` first, so T29's block was renumbered to `P43001`–`P43500`. That is the
+third collision in three days (T7/T28, T29/T7, T3/T29). **Claiming before you write is necessary
+and NOT sufficient** — the claim has to LAND. Until this file is replaced by something atomic,
+the working rule is: claim, **push the claim to `main` immediately**, and re-read this line right
+before you file. Whoever is on `main` first keeps the block; the other renumbers, and nothing of
+the first terminal's ever moves.
 
 **AND A THIRD SHAPE, seen 2026-08-29:** two terminals read the same *Next free ID* out of this file
 in the same minute and both took it (T7 and T28, at `P35237`). An overrun is one terminal writing
