@@ -38,6 +38,28 @@ const REF = ARG("--db", "wnsfcizclkbobwzcxqsf");
 const q = async (sql) => { const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, {
   method: "POST", headers: { Authorization: "Bearer " + TOK, "content-type": "application/json" }, body: JSON.stringify({ query: sql }) });
   const t = await r.text(); if (!r.ok) throw new Error(t.slice(0, 160)); return JSON.parse(t); };
+// ONE AT A TIME, LIKE THE PRINTING SWEEP (T28, 2026-08-30). This guard seats a four-table party and
+// then asserts, step by step, what the whole party's state should be. Two copies running at once —
+// which is what any whole-suite sweep does, and what four sweep terminals in one folder do all day —
+// re-seat each other's tables mid-walk, and the SECOND one reports the damage as a product fault:
+// "the party lost a member", "a table went backwards from preparing to received". I nearly filed
+// that as a serious floor bug. Refusing to start is the honest answer; exit 2 says "could not run",
+// never "found something".
+const LOCK = "/tmp/merged-floor.pid";
+try {
+  const alive = Number(fs.readFileSync(LOCK, "utf8"));
+  if (alive && alive !== process.pid) {
+    try { process.kill(alive, 0); }              // signal 0 = "does this process exist?"
+    catch { throw new Error("stale"); }
+    console.log(`\nAnother merged-floor run is already going (pid ${alive}). Two of them seat a party on the\nsame four tables and each reads the other's writes as the floor misbehaving. Waiting is right.`);
+    process.exit(2);
+  }
+} catch (e) { if (e && e.message && e.message.includes("already going")) throw e; }
+try { fs.writeFileSync(LOCK, String(process.pid)); } catch {}
+const dropLock = () => { try { if (Number(fs.readFileSync(LOCK, "utf8")) === process.pid) fs.unlinkSync(LOCK); } catch {} };
+process.on("exit", dropLock);
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { dropLock(); process.exit(130); });
+
 const PARTY = ["11", "12", "13", "14"], SOLO = ["21", "22", "23"];
 const list = (a) => a.map((x) => `'${x}'`).join(",");
 let fails = 0;
@@ -116,18 +138,34 @@ const det = await fr.locator('[data-floating-table="13"]').evaluate((el) => ({
   title: (el.querySelector(".sx-party-title")?.textContent || "").trim(), kots: (el.innerText.match(/KOT #\d+/g) || []).length,
   unmerge: el.querySelectorAll(".sx-unmerge-row [data-unmerge]").length, loading: !!el.querySelector(".sx-loading") }));
 check("joined table's detail: party title, all 4 tickets, unmerge at bottom", det.title === "T11 + T12 + T13 + T14" && det.kots === 4 && det.unmerge === 1 && !det.loading, JSON.stringify(det));
+// WAIT FOR THE STATE, DON'T SLEEP AT IT (T28, 2026-08-30). The mark-paid step below already learned
+// this on 2026-08-17 — "a guard that flaps teaches people to re-run it until it is green, which is
+// the opposite of what it is for" — but the two steps above it kept a flat 8-second sleep. Accept-all
+// and serve-all each send ONE request per order, four of them across four tables, and on a busy dev
+// box that is easily longer than 8s. So this guard reported "the party lost a member" and "a table
+// went backwards from preparing to received" on three separate runs, blaming a different table each
+// time, and every one of them was the clock. Same assertions, polled.
+const settleTo = async (want, seconds = 30) => {
+  for (let i = 0; i < seconds; i++) {
+    const s2 = await snap();
+    if (PARTY.every((t) => s2.by[t] === want)) return s2;
+    await p.waitForTimeout(1000);
+  }
+  return await snap();
+};
+
 // accept all
 const acc = fr.locator("[data-accept-all]").first();
 check("accept-all counts the whole party", (await acc.count()) > 0 && /\(4\)/.test(await acc.innerText()), await acc.innerText().catch(() => "missing"));
-await acc.click({ force: true }); await p.waitForTimeout(8000);
-st = await snap();
+await acc.click({ force: true });
+st = await settleTo("preparing/pending");
 check("accept all → all 4 preparing", PARTY.every((t) => st.by[t] === "preparing/pending"), JSON.stringify(st.by));
 check("accept all → the 3 separate tables untouched", SOLO.every((t) => st.by[t] === "received/pending"), SOLO.map((t) => t + ":" + st.by[t]).join(" "));
 // serve all
 const sa = fr.locator("[data-serve-all-orders]").first();
 check("serve-all offered", (await sa.count()) > 0);
-await sa.click({ force: true }); await p.waitForTimeout(8000);
-st = await snap();
+await sa.click({ force: true });
+st = await settleTo("served/pending");
 check("serve all → all 4 served", PARTY.every((t) => st.by[t] === "served/pending"), JSON.stringify(st.by));
 check("serve all → separate tables still received", SOLO.every((t) => st.by[t] === "received/pending"));
 // mark paid

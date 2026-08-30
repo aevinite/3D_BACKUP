@@ -240,11 +240,25 @@
          that is decided, because it already knows whether the sheet is satisfiable — and it runs on
          every keystroke AND after a lookup fills the name in, so the message clears from either. */
       let refusing = false;
+      let refusedBox = null;          // WHICH box the refusal named — "phone" or "name"
       function sync() {
         const p = norm(phoneEl.value);
         const ok = p.length === 10 && nameEl.value.trim().length > 0;
         const live = required ? ok : (p.length === 0 || p.length === 10);
-        if (refusing && live) { refusing = false; statusEl.style.color = ""; statusEl.textContent = ""; }
+        // A REFUSAL MUST STOP NAMING A BOX THAT IS NOW FILLED (T28, 2026-08-30).
+        // It used to hold until the whole sheet was satisfiable, which is one condition too many:
+        // tap Generate on an empty sheet, be told "Enter the full 10-digit mobile number", type all
+        // ten digits — and the line still said "Enter the full 10-digit mobile number", because the
+        // NAME was also missing. The waiter is being told to do a thing they have just done, and
+        // "New customer" / "✓ Returning customer" is held back behind it, so the lookup that DID run
+        // says nothing either. The original intent — "a refusal holds the line until the thing it
+        // named is actually supplied" — is exactly right; it was measured against the wrong thing.
+        // So it clears when ITS OWN box is supplied. The button still looks not-ready while anything
+        // is missing, which is what carries "not finished yet".
+        const supplied = refusedBox === "phone" ? p.length === 10
+          : refusedBox === "name" ? nameEl.value.trim().length > 0
+          : live;
+        if (refusing && (live || supplied)) { refusing = false; refusedBox = null; statusEl.style.color = ""; statusEl.textContent = ""; }
         setReady(live);
       }
       sync();   // paint the not-ready look before the waiter's first keystroke
@@ -403,7 +417,8 @@
         const shortPhone = phone.length > 0 && phone.length !== 10;
         if (required ? (phone.length !== 10 || !name) : shortPhone) {
           const miss = phone.length !== 10 ? phoneEl : nameEl;
-          refusing = true;   // holds until sync() sees the sheet satisfied — see `refusing` above
+          refusing = true;   // holds until sync() sees ITS OWN box supplied — see `refusing` above
+          refusedBox = phone.length !== 10 ? "phone" : "name";
           statusEl.style.color = "#dc2626";
           statusEl.textContent = phone.length !== 10 ? "Enter the full 10-digit mobile number" : "Enter the customer's name";
           miss.focus();

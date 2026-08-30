@@ -147,10 +147,22 @@ if (fr) {
       || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     if (!row) return { html: "", note: "no orders" };
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
-    let html = ""; const real = window.open;
+    // THE BILL NO LONGER REACHES A WINDOW SYNCHRONOUSLY (T28, 2026-08-30). Since the print queue
+    // landed (mig 341), printBill() asks the SERVER who owns the paper — `api("POST","/print/send")`
+    // — and only falls back to opening a window when nobody does, inside a .then(). This capture
+    // stubbed window.open and read `html` on the very next line, so it always read "" and every one
+    // of the eight checks below failed about an empty string. Eight red lines, one stale technique,
+    // and nothing wrong with the bill.
+    // Both doors are stubbed now — openBillWindow is the fallback the panel actually calls — and the
+    // round trip is waited for rather than assumed.
+    let html = "";
+    const realOpen = window.open, realWin = window.openBillWindow;
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
-    try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
-    finally { window.open = real; }
+    window.openBillWindow = (h) => { html = h || ""; };
+    try {
+      printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os);
+      for (let i = 0; i < 60 && !html; i++) await new Promise((r) => setTimeout(r, 100));
+    } finally { window.open = realOpen; window.openBillWindow = realWin; }
     return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone } };
   }, printTable);
   const h = printed.html || "";

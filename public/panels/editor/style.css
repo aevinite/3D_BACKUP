@@ -4651,7 +4651,13 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
    words, so the two screens do not teach a person two different things (owner, 2026-08-29). */
 .pw-confirm { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
   margin-top: 11px; padding: 12px 14px; border-radius: 12px;
-  border: 1px solid var(--gold, #d4a574); background: color-mix(in srgb, var(--gold, #d4a574) 8%, var(--card)); }
+  /* --panel-2, NOT --card (T28, 2026-08-30). `--card` is declared in app/globals.css, and this
+     stylesheet belongs to the panel INSIDE the iframe, which cannot see it. An undefined variable
+     inside color-mix() makes the whole function invalid, so the browser threw the background away
+     and this strip rendered as a gold outline over the page with no fill at all — in BOTH skins,
+     which is why nobody caught it by looking at one. --panel-2 is the raised surface every other
+     card in this panel already sits on, and it is declared for dark and light here. */
+  border: 1px solid var(--gold, #d4a574); background: color-mix(in srgb, var(--gold, #d4a574) 8%, var(--panel-2, #251f17)); }
 .pw-confirm .txt { flex: 1 1 300px; display: flex; flex-direction: column; gap: 4px; }
 .pw-confirm .txt b { font-size: 13.5px; color: var(--ink, var(--text)); }
 .pw-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
