@@ -33,7 +33,14 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P45301`.**
+**Next free ID: `P45801`.**
+
+> **`P45301`–`P45800` is CLAIMED by T9's THIRD 500** (shared panel plumbing, 2026-08-31) — the
+> owner's word: *"replan whole 500 phases test and execute the test on the back up side again ...
+> It should check every single bit of the thing within your boundaries"*. Claimed before a single
+> row was written **and PUSHED before a single row was written**, which is the half of the rule my
+> second 500 learned the hard way: I claimed `P42501`–`P43000` at 18:01 on 2026-08-30, T7 claimed it
+> at 20:08, and mine still had to move because it never reached `main` where anyone could see it.
 
 > **T7's FIFTH freshly planned 500 — `P44801`–`P45300` — is DONE: 500 written, 500 executed,
 > 500 ✅** (2026-08-30, the owner's word:
