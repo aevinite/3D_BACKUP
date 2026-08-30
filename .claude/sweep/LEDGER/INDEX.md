@@ -33,7 +33,11 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P42001`.**
+**Next free ID: `P42501`.**
+
+> **`P42001`–`P42500` is CLAIMED by T3** — its THIRD sweep-#7 block, for the 500 phases the owner
+> asked for on 2026-08-30 to cover four improvements he picked (items 10, 12, 13 and 14 of T3's
+> list). Claimed BEFORE a single row was written, per the note further down this file.
 
 > **`P41501`–`P42000` is TAKEN by T29** (docs, tooling, root config and the remainder) for its
 > follow-up 500, on the owner's instruction of 2026-08-30. It was first written at
