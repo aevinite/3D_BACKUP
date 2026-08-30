@@ -65,27 +65,31 @@ for (const [file, boxes] of BOXES) {
   let src = "";
   try { src = read(file); } catch { check(`${file} is present`, false, `${file} could not be read.`); continue; }
   for (const [id, why] of boxes) {
-    // The <input …> tag that carries this id or class, whichever way it is written.
-    const tag = (src.match(new RegExp(`<input[^>]*\\b(?:id|class)="[^"]*\\b${id}\\b[^"]*"[^>]*>`)) || [])[0]
-             || (src.match(new RegExp(`<input[^>]*\\b${id}\\b[^>]*>`)) || [])[0] || "";
+    // EVERY tag carrying this name, not the first one found. A CLASS can be on two screens at
+    // once: the split screen grew its own tip row on 2026-08-30, with the same three class names
+    // as the payment sheet's, and at step="1" — hours after the payment sheet's copy was fixed.
+    // Checking only the first match would have passed that file with the fault in it.
+    const tags = [...src.matchAll(new RegExp(`<input[^>]*\\b(?:id|class)="[^"]*\\b${id}\\b[^"]*"[^>]*>`, "g"))].map((m) => m[0]);
+    const panel = path.basename(path.dirname(file));
     check(
-      `${path.basename(path.dirname(file))}: ${id} exists`,
-      !!tag,
+      `${panel}: ${id} exists`,
+      tags.length > 0,
       `${file}: no <input> carries ${id}. If the box was renamed, rename it here too; if the\n    ` +
       `screen was deleted, delete its line from BOXES with the reason.`,
     );
-    if (!tag) continue;
-    const step = (tag.match(/step="([^"]*)"/) || [])[1];
+    if (!tags.length) continue;
+    const steps = tags.map((t) => (t.match(/step="([^"]*)"/) || [])[1]);
+    const bad = steps.filter((v) => v !== "0.01").length;
     check(
-      `${path.basename(path.dirname(file))}: ${id} steps in paise`,
-      step === "0.01",
-      `${file}: ${id} declares step="${step ?? "(none)"}" — ${why}.\n    ` +
+      `${panel}: ${id} steps in paise${tags.length > 1 ? ` (all ${tags.length} of them)` : ""}`,
+      bad === 0,
+      `${file}: ${bad} of ${tags.length} box(es) named ${id} declare step="${steps.find((v) => v !== "0.01") ?? "(none)"}" — ${why}.\n    ` +
       `A step of 1 makes the box refuse its own contents: ↑/↓ snaps 12.5 to 13 and a hand-typed\n    ` +
-      `153.29 is marked invalid. Use step="0.01". (owner, 2026-08-29.)`,
+      `153.29 is marked invalid. Use step="0.01" on EVERY one. (owner, 2026-08-29.)`,
     );
     check(
-      `${path.basename(path.dirname(file))}: ${id} still asks for the number keypad`,
-      /inputmode="decimal"/.test(tag) && /type="number"/.test(tag),
+      `${panel}: ${id} still asks for the number keypad`,
+      tags.every((t) => /inputmode="decimal"/.test(t) && /type="number"/.test(t)),
       `${file}: ${id} lost type="number" / inputmode="decimal" — a person on a tablet gets the\n    ` +
       `letter keyboard for a money field.`,
     );

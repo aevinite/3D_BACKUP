@@ -2879,16 +2879,20 @@ function renderSplitBill(t, opts = {}) {
       <div style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Change any one of the three — the other two follow. It is not divided between the parts.</div>
       <div style="display:flex;align-items:flex-end;gap:8px;margin:0 0 8px">
         <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip %</span>
-          <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-pct" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+          <!-- step="0.01" here TOO. The split screen grew its own tip row on 2026-08-30 (PR #1187), with
+               the same three class names and the same step="1" the payment sheet's copy had just been
+               fixed for — the fault came back in a new place on the same day. verify:money-boxes now
+               checks EVERY box carrying these names, not the first one it finds. -->
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-pct" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
         <span style="font-weight:800;color:var(--muted);padding-bottom:11px">=</span>
         <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip amount (₹)</span>
-          <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-amt" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-amt" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${[0, 5, 10, 15].map((k) => `<button type="button" class="btn pay-tip-pick" data-tip-pct="${k}" style="min-height:44px;padding:0 14px;font-weight:700">${k ? k + "%" : "None"}</button>`).join("")}</div>
       <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--line)">
         <b style="font-size:13.5px">They paid in all</b>
         <span style="display:inline-flex;align-items:center;gap:2px;color:var(--gold-strong);font-weight:800;font-size:15px">₹
-          <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-paid" aria-label="Total the customer paid, tip included" style="width:8ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none"></span>
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-paid" aria-label="Total the customer paid, tip included" style="width:8ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none"></span>
       </label>
       <div class="pay-tip-msg" role="status" style="display:none;font-size:12px;font-weight:600;color:#f59e0b;margin:8px 0 0"></div>
     </div>
