@@ -106,7 +106,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       // What this machine is expected to print, so a helper can say so in its own log and a person
       // reading that log can tell "not my job" from "something is broken".
       mine: PRINT_KINDS.filter((k) => routes[k].agent === agent.id),
-      backupFor: PRINT_KINDS.filter((k) => routes[k].backupAgent === agent.id && routes[k].agent !== agent.id),
+      // `backupFor` is gone: a helper is never a second machine's fallback (owner, 2026-08-30).
+      backupFor: [] as string[],
       // Two machines sharing one code: no paper is duplicated (the claim prevents it) but half the
       // tickets would come out in the wrong room, so the helper is told and the admin screen shows
       // it. Copying the file to a second computer is the way this happens.

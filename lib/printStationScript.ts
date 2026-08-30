@@ -149,6 +149,25 @@ ${CHROME_FLAGS.map((f) => `  ${f} \\`).join("\n")}
   if [ -n "$WASFRONT" ] && [ "$WASFRONT" != "Google Chrome" ]; then
     osascript -e "tell application \\"$WASFRONT\\" to activate" >/dev/null 2>&1
   fi
+
+  # ── AND IT STAYS OUT OF THE WAY ────────────────────────────────────────────────────────────
+  # Printing can bring a hidden app back into view on macOS — measured on 2026-08-30, the station
+  # was visible again after a ticket came out. Hiding it once at startup is therefore not enough:
+  # the whole promise is a window that is never in anybody's way, and a window that reappears after
+  # the first order has broken that promise by the second one.
+  #
+  # NEVER WHILE SOMEBODY IS USING IT. It only re-hides when the station is visible AND is NOT the
+  # app in front — so the person signing in for the first time, or looking at it deliberately, is
+  # left alone. One check a minute; it costs nothing and it never fights the human.
+  while true; do
+    sleep 60
+    CPID="$(pgrep -f "user-data-dir=$PROFILE" 2>/dev/null | head -1)"
+    [ -z "$CPID" ] && continue
+    FRONT="$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null)"
+    [ "$FRONT" = "Google Chrome" ] && continue
+    SEEN="$(osascript -e "tell application \\"System Events\\" to get visible of (first process whose unix id is $CPID)" 2>/dev/null)"
+    [ "$SEEN" = "true" ] && osascript -e "tell application \\"System Events\\" to set visible of (first process whose unix id is $CPID) to false" >/dev/null 2>&1
+  done
 ) &
 
 echo "    Chrome is running out of the way. It will print without ever coming to the front." | tee -a "$LOG"

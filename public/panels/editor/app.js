@@ -6781,6 +6781,31 @@ function syncGuestBell() {
       const n = Number((tile.counts || {}).nw) || 1;
       rows.push({ kind: "order", table: t, text: n > 1 ? n + " waiting to be accepted" : "waiting to be accepted", at: 0, key: "order:" + t + ":" + n });
     }
+    // ── PRINTING (owner, 2026-08-30) ────────────────────────────────────────────────────────
+    // Two strips used to sit across the top of the floor, above the table grid, on every manager
+    // screen: where the paper comes out, and any printer problem. His words: "I don't want it there
+    // — it should be in the notification thing that we have built… why is it taking the space of
+    // the table boxes." They are notifications, so they are notifications.
+    //
+    // A PROBLEM comes first and carries its own words; the STATUS line is only worth saying when
+    // this screen is the one printing, or when a computer owns the paper and somebody wondering
+    // where their slip went should be told it is not coming out here.
+    for (const e of ((state.summary.printer || {}).events || [])) {
+      if (!e || e.status === "resolved") continue;
+      rows.push({ kind: "printer", key: "printer-problem:" + e.id,
+        title: e.printer ? `${e.printer} needs looking at` : "A printer needs looking at",
+        text: e.note || e.kind || "", at: at(e.created_at) });
+    }
+    const pt = printTargetSays;
+    if (pt && pt.helper && pt.helper.owned) {
+      rows.push({ kind: "printer", key: "printer-where:helper:" + pt.helper.agent,
+        title: `Kitchen tickets print on ${pt.helper.printer}`,
+        text: pt.helper.connected ? `from ${pt.helper.agent}` : `${pt.helper.agent} is asleep — tickets are waiting`, at: 0 });
+    } else if (pt && pt.station && pt.station.mine) {
+      rows.push({ kind: "printer", key: "printer-where:me",
+        title: "This screen prints the kitchen tickets", text: "", at: 0 });
+    }
+
     window.LFH_BELL.sync({ menuOn: true, rows, onOpen: (table) => { try { openFloatingTable(table); } catch (e) {} } });
   } catch (e) { /* the bell is a readout; it must never be able to stop the panel rendering */ }
 }
@@ -10314,7 +10339,7 @@ function floorHtml() {
   // sideways any more — owner, 2026-08-15: "there shouldn't be horizontal scroll anywhere" — so the
   // chip, its wrapper and syncFloorMore()'s measuring pass went with the scroll they described.)
   const gridBlock = gridHtml;
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${printStationStripHtml()}${planNote}${gridBlock}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${planNote}${gridBlock}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -13652,6 +13677,9 @@ let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it
 // So: no question, no buttons, no per-device opt-in. Three facts and silence otherwise. The station
 // is claimed automatically by the named screen (see managerPrintPass), because the decision was
 // already made and a screen that waits to be tapped is a printer that never prints.
+// NO LONGER RENDERED ANYWHERE (owner, 2026-08-30). Kept as the one place that knows how to word
+// "where does the paper come out", now read by syncGuestBell() into a notification row instead of
+// painted as a band across the floor. Do not put it back above the table grid.
 function printStationStripHtml() {
   // A COMPUTER OWNS THE PAPER (mig 341) — nothing for a screen to do, but a manager who used to see
   // "printing here" and now sees nothing would reasonably think printing had broken.
