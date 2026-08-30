@@ -13,7 +13,7 @@
 //   node scripts/verify-printing-sweep.mjs [--base http://localhost:4100] [--from N] [--to N]
 //
 // Needs: .env.local · the app running on --base · (for the print phases) the three ZZ-Virt-* CUPS
-// queues and /tmp/virtual-prints/capture.mjs listening. Without those it SAYS so and skips them
+// queues and scripts/sweep/virtual-printers.mjs listening. Without those it SAYS so and skips them
 // rather than passing quietly — a skipped check that reads as green is worse than a red one.
 import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
@@ -179,7 +179,23 @@ const takeUntil = async (jobId, max = 15) => {
 // ── the virtual print shop ────────────────────────────────────────────────────────────────────
 const VIRT = { kitchen: "ZZ-Virt-Kitchen", counter: "ZZ-Virt-Counter", banquet: "ZZ-Virt-Banquet" };
 const OUT = "/tmp/virtual-prints/out";
-const haveVirtual = () => { try { return execFileSync("lpstat", ["-p"], { encoding: "utf8" }).includes("ZZ-Virt-Kitchen") && existsSync("/tmp/virtual-prints/capture.mjs"); } catch { return false; } };
+// ASK THE PORTS, NOT A FILE (2026-08-31). This used to require /tmp/virtual-prints/capture.mjs to
+// exist. /tmp is swept: the file went, the listener kept running and printing perfectly, and this
+// gate answered "no virtual printers" and skipped SIXTEEN paper-geometry phases — the ones that
+// measure whether a slip is chopped, sideways or zero-length. A skip has to mean the coverage is
+// genuinely unavailable. If it can mean "the harness lost track of itself", every green run is
+// worth less than it looks. The listener now lives in scripts/sweep/virtual-printers.mjs; what is
+// asked here is the only thing the sweep actually depends on: is something accepting on the ports.
+const portOpen = (port) => {
+  try { execFileSync("bash", ["-c", `exec 3<>/dev/tcp/127.0.0.1/${port}`], { stdio: "ignore", timeout: 2000 }); return true; }
+  catch { return false; }
+};
+const haveVirtual = () => {
+  try {
+    if (!execFileSync("lpstat", ["-p"], { encoding: "utf8" }).includes("ZZ-Virt-Kitchen")) return false;
+    return [9101, 9102, 9103].every(portOpen);
+  } catch { return false; }
+};
 const VIRTUAL = haveVirtual();
 const latestMeasure = (which) => {
   const files = readdirSync(OUT).filter((f) => f.endsWith(".json") && f.includes("-" + which));

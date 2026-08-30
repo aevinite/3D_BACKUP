@@ -44,8 +44,16 @@ console.log("\nprint queue — a ticket is a row, and any screen can be the prin
 const mig = read("supabase/migrations/335_a_kitchen_ticket_queues_itself.sql");
 const kroute = read("app/api/kitchen/[...path]/route.ts");
 const eroute = read("app/api/editor/[...path]/route.ts");
-const kpanel = read("public/panels/kitchen/app.js");
-const epanel = read("public/panels/editor/app.js");
+const kpanel = codeOnly(read("public/panels/kitchen/app.js"));
+// ⚠️ THE PANEL SOURCES ARE READ COMMENT-STRIPPED, AND THAT IS THE POINT (2026-08-31).
+// Two checks in this file were passing on their own obituaries. They required `data-printhere-set`,
+// `printStationStripHtml` and `data-kstation` — a per-device question, a band across the floor and
+// a take-over button, all three deliberately retired. The code went; the comments EXPLAINING that it
+// went stayed; the regexes went on matching, and the file reported three protections that no longer
+// existed. A guard that reads comments is testing the story, not the program.
+// So: judge these two files by their code. If a check ever genuinely needs to assert that a comment
+// is present (an obituary that must not be dropped), read the raw file explicitly and say why.
+const epanel = codeOnly(read("public/panels/editor/app.js"));
 const rt = read("public/panels/realtime.js");
 const lib = read("lib/printQueue.ts");
 
@@ -222,9 +230,19 @@ check(/async function counterPrintTarget/.test(eroute) && (eroute.match(/counter
 check(!/BACKUP_PRINTER_MS/.test(codeOnly(eroute)),
   "…and no backup window is timed anywhere, because nothing is waiting its turn",
   "a backup window is back in the editor route");
-check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
-  "the manager panel ASKS the device once, on the floor screen (a phone must never claim a ticket)",
-  "the per-device question is gone — the manager panel is opened on phones, and a phone that claims a ticket loses it");
+// ⚠️ THIS CHECK WAS PASSING ON ITS OWN OBITUARY (2026-08-31). It required the literal strings
+// `data-printhere-set` and `printStationStripHtml` — the per-device "should this screen print?"
+// question and the band that carried it. Both were retired: the question was a second answer to
+// something the admin had already decided, and the band came off the floor. But it read `epanel`
+// RAW, so once the code was gone it went on matching the COMMENTS describing their removal, and
+// reported a protection that no longer existed. Comment-stripped now, and pointed at the rule.
+//
+// THE RULE, which never changed: a phone must never claim the printing job. The mechanism did —
+// the admin names a PERSON, and that person may well open their phone — so what is asserted is the
+// live gate: no auto-claim unless the pointer is fine (a real computer), and no per-device question.
+check(!/data-printhere-set/.test(epanel),
+  "…and the retired per-device question has not come back as a second way to answer it",
+  "the per-device print question is back — the admin's choice and the browser's now disagree");
 // ASSERT THE RULE, NOT THE WORDING (this file's own header). This used to require the literal
 // `if (ans === "off") return;` as the FIRST thing managerPrintPass did. That line legitimately
 // changed shape in mig 341: a device that has said "never print here" must still be able to SAY
@@ -371,9 +389,18 @@ check(/export async function mayClaim/.test(lib) && (kroute.match(/mayClaim\(/g)
 check(/print-station" && b === "take"/.test(kroute) && /print-station" && b === "take"/.test(eroute),
   "both the kitchen and the counter screen can TAKE printing in one tap",
   "a panel lost its take-over endpoint, so a person standing at the right printer cannot move printing to it");
-check(/data-station-set/.test(epanel) && /data-kstation/.test(kpanel),
-  "…and both panels offer that tap on screen",
-  "the take-over button is missing from a panel");
+// INVERTED, NOT SATISFIED (2026-08-31). This required a take-over button on BOTH panels
+// (`data-station-set`, `data-kstation`). Both were removed on purpose: a button that says "print
+// here instead" is a second answer to a question the admin has already answered on the Printing
+// board, and when the two disagreed the paper came out wherever the last tap was. Moving printing
+// is now ONE act — naming a person — and the panels obey it. The check had been passing on the
+// comments that recorded the removal, which is why nobody noticed the rule had been reversed.
+check(!/data-station-set/.test(epanel) && !/data-kstation/.test(kpanel),
+  "neither panel offers a competing take-over tap — printing moves in ONE place",
+  "a take-over button is back on a panel: the admin's choice and a tap on the floor can now disagree");
+check(/pickPerson/.test(read("app/aevinite/printing/page.tsx")),
+  "…and that one place is the Printing board, where a person is named",
+  "the Printing board lost its person picker — there is now no way at all to move printing");
 check(/onlyWhen: "printing"/.test(epanel) && /x\.onlyWhen !== "printing" \|\| printingOn/.test(epanel),
   "the manager's Printing row is ABSENT when automatic printing is off (not greyed)",
   "the Printing row shows when printing is off — the owner's rule is that no option appears at all");
