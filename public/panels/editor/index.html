@@ -138,7 +138,7 @@
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
        After backstack.js, because its sheet registers a back layer. -->
-  <script src="/panels/guestbell.js?v=020a7eca"></script>
+  <script src="/panels/guestbell.js?v=7f018bab"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -172,6 +172,6 @@
   <script src="/panels/auditsort.js?v=1da861b5"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=93f0425e"></script>
+  <script src="/panels/editor/app.js?v=e03d685e"></script>
 </body>
 </html>

@@ -26,10 +26,10 @@ type Agent = {
   id: string; name: string; printers: Printer[]; last_seen_at: string | null;
   connected: boolean; secondsAgo: number | null; fingerprintClash: boolean;
 };
-type Route = { agent: string | null; printer: string | null; backupAgent?: string | null; backupPrinter?: string | null; paper?: Paper;
+type Route = { agent: string | null; printer: string | null; paper?: Paper;
   via?: "computer" | "screen" | "off"; panel?: string | null; person?: string | null; personName?: string | null; device?: string | null;
   /** The second screen allowed to take what the first leaves sitting — the retired "both" (mig 369). */
-  backupPanel?: string | null };
+};
 type Person = { id: string; name: string; role: string; panels: string[] };
 type Device = { device_id: string; label?: string | null; panel?: string | null; last_seen_at?: string | null };
 type Job = { id: string; kind: string; status: string; printer: string | null; printed_by: string | null; attempts: number; error: string | null; created_at: string; done_at: string | null };
@@ -271,8 +271,8 @@ const PANEL_GROUPS: [ string, string ][] = [
     const r = draft[kind] || {};
     const d = await post("routes", { routes: { [kind]: {
       via: r.via || (r.agent ? "computer" : undefined),
-      agent: r.agent, printer: r.printer, backupAgent: r.backupAgent, backupPrinter: r.backupPrinter, paper: r.paper,
-      panel: r.panel, person: r.person, device: r.device, backupPanel: r.backupPanel,
+      agent: r.agent, printer: r.printer, paper: r.paper,
+      panel: r.panel, person: r.person, device: r.device,
     } } });
     if (d) { toast(`${KIND_LABEL[kind] || kind} saved.`, "ok"); void load(); }
   };
@@ -464,7 +464,7 @@ const PANEL_GROUPS: [ string, string ][] = [
               selected — only the setting for that option will be shown."
 
               WHAT IT WAS. Three papers × (two shape buttons + a computer + a printer + a paper size
-              + a screen + a person + a device + two backup pickers) and FIVE Save buttons. About
+              + a screen + a person + a device) and FIVE Save buttons. About
               twenty controls to answer one question, and every one of them on screen at once whether
               it applied or not.
 

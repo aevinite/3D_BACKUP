@@ -267,8 +267,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     const routes = await readRoutes(rid);
     const patch: Record<string, unknown> = {};
     for (const k of PRINT_KINDS) {
+      // Removing a computer clears the lines it owned. There is no second branch for "it was the
+      // BACKUP of this line" any more — there is no backup (owner, 2026-08-30).
       if (routes[k].agent === row.id) patch[k] = null;
-      else if (routes[k].backupAgent === row.id) patch[k] = { agent: routes[k].agent, printer: routes[k].printer };
     }
     if (Object.keys(patch).length) await writeRoutes(rid, patch);
     await logAction("admin", "print_helper_removed", { restaurant_id: rid, detail: `“${row.name}” can no longer print` });

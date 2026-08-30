@@ -254,6 +254,43 @@ export async function finishKotJob(
     attempts, claimed_at: null,
     error: String(error || "print failed").slice(0, 300),
   }).eq("id", id).eq("restaurant_id", rid);
+
+  // ── A TICKET THAT CANNOT PRINT TELLS SOMEBODY (owner, 2026-08-30) ──────────────────────────
+  // This is what REPLACED the backup printer. His words: "we don't even need the backup printer —
+  // if anything fails it should show me or the person, manager, owner, everyone should get a
+  // notification that this has failed, and if you want to reprint it."
+  //
+  // A silent second attempt on another machine was the old answer, and it was the wrong shape: paper
+  // in a room nobody is standing in, and a restaurant that never learns its printer is broken. So
+  // when a ticket gives up after five tries, a printer problem is FILED against the printer that
+  // failed — which is what puts it on the manager's floor strip and in the kitchen's 🖨 sheet, both
+  // of which already read this table — and the owner gets a ping.
+  //
+  // Only on the FIFTH failure, not on every retry: four quiet retries are the queue doing its job,
+  // and a notification per attempt is how an alert becomes something people switch off.
+  if (parked) {
+    try {
+      await sb.from("printer_events").insert({
+        restaurant_id: rid,
+        // `auto_fail` is the kind that already means this (mig 269's CHECK allows exactly five).
+        // Inventing "print_failed" would have been refused by the constraint at run time, and the
+        // insert is in a try/catch — so the report would have vanished silently.
+        kind: "auto_fail",
+        printer: printer ?? null,
+        reported_by: "the printing queue",
+        note: ord?.kot_no
+          ? `Kitchen ticket #${ord.kot_no}${ord.table_number ? ` · ${ord.table_number}` : ""} gave up after ${attempts} tries`
+          : `A ticket gave up after ${attempts} tries`,
+      });
+    } catch { /* the ticket is already parked and visible; a missing row must not break the report */ }
+    try {
+      const { sendOwnerAlert } = await import("@/lib/alerts");
+      await sendOwnerAlert(
+        `🖨 A kitchen ticket could not be printed${printer ? ` on ${printer}` : ""} — it gave up after ${attempts} tries and is waiting to be reprinted.`,
+        `print-failed:${rid}:${printer || "any"}`,
+      );
+    } catch { /* an alert is best-effort and must never break a print report */ }
+  }
   return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts, parked, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
 }
 

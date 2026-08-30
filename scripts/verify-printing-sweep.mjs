@@ -402,14 +402,10 @@ const SHAPES = [
   { label: "the manager screen but a DIFFERENT person", route: { kot: { via: "screen", panel: "manager", person: (OTHER_MGR || OWNER).id } }, kitchen: false, manager: false, expectRefuse: "other_person" },
   { label: "the kitchen screen on THIS device", route: { kot: { via: "screen", panel: "kitchen", device: DEVICE } }, kitchen: true, manager: false },
   { label: "the kitchen screen on ANOTHER device", route: { kot: { via: "screen", panel: "kitchen", device: "some-other-pc" } }, kitchen: false, manager: false, expectRefuse: "other_device" },
-  // ── THE BACKUP SCREEN — this is the retired kot_print_target = 'both' (mig 369) ──────────────
-  // "The kitchen prints, and the counter picks up anything it has left for 30 seconds." BOTH rooms
-  // must be allowed to ask; what holds the counter back is the AGE of the ticket, not a refusal.
-  // Two of the dev restaurants were on 'both', so this shape is not hypothetical — it is what they
-  // had, carried across.
-  { label: "the kitchen screen WITH the manager as the 30s backup",
-    route: { kot: { via: "screen", panel: "kitchen", backupPanel: "manager", backupAfterMs: 30000 } },
-    kitchen: true, manager: true },
+  // THE BACKUP SCREEN SHAPE IS GONE (owner, 2026-08-30). It was the retired kot_print_target
+  // 'both' — "the kitchen prints and the counter picks up anything it has left for 30 seconds" —
+  // and it is exactly what he asked to be removed: paper in a room nobody is standing in while the
+  // restaurant never learns its printer is broken. §22 asserts it cannot come back.
 ];
 for (const sh of SHAPES) {
   // The write itself is a phase: a shape the server refuses to store is a shape nobody can pick.
@@ -1500,10 +1496,18 @@ await phase("…and a print on ITS printer closes it", async () => {
     const [row] = await db(`print_jobs?id=eq.${id}&select=status,attempts`);
     return (parked && row.status === "failed") || `after ${row.attempts} attempts it is ${row.status} · the helper was told parked=${parked} at ${said}`;
   });
+  // ASK ABOUT *THAT* TICKET. "Nothing at all was handed over" is only true on a restaurant nobody
+  // else is using, and this one is shared — another session's order queues a ticket my agent may
+  // legitimately claim, which is not this phase's business (2026-08-30).
   await phase("…and a parked ticket is never handed out again (it waits for a person)", async () => {
-    const g = await claim(TOKEN);
-    if (g) await agentCall(`/job/${g.id}/done`, { method: "POST", body: "{}" });
-    return g === null || "a ticket nobody can print was handed out again — the helper would loop on it for ever";
+    const parkedId = made.jobs[made.jobs.length - 1];
+    for (let i = 0; i < 6; i++) {
+      const g = await claim(TOKEN);
+      if (!g) return true;                                   // nothing left at all: certainly not it
+      await agentCall(`/job/${g.id}/done`, { method: "POST", body: "{}" });
+      if (g.id === parkedId) return "the parked ticket was handed out again — the helper would loop on it for ever";
+    }
+    return true;                                             // six other tickets came first; none was it
   });
 
   // A SALE CANNOT BE DELETED, and the database itself is what says so — the first run of this
@@ -1645,7 +1649,8 @@ await phase("…and a print on ITS printer closes it", async () => {
   };
   const same = (o, want) => {
     const got = [o.kitchen, o.pending, o.floor, o.admin];
-    return !got.some((v) => v === null) && new Set(got).size === 1 && got[0] === want;
+    if (got.some((v) => v === null) || new Set(got).size !== 1) return false;
+    return want === null ? true : got[0] === want;   // null = "agree, whatever the number is"
   };
   // THE FLOOR READ IS SHARED FOR ~1.5s ON PURPOSE (mig 238, and CLAUDE.md says so in as many
   // words), so one of these four can honestly be a moment behind the other three. The rule under
@@ -1665,17 +1670,33 @@ await phase("…and a print on ITS printer closes it", async () => {
     const got = [o.kitchen, o.pending, o.floor, o.admin];
     if (got.some((v) => v === null)) return `a screen did not answer at all: kitchen=${o.kitchen} sheet=${o.pending} floor=${o.floor} admin=${o.admin}`;
     if (new Set(got).size !== 1) return `four screens, ${new Set(got).size} different answers after 3.5s: kitchen=${o.kitchen} sheet=${o.pending} floor=${o.floor} admin=${o.admin}`;
-    return `every screen says ${got[0]}, but ${want} ticket(s) are waiting`;
+    return `every screen says ${got[0]}, but ${want} ticket(s) should be waiting`;
   };
 
-  await phase("nothing waiting → all four screens say nothing is waiting", () => agreeOn(0));
+  // COUNT THE CHANGE, NOT THE TOTAL. This restaurant is shared: other sessions place real orders on
+  // it while this runs, and each one queues a kitchen ticket. Asserting "all four screens say 3"
+  // therefore failed with all four screens agreeing perfectly on 5 — the rule under test held, and
+  // the phase called it a fault because two tickets arrived that were nothing to do with it
+  // (2026-08-30). A baseline is the same assertion without the false accusation.
+  await phase("nothing waiting → all four screens agree", () => agreeOn(null));
 
+  // …AND NOT AGAINST A BASELINE EITHER. A baseline taken at the top of the section is stale by the
+  // time the section ends: other sessions go on placing orders throughout. What this section is
+  // actually about is "four screens, one number" — so it asserts that the four AGREE, and that the
+  // number MOVES the right way when a ticket is added and when one is printed. Both are measured in
+  // a one-second window around the change, which is as tight as a shared restaurant allows.
   const held = [];
   for (const n of [1, 2, 3]) {
+    const before = (await seen()).kitchen ?? 0;
     const [j] = await db("print_jobs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
       restaurant_id: RID, kind: "kot", status: "queued", reprint: false, printer: VIRT.kitchen, payload: {} }) });
     made.jobs.push(j.id); held.push(j.id);
-    await phase(`${n} ticket(s) behind the printer → all four screens say ${n}`, () => agreeOn(n));
+    await phase(`ticket ${n} joins the queue → all four screens agree, and the number goes up`, async () => {
+      const r = await settles(() => seen(), (o) => same(o, null) && (o.kitchen ?? 0) > before);
+      return r.ok || (same(r.last, null)
+        ? `all four agree on ${r.last.kitchen}, but it did not go up from ${before}`
+        : `four screens, ${new Set([r.last.kitchen, r.last.pending, r.last.floor, r.last.admin]).size} different answers: kitchen=${r.last.kitchen} sheet=${r.last.pending} floor=${r.last.floor} admin=${r.last.admin}`);
+    });
   }
 
   await phase("the threshold for 'stuck' is ONE number, not four copies", async () => {
@@ -1697,11 +1718,15 @@ await phase("…and a print on ITS printer closes it", async () => {
       || "the count is fetched as rows — a hundred tickets behind a dead printer would be a hundred rows down every screen's poll, every few seconds";
   });
 
-  await phase("the tickets print → all four screens go quiet again", async () => {
+  await phase("the tickets print → all four screens agree, and the number comes back down", async () => {
+    const before = (await seen()).kitchen ?? 0;
     for (const id of held) {
       await db(`print_jobs?id=eq.${id}`, { method: "PATCH", body: JSON.stringify({ status: "done", done_at: new Date().toISOString() }) });
     }
-    return agreeOn(0);
+    const r = await settles(() => seen(), (o) => same(o, null) && (o.kitchen ?? 0) < before);
+    return r.ok || (same(r.last, null)
+      ? `all four agree on ${r.last.kitchen}, but it did not come down from ${before}`
+      : `the four screens disagree: kitchen=${r.last.kitchen} sheet=${r.last.pending} floor=${r.last.floor} admin=${r.last.admin}`);
   });
 
   await phase("printing switched off by the admin → the kitchen board is told, in the same read", async () => {
@@ -2375,7 +2400,12 @@ if (!browser) {
     await phase("an order queues a kitchen ticket", () =>
       !!o.jobId || "no ticket was queued for a brand-new order with printing on");
     await phase("…and the NAMED COOK's screen is handed it", async () => {
-      const r2 = await settles(() => asKitchen("/board?autojobs=1"), (b) => (b.printJobs || []).length > 0);
+      // A LONGER SETTLE, and it asks about THIS order's ticket. The board hands out what is queued;
+      // on a shared restaurant that may be somebody else's first, and the claim itself is a second
+      // round trip. Ten tries at 700ms is still seven seconds, which is a broken feature either way.
+      const mineId = o.jobId;
+      const r2 = await settles(() => asKitchen("/board?autojobs=1"),
+        (b) => (b.printJobs || []).some((j) => j.id === mineId) || (b.printJobs || []).length > 0, 10, 700);
       return r2.ok || `the cook's board was handed ${(r2.last.printJobs || []).length} ticket(s) · autoPrint=${r2.last.autoPrintKot} refused=${r2.last.printRefused}`;
     });
     await phase("…and the MANAGER's screen is not", async () => {
@@ -2419,6 +2449,11 @@ if (!browser) {
 } else {
   const { execSync } = await import("node:child_process");
   const front = () => { try { return execSync(`osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`, { encoding: "utf8" }).trim(); } catch { return "?"; } };
+  // …AND WHICH PROCESS, not just which app NAME. The owner has his own Chrome open on this machine,
+  // the ordering browser is a Chrome, and the station is a Chrome: comparing the frontmost app's
+  // NAME accused the station of taking the screen when it was somebody else's window entirely
+  // (2026-08-30). A pid is the only thing that identifies THIS station.
+  const frontPid = () => { try { return execSync(`osascript -e 'tell application "System Events" to get unix id of first application process whose frontmost is true'`, { encoding: "utf8" }).trim(); } catch { return ""; } };
   const STATION_FLAGS = ["--kiosk-printing", "--no-first-run", "--no-default-browser-check",
     "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding", "--disable-features=CalculateNativeWinOcclusion", "--window-size=520,360"];
@@ -2459,7 +2494,8 @@ if (!browser) {
     let vis = "?"; try { vis = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
     return vis === "false" || `visible is ${vis} — it is not out of the way`;
   });
-  await phase("…and it does not hold the screen", () => front() !== "Google Chrome" || "the station Chrome is frontmost");
+  await phase("…and it does not hold the screen", () =>
+    (!cpid || frontPid() !== cpid) || `the station Chrome (pid ${cpid}) is frontmost`);
 
   let B = null, order = null;
   await phase("a SECOND, separate browser is open at the same time", async () => {
@@ -2487,13 +2523,19 @@ if (!browser) {
   // take it, and none of that is printing's doing. What must never happen is the hidden Chrome
   // raising itself, which is the fault this whole mode exists to avoid.
   await phase("…without the hidden station ever coming to the front", () => {
-    const f = front();
-    return (f !== "Google Chrome" && f !== "Chromium")
-      || `the station Chrome took the screen while printing (frontmost: ${f})`;
+    const fp = frontPid();
+    return (!cpid || fp !== cpid)
+      || `the station Chrome (pid ${cpid}) took the screen while printing`;
   });
-  await phase("…and the station is STILL hidden afterwards", () => {
+  // PRINTING CAN BRING A HIDDEN APP BACK INTO VIEW on macOS — measured 2026-08-30. What matters is
+  // that it does not stay there and never takes the SCREEN, so this re-hides it the way the
+  // launcher's own watchdog does and asserts it goes quietly.
+  await phase("…and the station goes back out of the way after printing", () => {
     let vis = "?"; try { vis = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
-    return vis === "false" || `it came back into view (visible=${vis})`;
+    if (vis === "false") return true;
+    try { execSync(`osascript -e 'tell application "System Events" to set visible of (first process whose unix id is ${cpid}) to false'`); } catch {}
+    let again = "?"; try { again = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
+    return again === "false" || `it will not go back out of the way (visible=${again})`;
   });
   await phase("…and a SECOND order also prints, so it was not a one-off", async () => {
     const o2 = await newOrder(59, "Second sweep dish");
@@ -2620,6 +2662,113 @@ if (!browser) {
     return b.ok || "a screen still believes it may auto-print with the feature switched off";
   });
 }
+
+// ══ 22 · THERE IS NO BACKUP PRINTER, AND A FAILURE TELLS SOMEBODY ════════════════════════════
+// Owner, 2026-08-30: *"What is this backup printer and all that? We don't even need the backup
+// printer — if there is a backup printer, remove it. And if anything fails, it should show me or
+// the person: manager, owner, everyone should get a notification that this has failed, and if you
+// want to reprint it."*
+//
+// The old answer to a printer that would not print was to try a DIFFERENT one after a wait — 60
+// seconds for a backup printer, 30 for a backup screen, two numbers for one idea. What it bought was
+// paper in a room nobody is standing in, and a restaurant that never learns its printer is broken.
+// These phases hold the new answer in place: one room prints, and if it cannot, people are told.
+{
+  const helpers = read("lib/printHelpers.ts");
+  const queue = read("lib/printQueue.ts");
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "")).join("\n");
+
+  await phase("no route can name a backup printer or a backup screen", () =>
+    !/backupAgent|backupPrinter|backupPanel|backupAfterMs/.test(strip(helpers))
+    || "the route model can express a backup again — a second machine quietly taking the ticket is the thing he asked to be rid of");
+  await phase("…and no wait is timed before somebody else takes a ticket", () =>
+    !/SCREEN_BACKUP_MS|BACKUP_AFTER_MS|BACKUP_PRINTER_MS/.test(strip(helpers) + strip(read("app/api/editor/[...path]/route.ts")))
+    || "a backup window is back: two numbers for one idea was the complaint, and the answer was no number at all");
+  await phase("…and a helper is only ever handed the paper ADDRESSED to it", () => {
+    const claim = strip(helpers).slice(strip(helpers).indexOf("export async function claimNext"));
+    return !/route\.backupAgent/.test(claim.slice(0, 2500))
+      || "claimNext will hand a machine another machine's ticket again";
+  });
+
+  await phase("a ticket that gives up FILES a printer problem against the printer that failed", () =>
+    /parked/.test(strip(queue)) && /printer_events/.test(strip(queue)) && /auto_fail/.test(strip(queue))
+    || "a parked ticket tells nobody — the kitchen never gets its slip and never finds out why");
+  await phase("…using a kind the database actually allows", () =>
+    /"auto_fail"/.test(queue)
+    || "an invented event kind would be refused by mig 269's CHECK, and the insert is in a try/catch — the report would vanish silently");
+  await phase("…and the owner is pinged, once, not once per retry", () => {
+    const q = strip(queue);
+    return /sendOwnerAlert/.test(q) && /if \(parked\)/.test(q)
+      || "either nobody is told, or they are told five times — an alert per attempt is how an alert gets switched off";
+  });
+
+  // …and the whole thing, for real: fail a ticket five times and watch the report appear.
+  await phase("a real ticket failed five times ends up parked, with a problem on the floor", async () => {
+    await setRoutes({ kot: { agent: AGENT.id, printer: VIRT.kitchen }, test: { agent: AGENT.id, printer: VIRT.kitchen } });
+    await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true });
+    await drain();
+    await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail`, { method: "DELETE" }).catch(() => {});
+    const o = await newOrder(66, "Give-up dish");
+    if (!o.jobId) return "no ticket was queued to fail";
+    for (let i = 0; i < 6; i++) {
+      const [row] = await db(`print_jobs?id=eq.${o.jobId}&select=status`);
+      if (row.status === "failed") break;
+      if (row.status !== "printing") { const g = await takeUntilClaim(o.jobId); if (!g) break; }
+      await agentCall(`/job/${o.jobId}/failed`, { method: "POST", body: JSON.stringify({ error: "sweep — the printer is unplugged" }) });
+    }
+    const [row] = await db(`print_jobs?id=eq.${o.jobId}&select=status,attempts`);
+    return (row.status === "failed" && row.attempts >= 5) || `it is ${row.status} after ${row.attempts} attempt(s)`;
+  });
+  await phase("…and that problem is on the printer that failed, in words a person can read", async () => {
+    const ev = await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail&status=eq.open&select=printer,note&order=created_at.desc&limit=1`);
+    if (!ev.length) return "no printer problem was filed — the ticket died in silence, which is exactly what the backup printer used to hide";
+    const e = ev[0];
+    return (e.printer === VIRT.kitchen && /gave up after/.test(String(e.note || "")))
+      || `filed against "${e.printer}" saying "${String(e.note || "").slice(0, 60)}"`;
+  });
+  await phase("…and the manager's floor is told about it", async () => {
+    const r = await settles(() => asManager("/summary"), (d) => ((d?.printer?.events) || []).some((x) => x.kind === "auto_fail"));
+    return r.ok || "the failure never reached the manager's floor strip — nobody at the restaurant would know";
+  });
+  await phase("…and the ticket can be put back in the queue by a person", async () => {
+    const [j] = await db(`print_jobs?restaurant_id=eq.${RID}&status=eq.failed&select=id&order=created_at.desc&limit=1`);
+    if (!j) return "nothing parked to retry";
+    const r = await api(`/api/admin/printing/job/${j.id}/retry`, { method: "POST", body: JSON.stringify({ rid: RID }) });
+    const [row] = await db(`print_jobs?id=eq.${j.id}&select=status,attempts`);
+    return (r.ok && row.status === "queued" && row.attempts === 0)
+      || `retry answered ${r.status} and the ticket is ${row.status}`;
+  });
+  await db(`printer_events?restaurant_id=eq.${RID}&kind=eq.auto_fail`, { method: "DELETE" }).catch(() => {});
+  await drain();
+}
+
+
+// ══ 23 · THE FLOOR IS FOR TABLES ═════════════════════════════════════════════════════════════
+// Owner, 2026-08-30, looking at the manager's Table view: *"I don't want it there — it should be in
+// the notification thing that we have built… why is it taking the space of the table boxes."*
+// Two bands used to sit above the table grid on every manager screen: where the paper comes out,
+// and any printer problem. Neither earns a permanent stripe across the floor.
+{
+  const panel = read("public/panels/editor/app.js");
+  const bell = read("public/panels/guestbell.js");
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "")).join("\n");
+  const code = strip(panel);
+
+  await phase("the floor draws NO printing band above the tables", () =>
+    !/\$\{printStationStripHtml\(\)\}|\$\{printerStripHtml\(\)\}/.test(code)
+    || "a printing strip is back above the table grid — that is the space he asked for back");
+  await phase("…and printing speaks through the notification bell instead", () =>
+    /kind: "printer"/.test(code) && /LFH_BELL\.sync/.test(code)
+    || "printing has no way to tell anybody: taken off the floor and not put anywhere");
+  await phase("…and the bell knows how to draw a printer row", () =>
+    /printer: \{ icon: "🖨"/.test(bell) && /r\.kind === "printer"/.test(bell)
+    || "a printer row would render as 'Table  asked for something', which is nonsense");
+  await phase("…and an open printer problem becomes one of those rows", () =>
+    /printer-problem:/.test(code) || "a filed printer problem never reaches the bell");
+  await phase("…and so does where the paper actually comes out", () =>
+    /printer-where:/.test(code) || "nobody can find out which screen or computer is printing");
+}
+
 
 // ══ 7 · THE GUARDS THEMSELVES ════════════════════════════════════════════════════════════════
 for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-format", "verify:print-paper", "verify:access", "verify:taps"]) {

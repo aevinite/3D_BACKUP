@@ -43,7 +43,8 @@
  *     onOpen:  function (table) {}, // take me to that table
  *   });
  *
- * 'kind' is one of "call" | "order" | "join" | "request" — it picks the icon and the wording.
+ * 'kind' is one of "call" | "order" | "join" | "request" | "printer" — it picks the icon and the
+ * wording. A "printer" row has no table and carries its whole sentence in `text`.
  */
 (function () {
   var mounted = null;      // the <button> in the top bar, once there is something to mount it in
@@ -117,6 +118,11 @@
     order:   { icon: "🧾", what: "sent a new order" },
     join:    { icon: "🙋", what: "is waiting to be let in" },
     request: { icon: "✋", what: "asked for something" },
+    // PRINTING LIVES HERE NOW (owner, 2026-08-30): "I don't want it there [on the floor] — it
+    // should be in the notification thing that we have built… why is it taking the space of the
+    // table boxes." Two strips used to sit above the table grid on every manager screen: where the
+    // paper comes out, and any printer problem. Neither is worth a permanent band across the floor.
+    printer: { icon: "🖨", what: "" },
   };
 
   function injectStyles() {
@@ -246,7 +252,18 @@
     node.type = "button";
     node.appendChild(el("span", "lfh-bell-ic", k.icon));
     var tx = el("span", "lfh-bell-tx");
-    tx.appendChild(el("b", null, (r.table ? "Table " + r.table + " " : "") + k.what));
+    // A PRINTER ROW HAS NO TABLE and its whole sentence is its own — "Table  " and a canned "what"
+    // would read as nonsense on it.
+    tx.appendChild(el("b", null, r.kind === "printer"
+      ? String(r.title || r.text || "Printing")
+      : (r.table ? "Table " + r.table + " " : "") + k.what));
+    if (r.kind === "printer") {
+      if (r.title && r.text) tx.appendChild(el("small", null, r.text));
+      node.appendChild(tx);
+      node.appendChild(el("span", "lfh-bell-when", r.at ? fmtAgo(r.at) : ""));
+      node.disabled = true;                       // it is a readout, not a place to tap through to
+      return node;
+    }
     if (r.text) tx.appendChild(el("small", null, r.text));
     node.appendChild(tx);
     node.appendChild(el("span", "lfh-bell-when", fmtAgo(r.at)));

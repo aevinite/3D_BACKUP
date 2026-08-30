@@ -32,6 +32,11 @@ const QUIET = process.argv.includes("--quiet");
 let failed = 0;
 const pass = (m) => { if (!QUIET) console.log("  ok   " + m); };
 const fail = (m) => { console.log("  FAIL " + m); failed++; };
+// JUDGE THE CODE, NOT THE NOTE ABOUT IT. Every "this is gone" check below would otherwise match
+// the obituary comment explaining WHY it is gone — which is exactly how this file went red the
+// minute the backup printer was removed. Same stripper verify-print-helper.mjs uses.
+const codeOnly = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
+
 const check = (cond, good, bad) => (cond ? pass(good) : fail(bad));
 
 console.log("\nprint queue — a ticket is a row, and any screen can be the printer");
@@ -76,9 +81,12 @@ for (const [name, src] of [["kitchen", kroute], ["editor", eroute]]) {
 check(/\.or\(liveFilter\(\)\)[\s\S]*\.or\(liveFilter\(\)\)/s.test(lib),
   "what is OFFERED and what can be WON use the same live filter, so they cannot drift",
   "lib/printQueue no longer shares one filter between the read and the claim");
-check(/minAgeMs/.test(lib) && /claimKotJobs[\s\S]{0,600}minAgeMs/.test(lib),
-  "the backup-printer window is enforced at the CLAIM, server-side (a stale tab can't jump the kitchen's queue)",
-  "claimKotJobs no longer enforces minAgeMs — 'backup only' would be a client-side promise");
+// The backup-printer WINDOW is retired with the backup printer. `minAgeMs` survives in the queue as
+// a parameter nothing passes a value to any more; what matters is that no caller can hand a screen
+// somebody else's ticket after a wait, because there is no "somebody else's ticket" to wait for.
+check(!/t\.backup \? BACKUP_PRINTER_MS/.test(codeOnly(eroute)),
+  "no screen waits for a window and then takes another room's ticket",
+  "the backup-printer window is back: a ticket appearing in a second room is what he asked to be removed");
 
 // ── 2b. a ticket nobody can cook LEAVES the queue (both found on 2026-08-18) ────────────────────
 check(/the order was deleted before this ticket printed/.test(lib),
@@ -175,23 +183,45 @@ check(/backupPanel/.test(mig369) && /lfh_already_applied/.test(mig369),
     "…and no code reads or writes it any more — the route is the only answer",
     `${guilty.join(", ")} still touches kot_print_target. Two settings for one question is what made the manager screen refuse the owner's own choice in August; derive it from the Kitchen slips route instead.`);
 }
-check(/backupPanel/.test(read("lib/printHelpers.ts")) && /backup: true/.test(read("lib/printHelpers.ts")),
-  "…and a screen route can name a BACKUP screen, which is where 'both' went",
-  "backupPanel is gone from the route model: 'the kitchen prints, the counter picks up what it leaves' can no longer be expressed, and the two restaurants that were on 'both' quietly lose their safety net");
+// ── THERE IS NO BACKUP SCREEN, AND THAT IS THE RULE NOW (owner, 2026-08-30) ─────────────────
+// This used to REQUIRE backupPanel: "the kitchen prints, the counter picks up what it leaves" was
+// where the retired kot_print_target='both' went (mig 369), and losing it was described here as two
+// restaurants losing their safety net.
+//
+// He removed the idea outright: *"what is this backup printer and all that — we don't even need the
+// backup printer. If there is a backup printer, remove it. If anything fails it should show me or
+// the person: manager, owner, everyone should get a notification that this has failed, and if you
+// want to reprint it."*
+//
+// It was never much of a safety net. Two waits for one idea (60s for a backup PRINTER, 30s for a
+// backup SCREEN, neither screen mentioning the other), and what it bought was paper appearing in a
+// room nobody is standing in while the restaurant never learns its printer is broken. The
+// replacement is not a shorter wait: it is TELLING SOMEBODY.
+const pq = read("lib/printQueue.ts");
+check(!/backupPanel/.test(codeOnly(read("lib/printHelpers.ts"))),
+  "no route can name a backup screen — one room prints, and if it cannot, people are told",
+  "backupPanel is back in the route model: a second room quietly taking the ticket is what he asked to be rid of");
+check(/parked/.test(pq) && /printer_events/.test(pq) && /auto_fail/.test(pq) && /sendOwnerAlert/.test(pq),
+  "…and a ticket that gives up FILES a printer problem and pings the owner, so the failure is seen",
+  "a parked ticket tells nobody: without the backup printer, a silent failure is a kitchen that never gets its slip and never finds out");
 // The old check here asserted that the admin settings route SANITISED kot_print_target to one of
 // three values. There is nothing left to sanitise: the key is off the write allow-list (mig 369), so
 // the rule to assert is that it cannot be written at all. The screen-route validator does the
 // equivalent job now — writeRoutes refuses a panel that is not one of the four, and refuses a backup
 // screen that is the same screen.
-check(/isRoutePanel\(panel\)/.test(read("lib/printHelpers.ts")) && /o\.backupPanel !== panel/.test(read("lib/printHelpers.ts")),
-  "…and the route validator accepts only real panels, and refuses a backup that is the same screen",
-  "writeRoutes stopped checking the panel names, or allows a screen to be its own backup — an age window nothing can ever satisfy looks like a rule and is not one");
+check(/isRoutePanel\(panel\)/.test(read("lib/printHelpers.ts")),
+  "…and the route validator still accepts only real panels",
+  "writeRoutes stopped checking the panel names — a route naming a panel that does not exist would print nowhere while looking set");
 check(/async function counterPrintTarget/.test(eroute) && (eroute.match(/counterPrintTarget\(rid\)/g) || []).length >= 2,
   "the editor route re-asks WHO may print at the claim as well as at the read (never trusts the panel)",
   "the counter-print gate is asked once or not at all — a screen left open from before the setting changed would keep claiming tickets");
-check(/BACKUP_PRINTER_MS = 30000/.test(eroute),
-  "'the counter is the backup' means 30 seconds, in one named place",
-  "the backup window is no longer a named constant in the editor route");
+// The 30-second constant is retired with the thing it timed. It was one of the TWO numbers for one
+// idea the owner objected to (30 for a backup screen, 60 for a backup printer, neither screen
+// mentioning the other) — and the answer to "should they be the same number?" turned out to be
+// "there should be no number, because there is no backup".
+check(!/BACKUP_PRINTER_MS/.test(codeOnly(eroute)),
+  "…and no backup window is timed anywhere, because nothing is waiting its turn",
+  "a backup window is back in the editor route");
 check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
   "the manager panel ASKS the device once, on the floor screen (a phone must never claim a ticket)",
   "the per-device question is gone — the manager panel is opened on phones, and a phone that claims a ticket loses it");
@@ -216,9 +246,21 @@ check(/pointer: coarse/.test(epanel) && /looksLikeAComputer/.test(epanel),
 check(/helper: \(r && r\.helper\) \|\| null/.test(epanel) && /helperKey/.test(epanel),
   "…and it carries the helper's answer, so a screen can say which computer prints instead",
   "the panel dropped the helper field again — every line about it goes invisible while the server is right (mig 341)");
-check(/\$\{printerStripHtml\(\)\}\$\{printStationStripHtml\(\)\}/.test(epanel),
-  "the strip is rendered on the floor, right beside the printer-problem strip",
-  "the print-station strip is not rendered on the floor — the question would never be asked, so a counter screen could never be switched on");
+// ── THE FLOOR IS FOR TABLES (owner, 2026-08-30) ──────────────────────────────────────────────
+// This used to REQUIRE both printing strips across the top of the floor, and its failure message
+// still argued from a model retired two changes earlier ("the question would never be asked") —
+// there is no question any more: the admin names one person on the Printing board.
+//
+// He then looked at what was left and said: *"I don't want it there — it should be in the
+// notification thing that we have built… why is it taking the space of the table boxes."* So the
+// rule is inverted: nothing about printing is painted across the table grid, and printing reaches
+// people through the bell, which is where a notification belongs.
+check(!/\$\{printStationStripHtml\(\)\}|\$\{printerStripHtml\(\)\}/.test(codeOnly(epanel)),
+  "no printing band is painted across the floor — the table grid keeps its space",
+  "a printing strip is back above the tables: that is the space he asked for back, twice");
+check(/kind: "printer"/.test(codeOnly(epanel)) && /printer-problem:/.test(codeOnly(epanel)),
+  "…and printing speaks through the notification bell instead, problems first",
+  "printing was taken off the floor and not put anywhere — a printer problem would now be invisible");
 
 // ── 7. the setup guide is IN the app, and reachable from a screen that is not hidden ────────────
 const guide = read("public/print-setup.html");

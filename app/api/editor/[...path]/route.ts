@@ -58,7 +58,8 @@ import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
-const BACKUP_PRINTER_MS = 30000;
+// BACKUP_PRINTER_MS is gone with the backup screen (owner, 2026-08-30): there is no second room
+// waiting its turn, so there is no window for it to wait.
 // May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
 //
 // It asks ONE thing now: the Kitchen slips route (mig 369). It used to ask two — the route AND
@@ -83,8 +84,9 @@ async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; bac
   const on = !paused && st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
   // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
   // plain words. It is derived from the route now, never stored.
+  // "both" is gone with the backup screen: a room either prints the kitchen slips or it does not.
   const target = route.kind === "screen"
-    ? (route.backupPanel ? "both" : route.panel === "manager" ? "counter" : "kitchen")
+    ? (route.panel === "manager" ? "counter" : "kitchen")
     : "kitchen";
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
@@ -99,9 +101,7 @@ async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; bac
   // 22 before this shipped; my first version returned true here.
   // (After mig 369 every existing restaurant HAS a kitchen-slip route, so this branch is only a
   // brand-new one — where "the kitchen prints" is the right thing to assume.)
-  const panelOk = route.kind === "screen"
-    ? (route.panel === "manager" || route.backupPanel === "manager")
-    : false;
+  const panelOk = route.kind === "screen" ? route.panel === "manager" : false;
   return { mayPrint: on && panelOk, backup: !!may.backup, target, helper };
 }
 
@@ -2120,7 +2120,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
       // station's name instead, so it can offer "print here instead" rather than quietly racing.
       if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS });
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS, targets });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: 0 }), target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS, targets });
     }
 
 
@@ -4830,7 +4830,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         auto: t.mayPrint, roomAllowed: t.mayPrint, by: actorName || null,
       });
       if (!gate.ok) return ok({ won: [], refused: gate.reason, station: gate.station });
-      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), station: gate.station });
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: 0 }), station: gate.station });
     }
 
     if (a === "print-jobs" && c === "done") {
@@ -4939,8 +4939,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const routes = await readRoutes(rid);
         const patch: Record<string, unknown> = {};
         for (const k of ROUTABLE_KINDS) {
-          if (routes[k].agent === mine.id) patch[k] = null;
-          else if (routes[k].backupAgent === mine.id) patch[k] = { agent: routes[k].agent, printer: routes[k].printer };
+          if (routes[k].agent === mine.id) patch[k] = null;   // no backup line to fall back to
         }
         if (Object.keys(patch).length) await writeRoutes(rid, patch);
         await logAction("editor", "print_helper_removed", {

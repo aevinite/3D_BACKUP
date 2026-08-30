@@ -299,9 +299,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // saying "the kitchen screen prints" was still vetoed by an admin who had set "counter" months
       // ago — two settings, opposite answers, and the newer one losing (printing sweep, 2026-08-26).
       // A screen route names the room. `backupPanel` counts too: the retired 'both' is now
-      // "kitchen prints, the counter picks up what it leaves", and the room named as the backup must
-      // still be allowed to ask (the AGE window is what holds it back, not a flat refusal).
-      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen" || target.backupPanel === "kitchen";
+      // ONE ROOM PRINTS. "The kitchen prints and the counter picks up what it leaves" is gone with
+      // the backup screen (owner, 2026-08-30): paper appearing in a room nobody is standing in is
+      // worse than paper that has not appeared, because nobody learns the printer is broken.
+      if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
       else if (target.kind === "off" || target.kind === "computer") kitchenMayAuto = false;
       const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
       const screenPrints = kitchenMayAuto && mayI.ok;
@@ -347,8 +348,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Kept for the 🖨 sheet's plain-words line, but DERIVED from the route now — never stored.
         // A panel that is weeks old still reads this key, so it keeps its name and its three values.
         kotPrintTarget: target.kind === "screen"
-          ? (target.backupPanel ? "both" : target.panel === "manager" ? "counter" : "kitchen")
-          : "kitchen",
+          ? (target.panel === "manager" ? "counter" : "kitchen")
+          : "kitchen",   // "both" retired with the backup screen
         // Who really prints, so the sheet can say "Kitchen slips print at: Shop's computer →
         // Printer_POS_80" instead of leaving a cook to guess why this screen is quiet.
         helper,
