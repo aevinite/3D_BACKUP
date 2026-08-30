@@ -33,39 +33,44 @@ export type Affected = { tables: string[]; unknown: boolean };
 // every other caller short-circuits in waiterTables() before we get here.
 const NO_TABLE: Affected = { tables: [], unknown: false };
 
-async function tableOfSession(id: string): Promise<string | null> {
-  const { data } = await sb.from("sessions").select("table_number").eq("id", id).maybeSingle();
+async function tableOfSession(rid: string, id: string): Promise<string | null> {
+  const { data } = await sb.from("sessions").select("table_number")
+    .eq("restaurant_id", rid).eq("id", id).maybeSingle();
   return data?.table_number ? normTable(data.table_number) : null;
 }
 
-async function tableOfOrder(id: string): Promise<string | null> {
-  const { data } = await sb.from("orders").select("table_number").eq("id", id).maybeSingle();
+async function tableOfOrder(rid: string, id: string): Promise<string | null> {
+  const { data } = await sb.from("orders").select("table_number")
+    .eq("restaurant_id", rid).eq("id", id).maybeSingle();
   return data?.table_number ? normTable(data.table_number) : null;
 }
 
 // order_items carries NO table_number (mig 014) — the reliable join is
 // order_id → orders.table_number. session_id exists too but is null when the
 // restaurant runs with dining sessions off, so it is only the fallback.
-async function tableOfItem(id: string): Promise<string | null> {
+async function tableOfItem(rid: string, id: string): Promise<string | null> {
   const { data } = await sb
-    .from("order_items").select("order_id, session_id").eq("id", id).maybeSingle();
+    .from("order_items").select("order_id, session_id")
+    .eq("restaurant_id", rid).eq("id", id).maybeSingle();
   if (!data) return null;
-  if (data.order_id) return await tableOfOrder(data.order_id);
-  if (data.session_id) return await tableOfSession(data.session_id);
+  if (data.order_id) return await tableOfOrder(rid, data.order_id);
+  if (data.session_id) return await tableOfSession(rid, data.session_id);
   return null;
 }
 
 async function tableOfSimple(
-  table: "waiter_calls" | "requests", id: string,
+  rid: string, table: "waiter_calls" | "requests", id: string,
 ): Promise<string | null> {
-  const { data } = await sb.from(table).select("table_number").eq("id", id).maybeSingle();
+  const { data } = await sb.from(table).select("table_number")
+    .eq("restaurant_id", rid).eq("id", id).maybeSingle();
   return data?.table_number ? normTable(data.table_number) : null;
 }
 
-async function tableOfMember(id: string): Promise<string | null> {
+async function tableOfMember(rid: string, id: string): Promise<string | null> {
   const { data } = await sb
-    .from("session_members").select("session_id").eq("id", id).maybeSingle();
-  return data?.session_id ? await tableOfSession(data.session_id) : null;
+    .from("session_members").select("session_id")
+    .eq("restaurant_id", rid).eq("id", id).maybeSingle();
+  return data?.session_id ? await tableOfSession(rid, data.session_id) : null;
 }
 
 /**
@@ -77,9 +82,18 @@ async function tableOfMember(id: string): Promise<string | null> {
  * restricted waiter could push a party onto a table they can no longer see.
  */
 export async function affectedTables(
+  rid: string,
   a: string, b: string | undefined, c: string | undefined,
   body: Record<string, unknown> | null | undefined,
 ): Promise<Affected> {
+  // NO RESTAURANT, NO ANSWER (T25 round 2, item 29, 2026-08-31). Every lookup below reads a row BY
+  // ID with the service-role key, which bypasses the row-level rules — so without the restaurant it
+  // would answer with whichever restaurant owns that id. Both callers have `rid` to hand: the tablet
+  // dispatcher (which uses the answer to decide whether a waiter may write to that table) and
+  // lib/clash.ts (which uses it to decide whether somebody else's party is on it now). An answer of
+  // "I couldn't tell" is already handled everywhere — it is `unknown: true` — so a missing restaurant
+  // takes that path rather than guessing.
+  if (!rid) return { tables: [], unknown: true };
   const bod = body || {};
   const push = async (v: string | null): Promise<Affected> =>
     v ? { tables: [v], unknown: false } : { tables: [], unknown: true };
@@ -103,12 +117,12 @@ export async function affectedTables(
   const withDest = (base: Affected): Affected =>
     dest ? { tables: [...base.tables, dest], unknown: base.unknown } : base;
 
-  if (a === "sessions" && b) return withDest(await push(await tableOfSession(b)));
-  if (a === "orders" && b) return withDest(await push(await tableOfOrder(b)));
-  if ((a === "items" || a === "order-items") && b) return withDest(await push(await tableOfItem(b)));
-  if (a === "calls" && b) return await push(await tableOfSimple("waiter_calls", b));
-  if (a === "requests" && b) return await push(await tableOfSimple("requests", b));
-  if (a === "members" && b) return await push(await tableOfMember(b));
+  if (a === "sessions" && b) return withDest(await push(await tableOfSession(rid, b)));
+  if (a === "orders" && b) return withDest(await push(await tableOfOrder(rid, b)));
+  if ((a === "items" || a === "order-items") && b) return withDest(await push(await tableOfItem(rid, b)));
+  if (a === "calls" && b) return await push(await tableOfSimple(rid, "waiter_calls", b));
+  if (a === "requests" && b) return await push(await tableOfSimple(rid, "requests", b));
+  if (a === "members" && b) return await push(await tableOfMember(rid, b));
 
   // An action shape we don't recognise. Unknown ⇒ refuse for a restricted waiter (a new
   // table-scoped endpoint is protected on the day it is added, not the day it is noticed).

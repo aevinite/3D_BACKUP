@@ -862,7 +862,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // waiter at a restaurant that actually uses sections.
     const sectionLimit = await waiterTables(actor, rid);
     if (sectionLimit !== null) {
-      const blocked = await blockedReason(sectionLimit, a, b, c, body);
+      const blocked = await blockedReason(sectionLimit, rid, a, b, c, body);
       if (blocked) return err(blocked, 403);
     }
 

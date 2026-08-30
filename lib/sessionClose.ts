@@ -66,7 +66,11 @@ export async function closeSession(
   ctx: {
     panel: "editor" | "tablet" | "admin";
     deviceId?: string | null;
-    restaurantId?: string | null;
+    /** WHICH RESTAURANT — required, not optional (T25 round 2, item 30, 2026-08-31). Every write in
+     *  this function is keyed by `session_id` alone, so the ownership check below is the only thing
+     *  keeping a close inside the restaurant that asked for it — and it used to be skipped when this
+     *  was absent. */
+    restaurantId: string;
     /** Who closed it — so the Audit row for a written-off bill names a person, not "someone". */
     user?: StaffUser | null;
     /** Why, when the panel asked (the "close anyway" dialog). */
@@ -79,8 +83,18 @@ export async function closeSession(
   // is client-supplied and every query below keys on session_id alone (service-role bypasses
   // RLS), so without this a panel scoped to one restaurant could close another restaurant's
   // table. The neighbouring invoice/void/shift actions already do this same pre-check; close
-  // was the gap. (Passed by both callers now; kept optional so an unscoped caller still works.)
-  if (ctx.restaurantId) {
+  // was the gap.
+  //
+  // ⚠️ IT USED TO BE OPT-IN (T25 round 2, item 30, 2026-08-31). The line here read
+  // `if (ctx.restaurantId)`, and the note beside it said *"kept optional so an unscoped caller still
+  // works"* — so the ONE check that scopes eight writes was skipped entirely by a caller that did not
+  // pass it. All eight callers DO pass it (checked, one by one), so nothing was wrong on the floor;
+  // what was wrong is that being right depended on every future caller remembering. The field is now
+  // required by the type and refused when absent.
+  if (!ctx.restaurantId) {
+    return { ok: false, status: 400, message: "Couldn't tell which restaurant this table belongs to.", reason: "not_found" };
+  }
+  {
     const owns = (await sb.from("sessions").select("id").eq("id", sessionId).eq("restaurant_id", ctx.restaurantId).maybeSingle()).data;
     if (!owns) return { ok: false, status: 404, message: "That table isn't for this restaurant.", reason: "not_found" };
   }
