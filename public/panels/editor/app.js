@@ -6803,7 +6803,13 @@ function syncGuestBell() {
         text: pt.helper.connected ? `from ${pt.helper.agent}` : `${pt.helper.agent} is asleep — tickets are waiting`, at: 0 });
     } else if (pt && pt.station && pt.station.mine) {
       rows.push({ kind: "printer", key: "printer-where:me",
-        title: "This screen prints the kitchen tickets", text: "", at: 0 });
+        title: "This screen prints the kitchen tickets",
+        // THE PROOF IT IS WORKING. The band this row replaced named the last ticket, and that
+        // sentence was the whole reason a manager trusted the screen at a glance. Dropping it in
+        // the move would have been a quieter version of the band never having been there.
+        text: lastPrintedHere
+          ? `Last: KOT #${lastPrintedHere.kot ?? "—"}${lastPrintedHere.table ? " · " + lastPrintedHere.table : ""} · ${timeAgo(lastPrintedHere.at)}`
+          : "Waiting for the next order.", at: 0 });
     }
 
     window.LFH_BELL.sync({ menuOn: true, rows, onOpen: (table) => { try { openFloatingTable(table); } catch (e) {} } });
@@ -7350,7 +7356,6 @@ function bindEditor() {
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
   // Settings → Printing offers the same per-device Yes/No the floor strip does, so it is bound on the
   // same helper — one handler, two places, no chance of one of them going dead.
-  bindPrintStationStrip(ed);
   // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
   // boxes it depends on — the mode AND the price typed above it. A stale example is worse
   // than none: it would show ₹294 while the box says ₹500 and quietly teach the wrong rule.
@@ -10653,7 +10658,6 @@ function bindFloor() {
   }));
   // "Should this screen print the kitchen tickets?" — the print-station strip beside the printer-
   // problem one (mig 336). Bound on the same pass so a repaint never leaves a dead button.
-  bindPrintStationStrip(ed);
   // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
   // and everything that lived in it are gone. A table opens as a popup, full stop.)
   // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
@@ -13561,21 +13565,6 @@ function printerAlerts() {
   });
   return out;
 }
-function printerStripHtml() {
-  const list = printerAlerts();
-  if (!list.length) return "";
-  return `<div class="prstrip">` + list.map((a) => `<div class="prstrip-row">
-    <span class="prstrip-ico">${a.icon}</span><span class="prstrip-txt">${esc(a.text)}<small>${esc(timeAgo(a.at))}</small></span>
-    ${a.kind === "job" ? `<button class="btn" data-prhere="${esc(a.id)}">🖨 Print here instead</button>` : ""}
-    ${a.kind === "waiting"
-      // NO "Resolved" ON THE PILE-UP ROW. Every other row is a REPORT — a person said the paper
-      // jammed, and ticking it off says "dealt with". This row is a COUNT of tickets that are still
-      // sitting there: a button that made it disappear would be a lie, and the row goes away by
-      // itself the moment the printer prints. It offers the one thing that actually helps instead.
-      ? `<button class="btn" data-prsetup="1">Where the paper goes →</button>`
-      : `<button class="btn" data-prok="${esc(a.kind)}:${esc(a.id)}">✓ Resolved</button>`}
-  </div>`).join("") + `</div>`;
-}
 // Toast NEW problems the moment a floor read carries them (realtime makes that near-instant);
 // history never toasts on boot, and a problem only toasts once however many polls repeat it.
 //
@@ -13588,6 +13577,12 @@ function printerStripHtml() {
 // failed read all legitimately arrive with nothing to say. Only a real, present, EMPTY list means
 // "the problems are gone". This is the owner's don't-cry-wolf rule at the one place it costs him
 // trust in the alarm.
+// DELETED 2026-08-31 (owner): printerStripHtml, printStationStripHtml and bindPrintStationStrip.
+// Three dead bodies left standing after the bands came off the floor. Never called again — but
+// still holding a SECOND copy of the wording for "where does the paper come out", which
+// syncGuestBell now owns. That duplicate is the exact thing he objected to: "there is two printing
+// things, one is working and one is just showing." The live wording is in syncGuestBell; do not
+// put a band back above the table grid. printerAlerts() stays — it still feeds the toasts below.
 function noticePrinterNews() {
   if (!(state.summary && state.summary.printer)) return;  // nothing was reported this pass — leave the seen-set alone
   const list = printerAlerts();
@@ -13661,7 +13656,7 @@ let printTargetSays = null;
 // an empty answer means "no computer owns it", which is the old behaviour: open the window.
 let printOwners = {};
 const printOwner = (kind) => { const o = printOwners && printOwners[kind]; return o && o.owned ? o : null; };
-let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
+let lastPrintedHere = null;   // { kot, table, at } — the bell row proves printing is genuinely working
 
 // ── THE STRIP SAYS WHAT IS HAPPENING. IT DOES NOT ASK. ───────────────────────────────────────
 //
@@ -13680,50 +13675,8 @@ let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it
 // NO LONGER RENDERED ANYWHERE (owner, 2026-08-30). Kept as the one place that knows how to word
 // "where does the paper come out", now read by syncGuestBell() into a notification row instead of
 // painted as a band across the floor. Do not put it back above the table grid.
-function printStationStripHtml() {
-  // A COMPUTER OWNS THE PAPER (mig 341) — nothing for a screen to do, but a manager who used to see
-  // "printing here" and now sees nothing would reasonably think printing had broken.
-  const hlpS = printTargetSays && printTargetSays.helper && printTargetSays.helper.owned ? printTargetSays.helper : null;
-  if (hlpS) {
-    return `<div class="prstrip"><div class="prstrip-row">
-      <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">Kitchen tickets print on <b>${esc(hlpS.printer)}</b> from <b>${esc(hlpS.agent)}</b>${hlpS.connected ? "" : " — that computer is asleep, tickets are waiting"}<small>No screen needs to be open for this.</small></span>
-    </div></div>`;
-  }
-  if (!printTargetSays || !printTargetSays.mayPrint) return "";
-  const stnS = printTargetSays.station || null;
-  // ANOTHER SCREEN IS THE ONE — a fact, not an offer. Moving it is done on the Printing board, by
-  // naming somebody else; a "take it over" button here is a second way to answer one question.
-  if (stnS && stnS.active && !stnS.mine && !stnS.stale) {
-    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "the kitchen screen" : "the counter screen"));
-    return `<div class="prstrip"><div class="prstrip-row">
-      <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">Kitchen tickets print on <b>${who}</b><small>Aevidine chooses which screen — this one is not it.</small></span>
-    </div></div>`;
-  }
-  if (stnS && stnS.mine) {
-    const last = lastPrintedHere
-      ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
-      : "Waiting for the next order.";
-    return `<div class="prstrip"><div class="prstrip-row">
-      <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">This screen prints the kitchen tickets<small>${last}</small></span>
-    </div></div>`;
-  }
-  return "";
-}
 // Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
 // a yes prints anything already waiting straight away — so answering IS the test that it works.
-function bindPrintStationStrip(root) {
-  // 🖨 take over / stop — the server decides and answers with the new state, so the screen never
-  // The strip has no buttons any more (see printStationStripHtml). Both binders are gone with them:
-  //   · [data-station-set]   — "take the printer off that screen" / "stop printing here". Moving the
-  //                            printer is done by naming somebody else on the Printing board.
-  //   · [data-printhere-set] — the per-browser yes/no to "should this screen print?", which was a
-  //                            second answer to a question the admin had already answered.
-  // The claim is automatic now, in managerPrintPass, for the screen the admin actually named.
-}
-
 // ── SETTINGS → PRINTING: where printing stands, and how to set a printer up ──────────────────────
 // Owner, 2026-08-18: "tell me how the printer will work and inside the setting how it will be —
 // every single bit of thing, how we're gonna print. It should be shown in kitchen panel… manager
