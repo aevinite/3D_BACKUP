@@ -177,6 +177,30 @@ check(/resolve\(\{ special: b\.dataset\.special, tip \}\)/.test(tablet),
   "a bill settled on the house or put on a tab still carries its tip",
   "the BILL being free does not make the cash handed over for the staff disappear");
 
+// ── 6b · the SPLIT screen takes a tip too (owner, 2026-08-30) ─────────────────────────────────
+// It is the one place a bill can close without ever opening the payment sheet, so without this a
+// table that splits could not tip at all. The tip is NOT one of the parts: lib/paySplit.ts
+// recomputes the due server-side and refuses parts that do not add up to it exactly, so a tip
+// mixed into the parts would be refused as an overpayment.
+{
+  const at = tablet.indexOf("function renderSplitBill");
+  const split = at < 0 ? "" : tablet.slice(at, tablet.indexOf("function renderMoveItemPicker", at));
+  check(/class="pay-tip-pct"/.test(split) && /class="pay-tip-amt"/.test(split) && /class="pay-tip-paid"/.test(split),
+    "the split screen has the same three linked tip boxes as the payment sheet",
+    "a bill that closes here would otherwise have no way to be tipped at all");
+  check(/recordTip\(t, tip\)/.test(split),
+    "…and records it once the split has really gone through");
+  // The parts must still foot to the bill. If the tip ever entered `splits`, the server would
+  // refuse the whole payment as an overpayment — so this is a correctness check, not a tidy-up.
+  const splitsBlock = split.slice(split.indexOf("const splits = legs.map"), split.indexOf("const how ="));
+  check(!/\btip\b/.test(splitsBlock),
+    "…and the tip is NOT one of the parts — the parts still add up to the bill exactly",
+    "lib/paySplit.ts recomputes the due and refuses anything else");
+  check(/payable\[0\] && Number\(payable\[0\]\.tip\)/.test(split),
+    "the split screen shows a tip already recorded, rather than looking like it was lost",
+    "there are two doors to this screen and one of them records a tip on the way in");
+}
+
 // ── 7 · the types name it ─────────────────────────────────────────────────────────────────────
 check(/\btip\?: number;/.test(dts), "BillDocData declares the tip, so a TypeScript caller can render one");
 check(/export function tipFromPaid|export function tipPct/.test(dts), "the shared tip maths is reachable by name");
