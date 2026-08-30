@@ -507,6 +507,26 @@ try {
     }
   }
 
+  // ── E2 · the guest-spread card says when it is hiding a restaurant ─────────────────────────
+  head("E2 · Customers' guest-spread card owns up to its own cap");
+  {
+    // The bars are capped at 8 server-side and the page could not know it, so a ninth restaurant
+    // with guests was dropped in silence — on the card whose stated job is "how many saved guests
+    // each restaurant has". Its sibling on Platform analytics has said "the busiest 8 of 9" since
+    // 2026-08-20 (owner item 9). Asserted three ways: the endpoint sends the true count, the page
+    // reads it, and the sentence is conditional so it stays silent when nothing is hidden.
+    const rt = R("app/api/admin/customers/route.ts"), pg = R("app/aevinite/customers/page.tsx");
+    ok(/const spreadTotal = spreadAll\.length/.test(rt) && /\bspreadTotal,/.test(rt),
+      "the endpoint counts every restaurant that has guests and sends it");
+    ok(/setSpreadTotal\(Number\(j\.spreadTotal\)/.test(pg), "the page reads that count");
+    ok(/spreadTotal > spread\.length[\s\S]{0,200}Showing the/.test(pg) && /: ""/.test(pg),
+      "the sentence appears only when the count is bigger than the bars shown");
+    const j = await api("/api/admin/customers");
+    const n = Array.isArray(j.spread) ? j.spread.length : 0;
+    ok(typeof j.spreadTotal === "number" && j.spreadTotal >= n,
+      `live: ${n} bars, ${j.spreadTotal} restaurants have guests — ${j.spreadTotal > n ? "the card must say so" : "nothing hidden, the card stays quiet"}`);
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {

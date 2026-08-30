@@ -57,6 +57,7 @@ export default function AdminCustomers() {
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [spread, setSpread] = useState<Spread[]>([]);
+  const [spreadTotal, setSpreadTotal] = useState(0);   // how many restaurants HAVE guests, not how many bars fit
   const [rests, setRests] = useState<Array<{ id: string; name: string }>>([]);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -86,6 +87,7 @@ export default function AdminCustomers() {
       setCustomers(j.customers || []);
       setSummary(j.summary || null);
       setSpread(j.spread || []);
+      setSpreadTotal(Number(j.spreadTotal) || (j.spread || []).length);
       setCachedAt(j.cachedAt || null);
       if (j.restaurants) setRests(j.restaurants);
       setErr(null);
@@ -175,7 +177,17 @@ export default function AdminCustomers() {
       {spread.length > 1 && (
         <div className="adm-card" style={{ marginBottom: 14 }}>
           <h2>Where the guests are</h2>
-          <p className="hint">How many saved guests each restaurant has. Tap one to filter the list.</p>
+          {/* A LIST THAT QUIETLY ENDS IS A LIST HE CANNOT ADD UP (owner, 2026-08-31 — item 9). The
+              server caps the bars at 8; below that the card said nothing either way, so a ninth
+              restaurant with guests was dropped with no sign of it. Says so only when something IS
+              hidden — the same wording and the same rule as the busiest-restaurants card on
+              Platform analytics. */}
+          <p className="hint">
+            How many saved guests each restaurant has. Tap one to filter the list.
+            {spreadTotal > spread.length
+              ? ` Showing the ${spread.length} with the most guests, of ${spreadTotal} restaurants that have any.`
+              : ""}
+          </p>
           <div style={{ display: "grid", gap: 7 }}>
             {spread.map((s) => (
               <button key={s.id} type="button" onClick={() => reset(() => setRid(rid === s.id ? "" : s.id))}

@@ -162,17 +162,26 @@ export async function GET(req: NextRequest) {
     // The per-restaurant bars follow the dropdown: a bar you cannot then filter to, for a
     // restaurant that has been deleted, is the same fault one row down.
     const liveIds = new Set(liveRests.map((r) => r.id));
-    const spread = agg.spreadRaw
+    const spreadAll = agg.spreadRaw
       .filter((s2) => liveIds.has(s2.restaurant_id))
       .map((s2) => ({ id: s2.restaurant_id, name: nameOf(s2.restaurant_id), count: s2.guests, regulars: s2.regulars }))
-      .filter((s2) => s2.count > 0)
-      .slice(0, 8);
+      .filter((s2) => s2.count > 0);
+    const spread = spreadAll.slice(0, 8);
+    // HOW MANY THERE REALLY ARE, so the card can say when it is hiding one (owner, 2026-08-31 —
+    // item 9). The bars are capped at 8 and the page could not know that, so on a platform with a
+    // ninth restaurant that has guests, that restaurant simply was not there — on the card whose
+    // stated job is "how many saved guests each restaurant has". The sibling card on Platform
+    // analytics ("Showing the busiest 8 of 9 restaurants that took an order") was given this on
+    // 2026-08-20; this one was not. Sent as a count, not more rows: the cap is what keeps the read
+    // small, and one number is enough to tell the truth about it.
+    const spreadTotal = spreadAll.length;
 
     return NextResponse.json({
       summary: { total, regulars, blocked, newThisMonth: fresh, matched: count || 0, page, pageSize: PAGE },
       cachedAt: agg.cachedAt,
       restaurants: liveRests.map((r) => ({ id: r.id, name: label(r) })),
       spread,
+      spreadTotal,
       customers,
     });
   } catch (e) {
