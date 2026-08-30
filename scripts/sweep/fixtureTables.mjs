@@ -40,10 +40,11 @@ export const OFF_PLAN = [
  * Keep the reason next to each — the point is that the next person can see the clash before it happens.
  */
 export const RESERVED = [
-  ["11", "verify-edge-cases.mjs — the session-gate races"],
+  ["11", "verify-merged-floor.mjs — the four-table party's PARENT (it holds the joint bill)"],
   ["12", "verify-merged-floor.mjs — the four-table party"],
   ["13", "verify-merged-floor.mjs — the four-table party"],
   ["14", "verify-merged-floor.mjs — the four-table party"],
+  ["15", "verify-edge-cases.mjs — the session-gate races (moved off 11 on 2026-08-30: 11 is the merged party's parent, and the two guards were scrambling each other)"],
   ["21", "verify-merged-floor.mjs / verify-families.mjs — the independent tables"],
   ["22", "verify-merged-floor.mjs / verify-families.mjs — the independent tables"],
   ["23", "verify-merged-floor.mjs — the independent tables"],
