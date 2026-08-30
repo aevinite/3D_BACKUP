@@ -329,9 +329,58 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
       try { yes.focus(); } catch (e) { /* focus is a nicety; the buttons are tappable regardless */ }
     });
   }
+  /* ASKING FOR A REASON, IN THE PANEL (T9 third sweep, 2026-08-31).
+     The stock sheet asked "Why is this purchase being voided? (kept on record)" with prompt(), in
+     three places, and prompt() on a device that hides dialogs returns NULL without showing
+     anything. Every one of those call sites reads `if (!reason) return;` — so the manager tapped
+     Void, and nothing happened and nothing was said. Worse than the confirm() cases already fixed,
+     because those at least refused out loud, and because the answer here is a REASON KEPT ON
+     RECORD: the void exists to be explainable afterwards.
+     Answers a string, or null for Cancel — the same shape prompt() had, so the call sites keep
+     their own guard. The confirm button stays disabled until something has been typed, which is
+     what the old `!reason.trim()` check did silently and invisibly. */
+  function askText(msg, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      injectStyles();
+      var done = false, off = null;
+      function finish(v) {
+        if (done) return; done = true;
+        if (off) { try { off(); } catch (e) { /* already popped by the Back press */ } off = null; }
+        if (ov && ov.parentNode) ov.remove();
+        resolve(v);
+      }
+      var input = el("input", { class: "lfh-in", type: "text", placeholder: opts.placeholder || "", "aria-label": opts.title || "Reason" });
+      var go = el("button", { class: "lfh-bt lfh-cta lfh-ask-yes", type: "button", disabled: "disabled",
+        onClick: function () { var v = String(input.value || "").trim(); if (v) finish(v); } }, [opts.yes || "Save"]);
+      // The button is the only thing that says "you have not typed anything yet" — a refusal that
+      // happens after the tap is the fault this whole card exists to end.
+      input.addEventListener("input", function () {
+        if (String(input.value || "").trim()) go.removeAttribute("disabled");
+        else go.setAttribute("disabled", "disabled");
+      });
+      input.addEventListener("keydown", function (e) { if (e.key === "Enter" && String(input.value || "").trim()) finish(String(input.value).trim()); });
+      var card = el("div", { class: "lfh-dw", role: "dialog", "aria-modal": "true", style: { width: "min(94vw,340px)" } }, [
+        el("div", { class: "lfh-wrap" }, [
+          el("div", { class: "lfh-h1" }, [opts.title || "Why?"]),
+          el("div", { class: "lfh-d" }, [String(msg == null ? "" : msg)]),
+        ]),
+        el("div", { class: "lfh-sec", style: { display: "grid", gap: "8px", borderBottom: "0" } }, [
+          input, go,
+          el("button", { class: "lfh-ghost lfh-ask-no", type: "button", onClick: function () { finish(null); } }, [opts.no || "Cancel"]),
+        ]),
+      ]);
+      var ov = el("div", { class: "lfh-ov", style: { zIndex: "99999" },
+        onClick: function (e) { if (e.target === ov) finish(null); } }, [card]);
+      document.body.appendChild(ov);
+      if (window.LFH_BACK) off = window.LFH_BACK.layer("lfh-ask-text", function () { off = null; finish(null); });
+      try { input.focus(); } catch (e) { /* focus is a nicety; the field is tappable regardless */ }
+    });
+  }
   var LFH_ASK = {
     confirm: function (msg, opts) { return askLayer("ask", msg, opts); },
     say: function (msg, opts) { return askLayer("say", msg, opts); },
+    text: askText,
   };
   window.LFH_ASK = window.LFH_ASK || LFH_ASK;
   // myprofile.js loads beside this file and makes the same fallback read; one deadline, decided
