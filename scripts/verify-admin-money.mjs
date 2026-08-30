@@ -477,6 +477,36 @@ try {
     }
   }
 
+  // ── F2(live) · the Change log has no sideways scroll on a phone ────────────────────────────
+  head("F2(live) · every column of a change is on screen at 360px, both skins");
+  {
+    // It was a six-column grid pinned at 720px inside an overflowX:auto box: at 360 the heading read
+    // "TABLI" and By / Reason / When sat off the right edge with nothing saying so — on a log whose
+    // job is answering "who did this, and when". It folds onto three lines now, the same technique
+    // and breakpoint the Bills row next door uses (owner item 8).
+    for (const skin of ["dark", "light"]) for (const [w, tag] of [[360, "phone"], [768, "tablet"], [1280, "desktop"]]) {
+      const c = await ctx(w, 900, w < 500 ? 3 : 1, skin);
+      const p = await c.newPage();
+      await p.goto(BASE + "/aevinite/bill-audit/changes", { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const r = await p.evaluate(() => {
+        const row = document.querySelector(".chg-row:not(.head)");
+        if (!row) return { none: true };
+        const out = [...row.children].filter((s) => {
+          const b = s.getBoundingClientRect();
+          return b.right > innerWidth + 1 || b.left < -1;
+        }).map((s) => (s.textContent || "").trim().slice(0, 12) || "·");
+        const wrap = document.querySelector(".chg-wrap");
+        return { out, wrapScrolls: wrap ? wrap.scrollWidth > wrap.clientWidth + 1 : false,
+                 pageScrolls: document.documentElement.scrollWidth > innerWidth + 1 };
+      });
+      if (r.none) { console.log(`⏭ ${tag} ${skin}: no changes on this database`); await p.close(); await c.close(); continue; }
+      ok(r.out.length === 0 && !r.wrapScrolls && !r.pageScrolls,
+        `${tag} ${w}px ${skin}: ${r.out.length ? `off screen — ${r.out.join(", ")}` : "every column on screen"}${r.wrapScrolls ? " · the row box SCROLLS sideways" : ""}${r.pageScrolls ? " · the page scrolls sideways" : ""}`);
+      await p.close(); await c.close();
+    }
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {

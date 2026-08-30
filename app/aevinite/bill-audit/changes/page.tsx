@@ -115,6 +115,40 @@ export default function AdminBillChanges() {
 
   return (
     <>
+      {/* NO SIDEWAYS SCROLL, ANYWHERE (owner, 2026-08-31 — item 8). This was a six-column grid held
+          at minWidth 720 inside an overflowX:auto box, so on a 360px phone the heading read "TABLI"
+          and Who did it / Why / When all sat off the right edge, with nothing saying they were
+          there. On a log whose whole job is answering "who did this, and when", "when" being the
+          invisible column is the wrong one to lose. Its sibling — the Bills ledger next door — was
+          rebuilt to fold for exactly this reason, on his standing rule that there should not be
+          horizontal scrolling anywhere; this one had been left behind.
+          Below 760px the row folds onto three lines using named grid areas, the same technique and
+          the same breakpoint the Bills row uses, so the two screens behave alike. The desktop grid
+          is exactly the one it was. The column heads are hidden when folded, because a heading row
+          cannot describe a shape that is no longer a table — each value carries its own label
+          instead. */}
+      <style>{`
+        .chg-row { display: grid; grid-template-columns: 150px 1.1fr 60px 0.9fr 1.4fr 84px; min-width: 720px; }
+        @media (max-width: 760px) {
+          .chg-wrap { overflow-x: visible; }
+          .chg-row { min-width: 0; grid-template-columns: minmax(0,1fr) auto;
+                     grid-template-areas: "change when" "rest tbl" "by why"; gap: 3px 10px; padding: 10px 12px; }
+          .chg-row.head { display: none; }
+          .chg-row > .c-change { grid-area: change }
+          .chg-row > .c-when   { grid-area: when }
+          .chg-row > .c-rest   { grid-area: rest; min-width: 0 }
+          .chg-row > .c-tbl    { grid-area: tbl; text-align: right }
+          .chg-row > .c-by     { grid-area: by; min-width: 0 }
+          .chg-row > .c-why    { grid-area: why; min-width: 0; text-align: right }
+          /* The heads are gone, so each value says what it is. ::before rather than markup, so the
+             desktop table keeps exactly the DOM (and the screen-reader reading order) it had. */
+          /* A row with no reason recorded should not spend a line saying so — on the desktop table
+             the "—" holds a column open, but folded it is just a dash floating beside another. */
+          .chg-row > .c-why[data-empty] { display: none }
+          .chg-row > .c-by::before  { content: "by "; opacity: .65 }
+          .chg-row > .c-tbl::before { content: "table "; opacity: .65 }
+        }
+      `}</style>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Bills · Change log</h1>
@@ -169,24 +203,27 @@ export default function AdminBillChanges() {
         {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading changes" />) : d.rows.length === 0 ? (
           <div className="adm-empty">No bill changes recorded in this view.</div>
         ) : (
-          <div className="adm-logwrap" style={{ border: 0, overflowX: "auto" }}>
-            <div className="adm-logrow head" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720 }}>
-              <span>Change</span><span>Restaurant</span><span>Table</span><span>By</span><span>Reason</span><span style={{ textAlign: "right" }}>When</span>
+          <div className="adm-logwrap chg-wrap" style={{ border: 0 }}>
+            <div className="adm-logrow head chg-row">
+              <span className="c-change">Change</span><span className="c-rest">Restaurant</span><span className="c-tbl">Table</span>
+              <span className="c-by">By</span><span className="c-why">Reason</span><span className="c-when" style={{ textAlign: "right" }}>When</span>
             </div>
             {d.rows.map((r) => {
               // No entry → the shared plain-words map, then Sentence Case. Never the raw code.
               const a = ACT[r.action] || { t: actLabel(r.action), risk: r.risk };
               return (
-                <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720, alignItems: "center" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <div key={r.id} className="adm-logrow chg-row" style={{ alignItems: "center" }}>
+                  <span className="c-change" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 999, background: a.risk ? "var(--adm-danger)" : "var(--muted)", flex: "0 0 auto" }} aria-hidden="true" />
                     <span style={{ fontWeight: 600, color: a.risk ? "var(--adm-danger)" : "var(--text)", fontSize: 12.5 }}>{a.t}</span>
                   </span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.restaurantName}</span>
-                  <span className="adm-muted">{r.table ? `#${r.table}` : "—"}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="adm-muted">{r.actor}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="adm-muted" title={r.detail || undefined}>{r.detail || "—"}</span>
-                  <span style={{ textAlign: "right" }} className="adm-muted" title={r.at}>{timeAgo(r.at)}</span>
+                  <span className="c-rest" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.restaurantName}</span>
+                  <span className="c-tbl adm-muted">{r.table ? `#${r.table}` : "—"}</span>
+                  <span className="c-by adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.actor}</span>
+                  {/* `data-empty` so the FOLDED layout can drop a reason that says nothing. The desktop table
+                      keeps its "—", because there a column has to hold its place. */}
+                  <span className="c-why adm-muted" data-empty={r.detail ? undefined : ""} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.detail || undefined}>{r.detail || "—"}</span>
+                  <span className="c-when adm-muted" style={{ textAlign: "right" }} title={r.at}>{timeAgo(r.at)}</span>
                 </div>
               );
             })}
