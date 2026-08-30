@@ -288,7 +288,37 @@ const [ag] = await db("print_agents", { method: "POST", headers: { Prefer: "retu
     { name: VIRT.banquet, desc: "virtual A4", paper: { wMm: 210, hMm: 297 } },
   ] }) });
 AGENT = ag; made.agents.push(ag.id);
-[SESSION] = await db(`sessions?restaurant_id=eq.${RID}&bill_no=not.is.null&select=id,table_number&order=created_at.desc&limit=1`);
+// ── PICK A SESSION WHOSE BILL ACTUALLY RENDERS ───────────────────────────────────────────────
+// This used to take "the newest billed session", full stop — data this sweep does not own. On
+// 2026-08-30 the newest one belonged to ANOTHER session's end-to-end tax fixture: still open, one
+// unbilled order, and its bill document came back 204. Six phases then failed with "no document"
+// about a bill printer that was working perfectly, on a run that had been clean an hour earlier.
+//
+// So it probes: take the recent billed sessions, ask the server to build each one's bill, and use
+// the first that really produces paper. A closed one is tried first, because a bill that has been
+// issued and settled is the most complete thing this restaurant has. If none renders, SESSION stays
+// null and the phase below says so honestly rather than six others failing as a cascade.
+{
+  // A ticket only reaches the machine its KIND is routed to, so the probe needs that route in place.
+  await setRoutes({ bill: { agent: AGENT.id, printer: VIRT.counter }, test: { agent: AGENT.id, printer: VIRT.counter } });
+  const cands = await db(`sessions?restaurant_id=eq.${RID}&bill_no=not.is.null&select=id,table_number,closed_at&order=closed_at.desc.nullslast,created_at.desc&limit=6`);
+  for (const c of cands) {
+    try {
+      const [probe] = await db("print_jobs", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
+        restaurant_id: RID, kind: "bill", status: "queued", reprint: false, agent_id: AGENT.id,
+        printer: VIRT.counter, payload: { sessionId: c.id } }) });
+      const got = await agentCall("/next").then((r) => (r.status === 200 ? r.json() : null));
+      let renders = false;
+      if (got && got.id === probe.id) {
+        const res = await agentCall(`/job/${got.id}/document`);
+        renders = res.status === 200 && (await res.text()).length > 200;
+        await agentCall(`/job/${got.id}/done`, { method: "POST", body: "{}" });
+      }
+      await db(`print_jobs?id=eq.${probe.id}`, { method: "DELETE" }).catch(() => {});
+      if (renders) { SESSION = c; break; }
+    } catch { /* try the next candidate */ }
+  }
+}
 await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true, kot_print_target: "kitchen" });
 
 await phase("a helper can be added and it is stored hashed", async () => {
@@ -297,7 +327,7 @@ await phase("a helper can be added and it is stored hashed", async () => {
 await phase("its printers came from the machine, with paper sizes", async () => {
   const [row] = await db(`print_agents?id=eq.${AGENT.id}&select=printers`);
   return row.printers.length === 3 && row.printers.every((p) => p.paper) || "printer list wrong"; });
-await phase("a real billed session exists to print", () => !!SESSION || "no billed session on this restaurant");
+await phase("a real billed session exists, and its bill really renders", () => !!SESSION || "no billed session on this restaurant produces a bill document — every bill phase below is skipped rather than failing as a cascade");
 
 // ══ 2 · THE DOOR (the helper's five verbs, and every refusal) ════════════════════════════════
 // A machine's hello REPLACES its printer list — as it must, since the machine is the one who knows.
@@ -1882,8 +1912,11 @@ if (!browser) {
     const page = await ctx.newPage();
     await page.setViewportSize({ width, height: 900 });
     await ctx.addCookies([{ name: "aevidine_skin", value: skin, domain: "localhost", path: "/" }]);
-    await page.goto(`${BASE}/aevinite/printing?rid=${RID}`, { waitUntil: "networkidle" });
-    await page.waitForTimeout(700);
+    // NOT "networkidle" — every screen in this app polls, so the network never goes idle and this
+    // either times out or resolves so late that the read below sees a half-built page. It cost two
+    // phases on 2026-08-30 with a board that was perfectly correct when looked at by hand.
+    await page.goto(`${BASE}/aevinite/printing?rid=${RID}`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1400);
     return page;
   };
 
@@ -1973,8 +2006,13 @@ if (!browser) {
     await c.addInitScript(`try { localStorage.setItem("lfh_panel_theme", ${JSON.stringify(theme)}); } catch (e) {}`);
     const pg = await c.newPage();
     await pg.setViewportSize({ width, height: 900 });
-    await pg.goto(`${BASE}/panels/editor/index.html`, { waitUntil: "networkidle" });
-    await pg.waitForTimeout(1800);
+    await pg.goto(`${BASE}/panels/editor/index.html`, { waitUntil: "domcontentloaded" });   // it polls: never idle
+    // WAIT FOR THE THING, NOT FOR A NUMBER. "networkidle" used to hide this: it happened to hold on
+    // until the panel had fetched its board, so a fixed 1800ms afterwards was always enough. With a
+    // document-ready wait the panel is still loading, and a fixed delay is a guess that is wrong on
+    // a busy machine. Waiting for the Settings tab to exist is the same wait, stated honestly.
+    try { await pg.waitForFunction(`typeof state !== "undefined" && !!document.querySelector(".tab")`, null, { timeout: 15000 }); }
+    catch { return { c, pg, reached: "the panel never finished loading" }; }
     // CLICK IT THE WAY A PERSON DOES — ⚙️ Settings, then Printing. Reaching in and setting
     // `state.settingsSection` looked like it worked (renderEditor ran, no error) and drew the menu's
     // empty state instead, because the left list is what actually moves the section. Driving the
@@ -1986,14 +2024,17 @@ if (!browser) {
       return "ok";
     })()`);
     if (reached !== "ok") return { c, pg, reached };
-    await pg.waitForTimeout(900);
+    // …and wait for the Printing row to be BUILT, rather than assuming 900ms is enough. It only
+    // exists once the board has said printing is allowed, which is a second round trip.
+    try { await pg.waitForSelector(`li[data-settings-section="printing"]`, { timeout: 12000 }); } catch { /* the message below says what is missing */ }
     const opened = await pg.evaluate(`(() => {
       const li = document.querySelector('li[data-settings-section="printing"]');
       if (!li) return "Settings has no Printing section — the restaurant's printing is switched off, or this person may not set it up";
       li.click();
       return "ok";
     })()`);
-    await pg.waitForTimeout(1500);
+    // …and for the board itself to paint, not a guess at how long that takes.
+    try { await pg.waitForFunction(`/1 · Is printing switched on/i.test((document.querySelector("#editor")||{}).innerText||"")`, null, { timeout: 12000 }); } catch {}
     return { c, pg, reached: opened };
   };
 
@@ -2261,8 +2302,8 @@ if (!browser) {
       const ctx2 = await browser.newContext();
       await ctx2.addCookies([{ name: "lfh_staff_auth", value: adminCookie.split("=")[1], domain: "localhost", path: "/" }]);
       const pg2 = await ctx2.newPage();
-      await pg2.goto(`${BASE}/aevinite/printing?rid=${RID}`, { waitUntil: "networkidle" });
-      await pg2.waitForTimeout(700);
+      await pg2.goto(`${BASE}/aevinite/printing?rid=${RID}`, { waitUntil: "domcontentloaded" });
+      await pg2.waitForTimeout(1400);
       const nums = await pg2.evaluate(`[...document.querySelectorAll("main.adm-main h2")].map(h=>(h.textContent.trim().match(/^(\\d+) ·/)||[])[1]).filter(Boolean)`);
       await ctx2.close();
       return new Set(nums).size === nums.length || `${m} mode numbers its cards ${nums.join(", ")}`;
