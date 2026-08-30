@@ -24,7 +24,7 @@
  *
  *   node .github/scripts/verify-unowned-routes.mjs
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
@@ -102,6 +102,39 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
       "\n      Either move the line-height AFTER the shorthand, or centre with grid/flex — which also survives a\n      " +
       "label that wraps to two lines, where a tall line-height would push the second line out of the box.");
   }
+
+/* ── the help pictures the access screen teaches from ─────────────────────────────────── */
+{
+  // WHY (T29, 2026-08-30, on the owner's word). public/admin-help/ had grown to 26.4 MB across 51
+  // pictures, the worst 877 KB, several of them 2560px wide — for a slot that is 476 CSS px, because
+  // the sheet they sit in is capped at 520px with 22px of padding. Nothing was slow: AccessTree only
+  // fetches one when somebody opens the ⓘ sheet, and its own notes record fixing the version that
+  // fetched them all at once. The cost was the UPLOAD, on every deploy, on a stack with a daily cap.
+  // Resized to 1100px (still crisp at 3× on a phone) and palette-encoded: 26.4 MB → 5.1 MB.
+  //
+  // The ceilings below are deliberately loose. These are TEACHING pictures with a ring drawn round
+  // one control, and a picture nobody can read teaches nothing — so this guards against the folder
+  // creeping back to tens of megabytes, not against one picture being a little larger than another.
+  const DIR = "public/admin-help";
+  if (!existsSync(R(DIR))) bad(`${DIR} is missing — the ⓘ sheets on the access screen teach from it`);
+  else {
+    const shots = readdirSync(R(DIR)).filter((f) => /\.png$/i.test(f));
+    const sized = shots.map((f) => ({ f, kb: Math.round(statSync(R(`${DIR}/${f}`)).size / 1024) }))
+      .sort((a, b) => b.kb - a.kb);
+    const total = sized.reduce((s2, x) => s2 + x.kb, 0);
+    const fat = sized.filter((x) => x.kb > 400);
+    want(fat.length === 0,
+      `all ${shots.length} help pictures are under 400 KB (worst ${sized[0]?.kb} KB)`,
+      `${fat.length} help picture(s) are over 400 KB: ${fat.slice(0, 4).map((x) => `${x.f} ${x.kb}KB`).join(", ")}`,
+      "They render in a 476px slot. A 2560px original is four times wider than it can ever be shown, and\n      " +
+      "every byte of it is uploaded on every deploy. Resize to 1100px and palette-encode the PNG.");
+    want(total <= 9000,
+      `the whole folder is ${Math.round(total / 102.4) / 10} MB, which is a deploy this stack can afford`,
+      `public/admin-help/ is ${Math.round(total / 102.4) / 10} MB`,
+      "It was 26.4 MB before 2026-08-30. On a stack with a daily deploy cap that is upload time on every\n      " +
+      "single push, for pictures that are only ever fetched when somebody opens one ⓘ sheet.");
+  }
+}
 
 /* ── the two crash boundaries — what a person sees when everything else has failed ────── */
 {

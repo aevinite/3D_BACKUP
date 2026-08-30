@@ -213,8 +213,20 @@ all resolving.
 **`P15001`–`P15100` is reserved for repairs and nothing else.** `P15001`–`P15018` are
 **allocated to T9**; `P15019`–`P15022` are **allocated to T27** (sweep #7 — it wrote 504 rows into
 a block of 500 and its last four sat inside T28's block; renumbered by T28, 2026-08-28, with a
-banner on `T27.md` saying so). `P15023`–`P15100` remain free for the next repair. **A new sweep
-starts at `P15101`.**
+banner on `T27.md` saying so); `P15024` is **allocated to T12** (its screenshot band `P40386`–`P40435`
+is 50 ids and it wrote a 51st row, so two different checks shared `P40435`; renumbered by T29,
+2026-08-30, with the reason on the row itself). `P15025`–`P15100` remain free for the next repair.
+**A new sweep starts at `P15101`.**
+
+**A FOURTH SHAPE, seen 2026-08-30 — a recap table written in the PHASE-ROW shape.** `T12.md`'s
+honest recap *"Three rows that were ✅ are ❌ this run"* is headed `| id | what it claimed | what it
+actually did |` — three columns — but its rows were written with all five cells of a phase row. The
+guard identifies a phase row by shape, so three legitimate back-references were reported as
+duplicate checks, and **`verify:ledger-index` sat RED on `main`**. Collapsing those rows to the three
+columns their own header promises fixed it with no fact lost. **If you write a recap table, give its
+rows the same number of cells as its header** — a five-cell row IS a phase row, whatever you meant
+it to be. Teaching the guard to read table headers instead was tried first and made it far worse
+(1,580 false reports across every ledger); the shape rule is the one that holds.
 
 **AND A THIRD SHAPE, seen 2026-08-29:** two terminals read the same *Next free ID* out of this file
 in the same minute and both took it (T7 and T28, at `P35237`). An overrun is one terminal writing
