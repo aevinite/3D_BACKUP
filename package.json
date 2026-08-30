@@ -106,6 +106,8 @@
     "verify:panel-secrets": "node scripts/verify-panel-secrets.mjs",
     "verify:id-chunks": "node scripts/verify-id-chunks.mjs",
     "verify:one-bill-delete": "node scripts/verify-one-bill-delete.mjs",
+    "verify:plain-refusals": "node scripts/verify-plain-refusals.mjs",
+    "verify:log-visibility": "node scripts/verify-log-visibility.mjs",
     "verify:bills-screen": "node scripts/verify-bills-screen.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:print-queue": "node scripts/verify-print-queue.mjs",

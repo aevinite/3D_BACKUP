@@ -8,6 +8,10 @@
 import { useEffect, useRef } from "react";
 import { createClient, type SupabaseClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { reportRealtime, reportLatency } from "@/lib/connectionStatus";
+import { deadline } from "@/lib/partialRead";
+
+/** 10s for the one tiny config read the /api/rt-config fallback makes. */
+const rtDeadline = () => deadline(10_000);
 
 // `audit` carries staff_actions only, and exists so the activity log does NOT ride `ops`
 // (mig 267 / sweep F3): an ops breadcrumb with no table_number means "reload the whole
@@ -55,7 +59,13 @@ async function getClient(): Promise<SupabaseClient> {
     return clientPromise;
   }
   clientPromise = (async () => {
-    const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
+    // A CEILING on the fallback too (owner picked item 18, 2026-08-30). This is the path a
+    // deployment without the public values takes, and it decides whether live updates exist at all —
+    // so a stalled read here left `clientPromise` pending for ever and every caller awaiting it.
+    // 10s: it is one tiny config read. Feature-guarded through the shared helper, because READING
+    // AbortSignal.timeout throws on a browser that has not got it — which is the whole reason
+    // verify:abort-guard exists, and this file's own fallback is what it protects.
+    const cfg = await (await fetch("/api/rt-config", { cache: "no-store", ...(rtDeadline() ? { signal: rtDeadline() } : {}) })).json();
     // See the note in public/panels/realtime.js: a 503 { unconfigured:true } is a real answer, and
     // passing its empty values into createClient would surface as "Invalid URL" (T9 improvement 6).
     if (cfg?.unconfigured || !cfg?.url || !cfg?.anonKey) {

@@ -11,13 +11,22 @@
 
 // Turn a brand hex ("#c0392b") into "r, g, b" so we can build rgba() glows at any
 // opacity. Accepts #rgb or #rrggbb; returns null for anything we can't parse.
-export function hexToRgbTriplet(hex: string): string | null {
-  let h = hex.trim().replace(/^#/, "");
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  const n = parseInt(h, 16);
-  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
-}
+//
+// ── ONE DEFINITION, NOT TWO (T25, sweep #7, 2026-08-28) ──────────────────────────────────────────
+// This file used to carry its OWN copy of this function, exported under the SAME NAME as the one in
+// lib/brandTheme.ts — and the two disagreed on a real input. brandTheme's calls isHexColor() first,
+// which requires the leading `#`; this one stripped the `#` before testing, so a value stored
+// WITHOUT one ("c0392b") came back as "192, 57, 43" here and null there. components/AppShell.tsx
+// imports from both files, so both answers were in one module graph.
+//
+// One name with two answers is the drift this codebase keeps consolidating away, and the resolution
+// is the one lib/liveBoard.ts's `pageAll` → `pageBoard` note records: fix the thing that is actually
+// wrong. Here that is the DUPLICATE, not the behaviour — a brand colour is stored with its `#` by
+// every writer (admin branding goes through isHexColor in the same commit that saves it), and
+// measured on the dev database every stored accent_color carries one. So the strict version is the
+// only one, and it is imported rather than re-typed.
+export { hexToRgbTriplet } from "./brandTheme";
+import { hexToRgbTriplet } from "./brandTheme";
 
 // WHICH INK READS ON THE ACCENT ITSELF — black or white, whichever genuinely has more contrast.
 //

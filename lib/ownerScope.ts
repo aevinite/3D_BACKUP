@@ -126,8 +126,23 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
       // borrowing the owner's id, so entitlement gates must never fire on it.
       const [primaryQ, membersQ] = await Promise.all([
         sb.from("restaurants").select("owner_user_id").eq("id", acting).maybeSingle(),
-        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", acting),
+        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", acting).limit(1000),
       ]);
+      // …AND THESE TWO READS' ERRORS COUNT TOO (T25, sweep #7, 2026-08-28). F22 (below) taught this
+      // function that a blip must never silently SHRINK the view — and then fixed only the third
+      // read. These two are one step earlier in the same ladder and were still `(data || [])`, so a
+      // failure here left `members` empty and `primary` undefined, `ownerId` fell through to null,
+      // and the function returned `{ ids: [acting] }`: the admin who opened a five-restaurant
+      // owner's cockpit saw ONE, with nothing on screen to say the other four had been dropped
+      // rather than never existed. Exactly the symptom F22 is written up as.
+      //
+      // "Nobody owns this restaurant" is a real, different answer and it still falls through to the
+      // single-restaurant scope below — that is why the ERROR is checked rather than the emptiness.
+      if (membersQ.error || primaryQ.error) {
+        console.error("[ownerScope] could not read who owns the acting restaurant:",
+          membersQ.error?.message || primaryQ.error?.message);
+        throw new OwnerScopeUnavailable();
+      }
       const members = (membersQ.data || []).map((m) => m.user_id as string);
       const primary = primaryQ.data?.owner_user_id as string | null | undefined;
       // ?as=<ownerId> — the admin explicitly PICKED which owner's cockpit to open (the

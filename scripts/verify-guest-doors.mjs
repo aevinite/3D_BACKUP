@@ -40,7 +40,7 @@
 //
 // Static: it reads the shipped files. No database, no login, no deployed site — so it can never
 // add load or trip one of the app's own limits, and it runs in well under a second.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -100,6 +100,85 @@ check("only the routes that genuinely ARE restaurant #1 start out `ready`",
   /useState<boolean>\(\(\) => \/\^\\\/\(menu\|item\)/.test(ctx));
 check("the pin is read inside an effect, never during render (there is no sessionStorage on the server)",
   !/const\s+\w+\s*=\s*useMemo\([^)]*tenantSlug\(\)/.test(ctx));
+
+// ── AND A FAILED LOOKUP IS NOT ALLOWED TO ANSWER "RESTAURANT #1" EITHER (item 21, 2026-08-30) ──
+//
+// Section 1 above fixed the case where the context did not KNOW about the `/q/<code>` pin. This is
+// the same fault by the other road: the pin is read correctly, the slug is right, and the RESOLVE
+// fails. It used to end
+//
+//     .then((r) => { setId(r?.id || DEFAULT_RESTAURANT_ID); … setReady(true); })
+//     .catch(() => { setReady(true); })                     // ← id left on #1, and declared ready
+//
+// so a refused read produced exactly the symptom in this file's own header. MEASURED on Aangan's
+// real table-1 sticker (`/q/9AAG8YK8`) with only the client-side `lfh_guest_restaurant` call
+// refused, tapping "+" on a dish:
+//
+//     lookup works ......................... basket = lfh_cart:aangan-garden-restaurant [Virgin Mojito]
+//     lookup refused, OLD behaviour ........ basket = (none)          ← the tap did nothing
+//     lookup refused, WITH the fix ......... basket = lfh_cart:aangan-garden-restaurant [Virgin Mojito]
+//
+// The empty id is not a hang: `/api/guest/place-order` and `/api/guest/call-waiter` already refuse
+// a body with no restaurant (`unknown_restaurant`), and lib/guestOutbox.ts already words it for a
+// diner. An unknown restaurant now takes the path that was built for it.
+//
+// lib/tenant.ts is what makes the catch reachable: since 2026-08-03 a failed READ throws instead of
+// folding into `null`, so this is a cold process plus one refused read.
+const resolveTail = ctx.slice(ctx.indexOf("getRestaurantBySlug("));
+check("a FAILED tenant resolve does not fall back to restaurant #1",
+  !/\.catch\([^)]*\)\s*=>\s*\{[^}]*setReady\(true\)/.test(resolveTail) &&
+  /\.catch\(/.test(resolveTail) && /setId\(""\)/.test(resolveTail));
+check("…and it does not declare itself `ready` on the way past",
+  /\.catch\(\(\) => \{[\s\S]{0,400}setReady\(false\)/.test(resolveTail));
+check("…while a lookup that SUCCEEDS with no row still resolves to #1 (a slug nobody owns is a different answer)",
+  /setId\(DEFAULT_RESTAURANT_ID\); setName\(null\); setReady\(true\)/.test(resolveTail));
+check("the server half the empty id relies on is still there — a guest write with no restaurant is REFUSED",
+  ["app/api/guest/place-order/route.ts", "app/api/guest/call-waiter/route.ts"].every((f) => {
+    const s = read(f);
+    return /isUuid\(b\.restaurantId\)/.test(s) && /unknown_restaurant/.test(s);
+  }));
+check("…and a diner is TOLD, in words, rather than watching a tap do nothing",
+  /case "unknown_restaurant": return "We couldn't tell which restaurant/.test(read("lib/guestOutbox.ts")));
+
+// ── THE TABLE NUMBER DOES NOT STAY IN THE ADDRESS BAR (owner, 2026-08-30) ──────────────────────
+//
+// His words: *"instead of numbers for table, do you use some kind of code right? Because people
+// can't able to change the table number from top just by changing the URL."*
+//
+// The answer is the `/q/<code>` door (mig 210), and it is what every QR this app generates encodes —
+// components/admin/RestaurantSettings.tsx builds `/q/<code>` and nothing builds `?table=N` any more.
+// The two older doors are kept alive only so a sticker laminated before mig 210 keeps working, so
+// they read the number ONCE and then wipe it out of the address: nothing left on screen to edit, and
+// no `?table=` to share by accident.
+//
+// NOT a redirect to `/q/<code>`, which was the obvious idea and is strictly worse: the code is a
+// PRIVATE random string (mig 210's own words), so a route that turned "table 7" into "table 7's
+// code" would let anyone learn every table's code by walking 1…30.
+//
+// AND NOT A GATE. A diner can still name a table by typing it. What protects an OCCUPIED table is
+// `lfh_join_session` making a second arrival a `guest` whose approval comes from
+// `sessions.auto_approve` — DEFAULT FALSE since mig 018 — plus `lfh_geo_ok`. Those two are checked
+// below so this section cannot quietly become the only thing standing there.
+const menuView = read("components/MenuView.tsx");
+check("the older doors WIPE ?table= / ?t= out of the address once it is read",
+  /searchParams\.delete\("table"\)/.test(menuView) && /searchParams\.delete\("t"\)/.test(menuView));
+check("…with replaceState, so the back button cannot put the number back",
+  /history\.replaceState\(/.test(menuView) && !/history\.pushState\([^)]*table/.test(menuView));
+check("…and the `/q/<code>` door is left alone (it never had a number to wipe)",
+  /if \(!qrTable && window\.location\.search\)/.test(menuView));
+check("…while the table itself still reaches the app",
+  /setScannedTable\(digits\)/.test(menuView) && /lfh:table-scanned/.test(menuView));
+check("every QR this app generates is the CODE door, not ?table=N",
+  /\/q\/\$\{code\}/.test(read("components/admin/RestaurantSettings.tsx")));
+check("an OCCUPIED table still needs the head to let a second party in (auto_approve DEFAULT false)",
+  (() => {
+    const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /\.sql$/.test(f));
+    const setsFalse = migs.some((f) => /auto_approve SET DEFAULT false/.test(read(`supabase/migrations/${f}`) || ""));
+    const joinUsesIt = migs.some((f) => /v_approved := v_session\.auto_approve/.test(read(`supabase/migrations/${f}`) || ""));
+    return setsFalse && joinUsesIt;
+  })());
+check("…and the basket refuses an unapproved member, so naming a table is not the same as joining it",
+  /connected/.test(read("lib/tableConnection.ts")) && /gateAddToCart/.test(read("lib/tableConnection.ts")));
 
 say("\n2) A request to staff is only reported as sent when it was");
 check("the gate reads the answer instead of discarding it",

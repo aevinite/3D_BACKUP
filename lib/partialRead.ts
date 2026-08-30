@@ -91,3 +91,40 @@ export function partialNote(keys: string[]): string {
     : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
   return `Couldn't read ${list} just now — everything else on this page is up to date.`;
 }
+
+// ── A DEADLINE A BROWSER CAN ACTUALLY ASK FOR (owner picked item 18, 2026-08-30) ──────────────────
+//
+// Four screens fetched our own API with no upper bound, so a read that never came back left a
+// spinner turning for ever: the admin console's one safe fetch wrapper, the owner Dashboard's
+// overview, and the three reads the owner Report is assembled from. Measured, not guessed — the
+// sweep listed them.
+//
+// READING `AbortSignal.timeout` THROWS on a browser that has not got it. Not calling it — reading
+// it. Five files in this repo already feature-test it and `npm run verify:abort-guard` exists
+// because lib/supabase.ts did it unguarded anyway, and with the API absent a guest's dish page
+// rendered 17 characters instead of 627. So the test lives in ONE place now rather than being
+// re-typed at each call site.
+//
+// It lives in lib/partialRead.ts for the same reason everything else here does: this file has NO
+// IMPORTS, so a "use client" screen can hold it without dragging a server module into the browser
+// bundle. (lib/ownerScope.ts re-exports the rest of this file for exactly that reason.)
+//
+// Returns `undefined` when the browser cannot offer one — the caller then behaves exactly as it does
+// today, which is the honest fallback rather than a thrown error.
+export function deadline(ms: number): AbortSignal | undefined {
+  try {
+    return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(ms) : undefined;
+  } catch { return undefined; }
+}
+
+/** The words a person reads when OUR OWN server did not answer in time. Never blames their internet
+ *  — the request left the device, so "your connection" would be a guess and usually a wrong one. */
+export const TOOK_TOO_LONG = "That took too long to load — please try again.";
+
+/** True when a caught error is a deadline firing rather than a refusal. AbortSignal.timeout rejects
+ *  with a DOMException named TimeoutError; a caller's own controller gives AbortError. */
+export const isDeadline = (e: unknown): boolean => {
+  const n = (e as { name?: unknown } | null)?.name;
+  return n === "TimeoutError" || n === "AbortError";
+};
