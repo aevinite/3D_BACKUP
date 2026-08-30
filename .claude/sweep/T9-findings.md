@@ -310,3 +310,98 @@ was re-aimed at what the rule actually protects, not deleted:
 | **T7** (waiter tablet) | four sideways rows still have no swipe hint — the module is now proven across five layouts, so it is pure wiring | `P19596`, re-stated `P44788` |
 | **T5** (manager panel) | the duplicate undo-toast rule in the panel stylesheet | `P19597`, re-stated `P44789` |
 | **T5** (manager panel) | one unguarded back-layer call | `P19598`, re-stated `P44790` |
+
+---
+
+# T9 — THIRD 500 (2026-08-31) · phases `P45301`–`P45800`
+
+**Tested against the backup SITE, not the source on this laptop.** That is the whole point of this
+run: a green suite on a laptop says the source is right, not that the site is.
+
+**500 rows · 8 suites · all ✅ · 2 faults, both fixed with a guard proved RED first.**
+Nothing written to any database, nothing signed into. AV live never touched.
+
+| # | severity | who loses | file | confirmed how |
+|---|---|---|---|---|
+| **1** | **high** | the manager: Void, Strike out and Discard all do nothing and say nothing | `editor/inventory.js` | **driven**, dialogs suppressed |
+| **2** | medium | anyone trusting two guards: they stopped seeing 190 lines of the file they check | `verify-panel-dialogs.mjs`, `verify-panel-plumbing.mjs` | reproduced, re-proved red |
+
+## 1 · voiding a purchase did nothing, silently
+
+The 2026-08-30 pass fixed ONE browser dialog in this file. There were four more:
+
+```
+prompt("Why is this purchase being voided? (kept on record)")
+prompt("Why strike this out? (kept on record)")   ×2, on waste lines
+confirm("Throw this draft count away?")
+```
+
+On a kiosk browser, an embedded webview, or Chrome after *"prevent this page from creating
+additional dialogs"*, `prompt()` answers **null** and `confirm()` answers **false**, both without
+showing anything. Every one of those call sites reads `if (!answer) return;`. **The manager taps
+Void, and nothing happens and nothing is said.**
+
+Worse than the case fixed last time, which at least refused out loud — and it lands on the actions
+whose whole point is being explainable afterwards: the reason is kept on record, and the void
+reverses stock.
+
+`maint.js` gains **`LFH_ASK.text()`**: the same card as the other two, with a box focused on open
+and Save disabled until something is typed — a refusal *before* the tap rather than after, which is
+what the old `!reason.trim()` check did silently. Cancel, the scrim and BACK all answer **null**,
+never an empty string: a blank reason on a record that exists to be explainable is the one answer
+this must never invent. The older three-step chain from 2026-08-30 was folded into the same helper.
+
+Driven with dialogs suppressed, **20/20**.
+
+## 2 · two guards stripped comments in an order that hid the code they check
+
+Both removed BLOCK comments before LINE comments. That is harmless until a line comment contains
+the characters that OPEN a block one — and `editor/inventory.js` line 3 reads:
+
+```
+// Talks to /api/inventory/* (power-enforced server-side; whoami here is display truth).
+```
+
+That `/*` paired with the next `*/` below it. Once the reason-card fix added a comment block at
+line 192, the pair swallowed **lines 3–192** — every write, the queue guard, the request deadline
+and the restaurant scoping. Stripped length: 58,708 → 54,417 characters.
+
+**Nothing failed loudly.** The checks simply stopped seeing the code they were about — the same
+shape as `verify:rejected` matching a note's anchor inside the note. It surfaced only because four
+rows of mine asserted those things were PRESENT and went red when they vanished from the stripped
+text. Line comments are removed first now, still protecting `://` so a URL survives.
+
+## What the site proved about the previous two runs
+
+- **All 19 shared files are byte-for-byte what `main` says.** Compared against `origin/main` rather
+  than my working tree, so an edit of mine could not make the site look wrong.
+- **All five fixes from the second 500 are live and working**, driven again on the served bytes:
+  the guest-menu switch asks in the panel with no browser dialog, live updates recover from a hung
+  server (`1 → 2` requests on wake), the drawer's deadlines fire and say *"the server didn't answer
+  in time"*, and the stock sheet's chain is in place.
+- The chart library and icon font are genuinely bundled — nothing fetched from a CDN at run time —
+  and no key, source-map link or laptop address is on the public site.
+
+## Eight of nine red rows were MY CHECK being wrong
+
+Recorded rather than deleted: an icon *directory* fetched as a file; a licence banner naming
+fontawesome.com read as a font being fetched off-site; an unstyled button measured as a 28px tap
+target (the real panel CSS makes it 44); a rate-limited page read as "the site does not publish
+this"; a load-order rule that ignored the guard on the reference; the queue's `send({base, path})`
+signature called as `{url}`; my own leftovers in shared IndexedDB counted as the device breaking its
+200 limit; and a relative `app.js` path read as a missing app file.
+
+## Looked at and deliberately NOT changed
+
+- **The browser's dialog stays as the last resort in exactly three places.** A page with neither the
+  editor's dialog nor the shared card would otherwise ask nothing at all. The guard allows precisely
+  those three and fails on a fourth.
+- **The connection panel still does not say WHY each waiting change is waiting.** Unchanged across
+  all three runs, still the weakest thing here, still a feature rather than a fault. `P45793`.
+
+## 🔗 HANDOFF
+
+| for | what | row |
+|---|---|---|
+| whoever owns the files outside `public/panels/*.js` | browser dialogs are still used there; `LFH_ASK` (now with `.text()`) is on every panel page and `verify:panel-dialogs` widens in one line | `P45792` |
+| whoever owns `verify:guards-alive` | it cannot see a guard whose comment-stripping quietly removes the code it checks — the tell is a checked marker disappearing from the stripped text | `P45782` |

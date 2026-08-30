@@ -42,7 +42,19 @@ if (!existsSync(DIR)) {
 // Comments are not code. Several of these files describe the old behaviour in prose (deliberately —
 // an obituary is how the next person learns why it changed), and a guard that reads a sentence as a
 // line of source is a guard that invents a failure.
-const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+// LINE COMMENTS FIRST, THEN BLOCK COMMENTS (T9 third sweep, 2026-08-31).
+//
+// Stripping block comments first looks harmless until a LINE comment contains the characters that
+// open one. editor/inventory.js line 3 reads
+//
+//     // Talks to /api/inventory/* (power-enforced server-side; whoami here is display truth).
+//
+// and that `/*` was paired with the next `*/` anywhere below it — swallowing 190 lines of real
+// code, including every write, the queue guard and the request deadline. Nothing failed loudly:
+// the checks simply stopped seeing the code they were about, which is a guard passing for the
+// wrong reason. Removing `// …` first (protecting `://` so a URL survives) means no such opener
+// is left by the time block comments are removed.
+const strip = (s) => s.replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
 
 const FILES = readdirSync(DIR).filter((f) => f.endsWith(".js")).sort();
 

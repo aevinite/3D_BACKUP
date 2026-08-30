@@ -365,7 +365,12 @@ has("maint.js", /AbortSignal\.timeout/, "the drawer's deadline no longer uses th
   // Comments stripped first: this file DESCRIBES its old raw fetch()es in prose (deliberately — an
   // obituary is how the next person learns why they changed), and the first pass counted the word
   // "fetch()" in a comment as a request with no deadline.
-  const src = (fileFor("maint.js") || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  // LINE COMMENTS FIRST, THEN BLOCK COMMENTS. The other order looks harmless until a LINE comment
+  // contains the characters that OPEN one — editor/inventory.js carries "/api/inventory/*" in a //
+  // comment on line 3, and that `/*` paired with the next `*/` below it and swallowed 190 lines of
+  // real code. Nothing failed loudly; the checks simply stopped seeing what they were about.
+  // (T9 third sweep, 2026-08-31.)
+  const src = (fileFor("maint.js") || "").replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
   if (src) {
     // A fetch call is read to its OWN closing bracket, counting brackets — the first pass used
     // /fetch\("…"[^)]*\)/ and stopped at the ) inside JSON.stringify({...}), so three calls that
