@@ -5740,8 +5740,15 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // RECORD, not a refusal: every cancel now writes an Audit row naming the person, the reason,
       // the KOT and the bill (below), so nothing can be cancelled quietly.
       //
-      // DELETING a bill keeps its own power (delete_bill + void_bills, further down) — that is the
-      // one that takes a sale out of the reports, and it stays deliberately handed over.
+      // AND DELETING A BILL IS NOT A POWER THIS RESTAURANT HAS AT ALL — do not read the paragraph
+      // above as saying it is. R27 (owner, 2026-08-16, re-confirmed 2026-08-21) retired the
+      // grantable "Delete a bill" row outright: *"I don't want to give permission to the restaurant
+      // owner to delete the bill because he will fake the bill and delete the bill"*. Cancel is the
+      // only route out of a bill for a manager AND for the owner; `canDeleteBill()` answers true for
+      // the Aevidine admin console only, and `npm run verify:one-bill-delete` asserts exactly that.
+      // This comment said the OPPOSITE until 2026-08-28 (sweep #7, T30) — written before R27 and
+      // never re-read, which is how a permission the owner refused gets rebuilt by somebody
+      // trusting a comment. The guard now fails if that wording ever comes back.
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to
