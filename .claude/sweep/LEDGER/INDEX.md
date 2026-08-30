@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P44001`.**
+**Next free ID: `P44301`.**
 
 > **T30 claims `P43501`–`P44000`** for its round-2 block (2026-08-30). RENUMBERED FROM `P42501`–`P43000`: I wrote the rows first and claimed after, and T7 claimed that same range correctly — before writing — while I was working. Their claim stands; mine moved. This is the third time this file has recorded that collision, and every time the terminal that claimed FIRST was the one that had it right.
 
@@ -78,6 +78,11 @@ again. Read those before reporting anything.
 > Every row was driven against the LIVE site, so a green row says what a waiter meets today.
 > (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
+> **T28 · the two blocks the 500 squeezed out** at `P44001`–`P44300` (2026-08-30). Blocks E and F
+> of the guards audit were RUN and then left out of the ledger, because blocks A–D filled the 500
+> first. Registering them properly — and block E's fixture check had a hole that missed the very
+> collision that caused three false "serious floor bug" reports, so it is rebuilt here.
+>
 > **THE REPO'S OWN SAFETY NET — 500 on the guards themselves** at `P37358`–`P37857` (2026-08-30).
 > T28's own territory, asked for by the owner: "check everything is working fine as it should or
 > not". Does each of the 153 `verify:*` / `test:*` entries actually run, actually bite when the

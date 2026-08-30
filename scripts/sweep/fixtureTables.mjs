@@ -48,6 +48,7 @@ export const RESERVED = [
   ["21", "verify-merged-floor.mjs / verify-families.mjs — the independent tables"],
   ["22", "verify-merged-floor.mjs / verify-families.mjs — the independent tables"],
   ["23", "verify-merged-floor.mjs — the independent tables"],
+  ["25", "scripts/sweep/t3/order-end-to-end.mjs — it opens a session on 25 and walks an order through it (registered 2026-08-30: it had been sitting there unlisted, so any dynamic picker was free to take it mid-run)"],
   ["27", "verify-void-on-joined-party.mjs — the party that holds the bill"],
   ["28", "verify-void-on-joined-party.mjs — the joined table whose food must survive"],
   ["9", "verify-session-ux.mjs — the partner-approval walk"],
