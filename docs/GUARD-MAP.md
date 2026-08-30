@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **154** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **155** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 154 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -74,6 +74,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 | you touched | run | needs | writes |
 |---|---|---|---|
 | **anything at all in this panel** | `verify:manager-behaviour`, `verify:ui`, `verify:taps` | nothing | no |
+| a box a person types **money** into — a discount, a tip, a split part, a price | `verify:money-boxes` | nothing | no |
 | the tables floor / a tile / the floor summary | `verify:floor`, `verify:cancelled-tile` | nothing / `.env.local` | no |
 | how many tables sit in a row / the floor's CSS bands / sideways scrolling | `verify:floor-per-row` | nothing | no |
 | `lfh_table_view_summary` (the floor's one big read) | `verify:summary-parity` ← **not hand-review** | `.env.local` | no |
@@ -130,6 +131,7 @@ Code: `public/panels/tablet/*`, `app/api/tablet/*`
 |---|---|---|---|
 | the waiter's floor | `verify:tablet-wants-in`, then `verify:tablet` | nothing / `.env.local` | `verify:tablet` **YES** |
 | **anything at all in `public/panels/tablet/app.js`** | `verify:tablet-taps` — it compiles the file (a stray backtick in a template literal blanks the whole panel), and holds the four bulk actions, the KOT rows, the destination pickers and the money buttons to "a tap must never vanish in silence" | nothing | no |
+| a box a waiter types **money** into — a discount, a tip, a split part | `verify:money-boxes` ← a money box the screen fills in ITSELF must not declare whole numbers only; the same rule, and the same guard, covers the manager panel's copies | nothing | no |
 | the tablet's own endpoints | `verify:tablet-parity` | `.env.local` | **YES** |
 | waiter sections | `verify:sections` | `.env.local` | **YES** |
 | the board fingerprint | `verify:board-sig` | nothing | no |

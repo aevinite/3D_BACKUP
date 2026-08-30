@@ -117,6 +117,7 @@
     "verify:menu-parts-live": "node scripts/verify-menu-parts-live.mjs",
     "verify:tablet": "node scripts/verify-tablet-floor.mjs",
     "verify:manager-behaviour": "node scripts/verify-manager-behaviour.mjs",
+    "verify:money-boxes": "node scripts/verify-money-boxes.mjs",
     "verify:manager-gates": "node scripts/verify-manager-gates.mjs",
     "verify:guest": "node scripts/verify-guest.mjs",
     "verify:i18n-scope": "node scripts/verify-i18n-scope.mjs",

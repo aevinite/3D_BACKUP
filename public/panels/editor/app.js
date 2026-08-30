@@ -4604,12 +4604,20 @@ function openPaymentMethodModal(due, label, opts = {}) {
         <div class="disc-linked-row">
           <div class="disc-field">
             <label class="dish-edit-lbl">Tip %</label>
-            <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="payTipPct" placeholder="0">
+            <!-- step="0.01", NOT "1" (T7 sweep #7, 2026-08-30 — the same rule the owner ruled on for this
+                 panel's split-amount box on 2026-08-29). THIS SHEET FILLS THESE BOXES IN ITSELF: paintTip
+                 writes a percentage to one decimal and an amount with r2(), and the discount modal's
+                 paint() writes 12.5 into the percent box and 153.29 into the amount box. Declaring
+                 whole numbers only made each box refuse its own contents — a hardware ↑/↓ snapped 12.5
+                 to 13, and a person correcting a figure by hand was pushed to whole rupees on a bill
+                 that carries paise. Found on the WAITER TABLET first (its three were identical) and
+                 fixed there as item 18; this is the other half of the same fault. -->
+              <input type="number" inputmode="decimal" min="0" step="0.01" class="dish-edit-custominput disc-input" id="payTipPct" placeholder="0">
           </div>
           <div class="disc-linked-eq">=</div>
           <div class="disc-field">
             <label class="dish-edit-lbl">Tip amount (₹)</label>
-            <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="payTipInput" placeholder="0">
+            <input type="number" inputmode="decimal" min="0" step="0.01" class="dish-edit-custominput disc-input" id="payTipInput" placeholder="0">
           </div>
         </div>
         <div class="chips pay-tip-chips" style="margin:4px 0 6px">
@@ -4623,7 +4631,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <span><b>They paid</b></span>
             <label class="disc-pay-edit" title="Type the total the customer actually handed over — the tip works itself out">
               <span class="disc-pay-cur">₹</span>
-              <input type="number" inputmode="decimal" min="0" step="1" id="payPaidInput" class="disc-pay-input" aria-label="Total the customer paid">
+              <input type="number" inputmode="decimal" min="0" step="0.01" id="payPaidInput" class="disc-pay-input" aria-label="Total the customer paid">
             </label>
           </div>
         </div>
@@ -14449,12 +14457,20 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
       <div class="disc-linked-row">
         <div class="disc-field">
           <label class="dish-edit-lbl">Discount %</label>
-          <input type="number" inputmode="decimal" min="0" max="100" step="1" class="dish-edit-custominput disc-input" id="discPctInput" placeholder="0">
+          <!-- step="0.01", NOT "1" (T7 sweep #7, 2026-08-30 — the same rule the owner ruled on for this
+                 panel's split-amount box on 2026-08-29). THIS SHEET FILLS THESE BOXES IN ITSELF: paintTip
+                 writes a percentage to one decimal and an amount with r2(), and the discount modal's
+                 paint() writes 12.5 into the percent box and 153.29 into the amount box. Declaring
+                 whole numbers only made each box refuse its own contents — a hardware ↑/↓ snapped 12.5
+                 to 13, and a person correcting a figure by hand was pushed to whole rupees on a bill
+                 that carries paise. Found on the WAITER TABLET first (its three were identical) and
+                 fixed there as item 18; this is the other half of the same fault. -->
+              <input type="number" inputmode="decimal" min="0" max="100" step="0.01" class="dish-edit-custominput disc-input" id="discPctInput" placeholder="0">
         </div>
         <div class="disc-linked-eq">=</div>
         <div class="disc-field">
           <label class="dish-edit-lbl">Discount amount (₹)</label>
-          <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="discAmtInput" placeholder="0">
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="dish-edit-custominput disc-input" id="discAmtInput" placeholder="0">
         </div>
       </div>
       <div class="chips disc-pct-quick">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
@@ -14464,7 +14480,7 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
           <span>They pay</span>
           <label class="disc-pay-edit" title="Type what the customer will actually pay — the discount works itself out">
             <span class="disc-pay-cur">₹</span>
-            <input type="number" inputmode="decimal" min="0" step="1" id="discPayInput" class="disc-pay-input" aria-label="Amount they pay">
+            <input type="number" inputmode="decimal" min="0" step="0.01" id="discPayInput" class="disc-pay-input" aria-label="Amount they pay">
           </label>
         </div>
       </div>
@@ -17016,7 +17032,11 @@ function bqPackagesHtml() {
   const rows = bq.items.map((it) => `
     <div class="bq-row${it.active ? "" : " bq-off"}" data-bq-id="${esc(it.id)}" style="display:grid;grid-template-columns:1fr 110px 130px auto auto;gap:8px;align-items:center;padding:8px 10px;border-radius:9px;background:var(--panel-2);margin-bottom:8px${it.active ? "" : ";opacity:.55"}">
       <input class="sx-input" data-bq-f="title" value="${esc(it.title)}" placeholder="Package name" />
-      <input class="sx-input" data-bq-f="price" type="number" min="0" step="1" value="${esc(String(it.price))}" title="Price per unit (₹) — 0 means the price is typed on the bill" />
+      <!-- step="0.01" on both price boxes on this screen (T7 sweep #7, 2026-08-30). This one is
+           filled from the STORED price, so a package saved at ₹249.50 came back into a box that
+           declared whole numbers only — and a per-plate price with paise is an ordinary thing to
+           want. Number(inp.value) on save already reads paise, so nothing else changes. -->
+      <input class="sx-input" data-bq-f="price" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(String(it.price))}" title="Price per unit (₹) — 0 means the price is typed on the bill" />
       <input class="sx-input" data-bq-f="unit" value="${esc(it.unit || "per plate")}" placeholder="per plate" title='Shown on the bill after the name, e.g. "per plate"' />
       <button class="btn small" data-bq-toggle title="${it.active ? "Hide from the bill screen" : "Show on the bill screen"}">${it.active ? "On" : "Off"}</button>
       <button class="btn small danger" data-bq-del title="Delete">🗑</button>
@@ -17029,7 +17049,7 @@ function bqPackagesHtml() {
       ${rows || `<div class="sx-empty">No packages yet — add the first one below.</div>`}
       <div style="display:grid;grid-template-columns:1fr 110px auto;gap:8px;margin-top:10px">
         <input class="sx-input" id="bqNewTitle" placeholder="New package — e.g. Unlimited package" />
-        <input class="sx-input" id="bqNewPrice" type="number" min="0" step="1" placeholder="₹ / plate" />
+        <input class="sx-input" id="bqNewPrice" type="number" inputmode="decimal" min="0" step="0.01" placeholder="₹ / plate" />
         <button class="btn primary" id="bqAdd">+ Add</button>
       </div>
     </div>`;
