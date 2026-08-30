@@ -209,7 +209,7 @@
       queued = queued || res2.queued;
       if (queued) {
         if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
-        alert("Saved on this device — it will sync when you're back online.");
+        tell("Saved on this device — it will sync when you're back online.", "Saved here for now");
         return;
       }
       if (btn) btn.textContent = "Saved ✓";
@@ -229,8 +229,23 @@
       } catch (e) { /* saved; only the read back failed. Nothing to correct and nothing to confess. */ }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
-      alert(e && e.message ? e.message : "Couldn't save. Please try again.");
+      tell(e && e.message ? e.message : "Couldn't save. Please try again.", "Not saved");
     } finally { saving = false; }
+  }
+
+  /* SAYING SOMETHING TO A PERSON, IN THE PANEL (T9 second sweep, 2026-08-30).
+     Both of the lines above used alert(), and a staff device may simply not show one: a kiosk
+     browser, an embedded webview and Chrome after "prevent this page from creating additional
+     dialogs" all return from alert() having displayed nothing. The two messages it carried are the
+     two that matter most on this screen — "saved on this device only" and "not saved" — so losing
+     them means the person walks away believing the opposite of what happened. maint.js (loaded by
+     every panel that loads this one) publishes the panel's own notice card; the native dialog stays
+     only as the fallback for a page that somehow has neither. */
+  function tell(msg, title) {
+    try {
+      if (window.LFH_ASK && window.LFH_ASK.say) { window.LFH_ASK.say(msg, { title: title }); return; }
+    } catch (e) { /* fall through to the browser's own, below */ }
+    try { alert(msg); } catch (e) { /* a device with no dialogs at all — nothing further to try */ }
   }
 
   async function open() {

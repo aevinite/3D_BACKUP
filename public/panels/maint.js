@@ -224,6 +224,10 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     .lfh-ghost{display:block;width:100%;background:transparent;border:0;color:var(--muted,#8aa0c9);font-size:12.5px;font-weight:600;cursor:pointer;padding:8px;text-align:center}
     .lfh-ghost:hover{color:#fca5a5}
     .lfh-foot{padding:2px 20px 20px;font-size:11px;color:var(--muted,#6c80a8);text-align:center}
+    /* the two answers on a question card: both are a real choice, so both get a finger's worth of
+       height (44px, the owner's target) — .lfh-ghost stays small only where it is a footnote */
+    .lfh-ask-yes,.lfh-ask-no{min-height:46px;display:flex;align-items:center;justify-content:center}
+    .lfh-ask-no{border:1px solid var(--line,#2a3a5f);border-radius:12px;font-size:14px}
     .lfh-msg{font-size:12px;margin:6px 0 8px}
     .lfh-note{font-size:12px;color:var(--muted,#8aa0c9);line-height:1.5}
     .lfh-av{width:46px;height:46px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#0b1220;flex-shrink:0}
@@ -240,6 +244,69 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     document.head.appendChild(el("style", { id: "lfh-set-style", html: css }));
   }
 
+  /* ── ASKING A PERSON SOMETHING, WITHOUT THE BROWSER'S OWN DIALOG (T9 second sweep, 2026-08-30) ──
+     This file used confirm() for the guest-menu switch and for "Not you? Sign out", and alert()
+     for the two things that can go wrong. Those are the browser's dialogs, and a staff panel is
+     the one place they cannot be trusted:
+
+       · A DEVICE MAY SIMPLY NOT SHOW THEM. A kiosk browser, an embedded webview, and Chrome after
+         somebody ticks "prevent this page from creating additional dialogs" all answer confirm()
+         with false and return from alert() having shown nothing. Driven headless with dialogs
+         suppressed: the manager tapped "🟢 Take guest menu offline", NOTHING was sent, the button
+         did not move, and there was not one word on screen saying why — a tap vanishing in
+         silence, which is the one thing this product's own rule forbids.
+       · IT FREEZES THE PANEL. A native dialog blocks the page's whole thread, so while it is up
+         the write queue does not drain, live updates do not arrive and no other button responds.
+       · IT IS NOT PART OF THE PANEL. Hardware BACK does not close it (backstack never sees it),
+         it wears the browser's own wording and the site's address, and it ignores the panel's skin.
+
+     So the question is asked IN the panel, in the drawer's own card, on the drawer's own scrim.
+     Published as LFH_ASK so myprofile.js — which had the same two alert() calls — uses the one
+     implementation rather than growing a second. A caller that loads before this file still gets
+     an answer: the fallbacks at each call site are what they always were. */
+  function askLayer(kind, msg, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      injectStyles();
+      var done = false;
+      var off = null;
+      function finish(v) {
+        if (done) return; done = true;
+        if (off) { try { off(); } catch (e) { /* already popped by the Back press itself */ } off = null; }
+        if (ov && ov.parentNode) ov.remove();
+        resolve(v);
+      }
+      var yes = el("button", { class: "lfh-bt lfh-cta lfh-ask-yes", type: "button",
+        style: kind === "ask" && opts.danger ? { background: "linear-gradient(180deg,#f87171,#ef4444)", color: "#fff", boxShadow: "0 8px 22px rgba(239,68,68,.28)" } : null,
+        onClick: function () { finish(true); } }, [opts.yes || (kind === "ask" ? "Yes" : "OK")]);
+      var kids = [
+        el("div", { class: "lfh-wrap" }, [
+          el("div", { class: "lfh-h1" }, [opts.title || (kind === "ask" ? "Are you sure?" : "")]),
+          el("div", { class: "lfh-d" }, [String(msg == null ? "" : msg)]),
+        ]),
+        el("div", { class: "lfh-sec", style: { display: "grid", gap: "8px", borderBottom: "0" } },
+          kind === "ask"
+            ? [yes, el("button", { class: "lfh-ghost lfh-ask-no", type: "button", onClick: function () { finish(false); } }, [opts.no || "Cancel"])]
+            : [yes]),
+      ];
+      var card = el("div", { class: "lfh-dw", role: "dialog", "aria-modal": "true", style: { width: "min(94vw,340px)" } }, kids);
+      // A tap on the scrim is the same as Cancel — and the same as OK on a notice, which has
+      // nothing to cancel. It may never be the same as YES on a question.
+      var ov = el("div", { class: "lfh-ov", style: { zIndex: "99999" },
+        onClick: function (e) { if (e.target === ov) finish(kind === "ask" ? false : true); } }, [card]);
+      document.body.appendChild(ov);
+      // The phone's BACK button closes it like every other overlay in these panels, instead of
+      // leaving the panel with a question still on the screen.
+      if (window.LFH_BACK) off = window.LFH_BACK.layer("lfh-ask", function () { off = null; finish(kind === "ask" ? false : true); });
+      try { yes.focus(); } catch (e) { /* focus is a nicety; the buttons are tappable regardless */ }
+    });
+  }
+  var LFH_ASK = {
+    confirm: function (msg, opts) { return askLayer("ask", msg, opts); },
+    say: function (msg, opts) { return askLayer("say", msg, opts); },
+  };
+  window.LFH_ASK = window.LFH_ASK || LFH_ASK;
+
   let profile = null; // {username, role, name, phone, hasPin, needsProfile, canSelfReset}
   let overlay = null;
 
@@ -254,7 +321,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   function armBack() { if (window.LFH_BACK && !backOff) backOff = window.LFH_BACK.layer("staff-profile", onBackClose); }
   function closeDrawer() {
     // Block closing (✕ / backdrop) during the one-time setup until name + phone are confirmed.
-    if (profile && profile.needsProfile) { alert("Please confirm your username and phone to continue."); return; }
+    if (profile && profile.needsProfile) { LFH_ASK.say("Please confirm your username and phone to continue.", { title: "One more step" }); return; }
     if (backOff) { backOff(); backOff = null; } // rewind the hardware-Back history entry
     if (overlay) { overlay.remove(); overlay = null; }
   }
@@ -448,8 +515,15 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
           if (maintOn === null) { maintBtn.textContent = "…"; await fetchMaint(); renderMaint(); return; }
           const turnOn = !maintOn;
           const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)? Guests can’t browse or order until it’s back." : "Bring the guest menu back ONLINE?";
-          if (!confirm(msg)) return;
-          try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + ((e && e.message) || "the server didn't answer") + " — the guest menu has NOT changed."); }
+          if (!(await LFH_ASK.confirm(msg, {
+            title: turnOn ? "Take the guest menu offline?" : "Bring the guest menu back?",
+            yes: turnOn ? "Take it offline" : "Bring it back", danger: turnOn,
+          }))) return;
+          try { await setMaint(turnOn); renderMaint(); }
+          catch (e) {
+            LFH_ASK.say("Couldn't change it: " + ((e && e.message) || "the server didn't answer") + " — the guest menu has NOT changed.",
+              { title: "Nothing changed" });
+          }
         });
         fetchMaint().then(renderMaint);
         sections.push(el("div", { class: "lfh-sec" }, [
@@ -465,7 +539,7 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     } else {
       // — first-login: a quiet "not you?" escape + reassuring footer (no full menu) —
       sections.push(el("div", { class: "lfh-sec", style: { paddingTop: "4px" } }, [
-        el("button", { class: "lfh-ghost", onClick: () => { if (confirm("Sign out and sign in as someone else?")) signOut(); } }, ["Not you? Sign out"]),
+        el("button", { class: "lfh-ghost", onClick: async () => { if (await LFH_ASK.confirm("You'll be signed out on this device and taken back to the sign-in screen.", { title: "Sign out and sign in as someone else?", yes: "Sign out", danger: true })) signOut(); } }, ["Not you? Sign out"]),
       ]));
       sections.push(el("div", { class: "lfh-foot" }, ["🔒 Visible only to you and your team"]));
     }
