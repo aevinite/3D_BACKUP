@@ -33,7 +33,17 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P45801`.**
+**Next free ID: `P46301`.**
+
+> **`P45801`–`P46300` is CLAIMED by T25's SECOND freshly-planned 500** (`lib/**` — every shared
+> library file no other terminal owns, 2026-08-31). The owner's word, after his first 500 was merged
+> and deployed: *"plan whole five hundred phase test again within your boundaries that you have been
+> given. Plan whole test divided into five hundred phases and run that test. Check every single part
+> in your boundary. If you find any error, fix it. I want completely error free."*
+>
+> Claimed by editing this line **before a single row was written**, taken from the mark AND checked
+> against the highest id actually on disk, and **pushed to `main` before any row existed** — the two
+> halves of the rule this file has now recorded five collisions over.
 
 > **`P45301`–`P45800` is CLAIMED by T9's THIRD 500** (shared panel plumbing, 2026-08-31) — the
 > owner's word: *"replan whole 500 phases test and execute the test on the back up side again ...
