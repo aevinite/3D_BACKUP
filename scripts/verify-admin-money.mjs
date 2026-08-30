@@ -527,6 +527,28 @@ try {
       `live: ${n} bars, ${j.spreadTotal} restaurants have guests — ${j.spreadTotal > n ? "the card must say so" : "nothing hidden, the card stays quiet"}`);
   }
 
+  // ── H2 · the revenue chart's twelve months are IST months, and each label is its own month ─
+  head("H2 · Platform revenue's 12-month grid agrees with the year above it");
+  {
+    // "Collected this year" is pinned to the IST calendar and the route says why; the twelve-month
+    // grid beside it was left on the world clock. For the first 5½ hours of the 1st of each IST
+    // month they disagreed — the newest bucket was last month, so a payment taken in that window
+    // sat outside the chart while counting in the yearly figure above it (owner item 10).
+    const rt = R("app/api/admin/revenue/route.ts");
+    ok(!/Date\.UTC\(now\.getUTCFullYear\(\), now\.getUTCMonth\(\)/.test(rt),
+      "the grid is no longer built from the world clock's month");
+    ok(/const istNow = new Date\(now\.getTime\(\) \+ IST_SHIFT_MS\)/.test(rt) && /Date\.UTC\(istY, istM/.test(rt),
+      "…it is built from the IST month, the same calendar as the year boundary");
+    ok(/month: "short", timeZone: "UTC"/.test(rt),
+      "…and each label names its timezone, so a label can never come from a different calendar than its key");
+    const j = await api("/api/admin/revenue");
+    const NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const rows = Array.isArray(j.monthly) ? j.monthly : [];
+    const wrong = rows.filter((m) => !String(m.label).startsWith(NAMES[+String(m.month).slice(5) - 1]));
+    ok(rows.length === 12 && wrong.length === 0,
+      `live: ${rows.length} buckets, ${wrong.length} whose label disagrees with its own month${wrong.length ? ` — ${wrong.map((m) => m.month + ":" + m.label).join(", ")}` : ""}`);
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {
