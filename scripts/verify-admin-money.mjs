@@ -549,6 +549,25 @@ try {
       `live: ${rows.length} buckets, ${wrong.length} whose label disagrees with its own month${wrong.length ? ` — ${wrong.map((m) => m.month + ":" + m.label).join(", ")}` : ""}`);
   }
 
+  // ── F3 · the admin's own bill actions are signed ───────────────────────────────────────────
+  head("F3 · every admin bill action names who did it");
+  {
+    // `logAction` takes an actor and this route passed none, so `staff_actions.actor` was NULL and
+    // the Change log's "By" read "—" for every admin action — on the screen built for spotting
+    // bills being quietly removed (owner item 11). Asserted at the SOURCE, not against live rows:
+    // every row written before this fix keeps its blank honestly, and a live scan would fail on
+    // history rather than on the code.
+    const rt = R("app/api/admin/bills/route.ts");
+    const calls = [...rt.matchAll(/logAction\("admin", "([a-z_]+)", \{([^}]*)\}/g)].map((m) => ({ action: m[1], args: m[2] }));
+    const unsigned = calls.filter((c) => !/actor:/.test(c.args)).map((c) => c.action);
+    ok(calls.length >= 3 && unsigned.length === 0,
+      `${calls.length} admin bill actions logged, ${unsigned.length} of them with nobody named${unsigned.length ? ` — ${unsigned.join(", ")}` : ""}`);
+    // The same word the permanent removals record and the credit note already use, so the two
+    // records cannot name the same act two different ways.
+    ok(/softDeleteOrders\(rid, ids, \{ actor: "Admin"/.test(rt) && (rt.match(/actor: "Admin"/g) || []).length >= 4,
+      "…and it is the same \"Admin\" the removals record and the credit note already write");
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {

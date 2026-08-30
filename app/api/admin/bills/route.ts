@@ -305,7 +305,13 @@ async function postImpl(req: NextRequest) {
       await sb.from("sessions").update({ deleted_at: new Date().toISOString(), deleted_by: "Admin", delete_reason: reason || null }).eq("id", sessionId).is("deleted_at", null);
     }
     invalidateFloor(rid);
-    await logAction("admin", "order_delete", { restaurant_id: rid, table_number: sess.table_number, detail: `admin deleted bill${sess.bill_no ? ` #${sess.bill_no}` : ""}${reason ? ` — ${reason}` : ""}` });
+    // SIGNED (owner, 2026-08-31 — item 11). `logAction` takes an actor and this route never passed
+    // one, so `staff_actions.actor` was NULL and the Change log's "By" column read "—" for every
+    // admin action — on the one screen built for spotting bills being quietly removed, the strongest
+    // removals in the product were the rows with nobody's name against them. "Admin" is not a new
+    // word: it is exactly what this same handler already writes into the permanent removals record
+    // (softDeleteOrders) and onto a credit note, so the two records now name the same actor.
+    await logAction("admin", "order_delete", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin deleted bill${sess.bill_no ? ` #${sess.bill_no}` : ""}${reason ? ` — ${reason}` : ""}` });
     return NextResponse.json({ ok: true, deleted: res.deleted });
   }
 
@@ -342,7 +348,7 @@ async function postImpl(req: NextRequest) {
       });
     }
     invalidateFloor(rid);
-    await logAction("admin", "bill_restore", { restaurant_id: rid, table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
+    await logAction("admin", "bill_restore", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
     return NextResponse.json({ ok: true, restored: res.restored });
   }
 
@@ -357,7 +363,7 @@ async function postImpl(req: NextRequest) {
     // Code first, prose as the fallback for a database without mig 278 (see that migration's header).
     if (error) return NextResponse.json({ error: (error.code === "LFH02" || /cannot exceed/i.test(error.message)) ? "The credit can't be more than the bill total." : error.message }, { status: error.code === "LFH02" ? 409 : 400 });
     const row = Array.isArray(data) ? data[0] : data;
-    await logAction("admin", "credit_note", { restaurant_id: rid, table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
+    await logAction("admin", "credit_note", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
     return NextResponse.json({ ok: true, creditNo: row?.credit_no });
   }
 
