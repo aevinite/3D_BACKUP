@@ -132,6 +132,24 @@ else for (const n of strayTabs) {
   // line comments; never a block-comment stripper, which eats a file at the first `/*` in a regex.)
   const cloneCode = cloneSrc.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
   const assigned = new Set([...cloneCode.matchAll(/\bbase\.([a-z0-9_]+)\s*=/g)].map((m) => m[1]));
+  // ── A DERIVED SEED COUNTS, AND IS BETTER THAN A HAND-TYPED ONE (2026-08-30) ────────────────────
+  // This check was written on 2026-08-28 looking for a literal `base.<col> = …`. The same day another
+  // lane fixed the same fault a better way: the module admin rungs are seeded from
+  // MODULE_ALLOWED_DEFAULTS in lib/accessTree.ts — the `def` on each module's own row on the Access
+  // screen — so a module added tomorrow is seeded correctly with no line written in the clone, and
+  // the ⓘ a person reads cannot disagree with the value they get.
+  //
+  // So a guard looking only for the literal form ACCUSED THE BETTER FIX. That map is built at runtime
+  // from ALL_NODES (`.filter(n => n.bind.t === "module").map(n => [`${key}_allowed`, n.def === true])`),
+  // so its DOMAIN is provably every module's `_allowed` column — nothing to enumerate and nothing to
+  // keep in step. When the loop is present, every `*_allowed` ladder column is seeded by it.
+  //
+  // The other two rungs are NOT in that map and still need their own line, which is why the check
+  // stays useful: `_owner_control` and `_enabled` are decided per module in the clone, and the loop
+  // does not touch them. Delete the loop and every `_allowed` column drops out of `assigned` again.
+  const derivesAllowed =
+    /for \(const \[col, on\] of Object\.entries\(MODULE_ALLOWED_DEFAULTS\)\) base\[col\] = on;/.test(cloneCode) &&
+    /MODULE_ALLOWED_DEFAULTS[\s\S]{0,400}n\.bind\.t === "module"/.test(readFileSync(join(root, "lib/accessTree.ts"), "utf8"));
   const nulled = /const NULL_COLUMNS = \[([\s\S]*?)\]/.exec(cloneSrc);
   for (const n of (nulled ? [...nulled[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]) : [])) assigned.add(n);
   // A DEAD COLUMN NEEDS NO DEFAULT, and saying otherwise would make this guard cry wolf on its
@@ -161,9 +179,27 @@ else for (const n of strayTabs) {
     }
     return false;
   };
-  const missing = [...ladder, ...tabs].filter((n) => !assigned.has(n)).filter(readSomewhere);
+  // ── THIS CHECK BUILDS ITS OWN COLUMN LIST (2026-08-30) ────────────────────────────────────────
+  // It used to reuse `ladder` from check 2, which is filtered by NOT_A_MODULE — a list written for a
+  // DIFFERENT question ("is this a NEW module's column?"), and it excludes
+  // table_tags_owner_control and table_tags_enabled as "covered by table_tags, listed for clarity".
+  // Right there, wrong here: those two ARE real columns a clone inherits, so removing their line in
+  // lib/settingsClone.ts left this check green. Caught by driving it, not by reading it.
+  //
+  // So the list comes straight from the catalog: every ladder-shaped column that belongs to one of
+  // the legacy modules. `auto_print_kot_allowed` and the plain on/off switches (menu_enabled,
+  // sessions_enabled, qop_*, …) are still excluded, because they are not module ladders at all —
+  // but they are excluded by NOT BEING a legacy module's column, which is the honest test.
+  const myLadder = names.filter((n) => {
+    const m = /^(.+?)_(allowed|owner_control|enabled)$/.exec(n);
+    return !!m && LEGACY_MODULES.has(m[1]);
+  });
+  const missing = [...myLadder, ...tabs]
+    .filter((n) => !assigned.has(n))
+    .filter((n) => !(derivesAllowed && n.endsWith("_allowed")))
+    .filter(readSomewhere);
   if (!missing.length) {
-    pass(`all ${ladder.length + tabs.length} ladder and tablet-rung columns get an EXPLICIT default in lib/settingsClone.ts`);
+    pass(`all ${myLadder.length + tabs.length} ladder and tablet-rung columns get an EXPLICIT default in lib/settingsClone.ts`);
   } else for (const n of missing) {
     fail(`lib/settingsClone.ts sets no explicit default for settings.${n} — a new restaurant therefore INHERITS restaurant #1's value for it. Add \`base.${n} = …\` beside the other ladders (a module starts admin-held: allowed false, owner_control false, enabled true).`);
   }
