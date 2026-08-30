@@ -33,7 +33,16 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P44301`.**
+**Next free ID: `P44801`.**
+
+> **`P44301`–`P44800` is T9's SECOND 500** (shared panel plumbing, 2026-08-30). **RENUMBERED FROM
+> `P42501`–`P43000`.** I claimed that block correctly — by editing this line before writing a single
+> row — at 18:01, and T7 claimed the same range at 20:08. Mine was earlier, and mine still moves,
+> because a claim nobody can SEE is not a claim: it sat on my own branch and never reached `main`,
+> so both T7 and T30 read this file, saw the range free, and were right to take it. T7's rows are on
+> `main`; mine were not. **The rule below needs its other half, and this is it: claim before you
+> write a row AND PUSH THE CLAIM, or you have only told yourself.** Fourth recording of this
+> collision in this file, and the first where the earlier claimant was the one who had to move.
 
 > **T30 claims `P43501`–`P44000`** for its round-2 block (2026-08-30). RENUMBERED FROM `P42501`–`P43000`: I wrote the rows first and claimed after, and T7 claimed that same range correctly — before writing — while I was working. Their claim stands; mine moved. This is the third time this file has recorded that collision, and every time the terminal that claimed FIRST was the one that had it right.
 

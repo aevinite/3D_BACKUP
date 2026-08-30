@@ -163,7 +163,7 @@ Recorded as phase rows so they are re-run rather than remembered.
 
 ---
 
-# T9 — SECOND 500 (2026-08-30) · phases `P42501`–`P43000`
+# T9 — SECOND 500 (2026-08-30) · phases `P44301`–`P44800`
 
 Same territory, different question. The first 500 read these files for the correctness of what they
 DO. This run asked **what a person is TOLD when the answer never comes** — and every one of the five
@@ -298,15 +298,15 @@ was re-aimed at what the rule actually protects, not deleted:
 - **`errlog.js` keeps its deadline-free request.** `keepalive: true` exists so it outlives the page
   closing; an abort signal would defeat it.
 - **The connection panel still does not say WHY each change is waiting.** Raised by sweep #6, left
-  open by the first 500, still the weakest thing here — and still a feature, not a fault. `P42911`.
+  open by the first 500, still the weakest thing here — and still a feature, not a fault. `P44711`.
 
 ## 🔗 HANDOFF
 
 | for | what | row |
 |---|---|---|
-| whoever owns the panels outside `public/panels/*.js` | they still ask with a browser dialog; `LFH_ASK` is now on every panel page and `verify:panel-dialogs` widens in one line | `P42986` |
-| whoever owns `verify:guards-alive` | it cannot see a guard that runs 300 checks and silently skips 16 — the tell is a check naming a file the guard never read | `P42991` |
-| **T7** (waiter tablet) | the 🔔 still has no ☰ drawer row | `P19595`, re-stated `P42987` |
-| **T7** (waiter tablet) | four sideways rows still have no swipe hint — the module is now proven across five layouts, so it is pure wiring | `P19596`, re-stated `P42988` |
-| **T5** (manager panel) | the duplicate undo-toast rule in the panel stylesheet | `P19597`, re-stated `P42989` |
-| **T5** (manager panel) | one unguarded back-layer call | `P19598`, re-stated `P42990` |
+| whoever owns the panels outside `public/panels/*.js` | they still ask with a browser dialog; `LFH_ASK` is now on every panel page and `verify:panel-dialogs` widens in one line | `P44786` |
+| whoever owns `verify:guards-alive` | it cannot see a guard that runs 300 checks and silently skips 16 — the tell is a check naming a file the guard never read | `P44791` |
+| **T7** (waiter tablet) | the 🔔 still has no ☰ drawer row | `P19595`, re-stated `P44787` |
+| **T7** (waiter tablet) | four sideways rows still have no swipe hint — the module is now proven across five layouts, so it is pure wiring | `P19596`, re-stated `P44788` |
+| **T5** (manager panel) | the duplicate undo-toast rule in the panel stylesheet | `P19597`, re-stated `P44789` |
+| **T5** (manager panel) | one unguarded back-layer call | `P19598`, re-stated `P44790` |
