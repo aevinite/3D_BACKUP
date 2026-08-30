@@ -220,6 +220,36 @@ for (const { rel, hits } of handNet) {
 if (!handNet.some(({ rel }) => !HAND_NET_ALLOWED.has(rel)))
   pass(`${handNet.length} file${handNet.length === 1 ? "" : "s"} touch the expression at all, and every one of them is on the written-down list`);
 
+// ── …AND THE PLAINER SHAPE, WHICH THIS GUARD USED TO WALK PAST (sweep #7, T30, 2026-08-29) ──────
+// The scan above looks for `discount * (1 + rate)` — the version that can be WRONG, because it can
+// gross at the wrong rate. It does not see `total - disc_gross`, which is right by construction and
+// therefore looked harmless. It is not harmless: it is a SECOND COPY of the definition, and this
+// codebase's whole history is copies drifting from the original (the printed bill, the KOT, the
+// banquet sheet, the filing tax split and "the rate this order was charged at" were each
+// consolidated after a copy went its own way). `app/api/owner/customers/route.ts` carried one for
+// months — the pay-later balance the erase check refuses on — and every check in this file passed
+// over it. It now reads netOf(). Same rule as above: a hand-worked net needs a written-down reason.
+const PLAIN_NET_ALLOWED = new Map([
+  ["lib/billLedger.ts",
+    "netOf()'s own second branch — the documented fallback for a caller that selected disc_gross but not the generated column. This IS the one definition, so it is the one place allowed to write it out"],
+]);
+const plainNet = [];
+for (const dir of SRC_DIRS) {
+  for (const rel of walk(dir)) {
+    const lines = readFileSync(join(root, rel), "utf8").split(/\r?\n/);
+    const hits = lines
+      .map((l, i) => ({ l, n: i + 1 }))
+      .filter(({ l }) => !isComment(l) && /\btotal\b[^\n]{0,40}?-[^\n]{0,40}?\bdisc_gross\b/.test(l));
+    if (hits.length) plainNet.push({ rel, hits });
+  }
+}
+for (const { rel, hits } of plainNet) {
+  if (PLAIN_NET_ALLOWED.has(rel)) pass(`${rel} (${hits.length} line${hits.length === 1 ? "" : "s"}) — allowed: ${PLAIN_NET_ALLOWED.get(rel)}`);
+  else fail(`${rel}:${hits.map((h) => h.n).join(",")} works the net out as "total - disc_gross" in app code — import netOf() from lib/billLedger and select net_amount (mig 310)`);
+}
+if (!plainNet.some(({ rel }) => !PLAIN_NET_ALLOWED.has(rel)))
+  pass(`and ${plainNet.length} file${plainNet.length === 1 ? "" : "s"} write "total - disc_gross" out, which is netOf() itself`);
+
 head("the admin Bill ledger reads the stored net, and asks for it");
 const ledger = readFileSync(join(root, "lib/billLedger.ts"), "utf8");
 // The ORDER of the two branches is the fix. netOf() must answer from net_amount BEFORE it can

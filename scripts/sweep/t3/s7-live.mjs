@@ -194,8 +194,15 @@ try {
     const sub = await txt(p.locator(".gob-row-sub").first());
     P("P16445", "…and says what will happen to it", /staff will be called/i.test(sub), sub);
     P("P16446", "…with no price invented for it", !/[₹$]/.test(sub), sub);
-    P("P16447", "…and no cancel button on something already on its way",
-      (await p.locator(".gob-row .gob-btn").count()) === 0);
+    // EXPECTATION SUPERSEDED BY AN OWNER DECISION (item 12, 2026-08-30). This asserted that a queued
+    // CALL has no buttons. He picked the opposite for calls, and for a good reason: nobody has
+    // cooked a glass of water, so a request that has not rung yet can be taken back. The rule this
+    // row exists for — you cannot cancel something that may already be being ACTED ON — moved to
+    // the order, and is asserted for an order at P42381. Here it becomes: a call has exactly the
+    // one take-back and nothing else.
+    P("P16447", "…and a saved request offers exactly one control, the take-back",
+      (await p.locator(".gob-row .gob-btn").count()) === 1
+      && /not needed/i.test(await txt(p.locator(".gob-row .gob-btn").first())));
     P("P16448", "the sheet explains that it is saved on this phone and sends by itself",
       /saved on this phone/i.test(await txt(p.locator(".gob-foot"))));
     const stored = await p.evaluate(async () => {

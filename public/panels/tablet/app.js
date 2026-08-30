@@ -2868,6 +2868,34 @@ function renderSplitBill(t, opts = {}) {
     </div>
     <div class="sb-body"></div>
     <div class="sb-sum"></div>
+    <!-- THE TIP IS NOT ONE OF THE PARTS (owner, 2026-08-30). The parts must still add up to the
+         bill EXACTLY — lib/paySplit.ts recomputes the due server-side and refuses anything else —
+         so the tip sits below them, on top of the whole bill, the same way it sits below the TOTAL
+         on paper. One tip for the table, not one per person: a tip on every part is how you
+         double it. Same three linked boxes as the payment sheet, and the same class names, so the
+         spinner-arrow rule and everything else already written for them applies here too. -->
+    <div class="sb-tip" style="margin:10px 0 12px;padding:12px;border-radius:12px;border:1px dashed var(--line);background:var(--panel-2)">
+      <div style="font-size:13px;font-weight:700;margin:0 0 3px">Add a tip? <span style="color:var(--muted);font-weight:400">— optional, extra for staff on top of the whole bill</span></div>
+      <div style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Change any one of the three — the other two follow. It is not divided between the parts.</div>
+      <div style="display:flex;align-items:flex-end;gap:8px;margin:0 0 8px">
+        <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip %</span>
+          <!-- step="0.01" here TOO. The split screen grew its own tip row on 2026-08-30 (PR #1187), with
+               the same three class names and the same step="1" the payment sheet's copy had just been
+               fixed for — the fault came back in a new place on the same day. verify:money-boxes now
+               checks EVERY box carrying these names, not the first one it finds. -->
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-pct" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+        <span style="font-weight:800;color:var(--muted);padding-bottom:11px">=</span>
+        <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip amount (₹)</span>
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-amt" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${[0, 5, 10, 15].map((k) => `<button type="button" class="btn pay-tip-pick" data-tip-pct="${k}" style="min-height:44px;padding:0 14px;font-weight:700">${k ? k + "%" : "None"}</button>`).join("")}</div>
+      <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--bg);border:1px solid var(--line)">
+        <b style="font-size:13.5px">They paid in all</b>
+        <span style="display:inline-flex;align-items:center;gap:2px;color:var(--gold-strong);font-weight:800;font-size:15px">₹
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-paid" aria-label="Total the customer paid, tip included" style="width:8ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none"></span>
+      </label>
+      <div class="pay-tip-msg" role="status" style="display:none;font-size:12px;font-weight:600;color:#f59e0b;margin:8px 0 0"></div>
+    </div>
     <!-- inrExact, NOT inr, on BOTH the title and this button (T7 sweep #7 third pass, 2026-08-30).
          They are the figure the waiter reads while typing custom amounts, so they are figures a
          person must MATCH — the whole reason inrExact exists. On a ₹1,065.75 bill the title and
@@ -2882,6 +2910,60 @@ function renderSplitBill(t, opts = {}) {
   );
   const p = $("#panel");
   const bodyEl = p.querySelector(".sb-body"), sumEl = p.querySelector(".sb-sum");
+
+  // ── THE TIP (owner, 2026-08-30) ──────────────────────────────────────────────────────────────
+  // Seeded from what is ALREADY on the bill, because there are two doors to this screen and one of
+  // them (the payment sheet's "Split this bill →") records a tip before handing over. Showing it
+  // means a waiter who typed 200 there does not think it was lost and type it again. The write is
+  // an overwrite, not an increment, so re-recording the same figure is harmless either way — but a
+  // box that silently forgets what you typed is not.
+  let tip = Math.max(0, Math.round(((payable[0] && Number(payable[0].tip)) || 0) * 100) / 100);
+  {
+    const BD = window.LFH_BILLDOC || {};
+    const TIP_MAX = Number(BD.TIP_MAX) || 100000;
+    const pctIn = p.querySelector(".pay-tip-pct");
+    const amtIn = p.querySelector(".pay-tip-amt");
+    const paidIn = p.querySelector(".pay-tip-paid");
+    const msgEl = p.querySelector(".pay-tip-msg");
+    const goBtn = p.querySelector(".sb-go");
+    if (pctIn && amtIn && paidIn) {
+      const say = (m) => { msgEl.textContent = m || ""; msgEl.style.display = m ? "" : "none"; };
+      const paintTip = (typing) => {
+        const pct = due > 0 ? Math.round((tip / due) * 1000) / 10 : 0;
+        if (typing !== "pct") pctIn.value = tip ? String(pct) : "";
+        if (typing !== "amt") amtIn.value = tip ? String(round2(tip)) : "";
+        if (typing !== "paid") paidIn.value = String(Math.round(due + tip));
+        p.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("primary", Number(x.dataset.tipPct) === pct));
+        // The button names what will actually be collected. The PARTS still add up to the bill —
+        // the tip is on top — so saying only the bill here would under-state the money in hand.
+        // "in parts" is dropped once there is a tip: the parts are listed directly above and the
+        // longer label wrapped, leaving the word "tip" alone on a second line at 390px. Measured.
+        if (goBtn) goBtn.textContent = tip > 0
+          ? `💳 Collect ${inrExact(due)} + ${inrExact(tip)} tip`
+          : `💳 Collect ${inrExact(due)} in parts`;
+      };
+      const setTip = (v, typing) => {
+        const want = Math.max(0, Number(v) || 0);
+        if (want > TIP_MAX) say(`The most a tip can be is ${inr(TIP_MAX)} — check that figure.`);
+        else if (want > due && due > 0) say(`That is a tip bigger than the bill (${inrExact(due)}). Fine if they meant it.`);
+        else say("");
+        tip = Math.min(want, TIP_MAX);
+        paintTip(typing);
+      };
+      p.querySelectorAll(".pay-tip-pick").forEach((b) => (b.onclick = () => setTip(round2(due * (Number(b.dataset.tipPct) || 0) / 100))));
+      pctIn.oninput = () => setTip(round2(due * (parseFloat(pctIn.value) || 0) / 100), "pct");
+      amtIn.oninput = () => setTip(parseFloat(amtIn.value), "amt");
+      paidIn.oninput = () => {
+        const raw = paidIn.value.trim(), q = parseFloat(raw);
+        if (raw === "" || !(q >= 0)) return;           // blank is "about to type", never ₹0
+        setTip(BD.tipFromPaid ? BD.tipFromPaid(due, q) : Math.max(0, round2(q - due)), "paid");
+        if (q < due) say(`That is less than the bill (${inrExact(due)}) — this box is the TOTAL they handed over, tip included.`);
+      };
+      [pctIn, amtIn, paidIn].forEach((b) => { b.onblur = () => paintTip(); });
+      paidIn.onfocus = () => { try { paidIn.select(); } catch (e) {} };
+      paintTip();
+    }
+  }
 
   // THE LINE MUST AGREE WITH THE BUTTON UNDER IT (T7, 2026-08-29 — found by the fresh 500-phase
   // plan, and inherited from the payment sheet's old split panel rather than introduced here).
@@ -3023,8 +3105,11 @@ function renderSplitBill(t, opts = {}) {
       // was told "Bill paid in 3 parts" and offered an UNDO for a payment the server had never
       // seen. savedMsg() is the sentence the rest of the panel already uses for exactly this.
       onSuccess: (r) => {
+        // The tip goes with the bill, once, after the split is really through — and it is NOT one
+        // of the parts, so it never has to balance against the due.
+        void recordTip(t, tip);
         if (isQueued(r)) { toast(savedMsg(r)); return; }
-        offerPayUndo(t, { message: `Bill paid in ${splits.length} parts — ${how}` });
+        offerPayUndo(t, { message: `Bill paid in ${splits.length} parts — ${how}${tip > 0 ? ` · ${inrExact(tip)} tip` : ""}` });
       },
     });
   };
@@ -3441,16 +3526,20 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <div style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Change any one of the three — the other two follow.</div>
           <div style="display:flex;align-items:flex-end;gap:8px;margin:0 0 8px">
             <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip %</span>
-              <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-pct" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+              <!-- step="0.01", NOT "1" — the SAME fault item 18 fixed in the discount sheet, three boxes further
+                   down the same file, and item 18 missed it (T7 sweep #7, 2026-08-30; the new cross-panel
+                   guard verify:money-boxes is what found them). paintTip() writes a percentage to one
+                   decimal and an amount through r2t(), so these boxes were refusing their own contents. -->
+              <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-pct" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
             <span style="font-weight:800;color:var(--muted);padding-bottom:11px">=</span>
             <label style="flex:1;min-width:0"><span style="display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin:0 0 4px">Tip amount (₹)</span>
-              <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-amt" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
+              <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-amt" placeholder="0" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;font-variant-numeric:tabular-nums"></label>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px">${[0, 5, 10, 15].map((p) => `<button type="button" class="btn pay-tip-pick" data-tip-pct="${p}" style="min-height:44px;padding:0 14px;font-weight:700">${p ? p + "%" : "None"}</button>`).join("")}</div>
           <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">
             <b style="font-size:13.5px">They paid</b>
             <span style="display:inline-flex;align-items:center;gap:2px;color:var(--gold-strong);font-weight:800;font-size:15px">₹
-              <input type="number" inputmode="decimal" min="0" step="1" class="pay-tip-paid" aria-label="Total the customer paid" style="width:8ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none"></span>
+              <input type="number" inputmode="decimal" min="0" step="0.01" class="pay-tip-paid" aria-label="Total the customer paid" style="width:8ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none"></span>
           </label>
           <div class="pay-tip-msg" role="status" style="display:none;font-size:12px;font-weight:600;color:#f59e0b;margin:8px 0 0"></div>
         </div>`}

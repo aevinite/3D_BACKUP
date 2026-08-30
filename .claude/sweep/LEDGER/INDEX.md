@@ -33,7 +33,17 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P42501`.**
+**Next free ID: `P43001`.**
+
+> **T7 claims `P42501`–`P43000`** for a FOURTH freshly planned 500 (2026-08-30, the owner's word:
+> *"plan again 500 phases test within the boundary that you have given and rerun the test… there
+> shouldn't be any error left"*). Claimed by editing this line BEFORE a single row was written, and
+> taken above the highest id actually on disk (`P42500`) rather than from the mark — the same two
+> rules the third claim followed.
+
+> **`P42001`–`P42500` is CLAIMED by T3** — its THIRD sweep-#7 block, for the 500 phases the owner
+> asked for on 2026-08-30 to cover four improvements he picked (items 10, 12, 13 and 14 of T3's
+> list). Claimed BEFORE a single row was written, per the note further down this file.
 
 > **`P42001`–`P42500` is FILED by T29** — 500 written, 500 executed, **500 ✅, 0 product faults**.
 > Originally claimed as below, before a row was written.
@@ -107,6 +117,7 @@ again. Read those before reporting anything.
 > | T9 · shared panel plumbing | `P19101`–`P19600` | ✅ 496 written (481 executed mechanically · 15 judgment), 496 ✅ — plus all 518 of `P04001`–`P04500` + `P15001`–`P15018` re-run: **no regression**, 1 expectation corrected (`P04215` said the theme script sits above the stylesheet; it sits below, which was always fine), and **six rows that PASSED and were still not enough** — each next to a half nobody had asked about. **16 problems fixed, one commit each**, the worst being a change the queue reported as held back and then sent anyway, settling a bill at the full amount with the discount stranded. `verify:panel-plumbing` +14 checks, `verify:audit` +2. |
 >
 > | T27 · every word on every screen | `P28101`–`P28600` | ✅ 500 written, 500 executed (484 ✅ · 10 ✅ deliberate · 6 ❌→✅ fixed) — plus **the T27 ledger itself landed on main at last**, and all 500 of `P13001`–`P13500` re-run: **ONE REGRESSION** (`P13140` — the Bills-screen rework replaced \"No bills match that search.\" with an empty string inside a box that carries 120px of padding, so a search matching today but not yesterday printed blank nothing under a \"0 bills\" heading), 2 more rows newly red, **42 of the 59 reserved rows CLOSED**, and sweep #6’s biggest ⏭ answered: all six languages photographed, and Arabic right-to-left found to be a written decision rather than a gap. **7 problems fixed, one commit each**, and a new `verify:wording` guard — this territory had none of its own. Owner reviewed 2026-08-28: kept 1/2/4/5/7, **reverted 3** (recorded as R48 — the sentence is unreachable for every role but the admin), **widened 6** to every place "removed" is read, and approved the `verify:rejected` fix (a rejection note could satisfy the "is it beside the code?" check against itself). |
+> | T30 · cross-panel truth | `P29601`–`P30100` | ✅ 500 written, 500 executed (469 ✅ · 30 ⏭ · **1 ❌**: `sessions.bill_printed_at` is outside its table's breadcrumb watch-list, so a bill printed at the till leaves another device's button reading "Print" instead of "Reprint" for up to 60s — a label, not money and not paper) — plus all 500 of `P14501`–`P15000` re-run: **NO REGRESSION**, **57 rows that were ❌ are now green** (all 6 product handoffs done on main, all 30 coverage gaps assigned to sweep-#7 terminals 31–34), 5 expectations moved, and 3 of my own detectors found to be wrong before the product was. **1 problem fixed, one commit.** |
 >
 > | T29 · docs, tooling, root config and the remainder | `P29101`–`P29600` | ✅ 500 written, 500 executed, **500 ✅** — plus all 500 of `P14001`–`P14500` re-run: **NO REGRESSION** (494 ✅ · 6 ⏭ · 0 ❌), 3 rows **filed green in sweep #6 on a claim that was never true** (`P14044` nine documents in no index · `P14466` `next.config.ts` had no guard and no guard-map row · `P14188` a dead owner component), 4 expectations moved, 2 handoffs landed, and the 3 rows still red at the first pass (`P14317`/`P14460`/`P14462`, one fault in T2's file) FIXED on the owner's word. **11 items fixed, one commit each, 3 new CI guards; 2 more fixed then REVERTED on his word, with their guard checks removed in the same commit.** |
 >

@@ -225,8 +225,11 @@ check("…and the chip does not call a request for water an 'order'",
   /list\.every\(isCall\)/.test(chip) && /request for staff/.test(chip));
 // A MIXED queue drops the noun rather than picking one that is untrue about half of it, matching
 // the connection badge's own voice at the top of the same screen ("Offline · 2 waiting").
-check("…and says nothing about 'orders' when the queue holds both kinds",
-  /if \(list\.some\(isCall\)\) return `\$\{n\}`;/.test(chip));
+// EXPECTATION MOVED (item 14, 2026-08-30): the queue gained a THIRD kind, "I've left this table",
+// so the mixed test now covers calls OR leaves. The rule — never a noun that is untrue about part
+// of what it is counting — is unchanged.
+check("…and says nothing about 'orders' when the queue holds more than one kind",
+  /if \(list\.some\(isCall\) \|\| list\.some\(isLeave\)\) return `\$\{n\}`;/.test(chip));
 // The guard that keeps the ORIGINAL behaviour: an order still reads as its dishes.
 check("an ORDER still names its dishes, unchanged",
   /list\.map\(\(i\) => `\$\{i\.qty\} × \$\{i\.title\}`\)\.join\(", "\)/.test(chip));
@@ -249,11 +252,22 @@ check("the leave handlers read the server's answer",
 check("…neither one throws the answer away any more",
   !/^\s*await leaveSession\(token\);\s*$/m.test(widget));
 check("'You left the table' is only said when the restaurant heard it",
-  /if \(told\) toast\("You left the table"/.test(widget));
-check("…and the diner is told plainly when it did not",
-  /couldn't tell the restaurant/.test(widget));
-check("'Change table' stops before navigating, so the sentence is not wiped by the page load",
-  /if \(!told\) \{[\s\S]{0,400}return;\n\s*\}\n\s*\/\/ Back to THIS restaurant's menu/.test(widget));
+  /if \(told\) \{ toast\("You left the table", "table"\); return; \}/.test(widget));
+// EXPECTATION SUPERSEDED, AND BY A BETTER ANSWER (item 14, 2026-08-30). This asserted that a diner
+// whose leave did not land is TOLD to go and mention it to staff. That sentence is gone because the
+// job is gone: the phone now saves the leave and sends it itself. Asserting the old wording would be
+// asserting a worse product. The rule this row exists for — the diner is never left with a lie and
+// never left holding a job the app can do — is now met by the queue, so that is what it checks.
+check("…and when it did NOT land, the phone takes the job rather than handing it to the diner",
+  /const q = await enqueueGuestLeave\(\{ token, restaurantId, restaurantSlug \}\);/.test(widget)
+  && /we'll tell the restaurant as soon as there's signal/.test(widget));
+// EXPECTATION SUPERSEDED (item 14, 2026-08-30). "Change table" used to have to STOP when the leave
+// had not landed, because the only thing left was to tell the diner — and a page load would wipe
+// that sentence. Now the leave is saved and sends itself, so there is nothing to tell them and no
+// reason to block the thing they asked for. What must still hold is that the leave is not simply
+// dropped on the floor when they move.
+check("'Change table' saves the leave when it did not land, then lets them move on",
+  /if \(!told\) await enqueueGuestLeave\(\{ token, restaurantId, restaurantSlug \}\);/.test(widget));
 check("…and the phone still lets go either way, so nobody is TRAPPED by a dead connection",
   /clearLocal\(\); \/\/ also drops lfh_active_orders \+ nudges the tracker to hide/.test(widget)
   && /const told = await leftForReal\(token\);\n\s*clearLocal\(\)/.test(widget));
@@ -288,6 +302,81 @@ check("…and the green 'live' dot stops claiming a live connection while it is 
 // The skeleton itself must survive: it is what stops the "no dishes yet" message flashing.
 check("the loading skeleton is still there for the normal first load",
   /className="stb-loading"/.test(tbill) && /className="stb-skel"/.test(tbill));
+
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+// THE FOUR IMPROVEMENTS THE OWNER PICKED ON 2026-08-30 (items 10, 12, 13, 14 of T3's list).
+// Same subject as the rest of this guard: what a diner is told, and whether it is true.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+const sync = read("components/SessionCartSync.tsx");
+const leaveRoute = read("app/api/guest/leave/route.ts");
+const outbox = read("lib/guestOutbox.ts");
+
+say("\n13) A dish that fails to reach the shared basket heals itself (item 10)");
+check("a failed push no longer just waits for the diner's next edit",
+  /reconciledToken\.current = null;/.test(sync) && /A FAILED PUSH NOW HEALS ITSELF/.test(sync));
+check("…it re-runs the FIRST-JOIN reconcile, which SETS the whole array",
+  /setSessionCart\(s\.token, merged,/.test(sync));
+check("…carrying the timestamp it read, so a co-diner's add is refused not overwritten",
+  /cart_updated_at \?\? null/.test(sync));
+check("…and a refusal re-merges rather than forcing through",
+  /reconciledToken\.current = null; \/\/ someone else got there first/.test(sync));
+check("…and it is NOT a blind retry of the delta, which would double the food",
+  !/mergeSessionCart\(token, added, removed, qty\);[\s\S]{0,400}mergeSessionCart\(token, added, removed, qty\)/.test(sync));
+
+say("\n14) A request for staff can be taken back; an order still cannot (item 12)");
+check("the queue can cancel a call that has not gone yet",
+  /export async function cancelQueuedCall/.test(outbox));
+check("…and refuses anything that is not a call, by KIND, not by trusting the screen",
+  /if \(!isCall\(it\)\) return \{ ok: false, reason: "not_a_call" \};/.test(outbox));
+check("…and refuses one that is no longer queued, with a reason rather than a bare false",
+  /if \(!it\) return \{ ok: false, reason: "not_found" \};/.test(outbox));
+check("the button is offered on a call and never on an order",
+  /\{isCall\(o\) && !isLeave\(o\) \? \(/.test(chip));
+check("…and a refusal is SAID, not swallowed",
+  /That's already gone to the staff/.test(chip));
+check("an order still shows a spinner and no buttons",
+  /<span className="gob-spin"/.test(chip));
+
+say("\n15) The diner is told how long staff have been asked (item 13)");
+check("the moment the request LANDED is remembered",
+  /const \[reqAt, setReqAt\] = useState\(0\);/.test(gate));
+check("…stamped on both request paths, only after it landed",
+  (gate.match(/setReqAt\(Date\.now\(\)\)/g) || []).length === 2);
+check("…and the clock ticks only while that screen is up",
+  /if \(!open \|\| step !== "request_sent" \|\| !reqAt\) return;/.test(gate));
+check("…saying nothing at all in the first minute",
+  /if \(mins < 1\) return null;/.test(gate));
+check("…and it is elapsed time, never a countdown or a warning",
+  /Asked \{mins === 1 \? "a minute" : `\$\{mins\} minutes`\} ago\./.test(gate));
+
+say("\n16) The phone carries 'I've left this table' when the signal is gone (item 14)");
+check("the queue has a third kind",
+  /kind\?: "order" \| "call" \| "leave";/.test(outbox));
+check("…with its own endpoint, so the queue's rules apply to it unchanged",
+  /fetch\("\/api\/guest\/leave"/.test(outbox) && /export const POST = withIdempotency\(postImpl, "guest"\);/.test(leaveRoute));
+check("…which treats a database that will not answer as BUSY, never as a refusal",
+  /reason: "server_busy", retryAfter/.test(leaveRoute));
+check("…and drops the floor snapshot, because a seat freed",
+  /invalidateFloor\(rid\)/.test(leaveRoute));
+check("only ONE leave per token can be waiting",
+  /queued\.find\(\(x\) => isLeave\(x\) && String\(x\.token \|\| ""\) === String\(p\.token \|\| ""\)\)/.test(outbox));
+check("A SAVED LEAVE IS DROPPED IF THEY RE-JOIN THAT VERY TABLE",
+  /function leaveIsStale/.test(outbox) && /s\.token === it\.token/.test(outbox));
+check("…checked at SEND time, because the rejoin can happen while the tab is shut",
+  /if \(leaveIsStale\(item\)\) \{ await removeItem\(item\.id\); notify\(\); continue; \}/.test(outbox));
+check("the table card saves the leave rather than handing the diner the job",
+  /enqueueGuestLeave\(\{ token, restaurantId, restaurantSlug \}\)/.test(widget));
+check("…on both Leave and Change table",
+  (widget.match(/enqueueGuestLeave\(/g) || []).length === 2);
+check("…and the phone still lets go either way, so nobody is trapped",
+  /const told = await leftForReal\(token\);\n\s*clearLocal\(\)/.test(widget));
+check("the saved-work list names a leave instead of counting an empty basket",
+  /if \(isLeave\(o\)\) return "Leaving your table";/.test(chip));
+check("…says what will happen to it",
+  /The restaurant will be told/.test(chip));
+check("…and the chip counts it as a MESSAGE, not an order",
+  /message to the restaurant/.test(chip));
 
 console.log(out.join("\n"));
 if (fail) {
