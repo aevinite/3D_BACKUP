@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P35237`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
+**Next free ID: `P35737`.** (`P15001`–`P15100` is reserved — see *The ID repair block*.)
 
 > **SWEEP #7 took `P15101`–`P35100`** — 40 terminals × 500, contiguous and in terminal order, so
 > T1 is `P15101`–`P15600`, T5 is `P17101`–`P17600`, and T40 is `P34601`–`P35100`. Each terminal
@@ -55,6 +55,8 @@ again. Read those before reporting anything.
 > | T27 · every word on every screen | `P28101`–`P28600` | ✅ 500 written, 500 executed (484 ✅ · 10 ✅ deliberate · 6 ❌→✅ fixed) — plus **the T27 ledger itself landed on main at last**, and all 500 of `P13001`–`P13500` re-run: **ONE REGRESSION** (`P13140` — the Bills-screen rework replaced \"No bills match that search.\" with an empty string inside a box that carries 120px of padding, so a search matching today but not yesterday printed blank nothing under a \"0 bills\" heading), 2 more rows newly red, **42 of the 59 reserved rows CLOSED**, and sweep #6’s biggest ⏭ answered: all six languages photographed, and Arabic right-to-left found to be a written decision rather than a gap. **7 problems fixed, one commit each**, and a new `verify:wording` guard — this territory had none of its own. Owner reviewed 2026-08-28: kept 1/2/4/5/7, **reverted 3** (recorded as R48 — the sentence is unreachable for every role but the admin), **widened 6** to every place "removed" is read, and approved the `verify:rejected` fix (a rejection note could satisfy the "is it beside the code?" check against itself). |
 >
 > | T29 · docs, tooling, root config and the remainder | `P29101`–`P29600` | ✅ 500 written, 500 executed, **500 ✅** — plus all 500 of `P14001`–`P14500` re-run: **NO REGRESSION** (494 ✅ · 6 ⏭ · 0 ❌), 3 rows **filed green in sweep #6 on a claim that was never true** (`P14044` nine documents in no index · `P14466` `next.config.ts` had no guard and no guard-map row · `P14188` a dead owner component), 4 expectations moved, 2 handoffs landed, and the 3 rows still red at the first pass (`P14317`/`P14460`/`P14462`, one fault in T2's file) FIXED on the owner's word. **11 items fixed, one commit each, 3 new CI guards; 2 more fixed then REVERTED on his word, with their guard checks removed in the same commit.** |
+>
+> | T29 · the owner's own follow-up run | `P35237`–`P35736` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌ left as HIS decision). Asked for after T29's PR merged: same territory, fresh block, planned against `origin/main` a5382a40. **Band M2 (`P35347`–`P35412`) breaks every check in this terminal's own three guards ON PURPOSE — and EIGHT of them did not fire.** Four were real weaknesses (a key that matched `undefined`, two `||` fallbacks that made a check unfalsifiable, three substring matches a rename satisfied) and four were the sabotage being too gentle; all fixed. It also found and fixed one real product fault: an admin opening an already-linked pairing link was sent to a restaurant's own manager panel instead of the console. **Re-run band M2 FIRST — it is the only band that tells a live guard from a decorative one.** |
 >
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
