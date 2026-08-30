@@ -33,8 +33,13 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P42001`.**
+**Next free ID: `P42501`.**
 
+> **`P42001`–`P42500` is CLAIMED by T29** (docs, tooling, root config and the remainder) for a THIRD
+> freshly planned 500, on the owner's instruction of 2026-08-30: *"completely replan whole 500 phases
+> test and do it, make sure everything in your area is error free"*. **Claimed before a single row was
+> written**, which is the rule this file asks for after T7/T28 and then T29/T7 both took a live block.
+>
 > **`P41501`–`P42000` is TAKEN by T29** (docs, tooling, root config and the remainder) for its
 > follow-up 500, on the owner's instruction of 2026-08-30. It was first written at
 > `P35237`–`P35736` and **renumbered on merge**, because T7's own second 500 had claimed that
