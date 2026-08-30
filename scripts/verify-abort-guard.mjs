@@ -163,8 +163,34 @@ existed — a slow read, not a dead one. A protection must never be the thing th
         else if (code[j] === ")") { depth--; if (!depth) break; }
       }
       const call = code.slice(m.index, j + 1);
-      if (/signal|AbortSignal|deadline\(/.test(call)) continue;
       if (/keepalive:\s*true/.test(call)) continue;     // a beacon: nothing awaits it
+      // ── MENTIONING A SIGNAL IS NOT HAVING A DEADLINE (T25 round 2, 2026-08-31) ────────────────
+      // This test used to be `/signal|AbortSignal|deadline\(/`, and SABOTAGE showed what that let
+      // through: replacing `opts?.signal ?? deadline(30_000)` with a bare `opts?.signal` left the
+      // call still spelling the word "signal" (`...(signal ? { signal } : {})`), so the guard stayed
+      // GREEN over a fetch with no ceiling at all — the exact fault it was written for.
+      //
+      // What counts now:
+      //   · the call reaches a deadline itself — `deadline(…)`, `AbortSignal.timeout(…)`, or any
+      //     helper whose NAME says so (`sendDeadline()`, `uploadDeadline()`, `orderDeadline()`);
+      //   · or it passes a variable that is assigned from one of those in the same file;
+      //   · or it passes an AbortController's signal — a cancel rather than a clock, which is the
+      //     right shape for a download the app itself calls off (lib/modelLoader.ts).
+      // Anything else is a signal somebody else may or may not have set a ceiling on.
+      if (/(?:^|[^\w$])(?:[a-zA-Z_$][\w$]*)?[dD]eadline\s*\(/.test(call)) continue;
+      if (/AbortSignal\s*\.\s*timeout/.test(call)) continue;
+      const names = [...call.matchAll(/signal:\s*([A-Za-z_$][\w$.]*)/g)].map((x) => x[1])
+        .concat([...call.matchAll(/\{\s*signal\s*\}/g)].length ? ["signal"] : []);
+      let bounded = false;
+      for (const raw of names) {
+        const v = raw.split(".")[0];
+        // Either the DECLARATION carries the deadline, or a later ASSIGNMENT does — lib/aggregators.ts
+        // declares `let signal: AbortSignal | undefined;` and fills it inside a try on the next line,
+        // which is the feature-guarded shape this whole guard asks for.
+        if (/^[a-z_$][\w$]*$/i.test(v) && new RegExp(`\\b${v}\\s*(?::[^=;]*)?=[^;]*?(?:[dD]eadline\\s*\\(|AbortSignal\\s*\\.\\s*timeout|new AbortController)`).test(code)) bounded = true;
+        if (/\.signal$/.test(raw) && /new AbortController/.test(code)) bounded = true;
+      }
+      if (bounded) continue;
       bare.push(`lib/${f}: ${call.replace(/\s+/g, " ").slice(0, 74)}…`);
     }
   }

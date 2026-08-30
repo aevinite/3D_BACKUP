@@ -458,6 +458,28 @@ check("…and the chip counts it as a MESSAGE, not an order",
   /message to the restaurant/.test(chip));
 
 console.log(out.join("\n"));
+
+// ── THE TABLE NUMBER LEAVES THE ADDRESS BAR (T25 round 2, 2026-08-31) ─────────────────────────────
+// Round 1's item 21b strips `?table=` / `?t=` from the two older doors after the page has read them,
+// so the number a diner could edit is not sitting in the address. This guard covered every other
+// promise made to a diner and not that one — found by SABOTAGE: commenting the strip out left
+// verify:guest-doors green.
+{
+  // COMMENTS OUT. Sabotage caught this instantly: `// url.searchParams.delete("table");` still
+  // matched a raw-text test, so the guard passed against a commented-out fix. Third recording of that
+  // shape in this repo — a guard can pass against its own comment.
+  const menuView = read("components/MenuView.tsx").split("\n")
+    .filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*)/.test(l)).join("\n");
+  check("the table number is stripped from the address after the page has read it",
+    /searchParams\.delete\("table"\)/.test(menuView) && /searchParams\.delete\("t"\)/.test(menuView));
+  check("…with replaceState, not a redirect (a redirect to /q/<code> would expose every table's code)",
+    /history\.replaceState/.test(menuView) && !/router\.replace\(`\/q\//.test(menuView));
+  check("…and only when the page did NOT come in through the private-code door",
+    /!qrTable/.test(menuView));
+  check("…while any other query the address carries is left alone",
+    /url\.pathname \+ \(url\.searchParams\.toString\(\)/.test(menuView));
+}
+
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);

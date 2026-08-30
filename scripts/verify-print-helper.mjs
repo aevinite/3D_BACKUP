@@ -568,9 +568,18 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "HELPER_AUTOSTART is telling somebody to do something again");
 
   // WINDOWS: the hole that made "nothing is downloaded" only true on a Mac.
-  check(/SUMATRA = \{/.test(script) && /sha256:/.test(script) && /certutil -hashfile/.test(script),
-    "Windows fetches its own PDF printer, pinned and checksummed",
-    "the Windows helper is asking a person to download SumatraPDF by hand again, or fetching it without checking what arrived");
+  // ⚠️ THIS USED TO TEST `/sha256:/` AND NOTHING MORE, and sabotage showed what that let through
+  // (T25 round 2, 2026-08-31): emptying the constant to `sha256: ""` kept the guard GREEN, so the
+  // helper would have downloaded a 20 MB program and checked it against nothing. A checksum is 64 hex
+  // characters or it is not a checksum, and the version must appear in the URL it pins.
+  const sha = (script.match(/sha256:\s*"([0-9a-f]{64})"/) || [])[1];
+  const ver = (script.match(/version:\s*"([\d.]+)"/) || [])[1];
+  check(/SUMATRA = \{/.test(script) && !!sha && /certutil -hashfile/.test(script),
+    "Windows fetches its own PDF printer, pinned and checksummed (64 hex characters)",
+    "the Windows helper is asking a person to download SumatraPDF by hand again, or fetching it without a real 64-character checksum to compare against");
+  check(!!ver && new RegExp(ver.replace(/\./g, "\\.")).test(script) && !/\/dl\/rel\/latest\//.test(script),
+    "…at a PINNED version, never a floating 'latest'",
+    "the download URL floats: the program a restaurant runs could change underneath it with nobody deciding to");
   check(/PaperSizeWidth/.test(script) && /PaperSizeHeight/.test(script),
     "…and Windows now reports its paper sizes, instead of somebody typing them",
     "the Windows helper stopped reading paper sizes — and a page that disagrees with the paper is what prints a slip sideways");

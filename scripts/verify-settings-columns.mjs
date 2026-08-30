@@ -328,6 +328,27 @@ if (legacyReaders.length) {
   pass('nothing reads settings by the retired single-row key .eq("id","site")');
 }
 
+
+// ── A MODULE LADDER LIVES IN settings.modules, AND THE DECLARATION IS WHAT PUTS IT THERE ──────────
+// (T25 round 2, 2026-08-31.) Everything above catches a NEW COLUMN appearing on settings. This is the
+// other half: `moduleBag: true` in lib/accessModel.ts is what sends a module's ladder to
+// settings.modules instead of a column of its own, and lib/tableTags.ts reads it from there. Turning
+// that flag off is how the column comes back — and sabotage showed this guard stayed GREEN when it
+// was. Found by breaking it, not by reading it.
+{
+  const model = readFileSync(join(root, "lib/accessModel.ts"), "utf8");
+  const bags = (model.match(/moduleBag:\s*true/g) || []).length;
+  if (bags < 1) {
+    fail("lib/accessModel.ts no longer declares `moduleBag: true` for any module — every new module ladder would need its own settings column again (mig 326, and settings already has 110 columns)");
+  } else {
+    pass(`${bags} module(s) declare moduleBag: true, so their ladders live in settings.modules`);
+  }
+  const tags = readFileSync(join(root, "lib/tableTags.ts"), "utf8");
+  if (!/moduleBag/.test(tags) && !/settings\.modules|\bmodules\b/.test(tags)) {
+    fail("lib/tableTags.ts stopped reading the shared module bag — the declaration would be decoration");
+  }
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — the settings row is growing again`
   : "\n✓ a new module needs no new column");
