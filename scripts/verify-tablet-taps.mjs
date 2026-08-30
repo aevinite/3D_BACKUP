@@ -911,8 +911,22 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `It was 37px —\n    the smallest control on the panel and the only DESTRUCTIVE one, between two ` +
     `40px buttons that merely change a number.`,
   );
+  // …AND SO IS EVERY OTHER CONTROL ON THAT ROW. The first version of this check named .idel and
+  // .qbtn only, and missed ✓ Serve one line over at 29px — the button that does the actual job on
+  // a dish row, two-thirds the height of the − and + beside it (found by the fifth pass, hours
+  // after item 25 shipped). A rule written for two of the three controls on a row is half a rule.
+  {
+    const serve = (css.match(/\.ist-serve \{[^}]*\}/) || [""])[0];
+    check(
+      "tablet: ✓ Serve is as tall as the rest of its dish row",
+      Number(((serve.match(/min-height:\s*([\d.]+)px/) || [])[1]) || 0) >= 40,
+      `${CSS}: .ist-serve is ${(serve.match(/min-height:[^;]*/) || ["sized by padding"])[0]} against ` +
+      `.qbtn's 40px square.\n    It is the control that marks a dish delivered — the one thing on ` +
+      `that row a waiter taps on purpose.`,
+    );
+  }
   check(
-    "tablet: …and it is a square, not a padded glyph that shrinks with its font",
+    "tablet: …and 🗑 is a square, not a padded glyph that shrinks with its font",
     /width:\s*40px/.test(idel) && /height:\s*40px/.test(idel),
     `${CSS}: .idel is sized by padding again. A padded glyph changes size with its font; the − and + ` +
     `beside it are a fixed square, and a delete should not be the odd one out.`,

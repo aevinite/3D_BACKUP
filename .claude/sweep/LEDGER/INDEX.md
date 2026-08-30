@@ -33,7 +33,13 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P44801`.**
+**Next free ID: `P45301`.**
+
+> **T7 claims `P44801`–`P45300`** for a FIFTH freshly planned 500 (2026-08-30, the owner's word:
+> *"you plan 500 phases test again around the boundaries that you have given and run the test and
+> check everything should be green If not solve that all things which are not"*). Claimed by editing
+> this line BEFORE a single row was written, and taken above the highest id actually on disk
+> (`P44800`) rather than from the mark — the two rules every T7 claim has followed.
 
 > **`P44301`–`P44800` is T9's SECOND 500** (shared panel plumbing, 2026-08-30). **RENUMBERED FROM
 > `P42501`–`P43000`.** I claimed that block correctly — by editing this line before writing a single
