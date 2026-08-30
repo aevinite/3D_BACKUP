@@ -47,8 +47,13 @@ check("…and the button uses it when the phone is offline",
 check("it goes to its own door, not the order one", /"\/api\/guest\/call-waiter"/.test(outbox));
 check("that door exists and rings the floor AT MOST ONCE",
   /withIdempotency\(postImpl, "guest"\)/.test(route) && /X-LFH-Action-Id/.test(outbox));
+// EXPECTATION WIDENED, RULE UNCHANGED (T3 item 14, 2026-08-30). The guest queue gained a third
+// kind — "I've left this table" — which, like a call, comes back with no order_id to track. The
+// same branch now clears both, so this asserted spelling was one kind out of date. What the row is
+// really about is "a delivered thing with nothing to track is cleared, not left to send twice", and
+// that is what it checks now. (This guard's own header says: assert the rule, not the wording.)
 check("a call that succeeds is cleared even though it has no order to track",
-  /res\.ok && j\?\.ok && isCall\(item\)/.test(outbox));
+  /res\.ok && j\?\.ok && \(isCall\(item\) \|\| isLeave\(item\)\)/.test(outbox));
 check("a STALE call is not delivered — both on the phone…", /STALE_CALL_MS/.test(outbox));
 check("…and on the server, which cannot rely on the phone", /STALE_CALL_MS/.test(route));
 check("the diner is told in words why a stale call didn't go", /case "call_too_old":/.test(outbox));

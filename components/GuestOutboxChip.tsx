@@ -34,6 +34,7 @@ import {
   retryGuestFailed,
   dismissGuestFailed,
   orderRestWithout,
+  cancelQueuedCall,
   type GuestOrder,
 } from "@/lib/guestOutbox";
 import { formatPrice, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format";
@@ -62,6 +63,10 @@ function whenText(ts: number): string {
 // under a chip reading "1 order waiting to send". Nothing they had done was an order, and nothing
 // on the row said water.
 const isCall = (o: GuestOrder): boolean => o.kind === "call";
+// The queue gained a THIRD kind on 2026-08-30 — "I've left this table". It carries no items and no
+// track summary either, so without this it would fall through to the item count and print "0 items",
+// which is the exact fault this file was fixed for a week ago. One kind, one sentence.
+const isLeave = (o: GuestOrder): boolean => o.kind === "leave";
 
 // What was asked for, in the diner's own words — "Water", "Bring the bill". `reason` is exactly
 // the label they tapped in the waiter popup (ChefPopup's REASONS), so it needs no translating.
@@ -74,6 +79,7 @@ function callText(o: GuestOrder): string {
 // "2 × Espresso, 1 × Croissant" — read from the summary the cart stored with the order, so this
 // never has to re-price or re-read anything. A saved waiter call names what was asked for instead.
 function itemsText(o: GuestOrder): string {
+  if (isLeave(o)) return "Leaving your table";
   if (isCall(o)) return callText(o);
   const list = o.track?.items;
   if (Array.isArray(list) && list.length) {
@@ -130,8 +136,9 @@ export default function GuestOutboxChip() {
   // "2 orders" would be.
   const count2 = (list: GuestOrder[]): string => {
     const n = list.length;
+    if (list.every(isLeave)) return n === 1 ? "1 message to the restaurant" : `${n} messages to the restaurant`;
     if (list.every(isCall)) return n === 1 ? "1 request for staff" : `${n} requests for staff`;
-    if (list.some(isCall)) return `${n}`;
+    if (list.some(isCall) || list.some(isLeave)) return `${n}`;
     return n === 1 ? "1 order" : `${n} orders`;
   };
   const label = failed.length
@@ -169,13 +176,47 @@ export default function GuestOutboxChip() {
                 <div className="gob-row-main">
                   <div className="gob-row-title">{itemsText(o)}</div>
                   <div className="gob-row-sub">
-                    {isCall(o) ? "Staff will be called" : "Waiting to send"} · {whenText(o.at)}
+                    {isLeave(o) ? "The restaurant will be told" : isCall(o) ? "Staff will be called" : "Waiting to send"} · {whenText(o.at)}
                     {o.track?.total ? ` · ${formatPrice(String(o.track.total), currency || DEFAULT_CURRENCY)}` : ""}
                   </div>
                 </div>
-                {/* Deliberately NO buttons on a waiting order. It sends itself, and the only thing a
-                    "cancel" here could do is throw away an order the kitchen may already have. */}
-                <span className="gob-spin" aria-hidden="true"><i className="fas fa-circle-notch" /></span>
+                {/* AN ORDER STILL HAS NO CANCEL, AND A REQUEST FOR STAFF NOW DOES (owner, 2026-08-30).
+                    By the time a diner looks at a waiting ORDER the kitchen may already hold it —
+                    what was lost is the reply, not the order — so a "cancel" here could throw away
+                    real work. Nobody has cooked a glass of water: a queued CALL has not rung
+                    anything yet, and a diner whose waiter has already walked past should be able to
+                    take it back rather than send someone to a table that needs nothing. */}
+                {isCall(o) && !isLeave(o) ? (
+                  <div className="gob-row-acts">
+                    <button
+                      type="button"
+                      className="gob-btn gob-drop"
+                      disabled={busyId === o.id}
+                      onClick={() => act(o.id, async (id) => {
+                        const r = await cancelQueuedCall(id);
+                        if (r.ok) {
+                          window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+                            message: "Not needed — we won't call them",
+                            kicker: "service", variant: "success",
+                          } }));
+                          return;
+                        }
+                        // A TAP MUST NEVER VANISH IN SILENCE. The button only renders on a call, but
+                        // the row can send itself between the render and the tap — say so.
+                        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+                          message: r.reason === "not_found"
+                            ? "That's already gone to the staff"
+                            : "That one can't be taken back — please ask a member of staff",
+                          kicker: "service", variant: "error",
+                        } }));
+                      })}
+                    >
+                      {busyId === o.id ? "…" : "Not needed"}
+                    </button>
+                  </div>
+                ) : (
+                  <span className="gob-spin" aria-hidden="true"><i className="fas fa-circle-notch" /></span>
+                )}
               </div>
             ))}
 

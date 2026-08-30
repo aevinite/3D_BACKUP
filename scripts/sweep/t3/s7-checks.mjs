@@ -95,8 +95,10 @@ P("P16112", "…keeping the NEWEST note rather than the first",
   /if \(p\.reason\) already\.reason = p\.reason;/.test(F.outbox));
 P("P16113", "…and matched on table AND token AND mode, so two tables never merge",
   /isCall\(x\) && x\.mode === p\.mode && String\(x\.table \|\| ""\) === String\(p\.table \|\| ""\) && String\(x\.token \|\| ""\) === String\(p\.token \|\| ""\)/.test(F.outbox));
+// EXPECTATION MOVED, RULE BROADENED (item 14, 2026-08-30): the same branch now also clears a
+// delivered LEAVE. "A delivered thing-with-no-order-id is removed" is what the row was always about.
 P("P16114", "a delivered call is removed from the queue, not left to send twice",
-  /if \(res\.ok && j\?\.ok && isCall\(item\)\) \{ progressed = true; await removeItem\(item\.id\)/.test(F.outbox));
+  /if \(res\.ok && j\?\.ok && \(isCall\(item\) \|\| isLeave\(item\)\)\) \{ progressed = true; await removeItem\(item\.id\)/.test(F.outbox));
 P("P16115", "the saved-work list can tell a call from an order",
   /const isCall = \(o: GuestOrder\): boolean => o\.kind === "call"/.test(F.chip));
 P("P16116", "…and names what was asked for",
@@ -106,12 +108,15 @@ P("P16117", "…falling back to plain words when an old row carries no note",
 P("P16118", "…and never prints the count of an empty basket for one",
   /const n = o\.track\?\.itemCount \?\? \(Array\.isArray\(o\.items\) \? o\.items\.length : 0\);/.test(F.chip)
   && /if \(isCall\(o\)\) return callText\(o\);/.test(F.chip));
+// EXPECTATION MOVED (item 14): three kinds now, so the ternary has three arms. The rule — each kind
+// says what will happen to IT, never a generic "waiting" — is unchanged and now covers one more.
 P("P16119", "the row's second line says what will happen to a call, not 'waiting to send'",
-  /\{isCall\(o\) \? "Staff will be called" : "Waiting to send"\}/.test(F.chip));
+  /\{isLeave\(o\) \? "The restaurant will be told" : isCall\(o\) \? "Staff will be called" : "Waiting to send"\}/.test(F.chip));
 P("P16120", "the chip counts requests for staff as requests",
   /return n === 1 \? "1 request for staff" : `\$\{n\} requests for staff`;/.test(F.chip));
+// EXPECTATION MOVED (item 14): "mixed" now means any two of three kinds.
 P("P16121", "…and drops the noun entirely when the queue is mixed, rather than picking a wrong one",
-  /if \(list\.some\(isCall\)\) return `\$\{n\}`;/.test(F.chip));
+  /if \(list\.some\(isCall\) \|\| list\.some\(isLeave\)\) return `\$\{n\}`;/.test(F.chip));
 P("P16122", "…and still says 'order' when that is all there is",
   /return n === 1 \? "1 order" : `\$\{n\} orders`;/.test(F.chip));
 P("P16123", "the plural of 'request for staff' is not 'request for staffs'",
@@ -135,9 +140,14 @@ P("P16131", "a call that could not even be saved says so honestly instead of pro
   /message: "Couldn't save your call"/.test(F.chef));
 P("P16132", "the session path falls through to a live attempt rather than lying, if saving throws",
   /\} catch \{ \/\* couldn't even save → fall through and let the live attempt say so honestly \*\//.test(F.gate));
-P("P16133", "the queue is capped, so one phone cannot pile up unbounded saved calls",
+// EXPECTATION MOVED, AND THE RULE GOT STRONGER (item 14): there are three enqueue paths now, and
+// all three are capped. Counting two was only ever a proxy for "every path is capped" — so count
+// that the cap appears once per enqueue function instead of pinning it to a number that must change
+// whenever a kind is added.
+P("P16133", "the queue is capped, so one phone cannot pile up unbounded saved work",
   /const MAX_QUEUED = 25;/.test(F.outbox)
-  && (F.outbox.match(/while \(queued\.length > MAX_QUEUED\)/g) || []).length === 2);
+  && (F.outbox.match(/while \(queued\.length > MAX_QUEUED\)/g) || []).length
+     === (F.outbox.match(/export async function enqueueGuest/g) || []).length);
 P("P16134", "…and the OLDEST is the one retired, with a sentence written for a diner",
   /This one waited too long to send — please ask a member of staff if you still need someone\./.test(F.outbox));
 P("P16135", "a call and an order both reset all three attempt counters on 'Try again'",
