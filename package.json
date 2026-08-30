@@ -90,6 +90,8 @@
     "sweep:t3": "node scripts/sweep/t3/run-all.mjs",
     "sweep:t3-static": "node scripts/sweep/t3/s7-checks.mjs",
     "sweep:t3-live": "node scripts/sweep/t3/s7-live.mjs",
+    "sweep:t3b": "node scripts/sweep/t3/s7b-checks.mjs",
+    "sweep:t3b-live": "node scripts/sweep/t3/s7b-live.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:panel-canvas": "node scripts/verify-panel-canvas.mjs",
