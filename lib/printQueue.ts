@@ -111,10 +111,14 @@ export async function pendingKotJobs(
     // 2026-08-11). A soft delete leaves the row in place, so filtering it out here is the only way
     // the join can come back empty and the job be dropped below.
     // `status` rides along so a CANCELLED order can be told apart from a live one below.
+    // BOUNDED (T25 round 2, item 31). `oids` is already capped by the caller's job batch, so the
+    // orders read is ONE ROW PER ID; the items read is many per order, so it is bounded generously
+    // instead — 200 lines per ticket is far past a real one, and an unbounded read is silently
+    // capped at 1,000 by PostgREST, which on a kitchen slip means missing food.
     sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items, status")
-      .in("id", oids).eq("restaurant_id", rid).is("deleted_at", null),
+      .in("id", oids).eq("restaurant_id", rid).is("deleted_at", null).limit(oids.length),
     sb.from("order_items").select("id, order_id, title, qty, note, options, removed")
-      .in("order_id", oids).eq("restaurant_id", rid).order("created_at"),
+      .in("order_id", oids).eq("restaurant_id", rid).order("created_at").limit(oids.length * 200),
   ]);
   const byId = new Map(((jo.data || []) as { id: string }[]).map((o) => [o.id, o]));
   const items = (ji.data || []) as { order_id: string }[];

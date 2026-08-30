@@ -8,7 +8,7 @@
 // restored. All three delete entry points (tablet orders/:id/delete, editor bulk
 // clear, editor single order_delete) funnel through here so the rule can't drift.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { readInChunks } from "@/lib/inChunks";
+import { readInChunks, idChunks } from "@/lib/inChunks";
 
 const nowIso = () => new Date().toISOString();
 
@@ -22,6 +22,44 @@ export type SoftDeleteActor = {
 // actually stamped (already-deleted rows are skipped so a double-tap is a no-op).
 // If a session is left with NO live (non-deleted) orders, the session itself is
 // tombstoned too, so the admin ledger shows the whole bill as one deleted unit.
+/**
+ * WHICH OF THESE SESSIONS STILL HAS A LIVE ORDER — paged, because there are many orders per session.
+ *
+ * This is the read that decides whether a table gets tombstoned along with its bills, so a short
+ * answer is not a smaller result: it is a live table marked deleted. It cannot go through
+ * `readInChunks`, whose contract is one row per id (see the CORRECTION note in softDeleteOrders).
+ *
+ * Bounded three ways: 200 ids per request (an `.in()` list of 800 is 29.6 KB of URL and PostgREST
+ * answers "Bad Request"), ONE column, and pages of 1,000 until a short page — with a ceiling so a
+ * runaway can never become an endless loop. An error is thrown, never folded into a shorter set.
+ */
+const TOMBSTONE_PAGE = 1000;
+const TOMBSTONE_IDS_PER_READ = 200;
+const TOMBSTONE_MAX_ROWS = 100_000;
+async function sessionsWithLiveOrders(rid: string, sessionIds: string[]): Promise<Set<string>> {
+  const busy = new Set<string>();
+  for (const chunk of idChunks(sessionIds, TOMBSTONE_IDS_PER_READ)) {
+    let from = 0;
+    for (;;) {
+      const r = await sb.from("orders").select("session_id")
+        .eq("restaurant_id", rid).in("session_id", chunk).is("deleted_at", null)
+        .order("session_id", { ascending: true })
+        .range(from, from + TOMBSTONE_PAGE - 1);
+      if (r.error) {
+        throw new Error(`bill tombstone check failed: ${(r.error as { message?: string })?.message ?? String(r.error)}`);
+      }
+      const rows = (r.data || []) as { session_id: string | null }[];
+      for (const o of rows) if (o.session_id) busy.add(o.session_id);
+      if (rows.length < TOMBSTONE_PAGE) break;
+      from += TOMBSTONE_PAGE;
+      if (from > TOMBSTONE_MAX_ROWS) {
+        throw new Error("bill tombstone check failed: too many live orders to page through");
+      }
+    }
+  }
+  return busy;
+}
+
 export async function softDeleteOrders(
   rid: string,
   ids: string[],
@@ -109,8 +147,27 @@ export async function softDeleteOrders(
     //     orders each is enough to cross it.
     //
     // So it is chunked, every chunk is limited, and a failed chunk is an ERROR that aborts the
-    // tombstone rather than a shorter list. `.limit(1000)` per chunk, not `chunk.length`: the rows
-    // are orders, so there are legitimately more of them than there are ids.
+    // tombstone rather than a shorter list.
+    //
+    // ⚠️ CORRECTION (T25 round 2, item 28, 2026-08-31). The reasoning above was right and the tool it
+    // reached for could not carry it. This read used `readInChunks(...).limit(1000)`, with the note
+    // *"`.limit(1000)` per chunk, not `chunk.length`: the rows are orders, so there are legitimately
+    // more of them than there are ids"* — and `readInChunks` REFUSES a batch bigger than its chunk:
+    //
+    //     readInChunks: a chunk returned more rows than ids (1000 > 500) — the read is not one-row-per-id
+    //
+    // MEASURED against the real helper. So the intended behaviour was unreachable, and what happened
+    // instead was worse than the truncation it was guarding against: as soon as one chunk of sessions
+    // held more live orders than sessions (bin 200 bills across 150 tables that still have 200 live
+    // orders — ordinary), this threw `bill tombstone check failed` **after the orders had already been
+    // stamped deleted**. And a retry cannot repair it: the second call finds those orders no longer
+    // live, returns `{ deleted: 0 }`, and never reaches the tombstone at all. The sessions stay
+    // un-tombstoned for ever, which is precisely the half-state this whole block exists to prevent.
+    //
+    // It is now PAGED instead: 200 sessions at a time, one column, pages of 1,000 until a short page,
+    // with a hard ceiling so it can never loop. Every other chunked read in the codebase is
+    // one-row-per-id and keeps `.limit(chunk.length)`; `verify:id-chunks` now enforces that shape and
+    // this read no longer pretends to have it.
     //
     // (The bulk clear that made this large was removed from the manager panel on the same day —
     // owner, 2026-08-21 — but this function is still reachable from the ADMIN bill ledger with a
@@ -118,13 +175,7 @@ export async function softDeleteOrders(
     // caller happens to have gone away.)
     // Named `stillBusy`, not `live`: the read above now binds `live` too, and one name meaning two
     // things in one function is the drift this codebase keeps consolidating away.
-    const stillBusy = await readInChunks<{ session_id: string | null }>(sessionIds, (chunk) =>
-      sb.from("orders").select("session_id")
-        .in("session_id", chunk).is("deleted_at", null).eq("restaurant_id", rid).limit(1000));
-    if (stillBusy.error) {
-      throw new Error(`bill tombstone check failed: ${(stillBusy.error as { message?: string })?.message ?? String(stillBusy.error)}`);
-    }
-    const busy = new Set((stillBusy.rows || []).map((o) => o.session_id).filter(Boolean) as string[]);
+    const busy = await sessionsWithLiveOrders(rid, sessionIds);
     const toTombstone = sessionIds.filter((sid) => !busy.has(sid));
     if (toTombstone.length) {
       const sUpd = await sb.from("sessions").update(sessionStamp)

@@ -255,6 +255,58 @@ for (const [rel] of Object.entries(ESTATE_READERS).concat([["lib/liveBoard.ts"]]
   }
 }
 
+// ── EVERY readInChunks READ IS ONE ROW PER ID (T25 round 2, item 28, 2026-08-31) ─────────────────
+//
+// `readInChunks` has a contract its own body enforces:
+//
+//     if (batch.length > chunk.length) return { error: new Error("…the read is not one-row-per-id") }
+//
+// So a callback that can return MANY rows per id does not get a longer list — it gets an error, and
+// whatever the caller already wrote stays written. lib/softDelete.ts did exactly that: it asked
+// "which of these sessions still has a live order" through readInChunks with `.limit(1000)` and a
+// note explaining that orders outnumber sessions on purpose. MEASURED against the real helper:
+//
+//     readInChunks: a chunk returned more rows than ids (1000 > 500) — the read is not one-row-per-id
+//
+// …thrown as `bill tombstone check failed` AFTER the bills had been stamped deleted, and unrepairable
+// by a retry (the second call finds nothing live, returns { deleted: 0 } and never reaches the
+// tombstone). Ten other chunked reads in the codebase all end `.limit(chunk.length)`. This makes that
+// shape the rule, so the next many-per-id read has to page instead of pretending.
+{
+  const files = [];
+  (function walk(d) {
+    for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+      const rel = `${d}/${e.name}`;
+      if (e.isDirectory()) walk(rel);
+      else if (/\.tsx?$/.test(e.name)) files.push(rel);
+    }
+  })("lib");
+  let chunked = 0;
+  for (const rel of files) {
+    // lib/inChunks.ts is where readInChunks is DEFINED — its own signature is not a call.
+    if (rel === "lib/inChunks.ts") continue;
+    const src = readFileSync(join(ROOT, rel), "utf8");
+    if (!/readInChunks/.test(src)) continue;
+    // Take each readInChunks CALL by paren-matching, so a wrapped callback is seen whole. `<` after
+    // the name is the type argument every caller passes; the definition is excluded above.
+    for (const m of src.matchAll(/readInChunks\s*</g)) {
+      let i = src.indexOf("(", m.index), depth = 0, j = i;
+      for (; j < src.length; j++) {
+        if (src[j] === "(") depth++;
+        else if (src[j] === ")") { depth--; if (!depth) break; }
+      }
+      const call = src.slice(m.index, j + 1);
+      chunked++;
+      if (/\.limit\(\s*chunk\.length\s*\)/.test(call)) continue;
+      const shown = call.replace(/\s+/g, " ").slice(0, 150);
+      bad.push(`${rel}: a readInChunks read does not end .limit(chunk.length) — readInChunks REFUSES a batch bigger than its chunk ("the read is not one-row-per-id"), so a many-rows-per-id read gets an ERROR, not a longer list. Page it yourself instead (lib/softDelete.ts → sessionsWithLiveOrders is the worked example).\n         ${shown}…`);
+    }
+  }
+  if (chunked < 8) {
+    bad.push(`this check found only ${chunked} readInChunks call(s) — it should see ten or more. Its walk found nothing, so nothing was checked.`);
+  }
+}
+
 if (bad.length) {
   console.log(`\n✗ verify:id-chunks — ${bad.length} problem(s):\n`);
   for (const b of bad) console.log("  · " + b);

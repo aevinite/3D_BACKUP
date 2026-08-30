@@ -100,7 +100,10 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
   ]);
   const session = sessQ.data as Record<string, unknown> | null;
   if (!session) return null;
-  const orders = ((await sb.from("orders").select("*").eq("session_id", sessionId).eq("restaurant_id", rid)).data || []) as Record<string, unknown>[];
+  // BOUNDED (T25 round 2, item 31): every order on ONE table. 500 is far past a real bill, and an
+  // unbounded read is capped at 1,000 by PostgREST without telling anyone — on a printed bill, a
+  // silent truncation is a missing line of food.
+  const orders = ((await sb.from("orders").select("*").eq("session_id", sessionId).eq("restaurant_id", rid).limit(500)).data || []) as Record<string, unknown>[];
   if (!orders.length) return null;
   const settings = (setQ.data || {}) as Record<string, unknown>;
   const tnum = session.table_number == null ? "" : String(session.table_number);

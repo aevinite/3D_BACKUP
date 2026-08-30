@@ -44,7 +44,29 @@ const SUMATRA = {
   exe: "SumatraPDF-3.6.1-64.exe",
 };
 
-const safe = (s: string) => String(s || "").replace(/["`$\\]/g, "").slice(0, 200);
+// ── A VALUE PASTED INTO A GENERATED FILE MUST NOT BE ABLE TO ADD A LINE TO IT ────────────────
+// (T25 round 2, item 27, 2026-08-31.) Both values here are typed by a person: `label` is the name
+// the admin gives the computer on /aevinite/printing, and `origin` is built from the request's host.
+// They are pasted into a shell script, a .bat file and a comment line.
+//
+// The old rule stripped `"`, a backtick, `$` and `\` — everything that could END a quoted string or
+// start a substitution — and that part was right. It did NOT strip NEWLINES, and a comment line only
+// lasts until one. MEASURED by generating the real file with the computer named
+// `Front desk PC\nsay 'this line was added by the computer name'\n# `:
+//
+//     1| #!/bin/zsh
+//     2| # Aevidine print helper — Front desk PC
+//     3| say 'this line was added by the computer name'      ← a real line, from a NAME
+//
+// …identically on all three machines. So line breaks are folded to a space, and the batch/shell
+// punctuation that means "and then do this" (`% ^ & | < > ;`) goes with them: none of it belongs in
+// a hostname or in what somebody calls their front-desk PC, and `%` in particular is how a .bat file
+// expands a variable. The 200-character ceiling stays.
+const safe = (s: string) =>
+  String(s || "")
+    .replace(/[\r\n\u2028\u2029]+/g, " ")     // a name can never start a new LINE of the script
+    .replace(/["`$\\%^&|<>;]/g, "")
+    .slice(0, 200);
 
 // ── macOS ────────────────────────────────────────────────────────────────────────────────────
 // Printer discovery is `lpstat -e` (queue names) plus, for each, the DEFAULT page size out of

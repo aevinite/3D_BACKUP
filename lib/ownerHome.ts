@@ -41,7 +41,8 @@ export async function resolveOwnerHomeRid(
   // 2) a restaurant the admin just picked for this owner (skip binned ones).
   const wanted = preferred.filter(isUuid);
   if (wanted.length) {
-    const hit = await sb.from("restaurants").select("id").in("id", wanted).is("deleted_at", null);
+    // BOUNDED (T25 round 2, item 31): one row per id asked for, which is the shape this read has.
+    const hit = await sb.from("restaurants").select("id").in("id", wanted).is("deleted_at", null).limit(wanted.length);
     if (hit.error) return { error: hit.error.message };
     const first = wanted.find((r) => hit.data?.some((x) => x.id === r));
     if (first) return { rid: first };

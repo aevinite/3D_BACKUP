@@ -166,8 +166,11 @@ export async function liveOrdersAndItems(
   // `created_at >= since` arm of the OR below. Narrowing to the overnight stragglers
   // keeps this id-list tiny — the stress test showed 300+ open sessions inlining ~11KB
   // of UUIDs into the PostgREST URL, flirting with URL-length failures.
+  // BOUNDED (T25 round 2, item 31): the note above measured 300+ open sessions on a stress run, and
+  // an unbounded read is silently capped at 1,000 by PostgREST — which here would drop overnight
+  // stragglers off the board with nobody told. 2,000 is far past any real floor.
   const openRes = await sb.from("sessions").select("id")
-    .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since);
+    .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since).limit(2000);
   if (openRes.error) throw new Error(openRes.error.message);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
