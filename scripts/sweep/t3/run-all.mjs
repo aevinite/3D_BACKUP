@@ -60,6 +60,9 @@ results.push(["blocks 1+2 — the static rules", run("BLOCKS 1+2 — the static 
 // Sweep 7's own 300 code-reading rows, P16101..P16400. Same idea as the line above: the ledger says
 // WHAT is checked, this says HOW, so a re-run never has to be rebuilt from the ledger's prose.
 results.push(["sweep 7 block A — the 300 code-reading rows", run("SWEEP 7 BLOCK A — the 300 code-reading rows (P16101-P16400)", join(here, "s7-checks.mjs"), ["--quiet"])]);
+// The SECOND pass's 330 code-reading rows, P41001..P41330 — the libraries underneath, the dish
+// popup and all seventeen screens of the table gate.
+results.push(["sweep 7 block A2 — the 330 second-pass code rows", run("SWEEP 7 BLOCK A2 — the second pass's code rows (P41001-P41330)", join(here, "s7b-checks.mjs"), ["--quiet"])]);
 results.push(["block 3a — the basket, the doors, no signal", run("BLOCK 3a — the basket, the doors, no signal", join(here, "basket-and-doors.mjs"))]);
 await cool("the end-to-end order block");
 results.push(["block 3b — the whole journey, end to end", run("BLOCK 3b — the whole journey, end to end", join(here, "order-end-to-end.mjs"))]);
@@ -68,6 +71,8 @@ results.push(["block 4 — the captures + the bottom-corner hit-test", run("BLOC
 // Sweep 7's own live rows, P16401..P16460. Placed here for the same reason block 4 is: it only
 // browses, goes offline, and reads — it places no order, so it needs no cooldown.
 results.push(["sweep 7 block B — the 62 live rows", run("SWEEP 7 BLOCK B — the live rows (P16401-P16460)", join(here, "s7-live.mjs"))]);
+// …and the second pass's 70 live rows, P41331..P41400. Browses and reads only; no order, no cooldown.
+results.push(["sweep 7 block B2 — the 70 second-pass live rows", run("SWEEP 7 BLOCK B2 — the second pass's live rows (P41331-P41400)", join(here, "s7b-live.mjs"))]);
 await cool("the cross-panel block — two phones joining and another order, the heaviest of the five", LONG_COOLDOWN_MS);
 results.push(["block 5 — tracing a change across panels", run("BLOCK 5 — tracing a change across panels", join(here, "across-panels.mjs"))]);
 

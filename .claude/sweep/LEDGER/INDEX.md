@@ -33,7 +33,12 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P41001`.**
+**Next free ID: `P41501`.**
+
+> **`P41001`–`P41500` is CLAIMED by T3** (the guest basket / table session / placing an order) for its
+> SECOND sweep-#7 pass, on the owner's instruction of 2026-08-30 to re-plan and re-run the 500.
+> Claimed BEFORE a single row was written, which is what the note further down this file asks for
+> after T7 and T28 both took `P35237` in the same minute.
 
 > **T7's THIRD freshly planned 500 — `P40501`–`P41000` — is DONE: 500 written, 500 executed, 500 ✅**
 > (2026-08-30, the owner's word: *"plan again 500 phases test within the boundary that you have
