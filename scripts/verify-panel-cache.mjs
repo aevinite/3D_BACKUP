@@ -76,6 +76,17 @@ const pages = readdirSync(PANELS, { withFileTypes: true })
   .filter((d) => d.isDirectory() && existsSync(join(PANELS, d.name, "index.html")))
   .map((d) => ({ panel: d.name, file: join(PANELS, d.name, "index.html") }));
 
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+// Three panels have an index.html today — editor, kitchen, tablet (public/panels/vendor is a shared
+// library folder, not a panel). Two would mean the walk lost one.
+if (pages.length < 3) {
+  console.error(`✗ verify:panel-cache found only ${pages.length} panel(s) with an index.html under public/panels — there are three. Nothing was checked.`);
+  process.exit(1);
+}
 let stale = 0, checked = 0, fixed = 0;
 const problems = [];
 
@@ -109,6 +120,10 @@ for (const page of pages) {
 
 if (!stale) {
   if (HOOK) process.exit(0);                       // nothing to say when nothing moved
+  if (checked < 20) {
+    console.error(`✗ verify:panel-cache read only ${checked} versioned asset(s) out of three panels — there are dozens. The index.html files parsed to nothing, so nothing was checked.`);
+    process.exit(1);
+  }
   console.log(`✓ all ${checked} panel assets carry their own content hash — no browser can be left on a stale file`);
   process.exit(0);
 }

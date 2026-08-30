@@ -201,9 +201,18 @@ check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
 // where the paper comes out when a helper program owns it, so it now asks the server ONCE for the
 // display and still prints nothing. The rule that matters is unchanged and is what is checked:
 // nothing is printed unless this device answered YES.
-check(/ans !== "on"\) return;/.test(epanel) && !/claimJobs|printKot\(/.test(epanel.split(/ans !== "on"\) return;/)[0].split("async function managerPrintPass")[1] || ""),
-  "a device that has not answered YES never prints (the honest default is no)",
-  "the manager panel prints without the device having agreed to be the printer");
+// ── THE RULE SURVIVED ITS MECHANISM (2026-08-29) ─────────────────────────────────────────────
+// This used to require the literal `ans !== "on") return;` — the per-device question every screen
+// asked itself. The owner abolished that question: the admin names ONE person on the Printing board
+// and no screen re-opens the decision ("remove old logic, keep only one logic").
+//
+// But the DANGER it guarded is untouched, and it is his own words on the "May be the printer" row:
+// a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the
+// paper. So the rule is asserted against the new mechanism instead of the old spelling: a coarse
+// pointer — a touch screen with no mouse — never claims the printer.
+check(/pointer: coarse/.test(epanel) && /looksLikeAComputer/.test(epanel),
+  "a phone never claims the printer (a coarse pointer does not auto-claim)",
+  "the manager panel will auto-claim printing on a touch device — a phone that takes a ticket drops it into a dialog nobody looks at while the kitchen waits");
 check(/helper: \(r && r\.helper\) \|\| null/.test(epanel) && /helperKey/.test(epanel),
   "…and it carries the helper's answer, so a screen can say which computer prints instead",
   "the panel dropped the helper field again — every line about it goes invisible while the server is right (mig 341)");
@@ -242,10 +251,26 @@ const ownerSettings = read("app/owner/settings/page.tsx");
 // The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
 // rather than the literal — asserting the spelling of code that legitimately changed shape is how
 // this repo's guards have gone red twice (see verify-static's header).
-const managerReaches = /PRINT_SETUP_URL = "\/print-setup\.html"/.test(epanel) && /href="\$\{PRINT_SETUP_URL\}"/.test(epanel);
-check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel) && managerReaches && /print-setup\.html/.test(ownerSettings),
-  "it is reachable from ALL FOUR: admin console · kitchen 🖨 sheet · manager Settings → Printing · owner Settings",
-  "the guide has lost one of its four doors (owner, 2026-08-18: it must be visible in the kitchen panel, the manager settings AND the owner panel) — the first attempt put it in the manager panel's hidden Kitchen section, which is how being reachable stopped being obvious");
+// ── THE FOUR DOORS ARE DOWN TO ONE, AND THAT IS THE POINT NOW ────────────────────────────────
+// This used to demand the guide be reachable from all four — admin console, kitchen 🖨 sheet,
+// manager Settings, owner Settings — from 2026-08-18: "it should be shown in kitchen panel… manager
+// also and owner."
+//
+// He reversed it on 2026-08-29, having watched a restaurant use it: *"inside the kitchen panel there
+// is how to print, and in the manager and the owner inside the setting how to print a whole setup
+// guide, which was from previous — so remove that completely."* Setting a printer up is the ADMIN's
+// job on the Printing screen; three more copies of "how to print" sat in panels that can no longer
+// perform that setup, saying it in different words from the board that can. That is the same
+// two-things-for-one-job fault as the retired print-here banner, and the standing rule now in
+// CLAUDE.md ("a new way replaces the old one") says the old copies go.
+//
+// So the rule is INVERTED, not deleted: the guide lives where the setup lives, and nowhere else.
+check(/print-setup\.html/.test(admin),
+  "the guide is reachable from the admin console, where the printer is actually set up",
+  "the setup guide has no door at all — the admin console is the one place that must always reach it");
+check(!/print-setup\.html/.test(kpanel),
+  "…and the kitchen panel does NOT carry a second copy of it",
+  "the kitchen panel links the setup guide again: a cook cannot set a printer up, so it is an instruction to do something they cannot do");
 check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
   "the manager panel has its own VISIBLE Printing section (the admin-only Kitchen one stays hidden)",
   "the manager panel's Printing section is gone — the printing status and the device answer would be unreachable there again");

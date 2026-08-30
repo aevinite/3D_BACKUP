@@ -14,7 +14,7 @@ import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
-import { liveOrdersAndItems } from "@/lib/liveBoard";
+import { liveOrdersAndItems, stripPlacedBy } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 // A waiter's bill must take the SAME road as a manager's (mig 341). Before this, printing a bill from
 // the tablet opened a window and used whatever printer THAT device defaults to — which on a waiter's
@@ -679,7 +679,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ]);
         return ok({
           sessions, members: must(members) || [], calls: must(calls),
-          orders: live.orders, items: live.items, requests: must(requests),
+          // the who-punched-it columns are selected for the kitchen's chime and never sent to a
+          // browser — this panel's payload is byte-for-byte what it was (stripPlacedBy)
+          orders: stripPlacedBy(live.orders), items: live.items, requests: must(requests),
         });
       }
       // ── NO TABLE = NO ANSWER, AND THAT IS THE POINT (T4 improvement 4, 2026-08-11) ─────────
@@ -1595,6 +1597,31 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       await log("order_accept", { order_id: b, device_id: dev });
+      return ok({ ok: true });
+    }
+
+    // orders/:id/tip — record the optional TIP taken at payment (owner, 2026-08-28).
+    //
+    // This route did not exist on the tablet at all, which is why the waiter panel had no tip
+    // control: the panel your waiters actually take money on could not record one, so every tip
+    // they collected was invisible to the tips report while the manager's screen could log one.
+    //
+    // A byte-for-byte twin of the editor's own orders/:id/tip, on purpose — same ceiling, same
+    // permission, same audit line. Two routes writing the same column with different rules is how
+    // the two panels start disagreeing about money.
+    //   · GATED ON tablet_mark_paid, because taking a tip happens at a settle and nowhere else.
+    //     recordPin() means the manager-PIN mode covers it exactly as it covers the settle itself.
+    //   · The ceiling is the same 100000 the editor uses. It is there to catch a mis-typed 500000
+    //     landing in the day-close figure, not to judge a tip.
+    //   · It NEVER touches subtotal/tax/discount/total (migration 154). A tip is money on top of a
+    //     finished bill; the moment it enters the bill math it becomes an untaxed sale.
+    if (a === "orders" && c === "tip") {
+      const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp;
+      const cur = must(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      const amt = Math.min(Math.max(0, Number((body as { amount?: unknown })?.amount) || 0), 100000);
+      must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
+      await log("order_tip", { order_id: b, detail: `tip ₹${amt}`, device_id: dev });
       return ok({ ok: true });
     }
 

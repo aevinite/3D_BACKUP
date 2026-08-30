@@ -1,97 +1,107 @@
-# T12 findings — owner home screen, Audit & logs, who's online, marketing
+# T12 findings — sweep #7, 2026-08-27
 
-Phases P05501–P06000. 12 real problems, all fixed in `sweep6/t12-owner-home-activity`,
-**one commit per numbered item** so a single veto can be reverted cleanly.
-Restaurant used: **My Little French House** (the diag owner `diago1` owns exactly one, so the
-single-restaurant dashboard is the live path). **Aangan was never written to and never read.**
-No row was created in any table, so there was nothing to clean up.
+**Territory:** owner home screen, Audit & logs, who's online, marketing, `OwnerShell`.
+**Branch:** `sweep7/t12-owner-home` · **PR is open, not merged** (sweep #7 gates everything).
+**Ledger:** `.claude/sweep/LEDGER/T12.md` — 500 sweep-#6 rows re-run + 500 new (P20601–P21100).
 
-| # | severity | where | what | evidence | commit |
-|---|---|---|---|---|---|
-| 1 | low | owner → Dashboard → hero shortcut row | said "Staff & powers"; the sidebar and the page say "Team" | confirmed, both sizes, one frame | `a3e867f8` |
-| 2 | med | owner → Dashboard → Recent activity → "See all" | gated on `entitlements.activity`, a key the server has never sent | confirmed: overview sends 33 keys, no `activity` | `b8efc9c2` |
-| 3 | high | owner → Dashboard → Recent activity card | sat on "Loading…" for ever when the admin has switched Audit & logs off | confirmed by replaying the server's own 403 | `3180c9b5` |
-| 4 | med | owner → Dashboard → Recent activity card | never refreshed itself; frozen at page load while every other card was 60s fresh | confirmed: over 88s analytics 3→5, oplog stayed at 1 | `c890e0fe` |
-| 5 | high | owner → Dashboard, whole screen | a switched-off Reports section read as a broken dashboard: red "Couldn't load.", six cards stuck loading, three blank tiles, five dead links | confirmed by replaying the server's own 403 | `e96096c2` |
-| 6 | med | owner → Audit & logs → Audit · removals → the line under the chips | "200 records · ₹91,337 in total" described page 1 of 442 | confirmed on screen | `1b5033c9` |
-| 7 | high | owner → Audit & logs → Activity log → type chips + sort | both were dead controls — the filtered, sorted list was computed and thrown away. He asked for this on 2026-08-14 | confirmed: chip lit, list unchanged at 200 rows; sort changed nothing | `beb469b7` |
-| 8 | HIGH | owner → Dashboard → Every dish → a dish | on a phone there was NO way back to the dashboard: BACK left the panel, the crumb is hidden at 360px, the drawer's Dashboard link did nothing, and a reload restores the drill. The scroll memory also addressed the wrong element at ≤900px | confirmed on a 360×780 A35 | `d72cc926` |
-| 9 | low | owner → Manager mode → the "Manager mode" breadcrumb segment | silent dead tap: it dispatches an event Manager mode does not listen for | code-read + measured listeners | `b4c4b892` |
-| 10 | med | owner → any page → ☰ → the section you are already in | dead tap; on the dashboard with a dish open it was the only control visible on a phone | confirmed, both sizes | `1d9d0058` |
-| 11 | med | owner → Dashboard → "Today so far" tile → the "● live" pill | 1.92:1 on a white card once a tile is not a link (which fix 5 makes happen) | measured in all four states | `dab7fdb0` |
-| 12 | med | owner → Dashboard, switched-off state | the instant-paint snapshot still leaked real delta chips, sparklines, a full revenue chart and payroll money under a note saying figures were not shown | confirmed in both skins with a real snapshot present | `f1fa43fd` |
+Twelve problems, twelve fixes, one commit each with the number in the message. Every one carries a
+measurement, and every one turns `npm run verify:owner-screen` red when its own commit is reverted.
 
-Found by the **second pass**: 7 (a false green on the first pass), 11 and 12.
-
-## 🔗 HANDOFF — the fix lives in another terminal's file, so I did not touch it
-
-* **H1 — `components/owner/OwnerManagerMode.tsx`.** Its `lfh:owner-crumb` broadcast fires once in a
-  child effect, before `OwnerShell`'s listener is attached (parent effects run after child effects).
-  On a HARD load of `/owner/manager` the cockpit's top pill therefore does not name the restaurant
-  whose floor is on screen — measured: the crumb read "Owner › Manager mode" with the floor iframe
-  loaded. Needed change: give that effect a dependency that makes it re-run after mount, or re-emit
-  on a microtask. The dashboard and the reports hub survive this only because their emitters re-run
-  when their data lands. Visible to a multi-restaurant owner. (Ledger P05846, P05945.)
-* **H2 — `app/owner/reports/page.tsx` (T11).** `scroller()` reads `.adm-main` only. At ≤900px
-  globals.css makes that `overflow-y: visible` and `.adm` the 100dvh scroller, so the reports hub's
-  scroll save/restore silently does nothing on a phone — the same fault this PR fixes on the
-  dashboard. Copy the `scrollPort()` helper added to `app/owner/page.tsx`. (Ledger P05948.)
-* **H3 — `components/owner/Charts.tsx` → `LeaderBar` / `CatTick` (T11).** The category axis is a
-  fixed 110px and `CatTick` draws the full label with no truncation, so a long dish name overflows
-  and is cut by the SVG edge. Measured on the dish view, **both sizes**: "Truffle & Wild Mushroom
-  Pizza" loses 57px off its left, and 5 of the 6 visible names lose between 6 and 57px. The existing
-  mitigation is an SVG `<title>` for hover — which does not exist on a phone, so on the A35 the name
-  is simply gone. Needed change: truncate with an ellipsis at the axis width (so the loss is
-  visible), widen the axis, or make the label tappable.
-
----
-
-## His review, 2026-08-18 — what changed after he read the list
-
-He kept all 12 fixes. He also found a 13th problem himself, and turned the parked items into work.
-
-| # | where | what | commit |
+| # | where it lives | what was wrong | commit |
 |---|---|---|---|
-| 13 | owner → Dashboard → any tile → the report it opens | on an admin tab pinned to one restaurant but VIEWING all restaurants, every tile landed on that one restaurant — and always on 30 days whatever period was on screen. His catch. Reproduced, then fixed on both sides | `05f8b760` |
+| 1 | owner → Audit & logs → Activity log | a search or severity chip that matched nothing said "No staff activity yet — it appears here as your team works." over 8,829 entries, with no way to clear the search. Both filters are server-side, so they land on the zero-rows branch | `64d122d3` |
+| 2 | owner → Dashboard, top row, Reports switched off | four tiles said "— · Reports are switched off" and "Today so far" printed "₹0 · 0 orders today" as fact. It reads the overview, which zeroes that restaurant's day on purpose | `090aa941` |
+| 3 | owner → Dashboard → Recent activity, and Audit & logs (both halves) | the person column printed a raw database id: "Handled a rating · c0af7b5b-…-f475e48bab53" | `1e8e1e41` |
+| 4 | owner → Dashboard → Your records | `/api/owner/analytics` has sent `partial: ["records"]` since 2026-08-12 and nothing read it, so a failed read left the card silently absent | `24ff7d7d` |
+| 5 | owner → Dashboard → Expenses tile + On hand popup | a food-loss read that FAILED printed as "− ₹0" under a headline "Money on hand"; the tile face said nothing either | `57449f90` |
+| 6 | owner → Dashboard → Recent activity | a failed read landed on the same null the card renders as "Loading…", so it span with no end and no retry | `2180eb2e` |
+| 7 | owner → Audit & logs, both Refresh buttons + the dish view's Back | the icon touched the word — 0px of gap against the 6px everywhere else (a flex row eats a leading space) | `61b03cac` |
+| 8 | backend only, nothing on screen | three comments described guards that do not exist, and one dependency array listed the same value twice | `69ab7114` |
+| 9 | backend only, nothing on screen (the dashboard's load) | the all-time records scan — the one read the server keeps outside its cache because it is unbounded — ran TWICE on every open, per restaurant | `3a5bd56d` |
+| 10 | owner → Dashboard → Today so far → See the full detail | the popup says "it is always today" and the link opened a thirty-day report | `ea05e557` |
+| 11 | owner → Audit & logs → Audit · removals | a raw database word in three places: the row ("• customer_erased"), the chip strip, and the reason column ("data_erasure_request — …") | `77bde15f`, `17bf0732`, `b277deff` |
+| 12 | owner console, the light/dark button | the three writes sat inside a React state updater, so one tap broadcast the skin twice in development | `e250df0e` |
 
-**Two challenges, checked rather than coded:**
+## Reported, NOT fixed — all outside this territory
 
-* *"there is no toggle for report to be switch on and off. What are you even saying?"* — there is
-  one, and I was right to guard the state: `/aevinite/access` → **Owner** → **Owner's menu** →
-  **Reports** (`own_reports` in `lib/accessTree.ts`, `def: true`). It was added on 2026-08-06
-  precisely because the entitlement was enforced but unswitchable. Default ON, so no restaurant is
-  affected unless he switches it off himself.
-* *"is there any options that we can allow to own that card or off that card"* (the activity card) —
-  no, and none is being added, which is what he asked for. There is no toggle anywhere for that
-  card. It simply disappears when **Audit & logs** is switched off, which is what fixes 2 and 3 do.
+1. **`app/api/owner/ratings/route.ts:143` and `app/api/owner/customers/route.ts:352`** build their
+   actor as `(scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner")`, and `scope.ownerId`
+   is a uuid. That is the real cause of problem 3, and the same value also lands in
+   `deletion_audit`. Fixing it there restores the person's NAME; fix 3 only stops the id being
+   shown. The admin console's own log page and the manager panel's Removals screen still print it.
+2. **`public/panels/auditsort.js`** has no `KIND_LABEL` / `KIND_ICON` entry for `customer_erased`,
+   which `lib/removalAudit.ts` lists as a real removal kind and `app/api/owner/customers` writes.
+   One line each closes problem 11 for the owner panel, the manager panel, the admin console AND
+   the removal-detail card at once. `verify:owner-screen` now prints a NOTE naming any kind in that
+   state (a note, not a failure — this territory may only read that file).
+3. **The owner console has no offline outbox.** Its one write (the food-made answer) is a raw
+   `fetch`, so an answer given with no signal is refused rather than queued. Narrow — one field on
+   one row — but it is the one owner write that could sensibly queue.
+4. **`npm run verify:guards-alive` fails 1 of 7** — `verify-notfound-audience.mjs`,
+   `verify-printing-sweep.mjs` and `verify-sw-version-report.mjs` drive the app without the app-up
+   preflight. **Confirmed identical on `origin/main` before any edit of mine.**
 
-**The three handoffs became fixes** (`59559518`, `794ee3eb`, `1f8dda6b`) — he said "you can do this
-3 also", so I worked outside the original sweep fence on `OwnerManagerMode.tsx`,
-`app/owner/reports/page.tsx` and `components/owner/Charts.tsx`.
+## Not driven, and why
 
-| # | where | what | commit |
-|---|---|---|---|
-| 14 | owner → Dashboard → the "Lost to cancellations" tile, and the insight strip | the dashboard called a cancelled order money lost and printed a figure for it. The database classifies `order_cancelled` as `record`, never `money`, and the two sources disagree 3× on the same window (rollup 1,124/₹8,28,096 vs Audit 394/₹1,85,766) because they count different sets. His catch. The dashboard now quotes nothing and links to the record | `3eb58929` |
+* The food-made answer's WRITE path. Answering updates an order's meta and can insert a `food_loss`
+  expense — real rows on the database nine other terminals are reading. Code-read only. A session
+  with the database to itself should drive it and delete what it creates by id.
+* Every multi-restaurant path (the estate table, the drawer, the callouts, `RestaurantDrop`, the
+  stacked group chart, the top-switcher re-scope). `diago1` owns one restaurant. All were code-read
+  and their sweep-#6 rows re-read green, but none was driven.
+
+## Guards
+
+`scripts/verify-owner-screen.mjs`: **61 → 91 checks**. Each new check was proved to go red when its
+own fix is reverted. Green alongside it: `verify:audit` (87), `verify:xray` (10),
+`verify:owner-home`, `verify:access` (50), `verify:taps` (33), `verify:rejected`,
+`verify:clash-coverage`, `verify:settings-columns`, `verify:grants`. `npm run typecheck` and
+`npm run lint` both pass (lint exit 0; the two warnings in `app/owner/page.tsx` are pre-existing).
+
+**Nothing was written to the database in this run.**
 
 
 ---
 
-## Beyond the sweep — the cancellation feature (2026-08-18/19)
+# ROUND 2 — 2026-08-29/30
 
-Not a sweep finding: work he asked for after reading the list. Spec and closing notes in
-`docs/CANCEL-AND-LOSS-SPEC.md`; migration **337**; guards `verify:cancel-loss` (18, database) and
-`verify:cancel-made` (13, through the real endpoint).
+The owner read round 1's report, picked items **13, 14, 15, 16, 18 and 19**, parked 17, and asked
+for the lot merged and made live. Then he asked for another 500 phases inside the same territory.
 
-It uncovered three faults that were ALREADY in the product, which is why it is recorded here too:
+**Round 1 (items 1–19) is MERGED and LIVE on backup** — PR #1130, merge commit `324f485a`, Vercel
+READY, and all 18 changes re-verified on `https://3-d-backup.vercel.app` (13 live checks, 0 fails).
 
-| # | where | what | fixed in |
-|---|---|---|---|
-| 15 | manager panel → the floor → cancel a KOT · backend effect | cancelling reversed NO stock, so an order keyed by mistake ate its ingredients for ever with nothing recording why the shelf was short | mig 337 + `P2` |
-| 16 | manager panel → Inventory → the movement ledger | `consumption_reversal` was a declared movement kind the panel already LABELLED "Order cancelled", and nothing had ever written one — a dead kind | mig 337 |
-| 17 | owner → Dashboard → Expenses · owner → Inventory & expenses | food cooked and then thrown away never became a cost anywhere | mig 337 + `P5` |
+## From his list
 
-Who may answer it: **owner or manager** (his instruction, 2026-08-19) — the manager in their panel
-gated on `void_bills`, the owner in Audit & logs gated on the `logs` section. A narrow, deliberate
-exception to the owner-read-only rule of 2026-08-04: `canRestore: false` still stands, no route puts a
-bill back, and `verify:audit`'s "GET-only" check was NARROWED (the owner write handler may call exactly
-one RPC — the classifier) rather than dropped.
+| # | what happened |
+|---|---|
+| 13 | `customer_erased` now has words and a glyph in `public/panels/auditsort.js` — fixes the owner panel, the manager panel, the admin console AND the removal-detail card in one place |
+| 14 | **five** call sites, not two. `ratings`, `customers` and three in `issues` each built the person from `scope.ownerId`, a uuid, and wrote it into four columns the panels PRINT. One definition now (`lib/ownerScope → ownerActorName`). Driven end to end; the fixture restored |
+| 15 | the removals chip strip folds on a phone — 530px → 169px, search box back above the fold |
+| 16 | the pager's "back to the top" now moves the element that really scrolls; verified with the accidental collapse-to-Loading deliberately defeated |
+| 18 | `diagmulti` exists, with `scripts/sweep/make-multi-owner.mjs` and an `ownerMulti` login |
+| 19 | **already fixed** by another terminal in the 215 commits that landed meanwhile; `verify:guards-alive` is 8 of 8 |
+| 17 | parked by the owner |
+
+## What the new 500 phases found
+
+Two problems, both fixed, **both invisible before item 18**:
+
+| # | where it lives | what was wrong |
+|---|---|---|
+| 20 | owner → Dashboard (multi) → the estate table → tap a restaurant whose Reports are switched off | the row says "figures hidden"; the drawer it opens showed `Today ₹0 · Revenue ₹0 · Avg ₹0 · 0 orders all-time · ₹0 all-time` over a trading restaurant, with a drawn trend chart of nothing. The table, sidebar, switcher and captions were all taught this on 2026-08-04; the drawer never was |
+| 21 | owner → Dashboard (multi), on a phone | the estate table showed his restaurant NAMES and not one figure. Four of the six remaining columns sat off the right edge — a 561px table in a 330px scroller — behind a sideways swipe with no scrollbar and no hint. It now stacks into one labelled block per restaurant |
+
+## Eleven of my own assertions were wrong rather than the code
+
+Recorded in the ledger rows so the next sweep does not re-discover them as faults: recharts draws
+bars as `<path>` not `<rect>`; a `fa-triangle-exclamation` probe also catches the sidebar's Feedback
+icon; `AnimatedNumber` counts up from 0, so a fast sample reads "0"; the instant-paint snapshot is
+per TAB (sessionStorage), so a new tab correctly starts cold; a tile TOTAL and a per-day AXIS may
+legitimately differ in unit; `fullPage: true` pads a `100dvh` shell with the dark body background;
+a downscaled screenshot is not evidence about a colour — sample the pixel.
+
+## Still open in this territory
+
+One thing, and it is the owner's own decision: the owner console has no offline queue, so its single
+write (the food-made answer) is refused rather than saved when there is no signal. Parked as item 17.

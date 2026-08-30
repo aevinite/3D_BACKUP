@@ -85,8 +85,29 @@ const server = http.createServer((req, res) => {
     res.end('{"ok":true}');
   });
 });
-await new Promise((r) => server.listen(4324, r));
-const BASE = "http://127.0.0.1:4324";
+// A PORT THE OS GIVES US, NOT ONE WE HOPE IS FREE (T9 sweep #7, 2026-08-22).
+//
+// This asked for 4324 by name. Ten sweep terminals share this machine, and when a second one ran
+// this guard the listen quietly lost the race and the run then drove the FIRST terminal's server —
+// which answers a different script, so the failure came back as a navigation timeout and read like
+// the queue was broken. Port 0 means "any free port", and the address is read back after binding,
+// so two runs can never stand on each other's table.
+await new Promise((r, j) => { server.once("error", j); server.listen(0, "127.0.0.1", r); });
+const PORT = server.address().port;
+const BASE = "http://127.0.0.1:" + PORT;
+
+// A --base HANDED TO THIS GUARD IS NOT THE APP'S ADDRESS, AND SAYING SO BEATS SWALLOWING IT
+// (T28, sweep #7, 2026-08-30). This guard stands up its OWN tiny server on the port below and
+// drives a page there — the real app is never involved, which is exactly why it can run with
+// nothing else up. That is fine, and deliberate. What is not fine is accepting `--base
+// http://localhost:4228` in silence: every sweep lane passes that flag to every guard, and a
+// silent accept lets the lane record "I checked port 4228" when this guard never went near it.
+// Found by pointing all 153 guards at a DEAD port and asking which still said "33 passed".
+// `verify:panel-cache` already had the right answer — say it out loud — so this copies its manner.
+if (process.argv.some((a) => a === "--base" || a.startsWith("--base="))) {
+  console.log(`verify-outbox-drain: --base does not apply here — this guard runs its own server on ${BASE} and never touches the app. Running anyway; nothing about your --base was checked.`);
+}
+
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext();
@@ -97,7 +118,19 @@ const fresh = async () => {
   await ctx.clearCookies();
   await page.goto(BASE + "/page", { waitUntil: "domcontentloaded" });
   await page.evaluate(() => new Promise((r) => { const d = indexedDB.deleteDatabase("lfh_outbox"); d.onsuccess = d.onerror = d.onblocked = () => r(); }));
-  await page.reload({ waitUntil: "domcontentloaded" });
+  // ONE RETRY, BECAUSE THIS RELOAD RACES THE PAGE'S OWN NAVIGATION (T9 sweep #7, 2026-08-22).
+  //
+  // Scenario 5 leaves the panel going to /login (that is the point of it) and the queue can kick a
+  // flush at any moment, so a reload issued in that window comes back ERR_ADDRESS_INVALID. Seen
+  // once in five runs, and a guard that fails one run in five is a guard people learn to ignore —
+  // which is how this repo lost a month to a green check that asserted nothing. Settle, then retry
+  // once; a second failure is a real one and still throws.
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+  } catch (e) {
+    await page.waitForTimeout(300);
+    await page.goto(BASE + "/page", { waitUntil: "domcontentloaded" });
+  }
   await page.waitForFunction(() => !!window.LFH_OUTBOX, null, { timeout: 10000 });
 };
 const send = (label) => page.evaluate((l) => window.LFH_OUTBOX.send({

@@ -154,9 +154,24 @@ export default function OfflineNotice() {
         {msg}{" "}
         {/* Only the GUEST menu has a queue for what you do (lib/guestOutbox.ts). Promising
             "it's all saved" on the owner/admin screens would be a lie — their buttons post
-            straight to the server. Say the true thing for each surface. */}
+            straight to the server. Say the true thing for each surface.
+
+            "YOUR ORDER" WAS WRONG TWICE OVER (sweep 7 T3, 2026-08-29).
+            1. The queue holds TWO kinds of thing — an order, and a call for staff. A diner who
+               taps the bell for water in a dead spot was told "Your order is saved", and after the
+               saved-work list learned to say "Water · Staff will be called", this strip sat
+               directly beneath it contradicting it on the same screen.
+            2. `hasQueue` is decided by the ROUTE, not by the contents — so this promised "Your
+               order is saved" on a guest menu with an empty basket and nothing queued at all.
+            One sentence is true in all three states (an order waiting, a request waiting, nothing
+            waiting), and it needs no reading of the queue from here — which keeps this strip free
+            of any dependency on the outbox.
+
+            STILL ENGLISH ON PURPOSE: R15 in docs/REJECTED-IDEAS.md rejects TRANSLATING this label
+            ("No — English is fine for these"). It says nothing about the words being true. This is
+            an English literal, not moved to lib/i18n.ts, exactly as R15 requires. */}
         <span style={{ fontWeight: 600, opacity: 0.9 }}>
-          {hasQueue ? "Your order is saved and will send by itself." : "Changes you make now may not save until you're back."}
+          {hasQueue ? "Anything you send is saved and goes by itself." : "Changes you make now may not save until you're back."}
         </span>
       </span>
     </div>

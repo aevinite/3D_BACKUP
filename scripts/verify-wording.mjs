@@ -28,13 +28,18 @@
 //
 // It derives the checkout root from the edited file's path, so it is correct inside a worktree.
 import { readFileSync, existsSync } from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import { execFileSync } from "node:child_process";
 
 const HOOK = process.argv.includes("--hook");
 // The three trees this guard reads. A file outside them cannot put a word on a screen.
 const TEXT_FILE = /[/\\](app|components|public[/\\]panels)[/\\].*\.(ts|tsx|js)$/;
 
-let ROOT = process.argv[2] && process.argv[2] !== "--hook" ? process.argv[2] : process.cwd();
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// A bare `process.argv[2]` meant `-- --base http://localhost:4228` — which every sweep lane
+// passes to every guard — was taken as the folder, and this one then shelled `cd --`, which
+// bash reads as a flag: "cd: --: invalid option". (T28, sweep #7, 2026-08-29.)
+let ROOT = repoRootFrom(import.meta.url);
 if (HOOK) {
   let raw = "";
   try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }

@@ -120,6 +120,41 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     maintOn = turnOn;
   }
 
+  // LEAVING THE PANEL MOVES THE WHOLE WINDOW, NOT THE FRAME (T9 sweep #7, 2026-08-22).
+  //
+  // /manager, /kitchen and /tablet render the panel inside an IFRAME (components/PanelFrame.tsx),
+  // so a bare `location.href` from in here navigates the FRAME: the sign-in page loads INSIDE the
+  // panel, with the panel's own top bar still around it, and the page's own URL never changes. It
+  // looks almost right, which is why it survived — but the outer page is still on /manager, and
+  // signing in again nests a panel inside a panel. Measured headless: the frame went to /login and
+  // the page around it stayed exactly where it was.
+  //
+  // The kitchen and tablet panels each fixed this for their OWN Sign out on 2026-08-19 (their logout
+  // forms carry target="_top"). This file is the SHARED drawer that every panel loads, and it was
+  // missed — the twin-panel drift shape, a fix that landed in two copies and not in the one place
+  // that serves all of them. `window.top` is same-origin here (our own page frames our own panel),
+  // so it is readable; the catch is for the day it is not.
+  // …AND BACK MUST NOT WALK STRAIGHT BACK IN (owner, 2026-08-28: "how sign out works in Netflix?
+  // I wanted to work like that").
+  //
+  // Signing out of Netflix leaves you on the sign-in screen and pressing Back does not return you
+  // to the app. `.replace()` is what does that: it REPLACES the panel's history entry instead of
+  // stacking a new one on top, so the panel is no longer anywhere in the back list and the browser
+  // cannot restore it from its own cache either. With `.href` the panel was still one Back press
+  // away — dead (the session is gone, so anything it touched would bounce to /login) but on screen,
+  // which is the half-signed-out look he is describing.
+  //
+  // Two things have to happen for a sign-out to be real, and this helper is only the second:
+  //   1. the SESSION ends — the POST to /api/panel-logout, which clears the cookie server-side;
+  //   2. the WINDOW leaves — the whole window, not the iframe the panel lives in, and with no way
+  //      back to it.
+  const leaveTo = (url) => {
+    try {
+      if (window.top && window.top !== window.self) { window.top.location.replace(url); return; }
+    } catch (e) { /* not readable — fall through to this frame, which is still better than nothing */ }
+    window.location.replace(url);
+  };
+
   // SIGN OUT — a POST, then go to /login (T9 improvement 13, 2026-08-06).
   //
   // /api/panel-logout is POST-only now: as a GET it ended a session from anything that merely
@@ -132,12 +167,12 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   // are buttons built by el() inside a drawer, and one of them sits behind a confirm().
   async function signOut() {
     // A hard ceiling so a hung request cannot leave the person staring at a button that did nothing.
-    const stop = setTimeout(() => { location.href = "/login"; }, 4000);
+    const stop = setTimeout(() => { leaveTo("/login"); }, 4000);
     try {
       await fetch("/api/panel-logout", { method: "POST", cache: "no-store", redirect: "manual" });
     } catch { /* offline / refused — we go to /login regardless */ }
     clearTimeout(stop);
-    location.href = "/login";
+    leaveTo("/login");
   }
 
   // ── small DOM helpers ──────────────────────────────────────────────────────
@@ -192,7 +227,16 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     .lfh-msg{font-size:12px;margin:6px 0 8px}
     .lfh-note{font-size:12px;color:var(--muted,#8aa0c9);line-height:1.5}
     .lfh-av{width:46px;height:46px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#0b1220;flex-shrink:0}
-    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}`;
+    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}
+    /* SOMEBODY MAY HAVE ASKED FOR NO MOVEMENT (T9 sweep #7, 2026-08-22). This drawer scales itself
+       in and its inputs and buttons animate, with no way out — connbadge.js and undobar.js both
+       honour the setting and these two files were the ones that did not. The card still FADES, so
+       it is never less noticeable; only the motion goes. */
+    @media (prefers-reduced-motion:reduce){
+      .lfh-dw{animation:lfhfade .2s ease}
+      .lfh-in,.lfh-bt{transition:none}
+    }
+    @keyframes lfhfade{from{opacity:0}to{opacity:1}}`;
     document.head.appendChild(el("style", { id: "lfh-set-style", html: css }));
   }
 
@@ -339,7 +383,8 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
             const j = await r.json().catch(() => ({}));
             if (!r.ok) { setMsg(pwMsg, j.error || "Could not change.", false); return; }
             setMsg(pwMsg, "Password changed — signing you out…", true);
-            setTimeout(() => { location.href = "/login"; }, 900);
+            // The WHOLE window, not this frame — see leaveTo().
+            setTimeout(() => { leaveTo("/login"); }, 900);
           } catch { setMsg(pwMsg, "Network error.", false); }
           finally { savePw.disabled = false; }
         } }, ["Change password"]);

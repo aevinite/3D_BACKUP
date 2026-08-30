@@ -1505,3 +1505,37 @@ driven by the ☀/🌙 button in `OwnerShell.tsx`: tapping it turns the cards wh
 survives a reload, and it pushes the same skin into the embedded panel by postMessage —
 `useOwnerSkin` exists precisely because those two drifted apart once. DARK IS THE DEFAULT and the
 owner asked to keep it that way; that part of the old note always stood.
+
+## A new way replaces the old one
+
+Owner, 2026-08-29, STANDING. He found the retired "Should **this screen** print the kitchen tickets?"
+banner still live on the manager floor while the new Printing board was running underneath it:
+
+> *"Why this fucking thing is coming in the panel? I told you to remove old logic, keep only one logic
+> which we have build right now… right now there is two printing things, one is working and one is
+> just showing, so it shouldn't be like that."*
+
+**The rule.** If you ADD something, the existing thing that did the same job is removed in the SAME
+change. If you CHANGE how a feature works, the previous way goes with it. Not deprecated, not left
+"in case" — removed.
+
+**Why it is not pedantry.** Two ways to answer one question do not sit quietly side by side:
+ - they DRIFT, because only one of them gets the next fix;
+ - they DISAGREE ON SCREEN, and a restaurant cannot tell which is telling the truth;
+ - the staff learn whichever they found first, which is usually the dead one.
+The printing case had three copies of the old model — a floor banner with its own localStorage
+yes/no, "take the printer over" buttons in the kitchen panel, and a setup guide in four places —
+all describing a setup the app no longer performed.
+
+**What "remove" covers.** The screen, its buttons, the handlers bound to them, the storage keys, the
+server fields only it read, and every duplicate explanation of it. Leave an obituary comment where it
+stood, naming the date and the reason, so the next session does not helpfully restore it.
+
+**What survives.** Only a genuinely DIFFERENT feature. A "the printer is stuck" alert is not a second
+setup screen; a problem-report sheet is not a second Printing board. If in doubt, ask what QUESTION
+each one answers — same question, one of them goes.
+
+**Guards are not exempt.** A guard defending the replaced rule must be INVERTED, not satisfied. Two
+were, the day this rule was made: `verify:print-helper` had required Access ↔ Printing to
+cross-reference, and `verify-print-queue` had required the setup guide in four panels. Both now
+assert the opposite, carrying the old quote and the new one so the history is legible.

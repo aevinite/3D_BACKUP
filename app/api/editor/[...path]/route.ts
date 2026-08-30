@@ -72,12 +72,15 @@ const BACKUP_PRINTER_MS = 30000;
 // AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
   const [stQ, helper, route] = await Promise.all([
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
     targetFor(rid, "kot"),
   ]);
-  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
-  const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // A STOPPED QUEUE holds every screen too, not just the helper — otherwise "stop the queue" would
+  // stop the computer and let a screen carry on printing, which is not stopping anything.
+  const paused = st?.modules?.printing?.paused === true;
+  const on = !paused && st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
   // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
   // plain words. It is derived from the route now, never stored.
   const target = route.kind === "screen"
@@ -2095,11 +2098,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
       const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
       const mayKot = screenMayPrint(targets.kot, whoAmI);
-      // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here"). Eligibility comes
-      // before the route: a manager the restaurant has switched off is not handed paper even if the
-      // route names their panel, and the answer is sent back so their screen says why rather than
-      // going quiet. Asked with `g.user` — the admin viewing (no user) is not a person to gate.
-      const mayBePrinter = g.user ? await managerCan(g, rid, "print_here") : true;
+      // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here").
+      //
+      // BEING NAMED BY THE ADMIN *IS* THE PERMISSION (owner, 2026-08-29). He was being sent off to
+      // Access & permissions in the middle of setting a printer up — "in the middle of thing, you
+      // tell me to go to the access and permission… remove it completely" — and worse, naming
+      // somebody whose general permission happened to be off produced a screen that was offered the
+      // job and then refused it, with the paper going nowhere. So an explicit, deliberate choice of
+      // ONE person on the Printing screen outranks the restaurant-wide default: the admin has
+      // already answered the question that permission asks. The permission still governs everyone
+      // the admin has NOT named.
+      const namedMe = targets.kot.kind === "screen" && !!g.user?.id && targets.kot.person === g.user.id;
+      const mayBePrinter = !g.user || namedMe ? true : await managerCan(g, rid, "print_here");
       if (!t.mayPrint || !mayKot.ok || !mayBePrinter) {
         return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners,
                     waiting, stuckAfterMs: STUCK_AFTER_MS,
@@ -4951,7 +4961,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (!isPrintMode(m)) return err("There are two ways to print: a computer, or a screen.", 400);
         // A SCREEN ROUTE FROM HERE NAMES THIS PERSON. Choosing somebody else's screen from your own
         // Settings would move another person's paper without telling them — that stays an admin act.
-        const done = await writeMode(rid, m, { person: g.user?.id || null, panel: "manager" });
+        // TWO DIFFERENT INTENTS, and they must not be one call.
+        //
+        //   · flipping the toggle  → "print by computer / by a screen". A mechanism, nothing more.
+        //   · "Print them on this screen" → "and it is ME". A deliberate choice of a person.
+        //
+        // Naming a person switches the kitchen line back ON, because on this board the person IS the
+        // answer to "does it print?". So a plain toggle must NOT name one, or a manager flipping the
+        // mechanism would silently revive a line the restaurant had set to Nobody. The panel is no
+        // longer asked which PANEL: that follows the person's own role (panelForRole), so a cook
+        // setting this up from the kitchen screen names themselves and it means the kitchen screen.
+        const mine = (body as Record<string, unknown>)?.mine === true;
+        const done = await writeMode(rid, m, mine ? { person: g.user?.id || null } : {});
         if ("error" in done) return err(done.error, 400);
         await logAction("editor", "print_switch", {
           restaurant_id: rid, device_id: dv,
@@ -4973,11 +4994,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const mine = await agentForDevice(rid, dv);
         let patch: Record<string, unknown>;
         if (who === "computer") {
-          if (!mine) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
+          // WHICH machine, not necessarily THIS one. The board's dropdown is grouped by computer, so
+          // a restaurant with two machines can send the bills to the counter and the slips to the
+          // kitchen from either screen. It still falls back to this computer when none is named, so
+          // the older one-machine flow is unchanged.
+          const named = String((body as Record<string, unknown>)?.agent || "");
+          const agentId = named || mine?.id || "";
+          if (!agentId) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
           const printer = String((body as Record<string, unknown>)?.printer || "");
           if (!printer) return err("Which printer?", 400);
           patch = {
-            agent: mine.id, printer,
+            agent: agentId, printer,
             paper: (body as Record<string, unknown>)?.paper ?? undefined,
             backupAgent: (body as Record<string, unknown>)?.backupAgent ?? null,
             backupPrinter: (body as Record<string, unknown>)?.backupPrinter ?? null,
@@ -4989,6 +5016,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           patch = { via: "screen", panel: "manager", person: g.user?.id || null };
         } else if (who === "off") {
           patch = { via: "off" };
+        } else if (who === "none") {
+          // "— no printer chosen yet —". A real answer, and a different one from "nobody": the line
+          // is simply unanswered again, and every screen says so instead of going quiet.
+          patch = null as unknown as Record<string, unknown>;
         } else {
           return err("Say who prints it — this computer, a screen, or nobody.", 400);
         }

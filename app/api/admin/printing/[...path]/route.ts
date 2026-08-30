@@ -69,7 +69,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // N+1 shape the egress rule exists to refuse, and it would get slower with every client signed.
   if (seg[0] === "overview") {
     const [rests, agents, sets, jobs] = await Promise.all([
-      sb.from("restaurants").select("id, name, slug").order("name"),
+      // .limit(400) like its three siblings below — NOT decoration. Without a ceiling PostgREST
+      // applies its own default cap and silently returns a SHORT list, so the overview would stop
+      // showing later restaurants with no error anywhere. (sweep #7 / T28: verify:admin-api-a was
+      // red on clean main for this one line.)
+      sb.from("restaurants").select("id, name, slug").order("name").limit(400),
       sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
         .is("revoked_at", null).limit(400),
       sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
@@ -165,13 +169,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         managerPermissions: perms?.manager_permissions,
         ownOverride: u.permissions?.["print_here"],
       });
+    // EVERY ACTIVE PERSON IS OFFERED, and the panel is simply the screen they stand at.
+    //
+    // It used to hide any manager whose "May be the printer" permission was off, which is how the
+    // owner ended up being sent to Access & permissions in the middle of setting a printer up —
+    // and, when the kitchen was the only role never gated, why he found "there is not kitchen panel
+    // available" for the people he most wanted to name. Naming somebody here IS the permission now
+    // (the pending gate honours an explicit choice), so the picker's job is only to list who exists.
     const people = staff.filter((u) => u.active !== false).map((u) => {
       const role = String(u.role || "");
       const panels = role === "kitchen" ? ["kitchen"]
-        // An OWNER standing at the manager panel is gated by the same row, for the same reason.
-        : role === "manager" ? (mayBePrinter(u) ? ["manager"] : [])
-        : role === "owner" ? (mayBePrinter(u) ? ["owner", "manager"] : ["owner"])
-        : role === "tablet" || role === "waiter" ? ["tablet"] : [];
+        : role === "owner" ? ["manager", "owner"]
+        : role === "tablet" || role === "waiter" ? ["tablet"]
+        : role === "manager" ? ["manager"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
     const devices = ((await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
@@ -323,6 +333,49 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // ── send one page to a printer ────────────────────────────────────────────────────────────
   // A REAL job on the real road (kind='test'), because a test that takes a different path can pass
   // while the path that matters is broken.
+  // ── THE QUEUE'S OWN CONTROLS (owner, 2026-08-29) ──────────────────────────────────────────
+  // "Make a button also in the printing queue — you can delete one of the prints from the queue, or
+  // maybe you can stop the queue, restart the queue."
+  //
+  // A TICKET IS NEVER DELETED, it is DISMISSED: the row and its reason stay, so "why did table 6's
+  // slip never come out" has an answer months later. This is the same rule the bills live under and
+  // it costs nothing to keep.
+  if (seg[0] === "job" && seg[1] && seg[2] === "cancel") {
+    const upd = await sb.from("print_jobs")
+      .update({ status: "dismissed", done_at: new Date().toISOString(), error: "cancelled by Aevidine from the printing queue" })
+      .eq("id", seg[1]).eq("restaurant_id", rid).in("status", ["queued", "printing", "failed"])
+      .select("id, kind").maybeSingle();
+    if (upd.error) return err("Could not take that one out of the queue.");
+    if (!upd.data) return err("That ticket has already printed or is not this restaurant's.", 404);
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: `cancelled a ${(upd.data as { kind?: string }).kind || "print"} from the queue` });
+    return NextResponse.json({ ok: true });
+  }
+  // PUT IT BACK IN THE QUEUE — for one that gave up after five tries. Its attempt count resets,
+  // because the thing that was wrong (paper, power, a cable) has presumably been fixed.
+  if (seg[0] === "job" && seg[1] && seg[2] === "retry") {
+    const upd = await sb.from("print_jobs")
+      .update({ status: "queued", attempts: 0, claimed_at: null, error: null })
+      .eq("id", seg[1]).eq("restaurant_id", rid).in("status", ["failed", "dismissed"])
+      .select("id").maybeSingle();
+    if (upd.error) return err("Could not put that one back in the queue.");
+    if (!upd.data) return err("Only a ticket that failed or was cancelled can go back in.", 404);
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: "put a ticket back in the printing queue" });
+    return NextResponse.json({ ok: true });
+  }
+  // STOP / RESTART THE WHOLE QUEUE. Deliberately NOT the same as switching printing off: tickets go
+  // on being made and go on waiting, and the moment it restarts they come out. Switching printing
+  // off instead would stop them being made at all, and the paper for those orders would never exist.
+  if (seg[0] === "queue") {
+    const paused = body.paused === true;
+    const cur = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: Record<string, Record<string, unknown>> } | null;
+    const bag = { ...(cur?.modules || {}) };
+    bag["printing"] = { ...(bag["printing"] || {}), paused };
+    const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    if (up.error) return err("Could not change the queue.");
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: paused ? "printing queue STOPPED — tickets wait" : "printing queue restarted" });
+    return NextResponse.json({ ok: true, paused });
+  }
+
   if (seg[0] === "test") {
     const agentId = String(body.agentId || ""), printer = String(body.printer || "");
     if (!agentId || !printer) return err("Pick a computer and one of its printers.");

@@ -82,6 +82,13 @@ export interface BillDocData {
    *  caller could not render this document at all — on the one flag the whole sheet's identity
    *  turns on. */
   cancelled?: boolean;
+  /** The TIP taken at payment, in whole rupees — extra money for the staff on top of a finished
+   *  bill (migration 154). It is NOT part of the sale: it never enters the subtotal, the tax, the
+   *  discount or the TOTAL, and on paper it prints BELOW the TOTAL with the cash actually handed
+   *  over ("PAID"). Above the line it would read as an untaxed sale, which is a different and much
+   *  worse document. `billData()` derives it from the orders it is given, so a caller building this
+   *  object by hand simply omits it and nothing prints. Never on a cancelled sheet. */
+  tip?: number;
   /* REJECTED (owner, 2026-08-19): there is no `reprint` on a BILL. The band was live 2026-08-17 →
    * 2026-08-19 and the owner removed it — a second copy of a bill is a service action, not an
    * incident. Declaring the flag again is what would let a caller pass it, so it stays undeclared.
@@ -172,6 +179,15 @@ export function splitTax(
 /** A discount as a percentage of the pre-discount subtotal — "10%" / "12.5%", "" when there
  *  is nothing to show. Derived in ONE place so the paper and every screen quote the same figure. */
 export function discPct(subtotal: number, disc: number): string;
+/** What is due, what they handed over → the tip. Never negative: handing over LESS than the bill
+ *  is a part payment, not a small tip, and the app has a separate thing for that. */
+export function tipFromPaid(due: number, paid: number): number;
+/** A tip written as a percentage of the bill it sits on — same rounding rule as `discPct`, and ""
+ *  when there is nothing to say. */
+export function tipPct(due: number, tip: number): string;
+/** The server's own ceiling on a single tip, repeated here so a panel can refuse a typo BEFORE
+ *  sending rather than have it silently trimmed on arrival. */
+export const TIP_MAX: number;
 export function inr(v: number | string): string;
 
 // ── the bill's MONEY and the assembly of its data (moved here 2026-08-04) ────────────────────

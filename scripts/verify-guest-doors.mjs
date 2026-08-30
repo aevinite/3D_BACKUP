@@ -130,8 +130,17 @@ check("the returning-guest greeting waits for `ready`",
   /useRestaurantMeta\(\)/.test(greeter) && /!ready\) return/.test(greeter));
 check("…and re-asks when it becomes ready",
   /\}, \[restaurantId, ready\]\)/.test(greeter));
-check("the table-session gate caches settings PER RESTAURANT, not once for the page",
-  /settingsByRid/.test(gate) && /settingsByRid\.current\.get\(rid\)/.test(gate));
+// EXPECTATION MOVED, RULE UNCHANGED (sweep 7 T3). This asserted the literal
+// `settingsByRid.current.get(rid)` — the sweep-6 shape, where the map was READ in preference to
+// asking. Sweep 7 item 3 made the map a fallback instead (it froze a restaurant's table range and
+// geofence for the life of the page), so that exact string is gone while the rule this row exists
+// for — the gate can never answer with another restaurant's settings — is now stronger. Assert the
+// RULE: every touch of the map is keyed by a restaurant id, and nothing fills a single un-keyed ref.
+check("the table-session gate keeps settings PER RESTAURANT, never one set for the whole page",
+  /settingsByRid/.test(gate)
+  && /settingsByRid\.current\.set\(rid, s\)/.test(gate)
+  && /settingsByRid\.current\.get\(ridRef\.current/.test(gate)
+  && !/settingsByRid\.current\.(get|set)\(\)/.test(gate));
 check("…and there is no un-keyed `settingsRef.current || await getSettings` left",
   !/settingsRef\.current \|\| \(await getSettings/.test(gate));
 
@@ -192,6 +201,93 @@ check("the three scoped panels get it from one place (lib/panelGate)",
 check("no door answers a moved address with a PERMANENT redirect",
   !/permanentRedirect\(/.test(menuDoor + read("app/r/[restaurant]/item/[slug]/page.tsx") + read("app/r/[restaurant]/login/page.tsx"))
   && !/\b308\b/.test(read("app/r/[restaurant]/owner/route.ts").replace(/\/\/[^\n]*/g, "")));
+
+
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+// SWEEP 7 (T3) — SIX MORE PLACES A GUEST'S SCREEN COULD SAY SOMETHING THAT WASN'T TRUE.
+//
+// Same subject as everything above: a promise a diner (or a table's head) is given, which the code
+// had no evidence for. Each block names the item number from the sweep-7 PR so a red line here
+// points straight at the reasoning.
+// ───────────────────────────────────────────────────────────────────────────────────────────────
+const owner = read("components/SessionOwner.tsx");
+const widget = read("components/SessionStatusWidget.tsx");
+const tbill = read("components/SessionTableBill.tsx");
+
+say("\n8) The queue holds TWO kinds of thing, and the list must name the right one (item 2)");
+// A saved waiter call carries no items and no track summary, so anything that falls through to the
+// item count renders the literal words "0 items" for a request for water.
+check("the saved-work list knows a waiter call from an order",
+  /const isCall = \(o: GuestOrder\)/.test(chip) && /o\.kind === "call"/.test(chip));
+check("…and names what was asked for instead of counting an empty basket",
+  /if \(isCall\(o\)\) return callText\(o\);/.test(chip) && /String\(o\.reason \|\| ""\)/.test(chip));
+check("…and the chip does not call a request for water an 'order'",
+  /list\.every\(isCall\)/.test(chip) && /request for staff/.test(chip));
+// A MIXED queue drops the noun rather than picking one that is untrue about half of it, matching
+// the connection badge's own voice at the top of the same screen ("Offline · 2 waiting").
+check("…and says nothing about 'orders' when the queue holds both kinds",
+  /if \(list\.some\(isCall\)\) return `\$\{n\}`;/.test(chip));
+// The guard that keeps the ORIGINAL behaviour: an order still reads as its dishes.
+check("an ORDER still names its dishes, unchanged",
+  /list\.map\(\(i\) => `\$\{i\.qty\} × \$\{i\.title\}`\)\.join\(", "\)/.test(chip));
+
+say("\n9) A restaurant can change its own rules under a guest who already has the page open (item 3)");
+// The gate decides the geofence, whether a location check is needed and the table-number range.
+// A private map read in preference to asking froze all three for the life of the page.
+check("the table gate ASKS for settings rather than serving its own map",
+  /const s = await getSettings\(rid\);\n\s*settingsByRid\.current\.set\(rid, s\);/.test(gate));
+check("…so there is no 'if (cached) use it' short-circuit left",
+  !/const cached = settingsByRid\.current\.get\(rid\);/.test(gate));
+check("…and the map is still there as a FALLBACK, so a blip does not dead-end a diner",
+  /const known = settingsByRid\.current\.get\(/.test(gate) && /if \(known\) settingsRef\.current = known;/.test(gate));
+check("…and the reason is written down where the next reader will see it",
+  /A FALLBACK, NOT A CACHE/.test(gate));
+
+say("\n10) Leaving a table only CLAIMS to have been heard when it was (item 4)");
+check("the leave handlers read the server's answer",
+  /const leftForReal = async \(token: string\): Promise<boolean> => \{[\s\S]{0,200}return r\?\.ok === true;/.test(widget));
+check("…neither one throws the answer away any more",
+  !/^\s*await leaveSession\(token\);\s*$/m.test(widget));
+check("'You left the table' is only said when the restaurant heard it",
+  /if \(told\) toast\("You left the table"/.test(widget));
+check("…and the diner is told plainly when it did not",
+  /couldn't tell the restaurant/.test(widget));
+check("'Change table' stops before navigating, so the sentence is not wiped by the page load",
+  /if \(!told\) \{[\s\S]{0,400}return;\n\s*\}\n\s*\/\/ Back to THIS restaurant's menu/.test(widget));
+check("…and the phone still lets go either way, so nobody is TRAPPED by a dead connection",
+  /clearLocal\(\); \/\/ also drops lfh_active_orders \+ nudges the tracker to hide/.test(widget)
+  && /const told = await leftForReal\(token\);\n\s*clearLocal\(\)/.test(widget));
+
+say("\n11) The host's answer to 'someone wants to join' cannot vanish in silence (item 5)");
+check("'Let them in' reads the result",
+  /const r = await approveMember\(token, head\.id, head\.name\);/.test(owner));
+check("…and says so when it did not work",
+  /if \(r\?\.ok !== true\) say\(whyFailed\(r, "We couldn't let them in/.test(owner));
+check("'Not them' reads the result too",
+  /const r = await removeMember\(token, head\.id\);/.test(owner)
+  && /if \(r\?\.ok !== true\) say\(whyFailed\(r, "We couldn't turn that request down/.test(owner));
+check("'Let anyone join automatically' reports a PARTIAL result honestly",
+  /let allIn = true;/.test(owner) && /if \(a\?\.ok !== true\) allIn = false;/.test(owner)
+  && /but we couldn't let everyone already waiting in/.test(owner));
+check("…and 'you are not the host any more' is not worded as 'try again in a moment'",
+  /r\?\.reason === "not_owner" \? "You're not the host of this table any more\."/.test(owner));
+check("no handler in that popup awaits one of the three and drops the answer",
+  !/^\s*await (approveMember|removeMember|setAutoApprove)\(/m.test(owner));
+
+say("\n12) A skeleton that never resolves is a blank screen with no honest message (item 6)");
+check("the live table bill can tell 'still loading' from 'cannot be loaded'",
+  /const \[stalled, setStalled\] = useState\(false\);/.test(tbill));
+check("…it is only raised when NOTHING has ever loaded (a blip must not blank a live bill)",
+  /else setStalled\(true\);/.test(tbill) && /setStalled\(false\);/.test(tbill));
+check("…and the diner gets a sentence, not three pulsing bars",
+  /\{!loaded && stalled \? \(/.test(tbill) && /can&apos;t reach the restaurant&apos;s system right now/.test(tbill));
+check("…which says nothing is lost, and offers a way to ask again",
+  /Nothing is lost/.test(tbill) && /pollRef\.current\?\.\(\)/.test(tbill));
+check("…and the green 'live' dot stops claiming a live connection while it is up",
+  /!loaded && stalled \? \{ background: "var\(--muted\)"/.test(tbill));
+// The skeleton itself must survive: it is what stops the "no dishes yet" message flashing.
+check("the loading skeleton is still there for the normal first load",
+  /className="stb-loading"/.test(tbill) && /className="stb-skel"/.test(tbill));
 
 console.log(out.join("\n"));
 if (fail) {

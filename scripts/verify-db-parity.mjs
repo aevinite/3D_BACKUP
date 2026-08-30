@@ -426,6 +426,141 @@ head("B. Is every live function written down in supabase/migrations?");
   }
 }
 
+// ── C. Does every COLUMN the app writes to actually exist? ───────────────────
+//
+// WHY THIS HALF EXISTS (sweep #6 / T28 asked for it; built sweep #7 / T28, 2026-08-28).
+//
+// Everything above compares FUNCTIONS, indexes and triggers. It has never compared COLUMNS — and a
+// column is how the last half-landed schema change actually reached a person:
+//
+//   A migration that DROPS `menu_items.rating` was applied to the shared dev database while the
+//   panel change that stops writing that field was still unmerged. So `POST /api/editor/items`
+//   answered 500 with "Could not find the 'rating' column of 'menu_items' in the schema cache" —
+//   and the manager panel said **"Saved ✓"** over it. Owner console → Menu → add a dish → Save:
+//   a green tick, and then no dish. Nothing in this file could see it.
+//
+// So: read every column the database really has, read every field the app really writes, and name
+// any field that has nowhere to land. It is the cheapest possible version of "the schema and the
+// code agree", and it runs on any checkout — unlike half A, which is skipped entirely without
+// live-stack keys, which is most of the time.
+//
+// READ-ONLY, like the rest of this file: one catalog SELECT, and the repo's own source.
+head("C. Does every column the app writes to exist on the database?");
+{
+  const cols = await q(dev, `
+    SELECT c.relname AS tbl, a.attname AS col
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+     WHERE c.relkind IN ('r','v','m','p')
+     ORDER BY 1, 2`);
+  const have = new Map();
+  for (const r of cols) {
+    if (!have.has(r.tbl)) have.set(r.tbl, new Set());
+    have.get(r.tbl).add(r.col);
+  }
+  // NOTHING TO CHECK IS A FAILURE, NOT A PASS.
+  if (have.size < 20) {
+    fail(`only ${have.size} table(s) read from the catalog — this database has far more, so nothing below was checked`);
+  } else {
+
+  // Every .ts/.tsx under app/ and lib/ — the server side, which is where a write actually happens.
+  const srcFiles = [];
+  (function walk(rel) {
+    for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const r2 = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(r2);
+      else if (/\.tsx?$/.test(e.name)) srcFiles.push(r2);
+    }
+  })("app");
+  (function walk(rel) {
+    for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const r2 = `${rel}/${e.name}`;
+      if (e.isDirectory()) walk(r2);
+      else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) srcFiles.push(r2);
+    }
+  })("lib");
+
+  // Balance braces from the first `{` after .insert( / .update( / .upsert(, so a long object is read
+  // whole. A fixed character window truncates the commonest shape in this repo and invents misses.
+  const objectAfter = (t, from) => {
+    // The argument must BE an object literal, i.e. the very next thing after "(" is "{".
+    // `.update(patch)` passes a variable — there is no literal to read, and looking ahead for the
+    // next "{" anywhere nearby picks up a completely unrelated object further down the file. That
+    // is not a hypothetical: the first run of this check reported staff_users.who and
+    // print_agents.clash, both of which came from a LATER object literal in the same slice.
+    const open = t.indexOf("{", from);
+    if (open < 0 || t.slice(from + 1, open).trim() !== "") return null;
+    let depth = 0;
+    for (let i = open; i < t.length && i < open + 8000; i++) {
+      if (t[i] === "{") depth++;
+      else if (t[i] === "}") { depth--; if (depth === 0) return t.slice(open, i + 1); }
+    }
+    return null;
+  };
+  // Only TOP-LEVEL keys of that object are columns; anything nested is JSON inside one.
+  const topKeys = (obj) => {
+    const out = [];
+    let depth = 0, inStr = "";
+    for (let i = 0; i < obj.length; i++) {
+      const c = obj[i];
+      if (inStr) { if (c === "\\") i++; else if (c === inStr) inStr = ""; continue; }
+      if (c === '"' || c === "'" || c === "`") { inStr = c; continue; }
+      if (c === "{" || c === "[" || c === "(") { depth++; continue; }
+      if (c === "}" || c === "]" || c === ")") { depth--; continue; }
+      if (depth !== 1) continue;
+      // A key is `name:` or `"name":` — and only where a key can start, i.e. right after `{` or a
+      // comma. Anything after a `?` or a `:` is a ternary branch or a value, never a column: the
+      // first run of this check reported `staff_actions.is`, picked out of
+      // `...(rid !== null ? { … } : { … })`.
+      const before = obj.slice(0, i).replace(/\s+$/, "");
+      const at = before.length ? before[before.length - 1] : "{";
+      if (at !== "{" && at !== ",") continue;
+      const m = /^\s*(?:"([a-z_][a-z0-9_]*)"|'([a-z_][a-z0-9_]*)'|([a-z_][a-z0-9_]*))\s*(:|,|\}|$)/.exec(obj.slice(i));
+      if (!m) continue;
+      // `panel,` and `panel` are SHORTHAND for `panel: panel` — a real column, and this repo's
+      // usual style. `x: y` is a key too. Anything else (a spread, a method) is not.
+      out.push(m[1] || m[2] || m[3]);
+      i += m[0].length - 1;
+    }
+    return out;
+  };
+
+  const misses = [];
+  let writesRead = 0;
+  for (const f of srcFiles) {
+    let t = ""; try { t = readFileSync(join(root, f), "utf8"); } catch { continue; }
+    if (!/\.(insert|update|upsert)\(/.test(t)) continue;
+    // `.from("orders")` … `.insert({...})` — the table name has to come from the SAME chain, so the
+    // search starts at each from() and stops at the next one.
+    for (const m of t.matchAll(/\.from\(\s*["'`]([a-z_][a-z0-9_]*)["'`]\s*\)/g)) {
+      const tbl = m[1];
+      if (!have.has(tbl)) continue;                       // not a table of ours (a view name, a typo in a string)
+      const nextFrom = t.indexOf(".from(", m.index + 6);
+      const chain = t.slice(m.index, nextFrom < 0 ? t.length : nextFrom);
+      for (const w of chain.matchAll(/\.(insert|update|upsert)\(/g)) {
+        const obj = objectAfter(chain, w.index + w[0].length - 1);
+        if (!obj) continue;
+        writesRead++;
+        for (const k of topKeys(obj)) {
+          if (have.get(tbl).has(k)) continue;
+          misses.push(`${f}: ${tbl}.${k} — written by .${w[1]}(), and that column does not exist`);
+        }
+      }
+    }
+  }
+  if (writesRead < 20) {
+    fail(`only ${writesRead} write(s) could be read out of ${srcFiles.length} file(s) — the reader found almost nothing, so nothing was checked`);
+  } else if (misses.length === 0) {
+    pass(`${writesRead} write(s) across ${have.size} tables: every column the app writes to exists`);
+  } else {
+    fail(`${misses.length} write(s) name a column the database has not got — the route answers 500 and the panel can still say "Saved ✓":\n      ` + misses.slice(0, 10).join("\n      "));
+  }
+  }
+}
+
 const avTail = avNoted ? ` · ${avNoted} AV-live note(s) reported, not enforced (--av-strict to enforce)` : "";
 const warnTail = warned ? ` · ${warned} thing(s) this checkout could not judge — see the ⚠ line(s) above` : "";
 console.log(failed

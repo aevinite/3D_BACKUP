@@ -25,7 +25,7 @@ import { stationScript, STATION_FILENAME, STATION_FIRST_RUN, type StationOs } fr
 export {
   STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, paperLabel, WHO_CHOICES,
 } from "@/lib/printBoardWords";
-import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS } from "@/lib/printBoardWords";
+import { STEPS, KIND_LABEL, KIND_WHAT, KIND_OFF_LABEL, PAPER_PRESETS, papersFor, PAPER_ELSEWHERE } from "@/lib/printBoardWords";
 
 export type BoardJob = {
   id: string; kind: string; status: string; printer: string | null; printed_by: string | null;
@@ -37,6 +37,11 @@ export type BoardState = {
   kinds: readonly RoutableKind[];
   labels: { kind: Record<string, string>; what: Record<string, string>; off: Record<string, string> };
   papers: typeof PAPER_PRESETS;
+  /** The presets each kind can actually be told to use — the banquet sheet's list is empty, and
+   *  `paperElsewhere` says where its size really lives. Sent per kind so the manager panel and the
+   *  admin console cannot drift into offering different choices for the same line. */
+  papersByKind: Record<string, typeof PAPER_PRESETS>;
+  paperElsewhere: Record<string, string>;
   agents: AgentView[];
   routes: PrintRoutes;
   waiting: number;
@@ -52,6 +57,8 @@ export type BoardState = {
   /** WHICH OF THE TWO MODES this restaurant is on — the one toggle the whole card 3 hangs off
    *  (owner, 2026-08-28: "you only see the option you have selected"). */
   mode: PrintMode;
+  /** The queue is stopped: tickets keep being made and keep waiting until it is restarted. */
+  paused: boolean;
   /** The helper this browser set up, when a restaurant set itself up (mig 367). Null on the admin's
    *  screen and on any device that has not registered itself. */
   thisComputer: AgentView | null;
@@ -94,7 +101,7 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     sb.from("print_jobs").select(JOB_COLS).eq("restaurant_id", rid)
       .order("created_at", { ascending: false }).limit(Math.min(30, Math.max(5, opts?.recent ?? 12))),
     // Kitchen slips only: they are the paper with a person standing over it, and a bill waiting two
@@ -109,12 +116,20 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     kinds: ROUTABLE_KINDS,
     labels: { kind: KIND_LABEL, what: KIND_WHAT, off: KIND_OFF_LABEL },
     papers: PAPER_PRESETS,
+    papersByKind: Object.fromEntries(ROUTABLE_KINDS.map((k) => [k, papersFor(k)])) as Record<string, typeof PAPER_PRESETS>,
+    paperElsewhere: PAPER_ELSEWHERE,
     agents,
     routes,
     waiting,
     stuck: { ...stuck, afterMs: STUCK_AFTER_MS },
     recent: (jobs.data || []) as BoardJob[],
     mode,
+    // STOPPED, not switched off — the two are different answers and the board says which. Tickets go
+    // on being made while it is stopped; restart it and they come out (owner, 2026-08-29).
+    paused: (() => {
+      const m = (setRow.data as { modules?: Record<string, { paused?: boolean }> } | null)?.modules;
+      return !!(m && m.printing && m.printing.paused === true);
+    })(),
     printing: { allowed: s.auto_print_kot_allowed === true, on: s.auto_print_kot === true },
     thisComputer: dv ? agents.find((a) => a.owner_device === dv) || null : null,
   };

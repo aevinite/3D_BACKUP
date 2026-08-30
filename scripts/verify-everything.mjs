@@ -2889,5 +2889,11 @@ if (restoreFailed.length) {
 if (bad.length) {
   console.log(`\n${bad.length} PROBLEM${bad.length > 1 ? "S" : ""}:`);
   for (const b of bad) console.log(`  ${b.status} phase ${b.n} — ${b.name}\n        ${b.detail}`);
+  // AND THE COMMAND THAT RE-CHECKS ONLY THOSE. Without this line a person who has just watched a
+  // long run fail on six phases re-runs the WHOLE suite to see whether a fix worked — several
+  // minutes, and the same six failures. --only has existed all along; nobody remembers its shape,
+  // or that the base has to be repeated after it. (sweep #7 / T28, 2026-08-28.)
+  const { rerunLine } = await import("./sweep/rerun.mjs");
+  console.log("\n" + rerunLine("verify:everything", { base: BASE, only: bad.map((b) => b.n) }));
 }
 process.exit(bad.length ? 1 : 0);

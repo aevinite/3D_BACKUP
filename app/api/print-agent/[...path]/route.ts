@@ -20,7 +20,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
 import { startPairing, pollPairing } from "@/lib/printPair";
 import { finishKotJob } from "@/lib/printQueue";
-import { kotHtmlForOrder, billHtmlForSession, testHtml, withPaper } from "@/lib/printDocs";
+import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, withPaper } from "@/lib/printDocs";
 
 export const dynamic = "force-dynamic";
 
@@ -50,8 +50,13 @@ async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
  *  auto-print must be on. When either is off the helper is told "nothing to print" and idles — it
  *  is not an error, and a restaurant that pauses printing must not fill a log with refusals. */
 async function printingOn(rid: string): Promise<boolean> {
-  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle())
-    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle())
+    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // …AND THE QUEUE MUST NOT BE STOPPED (owner, 2026-08-29: "you can stop the queue, restart the
+  // queue"). Stopping is deliberately NOT the same as switching printing off: the tickets go on
+  // being made and go on waiting, so the moment it restarts they all come out. Switching printing
+  // off instead stops them being made at all, and that paper would never exist.
+  if (s?.modules?.printing?.paused === true) return false;
   return s?.auto_print_kot === true && s?.auto_print_kot_allowed === true;
 }
 
@@ -199,6 +204,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     let html: string | null = null;
     if (job.kind === "kot" && job.order_id) html = await kotHtmlForOrder(agent.restaurant_id, job.order_id, job.reprint !== false);
     else if (job.kind === "bill" && payload.sessionId) html = await billHtmlForSession(agent.restaurant_id, String(payload.sessionId), { parcel: !!payload.parcel });
+    // THE BANQUET SHEET. Missing until 2026-08-29, and it failed in the worst way there is: the
+    // admin screen offers a Banquet line and lets a restaurant point it at a computer and a printer,
+    // the ticket was handed to the helper, and then this endpoint answered "no document" and marked
+    // the ticket dismissed. No paper, no error, nothing on any screen — an event sheet that simply
+    // never came out. The builder had existed the whole time (lib/printDocs.banquetHtmlForBill); the
+    // helper was never told to call it. The panel queues these with `billId` (public/panels/editor/
+    // app.js → /print/send), which is the key read here.
+    else if (job.kind === "banquet" && payload.billId) html = await banquetHtmlForBill(agent.restaurant_id, String(payload.billId));
     else if (job.kind === "test") {
       const rest = (await sb.from("restaurants").select("name").eq("id", agent.restaurant_id).maybeSingle()).data as { name?: string } | null;
       html = testHtml({

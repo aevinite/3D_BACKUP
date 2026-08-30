@@ -53,9 +53,28 @@ function whenText(ts: number): string {
   return `${h}:${m < 10 ? "0" : ""}${m} ${ap}`;
 }
 
+// THE QUEUE HOLDS TWO KINDS OF THING, AND THIS LIST ONLY KNEW ABOUT ONE (sweep 7 T3).
+// `GuestOrder.kind` is "order" or "call": tapping the bell with no signal saves a REQUEST FOR
+// STAFF, not a basket. A call carries no `items` and no `track`, so every line below fell through
+// to the item count and rendered the literal words "0 items" — measured on a phone: a diner asked
+// for water in a dead spot and their own phone showed them
+//     0 items · Waiting to send · a moment ago
+// under a chip reading "1 order waiting to send". Nothing they had done was an order, and nothing
+// on the row said water.
+const isCall = (o: GuestOrder): boolean => o.kind === "call";
+
+// What was asked for, in the diner's own words — "Water", "Bring the bill". `reason` is exactly
+// the label they tapped in the waiter popup (ChefPopup's REASONS), so it needs no translating.
+// A row written before `reason` existed simply says what it is.
+function callText(o: GuestOrder): string {
+  const r = String(o.reason || "").trim();
+  return r || "A request for staff";
+}
+
 // "2 × Espresso, 1 × Croissant" — read from the summary the cart stored with the order, so this
-// never has to re-price or re-read anything.
+// never has to re-price or re-read anything. A saved waiter call names what was asked for instead.
 function itemsText(o: GuestOrder): string {
+  if (isCall(o)) return callText(o);
   const list = o.track?.items;
   if (Array.isArray(list) && list.length) {
     return list.map((i) => `${i.qty} × ${i.title}`).join(", ");
@@ -101,9 +120,23 @@ export default function GuestOutboxChip() {
     try { await fn(id); } finally { setBusyId(null); }
   };
 
+  // THE CHIP HAS TO NAME THE RIGHT THING TOO (sweep 7 T3). It said "1 order waiting to send" for a
+  // saved request for water. When everything waiting is a call it says so; when the queue is mixed
+  // it uses the neutral word that covers both, because "2 orders" would be a plain untruth about
+  // one of them.
+  // A MIXED queue drops the noun altogether rather than reaching for an awkward one. "2 waiting to
+  // send" is exactly the voice of the connection badge at the top of the same screen ("Offline · 2
+  // waiting"), so the two read as one app — and it cannot be untrue about either kind, which
+  // "2 orders" would be.
+  const count2 = (list: GuestOrder[]): string => {
+    const n = list.length;
+    if (list.every(isCall)) return n === 1 ? "1 request for staff" : `${n} requests for staff`;
+    if (list.some(isCall)) return `${n}`;
+    return n === 1 ? "1 order" : `${n} orders`;
+  };
   const label = failed.length
-    ? (failed.length === 1 ? "1 order couldn’t send" : `${failed.length} orders couldn’t send`)
-    : (queued.length === 1 ? "1 order waiting to send" : `${queued.length} orders waiting to send`);
+    ? `${count2(failed)} couldn’t send`
+    : `${count2(queued)} waiting to send`;
 
   return (
     <>
@@ -123,7 +156,7 @@ export default function GuestOutboxChip() {
           {/* Tapping anywhere outside closes the list — and the backdrop is what makes that
               possible on a touch screen, where there is no "click away" without one. */}
           <div className="gob-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="gob-sheet" role="dialog" aria-label="Orders saved on this phone">
+          <div className="gob-sheet" role="dialog" aria-label="Saved on this phone">
             <div className="gob-head">
               <span>On this phone</span>
               <button type="button" className="gob-x" onClick={() => setOpen(false)} aria-label="Close">
@@ -136,7 +169,7 @@ export default function GuestOutboxChip() {
                 <div className="gob-row-main">
                   <div className="gob-row-title">{itemsText(o)}</div>
                   <div className="gob-row-sub">
-                    Waiting to send · {whenText(o.at)}
+                    {isCall(o) ? "Staff will be called" : "Waiting to send"} · {whenText(o.at)}
                     {o.track?.total ? ` · ${formatPrice(String(o.track.total), currency || DEFAULT_CURRENCY)}` : ""}
                   </div>
                 </div>

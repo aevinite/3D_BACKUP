@@ -238,6 +238,11 @@ const state = {
   // "settings should be organized": General / Tables / Users / Access / Billing /
   // Dining sessions instead of one long scroll). See SETTINGS_SECTIONS.
   settingsSection: "tables",   // "general" was removed — see SETTINGS_SECTIONS
+  // Printing: which mode the in-page confirmation strip is asking about, or null when it is not
+  // asking. Declared here rather than sprung into life on first click, because a field this file
+  // READS in formPrinting and only ever assigns in a handler is exactly how `state.helper` sat dead
+  // for a week (2026-08-20).
+  printAsk: null,
 };
 
 // ---------- tiny helpers ----------
@@ -1595,6 +1600,19 @@ function bindPrintingBoard(ed) {
   };
   ed.querySelectorAll('[data-pw]').forEach((el) => {
     const what = el.dataset.pw;
+    // ONE DROPDOWN, WHOSE OPTIONS ARE THE ANSWERS. "off", "" (not chosen), or "<agent>|<printer>".
+    if (what === "printerpick") {
+      el.onchange = async () => {
+        const kind = el.dataset.kind, v = el.value;
+        if (v === "off") { const d = await post("route", { kind, who: "off" }); if (d) { toast("Saved."); await loadPrintBoard(); } return; }
+        if (!v) { const d = await post("route", { kind, who: "none" }); if (d) { toast("Saved."); await loadPrintBoard(); } return; }
+        const cut = v.indexOf("|");
+        const agent = v.slice(0, cut), printer = v.slice(cut + 1);
+        const d = await post("route", { kind, who: "computer", agent, printer });
+        if (d) { toast("Saved."); await loadPrintBoard(); }
+      };
+      return;
+    }
     if (what === "printer" || what === "paper") {
       // A dropdown SAVES on change — there is no second Save button to forget to press.
       el.onchange = async () => {
@@ -1602,7 +1620,7 @@ function bindPrintingBoard(ed) {
         const r = (B().routes || {})[kind] || {};
         const printer = what === "printer" ? el.value : r.printer;
         const paper = what === "paper"
-          ? ((B().papers || []).find((x) => x.id === el.value) || {}).paper || null
+          ? (((B().papersByKind || {})[el.dataset.kind] || B().papers || []).find((x) => x.id === el.value) || {}).paper || null
           : (r.paper || null);
         const d = await post("route", { kind, who: "computer", printer, paper });
         if (d) { toast("Saved."); await loadPrintBoard(); }
@@ -1646,13 +1664,25 @@ function bindPrintingBoard(ed) {
         if (d) { toast(d.note || "Test page sent."); await loadPrintBoard(); }
         return;
       }
+      // THE CONFIRMATION IS PART OF THE SCREEN (owner, 2026-08-29: "whenever you switch, there is
+      // no UI for confirmation"). A browser confirm() is a grey box with no room to say what the
+      // switch costs, and on a phone it covers the very screen you are reading.
       if (what === "mode") {
         const m = el.dataset.mode;
         if (m === (B().mode === "screen" ? "screen" : "computer")) return;
-        const label = m === "screen" ? "A screen (Chrome)" : "A computer";
-        if (!confirm("Switch this restaurant to \u201c" + label + "\u201d?\n\nThe three paper lines below move with it — anything chosen for the other way is cleared, and a line set to \u201cnobody\u201d stays that way.")) return;
+        state.printAsk = m; renderEditor(); return;
+      }
+      if (what === "mode-cancel") { state.printAsk = null; renderEditor(); return; }
+      if (what === "mode-yes") {
+        const m = state.printAsk; state.printAsk = null;
         const d = await post("mode", { mode: m });
-        if (d) { toast("Saved."); await loadPrintBoard(); }
+        if (d) { toast("Saved."); await loadPrintBoard(); } else { renderEditor(); }
+        return;
+      }
+      // "Print them on this screen" — screen mode's one action, and it names THIS person.
+      if (what === "mine") {
+        const d = await post("mode", { mode: "screen", mine: true });
+        if (d) { toast("Kitchen tickets print here now."); await loadPrintBoard(); }
         return;
       }
       if (what === "off") {
@@ -1667,7 +1697,6 @@ function bindPrintingBoard(ed) {
         const kind = el.dataset.kind;
         const md = B().mode === "screen" ? "screen" : "computer";
         if (md === "screen") {
-          lsSet(PRINT_HERE_KEY, "on");   // naming this screen IS this device agreeing to print
           const d = await post("route", { kind, who: "screen" });
           if (d) { toast("Saved."); await loadPrintBoard(); }
           return;
@@ -1697,7 +1726,6 @@ function bindPrintingBoard(ed) {
         // screen print?" — without it the route would point at a browser that has never agreed to
         // print anything, and the paper would simply never come. Answering "nobody" or "a computer"
         // does not switch the device off: another kind of paper may still be its job.
-        if (who === "screen") lsSet(PRINT_HERE_KEY, "on");
         const d = await post("route", body);
         if (d) { toast("Saved."); await loadPrintBoard(); }
         return;
@@ -4562,6 +4590,10 @@ async function setOrderPayment(id, paid, opts = {}) {
 function openPaymentMethodModal(due, label, opts = {}) {
   return new Promise((resolve) => {
     const r2 = (n) => Math.round(n * 100) / 100; let tip = 0;
+    // THE TICKETS ON THIS BILL, read once, so the split can offer By kitchen ticket and know
+    // whether there is anything to divide by. Un-accepted orders are dropped for the same reason
+    // the settle itself drops them: nobody is charged for food the kitchen has not taken yet.
+    const splitTickets = (opts.orders || []).filter((o) => o.status !== "received");
     document.querySelector(".pay-overlay")?.remove();
     const wrap = el(`<div class="sx-modal-overlay pay-overlay"><div class="sx-modal pay-modal">
       <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(label)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -4569,14 +4601,34 @@ function openPaymentMethodModal(due, label, opts = {}) {
         <div class="disc-bill-row"><span>Bill</span><b>${inr(due)}</b></div>
         ${opts.methodOnly ? "" : `
         <div class="dish-edit-lbl" style="margin-top:6px">Add a tip? <span class="muted small">(optional — extra for staff, on top of the bill)</span></div>
-        <div class="chips pay-tip-chips" style="margin:4px 0 6px">
-          <span class="chip pay-tip-pick" data-tip-amt="0">None</span>
-          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.05)}">5%</span>
-          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.10)}">10%</span>
-          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.15)}">15%</span>
+        <div class="disc-linked-row">
+          <div class="disc-field">
+            <label class="dish-edit-lbl">Tip %</label>
+            <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="payTipPct" placeholder="0">
+          </div>
+          <div class="disc-linked-eq">=</div>
+          <div class="disc-field">
+            <label class="dish-edit-lbl">Tip amount (₹)</label>
+            <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="payTipInput" placeholder="0">
+          </div>
         </div>
-        <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput" id="payTipInput" placeholder="Custom tip ₹" style="margin-bottom:8px">
-        <div class="disc-bill-row"><span><b>Total collected</b></span><b id="payTotal">${inr(due)}</b></div>`}
+        <div class="chips pay-tip-chips" style="margin:4px 0 6px">
+          <span class="chip pay-tip-pick" data-tip-pct="0">None</span>
+          <span class="chip pay-tip-pick" data-tip-pct="5">5%</span>
+          <span class="chip pay-tip-pick" data-tip-pct="10">10%</span>
+          <span class="chip pay-tip-pick" data-tip-pct="15">15%</span>
+        </div>
+        <div class="disc-preview">
+          <div class="disc-prev-row grand">
+            <span><b>They paid</b></span>
+            <label class="disc-pay-edit" title="Type the total the customer actually handed over — the tip works itself out">
+              <span class="disc-pay-cur">₹</span>
+              <input type="number" inputmode="decimal" min="0" step="1" id="payPaidInput" class="disc-pay-input" aria-label="Total the customer paid">
+            </label>
+          </div>
+        </div>
+        <div class="disc-cap-msg" id="payTipMsg" role="status" hidden></div>
+        <div class="disc-hint muted small">Change any one of the three — the other two follow. A tip is on TOP of the bill; it never changes the bill, the tax or the discount.</div>`}
         <div class="dish-edit-lbl">How did they pay? <span class="muted small">— only pick one if the money's actually in hand</span></div>
         <div class="pay-method-grid">
           <button type="button" class="pay-method-btn" data-method="UPI"><span class="pmi">📱</span>UPI</button>
@@ -4598,16 +4650,37 @@ function openPaymentMethodModal(due, label, opts = {}) {
           </div>
           <div class="pay-other-split" style="display:none">
             <div class="dish-edit-lbl">Split payment</div>
-            <div class="muted small" style="margin:-2px 0 8px">Tap how many are paying — the amounts fill in evenly and you can change any of them. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
+            <div class="muted small" style="margin:-2px 0 8px">Pick how to divide it, then how many are paying — the amounts fill in for you and every box stays editable. Each part picks its own way to pay. They have to add up to ${inrExact(due)}.</div>
+            <!-- THE SAME FOUR WAYS TO DIVIDE AS THE TABLET, IN THE SAME ORDER, WITH THE SAME WORDS
+                 (owner, 2026-08-29: "I want all the options for both the interface should be
+                 similar"). Before this the manager offered two ways here (an even split, and a
+                 🧾 By order button) and a SECOND split screen elsewhere offered a third (By dish),
+                 while the tablet offered all four on one screen. Three screens, three answers to
+                 "how do I split this?". Now there is one screen per panel and it is this one.
+                 By kitchen ticket is shown greyed rather than hidden when the bill is a single
+                 ticket, so the option never appears to have gone missing. -->
+            <div class="pay-split-tabs">${[["equal", "Equal"], ["custom", "Custom"], ["dish", "By dish"], ["ticket", "By kitchen ticket"]]
+              .map(([m, label]) => `<button type="button" class="btn pay-split-tab${m === "ticket" && splitTickets.length < 2 ? " pay-split-tab-off" : ""}" data-mode="${m}"${m === "ticket" && splitTickets.length < 2 ? ` title="This bill is one kitchen ticket — there is nothing to divide by"` : ""}>${label}</button>`).join("")}</div>
             <div class="muted small pay-split-nlbl">How many are paying?</div>
-            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}${(opts.orders || []).filter((o) => o.status !== "received").length > 1 ? `<button type="button" class="btn pay-split-byorder">🧾 By order</button>` : ""}</div>
+            <div class="pay-split-nrow">${[2, 3, 4, 5, 6].map((n) => `<button type="button" class="btn pay-split-n" data-n="${n}">${n}</button>`).join("")}</div>
+            <div class="pay-split-dishes"></div>
             <div class="pay-split-rows"></div>
             <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
             <div class="pay-split-sum small" style="margin:9px 0 8px;font-weight:700"></div>
             <button type="button" class="btn primary pay-split-go" style="width:100%">Take payment</button>
           </div>
         </div>
-        ${opts.crm === false ? "" : `
+        ${opts.crm === false ? "" : (opts.knownCust && opts.knownCust.phone ? `
+        <!-- ALREADY ASKED, SO DO NOT ASK AGAIN (owner, 2026-08-29). Somebody took this customer's
+             number earlier in this same visit — at the bill-customer step — and being asked for it
+             a second time on the way out reads as though the first answer was thrown away. Worse,
+             an empty box invites a DIFFERENT number to be typed for one bill.
+             So the number that was given is shown, as a fact, with one way to change it. -->
+        <div class="pay-cust pay-cust-known" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)">
+          <label class="dish-edit-lbl">📱 Customer <span class="muted small">— already saved for this table</span></label>
+          <div class="pay-cust-have small" style="margin:-2px 0 6px;font-weight:700">${esc(opts.knownCust.name ? `${opts.knownCust.name} · ${opts.knownCust.phone}` : opts.knownCust.phone)}</div>
+          <button type="button" class="btn small pay-cust-change">Change</button>
+        </div>` : `
         <div class="pay-cust" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)">
           <label class="dish-edit-lbl">📱 Save customer <span class="muted small">— optional, only if they agree</span></label>
           <div class="muted small" style="margin:-2px 0 6px">Lets you spot regulars and greet them by name next time.</div>
@@ -4618,7 +4691,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
             <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none">
             <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
           </label>
-        </div>`}
+        </div>`)}
       </div>
       <div class="dish-edit-foot"><button type="button" class="btn dish-edit-cancel">Cancel</button></div>
     </div></div>`);
@@ -4627,6 +4700,9 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const close = () => wrap.remove();
     // Read the optional customer fields at finish time (DPDP: only sent if consented).
     const readCust = () => {
+      // Already saved for this table → the boxes are not on screen and there is nothing new to
+      // send. Returning null is right: the settle does not need to re-save a customer the session
+      // already carries, and it must not blank one either. (owner, 2026-08-29.)
       const pe = wrap.querySelector(".pay-cust-phone");
       if (!pe) return null;
       const ne = wrap.querySelector(".pay-cust-name"), ce = wrap.querySelector(".pay-cust-consent");
@@ -4648,14 +4724,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
       // dedicated flow (person picker / no-charge settle); no payment method involved.
       // "Split payment" is not a settle of its own — it opens the parts panel right here (owner,
       // 2026-08-21: it was buried two taps deep under "Other", which is why nobody used it).
-      if (b.dataset.special === "split") {
-        wrap.querySelector(".pay-method-grid").style.display = "none";
-        wrap.querySelector(".pay-other-field").style.display = "";
-        wrap.querySelector(".pay-other-pick").style.display = "none";
-        wrap.querySelector(".pay-other-split").style.display = "";
-        splitTo(2);
-        return;
-      }
+      if (b.dataset.special === "split") { showSplitPanel(); return; }
       if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
@@ -4677,11 +4746,73 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // affected: the floor's parcel tile "💰 Mark paid" (since 2026-08-04), the Platform board's
     // 💰 Collect and the parcel "Pay now & print" sheet. The sheet OPENING was never proof that
     // it works — only a settled row is.
+    // THREE LINKED BOXES, LIKE THE DISCOUNT (owner, 2026-08-28: "just like the discount, one for
+    // the tip one also"). Tip % · Tip ₹ · They paid — all three are views of the same `tip`, so no
+    // two of them can disagree. The third is the one he actually asked for: a counter conversation
+    // is "they gave me 3200", not "give them 6.7%", so you type the total handed over and the tip
+    // falls out of it. Mirrors openDiscountModal box for box, and reuses its classes so it looks
+    // like the screen staff already know rather than a second dialect of the same idea.
     const tipInput = wrap.querySelector("#payTipInput");
-    const updTotal = () => { const el2 = wrap.querySelector("#payTotal"); if (el2) el2.textContent = inr(due + (Number(tip) || 0)); };
-    if (tipInput) {
-      wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tipAmt) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
-      tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
+    const tipPctIn = wrap.querySelector("#payTipPct");
+    const paidIn = wrap.querySelector("#payPaidInput");
+    const tipMsg = wrap.querySelector("#payTipMsg");
+    const BD = window.LFH_BILLDOC || {};
+    const TIP_MAX = Number(BD.TIP_MAX) || 100000;
+    // A refusal is SHOWN, never a silent trim — the same rule the discount modal follows. A tip
+    // has no legal ceiling, so the only thing refused outright is a figure past the server's own
+    // typo guard; a tip merely LARGER than the bill is allowed and simply asked about, because a
+    // generous tip is a real thing and refusing one would be the app arguing with a customer.
+    let tipNudgeT = null;
+    const sayTip = (msg) => {
+      if (!tipMsg) return;
+      if (!msg) { tipMsg.hidden = true; tipMsg.textContent = ""; return; }
+      tipMsg.textContent = msg; tipMsg.hidden = false;
+      wrap.classList.remove("disc-nudge"); void wrap.offsetWidth; wrap.classList.add("disc-nudge");
+      clearTimeout(tipNudgeT); tipNudgeT = setTimeout(() => wrap.classList.remove("disc-nudge"), 320);
+    };
+    if (tipInput && tipPctIn && paidIn) {
+      // Refresh every box EXCEPT the one being typed in, so a half-typed number is never clobbered
+      // mid-keystroke. "They paid" is written in whole rupees — the figure inr() puts on the paper.
+      const paintTip = (typing) => {
+        const pct = due > 0 ? Math.round((tip / due) * 1000) / 10 : 0;
+        if (typing !== "pct") tipPctIn.value = tip ? String(pct) : "";
+        if (typing !== "amt") tipInput.value = tip ? String(r2(tip)) : "";
+        if (typing !== "paid") paidIn.value = String(Math.round(due + tip));
+        wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", Number(x.dataset.tipPct) === pct));
+        // (There is no separate "Total collected" row any more — "They paid" IS that figure, and
+        // it is editable, which is the whole point. Two rows quoting the same number is how they
+        // start disagreeing.)
+      };
+      const setTip = (v, typing) => {
+        const want = Math.max(0, Number(v) || 0);
+        if (want > TIP_MAX) sayTip(`The most a tip can be is ${inr(TIP_MAX)} — check that figure.`);
+        else if (want > due && due > 0) sayTip(`That is a tip bigger than the bill (${inr(due)}). Fine if they meant it.`);
+        else sayTip("");
+        tip = Math.min(want, TIP_MAX);
+        paintTip(typing);
+      };
+      wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => setTip(r2(due * (Number(c.dataset.tipPct) || 0) / 100))));
+      tipPctIn.oninput = () => setTip(r2(due * (parseFloat(tipPctIn.value) || 0) / 100), "pct");
+      tipInput.oninput = () => setTip(parseFloat(tipInput.value), "amt");
+      // A BLANK BOX IS "I AM ABOUT TO TYPE", NEVER "they paid ₹0" — the guard the discount's pay box
+      // carries. Deleting three characters must not silently wipe a tip that was already entered.
+      paidIn.oninput = () => {
+        const raw = paidIn.value.trim(), p = parseFloat(raw);
+        if (raw === "" || !(p >= 0)) return;                 // leave the tip exactly as it was
+        setTip(BD.tipFromPaid ? BD.tipFromPaid(due, p) : Math.max(0, r2(p - due)), "paid");
+        // AFTER setTip, not before: setTip ends by clearing the message when the figure it lands on
+        // is unremarkable — and a tip of 0 is unremarkable — so saying this first meant saying it
+        // into a box that was wiped a line later. Measured on the real sheet: the tip correctly went
+        // to zero and the person was told nothing at all about why.
+        if (p < due) sayTip(`That is less than the bill (${inr(due)}) — this box is the TOTAL they handed over, tip included.`);
+      };
+      // A REFUSED FIGURE MUST NOT BE LEFT ON SCREEN. The box being typed in is deliberately not
+      // rewritten mid-keystroke, so a figure past the ceiling sat there reading 9,999,999 while the
+      // tip actually kept was 1,00,000 — the two boxes disagreeing, which is the one thing three
+      // linked boxes may never do. On blur every box snaps back to the value that was really kept.
+      [tipPctIn, tipInput, paidIn].forEach((b) => { b.onblur = () => paintTip(); });
+      paidIn.onfocus = () => { try { paidIn.select(); } catch (e) {} };
+      paintTip();
     }
     // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
     // Split payment is its own button on the grid now (owner, 2026-08-21 — it was two taps deep
@@ -4717,65 +4848,171 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const legLeft = () => Math.round((due - legSum()) * 100) / 100;
     const rowsEl = wrap.querySelector(".pay-split-rows");
     const sumEl = wrap.querySelector(".pay-split-sum");
+    const dishesEl = wrap.querySelector(".pay-split-dishes");
+
+    // ── THE FOUR WAYS TO DIVIDE, identical to the tablet's (owner, 2026-08-29) ─────────────────
+    // equal  · everyone the same, the last part carrying the odd paise
+    // custom · the same starting point, but the boxes are yours to type in
+    // dish   · hand each dish to a person; their share scales to the real due, so tax and any
+    //          discount ride along proportionally instead of being argued about
+    // ticket · one part per kitchen ticket, at what that ticket cost — for the table where four
+    //          friends ordered separately and nobody wants to work out who had what
+    const MAX_PARTS = 12;                     // what the server will take (lib/paySplit.ts)
+    let splitMode = "equal", splitN = 2;
+    const dishes = [];
+    splitTickets.forEach((o) => orderItemRows(o).forEach((r) =>
+      dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
+    const dishSubtotal = dishes.reduce((sum, d) => sum + d.amt, 0) || 1;
+    const canTicket = () => splitTickets.length >= 2;
+    // The LAST part absorbs the remainder: a bill's tax is rounded ONCE over the whole bill while
+    // a per-ticket figure is rounded per ticket, so summing them drifts by up to half a paisa each.
+    const ticketAmounts = () => {
+      const raw = splitTickets.map((o) => Math.round((billMath([o]).total || 0) * 100) / 100);
+      const head = raw.slice(0, -1);
+      return head.concat([Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100]);
+    };
+    const dishAmounts = () => {
+      const per = Array.from({ length: splitN }, () => 0);
+      dishes.forEach((d) => { per[Math.min(d.person, splitN) - 1] += d.amt; });
+      const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100);
+      const drift = Math.round((due - scaled.reduce((sum, x) => sum + x, 0)) * 100) / 100;
+      scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100;
+      return scaled;
+    };
     // An EVEN starting point that adds up exactly: everyone gets the rounded-down share and the
     // last part absorbs the odd paise, the same rule the printed bill splits its tax lines by.
     // A method already chosen on a row is kept, so changing "how many" never loses a pick.
+    // ONE seeder for all four ways, so they cannot disagree about what a part is. A way to pay
+    // already chosen on a row is KEPT — changing how the bill is divided must never silently
+    // reset how somebody is paying.
+    function seedSplit() {
+      if (splitMode === "ticket") {
+        const amts = ticketAmounts();
+        const kept = legs.slice();
+        legs.length = 0;
+        splitTickets.forEach((o, i) => legs.push({
+          amount: String(amts[i]), method: (kept[i] || {}).method || (i === 0 ? "UPI" : "Cash"),
+          note: (kept[i] || {}).note || "", khata: (kept[i] || {}).khata || null,
+          label: o.kot_no != null ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
+        }));
+        splitN = legs.length;
+        renderSplit();
+        return;
+      }
+      splitTo(splitN);
+    }
+    // Switching the way to divide clamps the count FIRST: `ticket` sets it from how many tickets
+    // there are, which can be 1, and carrying that 1 into Equal would draw a "split" of one part.
+    function setSplitMode(m) {
+      if (m === "ticket" && !canTicket()) {
+        toast("This bill is one kitchen ticket — there is nothing to divide by. Split it by amount instead.", "err");
+        return;
+      }
+      // A LONG BILL HAS MORE TICKETS THAN A SPLIT HAS PARTS. Thirteen tickets would seed thirteen
+      // parts and the server would refuse the lot at the last tap, with the money already counted
+      // out on the counter. Say it here instead, while there is still a choice.
+      if (m === "ticket" && splitTickets.length > MAX_PARTS) {
+        toast(`This bill has ${splitTickets.length} tickets — a bill can be split into at most ${MAX_PARTS} parts. Split it by amount instead.`, "err");
+        return;
+      }
+      splitMode = m;
+      if (m !== "ticket") splitN = Math.max(2, Math.min(MAX_PARTS, splitN));
+      seedSplit();
+    }
     function splitTo(n) {
-      const each = Math.floor((due / n) * 100) / 100;
+      // A PAISA NUDGE BEFORE ROUNDING DOWN, or one person quietly pays the others' rounding
+      // (split-bill 500, 2026-08-29). ₹555.55 ÷ 5 is ₹111.11 exactly in money, but in binary it is
+      // 111.10999999999999, so (due/n)*100 lands on 11110.999999999998 and Math.floor takes it to
+      // 11110 — a whole paisa short, five times over, and the LAST part absorbs all 5. On ₹9999.99
+      // ÷ 9 the last person paid 9 paise more than everyone else, on a screen whose whole promise
+      // is "same amount each". The nudge is far smaller than a paisa, so it can only rescue a
+      // value that was already a hair under a whole paisa; a genuine 111.109 still floors to 111.10.
+      splitN = n;
+      const each = Math.floor((due / n) * 100 + 1e-6) / 100;
+      // By dish, a person's share is their own dishes scaled to the real due; otherwise everyone
+      // gets the rounded-down share and the last part carries the odd paise.
+      const amts = splitMode === "dish"
+        ? dishAmounts()
+        : Array.from({ length: n }, (_, i) => (i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each));
       const kept = legs.slice(0, n);
       legs.length = 0;
       for (let i = 0; i < n; i++) {
         const was = kept[i] || {};
         legs.push({
-          amount: String(i === n - 1 ? Math.round((due - each * (n - 1)) * 100) / 100 : each),
+          amount: String(amts[i]),
           method: was.method || (i === 0 ? "UPI" : "Cash"), note: was.note || "",
-          khata: was.khata || null,
+          khata: was.khata || null, label: "",
         });
       }
-      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === n));
-      const bo0 = wrap.querySelector(".pay-split-byorder"); if (bo0) bo0.classList.remove("sel");
       renderSplit();
+    }
+    // THE COUNT ON THE CHIPS IS THE NUMBER OF PARTS ON SCREEN — always (owner, 2026-08-29, with a
+    // screenshot: three rows filled in and "2" still highlighted).
+    //
+    // It used to be set inside splitTo() only, so it followed the CHIP you tapped and nothing else.
+    // "＋ Add another part" and the ✕ on a row both change how many parts there are and neither
+    // touched it, so after one tap of Add the header said 2 while the screen showed 3. A number
+    // that contradicts what is under it is worse than no number: the waiter has to decide which of
+    // the two to believe, mid-service, with the customer waiting.
+    //
+    // So it is worked out from `legs.length` in ONE place, called by renderSplit() — which every
+    // path that changes the parts already goes through. A future fourth way to add a part inherits
+    // it without anybody remembering to.
+    function syncSplitCount() {
+      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.toggle("sel", Number(b.dataset.n) === legs.length));
+      wrap.querySelectorAll(".pay-split-tab").forEach((b) => b.classList.toggle("sel", b.dataset.mode === splitMode));
+      // By kitchen ticket decides the count for you, so asking "how many are paying?" underneath it
+      // would be a question with no answer. Everything else keeps the chips.
+      const nlbl = wrap.querySelector(".pay-split-nlbl"), nrow = wrap.querySelector(".pay-split-nrow");
+      const showN = splitMode !== "ticket";
+      if (nlbl) nlbl.style.display = showN ? "" : "none";
+      if (nrow) nrow.style.display = showN ? "" : "none";
+      // The dish list only exists in By dish — tap a dish to hand it to the next person.
+      if (dishesEl) {
+        dishesEl.style.display = splitMode === "dish" ? "" : "none";
+        if (splitMode === "dish") {
+          dishesEl.innerHTML = `<div class="muted small" style="margin:2px 0 6px">Tap a dish to hand it to the next person:</div>`
+            + dishes.map((d, i) => `<button type="button" class="btn pay-split-dish" data-dish="${i}"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span class="muted small">Person ${d.person} · ${inr(d.amt)}</span></button>`).join("");
+          dishesEl.querySelectorAll(".pay-split-dish").forEach((b) => (b.onclick = () => {
+            const d = dishes[Number(b.dataset.dish)];
+            d.person = d.person >= splitN ? 1 : d.person + 1;
+            seedSplit();
+          }));
+        } else dishesEl.innerHTML = "";
+      }
     }
     wrap.querySelectorAll(".pay-split-n").forEach((b) => (b.onclick = () => splitTo(Number(b.dataset.n))));
-
-    // ── SPLIT BY ORDER (owner, 2026-08-21: "i could able to do it by order or amount") ────────
-    // One part per KITCHEN TICKET, each at what that ticket actually cost — so when four friends
-    // ordered separately, nobody has to work out who had what. The amounts stay editable like any
-    // other split; this only fills them in.
-    //
-    // The LAST part absorbs the remainder, because a bill's tax is rounded ONCE over the whole
-    // bill while a per-ticket figure is rounded per ticket — summing them drifts by up to half a
-    // paisa each (see lib/paySplit.ts's own note). Without this the parts would miss the due by a
-    // paisa or two on a long bill and the server would rightly refuse them.
-    function splitByOrder() {
-      const os = (opts.orders || []).filter((o) => o.status !== "received");
-      if (os.length < 2) { toast("This bill is one ticket — split it by amount instead.", "err"); return; }
-      if (os.length > 12) { toast(`This bill has ${os.length} tickets — a split can hold 12 parts. Split it by amount instead.`, "err"); return; }
-      const raw = os.map((o) => Math.round((billMath([o]).total || 0) * 100) / 100);
-      const head = raw.slice(0, -1);
-      const last = Math.round((due - head.reduce((a, x) => a + x, 0)) * 100) / 100;
-      legs.length = 0;
-      os.forEach((o, i) => legs.push({
-        amount: String(i === os.length - 1 ? last : raw[i]),
-        method: i === 0 ? "UPI" : "Cash", note: "", khata: null,
-        label: o.kot_no ? `KOT #${o.kot_no}` : `Order ${String(o.id || "").slice(0, 6)}`,
-      }));
-      wrap.querySelectorAll(".pay-split-n").forEach((b) => b.classList.remove("sel"));
-      const bo = wrap.querySelector(".pay-split-byorder"); if (bo) bo.classList.add("sel");
-      renderSplit();
+    wrap.querySelectorAll(".pay-split-tab").forEach((b) => (b.onclick = () => setSplitMode(b.dataset.mode)));
+    // ONE way in, used by the "Split payment" button and by arriving with openSplit already set.
+    function showSplitPanel() {
+      wrap.querySelector(".pay-method-grid").style.display = "none";
+      wrap.querySelector(".pay-other-field").style.display = "";
+      wrap.querySelector(".pay-other-pick").style.display = "none";
+      wrap.querySelector(".pay-other-split").style.display = "";
+      splitTo(2);
     }
-    const byOrderBtn = wrap.querySelector(".pay-split-byorder");
-    if (byOrderBtn) byOrderBtn.onclick = splitByOrder;
+    if (opts.openSplit && opts.split !== false) showSplitPanel();
+
+    // The 🧾 "By order" button that used to live here IS the "By kitchen ticket" tab now — same
+    // arithmetic, same last-part-carries-the-remainder rule, moved up beside the other three ways
+    // so a person sees all four at once (owner, 2026-08-29). See ticketAmounts() above.
     function renderSplit() {
       if (!rowsEl) return;
       rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}">
-          ${l.label ? `<div class="psr-label muted small">${esc(l.label)}</div>` : ""}
-          <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
+          <div class="psr-label muted small">${l.label ? esc(l.label) : `Person ${i + 1}`}</div>
+          <!-- step="0.01", NOT "1" (owner, 2026-08-29, with the browser's own tooltip in the shot:
+               "Please enter a valid value. The two nearest valid values are 9 and 10." on 9.9).
+               Every split amount is money with paise, and THIS SCREEN FILLS THEM IN ITSELF — an even
+               split of ₹459.90 three ways puts 153.29 / 153.29 / 153.32 in these very boxes. So the
+               box was refusing the numbers the app had just written into it, and the waiter could
+               not correct one by hand without rounding it to whole rupees. -->
+          <input type="number" inputmode="decimal" min="0" step="0.01" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
           <select class="psr-method">${SPLIT_WAYS.map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
           ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part">✕</button>` : `<span class="psr-del-gap"></span>`}
           ${l.method === "Other" ? `<input type="text" class="dish-edit-custominput psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque">` : ""}
           ${l.method === PAY_LATER ? `<button type="button" class="btn psr-who">${l.khata ? "📒 " + esc(l.khata.label) + " — change" : "📒 Who owes this? — pick a person"}</button>` : ""}
         </div>`).join("");
+      syncSplitCount();          // the chips follow the rows, whatever changed them
       rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
         const i = Number(row.dataset.i);
         // Typing an amount must NOT re-render — that would blur the box mid-keystroke. Only the
@@ -4804,6 +5041,18 @@ function openPaymentMethodModal(due, label, opts = {}) {
     }
     function refreshSplitSum() {
       if (!sumEl) return;
+      // THE LINE MUST AGREE WITH THE BUTTON UNDER IT (the tablet learned this on 2026-08-29;
+      // brought here on 2026-08-29 when the two screens were made to match). An EMPTY part
+      // contributes 0, so the arithmetic still balanced and this line went green — while Take
+      // payment refused with "Every part needs an amount above zero". One tap reaches it:
+      // ＋ Add another part seeds the new box with the remainder, which is "" on a covered bill.
+      // So the empty part is named FIRST, before the arithmetic.
+      const blank = legs.filter((l) => !(Number(l.amount) > 0)).length;
+      if (blank) {
+        sumEl.textContent = blank === 1 ? "One part still needs an amount" : `${blank} parts still need an amount`;
+        sumEl.style.color = "var(--red)";
+        return;
+      }
       const left = legLeft();
       sumEl.textContent = left === 0 ? `✓ The parts add up to ${inrExact(due)}`
         : left > 0 ? `${inrExact(left)} still to cover` : `${inrExact(-left)} more than the bill`;
@@ -4811,7 +5060,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
     }
     const addBtn = wrap.querySelector(".pay-split-add");
     if (addBtn) addBtn.onclick = () => {
-      if (legs.length >= 12) { toast("A bill can be split into at most 12 parts.", "err"); return; }
+      if (legs.length >= MAX_PARTS) { toast(`A bill can be split into at most ${MAX_PARTS} parts.`, "err"); return; }
       const left = legLeft();
       legs.push({ amount: left > 0 ? String(left) : "", method: "Cash", note: "" });
       renderSplit();
@@ -4846,7 +5095,34 @@ function openPaymentMethodModal(due, label, opts = {}) {
       });
     };
 
+    // "Change" — the one way out of the already-saved line. It swaps the fact for the ordinary
+    // boxes, PRE-FILLED with what is already there, because the second half of his instruction was
+    // "if it is asked, it should be autofill because I have already filled it previously". An empty
+    // box here is how one bill ends up with a different number from the one the guest gave.
+    {
+      const chBtn = wrap.querySelector(".pay-cust-change");
+      if (chBtn) chBtn.onclick = () => {
+        const box = wrap.querySelector(".pay-cust-known");
+        const k = opts.knownCust || {};
+        box.classList.remove("pay-cust-known");
+        box.innerHTML = `
+          <label class="dish-edit-lbl">📱 Save customer <span class="muted small">— optional, only if they agree</span></label>
+          <div class="muted small" style="margin:-2px 0 6px">Lets you spot regulars and greet them by name next time.</div>
+          <input type="tel" inputmode="numeric" class="dish-edit-custominput pay-cust-phone" maxlength="20" placeholder="Mobile number" style="margin-bottom:6px" value="${esc(k.phone || "")}">
+          <input type="text" class="dish-edit-custominput pay-cust-name" maxlength="80" placeholder="Name (optional)" style="margin-bottom:6px" value="${esc(k.name || "")}">
+          <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 6px"></div>
+          <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none" checked>
+            <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
+          </label>`;
+        wireCustRecognise();
+      };
+    }
+
     // Repeat-customer recognition: known number → chip + pre-fill name. Read-only, debounced.
+    // A FUNCTION, not a one-shot, because "Change" above rebuilds these boxes and they have to be
+    // wired again. Two copies of this would be two behaviours within a week.
+    function wireCustRecognise() {
     const phoneEl = wrap.querySelector(".pay-cust-phone");
     if (phoneEl) {
       const nameEl = wrap.querySelector(".pay-cust-name");
@@ -4869,6 +5145,8 @@ function openPaymentMethodModal(due, label, opts = {}) {
         }, 400);
       });
     }
+    }
+    wireCustRecognise();
   });
 }
 
@@ -4905,11 +5183,21 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // Paid in PARTS (owner, 2026-08-02) — ₹200 UPI + ₹200 cash + … The whole bill is settled in
   // ONE server call: it recomputes the due itself and refuses parts that don't add up, so this
   // can never under- or over-collect. The legs land in session_payments for the money trail.
+  let splitQueued = false;                 // did the split write only reach this device?
   if (picked.splitLegs) {
     const tnum = payable[0] && payable[0].table_number;
     if (tnum == null) { toast("A split payment needs a table's bill.", "err"); return false; }
     try {
       const rs = await api("POST", `/tables/${tnum}/pay-split`, { splits: picked.splitLegs });
+      // ASK THE QUEUE BEFORE CLAIMING THE MONEY ARRIVED (T28, 2026-08-30). Every other settle on
+      // this screen does — on-the-house and khata both say "Saved on this device ✓ … the moment
+      // you're back online" — and this one did not, since the original split feature shipped.
+      // `verify:queued-truth` exists to catch exactly that and could not: it was anchored on an
+      // older spelling of this call, so it reported "the write is no longer written this way" and
+      // never reached its own queue check. Offline, the screen announced "Marked paid in 3 parts
+      // (₹161 UPI + ₹161 Cash + ₹161 Card) 💳" over a bill the server had not seen — the worst
+      // sentence this panel can say, because the table frees and the money is counted as taken.
+      splitQueued = wasQueued(rs);
       okCount = Number(rs && rs.count) || payable.length;
       paidIds.push(...payable.map((o) => o.id));
       await pollTables([String(tnum)]);
@@ -4925,7 +5213,21 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // it went to payable[0] unconditionally — if that specific order failed to settle, the tip was
   // written to an unpaid order and the Z-report (which sums tips over PAID orders only) dropped it.
   // Best-effort — a tip failing to save must not undo a completed payment.
-  if (paidIds.length && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
+  // A TIP IS SOMEBODY'S MONEY — IT DOES NOT GET A SILENT catch{} (owner, 2026-08-28).
+  //
+  // This read `catch { /* tip is non-critical */ }`. It is not non-critical: it is cash a customer
+  // handed over for the staff, and a write that fails with nobody told means it is simply gone from
+  // the tips report — the bill settles, the screen looks finished, and the money is not anywhere.
+  // (A dead connection is already covered: api() routes through the outbox, which keeps the write
+  // and replays it. This is for the case where it comes back refused.)
+  if (paidIds.length && Number(picked.tip) > 0) {
+    const tipAmt = Number(picked.tip);
+    try {
+      await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: tipAmt });
+    } catch (e) {
+      toast(`Bill is paid, but the ${inr(tipAmt)} tip was not recorded — ${(e && e.message) || "the system refused it"}. Try adding it again.`, "err");
+    }
+  }
   // Save the guest's consented name+number after the bill settles (Customer CRM). The
   // server stores nothing without consent + records one visit per session; fire-and-forget
   // so it never undoes a completed payment. Table comes from the orders we just settled.
@@ -4945,7 +5247,8 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
     const msg = skipped ? `Paid ${how} — ${skipped} new order still to accept` : `Marked paid ${how}`;
     // Same here: no undo bar. See the note on the single-order path above — reopening a settled
     // bill is Access → Manager → Manager menu → Bill → Reopen a bill, which is recorded.
-    toast(msg + " 💳", "ok");
+    if (splitQueued) toast(`Saved on this device ✓ — ${msg.replace(/^Marked paid /, "the bill will be settled ")} the moment you're back online.`, "ok");
+    else toast(msg + " 💳", "ok");
   }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
   else toast("Couldn't settle the payment — check the order.", "err");
@@ -4978,12 +5281,29 @@ async function markTablePaid(t, mtpOpts = {}) {
     // A whole table's bill can be paid in parts ("Split payment"). Single-order and khata-collect
     // settles can't — there is no pay-split endpoint for those.
     split: true,
+    // ARRIVING STRAIGHT ON THE SPLIT (owner, 2026-08-29). 🍴 Split on the table sheet, and the
+    // table-ops menu, used to open a screen of their own; they now open THIS sheet already on its
+    // split panel, so there is one split screen and two doors to it rather than two screens.
+    openSplit: !!mtpOpts.openSplit,
     // Which table, so a PAY-LATER part of the split can name the person owing it (mig 352).
     table: t,
     // The TICKETS on this bill, so the split can be filled in BY ORDER as well as by an even
     // share (owner, 2026-08-21: "i could able to do it by order or amount"). Un-accepted orders
     // are dropped for the same reason they are dropped from the settle itself.
     orders: os.filter((o) => o.status !== "received"),
+    // WHO THIS TABLE'S CUSTOMER ALREADY IS, if anybody has been asked once (owner, 2026-08-29:
+    // "you have asked for a mobile number and that already, then why are you asking right now
+    // again? … If it is asked, it should be autofill because I have already filled it previously").
+    //
+    // Read exactly the way the bill-customer sheet reads it, so the two can never disagree: this
+    // SESSION's own customer first, else the one already printed on this session's bill. Scoped to
+    // this session_id — one table's customer can never appear on another's screen.
+    knownCust: (() => {
+      const sess = openSessionForTable(mergeParentOf(t) || t) || openSessionForTable(t);
+      if (sess && sess.cust_phone) return { phone: sess.cust_phone, name: sess.cust_name || "" };
+      const row = os.find((o) => o.bill_cust_phone || o.bill_cust_name);
+      return row ? { phone: row.bill_cust_phone || "", name: row.bill_cust_name || "" } : null;
+    })(),
   };
   const r = await payOrdersWithMethod(os, `Mark table ${t} paid`, opts);
   if (r && r.special === "khata") { await khataParkFlow(t, os); return; }
@@ -5840,11 +6160,20 @@ function printBill(t, sess, os, opts = {}) {
   // the counter keeps the screen they were on. Sent fire-and-forget on purpose: the paper is the
   // server's job now, and if the send fails we fall straight back to the window below rather than
   // leaving a guest waiting while we retry.
-  const billOwner = printOwner("bill");
-  if (billOwner && printedSid) {
+  // ASK THE SERVER, ALWAYS — never a cached answer (owner, 2026-08-29: "when the helper has been
+  // selected… it will not pop up that print option. It will just directly sent to the helper").
+  //
+  // This used to check `printOwner("bill")` first, which reads a copy of the answer left behind by a
+  // DIFFERENT poll (/print-jobs/pending). If that poll had not landed yet — a fresh tab, the Bills
+  // tab opened straight from a link, a manager whose screen is not the printing one — the copy was
+  // empty, the panel decided nobody owned the bill, and the print window opened on top of somebody's
+  // work while the helper sat idle. The server always knows; one round trip is cheaper than a window
+  // nobody asked for, and `noRoute` is still the honest fallback that keeps every restaurant without
+  // a helper working exactly as it always did.
+  if (printedSid) {
     api("POST", "/print/send", { kind: "bill", sessionId: printedSid, parcel: !!opts.parcel })
       .then((r) => {
-        if (r && r.queued) { toast(r.note || ("Sent to " + billOwner.printer), "ok"); return; }
+        if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         // Viewing as the admin: their printer stays quiet and the bill opens here instead, so nothing
         // comes out of a paying client's roll because we looked at their screen.
         if (r && r.adminView) toast("Admin view — showing the bill here, not printing at the restaurant.", "ok");
@@ -12788,7 +13117,7 @@ function openKotColumns(t, sess) {
     // panel 1: pick an operation (split hands over to its form — it's a form, not a drill-down)
     colsEl.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => {
       const op = b.dataset.op;
-      if (op === "split") { closeM(); openSplitSettle(t); return; }
+      if (op === "split") { closeM(); markTablePaid(t, { openSplit: true }); return; }
       // Table type is its own little picker (VIP / Family / Owner's guest), not a drill-down —
       // same hand-over as split.
       if (op === "type") { closeM(); openTagModal(t); return; }
@@ -13003,7 +13332,7 @@ function openKotMenu(t, sess) {
     if (op === "merge" && sess) openMergePicker(t, sess);
     if (op === "movekot") openMoveKotPicker(t);
     if (op === "moveitem") openMoveItemPicker(t);
-    if (op === "split") openSplitSettle(t);
+    if (op === "split") markTablePaid(t, { openSplit: true });
     if (op === "reprint") openReprintKotPicker(t);
   }));
 }
@@ -13288,8 +13617,9 @@ async function printJobHere(id, btn) {
 // referencing a name that no longer existed — a ReferenceError on every floor render. verify:print-queue
 // caught it; that is what the check is for.)
 const PRINT_SETUP_URL = "/print-setup.html";
-const PRINT_HERE_KEY = "lfh_print_here";        // "on" | "off" — this device's answer, this browser
-const printHereAnswer = () => { const v = lsGet(PRINT_HERE_KEY, ""); return v === "on" || v === "off" ? v : ""; };
+// PRINT_HERE_KEY / printHereAnswer are GONE (owner, 2026-08-29). They stored, per browser, this
+// device's answer to "should this screen print?" — a second place where the question could be
+// answered differently from the Printing board. One question, one answer, one place.
 // What the SERVER last told us about who prints ({ mayPrint, target }) — set by managerPrintPass's
 // read, so the strip only ever asks a question the admin has actually opened.
 let printTargetSays = null;
@@ -13300,99 +13630,62 @@ let printOwners = {};
 const printOwner = (kind) => { const o = printOwners && printOwners[kind]; return o && o.owned ? o : null; };
 let lastPrintedHere = null;   // { kot, table, at } — so the strip can show it is genuinely working
 
-// The one-question strip, above the floor grid, in the same visual grammar as the printer-problem
-// strip that already lives there (mig 269) — a restaurant should not have to learn a second one.
+// ── THE STRIP SAYS WHAT IS HAPPENING. IT DOES NOT ASK. ───────────────────────────────────────
+//
+// Owner, 2026-08-29, on seeing the old one still there: *"why this is coming, the old logic of
+// printing… I told you to remove old logic, keep only one logic which we have build right now."*
+//
+// It used to ask every screen "should THIS screen print the kitchen tickets?", keep that answer in
+// this browser's localStorage, and offer to take the printer off whichever screen held it. That was
+// the model BEFORE the Printing board: a restaurant worked out who printed by tapping around its own
+// screens. It is not the model any more — the admin names one person on Printing, and this screen's
+// job is to do it, not to re-open the question in a second place with a different answer.
+//
+// So: no question, no buttons, no per-device opt-in. Three facts and silence otherwise. The station
+// is claimed automatically by the named screen (see managerPrintPass), because the decision was
+// already made and a screen that waits to be tapped is a printer that never prints.
 function printStationStripHtml() {
-  // A COMPUTER OWNS THE PAPER (mig 341). There is nothing to ask this screen — but there IS something
-  // to say, because a manager who used to see "printing here" and now sees nothing would reasonably
-  // think printing had broken. One quiet line, no buttons: a fact, not a question.
+  // A COMPUTER OWNS THE PAPER (mig 341) — nothing for a screen to do, but a manager who used to see
+  // "printing here" and now sees nothing would reasonably think printing had broken.
   const hlpS = printTargetSays && printTargetSays.helper && printTargetSays.helper.owned ? printTargetSays.helper : null;
   if (hlpS) {
     return `<div class="prstrip"><div class="prstrip-row">
       <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">Kitchen tickets print on <b>${esc(hlpS.printer)}</b> from <b>${esc(hlpS.agent)}</b>${hlpS.connected ? "" : " — that computer is asleep, tickets are waiting"}<small>No screen needs to be open for this, and this screen cannot take it over.</small></span>
+      <span class="prstrip-txt">Kitchen tickets print on <b>${esc(hlpS.printer)}</b> from <b>${esc(hlpS.agent)}</b>${hlpS.connected ? "" : " — that computer is asleep, tickets are waiting"}<small>No screen needs to be open for this.</small></span>
     </div></div>`;
   }
   if (!printTargetSays || !printTargetSays.mayPrint) return "";
-  const ans = printHereAnswer();
-  if (ans === "off") return "";                       // answered no: never ask again on this device
   const stnS = printTargetSays.station || null;
-  // ANOTHER SCREEN HOLDS IT — shown whatever this device answered. The first version only told a
-  // screen that had said "no", which left the confusing case out: a counter screen switched ON but
-  // NOT holding the station showed "this screen is printing" while the paper came out elsewhere.
+  // ANOTHER SCREEN IS THE ONE — a fact, not an offer. Moving it is done on the Printing board, by
+  // naming somebody else; a "take it over" button here is a second way to answer one question.
   if (stnS && stnS.active && !stnS.mine && !stnS.stale) {
-    // Another screen holds printing: say so once, with the one tap that moves it here. Not a warning —
-    // this is the normal state on every screen that is not the printer.
-    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "A kitchen screen" : "A counter screen"));
+    const who = esc(stnS.active.label || (stnS.active.panel === "kitchen" ? "the kitchen screen" : "the counter screen"));
     return `<div class="prstrip"><div class="prstrip-row">
       <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">Kitchen tickets are printing on <b>${who}</b><small>If the printer is actually at this screen, take it over — one tap, and that screen stops.</small></span>
-      <button class="btn" data-station-set="take">Print here instead</button>
-      <button class="btn" data-printhere-set="off">Not this screen</button>
+      <span class="prstrip-txt">Kitchen tickets print on <b>${who}</b><small>Aevidine chooses which screen — this one is not it.</small></span>
     </div></div>`;
   }
-  if (ans === "on" && stnS && stnS.mine) {
+  if (stnS && stnS.mine) {
     const last = lastPrintedHere
       ? `Last ticket: <b>KOT #${esc(String(lastPrintedHere.kot ?? "—"))}</b>${lastPrintedHere.table ? " · " + esc(String(lastPrintedHere.table)) : ""} · ${esc(timeAgo(lastPrintedHere.at))}`
-      : (printTargetSays.target === "both"
-          ? "Waiting — it prints anything the kitchen hasn't within 30 seconds."
-          : "Waiting for the next order.");
+      : "Waiting for the next order.";
     return `<div class="prstrip"><div class="prstrip-row">
       <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">This screen is printing the kitchen tickets<small>${last}</small></span>
-      <a class="btn" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Guide</a>
-      <button class="btn" data-printhere-set="off">Stop printing here</button>
+      <span class="prstrip-txt">This screen prints the kitchen tickets<small>${last}</small></span>
     </div></div>`;
   }
-  if (ans === "on") {
-    // Said yes, holds nothing (nobody does): one tap to actually become the printer. Without this the
-    // screen sat saying "yes" with no station and no explanation of why nothing printed.
-    return `<div class="prstrip"><div class="prstrip-row">
-      <span class="prstrip-ico">🖨</span>
-      <span class="prstrip-txt">This screen is ready to print — nothing has taken the printer yet<small>Press once on the computer the printer is attached to.</small></span>
-      <button class="btn primary" data-station-set="take">🖨 Print on this screen</button>
-      <button class="btn" data-printhere-set="off">Not this screen</button>
-    </div></div>`;
-  }
-  return `<div class="prstrip"><div class="prstrip-row">
-    <span class="prstrip-ico">🖨</span>
-    <span class="prstrip-txt">Should <b>this screen</b> print the kitchen tickets?<small>${
-      printTargetSays.target === "both"
-        ? "Your admin has set the counter screen as the BACKUP printer — it prints anything the kitchen hasn't within 30 seconds. Say yes only on the computer the printer is attached to."
-        : "Your admin has set kitchen tickets to print on the counter screen. Say yes only on the computer the printer is attached to — never on a phone."
-    }</small></span>
-    <button class="btn primary" data-printhere-set="on">Yes, print here</button>
-    <button class="btn" data-printhere-set="off">No</button>
-  </div></div>`;
+  return "";
 }
 // Bound wherever the floor renders the strip. Answering is instant (there is no Save to forget), and
 // a yes prints anything already waiting straight away — so answering IS the test that it works.
 function bindPrintStationStrip(root) {
   // 🖨 take over / stop — the server decides and answers with the new state, so the screen never
-  // shows itself as the printer on the strength of its own click (mig 338).
-  (root || document).querySelectorAll("[data-station-set]").forEach((b) => (b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    const take = b.dataset.stationSet === "take";
-    try {
-      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
-      if (r && r.station && printTargetSays) printTargetSays.station = r.station;
-      if (take) lsSet(PRINT_HERE_KEY, "on");     // taking it IS the answer to "should this screen print?"
-      okToast(r, take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
-      if (state.tab === "tables") renderEditor(); else if (state.tab === "general") renderEditor();
-      if (take) managerPrintPass();              // anything already waiting prints straight away
-    } catch (e) {
-      b.disabled = false;
-      toast("Couldn't change that: " + (e.message || "try again"), "err");
-    }
-  }));
-  (root || document).querySelectorAll("[data-printhere-set]").forEach((b) => (b.onclick = () => {
-    const v = b.dataset.printhereSet === "on" ? "on" : "off";
-    lsSet(PRINT_HERE_KEY, v);
-    if (v === "on") { toast("This screen will print the kitchen tickets ✓", "ok"); managerPrintPass(); }
-    else toast("This screen will not print kitchen tickets.", "ok");
-    if (state.tab === "tables") renderEditor();   // repaint the strip in place (there is no renderTables)
-  }));
+  // The strip has no buttons any more (see printStationStripHtml). Both binders are gone with them:
+  //   · [data-station-set]   — "take the printer off that screen" / "stop printing here". Moving the
+  //                            printer is done by naming somebody else on the Printing board.
+  //   · [data-printhere-set] — the per-browser yes/no to "should this screen print?", which was a
+  //                            second answer to a question the admin had already answered.
+  // The claim is automatic now, in managerPrintPass, for the screen the admin actually named.
 }
 
 // ── SETTINGS → PRINTING: where printing stands, and how to set a printer up ──────────────────────
@@ -13469,7 +13762,7 @@ function formPrinting(s) {
   const others = (B.agents || []).filter((a) => !mine || a.id !== mine.id);
   // NO NUMBER ON THIS ONE. It is not a step any more — it is what card 2's toggle reveals when the
   // answer is "a computer", and two cards both numbered "2 ·" is worse than neither being numbered.
-  const step2 = `<div class="card"><h3>The computers that can print</h3>
+  const step2 = `<div class="card"><h3>3 · The computer that prints</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       A computer prints by running one small program — the <b>helper</b>. It asks us every two seconds
       whether there is anything to print, and prints it. No window has to be open, nobody has to stay
@@ -13533,7 +13826,7 @@ function formPrinting(s) {
     ["computer", "A computer", "A small program prints silently. No window, nobody logged in. Each paper can have its own printer."],
     ["screen", "A screen (Chrome)", "This restaurant's own Chrome prints, out of the way, signed in as one person. Nothing to install."],
   ];
-  const step2mode = `<div class="card"><h3>2 · How this restaurant prints</h3>
+  const step2mode = `<div class="card"><h3>2 · How does the paper come out?</h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       ${may
         ? "Pick one. Everything below changes to match it, and nothing from the other way stays on screen."
@@ -13545,6 +13838,19 @@ function formPrinting(s) {
           <b>${esc(label)}</b><small>${esc(what)}</small>
         </button>`).join("")}
     </div>
+    ${(may && state.printAsk) ? `
+    <div class="pw-confirm" role="alertdialog" aria-label="Confirm the change">
+      <div class="txt">
+        <b>Switch to “${esc((MODES.find(([m]) => m === state.printAsk) || [])[1] || "")}”?</b>
+        <span>${state.printAsk === "screen"
+          ? "The printers chosen for each paper are cleared. Kitchen tickets will print from one person's screen; bills and banquet sheets go back to whoever presses Print."
+          : "The person chosen is cleared. Each paper then needs a printer choosing on a computer running the helper."} A line set to <b>Nobody</b> stays that way.</span>
+      </div>
+      <div class="acts">
+        <button type="button" class="btn" data-pw="mode-cancel">Cancel</button>
+        <button type="button" class="btn primary" data-pw="mode-yes">Yes, switch</button>
+      </div>
+    </div>` : ""}
   </div>`;
 
   // ── the chosen mode's SETUP — one of these two, never both ──────────────────────────────────
@@ -13589,13 +13895,22 @@ function formPrinting(s) {
           `A page opens. Press <b>Allow</b>. That is the whole setup.`,
         ],
         (k, f) => `<b>After a shutdown:</b> ${esc(f.autostart)}`)
-    : `<div class="card"><h3>Whose screen prints</h3>
+    : `<div class="card"><h3>3 · Whose screen prints the kitchen tickets</h3>
         <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
-          ${may
-            ? `The launcher below opens a Chrome signed in as <b>you</b>, out of the way, and that Chrome does
-               the printing — on whatever printer this machine is set to. Aevidine can name somebody else instead.`
-            : `A screen prints this restaurant's paper${(B.routes && B.routes.kot && B.routes.kot.personName) ? ` — <b>${esc(B.routes.kot.personName)}</b>` : ""}, on whatever printer that machine is set to.`}
+          One person. When an order comes in, the ticket prints from <b>their</b> screen. Bills and banquet
+          sheets are not affected — whoever presses Print gets the window, exactly as now.
         </p>
+        ${(() => {
+          const kot = (B.routes || {}).kot || {};
+          const nm = kot.personName || "";
+          const meIsIt = kot.person && B.person && kot.person === B.person.id;
+          if (kot.via === "off") return `<p class="what"><b>Nobody</b> — kitchen slips do not print by themselves.</p>`;
+          if (!kot.person) return `<p class="what">Nobody is chosen yet, so no kitchen slip prints by itself.${may ? " Press below to make it this screen." : " Aevidine chooses who."}</p>`;
+          return `<p class="what"${meIsIt ? ' style="color:var(--green)"' : ""}>${meIsIt
+            ? "Kitchen tickets print on <b>this</b> screen."
+            : `Kitchen tickets print on <b>${esc(nm || "another person")}</b>'s screen.`}</p>`;
+        })()}
+        ${may ? `<div style="margin-top:10px"><button type="button" class="btn primary" data-pw="mine">Print them on this screen</button></div>` : ""}
       </div>` + fileCard(
         "The print-station file",
         `It opens a <b>separate</b> Chrome with its own profile, <b>out of the way</b>, with silent printing
@@ -13616,59 +13931,61 @@ function formPrinting(s) {
   // person and the device. The MODE answers "who" now, so a paper is simply on, or nobody — plus, in
   // computer mode, which printer.
   const agentName = (id) => ((B.agents || []).find((a) => a.id === id) || {}).name || "another computer";
+
+  // ── ONE CONTROL PER PAPER ──────────────────────────────────────────────────────────────────
+  // The same shape as the admin console's board, on purpose: two screens describing one setup in
+  // two visual languages is what made a person learn each separately. A line used to be an On
+  // button, a Nobody button, a printer picker and a paper picker; the options ARE the answers now,
+  // grouped by machine, saved on change.
+  //
+  // The value is "<agent uuid>|<printer name>" — a uuid can never contain a pipe, so splitting on
+  // the FIRST one is safe even for a printer called "Front|Desk".
+  const anyPrinters = (B.agents || []).some((a) => (a.printers || []).length);
   const line = (kind) => {
     const r = (B.routes || {})[kind] || {};
     const off = r.via === "off";
     const answered = !!r.via;
-    const here = mode === "computer" && mine && r.agent === mine.id;
+    const val = off ? "off" : (r.agent && r.printer ? r.agent + "|" + r.printer : "");
+    if (!may) {
+      return `<div class="pw-line">
+        <h4>${esc(L.kind[kind] || kind)}</h4>
+        <p class="what">${esc(L.what[kind] || "")}</p>
+        <p class="what" style="margin-top:8px"><b>${esc(
+          off ? (L.off[kind] || "Nobody")
+          : r.printer ? `${r.printer} on ${agentName(r.agent)}`
+          : "No printer chosen yet")}</b> — set by Aevidine.</p>
+      </div>`;
+    }
     return `<div class="pw-line">
       <h4>${esc(L.kind[kind] || kind)}</h4>
       <p class="what">${esc(L.what[kind] || "")}</p>
-      ${!may ? `<p class="what" style="margin-top:8px"><b>${esc(
-          off ? (L.off[kind] || "Nobody")
-          : mode === "screen" ? "On — printed by that screen"
-          : r.printer ? `${r.printer} on ${agentName(r.agent)}`
-          : "No printer chosen yet")}</b> — set by Aevidine.</p>`
-      : `
-      <div class="pw-who" role="group" aria-label="${esc(L.kind[kind] || kind)}">
-        <button type="button" class="pw-opt${off ? "" : " on"}" aria-pressed="${off ? "false" : "true"}"
-          data-pw="on" data-kind="${esc(kind)}">${off ? "Switch on" : "On"}</button>
-        <button type="button" class="pw-opt${off ? " on" : ""}" aria-pressed="${off ? "true" : "false"}"
-          data-pw="off" data-kind="${esc(kind)}">${esc(L.off[kind] || "Nobody")}</button>
+      <div class="pw-row" style="margin-top:9px">
+        <select data-pw="printerpick" data-kind="${esc(kind)}" style="min-width:250px"${anyPrinters ? "" : ` disabled title="Set this computer up above first — the printers come from it."`}>
+          <option value="off"${off ? " selected" : ""}>${esc(L.off[kind] || "Nobody")}</option>
+          <option value=""${!off && !answered ? " selected" : ""}>— not decided yet —</option>
+          ${(B.agents || []).map((a) => `<optgroup label="${esc(a.name)}">${(a.printers || []).map((pr) => {
+            const v = a.id + "|" + pr.name;
+            return `<option value="${esc(v)}"${v === val ? " selected" : ""}>${esc(pr.name)}</option>`;
+          }).join("")}</optgroup>`).join("")}
+        </select>
+        ${(!off && r.agent && r.printer) ? `<button type="button" class="btn" style="padding:4px 9px;min-height:34px" data-pw="test" data-printer="${esc(r.printer)}">Test page</button>` : ""}
       </div>
-      ${(!off && mode === "computer" && here) ? `
-        <div class="pw-row">
-          <label class="muted" style="font-size:12.5px">Printer</label>
-          <select data-pw="printer" data-kind="${esc(kind)}" style="min-width:210px">
-            ${(mine.printers || []).map((p) => `<option value="${esc(p.name)}"${p.name === r.printer ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
-          </select>
-        </div>
-        <details class="pw-more"><summary>More — paper size</summary>
-          <div class="pw-row">
-            <select data-pw="paper" data-kind="${esc(kind)}" style="min-width:200px">
-              ${(B.papers || []).map((pp) => {
-                const chosen = pp.paper ? (r.paper && r.paper.wMm === pp.paper.wMm && r.paper.hMm === pp.paper.hMm) : !r.paper;
-                return `<option value="${esc(pp.id)}"${chosen ? " selected" : ""}>${esc(pp.label)}</option>`;
-              }).join("")}
-            </select>
-          </div>
-          <p class="what">The paper size is what stops a printer turning a slip sideways or shrinking it
-          to half. Leave it on <b>as the printer says</b> unless you know the roll is different.</p>
-        </details>` : ""}
-      ${(!off && mode === "computer" && !here && answered) ? `<p class="what" style="margin-top:8px">It prints on <b>${esc(r.printer || "a printer")}</b> at <b>${esc(agentName(r.agent))}</b>. Press <b>On</b> to move it to this computer.</p>` : ""}
-      ${(!off && mode === "computer" && !answered) ? `<p class="what" style="margin-top:8px">Nobody has chosen a printer for this yet — their screens say <b>“no printer chosen”</b> rather than going quiet.</p>` : ""}
-      ${(!off && mode === "screen") ? `<p class="what" style="margin-top:8px">Printed by that screen, on whatever printer the machine is set to.</p>` : ""}
+      ${!anyPrinters ? `<p class="what" style="margin-top:8px">Set this computer up above first — the printers in this list come from it.</p>` : ""}
       ${off ? `<p class="what" style="margin-top:8px">${esc(kind === "kot"
           ? "No slip comes out by itself. Orders still appear on the kitchen screen, and this is the same switch as “Kitchen slips print by themselves” at the top."
           : "No printer does it silently — the ordinary print window opens for whoever presses Print.")}</p>` : ""}
-      `}
     </div>`;
   };
-  const step3 = `<div class="card"><h3>3 · The three papers</h3>
+
+  // THE THREE PAPERS EXIST ONLY IN COMPUTER MODE.
+  // In screen mode there is nothing to answer here: one person's screen prints the KITCHEN TICKETS
+  // and the other two papers are printed by whoever presses Print, which is what a restaurant with
+  // no helper has always done (owner, 2026-08-29). Three lines saying "on" would be three controls
+  // that change nothing.
+  const step3 = mode !== "computer" ? "" : `<div class="card"><h3>4 · What does the helper print?</h3>
     <p class="muted" style="font-size:13px;margin:0 0 4px;line-height:1.5">
-      ${mode === "computer"
-        ? "Three lines, because this app prints three pieces of paper. Each one just needs a printer — or “nobody”."
-        : "Three lines, because this app prints three pieces of paper. Each one is simply on, or “nobody”."}
+      The papers the helper takes come out on their own, with no window. Anything left on <b>normal</b>
+      prints the way it always has: a window opens when somebody taps Print.
     </p>
     ${(B.kinds || ["kot", "bill", "banquet"]).map(line).join("")}
   </div>`;
@@ -13687,7 +14004,10 @@ function formPrinting(s) {
   const skAge = !sk.oldestMs ? "" : Number(sk.oldestMs) < 60000 ? "under a minute"
     : Number(sk.oldestMs) < 3600000 ? Math.round(Number(sk.oldestMs) / 60000) + " minutes"
     : Math.round(Number(sk.oldestMs) / 3600000) + " hours";
-  const step4 = `<div class="card"><h3>${esc(STEP.four || "4 · What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
+  // Numbered by what came BEFORE it: choosing a computer adds a step that choosing a screen does not,
+  // so this is 5 one way and 4 the other. The admin console numbers it the same way, from the same
+  // rule, because two boards that number one setup differently are two setups to learn.
+  const step4 = `<div class="card"><h3>${mode === "computer" ? "5" : "4"} · ${esc(STEP.four || "What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px">
       Nothing here is a guess: a job says <b>printed</b> only after the printer confirmed it.
     </p>
@@ -13714,19 +14034,11 @@ function formPrinting(s) {
     <div style="margin-top:10px"><button type="button" class="btn" data-pw="reload">Refresh</button></div>
   </div>`;
 
-  const guide = `<div class="card"><h3>📖 The written guide, with pictures of every step</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
-      Opens as its own page — every step for <b>Windows</b>, a <b>Mac</b> and <b>Linux</b>: plugging the
-      printer in, the paper settings, what each setting does, a what-went-wrong table, and which devices
-      can never be the printer. It has a button to save it as a PDF and take it to the shop.
-    </p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a class="btn primary" href="${PRINT_SETUP_URL}" target="_blank" rel="noopener">📖 Open the guide</a>
-      <a class="btn" href="${PRINT_SETUP_URL}#windows" target="_blank" rel="noopener">🪟 Windows</a>
-      <a class="btn" href="${PRINT_SETUP_URL}#mac" target="_blank" rel="noopener">🍎 Mac</a>
-      <a class="btn" href="${PRINT_SETUP_URL}#linux" target="_blank" rel="noopener">🐧 Linux</a>
-    </div>
-  </div>`;
+  // THE GUIDE CARD IS GONE (owner, 2026-08-29). Setting a printer up is the admin's job on the
+  // Printing screen, which carries the file and the five steps beside the thing they apply to. A
+  // second copy of "how to print" in the restaurant's own settings was the old model's leftover:
+  // it explained a setup this panel can no longer perform, in different words from the board above.
+  const guide = "";
 
   return step1 + step2mode + step2setup + step3 + step4 + guide;
 }
@@ -13738,16 +14050,15 @@ function formPrinting(s) {
 // by another window is exactly the situation the owner reported, and a print that does not happen is
 // reported failed and requeued rather than lost.
 let printPassBusy = false;
+// One automatic claim per page load. A screen that cannot take the printer (another live screen has
+// it) must not hammer the endpoint every poll.
+let stationClaimTried = false;
 async function managerPrintPass() {
   if (printPassBusy) return;
-  // A device that has said NO never asks the server anything. A device that has not answered yet asks
-  // ONCE (so the strip can appear at all) and prints nothing until it is answered.
-  const ans = printHereAnswer();
-  // A device that has said NO never PRINTS — but it still has to be able to SAY where the paper
-  // comes out, or the Printing screen on the counter machine would show the old "which screen
-  // prints?" question while a computer was quietly doing the job (mig 341). So it asks ONCE, keeps
-  // the answer for the display, and then stops asking. One request, not a poll.
-  if (ans === "off" && printTargetSays) return;
+  // NO PER-DEVICE OPT-IN ANY MORE. This used to read a localStorage answer to "should this screen
+  // print?" and stay silent until somebody tapped yes. That question belongs to the Printing board
+  // now — the admin names one person — so a screen that waits to be tapped is simply a printer that
+  // never prints. The server's `off` is the only gate.
   printPassBusy = true;
   try {
     const r = await api("GET", "/print-jobs/pending");
@@ -13759,6 +14070,21 @@ async function managerPrintPass() {
     // printBanquetBill() read this to decide whether to send the job to a computer or to open the
     // window as they always have.
     printOwners = (r && r.helpers) || printOwners;
+    // CLAIM IT, DO NOT ASK FOR IT. The admin named this screen on the Printing board; if no live
+    // station holds the printer, this one takes it silently. Only when the server says this screen
+    // may print (`!r.off`) — every other screen leaves it alone, so two screens never race.
+    // A PHONE MUST NEVER CLAIM A TICKET. This was the point of the old per-device question, and the
+    // danger did not go away when the question did: the manager panel is opened on phones, and a
+    // phone that claims a ticket drops it into a print dialog nobody looks at while the kitchen gets
+    // no paper. The admin's choice names a PERSON, and that person may well open their phone.
+    // So the mechanism changes and the rule does not: a COARSE pointer (touch, no mouse) never
+    // auto-claims. A real computer with a printer attached does.
+    const looksLikeAComputer = !(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    if (r && !r.off && looksLikeAComputer && r.station && !r.station.mine && (!r.station.active || r.station.stale) && !stationClaimTried) {
+      stationClaimTried = true;                       // once per load: a failed claim must not loop
+      try { const t = await api("POST", "/print-station/take", {}); if (t && t.station) says.station = t.station; }
+      catch { /* the next pass tries again after a reload — never a retry storm */ }
+    }
     const stationKey = (v) => v && v.station && v.station.active ? `${v.station.active.device_id}:${v.station.mine}:${v.station.stale}` : String(!!(v && v.station));
     // A helper appearing or going quiet must repaint too, or the floor strip keeps yesterday's answer.
     const helperKey = (v) => v && v.helper && v.helper.owned ? `${v.helper.agent}:${v.helper.printer}:${v.helper.connected}` : "none";
@@ -13766,8 +14092,14 @@ async function managerPrintPass() {
       || stationKey(printTargetSays) !== stationKey(says) || helperKey(printTargetSays) !== helperKey(says);
     printTargetSays = says;
     if (changed && state.tab === "tables") renderEditor();   // the question appears (or goes away)
-    if (!says.mayPrint || ans !== "on") return;              // not allowed, or not answered yet (a
-                                                            // helper-owned restaurant lands here)
+    // THE SERVER'S ANSWER IS THE ONLY ONE. `ans` used to be this browser's own yes/no to "should
+    // this screen print?", and when that opt-in was deleted this line was left reading it — an
+    // undeclared name, so the whole pass threw and EVERY screen-mode ticket stayed queued for ever.
+    // Nothing on screen said so: the strip was right, the board was right, the server offered the
+    // job, and the panel silently dropped it. Caught by running two real Chromes and watching a real
+    // order fail to print (owner, 2026-08-29). A deletion is not finished until the things that read
+    // the deleted thing are gone too.
+    if (!says.mayPrint) return;                              // a helper-owned restaurant lands here
     // ONE SCREEN PRINTS (mig 338). A live station elsewhere means this screen shows "printing happens
     // there · print here instead" and takes NOTHING — the server would refuse the claim anyway; not
     // asking is what stops two screens fighting over every ticket.
@@ -13821,93 +14153,19 @@ function notePrintTroubleHere() {
   toast("A kitchen ticket wouldn't print on this screen — check the printer.", "err");
 }
 
-// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
-// it: equal N-way, custom amounts, or by dish (assign each dish line to a person; each
-// person's share scales to the real due, so tax + discount split proportionally). The
-// server re-computes the due and refuses shares that don't add up — this UI can't
-// under- or over-collect. Replaces the old share CALCULATOR when the KOT ladder is on.
-async function openSplitSettle(t) {
-  document.querySelector(".splitsettle-overlay")?.remove();
-  // A merged party splits ITS WHOLE BILL — one table's own orders would quietly settle half
-  // a joint bill (the same class of bug as the half-party bill preview, owner 2026-08-03).
-  await ensurePartySlices(t); // every member table's orders, current, before money is divided
-  const payable = partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received");
-  if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", "err"); return; }
-  const due = billMath(payable).total;
-  const METHODS = ["UPI", "Cash", "Card", "Other"];
-  let mode = "equal", n = 2;
-  // By-dish state: every dish line (qty-priced) starts on person 1; tapping cycles 1→2→…→N.
-  const dishes = [];
-  payable.forEach((o) => orderItemRows(o).forEach((r) => dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
-  const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
-  const methodSel = (i, v) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === (v || "Cash") ? " selected" : ""}>${m}</option>`).join("")}</select>`;
-  const wrap = el(`<div class="sx-modal-overlay splitsettle-overlay"><div class="sx-modal" style="max-width:460px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split ${esc(tileFace(t))}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body" style="padding:12px 14px 14px">
-      <div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
-        <button class="btn ss-tab" data-mode="equal">Equal</button>
-        <button class="btn ss-tab" data-mode="custom">Custom</button>
-        <button class="btn ss-tab" data-mode="dish">By dish</button>
-      </div>
-      <div class="ss-body"></div>
-      <div class="ss-sum muted small" style="margin:10px 0 8px"></div>
-      <button class="btn primary ss-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>
-    </div></div></div>`);
-  document.body.appendChild(wrap);
-  const closeM = () => wrap.remove();
-  wrap.querySelector(".tbl-modal-close").onclick = closeM;
-  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
-  const bodyEl = wrap.querySelector(".ss-body"), sumEl = wrap.querySelector(".ss-sum");
-  // Equal shares that sum EXACTLY to the due (last share absorbs the rounding).
-  const equalLegs = () => { const base = Math.floor((due / n) * 100) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
-  const personAmounts = () => { const per = Array.from({ length: n }, () => 0); dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; }); const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100); const drift = Math.round((due - scaled.reduce((s, x) => s + x, 0)) * 100) / 100; scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100; return scaled; };
-  const legRow = (i, amount, editable, label) => `<div class="ss-leg" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <span class="muted" style="min-width:64px">${label || `Person ${i + 1}`}</span>
-      <input type="number" step="0.01" min="0" class="ss-amt" data-leg="${i}" value="${amount.toFixed(2)}" ${editable ? "" : "readonly"} style="width:100px;padding:8px;border-radius:8px">
-      ${methodSel(i)}
-    </div>`;
-  const nStepper = () => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span class="muted small">Split between</span>
-      <button class="btn ss-n" data-d="-1">−</button><b class="ss-nval">${n}</b><button class="btn ss-n" data-d="1">＋</button><span class="muted small">people</span></div>`;
-  const refreshSum = () => {
-    const amts = [...bodyEl.querySelectorAll(".ss-amt")].map((x) => Number(x.value) || 0);
-    const s = amts.reduce((a, b) => a + b, 0);
-    const diff = Math.round((s - due) * 100) / 100;
-    sumEl.innerHTML = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
-    sumEl.style.color = diff === 0 ? "var(--green)" : "var(--red)";
-  };
-  const render = () => {
-    wrap.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
-    if (mode === "equal") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, false)).join("");
-    else if (mode === "custom") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, true)).join("");
-    else bodyEl.innerHTML = nStepper() +
-      `<div class="muted small" style="margin-bottom:6px">Tap a dish to hand it to the next person:</div>` +
-      dishes.map((d, i) => `<button class="btn ss-dish" data-dish="${i}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:4px"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("") +
-      `<div style="margin-top:10px">${personAmounts().map((a, i) => legRow(i, a, false)).join("")}</div>`;
-    bodyEl.querySelectorAll(".ss-n").forEach((b) => (b.onclick = () => { n = Math.max(2, Math.min(12, n + Number(b.dataset.d))); dishes.forEach((d) => { if (d.person > n) d.person = 1; }); render(); }));
-    bodyEl.querySelectorAll(".ss-dish").forEach((b) => (b.onclick = () => { const d = dishes[Number(b.dataset.dish)]; d.person = d.person >= n ? 1 : d.person + 1; render(); }));
-    bodyEl.querySelectorAll(".ss-amt").forEach((x) => (x.oninput = refreshSum));
-    refreshSum();
-  };
-  wrap.querySelectorAll(".ss-tab").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; render(); }));
-  render();
-  wrap.querySelector(".ss-go").onclick = async () => {
-    const amts = [...bodyEl.querySelectorAll(".ss-amt")];
-    const splits = amts.map((x) => ({ amount: Number(x.value) || 0, method: bodyEl.querySelector(`.ss-method[data-leg="${x.dataset.leg}"]`).value }));
-    const s = splits.reduce((a, b) => a + b.amount, 0);
-    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inr(due), "err"); return; }
-    if (splits.some((x) => !(x.amount > 0))) { toast("Every share needs an amount above zero.", "err"); return; }
-    closeM();
-    try {
-      const r = await api("POST", `/tables/${t}/pay-split`, { splits });
-      // A QUEUED WRITE HAS NO COUNT (T5 sweep #7, 2026-08-22) — this said "Paid in 3 parts 💳 —
-      // undefined orders settled" with no signal. The sibling split path a few hundred lines
-      // below already checks `r.queued`; this one was the odd one out.
-      if (wasQueued(r)) { toast(`Saved on this device ✓ — the ${splits.length} parts will settle the moment you're back online.`, "ok"); await pollTables([String(t)]); return; }
-      toast(`Paid in ${splits.length} parts 💳 — ${r.count} order${r.count === 1 ? "" : "s"} settled`, "ok");
-      await pollTables([String(t)]);
-    } catch (e) { toast("Couldn't split-settle: " + e.message, "err"); }
-  };
-}
+// SPLIT-SETTLE'S SECOND SCREEN IS GONE (owner, 2026-08-29: "I want all the options for both the
+// interface should be similar", and "it should not look like a mess").
+//
+// openSplitSettle() used to open a SEPARATE overlay here — Equal / Custom / By dish — while the
+// pay sheet's own split offered an even share and 🧾 By order, and the tablet offered all four on
+// one screen. Three screens, three different answers to "how do I split this bill?", and the two
+// manager ones could not even be reached from each other. The pay sheet's split now carries all
+// four ways (see openPaymentMethodModal), so this one was a strictly smaller copy of it.
+//
+// Everything that used to open it — the table-ops menu, the ⋯ drill-down and the 🍴 Split button
+// on the table sheet — opens the ONE split screen instead, via markTablePaid(t, { openSplit: true }).
+// Do not reintroduce a second split screen in this panel: `verify:split-payment` already refuses
+// one on the tablet, and now refuses one here too.
 
 // Move ONE dish line to another table — two steps in one modal: pick the dish
 // (grouped under its KOT), then pick the target table. The dish lands under a fresh
@@ -14408,7 +14666,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
   // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
   // legs, mig 176); with it off it stays the old even-share calculator — no regression.
-  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? openSplitSettle(t) : openSplitBill(parseFloat(b.dataset.split) || 0))));
+  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? markTablePaid(t, { openSplit: true }) : openSplitBill(parseFloat(b.dataset.split) || 0))));
   // MERGED CHILD: jump to the table that holds the bill, or split them apart.
   root.querySelectorAll("[data-goto-parent]").forEach((b) => (b.onclick = () => {
     const parent = b.dataset.gotoParent;
@@ -17177,11 +17435,12 @@ function bindBanquet() {
 function printBanquetBill(b, lines) {
   // A computer may own the banquet sheets too — usually the big paper printer, which is exactly the
   // one nobody wants to pick out of a print dialog every time (mig 341).
-  const bqOwner = printOwner("banquet");
-  if (bqOwner && b && b.id) {
+  // The same rule as the bill above: the SERVER decides whether a computer owns this paper, not a
+  // cached copy of an answer from another poll.
+  if (b && b.id) {
     api("POST", "/print/send", { kind: "banquet", billId: b.id })
       .then((r) => {
-        if (r && r.queued) { toast(r.note || ("Sent to " + bqOwner.printer), "ok"); return; }
+        if (r && r.queued) { toast(r.note || ("Sent to " + (r.printer || "the printer")), "ok"); return; }
         if (r && r.adminView) toast("Admin view — showing the sheet here, not printing at the restaurant.", "ok");
         openBanquetWindow(b, lines);
       })

@@ -28,6 +28,7 @@
 // every normal request already updates.
 import { chromium } from "playwright";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +42,9 @@ if (!BASE || !args.includes("--base")) {
     "  npm run verify:sw-version -- --base http://localhost:4204\n");
   process.exit(2);
 }
+// …and having a base is not the same as something answering on it (see appUp.mjs): a stopped
+// server used to come back as a Playwright stack trace instead of one plain sentence.
+await requireUp(BASE, "the offline-layer version chain");
 
 let pass = 0, fail = 0;
 const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };

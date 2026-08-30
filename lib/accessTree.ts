@@ -523,18 +523,16 @@ export const SECTIONS: Section[] = [
           },
         ],
       },
-      // THE TWO BOARDS SAY THE SAME THING (owner, 2026-08-26: "board should be sync. Right now it's
-      // not"). This row used to be the ONLY printing row on this screen, while the whole of
-      // who-prints-what lived on the Printing menu and appeared nowhere here. Its child now opens that
-      // menu inside this row, so one screen answers both questions — is printing allowed, and where
-      // does the paper actually come out.
-      { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
-        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", preview: "kot",
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. WHERE they come out is the row below: a computer running the print helper, or a named screen. The printer check is inside, and Preview at the top right shows the ticket itself — the very same one the manager panel and the kitchen board print, not a mock-up of it.",
-        children: [
-          { id: "print_where", name: "Which printer gets which paper", bind: { t: "none" }, panel: "printing",
-            what: "The printing setup for this restaurant: the computers that may print (each running the small helper program), and one line per kind of paper — kitchen slips, bills, banquet sheets, parcel labels — saying which printer it comes out of, on which machine, at which paper size, with an optional backup printer. A line can name a SCREEN instead of a computer: which panel, which person, and even which PC. Held by Aevidine; the restaurant sees all of it, read-only, on the owner and manager screens. Who MAY be a printing screen is the “May be the printer” row in each person's own permissions." },
-        ] },
+      // THE PRINTING SETUP IS NOT HERE ANY MORE (owner, 2026-08-29): *"in the middle of thing, you
+      // tell me to go to the access and permission… remove it completely from the access and
+      // permission. Now printing has a new menu, so all the settings of the printing will be there."*
+      //
+      // A `print_where` child used to embed the whole Printing board inside this row, so the same
+      // setup existed in two places and he was sent from one to the other halfway through a job.
+      // The row above stays because it is the ENTITLEMENT — the same question every other feature
+      // answers here, "is this on for this restaurant" — and it is the very same switch as step 1 of
+      // the Printing menu. Everything else about printing lives on Printing.
+      // Do not re-embed the board here.
       // ⚡ QO/P — the floor's quick-order screen (owner, 2026-08-02). A main feature, not an
       // extra: it is how a whole order gets punched in at speed. Default ON (mig 257) because
       // it REPLACED the 🥡 New Parcel button every floor already had — shipping it off would

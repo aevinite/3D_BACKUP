@@ -206,7 +206,7 @@ const ownerJobs = [
 ];
 const panelJobs = {
   manager: [{ id: "panel_manager", pick: `return [null,null];`, label: "Staff apps  ›  Manager panel (the control room)" }],
-  kitchen: [{ id: "panel_kitchen", pick: `return [null,null];`, label: "Staff apps  ›  Kitchen display (New → Cooking → Ready)" }, { id: "auto_print_kot", pick: `const s=document.querySelector('.reprint')||document.querySelector('button');return [s,s];`, label: "Kitchen display  ›  ticket 🖨 — Auto-print kitchen tickets (admin hardware setting)" }],
+  kitchen: [{ id: "panel_kitchen", pick: `return [null,null];`, label: "Staff apps  ›  Kitchen display (New → Cooking → Ready)" }],
   tablet: [{ id: "panel_tablet", pick: `return [null,null];`, label: "Staff apps  ›  Waiter tablet (floor + take order)" }],
   owner: [{ id: "panel_owner", pick: `return [null,null];`, label: "Staff apps  ›  Owner panel (dashboard, staff, reports)" }],
 };

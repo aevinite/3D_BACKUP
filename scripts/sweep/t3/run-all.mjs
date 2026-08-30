@@ -2,6 +2,13 @@
 // RE-RUN TERMINAL 3'S 500 PHASES — one command.
 //
 //   npm run sweep:t3          # needs a dev server on 4103 (npm run dev -- -p 4103)
+//   T3_BASE=http://localhost:4203 npm run sweep:t3     # …or on whatever port is proved YOURS
+//
+// PORT. Every sweep terminal is given its own port, and 4103 was sweep #6's. A hard-coded base URL
+// meant a later run either measured NOTHING (nothing answers there) or, worse, measured ANOTHER
+// live session's dev server and reported its state as this branch's. So all four runners now read
+// `T3_BASE` and fall back to 4103. Set it to the port you have proved is yours
+// (CLAUDE.md: "verify on a port you PROVED is yours").
 //
 // The ledger (.claude/sweep/LEDGER/T3.md) is the permanent record of WHAT is checked; these
 // runners are the permanent record of HOW. They were scratch on the first sweep and had to be
@@ -50,11 +57,22 @@ const run = (label, file, args = []) => {
 
 const results = [];
 results.push(["blocks 1+2 — the static rules", run("BLOCKS 1+2 — the static rules", join(root, "scripts/verify-guest-doors.mjs"))]);
+// Sweep 7's own 300 code-reading rows, P16101..P16400. Same idea as the line above: the ledger says
+// WHAT is checked, this says HOW, so a re-run never has to be rebuilt from the ledger's prose.
+results.push(["sweep 7 block A — the 300 code-reading rows", run("SWEEP 7 BLOCK A — the 300 code-reading rows (P16101-P16400)", join(here, "s7-checks.mjs"), ["--quiet"])]);
+// The SECOND pass's 330 code-reading rows, P41001..P41330 — the libraries underneath, the dish
+// popup and all seventeen screens of the table gate.
+results.push(["sweep 7 block A2 — the 330 second-pass code rows", run("SWEEP 7 BLOCK A2 — the second pass's code rows (P41001-P41330)", join(here, "s7b-checks.mjs"), ["--quiet"])]);
 results.push(["block 3a — the basket, the doors, no signal", run("BLOCK 3a — the basket, the doors, no signal", join(here, "basket-and-doors.mjs"))]);
 await cool("the end-to-end order block");
 results.push(["block 3b — the whole journey, end to end", run("BLOCK 3b — the whole journey, end to end", join(here, "order-end-to-end.mjs"))]);
 // Block 4 only browses and screenshots — no order, so it needs no cooldown and doubles as one.
 results.push(["block 4 — the captures + the bottom-corner hit-test", run("BLOCK 4 — the captures + the hit-test", join(here, "screens.mjs"))]);
+// Sweep 7's own live rows, P16401..P16460. Placed here for the same reason block 4 is: it only
+// browses, goes offline, and reads — it places no order, so it needs no cooldown.
+results.push(["sweep 7 block B — the 62 live rows", run("SWEEP 7 BLOCK B — the live rows (P16401-P16460)", join(here, "s7-live.mjs"))]);
+// …and the second pass's 70 live rows, P41331..P41400. Browses and reads only; no order, no cooldown.
+results.push(["sweep 7 block B2 — the 70 second-pass live rows", run("SWEEP 7 BLOCK B2 — the second pass's live rows (P41331-P41400)", join(here, "s7b-live.mjs"))]);
 await cool("the cross-panel block — two phones joining and another order, the heaviest of the five", LONG_COOLDOWN_MS);
 results.push(["block 5 — tracing a change across panels", run("BLOCK 5 — tracing a change across panels", join(here, "across-panels.mjs"))]);
 
@@ -65,7 +83,11 @@ console.log(bad
   ? `\n❌ ${bad} block(s) failed — read the rows above, then the ledger row with the same id.`
   : "\n✅ every block green. Block 6 is judgment — read it in .claude/sweep/LEDGER/T3.md.");
 console.log("Screenshots must still be OPENED AND LOOKED AT — a green run is not evidence the screen is right.");
-if (!results[4][1]) {
+// BY NAME, NOT BY POSITION. This was `results[4][1]`, which meant "block 5" only for as long as
+// nobody inserted a block before it — and sweep 7 inserted two, which silently pointed this note at
+// block 4 instead. A positional index into a list other people append to is a bug waiting to happen.
+const block5 = results.find(([name]) => name.startsWith("block 5"));
+if (block5 && !block5[1]) {
   console.log("\nNOTE ON BLOCK 5: it drives TWO phones, two joins, an order, a table rename and a table");
   console.log("close on a restaurant up to ten other terminals are also driving — whose tables carry");
   console.log("sessions left open since early August. It has failed three times on that contention and");
