@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **155** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **156** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 154 names in their head, so in practice a person runs none of them, or reaches for
+can hold 156 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -221,6 +221,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | you touched | run | needs | writes |
 |---|---|---|---|
 | any `.js` or `.css` under `public/panels/` | `verify:panel-cache` ← the `?v=` must be the file's own content hash, or staff run a weeks-old panel | nothing | no |
+| ↳ anything that ASKS a staff member something, or tells them a save failed, in the shared panel files | `verify:panel-dialogs` ← a staff panel never uses the browser's own `alert`/`confirm`/`prompt`: a kiosk browser, a webview and Chrome after "prevent this page from creating additional dialogs" all answer confirm() false and show alert() to nobody, so the tap vanishes in silence. The question is a card in the panel (`LFH_ASK`), registered with the back-button manager, both answers a finger's size, and a scrim tap or a BACK press is always NO | nothing | no |
 | any of the SHARED panel files every staff panel loads (`public/panels/*.js` — the write queue, the connection pill, the back-button manager, the undo card, the guest bell, the settings drawer, the issue modal, the theme, the error log) | `verify:panel-plumbing` | nothing | no |
 | …and AFTER DEPLOYING any of those shared panel files | `verify:panel-plumbing-live -- --base <url>` ← runs the same checks against the bytes the SITE is really serving, and prints the served content hash beside the local one. A green guard on a laptop proves the source is right, not that the site is: the panels are static assets behind a cache `vercel.json` lets go stale for up to 24h, and a device has twice run a weeks-old panel whose bug was already fixed. GET requests for static files only — signs in to nothing, writes nothing | app running | no |
 | moved, renamed or deleted a panel HELPER function | `verify:panel-scope` ← a helper must exist where the code that calls it can see it; a panel that throws on load is a blank screen for staff | nothing | no |

@@ -32,19 +32,44 @@ function read(f) {
 }
 
 const fails = [];
+
+// EVERY FILE A CHECK NAMES IS READ, BECAUSE A CHECK NAMED IT (T9, second sweep of #7, 2026-08-30).
+//
+// This used to be a hand-written list of eight files, and `has()` returned SILENTLY when a file was
+// not in it. The checks below name thirteen. SIXTEEN of them therefore asserted nothing at all,
+// for weeks, while this guard printed "✓ all checks pass" — and they failed in two different ways:
+//
+//   · realtime.js was never in the list, so all TEN of its checks were dead: the memoised boot,
+//     the self-hosted client, the tenant-scoped socket, the worker heartbeat, the idle channel
+//     drop, catchUp's backoff and its socket-healthy guard. Every promise this guard makes about
+//     live updates was a promise it was not checking.
+//   · errlog.js and theme.js WERE loaded — by an ad-hoc `files[x] = read(x)` further down the
+//     file, placed after some of their own checks. The four errlog checks and two theme checks
+//     above that line ran against `undefined` and returned. Four top-ups like that is what made
+//     the list look complete while it was not.
+//
+// A dead check looks exactly like a passing one, which is why verify:guards-alive exists; it did
+// not catch this because the guard as a WHOLE was very much alive, and only part of it was dead.
+//
+// Reading on demand removes the list, so a check for a new file cannot silently do nothing. A file
+// that is genuinely absent (a checkout mid-rebase) is still forgiven — but it is SAID, once, which
+// is the behaviour the old list only ever gave its eight.
 const files = {};
-for (const f of ["outbox.js", "connbadge.js", "myprofile.js", "maint.js", "undobar.js",
-  "issue-raise.js", "guestbell.js", "editor/inventory.js"]) {
-  files[f] = read(f);
-  if (files[f] == null) { console.log(`· ${f} not in this checkout — skipping its checks`); }
+const announced = new Set();
+function fileFor(f) {
+  if (!(f in files)) {
+    files[f] = read(f);
+    if (files[f] == null && !announced.has(f)) { announced.add(f); console.log(`· ${f} not in this checkout — skipping its checks`); }
+  }
+  return files[f];
 }
 const has = (f, re, why) => {
-  const s = files[f];
+  const s = fileFor(f);
   if (s == null) return;
   if (!re.test(s)) fails.push(`${f}: ${why}`);
 };
 const hasNot = (f, re, why) => {
-  const s = files[f];
+  const s = fileFor(f);
   if (s == null) return;
   if (re.test(s)) fails.push(`${f}: ${why}`);
 };
@@ -57,7 +82,7 @@ has("outbox.js", /function requeueInOrder\s*\(\s*\)\s*\{[\s\S]{0,200}?\.sort\(/,
   "requeueInOrder() is gone — a retried change would go to the back of the queue again");
 {
   // Both hand-retry entry points, checked inside their own function body.
-  const s = files["outbox.js"];
+  const s = fileFor("outbox.js");
   for (const fn of ["async function retryFailed", "async function retryOne"]) {
     if (!s) break;
     const at = s.indexOf(fn);
@@ -150,7 +175,6 @@ has("issue-raise.js", /function doClose\(\) \{[\s\S]{0,320}?rec\.state === "reco
   "hardware Back throws away a voice note being recorded again (it must refuse AND re-arm its layer)");
 
 // ── fitnums.js — a bill's figure is the law, and this file must not feed itself ────────────────
-files["fitnums.js"] = read("fitnums.js");
 has("fitnums.js", /var EXACT_SEL = /,
   "the exact-money gate is gone — an order total of ₹1,23,45,678 would render as '₹1.2 Cr'");
 for (const sel of ["bill-amt", "ks-val", "ordtotal", "ctotal", "ord-total", "data-fit-exact"]) {
@@ -217,8 +241,7 @@ has("issue-raise.js", /prefers-reduced-motion:reduce\)\{[\s\S]{0,200}?\.lfhir-do
 // from scrollLeft + clientWidth. Measured with 40px of parent padding: "→ 7 more" where six were
 // off the edge, and "→ 1 more" at the end of the row with nothing left.
 {
-  files["swipehint.js"] = read("swipehint.js");
-  has("swipehint.js", /function hiddenAtEnd\(row\) \{[\s\S]{0,200}?getBoundingClientRect\(\)\.right/,
+    has("swipehint.js", /function hiddenAtEnd\(row\) \{[\s\S]{0,200}?getBoundingClientRect\(\)\.right/,
     "the chip's count is back on offsetLeft, which is measured from a different box than the row's own scroll position");
   hasNot("swipehint.js", /c\.offsetLeft \+ c\.offsetWidth > right/,
     "hiddenAtEnd() compares offsetLeft against a scroll coordinate again — the count drifts by however far the row sits inside its parent");
@@ -230,7 +253,7 @@ has("issue-raise.js", /prefers-reduced-motion:reduce\)\{[\s\S]{0,200}?\.lfhir-do
 // said nothing, and then came back with every figure still in it on the next read. Every write in
 // here must either surface its refusal or be a deliberate best-effort read.
 {
-  const src = files["editor/inventory.js"];
+  const src = fileFor("editor/inventory.js");
   if (src) {
     // Each `catch {}` / `catch (e) {}` that sits on a POST is a swallowed refusal.
     const swallowed = [];
@@ -317,6 +340,53 @@ has("outbox.js", /failed\.forEach\(function \(f\) \{ if \(f\.retryable !== false
 // realtime: the connection budget and the no-amplifier rule
 has("realtime.js", /if \(sbPromise === p\) sbPromise = null/, "a failed realtime boot is remembered forever again");
 has("realtime.js", /import\("\/vendor\/supabase\.js"\)/, "the realtime client is back on a public CDN a restaurant's wifi can block");
+// A SERVER THAT ACCEPTS AND NEVER ANSWERS PARKED LIVE UPDATES FOR EVER (T9, second sweep of #7).
+// The line above handles a REFUSED boot: the rejection drops the memo and the next wake re-boots.
+// A HANG is a different animal — fetch has no timeout of its own, so the boot promise stayed
+// pending for the life of the page, and because it is memoised every later getClient() (including
+// the ones behind "came back to the panel" and "online") was handed that same pending promise and
+// made no request at all. Driven against a route that accepts and never replies: ONE request in
+// the whole run, "Connecting…" still on screen twelve seconds later, and a wake changing nothing.
+// The deadline REJECTS, which is what lets the memo-drop above do its job.
+has("realtime.js", /signal:\s*deadline\(RT_CONFIG_DEADLINE_MS\)/, "the read that boots live updates lost its deadline — a server that hangs parks the panel on \"Connecting…\" for ever, with no retry");
+has("realtime.js", /const RT_CONFIG_DEADLINE_MS = \d+/, "the live-update boot deadline is no longer a named constant");
+has("realtime.js", /AbortSignal\.timeout/, "the boot deadline no longer uses the abort signal the rest of this app uses");
+
+// maint.js — THE SETTINGS DRAWER'S OWN REQUESTS HAVE THE SAME DEADLINE (T9, second sweep of #7).
+// Every fetch in the drawer was open-ended. A server that accepts and never answers left the
+// guest-menu button on "…" for the whole session, and a hung WRITE left the switch pointing the
+// wrong way with nothing said — the silent tap this file had just been fixed for in the other
+// direction. Driven with a route that accepts and never replies: the read now says "Couldn't read
+// the guest menu — tap to check again", and the write says the guest menu has NOT changed.
+has("maint.js", /const PANEL_DEADLINE_MS = \d+/, "the drawer's request deadline is no longer a named constant");
+has("maint.js", /AbortSignal\.timeout/, "the drawer's deadline no longer uses the abort signal the rest of this app uses");
+{
+  // Every fetch in this file carries the signal — a new one added without it is the fault coming back.
+  // Comments stripped first: this file DESCRIBES its old raw fetch()es in prose (deliberately — an
+  // obituary is how the next person learns why they changed), and the first pass counted the word
+  // "fetch()" in a comment as a request with no deadline.
+  const src = (fileFor("maint.js") || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  if (src) {
+    // A fetch call is read to its OWN closing bracket, counting brackets — the first pass used
+    // /fetch\("…"[^)]*\)/ and stopped at the ) inside JSON.stringify({...}), so three calls that
+    // DO carry a deadline were reported as bare. A guard that invents a failure protects nothing.
+    const calls = [];
+    for (let i = src.indexOf("fetch("); i >= 0; i = src.indexOf("fetch(", i + 1)) {
+      let depth = 0, j = i + 5;
+      for (; j < src.length; j++) {
+        if (src[j] === "(") depth++;
+        else if (src[j] === ")") { depth--; if (depth === 0) break; }
+      }
+      calls.push(src.slice(i, j + 1));
+    }
+    const bare = calls.filter((c) => !/signal:\s*deadline\(/.test(c));
+    if (bare.length) fails.push(`maint.js: ${bare.length} of ${calls.length} request(s) have no deadline — a server that hangs leaves the person watching a control that never resolves: ${bare[0].replace(/\s+/g, " ").slice(0, 80)}`);
+  }
+}
+// …and a deadline that fires must speak English. AbortSignal.timeout rejects with a DOMException
+// reading "signal timed out", and the manager saw exactly that on the first pass of this fix.
+has("maint.js", /name === "TimeoutError" \|\| e\.name === "AbortError"/, "a request that ran out of time reports the browser's own words to the manager again (\"signal timed out\")");
+has("myprofile.js", /signal:\s*sig/, "the profile fallback read lost its deadline — \"My profile\" would show Loading… for the whole session");
 has("realtime.js", /topic_rid=eq\./, "the socket is no longer scoped server-side to this restaurant (every tenant's traffic again)");
 has("realtime.js", /worker: true/, "the socket heartbeat left the worker — a backgrounded tablet drops live updates");
 has("realtime.js", /const IDLE_MS = 120000/, "a hidden tab no longer drops its channels");
@@ -370,8 +440,6 @@ has("editor/inventory.js", /if \(inFlight\.has\(key\)\) throw new Error/, "the i
 has("editor/inventory.js", /document\.querySelector\("\.inv-pop, #invPop"\)/, "the live refresh can repaint over a half-finished count again");
 
 // ── the four the owner asked for on 2026-08-18 ────────────────────────────────────────────────
-files["errlog.js"] = read("errlog.js");
-files["theme.js"] = read("theme.js");
 
 // 21 · a crash with no signal is kept and delivered later
 has("errlog.js", /var PENDING_KEY = "lfh_errlog_pending"/,

@@ -97,6 +97,7 @@
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:panel-canvas": "node scripts/verify-panel-canvas.mjs",
+    "verify:panel-dialogs": "node scripts/verify-panel-dialogs.mjs",
     "verify:panel-plumbing": "node scripts/verify-panel-plumbing.mjs",
     "verify:panel-scope": "node scripts/verify-panel-scope.mjs",
     "verify:queued-truth": "node scripts/verify-queued-truth.mjs",
