@@ -45,14 +45,33 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
     "Without them a restaurant cannot let its own computer print at all.");
 
   // The console link must be reachable only for the person who can actually open the console.
+  // EVERY branch that the page draws a next-step button on must carry `who`. The page keeps it in
+  // state and only sets it when an answer has one, so a branch that omits it leaves an ADMIN with
+  // the manager's link. The success screen hides this — by then an earlier answer carried it — so
+  // it only shows for a machine that was already linked when the page first opened.
+  {
+    const drawsButton = [...api.matchAll(/return NextResponse\.json\(\{[^}]*\balready:\s*true[^}]*\}\)/g)].map((m) => m[0]);
+    want(drawsButton.length > 0 && drawsButton.every((b) => /\bwho\s*:/.test(b)),
+      "the already-linked answer carries who is asking, so its button can point the right way",
+      "GET /api/pair's already-linked answer does not carry `who`",
+      "app/pair/page.tsx picks that screen's next step with `who === \"admin\"`, and only learns `who`\n      " +
+      "from an answer that carries it. Omit it here and an Aevidine admin is sent to /manager — a\n      " +
+      "restaurant's own panel — instead of the console.");
+  }
+
   // The two halves of the permission rule, restated here because this file is the one that reads
   // the page: verify:print-helper covers the door, nothing covered the screen.
-  want(/tokenIsValid/.test(api) && /managerCan/.test(api) && /print_setup/.test(api),
+  // WORD BOUNDARIES, not substrings. `tokenIsValidX` contains `tokenIsValid`, so renaming the
+  // call away kept this green — proven by breaking it.
+  want(/\btokenIsValid\s*\(/.test(api) && /\bmanagerCan\s*\(/.test(api) && /"print_setup"/.test(api),
     "only the admin, or a manager who may set the printers up, can allow a computer",
     "app/api/pair no longer asks both questions",
     "This is the whole boundary of the handshake: the helper describes itself, but a signed-in human\n      " +
     "decides which restaurant it joins.");
-  want(/who\.kind === "admin" \? String\(body\.rid/.test(api) || /who\.restaurantId/.test(api),
+  // NO `||`. The admin arm of that ternary was enough to keep this green while the STAFF arm was
+  // changed to trust the body — which is the whole thing the check exists to stop. Assert the
+  // staff arm explicitly.
+  want(/who\.kind === "admin" \? String\(body\.rid[^:]*:\s*who\.restaurantId/.test(api),
     "a manager can still only ever adopt a computer into their OWN restaurant",
     "app/api/pair now takes the restaurant from the request body for a staff member too",
     "Trusting the body's rid would let any manager attach a machine to somebody else's shop.");
@@ -146,13 +165,15 @@ const want = (c, good, badMsg, detail) => (c ? ok(good) : bad(badMsg, detail));
 {
   const layout = read("app/layout.tsx");
   const bodyAt = layout.indexOf("<body");
-  const themeAt = layout.indexOf("lfh_theme");
+  // `lfh_theme_moved` contains `lfh_theme`. Match the exact quoted key the guest toggle writes.
+  const themeAt = layout.search(/['"`]lfh_theme['"`]/);
   want(themeAt > -1 && (bodyAt === -1 || themeAt < bodyAt),
     "the saved light/dark choice is still applied before the first paint",
     "app/layout.tsx's theme boot script no longer runs before <body>",
     "Moving it later brings back the white flash on every load for anyone using light mode — and an\n      " +
     "unstyled flash is a CSS-DELIVERY fault, not a styling one, so it is easy to chase in the wrong file.");
-  want(/OfflineShell|serviceWorker/.test(layout),
+  // `OfflineShellX` contains `OfflineShell`. Word boundary, and require it to be RENDERED.
+  want(/<OfflineShell[\s/>]/.test(layout) || /\bnavigator\.serviceWorker\b/.test(layout),
     "every surface still registers the offline layer from the root layout",
     "app/layout.tsx no longer registers the service worker",
     "One missing registration is the whole offline layer, on every panel and every guest door.");

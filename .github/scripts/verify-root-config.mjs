@@ -146,7 +146,9 @@ want(/key:\s*"Content-Security-Policy-Report-Only"/.test(NEXT) && !/key:\s*"Cont
     "for brand-new restaurants only, which is the hardest case to notice. 62 of 72 photos were ungranted.");
 }
 
-want(/turbopack:\s*\{[\s\S]{0,200}root:/.test(NEXT),
+// `root:` alone is not enough — `root: undefined` matched the first version of this check and
+// left the workspace root un-pinned. Assert it RESOLVES to something.
+want(/turbopack:\s*\{[\s\S]{0,200}root:\s*path\.(join|resolve)\(/.test(NEXT),
   "the workspace root is still pinned to this folder",
   "next.config.ts no longer pins turbopack.root",
   "A stray package-lock.json in the user's home folder otherwise makes the dev server infer the wrong root, " +
@@ -160,9 +162,14 @@ want(/turbopack:\s*\{[\s\S]{0,200}root:/.test(NEXT),
     `vercel.json serves from ${JSON.stringify(V.regions)}, not ["bom1"]`,
     "Every query would cross a continent and back. The database is in Mumbai.");
   const headers = JSON.stringify(V.headers || []);
-  want(/sw\.js[\s\S]{0,200}must-revalidate/.test(headers) || /must-revalidate/.test(headers),
+  // NO `||` FALLBACK. The first version ended `|| /must-revalidate/.test(headers)`, so ANY other
+  // rule carrying that word kept this green while /sw.js itself was given a year-long cache —
+  // proven by breaking it. Find the /sw.js rule and read ITS header.
+  const swRule = (V.headers || []).find((h) => /sw\.js/.test(h.source || ""));
+  const swCache = (swRule?.headers || []).find((x) => /cache-control/i.test(x.key || ""))?.value || "";
+  want(/must-revalidate/.test(swCache) && /max-age=0/.test(swCache),
     "the service worker is still served must-revalidate, so it can update itself",
-    "vercel.json no longer sends must-revalidate for /sw.js",
+    `vercel.json serves /sw.js with "${swCache || "no cache-control at all"}"`,
     "A cached service worker never updates. Every phone and tablet keeps running the old app, and there is " +
     "no way to push a fix to them.");
   want(/max-age=\d{1,3}\b/.test(headers),

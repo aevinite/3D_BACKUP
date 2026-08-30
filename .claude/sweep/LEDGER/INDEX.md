@@ -33,8 +33,14 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P41501`.**
+**Next free ID: `P42001`.**
 
+> **`P41501`–`P42000` is TAKEN by T29** (docs, tooling, root config and the remainder) for its
+> follow-up 500, on the owner's instruction of 2026-08-30. It was first written at
+> `P35237`–`P35736` and **renumbered on merge**, because T7's own second 500 had claimed that
+> range and filed first — the same collision T16 hit, from the same stale *Next free ID*.
+> T7's claim stands; nothing of theirs moved. Claimed here before this line was committed.
+>
 > **`P41001`–`P41500` is CLAIMED by T3** (the guest basket / table session / placing an order) for its
 > SECOND sweep-#7 pass, on the owner's instruction of 2026-08-30 to re-plan and re-run the 500.
 > Claimed BEFORE a single row was written, which is what the note further down this file asks for
@@ -95,6 +101,8 @@ again. Read those before reporting anything.
 > | T27 · every word on every screen | `P28101`–`P28600` | ✅ 500 written, 500 executed (484 ✅ · 10 ✅ deliberate · 6 ❌→✅ fixed) — plus **the T27 ledger itself landed on main at last**, and all 500 of `P13001`–`P13500` re-run: **ONE REGRESSION** (`P13140` — the Bills-screen rework replaced \"No bills match that search.\" with an empty string inside a box that carries 120px of padding, so a search matching today but not yesterday printed blank nothing under a \"0 bills\" heading), 2 more rows newly red, **42 of the 59 reserved rows CLOSED**, and sweep #6’s biggest ⏭ answered: all six languages photographed, and Arabic right-to-left found to be a written decision rather than a gap. **7 problems fixed, one commit each**, and a new `verify:wording` guard — this territory had none of its own. Owner reviewed 2026-08-28: kept 1/2/4/5/7, **reverted 3** (recorded as R48 — the sentence is unreachable for every role but the admin), **widened 6** to every place "removed" is read, and approved the `verify:rejected` fix (a rejection note could satisfy the "is it beside the code?" check against itself). |
 >
 > | T29 · docs, tooling, root config and the remainder | `P29101`–`P29600` | ✅ 500 written, 500 executed, **500 ✅** — plus all 500 of `P14001`–`P14500` re-run: **NO REGRESSION** (494 ✅ · 6 ⏭ · 0 ❌), 3 rows **filed green in sweep #6 on a claim that was never true** (`P14044` nine documents in no index · `P14466` `next.config.ts` had no guard and no guard-map row · `P14188` a dead owner component), 4 expectations moved, 2 handoffs landed, and the 3 rows still red at the first pass (`P14317`/`P14460`/`P14462`, one fault in T2's file) FIXED on the owner's word. **11 items fixed, one commit each, 3 new CI guards; 2 more fixed then REVERTED on his word, with their guard checks removed in the same commit.** |
+>
+> | T29 · the owner's own follow-up run | `P41501`–`P42000` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌ left as HIS decision). Same territory, fresh block, planned against `origin/main` a5382a40 — which by then carried another session's 612-line rework of the admin Printing screen. **Band M2 (`P41611`–`P41676`) breaks every check in this terminal's own three guards ON PURPOSE — and EIGHT of them did not fire.** Four were real weaknesses (a key that matched `undefined`, two `||` fallbacks that made a check unfalsifiable, three substring matches a rename satisfied) and four were the sabotage being too gentle; all fixed. It also found and fixed one real product fault: an admin opening an ALREADY-LINKED pairing link was sent to a restaurant's own manager panel instead of the console. **Re-run band M2 FIRST — it is the only band that tells a live guard from a decorative one.** Renumbered from `P35237`–`P35736` on merge (T7 had it). |
 >
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
