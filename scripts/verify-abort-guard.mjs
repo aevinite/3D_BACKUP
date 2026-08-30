@@ -133,6 +133,59 @@ existed — a slow read, not a dead one. A protection must never be the thing th
   process.exit(1);
 }
 
+// ── AND EVERY fetch IN lib/ HAS A CEILING AT ALL (owner picked item 18, 2026-08-30) ──────────────
+//
+// Everything above is about a deadline being asked for SAFELY. This is the other half: five reads in
+// lib/ had no deadline of any kind, so a request that never came back left a spinner turning for
+// ever — the admin console's one safe fetch wrapper, the owner Dashboard's overview, the three reads
+// a statement is assembled from, and the `/api/rt-config` fallback that decides whether live updates
+// exist at all.
+//
+// MEASURED rather than argued: against a server that accepts the request and never answers, a fetch
+// carrying `deadline(400)` gave up in 404ms as a TimeoutError; the same fetch without one was still
+// waiting when the test gave up at 1,200ms.
+//
+// A `keepalive: true` beacon is exempt and named as such — nothing waits on one, and a deadline on a
+// fire-and-forget ping would be a ceiling on something with no floor.
+{
+  const libDir = join(ROOT, "lib");
+  const bare = [];
+  for (const f of readdirSync(libDir).filter((n) => /\.tsx?$/.test(n))) {
+    const src = readFileSync(join(libDir, f), "utf8");
+    // Line comments dropped so a fetch QUOTED in prose is not counted. Never a block-comment
+    // stripper — a `/*` inside a regex literal pairs with a `*/` thousands of characters later.
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+    for (const m of code.matchAll(/fetch\(/g)) {
+      // Walk the call by paren-matching, so a wrapped argument list is seen whole.
+      let i = code.indexOf("(", m.index), depth = 0, j = i;
+      for (; j < code.length; j++) {
+        if (code[j] === "(") depth++;
+        else if (code[j] === ")") { depth--; if (!depth) break; }
+      }
+      const call = code.slice(m.index, j + 1);
+      if (/signal|AbortSignal|deadline\(/.test(call)) continue;
+      if (/keepalive:\s*true/.test(call)) continue;     // a beacon: nothing awaits it
+      bare.push(`lib/${f}: ${call.replace(/\s+/g, " ").slice(0, 74)}…`);
+    }
+  }
+  if (bare.length) {
+    console.log(`\n✗ verify:abort-guard — ${bare.length} fetch(es) in lib/ have no deadline at all:\n`);
+    for (const b of bare) console.log("  · " + b);
+    console.log(`
+A read with no ceiling is a spinner that never stops. Use the shared, feature-guarded helper — it is
+in lib/partialRead.ts, which has NO IMPORTS on purpose so a "use client" screen can hold it:
+
+    import { deadline, isDeadline, TOOK_TOO_LONG } from "@/lib/partialRead";
+    const r = await fetch(url, { ...opts, signal: opts?.signal ?? deadline(30_000) });
+
+…and tell a deadline apart from a refusal when you report it: saying "Network error" for a read that
+left the device perfectly well sends a person to look at their wifi for nothing.
+`);
+    process.exit(1);
+  }
+  console.log(`  every fetch in lib/ carries a deadline (or is a keepalive beacon)`);
+}
+
 // NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
 // subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
 // wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
