@@ -1820,6 +1820,14 @@ const auditFor = (rootSel, contrastSel = "*") => `(() => {
     const clipped = all.filter((el) => {
       if (!el.textContent || !el.textContent.trim()) return false;
       if (el.children.length) return false;
+      // TEXT FOR A SCREEN READER IS *MEANT* TO BE CLIPPED. An sr-only span is a 1px box on purpose
+      // — it exists to be spoken, never seen — so "its box is narrower than its text" is the pattern
+      // working, not a fault. Flagged once on a run that caught the page mid-skeleton (2026-08-30).
+      // NO BACKTICKS IN THIS COMMENT: it lives INSIDE a template literal, and one backtick ends the
+      // template early — which turned the selector below into arithmetic ("only is not defined")
+      // and cost 56 phases. The project already guards this shape in panel scripts; it bites in a
+      // plain .mjs just the same.
+      if (el.closest(".sr-only, [class*='visually-hidden'], [class*='screen-reader']")) return false;
       const st = getComputedStyle(el);
       if (st.overflow === "visible" && st.textOverflow !== "ellipsis") return false;
       if (/scroll|auto/.test(st.overflowX)) return false;
@@ -1916,7 +1924,11 @@ if (!browser) {
     // either times out or resolves so late that the read below sees a half-built page. It cost two
     // phases on 2026-08-30 with a board that was perfectly correct when looked at by hand.
     await page.goto(`${BASE}/aevinite/printing?rid=${RID}`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(1400);
+    // …and do not measure a skeleton. "Loading printing" is what the screen says before the board
+    // arrives, and a half-drawn page produces faults that vanish a second later.
+    try { await page.waitForFunction(`/How does the paper come out/i.test((document.querySelector("main.adm-main")||{}).innerText||"")`, null, { timeout: 15000 }); }
+    catch { /* the phase below reports an empty screen honestly */ }
+    await page.waitForTimeout(400);
     return page;
   };
 
