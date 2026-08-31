@@ -206,8 +206,22 @@ check(/backupPanel/.test(mig369) && /lfh_already_applied/.test(mig369),
 // room nobody is standing in while the restaurant never learns its printer is broken. The
 // replacement is not a shorter wait: it is TELLING SOMEBODY.
 const pq = read("lib/printQueue.ts");
-check(!/backupPanel/.test(codeOnly(read("lib/printHelpers.ts"))),
-  "no route can name a backup screen — one room prints, and if it cannot, people are told",
+// ⚠️ IT ASKED ONE FILE, AND THE DELETION SPANNED SEVEN (2026-08-31). This named lib/printHelpers.ts
+// only — where the fields were DEFINED — so it went green while app/api/editor still accepted
+// `backupAgent`/`backupPrinter` off a request body and stamped them onto every route it saved, and
+// app/api/owner/settings still had a `k.backupPanel ? "both"` branch that could never be true.
+// A field that can still be WRITTEN is not a deleted field. The whole tree is asked now, so the
+// next deletion cannot hide in the file nobody named.
+const BACKUP_SRC = [
+  "lib/printHelpers.ts", "lib/printQueue.ts", "lib/printDocs.ts",
+  "app/api/editor/[...path]/route.ts", "app/api/kitchen/[...path]/route.ts",
+  "app/api/admin/printing/[...path]/route.ts", "app/api/print-agent/[...path]/route.ts",
+  "app/api/owner/settings/route.ts", "app/aevinite/printing/page.tsx",
+  "app/owner/settings/page.tsx", "public/panels/editor/app.js", "public/panels/kitchen/app.js",
+];
+const backupHits = BACKUP_SRC.filter((f) => /backupPanel|backupPrinter|backupAgent|backupAfterMs/.test(codeOnly(read(f))));
+check(backupHits.length === 0,
+  `no backup screen or printer survives anywhere in the printing path (${BACKUP_SRC.length} files asked)`,
   "backupPanel is back in the route model: a second room quietly taking the ticket is what he asked to be rid of");
 check(/parked/.test(pq) && /printer_events/.test(pq) && /auto_fail/.test(pq) && /sendOwnerAlert/.test(pq),
   "…and a ticket that gives up FILES a printer problem and pings the owner, so the failure is seen",
