@@ -3859,6 +3859,20 @@ html[data-theme="light"] .ord-pill.served{ color:#166534; }     /* 3.30 -> 4.69,
 /* .preparing IS in the 2026-07-23 list above, but that value only lifted it to 3.28 — the pass
    moved it off "unreadable" and stopped short of the line. One step deeper: 4.64. */
 html[data-theme="light"] .ord-pill.preparing{ color:#92400e; }
+/* .pay-pill.pending is in the SAME July selector list as .ord-pill.preparing above and needed the
+   same second step (item 21): "⏳ Unpaid" measured 3.36:1 on a bill card. 4.75 now. Splitting one
+   selector out of a shared list and leaving its neighbours behind is how item 16 happened; this is
+   that lesson applied to the one that was left. */
+html[data-theme="light"] .pay-pill.pending{ color:#92400e; }
+/* THE BILL'S OWN LINES, on the light skin (item 21). A bill card sits on a greyer ground than the
+   panel, and --muted is tuned against the panel: the time, the "×1" quantity, "Subtotal", "Tax 5%"
+   and their amounts all measured 3.87:1 on it. Same shape as the guest category card, the owner
+   chart toggle and the joined floor tile — ink tuned for one surface, read on a slightly different
+   one. One step deeper, scoped to the card so nothing else on the panel moves: 4.81. */
+html[data-theme="light"] .ord-card .ord-when,
+html[data-theme="light"] .ord-card .ol-qty,
+html[data-theme="light"] .ord-card .ord-sub,
+html[data-theme="light"] .ord-card .ord-sub * { color:#665b48; }
 /* THE BILL'S OWN TOTAL was the worst of the lot: --gold is a FILL, and as ink on the total row it
    measured 2.03:1 against the 3:1 a 24px/800 number needs — the single most important figure on the
    screen where money is read. --gold-ink is what this file already uses wherever gold carries
