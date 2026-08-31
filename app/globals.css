@@ -16,7 +16,12 @@
   --card: #2c1b11;          /* raised chocolate card — clearly lighter than bg for depth */
   --border: 1px solid rgba(227, 192, 111, 0.22); /* warm-gold edge */
   --text: #f3e9db;          /* cream text (matches logo) */
-  --muted: rgba(195, 168, 146, 0.72);  /* warm taupe for secondary text */
+  /* 0.76, not 0.72 (owner said do it, 2026-08-31 — item 11). This one token paints 77 secondary
+     rules on the guest menu, and at 0.72 it measured 4.47:1 on a card — 0.03 under the 4.5 that
+     small text needs. Sweep #6 measured the same 0.03 and parked it because touching this repaints
+     the whole menu; asked directly, the answer was to lift it. 0.76 measures 4.82:1, so it clears
+     the line with room rather than sitting on it. Same hue, same warmth — only the veil is thinner. */
+  --muted: rgba(195, 168, 146, 0.76);  /* warm taupe for secondary text */
   --gold: #b8923f;          /* deep warm gold (used in glows/highlights) */
   --gold-glow: rgba(227, 192, 111, 0.42);
   --gold-grad: linear-gradient(135deg, #b8923f 0%, #e3c06f 100%);
@@ -540,6 +545,7 @@ body.menu-scrolling .chef-call {
 /* --- ANIMATIONS --- */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .fade-in { animation: fadeIn 0.5s var(--ease) forwards; }
+/* __ITEM13_PENDING__ */
 @keyframes reveal { from { opacity:0; transform: translateY(20px); } to { opacity:1; transform: translateY(0); } }
 .reveal { opacity: 0; animation: reveal 0.8s var(--ease) forwards; }
 
