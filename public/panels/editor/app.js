@@ -6527,6 +6527,12 @@ ${(z.payments && z.payments.rows.length)
   ? z.payments.rows.map((p2) => row(p2.method, p2.bills + " · " + inr(p2.amount))).join("")
     + row("Total collected", inr(z.payments.total), true)
     + (z.payments.reversed > 0 ? row("Payments reversed (not collected)", z.payments.reversedCount + " · − " + inr(z.payments.reversed)) : "")
+    // Money already taken from a table that is STILL SITTING — it paid part of its bill and has not
+    // closed. The cash is in the drawer, so the count above will not match without it; the bill is
+    // not finished, so it is not today's takings either. Its own line, exactly like a reversal.
+    // A bill closed with one part on a tab is NOT here: that session IS closed and the collected
+    // parts really were collected today (T11, 2026-09-01).
+    + (z.payments.aside > 0 ? row("Taken from tables still open (not closed yet)", z.payments.asideCount + " · " + inr(z.payments.aside)) : "")
     // Only flag money on today's bills that NO method accounts for. The other direction is
     // innocent and would cry wolf every day: a bill opened yesterday and settled this morning
     // has its payment today but its orders in yesterday's set, so "collected" legitimately

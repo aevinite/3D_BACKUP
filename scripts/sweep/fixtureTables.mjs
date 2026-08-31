@@ -33,6 +33,8 @@ export const OFF_PLAN = [
   ["OWNCHK", "verify-table-ownership.mjs"],
   ["T12-TEST", "verify-cancel-loss.ts"],
   ["T12-P2", "verify-cancel-made.ts"],
+  ["T11-PAID", "verify-owner-reports.mjs — the Z-report till count: a bill settled in parts"],
+  ["T11-OPEN", "verify-owner-reports.mjs — the Z-report till count: a table STILL SITTING that has part-paid"],
 ];
 
 /**

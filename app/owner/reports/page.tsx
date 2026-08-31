@@ -512,19 +512,50 @@ export default function OwnerReports() {
   // states), and `started` is untouched, so every hydrated entry still refetches. Cleared
   // on login (lib/ownerSnap.ts).
   const snapKey = `reports${scopePin ? `:${scopePin}` : ""}`;
+  // ── WITH NO INTERNET, THIS PAGE HAD FORGOTTEN WHOSE FIGURES IT WAS HOLDING (T11 sweep #7) ──
+  // The scope is decided by /api/owner/overview. With no connection that read comes back
+  // `{ error: "offline" }` (public/sw.js answers 503 rather than throwing), so `rests` stayed
+  // empty and `rid` stayed "" — and every cache key this page builds carries the rid. The saved
+  // 30-day answer was sitting in this tab's own sessionStorage under `money|<rid>|30d` and the
+  // page looked for `money||30d`, found nothing, and printed five confident zeroes with the
+  // chart explaining "Not enough data yet — come back once there's a bit more". Measured on a
+  // production build, offline: headline ₹0 · Net sales ₹0 · Paid bills 0 · Avg bill ₹0 · GST ₹0,
+  // over a device holding ₹13,42,142.
+  //   The scope the device last SAW is the only honest answer when the server cannot give one,
+  // so it is used ONLY on that failure. On a good connection nothing changes: the overview
+  // answers, and the owner's "Reports always opens on All restaurants" rule stands untouched.
+  //   AND IT SAYS SO AT THE TOP, IN HIS OWN WORDS (owner, 2026-08-30): "you can just say there is
+  // no internet, or if it was loaded previously you can show the previously and write a note on
+  // the top: the internet is not available, this is not the current data."
+  //   The app's own offline notice sits at the BOTTOM of the window and talks about SAVING work
+  // ("changes you make now may not save"), which is the right sentence for a panel that writes
+  // and the wrong one for a page that only reads. This note is about the FIGURES, it is at the
+  // top where he asked for it, and it says which of the two cases he is in — figures saved
+  // earlier, or nothing saved at all. One line, no icon-shouting, and it is gone the moment the
+  // scope reads normally again.
+  const savedRid = useRef<string>("");
+  const savedName = useRef<string>("");
+  // Did the scope read come back empty? That is this page's only signal that it could not reach
+  // the server, and it is what the note at the top is driven from (owner, 2026-08-30).
+  const [noSignal, setNoSignal] = useState(false);
   useEffect(() => {
-    const s = readSnap<{ rid?: string; entries?: Record<string, Entry> }>(snapKey);
+    const s = readSnap<{ rid?: string; restName?: string; entries?: Record<string, Entry> }>(snapKey);
     if (!s) return;
     if (s.entries) setStore((cur) => ({ ...s.entries, ...cur }));
     // Deliberately NOT restoring the last-picked restaurant: the owner's rule (2026-07-26)
     // is that Reports always OPENS on "All restaurants" (a multi-restaurant estate) — a
     // restaurant is a per-visit choice, not a sticky one. (A single-restaurant owner still
     // gets pinned by the overview effect; admin act-as still pins from ?rid.)
+    // …but REMEMBER it, unused, for the one case where the rule cannot apply: see savedRid.
+    // The NAME rides along, or the offline sheet is headed "This restaurant" — the fallback for
+    // a scope we cannot name — while it is showing that restaurant's own figures.
+    if (s.rid) savedRid.current = s.rid;
+    if (s.restName) savedName.current = s.restName;
   }, [snapKey, scopePin]);
   useEffect(() => {
     const settled = Object.fromEntries(Object.entries(store).filter(([, e]) => e.data));
-    if (Object.keys(settled).length) writeSnap(snapKey, { rid, entries: settled });
-  }, [snapKey, store, rid]);
+    if (Object.keys(settled).length) writeSnap(snapKey, { rid, restName: rid ? rests.find((r) => r.id === rid)?.name : "", entries: settled });
+  }, [snapKey, store, rid, rests]);
 
   // Does this owner have the Staff-profiles-&-pay module anywhere? Off ⇒ the Team & pay
   // report card isn't rendered at all (mig 220).
@@ -552,8 +583,16 @@ export default function OwnerReports() {
       // rid is already pinned from the URL for admin act-as; a single-restaurant owner
       // (no ?rid) gets pinned here once we know there's exactly one.
       if (!scopePin && list.length === 1) setRid(list[0].id);
+      // Nothing came back (no internet, or the read failed): fall back to the scope this device
+      // last saw, so the figures it already holds can be found and shown — and say so on screen.
+      if (!list.length) { setNoSignal(true); if (!scopePin && savedRid.current) setRid(savedRid.current); }
+      else setNoSignal(false);
       setReady(true);
-    }).catch(() => setReady(true));
+    }).catch(() => {
+      setNoSignal(true);
+      if (!scopePin && savedRid.current) setRid(savedRid.current);
+      setReady(true);
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The effective backend window for the ACTIVE report: a day-kind report is always a
@@ -631,7 +670,10 @@ export default function OwnerReports() {
   const moneyEntry = store[cacheKey("money", rid, range)];
   const dishesDay = store[dayKeyFor("dishes")]?.data;
   const hourlyDay = store[dayKeyFor("hourly")]?.data;
-  const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? "This restaurant") : "All restaurants";
+  // …and when the restaurant list could not be read at all, the name this device last saw beats
+  // the generic fallback — the sheet is showing that restaurant's own saved figures, so it should
+  // say whose they are.
+  const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? (savedName.current || "This restaurant")) : "All restaurants";
   // Charts follow the owner-panel THEME (green), not each restaurant's brand colour —
   // a brown/orange/red chart inside the green owner console read as a bug (owner 2026-07-25).
   const accent = "var(--accent)";
@@ -668,6 +710,9 @@ export default function OwnerReports() {
     return () => clearInterval(t);
   }, []);
   const shownCachedAt = entry?.cachedAt;
+  /** Is there ANY settled payload on this device for what he is looking at? Decides which of the
+   *  two sentences the no-internet note shows — "this is not current" vs "there is nothing yet". */
+  const haveSaved = useMemo(() => Object.values(store).some((e) => !!e?.data), [store]);
   const refreshNow = () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -765,6 +810,23 @@ export default function OwnerReports() {
   return (
     <div className="rs-root">
       <ReportsStyles />
+
+      {/* THE NOTE AT THE TOP (owner, 2026-08-30 — item 5). Two sentences at most, and the second
+          one only when there is really something saved to look at. */}
+      {noSignal && (
+        <div className="rs-offnote" role="status">
+          <i className="fas fa-wifi" aria-hidden />
+          <span>
+            <b>The internet is not available.</b>{" "}
+            {haveSaved
+              ? <>This is not the current data — these are the figures saved on this device{shownCachedAt ? <>, from {timeAgo(shownCachedAt)}</> : null}.</>
+              : <>Nothing has been saved on this device for this period yet, so there is nothing to show.</>}
+          </span>
+          <button className="rs-btn" onClick={refreshNow} disabled={refreshing}>
+            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} aria-hidden /> Try again
+          </button>
+        </div>
+      )}
 
       <div className="rs-head">
         <div>
@@ -902,6 +964,7 @@ export default function OwnerReports() {
       {!sel ? (
         <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport}
           rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll} hasInventory={hasInventory} briefTick={briefTick}
+          blank={noSignal && !entry?.data}
           briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
@@ -915,9 +978,13 @@ export default function OwnerReports() {
 }
 
 // ── The hub: hero snapshot + per-restaurant brief + categorised report cards ──
-function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory, briefTick }: {
+function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory, briefTick, blank }: {
   range: Range; money?: Entry; restName: string; accent: string; onOpen: (k: RKey) => void;
   rests: Rest[]; rid: string; onPickRest: (id: string) => void; briefQs: string;
+  /** No connection AND nothing saved for this period. A dash, never a ₹0 — the owner asked for
+   *  "just say there is no internet", and a confident ₹0 is the opposite of saying that
+   *  (owner, 2026-08-30). The note at the top of the page carries the explanation. */
+  blank?: boolean;
   briefTick: number;   // bumped by Refresh so the per-restaurant brief re-reads too
   hasPayroll: boolean;   // mig 220 — hides the Team & pay card when the module is off
   hasInventory: boolean; // migs 221/224/227 — hides the Inventory & stock card when the module is off
@@ -977,19 +1044,24 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
           global `.owx-spark{position:absolute}` yanked it to the page corner — the "stray graph"). */}
       <div className="rs-overview">
         <div className="rs-ov-eyebrow">{restName} · {rangeLabel(range)}</div>
-        <div className="rs-ov-val"><AnimatedNumber value={t?.revenue || 0} money loading={loading} /></div>
-        <div className="rs-ov-sub">Total collected this period — GST included{money?.error ? " — couldn't load" : ""}</div>
+        <div className="rs-ov-val">{blank ? <span className="rs-ov-dash">—</span> : <AnimatedNumber value={t?.revenue || 0} money loading={loading} />}</div>
+        <div className="rs-ov-sub">Total collected this period — GST included{money?.error && !blank ? " — couldn't load" : ""}</div>
         <div className="rs-ov-kpis">
-          <div className="k"><span className="lbl">Net sales</span><span className="v"><AnimatedNumber value={Math.max(0, (t?.subtotal || 0) - (t?.discount || 0))} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Paid bills</span><span className="v"><AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Avg bill</span><span className="v"><AnimatedNumber value={avg} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">GST collected</span><span className="v"><AnimatedNumber value={t?.tax || 0} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Discounts</span><span className="v"><AnimatedNumber value={t?.discount || 0} money loading={loading} /></span></div>
+          <div className="k"><span className="lbl">Net sales</span><span className="v">{blank ? "—" : <AnimatedNumber value={Math.max(0, (t?.subtotal || 0) - (t?.discount || 0))} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">Paid bills</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">Avg bill</span><span className="v">{blank ? "—" : <AnimatedNumber value={avg} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">GST collected</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.tax || 0} money loading={loading} />}</span></div>
+          <div className="k"><span className="lbl">Discounts</span><span className="v">{blank ? "—" : <AnimatedNumber value={t?.discount || 0} money loading={loading} />}</span></div>
         </div>
         <div className="rs-ov-chart">
-          {loading
-            ? <div className="rs-ov-skel" aria-hidden />
-            : <ToggleChart data={series} color={accent} money height={210} title="Revenue over the period" />}
+          {/* With no connection and nothing saved, "Not enough data yet — come back once there's a
+              bit more" is a sentence about the RESTAURANT, and it is not true. Draw nothing and let
+              the note at the top of the page be the only thing that speaks (owner, 2026-08-30). */}
+          {blank
+            ? <div className="rs-ov-blank" aria-hidden />
+            : loading
+              ? <div className="rs-ov-skel" aria-hidden />
+              : <ToggleChart data={series} color={accent} money height={210} title="Revenue over the period" />}
         </div>
       </div>
 
@@ -2022,8 +2094,12 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bills settled`} />
-          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
+          {/* `bill` / `bills`, like every other count in this file. The 2026-08-17 pass fixed the
+              Busy-times and Times-of-day tiles and stopped at the word "orders" — so these two
+              still read "1 bills settled" and "· 1 bills" on any period settled by a single bill,
+              while the day sheet's settlement rows one click away said "1 bill" correctly. */}
+          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bill${bills === 1 ? "" : "s"} settled`} />
+          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bill${(top?.orders || 0) === 1 ? "" : "s"}`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} sub="collected ÷ bills settled" />
           {/* Discounts + cancellations fold in here as drill-boxes → open a detail overlay
               (owner 2026-07-26: a box on top that opens the full detail, not a sub-report). */}
