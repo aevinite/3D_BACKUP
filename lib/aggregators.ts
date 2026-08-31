@@ -122,7 +122,13 @@ export function normalizeIncoming(source: AggSource, payload: Record<string, any
   const phone = payload.customer_phone ?? payload.customer?.phone ?? payload.phoneNumber ?? null;
   const rawItems: any[] = Array.isArray(payload.items) ? payload.items : [];
   const items = rawItems.map((it) => ({
-    title: it.title ?? it.name ?? "Item",
+    // ── PRESENT IS NOT THE SAME AS FILLED IN (T25 round 3, item 43, 2026-08-31) ──────────────────
+    // `??` only replaces null and undefined, so a delivery app sending `{"name": ""}` — or a name of
+    // nothing but spaces — produced a kitchen slip line with NO NAME on it. Measured:
+    // `normalizeIncoming("zomato", { items: [{ name: "" }] })` → `{ title: "", qty: 1, price: 0 }`.
+    // The cook reads that slip; a blank line is an order nobody can make. Same class as the empty
+    // toast (item 25) and the stored `42` that looked like a session (item 35).
+    title: String(it.title ?? it.name ?? "").trim() || "Item",
     qty: Number(it.qty ?? it.quantity ?? 1) || 1,
     price: Number(it.price ?? it.unit_price ?? 0) || 0,
   }));
