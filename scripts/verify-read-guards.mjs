@@ -436,6 +436,41 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   }
 }
 
+// ── 13 · A REMOVAL THAT REMOVED NOTHING MUST NOT BE RECORDED AS ONE (T20 round 3, 2026-09-01) ────
+// "Never log and report a change that didn't happen" has now been applied three times in this
+// territory — the Repair Kit's cancel (item 18), the rate-limit board's Deny (item 16), and the logo
+// removal (item 33). The logo one was found by RUNNING it: the exhaustive pass called DELETE on a
+// restaurant that has never had a logo, and it answered ok, told the console "Logo removed", and
+// wrote **"removed logo" into the activity log for a removal that did not happen**. `logo_url` was
+// already null, the storage folder was empty, and the only artefact of the whole call was a false
+// line in the record.
+//
+// The shape that makes it possible is specific and worth naming: `update({ logo_url: null })` over a
+// row that is ALREADY null succeeds and changes nothing, so "did the write error?" cannot answer
+// "did anything change?". The decision has to come from what was THERE.
+{
+  const logo = read("app/api/admin/restaurants/logo/route.ts");
+  if (!logo) fail("app/api/admin/restaurants/logo/route.ts is missing");
+  else {
+    const del = logo.slice(logo.indexOf("export async function DELETE"));
+    if (/select\("id, logo_url"\)/.test(del) || /logo_url/.test(del.split("logAction")[0])) {
+      ok("the logo removal reads what was THERE before deciding whether anything was removed");
+    } else {
+      fail("the logo removal no longer looks at `logo_url` before claiming one was removed — setting null over null succeeds, so the write's own error cannot tell you whether anything changed");
+    }
+    if (/if \(!exists\.data\.logo_url\)[\s\S]{0,400}?removed: false/.test(del)) {
+      ok("…and it says `removed: false` instead of claiming a removal");
+    } else {
+      fail("the logo removal no longer distinguishes 'there was nothing to remove' from 'I removed it'");
+    }
+    // The audit line must sit AFTER that branch, so a no-op cannot reach it.
+    const noop = del.indexOf("removed: false");
+    const logged = del.indexOf("logAction");
+    if (noop > -1 && logged > noop) ok("…and the audit line is unreachable from the no-op path");
+    else fail("the logo removal's audit line can be reached without anything having been removed");
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
