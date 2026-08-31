@@ -852,8 +852,13 @@ body.lfh-undobar-up .toast { bottom: calc(24px + var(--sab) + var(--lfh-undobar-
 .dash-fresh { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
 .dash-fresh i { margin-right: 5px; }
 .dash-card .kchip { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 99px; vertical-align: 3px; margin-left: 7px; }
-.dash-card .kchip.up { background: rgba(22,142,93,.13); color: #168e5d; }
-.dash-card .kchip.dn { background: rgba(206,74,74,.13); color: #c05252; }
+/* The LIGHT values are deepened one step (T26 sweep #7, 2026-08-31 — item 19). These two already
+   had explicit DARK overrides below, which is the tell: someone tuned the dark skin and left the
+   light one at the value that had been picked for a dark card. On their own 13% tints they measured
+   3.53 (up) and 3.86 (down) at 10px — under the 4.5 that size needs. Same hue, one step deeper:
+   4.67 and 4.78. The DARK overrides below are untouched. */
+.dash-card .kchip.up { background: rgba(22,142,93,.13); color: #12784e; }
+.dash-card .kchip.dn { background: rgba(206,74,74,.13); color: #ad4444; }
 .dash-card .kchip.flat { background: rgba(150,140,125,.14); color: var(--muted); }
 html[data-theme="dark"] .dash-card .kchip.up { color: #4fd6a5; }
 html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }

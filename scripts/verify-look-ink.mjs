@@ -416,7 +416,8 @@ const PROBES = [
              <span class="ord-pill cancelled">Cancelled</span><span class="ord-pill new">New</span>
              <span class="ord-pill freed-pill">Freed</span></div>
              <div class="ord-total"><span>Total</span><span>₹126</span></div></div>
-             <button class="cat-chip active">All</button><span class="dish-no">#1</span>`,
+             <button class="cat-chip active">All</button><span class="dish-no">#1</span>
+             <div class="dash-card"><span class="kchip up">100%</span><span class="kchip dn">28%</span></div>`,
     checks: [[".ord-pill.received", 4.5, "Bills → the 'New order' tag (was 1.43 on the light skin — an amber word on a tan pill)"],
              [".ord-pill.preparing", 4.5, "Bills → the Cooking tag (was 3.28 — the July pass stopped short of the line)"],
              [".ord-pill.ready", 4.5, "Bills → the Ready tag (was 1.59)"],
@@ -426,7 +427,9 @@ const PROBES = [
              [".ord-pill.freed-pill", 4.5, "Bills → the Freed tag (was 3.43)"],
              [".ord-total span:last-child", 3, "Bills → THE BILL'S OWN TOTAL (was 2.03 on the light skin — --gold is a fill, not ink)"],
              [".cat-chip.active", 4.5, "Editor → the chosen category chip (was 2.71 on the light skin; it lays an 18% gold wash under its own label, so even --gold-ink only reached 4.31 there)"],
-             [".dish-no", 4.5, "Editor → a dish's number in the list (was 2.37 — gold as ink under a 0.75 veil)"]] },
+             [".dish-no", 4.5, "Editor → a dish's number in the list (was 2.37 — gold as ink under a 0.75 veil)"],
+             [".kchip.up", 4.5, "Dashboard → an up-percentage chip (was 3.53 on the light skin; it had a DARK override and no light one)"],
+             [".kchip.dn", 4.5, "Dashboard → a down-percentage chip (was 3.86, same story)"]] },
   { name: "kitchen board", role: "kitchen", url: "/kitchen", frame: "/panels/kitchen/",
     html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>`,
     checks: [["#col-cooking h2", 4.5, "the Cooking lane heading"]] },
