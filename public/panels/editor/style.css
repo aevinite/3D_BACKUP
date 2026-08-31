@@ -340,6 +340,9 @@ body.nav-rail .layout { margin-left: var(--rail-w); transition: margin-left .16s
 body.nav-rail .topbar { gap: 12px; height: calc(50px + var(--sat)); }
 body.nav-rail .layout { height: calc(100vh - 50px - var(--ribbon-h, 0px) - var(--offbar-h, 0px)); }
 body.nav-rail .top-actions { margin-left: auto; }
+/* The drawer's utility rows exist only in the phone layout — above 760px every one of these
+   buttons is on the bar, and offering the same action twice on one screen is its own fault. */
+.nav-util { display: none; }
 @media (prefers-reduced-motion: reduce) {
   body.nav-rail .tabs, body.nav-rail .layout { transition: none; }
 }
@@ -2225,6 +2228,21 @@ body {
        · a 6px gap instead of 10px across the (up to) 5 gaps  → ~20px back
        · an icon-only Profile button (the drawer it opens names itself) → ~59px back
      That lands at ~314px, so a 4-digit latency AND a future 6th button still fit. */
+  /* ITEM 9 (owner asked 2026-08-31). SIX controls do not fit beside the brand on a 360px bar, so
+     the bar ran to two rows and tipped into a THIRD whenever the connection pill grew — measured
+     108px normally and 152px on a slow link, against the waiter tablet's 57px. The floor lost a
+     whole row of tables exactly when the network was worst.
+     The four set-once ones move into the ☰ drawer (app.js → buildNavUtilRows, the same proxy
+     pattern the tablet has used since August). They stay in the DOM and keep every handler, badge
+     and aria-label — only their place on the BAR is given up, and only under 760px.
+     WHAT STAYS ON THE BAR: the connection pill (R40 — its size is settled) and 🔔, because an
+     alert you have to open a menu to notice is not an alert.
+     NOT DONE HERE, deliberately: the floor header below is untouched. R11 settled its KOT ▾ / QO/P
+     layout ("P four is perfectly fine") and R25 settled the legend, three times. */
+  #themeToggle, #reportIssueBtn, #myProfileBtn, #staffSettingsBtn { display: none; }
+  .nav-util { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .nav-util-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+  .nav-util-row:hover { background: var(--panel-2); }
   .top-actions { gap: 6px; }
   /* Icon-only, but ONLY for the everyday "👤 Profile" label. The one-time "👋 Finish setup"
      state keeps its words — that one is an invitation, not a utility button (maint.js sets
@@ -2232,7 +2250,9 @@ body {
   #staffSettingsBtn[data-mode="profile"] { padding: 9px 11px; }
   #staffSettingsBtn[data-mode="profile"] .ssb-t { display: none; }
 
-  /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
+    /* Above the phone breakpoint the bar has room for everything, so the drawer's copies must not
+     appear — otherwise the same action is offered twice on one screen. */
+/* belt-and-braces: never let a stray wide element scroll the whole page sideways */
   html, body { overflow-x: hidden; }
 
 
