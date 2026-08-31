@@ -458,10 +458,10 @@ html[data-theme="light"] #col-cooking h2 { color: var(--blue-ink); }
    3.19:1 and --green 3.30:1 as INK on the white column head, and these three words are what
    a cook reads first (T11 sweep, 2026-08-13). Same hues, deepened for the light skin only. */
 html[data-theme="light"] #col-new h2 { color: #a1560a; }
-/* #137034, not #15803d (T26 sweep #7, 2026-08-31 — item 22). The "✅ Ready" lane heading measured
+/* #137034, not #15803d (T26 sweep #7, 2026-08-31 - item 22). The "Ready" lane heading measured
    4.23:1 on the light board at 12px, against 4.5. Same green the manager panel's Served tag uses,
-   and that one needed the same second step in item 16 — it is a green picked for a dark card. The
-   other two lane headings already read 5.9+. Dark is untouched. */
+   and that one needed the same second step in item 16 - it is a green picked for a dark card. The
+   other two lane headings already read 4.6 and 4.98. Dark is untouched. */
 html[data-theme="light"] #col-ready h2 { color: #137034; }
 /* "served ✓" — the last green word on the light skin that never got deepened (T6 sweep,
    2026-08-17, pixel-measured on the running board). --green is #16a34a as INK on the white ticket:
