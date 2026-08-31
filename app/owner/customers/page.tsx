@@ -15,6 +15,7 @@
 // `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
 // wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
 import { asSuffix } from "@/lib/ownerPin";
@@ -75,9 +76,20 @@ export default function OwnerCustomers() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
 
+  const router = useRouter();
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [disabled, setDisabled] = useState(false);
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31) ─────────────────────────
+  // R36 again, from the page side: *"owner can't know which option are not given to them, only
+  // admin should know that."* The sidebar already hides a withheld section from a real owner;
+  // this page did not — reached by a typed URL or an old bookmark it printed "Customers isn't enabled for your restaurant — contact Aevidine",
+  // which names a feature he has not been given and tells him who to ask for it. The card is
+  // DELETED, not restyled, and he goes back to his dashboard. `replace`, not `push`, so Back does
+  // not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner
+  // (`if (!scope.all && !scope.admin)`), so the X-ray view still opens every section.
+  useEffect(() => { if (disabled) router.replace("/owner"); }, [disabled, router]);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [rid, setRid] = useState("");                       // one of MY restaurants
@@ -292,9 +304,9 @@ export default function OwnerCustomers() {
       <h1 className="adm-page-h">Customers</h1>
       <p className="adm-page-sub">The guests who&apos;ve dined with you — when they first came, when they were last in, and who keeps coming back.</p>
 
-      {disabled ? (
-        <div className="adm-card"><div className="adm-empty">Customers isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
-      ) : (
+      {/* Nothing at all while the redirect above runs — never a sentence naming a section he
+          has not been given (R36). */}
+      {disabled ? null : (
         <>
           {/* ── Summary tiles — and three of them are the filter (owner, 2026-08-18) ──────────────
               "We can do the twelfth one also." Tapping a figure shows you the people behind it.

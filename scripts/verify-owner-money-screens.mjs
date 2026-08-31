@@ -325,10 +325,50 @@ const RULES = [
     ],
   },
   {
+    // ── ITEM 7 IS NOW ONLY THE WHOLE-APP WALK ABOVE (owner, 2026-08-31) ───────────────────────────
+    // The Manager-mode fallback heading this rule used to assert has been DELETED along with the
+    // screen it sat on — a section he has not been given is a redirect now, not a page that names
+    // the feature (item 8 / R36). The `mustNot` survives because the dead class must never come
+    // back anywhere, and the walk over all of `app/` above is what actually enforces that.
     item: 7, file: MANAGER,
-    say: "the Manager-mode fallback heading uses a class the stylesheet defines",
-    must: [/className="adm-page-h">Manager mode/],
-    mustNot: [/className="adm-page-title"/],   // declared in no stylesheet — see app/globals.css
+    say: "Manager mode carries no heading in a dead stylesheet class",
+    mustNot: [/className="adm-page-title"/],
+  },
+  {
+    // ── ITEM 24 · A SECTION HE HAS NOT BEEN GIVEN IS NOT NAMED TO HIM (owner, 2026-08-31) ─────────
+    // *"it will not even show that option… it will not only show 'unable to access', that there is
+    //  a feature which contains inventory."* R36, from the page side. Four screens used to print a
+    //  sentence naming the feature and telling him who to ask; all four are redirects now.
+    item: 24, file: INVENTORY,
+    say: "Inventory sends a real owner home instead of naming a feature he has not been given",
+    must: [/import \{ redirect \} from "next\/navigation"/, /if \(!selected\) redirect\("\/owner"\);/],
+    mustNot: [/isn&apos;t switched on for your restaurant/, /ask your administrator/],
+  },
+  {
+    item: 24, file: MANAGER,
+    say: "Manager mode does the same",
+    must: [/import \{ redirect \} from "next\/navigation"/, /if \(!restaurants\.length\) redirect\("\/owner"\);/],
+    mustNot: [/No restaurant is available here right now/],
+  },
+  {
+    item: 24, file: CUSTOMERS,
+    say: "Customers does the same, from the client side, and never for the admin",
+    must: [
+      /import \{ useRouter \} from "next\/navigation"/,
+      /useEffect\(\(\) => \{ if \(disabled\) router\.replace\("\/owner"\); \}, \[disabled, router\]\);/,
+      /\{disabled \? null : \(/,
+    ],
+    mustNot: [/Customers isn&apos;t enabled for your restaurant/],
+  },
+  {
+    item: 24, file: ISSUES,
+    say: "Feedback & complaints does the same when BOTH tabs are off",
+    must: [
+      /import \{ useRouter \} from "next\/navigation"/,
+      /useEffect\(\(\) => \{ if \(bothOff\) router\.replace\("\/owner"\); \}, \[bothOff, router\]\);/,
+      /\{bothOff \? null : \(/,
+    ],
+    mustNot: [/This section isn&apos;t enabled for your restaurant/],
   },
 ];
 

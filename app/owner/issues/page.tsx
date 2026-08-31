@@ -19,6 +19,7 @@
 // `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
 // wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { actorLabel, actorTitle } from "@/lib/ownerActor";
 import { asSuffix } from "@/lib/ownerPin";
 // Client-safe by design (lib/partialRead has zero imports) — see that file's header.
@@ -55,6 +56,7 @@ const Stars = ({ n }: { n: number }) => (
 );
 
 export default function OwnerFeedback() {
+  const router = useRouter();
   const [tab, setTab] = useState<"ratings" | "issues">("ratings");
   // Admin-in-one-restaurant scope pin (bug C1) — rides on EVERY call as ?scope= so a
   // second tab's shared act-as cookie can't hijack this tab. Null for a real owner.
@@ -230,6 +232,16 @@ export default function OwnerFeedback() {
   const issueRows = (issues || []).filter((i) => iFilter === "all" || i.status === "open");
   const ratingRows = (ratings || []).filter((r) => rFilter === "all" || !r.acknowledged);
   const bothOff = ratingsOff && issuesOff;
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31) ─────────────────────────
+  // R36 again, from the page side: *"owner can't know which option are not given to them, only
+  // admin should know that."* The sidebar already hides a withheld section from a real owner;
+  // this page did not — reached by a typed URL or an old bookmark it printed "This section isn't enabled for your restaurant — contact Aevidine",
+  // which names a feature he has not been given and tells him who to ask for it. The card is
+  // DELETED, not restyled, and he goes back to his dashboard. `replace`, not `push`, so Back does
+  // not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner
+  // (`if (!scope.all && !scope.admin)`), so the X-ray view still opens every section.
+  useEffect(() => { if (bothOff) router.replace("/owner"); }, [bothOff, router]);
   // ── A LIST THAT IS ONLY PART OF THE LIST HAS TO SAY SO (sweep 6 · T14, 2026-08-18) ──────────────
   // The two sister screens in this panel already do it — Customers says "the N most-recent of M",
   // Pay Later says "the N people who owe the most, of M". This one said nothing, and on French House
@@ -248,9 +260,9 @@ export default function OwnerFeedback() {
       <h1 className="adm-page-h">Feedback &amp; complaints</h1>
       <p className="adm-page-sub">What your guests rated and the complaints your staff raised — read it, handle it, mark it done.</p>
 
-      {bothOff ? (
-        <div className="adm-card"><div className="adm-empty">This section isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
-      ) : (
+      {/* Nothing at all while the redirect above runs — never a sentence naming a section he
+          has not been given (R36). */}
+      {bothOff ? null : (
       <div className="adm-card">
         {/* Tabs (hide a tab the admin switched off) */}
         <div className="own-range" style={{ marginBottom: 14 }}>
