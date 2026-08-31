@@ -514,6 +514,16 @@ const RULES = [
            /I COULDN'T ASK" IS NOT "IT IS SWITCHED OFF/],
     mustNot: [/The menu editor isn&apos;t switched on for your restaurant/],
   },
+  {
+    // ── ITEM 35 · A NAME OF ONLY SPACES IS NOT A NAME, IN THE SHARED HELPER TOO ───────────────────
+    // `!actor` is false for "  ", so a blank-but-present name rendered as nothing at all. The same
+    // fault item 16 fixed on the Customers page, in the file every owner log screen shares.
+    item: 35, file: ACTOR,
+    say: "the shared \"who did it\" helper trims before deciding there is no name",
+    must: [/const a = \(actor \?\? ""\)\.trim\(\);/, /if \(!a\) return "—";/,
+           /if \(!\(actor \?\? ""\)\.trim\(\)\) return undefined;/],
+    mustNot: [/if \(!actor\) return "—";/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
