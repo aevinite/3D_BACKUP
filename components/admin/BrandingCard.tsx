@@ -85,7 +85,13 @@ export default function BrandingCard({ restaurant }: { restaurant: Restaurant })
     try {
       const r = await fetch(`/api/admin/restaurants/logo?restaurant_id=${encodeURIComponent(restaurant.id)}`, { method: "DELETE" });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't remove.");
-      setLogoUrl(null); setLogoMsg("Logo removed — the menu falls back to the name.");
+      setLogoUrl(null);
+      // The server now says whether there was anything to remove — it used to claim a removal either
+      // way and write "removed logo" into the audit for a restaurant that never had one (T20 round 3,
+      // 2026-09-01). Say the true thing, not the reassuring one.
+      setLogoMsg(d.removed === false
+        ? "There was no logo to remove — the menu was already falling back to the name."
+        : "Logo removed — the menu falls back to the name.");
     } catch (e) { setLogoMsg(e instanceof Error ? e.message : String(e)); } finally { setLogoBusy(false); }
   };
 
