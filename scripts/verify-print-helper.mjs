@@ -4,7 +4,7 @@
 // Everything here was learned by DRIVING it on 2026-08-20, and every check names the fault it would
 // have caught. Read the reason before "fixing" a failure: several of these look like style and are
 // not.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
@@ -768,6 +768,60 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
   check(cleaned.startsWith("Front desk PC"),
     "…and a normal computer name survives it unchanged",
     "the sanitiser is now eating ordinary names");
+}
+
+// ── 8h · THE BACKUP PRINTER IS GONE, AND STAYS GONE (T25 round 3, item 39, 2026-08-31) ────────────
+//
+// Removed across nine files on 2026-08-30 at the owner's word: *"What is this backup printer and all
+// that? We don't even need the backup printer — if there is a backup printer, remove it. And if
+// anything fails it should show me or the person: manager, owner, everyone should get a notification
+// that this has failed."* A silent second attempt somewhere else is paper appearing in a room nobody is
+// standing in, while the restaurant never learns its printer is broken.
+//
+// THE REMOVAL WAS NOT COMPLETE. Found by re-running four old ledger rows that were still defending the
+// feature: app/api/editor/[...path]/route.ts was still forwarding `backupAgent` and `backupPrinter`
+// from the request body into the route patch (dead weight that reads like a live feature), and two
+// sentences in lib/printHelpers.ts still described a job degrading to a backup after a wait.
+{
+  const DEAD = ["backupAgent", "backupPrinter", "backupAfterMs", "backupPanel", "SCREEN_BACKUP_MS",
+                "BACKUP_AFTER_MS_DEFAULT", "BACKUP_PRINTER_MS", "backupFor"];
+  const walk = (dir, out = []) => {
+    for (const e of readdirSync(new URL(`../${dir}`, import.meta.url), { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(rel, out);
+      else if (/\.(ts|tsx|js|mjs)$/.test(e.name)) out.push(rel);
+    }
+    return out;
+  };
+  const files = [...walk("lib"), ...walk("app"), ...walk("components"), ...walk("public/panels")];
+  // ONE NAMED EXEMPTION, with its reason. app/api/print-agent still ANSWERS `backupFor: []` because a
+  // helper file already installed on a restaurant's PC reads that field; sending an empty list is what
+  // makes an old helper behave like a new one. It is a transition shim, not the feature — and it must
+  // keep saying so beside itself, which the second check below requires.
+  const SHIM = "app/api/print-agent/[...path]/route.ts";
+  const alive = [];
+  for (const rel of files) {
+    const raw = readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+    // CODE only — an obituary naming the deleted thing is exactly what this repo asks for.
+    const code0 = raw.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    for (const d of DEAD) {
+      if (!new RegExp(`\\b${d}\\b`).test(code0)) continue;
+      if (rel === SHIM && d === "backupFor") continue;      // the named shim above
+      alive.push(`${rel} → ${d}`);
+    }
+  }
+  // …and the shim keeps its reason beside it, or the exemption above is describing something else.
+  {
+    const shimSrc = readFileSync(new URL(`../${SHIM}`, import.meta.url), "utf8");
+    check(/`?backupFor`? is gone/.test(shimSrc) && /backupFor: \[\] as string\[\]/.test(shimSrc),
+      "the one remaining `backupFor` is the transition shim, and it still says so",
+      "app/api/print-agent still sends backupFor but no longer explains that it is an empty-list shim for helpers already installed — either restore the note or delete the field");
+  }
+  check(alive.length === 0,
+    "the deleted backup printer is gone from every code path (obituary comments are fine)",
+    "a piece of the DELETED backup printer is still in the code: " + alive.join(" | ") +
+      " — it was removed on 2026-08-30 at the owner's word; a half-finished removal reads like a live feature");
 }
 
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
