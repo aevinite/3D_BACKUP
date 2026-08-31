@@ -273,6 +273,30 @@ function sentences(src, path) {
 
 
 if (!HOOK) console.log("");
+// ── A LINE ON A KITCHEN SLIP ALWAYS HAS A NAME (T25 round 3, item 43, 2026-08-31) ──────────────────
+// lib/aggregators.ts turns a Zomato/Swiggy order into this app's shape. It used
+// `it.title ?? it.name ?? "Item"`, and `??` only replaces null and undefined — so `{"name": ""}` came
+// through as a line with NO NAME, straight onto the slip the cook reads. A blank line is an order
+// nobody can make.
+//
+// ⚠️ AND A NOTE FOR THE NEXT PERSON: a new check goes ABOVE the `if (failed)` report below. My first
+// cut of this one was appended at the END of the file, after the report and its exit, so it printed
+// FAIL and the script still exited 0 — the second time in this sweep a block of mine landed after the
+// reporting block (verify:id-chunks, round 1). Both times, only sabotage showed it.
+{
+  const agg = readFileSync(`${ROOT}/lib/aggregators.ts`, "utf8");
+  const aggCode = agg.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*)/.test(l)).join("\n");
+  const FIXED = /String\(it\.title \?\? it\.name \?\? ""\)\.trim\(\) \|\| "Item"/;
+  const OLD = /title:\s*it\.title\s*\?\?\s*it\.name\s*\?\?\s*"Item"/;
+  if (FIXED.test(aggCode)) {
+    ok("a delivery order's line always has a name, even when the app sends an empty one");
+  } else if (OLD.test(aggCode)) {
+    fail('lib/aggregators.ts builds a line title with `??`, which lets an EMPTY name through — a kitchen slip line with no name on it. Use String(it.title ?? it.name ?? "").trim() || "Item".');
+  } else {
+    fail("lib/aggregators.ts no longer builds its line titles in a shape this guard recognises — check by hand that an empty name still cannot reach a kitchen slip, then update this check");
+  }
+}
+
 if (failed) {
   console.log(`${failed} check(s) failed — see above.`);
   if (HOOK) process.exit(2);   // tell the editing session immediately, the way the other guards do
@@ -281,6 +305,8 @@ if (failed) {
   process.exit(1);
 }
 if (HOOK) process.exit(0);
+
+
 console.log("All checks passed — the sentences on the screens still read as English.");
 if (!existsSync(`${ROOT}/docs/REJECTED-IDEAS.md`)) process.exit(0);
 

@@ -179,6 +179,9 @@ export async function GET(req: NextRequest) {
             // prints and the counter picks up what it leaves" — the backup screen, which is gone.
             // `k.backupPanel` had already stopped existing, so this read undefined every time and
             // the branch was dead code that still LOOKED like a supported answer.
+            // (Found twice on 2026-08-31, an hour apart: by pulling the thread of his question about
+            // the Kitchen printing section, and by T25 round 3's re-run of the four old rows that were
+            // still defending the backup printer.)
             return k.panel === "manager" ? "counter" : "kitchen";
           })(),
           station: st ? (st.label || (st.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (st.claimed_by ? ` · ${st.claimed_by}` : "") : null,

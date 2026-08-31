@@ -381,5 +381,37 @@ binned === null ? ok("a restaurant in the recycle bin is still hidden") : bad("a
 globalThis.fetch = realFetch;
 
 server.close();
+
+// ── THE TWO FILES MUST AGREE ABOUT THE POOLER (T25 round 3, item 42, 2026-08-31) ───────────────────
+// lib/readRetry.ts decides whether to RETRY a read; lib/dbRefusal.ts decides what a person is TOLD and
+// what status comes back. They read the same Postgres codes, and they disagreed: readRetry treated
+// 57P01/57P02/57P03 ("the pooler recycled us") as transient — retrying once — while dbRefusal did not
+// list them, so the same failure came back as a 500 "something went wrong at our end" with a red crash
+// row, instead of a 503 "the system is very busy — this will come back by itself".
+{
+  // COMMENTS OUT. The note explaining why XX000 is deliberately absent NAMES it, and the first cut of
+  // this check matched that note and reported the opposite of the truth. A guard must never read a
+  // comment as code — third recording of that shape in this repo.
+  const codeOnly = (t) => t.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+  const retry = codeOnly(readFileSync(join(ROOT, "lib/readRetry.ts"), "utf8"));
+  const refusal = codeOnly(readFileSync(join(ROOT, "lib/dbRefusal.ts"), "utf8"));
+  const POOLER = ["57P01", "57P02", "57P03"];
+  for (const c of POOLER) {
+    const inRetry = new RegExp(`"${c}"`).test(retry);
+    const inRefusal = new RegExp(`"${c}"`).test(refusal);
+    if (inRetry !== inRefusal) {
+      bad(`the two classifiers disagree about ${c}: lib/readRetry.ts ${inRetry ? "retries" : "does not retry"} it, lib/dbRefusal.ts ${inRefusal ? "calls it busy" : "calls it an app bug"} — the same failure must not be "retry me" to one file and "a bug" to the other`);
+    } else {
+      ok(`${c} means the same thing in readRetry and dbRefusal`);
+    }
+  }
+  // XX000 stays deliberately ASYMMETRIC, and the reason is written down where it is skipped.
+  if (/XX000/.test(retry) && /XX000/.test(refusal)) {
+    bad("XX000 (internal_error) is now 'busy' in dbRefusal too — the pooler reports some drops as XX000, but so does a genuine bug, and calling every internal error busy hides the faults the Repair board exists to show");
+  } else {
+    ok("XX000 is retried but never called busy — deliberately asymmetric, with the reason beside it");
+  }
+}
+
 console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

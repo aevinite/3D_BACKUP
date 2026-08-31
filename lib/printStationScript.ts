@@ -50,7 +50,25 @@ export type StationArgs = {
   label?: string;          // the restaurant's name, for the window title and the log only
 };
 
-const safe = (s: string) => String(s || "").replace(/["`$\\]/g, "").slice(0, 200);
+// ── THE SAME RULE AS THE HELPER'S: A VALUE CANNOT ADD A LINE (T25 round 3, item 40, 2026-08-31) ──
+// lib/printHelperScript.ts had exactly this hole and it was fixed on 2026-08-31 (item 27): the old
+// rule stripped everything that could END a quoted string and NOT newlines, and a comment line — or a
+// `SITE="…"` line — only lasts until one. This file is the station's twin and was left behind.
+// MEASURED here with an origin of `https://x\nsay 'added from an origin'\n# `:
+//
+//     1| #!/bin/sh
+//     2| # Aevidine print station
+//     3| SITE="https://x
+//     4| say 'added from an origin'      ← a real line, from the ORIGIN
+//
+// Same fix, same reasons: line breaks fold to a space, and the batch/shell punctuation that means
+// "and then do this" goes with them (`%` in particular is how a .bat file expands a variable). The
+// 200-character ceiling stays. `verify:print-helper` block 8g now checks BOTH files.
+const safe = (s: string) =>
+  String(s || "")
+    .replace(/[\r\n\u2028\u2029]+/g, " ")
+    .replace(/["`$\\%^&|<>;]/g, "")
+    .slice(0, 200);
 
 /** The flags that are the whole reason this works, in one place so the three scripts cannot drift.
  *  Every one of them was in the setup guide's hand-typed recipe; the difference here is that nobody

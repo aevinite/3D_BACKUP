@@ -296,6 +296,34 @@ function quotedStrings(src) {
     bad.join("\n      ") + "\n      Use baseFrom(process.argv) from ./sweep/appUp.mjs — it takes --base first, then LFH_BASE / VERIFY_BASE / BASE, then :4000.");
 }
 
+// ── THE LINT GATE CANNOT BE DROWNED BY A BUILD DIRECTORY (sweep #7 / T25 round 3, 2026-08-31) ────
+//
+// `npm run lint` is half of CLAUDE.md's definition of done, and it is bare eslint — it walks the
+// whole folder. Twice now a generated directory has turned it into a wall of noise: `.claude/**`
+// (another session's full checkout, 1,475 errors, T10 2026-08-06) and `.next-8093/` (a dev server's
+// build output, **502 errors**, found today). Nothing anybody wrote was at fault either time; the
+// gate simply stopped being readable, which teaches everyone to ignore it — a guard made useless is
+// the subject of this whole file.
+//
+// `.gitignore` already knows every one of these directories. So the check is that the two lists
+// AGREE: any directory `.gitignore` names as generated build output must also be in
+// eslint.config.mjs's globalIgnores. It is a static string comparison — no eslint run, no cost.
+{
+  const gi = read(".gitignore");
+  const el = read("eslint.config.mjs");
+  // Only build output, and only directory entries — never a file pattern, never a negation.
+  const generated = gi.split("\n").map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#") && !l.startsWith("!") && l.endsWith("/"))
+    .filter((l) => /^\/?\.next([-/]|$)|^\/?out\/|^\/?build\//.test(l))
+    .map((l) => l.replace(/^\//, "").replace(/\/$/, ""));
+  const missing = generated.filter((d) => !el.includes(`"${d}/**"`) && !el.includes(`'${d}/**'`));
+  check(`every generated build directory .gitignore names is also ignored by eslint (${generated.length} checked: ${generated.join(", ") || "NONE"})`,
+    generated.length > 0 && missing.length === 0,
+    generated.length === 0
+      ? ".gitignore no longer names a single build directory — this check has nothing to compare and is asserting nothing."
+      : `not in eslint.config.mjs globalIgnores: ${missing.map((d) => `"${d}/**"`).join(", ")}\n      Bare eslint will walk into it and report its generated chunks as errors, which is how the gate stops being read.`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 if (!HOOK) {
   console.log(`\nARE THE GUARDS ALIVE? — ${scriptFiles.length} script(s) under scripts/ and tests/\n`);

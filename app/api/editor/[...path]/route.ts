@@ -4983,6 +4983,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           // wrong: it quietly stamped `backupAgent: null` onto every route it saved, and a caller
           // passing a real one would have had it stored and silently ignored. A field that can still
           // be WRITTEN is not a deleted field — it is a deleted field waiting to be read again.
+          // (T25 round 3 found the same two lines independently, an hour later, by re-running four old
+          // ledger rows that were still defending the backup printer — P12488, P27231, P27232, P27586.
+          // Two lanes, one leftover: the guard that now watches every file is verify:print-queue's
+          // twelve-file walk, and verify:print-helper block 8h checks the whole tree including the
+          // panels, with the one named shim.)
           patch = {
             agent: agentId, printer,
             paper: (body as Record<string, unknown>)?.paper ?? undefined,
