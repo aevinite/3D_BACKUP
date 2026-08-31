@@ -65,6 +65,25 @@ export const CATEGORIES: ReportCat[] = [
   { key: "inventory", label: "Inventory & stock",   icon: "fa-boxes-stacked", keys: ["inventory"] },
 ];
 
+// ── The groupings a report SHOWS, in one place ──────────────────────────────
+// These used to live only inside app/owner/reports/page.tsx, so the EXPORT could not reach
+// them — which is why "Times of day" downloaded the by-hour table and "Day of week"
+// downloaded the dated by-period one (T11 round 2, 2026-09-01). One definition, two readers:
+// the screen and the file can no longer describe different groupings under the same heading.
+export const DAYPARTS: { label: string; icon: string; hours: number[] }[] = [
+  { label: "Morning",    icon: "fa-mug-hot",   hours: [5, 6, 7, 8, 9, 10, 11] },
+  { label: "Afternoon",  icon: "fa-sun",       hours: [12, 13, 14, 15, 16] },
+  { label: "Evening",    icon: "fa-cloud-sun", hours: [17, 18, 19, 20, 21] },
+  { label: "Late night", icon: "fa-moon",      hours: [22, 23, 0, 1, 2, 3, 4] },
+];
+export const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+export const WEEKDAY_FULL: Record<string, string> = {
+  Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday",
+};
+/** A bucket instant → its IST weekday. IST, or a non-IST reader groups a day into the wrong one. */
+export const istWeekday = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", { weekday: "short", timeZone: "Asia/Kolkata" });
+
 // ── Shared formatting ───────────────────────────────────────────────────────
 export const money = (n: number) => inr(n);
 export const nfmt = (n: number) => (Number(n) || 0).toLocaleString("en-IN");
