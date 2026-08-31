@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P47301`.**
+**Next free ID: `P47801`.**
 
 > **`P46301`–`P46800` is T25's THIRD freshly-planned 500 — DONE: 500 written, 500 executed, 11 problems found and fixed (items 34–44), and every one of this terminal's 1,810 earlier rows re-run in the same pass (4 had gone red, all four defending a feature the owner had deleted).** Planned by MEASURING what was left: 465 exported functions and constants in the territory, 156 of them never named by a single check — now 35. Originally claimed as: (`lib/**` — every shared library
 > file no other terminal owns, 2026-08-31). The owner's word, after round 2 was merged and deployed:
