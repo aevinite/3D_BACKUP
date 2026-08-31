@@ -32,7 +32,11 @@ type Customer = {
   restaurant_id: string; restaurantName: string; phone: string; name: string | null;
   blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string; returning: boolean;
 };
-type Summary = { total: number; returning: number; newThisMonth: number; blocked: number; shown: number };
+// `cachedAt` is when the four tiles were last COUNTED. They are aggregates, so they ride the
+// compute-on-view snapshot cache (`lib/ownerCache.ts`, 5-minute freshness) while the list below is
+// always live — which is why the tile can read 26 with 27 rows under it for a few minutes. The
+// route has always sent this; the screen never showed it. See the line under the tiles.
+type Summary = { total: number; returning: number; newThisMonth: number; blocked: number; shown: number; cachedAt?: string };
 // One guest's record: their bills here + the lifetime figures (mig 228). Money is the
 // OWNER's own takings, which is why it appears on this page and not the admin's.
 type Bill = { session_id: string; restaurant_id: string; bill_no: number | null; invoice_no: number | null; table_number: string | null; at: string; name: string | null; total: number };
@@ -44,6 +48,8 @@ type Detail = {
 
 // 10 digits read as "97376 38206" — easier to read back to a guest than one long run.
 const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
+// The clock time a figure was counted, in India time like every other date on this page.
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: IST });
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: IST });
 
 // One summary figure. When it names a `seg` it is a real button that puts the list on that
@@ -342,12 +348,27 @@ export default function OwnerCustomers() {
             <Tile label="New (last 30 days)" value={summary?.newThisMonth} loading={!summary} />
             <Tile label="Blocked" value={summary?.blocked} loading={!summary} seg="blocked" on={seg} pick={setSeg} />
           </div>
-          {/* One line so the little filter mark is not a riddle. Muted, and it sits with the tiles
-              rather than shouting from a bar — nothing is wrong, it is just how they work. */}
-          <p className="adm-muted" style={{ fontSize: 12, margin: "-8px 0 14px" }}>
-            <i className="fas fa-filter" aria-hidden="true" style={{ fontSize: 9.5, marginRight: 5 }} />
-            Tap a figure with this mark to see the people behind it.
-          </p>
+          {/* One quiet line under the tiles, carrying the two things they do not say themselves:
+              which of them you can press, and WHEN they were counted.
+              ── HOW FRESH IS THAT NUMBER (owner, 2026-08-31 — item 13) ─────────────────────────────
+              Counting every guest is expensive, so the four figures ride the 5-minute snapshot cache
+              while the list under them is always live. Measured on French House: add a guest and the
+              list shows 27 while the tile still says 26, until Refresh. The numbers are never WRONG,
+              only a few minutes old — but the screen never said so, and two numbers disagreeing in
+              front of you with no explanation is the thing that makes a person stop trusting both.
+              The route has sent `cachedAt` all along; it just went unread. Plain text, not a warning
+              bar: nothing is wrong here. Refresh still forces a live recount, as it always did. */}
+          <div className="adm-muted" style={{ fontSize: 12, margin: "-8px 0 14px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+            <span>
+              <i className="fas fa-filter" aria-hidden="true" style={{ fontSize: 9.5, marginRight: 5 }} />
+              Tap a figure with this mark to see the people behind it.
+            </span>
+            {/* Right-aligned with the tiles above it on a computer; on a phone it drops to its own
+                line, where being pushed to the right edge would just look stranded. */}
+            {summary?.cachedAt && (
+              <span style={{ marginLeft: narrow ? undefined : "auto" }}>Counted at {fmtTime(summary.cachedAt)} · Refresh to count again.</span>
+            )}
+          </div>
 
           {partial.length > 0 && (
             <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

@@ -409,6 +409,15 @@ const RULES = [
       /openCount: "how many complaints are still open"/,
     ],
   },
+  {
+    item: 29, file: CUSTOMERS,
+    say: "the four figures say WHEN they were counted, because they ride a 5-minute snapshot",
+    must: [
+      /cachedAt\?: string \};/,
+      /const fmtTime = \(iso: string\) =>/,
+      /Counted at \{fmtTime\(summary\.cachedAt\)\} · Refresh to count again\./,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
