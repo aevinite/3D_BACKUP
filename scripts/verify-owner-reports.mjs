@@ -785,6 +785,54 @@ console.log("\nT11-H · the manager's till count names the same methods the owne
   );
 }
 
+console.log("\nT11-I · the file you download IS the report you were looking at");
+{
+  // ── A REPORT THAT SHARES A PAYLOAD SHAPE STILL HAS ITS OWN TABLE (T11 round 2, 2026-09-01) ──
+  // The export branched on the payload SHAPE, and several bodies share one: by-hour and
+  // times-of-day are both "hourly", day-of-week and average-bill are both "money". So the file
+  // was headed with the right report and filled with a different one. Measured, 30 days:
+  //   Times of day      → 24 hourly rows instead of Morning/Afternoon/Evening/Late night
+  //   Day of week       → dated by-period rows instead of Monday…Sunday
+  //   Which dishes earn → the plain dish list, with the Star/Workhorse/Puzzle/Dog grouping gone
+  //   Average bill      → the by-period table WITHOUT the Avg bill column it is named after
+  check(
+    "the export is told WHICH report is on screen, not just its payload shape",
+    /body\?: string/.test(sectionExport) && /body: bodyKey/.test(reportsPage),
+    "components/owner/reports/sectionExport.tsx + app/owner/reports/page.tsx — pass the body. Branching " +
+      "on `kind` alone writes one report's table under another report's heading.",
+  );
+  for (const [body, mustHave] of [["daypart", /Day part", "Orders", "Revenue"/], ["weekday", /Days counted", "Paid bills"/], ["menu", /Dish", "Group", "Sold"/]]) {
+    check(
+      `…and "${body}" builds its own table`,
+      new RegExp(`meta\\.body === "${body}"`).test(sectionExport) && mustHave.test(sectionExport),
+      `components/owner/reports/sectionExport.tsx — the ${body} export must rebuild what the screen shows.`,
+    );
+  }
+  check(
+    "…and the Average bill file carries the column the report is named after",
+    /const avg = meta\.body === "avgbill"/.test(sectionExport) && /avg \? \["Avg bill"\]/.test(sectionExport),
+    "components/owner/reports/sectionExport.tsx — the screen shows an Avg bill column; the file must too.",
+  );
+  // ONE definition of each grouping, or the screen and the file drift apart again.
+  check(
+    "the day parts and the weekdays are defined ONCE, where both the screen and the file can read them",
+    /export const DAYPARTS/.test(kit) && /export const WEEKDAY_SHORT/.test(kit) && /export const istWeekday/.test(kit),
+    "components/owner/reports/kit.tsx — they used to live inside page.tsx where the export could not " +
+      "reach them, which is exactly how the two came to describe different groupings.",
+  );
+  check(
+    "…and the page reads those, rather than keeping its own copy",
+    /DAYPARTS, WEEKDAY_SHORT, WEEKDAY_FULL, istWeekday/.test(reportsPage) &&
+    !/^const DAYPARTS/m.test(reportsPage) && !/const NAMES = \["Mon"/.test(reportsPage),
+    "app/owner/reports/page.tsx — import them from the kit; a second copy is a second answer.",
+  );
+  check(
+    "…and the weekday grouping is done in IST",
+    /timeZone: "Asia\/Kolkata"/.test(kit.slice(kit.indexOf("export const istWeekday"), kit.indexOf("export const istWeekday") + 240)),
+    "components/owner/reports/kit.tsx — a non-IST reader would group a day into the wrong weekday.",
+  );
+}
+
 console.log("\nT11-G · with no internet, the saved figures can still be found");
 {
   // The scope comes from /api/owner/overview. Offline that read answers `{ error: "offline" }`

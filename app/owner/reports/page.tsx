@@ -27,6 +27,7 @@ import {
 } from "@/components/owner/Charts";
 import {
   REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, PrintHead, PrintFoot, nfmt, scrollToId, type RKey, type DataKind,
+  DAYPARTS, WEEKDAY_SHORT, WEEKDAY_FULL, istWeekday,
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport, classifyMenu, type MI } from "@/components/owner/reports/DishReports";
@@ -346,12 +347,8 @@ function PeriodDrop({ value, onChange }: { value: Range; onChange: (r: Range) =>
   );
 }
 
-const DAYPARTS: { label: string; icon: string; hours: number[] }[] = [
-  { label: "Morning",    icon: "fa-mug-hot",   hours: [5, 6, 7, 8, 9, 10, 11] },
-  { label: "Afternoon",  icon: "fa-sun",       hours: [12, 13, 14, 15, 16] },
-  { label: "Evening",    icon: "fa-cloud-sun", hours: [17, 18, 19, 20, 21] },
-  { label: "Late night", icon: "fa-moon",      hours: [22, 23, 0, 1, 2, 3, 4] },
-];
+// DAYPARTS, WEEKDAY_* and istWeekday now live in kit.tsx — the EXPORT needs the same
+// groupings, and two copies is how the file and the screen came to disagree.
 
 export default function OwnerReports() {
   const [rests, setRests] = useState<Rest[]>([]);
@@ -685,7 +682,10 @@ export default function OwnerReports() {
   const subTabs = tabsEarly;
   const activeSubKey = activeSubKeyEarly;
   const activeSubLabel = subTabs.find((t) => t.key === activeSubKey)?.label ?? "";
-  const exportMeta = { label: sel ? REPORTS[sel].label + (activeSubLabel ? ` · ${activeSubLabel}` : "") : "", kind: BODY_KIND[bodyKey] };
+  // `body` as well as `kind`: several bodies share one payload SHAPE (by-hour and times-of-day
+  // are both "hourly"; day-of-week and average-bill are both "money"), and the export used to
+  // branch on the shape alone — so it wrote the wrong report under the right heading.
+  const exportMeta = { label: sel ? REPORTS[sel].label + (activeSubLabel ? ` · ${activeSubLabel}` : "") : "", kind: BODY_KIND[bodyKey], body: bodyKey };
   const exportCtx = data ? {
     meta: exportMeta, data, restName, periodLabel: effLabel, isTax: bodyKey === "tax", bucketLabel,
     extra: sel === "daysummary" ? dayExtraTables(dishesDay, hourlyDay) : undefined,
@@ -1731,15 +1731,15 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
   // ── DAY OF WEEK ──
   if (bk === "weekday") {
     if (bucket !== "day") return <EmptyCard text="Pick a daily period (7 days, 30 days, this or last month) to see the day-of-week breakdown." />;
-    const NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const NAMES = [...WEEKDAY_SHORT];
     const by = new Map<string, { rev: number; orders: number; days: number }>();
     for (const r of mrows) {
-      const wd = new Date(r.bucket).toLocaleDateString("en-US", { weekday: "short", timeZone: TZ });
+      const wd = istWeekday(r.bucket);
       const cur = by.get(wd) || { rev: 0, orders: 0, days: 0 };
       cur.rev += r.revenue; cur.orders += r.paidOrders; cur.days += (r.revenue > 0 || r.paidOrders > 0) ? 1 : 0;
       by.set(wd, cur);
     }
-    const FULL: Record<string, string> = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
+    const FULL = WEEKDAY_FULL;
     const rows = NAMES.map((nm) => ({ nm, ...(by.get(nm) || { rev: 0, orders: 0, days: 0 }) }));
     const chart = rows.map((r) => ({ label: r.nm, revenue: r.rev }));
     const allRev = rows.reduce((a, r) => a + r.rev, 0);
