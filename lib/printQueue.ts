@@ -15,6 +15,29 @@
 // scopes every statement by it.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
+// ── A WRITE THAT NOBODY CHECKS IS A PROMISE NOBODY KEEPS (T25 round 3, item 41, 2026-08-31) ───────
+//
+// Eleven writes in this file were `await sb.from(…).update(…)` with the result thrown away. Each one
+// matters differently, and two of them matter a lot:
+//
+//   · the DONE stamp — if it fails, the paper came out and the ticket stays `printing` for ever, so
+//     the basket says a ticket is in flight that nobody is holding, and the stuck-alert eventually
+//     fires about a ticket that printed perfectly;
+//   · switching another screen OFF when this one takes over — if it fails, TWO screens are active and
+//     both print, which is the one promise this whole feature makes ("one piece of paper").
+//
+// The right answer here is NOT to throw: a print path that crashes leaves the ticket in a worse state
+// than one that carries on. So every write now reads its error and says so in the server log, where
+// the Fix-NOW board and `vercel logs` both look — which is the difference between a fault that is
+// invisible and a fault somebody can find. This is the same lesson as the bill tombstone that
+// "silently failed for months" (lib/softDelete.ts's own note).
+const wrote = async <T extends { error?: unknown } | null>(what: string, p: PromiseLike<T>): Promise<T> => {
+  const r = await p;
+  const e = (r as { error?: unknown } | null)?.error;
+  if (e) console.error(`[print-queue] ${what} failed:`, (e as { message?: string })?.message ?? e);
+  return r;
+};
+
 // A claim older than this with nothing to show for it is offered again: the tab that took it died
 // (closed, crashed, power cut, PC asleep mid-print). Same 2 minutes mig 269 chose.
 export const STALE_CLAIM_MS = 120000;
@@ -154,14 +177,14 @@ export async function pendingKotJobs(
     const gone = orphans.filter((j) => !j.order).map((j) => j.id);
     const cancelled = orphans.filter((j) => j.order).map((j) => j.id);
     if (gone.length) {
-      await sb.from("print_jobs")
+      await wrote("dismissing tickets whose order was deleted", sb.from("print_jobs")
         .update({ status: "dismissed", done_at: new Date().toISOString(), error: "the order was deleted before this ticket printed" })
-        .in("id", gone).eq("restaurant_id", rid);
+        .in("id", gone).eq("restaurant_id", rid));
     }
     if (cancelled.length) {
-      await sb.from("print_jobs")
+      await wrote("dismissing tickets whose order was cancelled", sb.from("print_jobs")
         .update({ status: "dismissed", done_at: new Date().toISOString(), error: "the order was cancelled before this ticket printed" })
-        .in("id", cancelled).eq("restaurant_id", rid);
+        .in("id", cancelled).eq("restaurant_id", rid));
     }
   }
   return withOrder.filter((j) => !dead(j));
@@ -223,8 +246,10 @@ export async function finishKotJob(
     : null;
 
   if (okPrint) {
-    await sb.from("print_jobs").update({ status: "done", done_at: new Date().toISOString(), error: null })
-      .eq("id", id).eq("restaurant_id", rid);
+    // THE ONE THAT MATTERS MOST: a failure here leaves a printed ticket marked `printing` for ever.
+    await wrote("marking a ticket printed", sb.from("print_jobs")
+      .update({ status: "done", done_at: new Date().toISOString(), error: null })
+      .eq("id", id).eq("restaurant_id", rid));
     // A SUCCESSFUL PRINT CLOSES THE COMPLAINTS IT ACTUALLY DISPROVES, and no others (mig 351).
     // Before this, ANY print resolved EVERY open row for the restaurant — right with one printer,
     // wrong the moment a computer owns three: "bill printer out of paper" vanished off the manager's
@@ -243,21 +268,23 @@ export async function finishKotJob(
     if (printer) {
       // Complaints about the printer that just printed — the paper IS the proof — and the
       // unknown-printer rows, which keep the pre-mig-351 behaviour so none can stick open.
-      await sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open").eq("printer", printer);
-      await sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open").is("printer", null);
+      await wrote("closing this printer's complaints", sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open").eq("printer", printer));
+      await wrote("closing complaints with no printer on them", sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open").is("printer", null));
     } else {
-      await sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open");
+      await wrote("closing every open printer complaint", sb.from("printer_events").update(resolved).eq("restaurant_id", rid).eq("status", "open"));
     }
     return { found: true, orderId: job.order_id ?? null, reprint: job.reprint !== false, attempts: job.attempts || 0, parked: false, kotNo: ord?.kot_no ?? null, tableNumber: ord?.table_number ?? null };
   }
 
   const attempts = (job.attempts || 0) + 1;
   const parked = attempts >= 5;
-  await sb.from("print_jobs").update({
+  // A failure here would leave `attempts` where it was, so a ticket could retry for ever without
+  // ever reaching the fifth try that tells somebody.
+  await wrote("recording a failed print", sb.from("print_jobs").update({
     status: parked ? "failed" : "queued",
     attempts, claimed_at: null,
     error: String(error || "print failed").slice(0, 300),
-  }).eq("id", id).eq("restaurant_id", rid);
+  }).eq("id", id).eq("restaurant_id", rid));
 
   // ── A TICKET THAT CANNOT PRINT TELLS SOMEBODY (owner, 2026-08-30) ──────────────────────────
   // This is what REPLACED the backup printer. His words: "we don't even need the backup printer —
@@ -369,27 +396,28 @@ export async function takeStation(
   rid: string,
   device: { deviceId: string; label: string; panel: "kitchen" | "editor"; by?: string | null },
 ): Promise<StationView> {
-  await sb.from("print_stations").update({ active: false })
-    .eq("restaurant_id", rid).eq("active", true).neq("device_id", device.deviceId);
-  await sb.from("print_stations").upsert({
+  // AND THE OTHER ONE: if this fails, two screens stay active and both print.
+  await wrote("switching the other printing screens off", sb.from("print_stations").update({ active: false })
+    .eq("restaurant_id", rid).eq("active", true).neq("device_id", device.deviceId));
+  await wrote("making this screen the printer", sb.from("print_stations").upsert({
     restaurant_id: rid, device_id: device.deviceId, label: device.label.slice(0, 60),
     panel: device.panel, active: true, claimed_by: (device.by || null), last_seen_at: new Date().toISOString(),
-  }, { onConflict: "restaurant_id,device_id" });
+  }, { onConflict: "restaurant_id,device_id" }));
   return stationView(rid, device.deviceId);
 }
 
 /** This screen stops being the printer. Nobody takes over until a screen asks — a restaurant that
  *  turned its printer off should not have tickets quietly coming out somewhere else. */
 export async function releaseStation(rid: string, deviceId: string): Promise<void> {
-  await sb.from("print_stations").update({ active: false })
-    .eq("restaurant_id", rid).eq("device_id", deviceId);
+  await wrote("this screen stopping being the printer", sb.from("print_stations").update({ active: false })
+    .eq("restaurant_id", rid).eq("device_id", deviceId));
 }
 
 /** "I am still here." Written on the reads a printing screen already makes, so a screen that closes
  *  goes quiet by itself and, after STATION_STALE_MS, stops holding printing hostage. */
 export async function touchStation(rid: string, deviceId: string): Promise<void> {
-  await sb.from("print_stations").update({ last_seen_at: new Date().toISOString() })
-    .eq("restaurant_id", rid).eq("device_id", deviceId).eq("active", true);
+  await wrote("a printing screen's heartbeat", sb.from("print_stations").update({ last_seen_at: new Date().toISOString() })
+    .eq("restaurant_id", rid).eq("device_id", deviceId).eq("active", true));
 }
 
 /**

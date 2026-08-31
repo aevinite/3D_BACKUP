@@ -827,6 +827,41 @@ for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript
       " — it was removed on 2026-08-30 at the owner's word; a half-finished removal reads like a live feature");
 }
 
+// ── 8i · EVERY WRITE IN THE QUEUE READS ITS ERROR (T25 round 3, item 41, 2026-08-31) ──────────────
+//
+// Ten writes in lib/printQueue.ts were `await sb.from(…).update(…)` with the result thrown away. Two
+// of them are the ones that matter: the DONE stamp (a failure leaves a printed ticket marked
+// `printing` for ever, so the basket claims a ticket is in flight that nobody is holding) and
+// switching the other screens OFF when one takes over (a failure leaves two screens active and both
+// print — the one promise this feature makes). It is the same shape as the bill tombstone that
+// "silently failed for months".
+//
+// The rule is not "throw" — a print path that crashes leaves the ticket worse off — it is "say so in
+// the server log", which is the difference between an invisible fault and a findable one.
+{
+  const q = readFileSync(new URL("../lib/printQueue.ts", import.meta.url), "utf8");
+  const qc = code(q);
+  const bare = [];
+  // WRITES ONLY — update / insert / upsert / delete. A select's error is a different question (it is
+  // answered by the caller reading `.data`), and counting reads here made the first cut of this check
+  // accuse six perfectly good queries.
+  for (const m of qc.matchAll(/await\s+(?:sb\s*\.from\([^)]*\)\s*\.)(update|insert|upsert|delete)\(/g)) {
+    const line = qc.slice(qc.lastIndexOf("\n", m.index) + 1, qc.indexOf("\n", m.index));
+    // ONE named exemption: the printer_events insert that files the "gave up" complaint sits inside
+    // its own try/catch, because the ticket is already parked and visible — a missing report must not
+    // replace a real failure with a bookkeeping one.
+    if (/printer_events"\)\.insert\(/.test(qc.slice(m.index, m.index + 120))) continue;
+    bare.push(line.trim().slice(0, 90));
+  }
+  check(bare.length === 0,
+    `every write in lib/printQueue.ts reads its error (${(qc.match(/await wrote\(/g) || []).length} through wrote())`,
+    "a write in lib/printQueue.ts throws its result away: " + bare.join(" | ") +
+      " — wrap it in wrote(\"what it was doing\", …) so a failure reaches the server log instead of vanishing");
+  check(/const wrote = async/.test(qc),
+    "…and the wrote() helper that logs a failed write is still there",
+    "lib/printQueue.ts lost the wrote() helper — every write would be silent again");
+}
+
 // ── 9 · it is written down ────────────────────────────────────────────────────────────────────
 check(plan.length > 4000 && /print_agents/.test(plan) && /four ticks/i.test(plan),
   "docs/PRINT-HELPER.md still explains the whole thing, including the four ticks",
