@@ -1069,7 +1069,11 @@ body {
 .ord-card.is-freed { filter: saturate(0.6) brightness(0.9); }
 .ord-card.is-freed:hover { filter: saturate(0.85) brightness(0.97); }
 .ord-card.is-freed .ord-del { opacity: 1; }
-.ord-pill.freed-pill { background: rgba(150,150,150,0.18); color: var(--muted); }
+/* Its own grey rather than --muted (T26 sweep #7, 2026-08-31 — item 16). --muted is tuned against
+   the panel; on this pill's own 18% grey wash it landed at 4.47:1 on the dark skin — 0.03 short.
+   One pill, one line, so it is worth clearing properly rather than excusing. The LIGHT skin gets
+   its own deeper value in the light block below. */
+.ord-pill.freed-pill { background: rgba(150,150,150,0.18); color: #cfc9bd; }
 .ord-grid-freed { opacity: 0.95; }
 .ord-section-divider { margin: 30px 0 14px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 20px; }
 .ord-section-divider h3 { margin: 0; font-size: 16px; font-weight: 800; }

@@ -405,6 +405,25 @@ const PROBES = [
              [".ft-num", 4.5, "the TABLE NUMBER on a dense tile (was 3.13 on an amber table, light skin)"],
              [".ft-merge-parent", 4.5, "the one-party chip on a tile (was 4.18 light / 4.46 dark at 8px)"],
              [".tab-badge", 4.5, "the tab's waiting count, white on red (was 3.76 on the dark skin)"]] },
+  // THE BILLS SCREEN — the one where money is read, and it had NINE things under the line
+  // (T26 sweep #7). Every state is mounted, because the pass that fixed this family in July
+  // deepened `.ord-pill.new` while the list actually renders `.ord-pill.received`, and left the
+  // states it did touch short of the line.
+  { name: "manager Bills", role: "manager", url: "/manager", frame: "/panels/editor/",
+    html: `<div class="ord-card"><div class="ord-top">
+             <span class="ord-pill received">New order</span><span class="ord-pill preparing">Cooking</span>
+             <span class="ord-pill ready">Ready</span><span class="ord-pill served">Served</span>
+             <span class="ord-pill cancelled">Cancelled</span><span class="ord-pill new">New</span>
+             <span class="ord-pill freed-pill">Freed</span></div>
+             <div class="ord-total"><span>Total</span><span>₹126</span></div></div>`,
+    checks: [[".ord-pill.received", 4.5, "Bills → the 'New order' tag (was 1.43 on the light skin — an amber word on a tan pill)"],
+             [".ord-pill.preparing", 4.5, "Bills → the Cooking tag (was 3.28 — the July pass stopped short of the line)"],
+             [".ord-pill.ready", 4.5, "Bills → the Ready tag (was 1.59)"],
+             [".ord-pill.served", 4.5, "Bills → the Served tag (was 3.30)"],
+             [".ord-pill.cancelled", 4.5, "Bills → the Cancelled tag (was 2.28 light / 4.08 dark)"],
+             [".ord-pill.new", 4.5, "Bills → the New tag"],
+             [".ord-pill.freed-pill", 4.5, "Bills → the Freed tag (was 3.43)"],
+             [".ord-total span:last-child", 3, "Bills → THE BILL'S OWN TOTAL (was 2.03 on the light skin — --gold is a fill, not ink)"]] },
   { name: "kitchen board", role: "kitchen", url: "/kitchen", frame: "/panels/kitchen/",
     html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>`,
     checks: [["#col-cooking h2", 4.5, "the Cooking lane heading"]] },
@@ -412,8 +431,12 @@ const PROBES = [
   // here. It needs no login: the menu is the one door that opens to anybody.
   { name: "guest menu", role: null, url: "/menu?table=1", frame: null, skinKey: "lfh_theme",
     html: `<div class="cat-card"><div class="cat-icon">C</div><div class="cat-name">Beverages</div></div>
-           <div class="review-card"><div class="rating-row"><span class="rating-count">(12 reviews)</span></div></div>`,
+           <div class="review-card"><div class="rating-row"><span class="rating-count">(12 reviews)</span></div></div>
+           <div class="detail-body"><div class="section-label">ABOUT THIS DISH</div>
+             <p class="detail-desc">Our Espresso is made by hand.</p><span class="desc-toggle">Read more ↓</span></div>`,
     checks: [[".cat-name", 4.5, "an unchosen category name under its icon (was 4.13 on the light skin — the card's own tint is darker than the page)"],
+             [".desc-toggle", 4.5, "a dish page's 'Read more' link (was 4.29 on the dark skin — --accent-ink-dim was a plain alias of the border colour)"],
+             [".section-label", 4.5, "a dish page's 'ABOUT THIS DISH' heading (was scraping over at 4.54)"],
              // 4.4, not 4.5, and the 0.1 is DELIBERATE. Both this and the unselected filter-chip
              // label take the guest's secondary ink --muted, which on the DARK skin lands at
              // 4.47:1 on a card — 0.03 short. Sweep #6 measured the same number and parked it in
