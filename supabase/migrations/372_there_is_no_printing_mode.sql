@@ -44,6 +44,20 @@ SET modules = jsonb_set(modules, '{printing}', (modules -> 'printing') - 'mode')
 WHERE modules -> 'printing' ? 'mode';
 GET DIAGNOSTICS v_rows = ROW_COUNT;
 RAISE NOTICE '372: dropped a dead printing.mode from % settings row(s)', v_rows;
+
+-- ── AND RECORD THAT IT RAN (added 2026-08-31, T25 round 3) ──────────────────────────────────────
+-- The guard above ASKS `lfh_already_applied('372_there_is_no_printing_mode')` and nothing ever wrote
+-- that key, so the answer was permanently false and the one-time UPDATE ran on every re-seed. Harmless
+-- for THIS statement (the key it removes is already gone the second time), but `verify:grants` refuses
+-- a checked-but-never-recorded key on principle — a guard that can never become true is not a guard,
+-- and the next one-time DATA migration copied from this shape would rewrite live rows every re-seed.
+-- Same shape as migrations 307, 321, 355 and 369.
+IF to_regclass('public.lfh_applied_once') IS NOT NULL THEN
+  INSERT INTO lfh_applied_once (key, note) VALUES
+    ('372_there_is_no_printing_mode',
+     'one-time removal of the dead settings.modules.printing.mode key (the printing MODE toggle was retired 2026-08-31). Re-running is harmless, but the marker keeps the guard honest.')
+  ON CONFLICT (key) DO NOTHING;
+END IF;
 END $mode_guard$;
 
 -- A GUARD IN THE DATABASE ITSELF would be wrong here: the bag is deliberately free-form (that is the
