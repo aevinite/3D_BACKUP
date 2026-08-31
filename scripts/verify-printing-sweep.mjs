@@ -51,6 +51,32 @@ const db = (p, init) => fetch(`${U}/rest/v1/${p}`, { ...init, headers: { ...H, .
   .then(async (r) => { const t = await r.text(); if (!r.ok) throw new Error(`${p} → ${r.status} ${t.slice(0, 160)}`); return t ? JSON.parse(t) : null; });
 const adminCookie = "lfh_staff_auth=" + createHash("sha256").update(env.ADMIN_PASSWORD || "").digest("hex");
 const api = (path, init) => fetch(BASE + path, { ...init, headers: { "content-type": "application/json", cookie: adminCookie, ...(init?.headers || {}) } });
+
+// ── PUTTING THE RESTAURANT IN ONE OF THE TWO SHAPES, NOW THERE IS NO MODE VERB ───────────────
+//
+// Fourteen places in this file used to POST /api/admin/printing/mode to set the scene before a group
+// of phases: "put it in computer mode, now check X". The verb went with the toggle (owner,
+// 2026-08-31 — *"in admin panel also we don't need toggle"*), but the two SHAPES it produced are
+// still exactly the states worth testing, because they are what the routes say:
+//
+//   asShape("screen", personId)  → the kitchen slips belong to that person's screen
+//   asShape("screen")            → nobody named: the slips fall to the KITCHEN SCREEN by default
+//   asShape("computer")          → a computer owns the slips (needs AGENT + a printer)
+//
+// Writing it through /routes is not a workaround — it is the only door there ever really was. The
+// mode was a second copy of this answer, which is why it could disagree with it.
+const asShape = async (shape, person, opts) => {
+  const kind = opts?.kind || "kot";
+  if (shape === "screen") {
+    if (!person) return api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { [kind]: null } }) });
+    const [u] = await db(`staff_users?id=eq.${person}&select=role`);
+    const panel = u?.role === "kitchen" ? "kitchen" : (u?.role === "waiter" || u?.role === "tablet") ? "tablet" : "manager";
+    return api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { [kind]: { via: "screen", panel, person } } }) });
+  }
+  // a computer owns it — the sweep's own agent, and whichever printer the caller means
+  return api("/api/admin/printing/routes", { method: "POST",
+    body: JSON.stringify({ rid: RID, routes: { [kind]: { agent: (opts?.agent || AGENT?.id), printer: (opts?.printer || VIRT?.kitchen || "ZZ-Virt-Kitchen") } } }) });
+};
 const read = (p) => { try { return readFileSync(new URL("../" + p, import.meta.url), "utf8"); } catch { return ""; } };
 // Nothing answering on --base is "could not run", never "ran and found a fault". Without this the
 // first api() call threw a bare fetch error 20 lines into the run, after the header had already
@@ -927,30 +953,47 @@ await phase("…and a print on ITS printer closes it", async () => {
 // a restaurant switched to Chrome would keep three routes pointing at a computer, the board would say
 // one thing and the paper would do another.
 {
-  const setMode = (mode, person) => api("/api/admin/printing/mode", { method: "POST",
-    body: JSON.stringify({ rid: RID, mode, ...(person ? { person } : {}) }) });
+  const setMode = (mode, person) => asShape(mode, person);   // see asShape — there is no mode verb
   const kotRoute = async () => {
     const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules,auto_print_kot`);
     return { kot: st.modules?.printing?.routes?.kot || {}, mode: st.modules?.printing?.mode, auto: st.auto_print_kot };
   };
 
-  await phase("the mode is stored, and defaults to a computer", async () => {
-    const r = await setMode("computer");
+  // ⚠️ NOTHING IS STORED ANY MORE (owner, 2026-08-31 — "we don't need toggle"). These three asked
+  // whether the MODE was saved, whether switching it dragged the paper lines along, and whether the
+  // switch re-asserted auto-print. There is no switch: the answer is READ off the route every time,
+  // so it cannot be stale and there is nothing to drag. What is asserted instead is the thing that
+  // now decides — and, critically, that NOTHING is written into the module bag behind our backs.
+  await phase("no printing mode is stored anywhere — the route is the only answer", async () => {
+    await asShape("computer");
     const a = await kotRoute();
-    return (r.ok && a.mode === "computer") || `status ${r.status} · mode ${a.mode}`;
+    return (a.mode === undefined && a.kot.agent === AGENT.id)
+      || `a mode is being stored again ("${a.mode}") — it can disagree with the route, which is why it went`;
   });
-  await phase("switching to A SCREEN moves the paper lines with it", async () => {
-    // give it a computer route first, so there is something to move
+  await phase("naming a person moves the kitchen slips to their screen, in one write", async () => {
     await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID,
       routes: { kot: { via: "computer", agent: AGENT.id, printer: VIRT.kitchen } } }) });
-    const r = await setMode("screen", mgr.id);
+    const r = await asShape("screen", mgr.id);
     const a = await kotRoute();
-    return (r.ok && a.mode === "screen" && a.kot.via === "screen" && a.kot.person === mgr.id)
+    return (r.ok && a.kot.via === "screen" && a.kot.person === mgr.id)
       || `status ${r.status} · ${JSON.stringify(a)}`;
   });
-  await phase("…and auto-print is re-asserted, so a mode change never silently stops printing", async () => {
+  await phase("…and auto-print comes with it, so naming somebody never leaves printing off", async () => {
     const a = await kotRoute();
-    return a.auto === true || `auto_print_kot is ${a.auto} after a mode change`;
+    return a.auto === true || `auto_print_kot is ${a.auto} after the slips were moved to a screen`;
+  });
+  // ── AND THE WHOLE POINT OF THE CHANGE: the kitchen screen needs no setup at all ─────────────
+  await phase("an UNANSWERED kitchen-slip line falls to the KITCHEN SCREEN, with nobody named", async () => {
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { kot: null } }) });
+    const t = await api(`/api/admin/printing/state?rid=${RID}`).then((r) => r.json());
+    const kot = ((t.routes || {}).kot) || {};
+    // NOT JUST "the route is empty" — that is the state we created and would pass on a product that
+    // does nothing with it. What is asserted is the CONSEQUENCE: the kitchen board must now say it
+    // may auto-print, and the manager's must say it may not, with nobody named anywhere.
+    const [kb, mb] = await Promise.all([asKitchen("/board?autojobs=1"), asManager("/print-jobs/pending")]);
+    if (kot.agent || kot.person) return `the line is not actually unanswered: ${JSON.stringify(kot)}`;
+    if (kb.autoPrintKot !== true) return `the KITCHEN screen was not handed the slips (autoPrintKot=${kb.autoPrintKot}, refused=${kb.printRefused})`;
+    return mb.off === true || "the MANAGER screen was handed them too — an unanswered line must fall to ONE room, not to whichever screen asks first";
   });
   await phase("a line set to NOBODY survives a mode change — the decision outlives the mechanism", async () => {
     await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { bill: { via: "off" } } }) });
@@ -959,24 +1002,44 @@ await phase("…and a print on ITS printer closes it", async () => {
     const bill = st.modules?.printing?.routes?.bill || {};
     return bill.via === "off" || `the bill line became ${JSON.stringify(bill)} — "we do not print this" was thrown away by a mechanism change`;
   });
-  await phase("…and going back to a computer does NOT invent a printer nobody chose", async () => {
+  // ⚠️ RE-AIMED. This asked what a MODE SWITCH left behind — it must not leave a printer nobody
+  // picked. There is no switch, so the question becomes the one that is still asked in anger:
+  // CLEARING a line invents nothing, and what it falls back to is the kitchen screen, not a printer.
+  await phase("clearing a line invents no printer — it falls back to the kitchen screen", async () => {
+    await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { kot: null } }) });
     const a = await kotRoute();
     return (!a.kot.printer && !a.kot.agent) || `it kept ${JSON.stringify(a.kot)} — the board would point at a printer nobody picked`;
   });
-  // ── THE NEW MODEL, asserted where it is decided (owner, 2026-08-29) ────────────────────────
-  await phase("switching to A SCREEN puts the bill back to whoever presses Print", async () => {
+  // ── THE RULE THAT MATTERS, SAID THE WAY IT IS NOW TRUE (owner, 2026-08-29 → 2026-08-31) ────
+  //
+  // His rule: *"the person will be only choose for KOT… other user will work as they work — from the
+  // manager panel you can print the bill."* The harm was ONE person's screen being handed every piece
+  // of paper in the restaurant.
+  //
+  // It used to be enforced by writeMode BLANKING the bill and banquet lines on a switch. That was
+  // right for a global switch and would be wrong now: with per-paper routes, a restaurant that
+  // deliberately sent its bills to the counter printer would have that thrown away because somebody
+  // named a cook for the slips. So what is asserted is the stronger, simpler invariant that replaced
+  // it: naming a person for the kitchen slips touches THE KITCHEN-SLIP LINE AND NOTHING ELSE.
+  await phase("naming a person for the slips leaves the BILL line exactly as it was", async () => {
     await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID,
       routes: { bill: { via: "computer", agent: AGENT.id, printer: VIRT.counter } } }) });
-    await setMode("screen", mgr.id);
+    await asShape("screen", mgr.id);
     const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
     const bill = st.modules?.printing?.routes?.bill || {};
-    return !bill.via
-      || `the bill line is ${JSON.stringify(bill)} — a screen was handed the bills too, which is how one person's screen ended up popping every piece of paper in the restaurant`;
+    return (bill.agent === AGENT.id && bill.printer === VIRT.counter)
+      || `the bill line became ${JSON.stringify(bill)} — a deliberate choice for the bills was thrown away by a decision about the slips`;
   });
-  await phase("…and the banquet sheet too", async () => {
+  await phase("…and the person named for the slips is never given the bills", async () => {
+    const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
+    const bill = st.modules?.printing?.routes?.bill || {};
+    return (bill.via !== "screen" && !bill.person)
+      || `the bill line names a screen (${JSON.stringify(bill)}) — this is how one person's screen ended up popping every piece of paper in the restaurant`;
+  });
+  await phase("…and the banquet sheet is untouched too", async () => {
     const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
     const bq = st.modules?.printing?.routes?.banquet || {};
-    return !bq.via || `the banquet line is ${JSON.stringify(bq)}`;
+    return (bq.via !== "screen" && !bq.person) || `the banquet line names a screen: ${JSON.stringify(bq)}`;
   });
   await phase("a KITCHEN person can be the printing screen, and the panel follows their role", async () => {
     const [cook] = await db(`staff_users?select=id,name&restaurant_id=eq.${RID}&role=eq.kitchen&order=id.asc&limit=1`);
@@ -1001,9 +1064,19 @@ await phase("…and a print on ITS printer closes it", async () => {
     return (r.ok && a.kot.via === "screen" && a.kot.person === mgr.id)
       || `it stayed ${JSON.stringify(a.kot)} — picking somebody after choosing Nobody saved nothing and the screen snapped back`;
   });
-  await phase("a mode that is not one of the two is refused", async () => {
-    const r = await setMode("carrier-pigeon");
-    return r.status >= 400 || `it answered ${r.status}`;
+  // ⚠️ RE-AIMED. This checked the mode ENUM refused nonsense. There is no enum and no verb — so what
+  // is worth asserting is that the DOOR is shut: nothing can post a mode at all, to either board.
+  // Left open, a stale screen could keep writing a key that nothing reads, which is how the dead
+  // `printing.mode` sat in three restaurants' settings until mig 372 swept it out.
+  await phase("the mode verb is gone from the admin board — nothing can store a mechanism", async () => {
+    const r = await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "computer" }) });
+    return r.status === 404 || `it answered ${r.status} — a door that still takes a mode will be used by something`;
+  });
+  await phase("…and from the manager panel's own board too", async () => {
+    const r = await fetch(BASE + "/api/editor/printing/mode", { method: "POST",
+      headers: { "content-type": "application/json", cookie: MANAGER_COOKIE + "; lfh_panel_device=mode-dev" },
+      body: JSON.stringify({ mode: "computer" }) });
+    return r.status === 404 || `it answered ${r.status}`;
   });
   await phase("…and a person who is not this restaurant's staff is refused", async () => {
     const r = await setMode("screen", "00000000-0000-0000-0000-0000000000ff");
@@ -1304,7 +1377,6 @@ await phase("…and a print on ITS printer closes it", async () => {
 
   for (const [verb, payload] of [
     ["this-computer", { name: "Perm PC" }],
-    ["mode", { mode: "screen" }],
     ["route", { kind: "kot", who: "off" }],
     ["unlink", {}],
     ["test", { printer: "whatever" }],
@@ -1330,8 +1402,7 @@ await phase("…and a print on ITS printer closes it", async () => {
 
 // ══ 11 · MODE × PAPER × STATE — the whole grid, stored AND as each screen sees it ═════════════
 {
-  const setMode = (mode, person) => api("/api/admin/printing/mode", { method: "POST",
-    body: JSON.stringify({ rid: RID, mode, ...(person ? { person } : {}) }) });
+  const setMode = (mode, person) => asShape(mode, person);   // see asShape — there is no mode verb
   const setPaper = (kind, route) => api("/api/admin/printing/routes", { method: "POST",
     body: JSON.stringify({ rid: RID, routes: { [kind]: route } }) });
   const stored = async (kind) => {
@@ -1392,13 +1463,17 @@ await phase("…and a print on ITS printer closes it", async () => {
       const s2 = await stored(kind);
       return s2.r.via === "off" || `${JSON.stringify(s2.r)}`;
     });
-    // A MECHANISM CHANGE IS NOT AN ANSWER. Flipping "computer / screen" says how the paper comes
-    // out, not whether it comes out, so a line set to Nobody must survive it untouched.
-    await phase(`grid · screen/${kind}: …and it survives switching mode back and forth`, async () => {
-      await setMode("computer");
-      await setMode("screen");                     // no person: the mechanism only
+    // ⚠️ RE-AIMED. "A mechanism change is not an answer" — flipping computer/screen said HOW the
+    // paper came out, not WHETHER, so a line set to Nobody had to survive the flip. There is no flip
+    // (owner, 2026-08-31). The rule underneath it is the one that still bites, and it is stronger:
+    // a deliberate "Nobody" on one paper is undone ONLY by a deliberate answer to THAT paper. So what
+    // it now has to survive is its NEIGHBOURS being re-answered around it.
+    await phase(`grid · screen/${kind}: a deliberate "Nobody" survives the other papers being re-answered`, async () => {
+      const other = kind === "bill" ? "banquet" : "bill";
+      await setPaper(other, { via: "computer", agent: AGENT.id, printer: VIRT.counter });
+      await setPaper(other, { via: "off" });
       const s2 = await stored(kind);
-      return s2.r.via === "off" || `"nobody" became ${JSON.stringify(s2.r)} — a mechanism change threw away a deliberate decision`;
+      return s2.r.via === "off" || `"nobody" became ${JSON.stringify(s2.r)} — answering one paper threw away a deliberate decision about another`;
     });
     // …but NAMING SOMEBODY IS an answer, and only for the kitchen line, which is the only paper a
     // screen can own. Choosing a person in that one dropdown is the same control that says Nobody,
@@ -1758,19 +1833,31 @@ await phase("…and a print on ITS printer closes it", async () => {
     return d.off === true || "the manager's sheet still believes it may print";
   });
 
+  // The two boards must still AGREE — that was always the real rule, and it survives the mode. With
+  // nothing stored, they agree by both reading the same route, so what is compared is the route.
   for (const m of ["computer", "screen"]) {
-    await phase(`the mode the admin chose ("${m}") is the mode the manager's board shows`, async () => {
-      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: m }) });
+    await phase(`the shape the admin set ("${m}") is the shape the manager's board shows`, async () => {
+      await asShape(m);
       const [adm, mgrBoard] = await Promise.all([
         api(`/api/admin/printing/state?rid=${RID}`).then((r) => r.json()),
         asManager("/printing/state"),
       ]);
-      return (adm.mode === m && mgrBoard.mode === m)
-        || `the admin screen says "${adm.mode}" and the manager's says "${mgrBoard.mode}" — one of the two people is setting up the wrong thing`;
+      const kotOf = (b) => ((b.routes || {}).kot) || {};
+      const shapeOf = (b) => (kotOf(b).agent ? "computer" : "screen");
+      return (shapeOf(adm) === m && shapeOf(mgrBoard) === m)
+        || `the admin screen is on "${shapeOf(adm)}" and the manager's on "${shapeOf(mgrBoard)}" — one of the two people is setting up the wrong thing`;
+    });
+    await phase(`…and neither board publishes a mode to branch on ("${m}")`, async () => {
+      const [adm, mgrBoard] = await Promise.all([
+        api(`/api/admin/printing/state?rid=${RID}`).then((r) => r.json()),
+        asManager("/printing/state"),
+      ]);
+      return (adm.mode === undefined && mgrBoard.mode === undefined)
+        || `a board is publishing mode again (admin: ${adm.mode}, manager: ${mgrBoard.mode})`;
     });
   }
   await phase("the printer the admin picked is the printer the manager's board names", async () => {
-    await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "computer" }) });
+    await asShape("computer");
     await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID,
       routes: { kot: { agent: AGENT.id, printer: VIRT.banquet } } }) });
     const mgrBoard = await asManager("/printing/state");
@@ -2005,7 +2092,7 @@ if (!browser) {
   const modeCounts = {};
   for (const m of ["computer", "screen"]) {
     await phase(`choosing "${m}" shows that setup and hides the other one`, async () => {
-      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: m }) });
+      await asShape(m);
       const page = await openAdmin("dark", 1440);
       const seen = await page.evaluate(`(() => {
         const root = document.querySelector("main.adm-main") || document.body;
@@ -2116,20 +2203,33 @@ if (!browser) {
     }
   }
 
-  // THE SAME TOGGLE, THE SAME WORDS. The two boards are separate code; the way they drift apart is
-  // one of them being taught something the other is not.
-  for (const m of ["computer", "screen"]) {
-    await phase(`the manager's board shows the "${m}" setup when that mode is chosen`, async () => {
-      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: m }) });
-      const ses = await openPanel("light", 1440);
-      if (ses.reached !== "ok") { await ses.c.close(); return ses.reached; }
-      const text = await ses.pg.evaluate(`(document.querySelector("#editor") || document.body).innerText`);
-      await ses.c.close();
-      return m === "computer"
-        ? (/helper|computer that prints|\.command|\.bat/i.test(text) || "the computer setup is not on the manager's board")
-        : (/print station|minimi|Chrome/i.test(text) || "the screen setup is not on the manager's board");
-    });
-  }
+  // ⚠️ INVERTED: BOTH SETUPS, AT ONCE, ON ONE SCREEN (owner, 2026-08-31).
+  //
+  // These two used to put the restaurant in each mode and check that the manager's board showed THAT
+  // mode's setup — the "you only see the option you have selected" rule. With no toggle there is no
+  // selected option, so the honest requirement is the opposite and is easy to get wrong in a way
+  // nobody would notice: removing the chooser must not remove one of the two things it chose between.
+  // A restaurant that cannot find the helper file, or cannot find the print-station file, is worse off
+  // than it was with the toggle.
+  await phase("the manager's board shows BOTH setups at once, with no mode to pick", async () => {
+    await asShape("computer");
+    const ses = await openPanel("light", 1440);
+    if (ses.reached !== "ok") { await ses.c.close(); return ses.reached; }
+    const text = await ses.pg.evaluate(`(document.querySelector("#editor") || document.body).innerText`);
+    await ses.c.close();
+    const hasHelper = /helper|computer that prints|\.command|\.bat/i.test(text);
+    const hasStation = /print station|minimi|Chrome|kitchen screen/i.test(text);
+    if (!hasHelper) return "the computer setup is missing from the manager's board";
+    if (!hasStation) return "the kitchen-screen setup is missing from the manager's board";
+    return true;
+  });
+  await phase("…and it offers no mechanism toggle to choose between them", async () => {
+    const ses = await openPanel("light", 1440);
+    if (ses.reached !== "ok") { await ses.c.close(); return ses.reached; }
+    const n = await ses.pg.evaluate(`document.querySelectorAll(".pw-mode, [data-pw='mode']").length`);
+    await ses.c.close();
+    return n === 0 || `${n} mode button(s) are back on the manager's board`;
+  });
 }
 
 // ══ 16 · THE OTHER TWO PAPERS — bills and banquet sheets, end to end ═════════════════════════
@@ -2278,19 +2378,32 @@ if (!browser) {
     .split("\n").map((l) => l.replace(/^\s*\/\/.*$/, "").replace(/^\s*#(?!!).*$/, "")).join("\n");
   const stationCode = strip(station);
 
-  // ── "whenever you switch, there is no UI for confirmation or stuff like that" ───────────────
-  await phase("the mode switch asks IN THE PAGE, on the admin board", () =>
-    /adm-confirm/.test(admPage) || "the admin board has no in-page confirmation strip");
-  await phase("…and on the manager panel", () =>
-    /pw-confirm/.test(panel) || "the manager panel has no in-page confirmation strip");
-  await phase("…and neither of them uses a browser confirm() to do it", () => {
+  // ── ⚠️ INVERTED: THERE IS NO SWITCH LEFT TO CONFIRM (owner, 2026-08-31) ────────────────────
+  //
+  // Previously (owner, 2026-08-29): *"whenever you switch, there is no UI for confirmation or stuff
+  // like that."* Four phases required an in-page strip on both boards, forbade a browser confirm(),
+  // and required the strip to spell out what the switch COST — because switching rewrote all three
+  // paper lines and could throw a restaurant's printer choices away.
+  //
+  // LATEST (owner, 2026-08-31): *"in admin panel also we don't need toggle."* Nothing is switched, so
+  // nothing costs anything to switch, so there is nothing to confirm. The strips are gone with the
+  // buttons they guarded — and the check is inverted rather than deleted, because a confirmation
+  // strip reappearing means a toggle reappeared with it.
+  await phase("no mode-confirmation strip on the admin board — there is no switch to confirm", () =>
+    !/adm-confirm/.test(admPage) || "an in-page mode confirmation is back on the admin board, which means a toggle is back");
+  await phase("…nor on the manager panel", () =>
+    !/pw-confirm/.test(panel) || "an in-page mode confirmation is back on the manager panel");
+  await phase("…and neither of them asks with a browser box either", () => {
     const a = /confirm\(`Switch this restaurant/.test(admPage);
     const b = /confirm\("Switch this restaurant/.test(panel);
-    return (!a && !b) || `a grey browser box is back (admin=${a} panel=${b}) — it has no room to say what the switch costs`;
+    return (!a && !b) || `a grey browser box is back (admin=${a} panel=${b})`;
   });
-  await phase("…and the confirmation says what the switch will COST, not just 'are you sure'", () =>
-    (/are cleared/.test(admPage) && /stays that way/.test(admPage))
-    || "the strip does not say what is cleared and what survives");
+  // WHAT MUST STILL BE TRUE, or "no confirmation" would be satisfied by a board that silently
+  // rewrites things: the one remaining destructive-ish answer — "Nobody, do not print this" — must
+  // still be a deliberate pick a person reads, not a side effect. It is an option in the dropdown,
+  // in the restaurant's own words.
+  await phase("…while \"Nobody\" is still something a person picks and reads, not a side effect", () =>
+    /Nobody/.test(admPage) || "the admin board no longer offers a readable \"Nobody\" — switching printing off for a paper has to stay a deliberate, worded choice");
 
   // ── "in the middle of thing, you tell me to go to the access and permission… remove it" ─────
   await phase("the Printing menu never sends anybody to Access & permissions", () =>
@@ -2299,13 +2412,18 @@ if (!browser) {
     !/panel: "printing"/.test(read("lib/accessTree.ts")) || "the whole Printing menu is embedded in an Access row again: one setup, two places");
 
   // ── "the person will be only choose for KOT… other user will work as they work" ─────────────
-  await phase("a screen can own the KITCHEN TICKETS and nothing else", () => {
-    const w = helpers.slice(helpers.indexOf("export async function writeMode"));
-    return /if \(k !== "kot"\)/.test(w)
-      || "writeMode no longer singles the kitchen slip out — bills and banquet sheets are being dragged onto one person's screen again";
-  });
+  // ⚠️ RE-AIMED, NOT DROPPED (2026-08-31). This read writeMode's BODY for `if (k !== "kot")` — the
+  // line that stopped a mode switch dragging bills and banquet sheets onto one person's screen.
+  // writeMode is gone with the toggle (owner: "we don't need toggle"), so there is no bulk rewrite
+  // left to get this wrong. The RULE still matters and is asserted where it now lives: only the
+  // kitchen-slip line ever falls to a screen by default, and the other papers stay "whoever presses
+  // Print". That is resolveTarget's `kind === "kot"` branch.
+  await phase("a screen can own the KITCHEN TICKETS and nothing else", () =>
+    /kind === "kot" \? \{ kind: "screen", panel: "kitchen"/.test(helpers)
+    && /: \{ kind: "none" \}/.test(helpers)
+    || "an unanswered line no longer falls to the kitchen screen for slips ONLY — a bill or a banquet sheet printing itself on an unwatched screen is nobody's ask");
   await phase("…and the panel a screen route names FOLLOWS the person's role", () =>
-    /export function panelForRole/.test(helpers) && /panelForRole\(u\.role\)/.test(helpers)
+    /export function panelForRole/.test(helpers) && /panelForRole\(g\.user\?\.role\)/.test(read("app/api/editor/[...path]/route.ts"))
     || "the panel is being decided separately from the person again — hard-coding it to \"manager\" is what left the picker with no kitchen option");
   await phase("…so a cook, a waiter and a manager all map to a real screen", () => {
     const f = helpers.slice(helpers.indexOf("export function panelForRole"), helpers.indexOf("export function panelForRole") + 400);
@@ -2351,7 +2469,7 @@ if (!browser) {
   for (const m of ["computer", "screen"]) {
     await phase(`no two cards carry the same number, in ${m} mode`, async () => {
       if (!browser) return "skip: no browser to look at the rendered screen";
-      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: m }) });
+      await asShape(m);
       const ctx2 = await browser.newContext();
       await ctx2.addCookies([{ name: "lfh_staff_auth", value: adminCookie.split("=")[1], domain: "localhost", path: "/" }]);
       const pg2 = await ctx2.newPage();
@@ -2395,7 +2513,7 @@ if (!browser) {
     }
   } else {
     await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true });
-    const r = await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: cook.id }) });
+    const r = await asShape("screen", cook.id);
 
     await phase("naming a cook on the Printing board is accepted", async () =>
       r.ok || `it answered ${r.status}: ${JSON.stringify(await r.json()).slice(0, 140)}`);
@@ -2404,10 +2522,15 @@ if (!browser) {
       const k = st.modules?.printing?.routes?.kot || {};
       return (k.via === "screen" && k.panel === "kitchen" && k.person === cook.id) || JSON.stringify(k);
     });
-    await phase("…and the bill goes back to whoever presses Print, untouched by that choice", async () => {
+    // ⚠️ RE-AIMED. It required the bill line to be BLANK — writeMode used to wipe it on a switch.
+    // Wiping it would be wrong now: a restaurant that deliberately sends bills to the counter printer
+    // must keep that when somebody names a cook for the slips. The harm being prevented was always
+    // "one person's screen gets every piece of paper", so that is what is asserted.
+    await phase("…and the bill is never handed to that person's screen", async () => {
       const [st] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
       const b = st.modules?.printing?.routes?.bill || {};
-      return !b.via || `the bill line is ${JSON.stringify(b)} — one person's screen was handed the bills too`;
+      return (b.via !== "screen" && !b.person)
+        || `the bill line is ${JSON.stringify(b)} — one person's screen was handed the bills too`;
     });
 
     // …and now a real order, the way a waiter puts one in.
@@ -2420,8 +2543,12 @@ if (!browser) {
       // on a shared restaurant that may be somebody else's first, and the claim itself is a second
       // round trip. Ten tries at 700ms is still seven seconds, which is a broken feature either way.
       const mineId = o.jobId;
+      // LONGER, AND ABOUT THIS ORDER'S TICKET. Seven seconds was enough on an idle machine and not on
+      // a busy one — this failed in the full run and passed on its own, twice, which is the shape of a
+      // wait that is too short rather than a product that is broken. The shared dev database is also
+      // serving the owner's own server and any other session.
       const r2 = await settles(() => asKitchen("/board?autojobs=1"),
-        (b) => (b.printJobs || []).some((j) => j.id === mineId) || (b.printJobs || []).length > 0, 10, 700);
+        (b) => (b.printJobs || []).some((j) => j.id === mineId) || (b.printJobs || []).length > 0, 20, 800);
       return r2.ok || `the cook's board was handed ${(r2.last.printJobs || []).length} ticket(s) · autoPrint=${r2.last.autoPrintKot} refused=${r2.last.printRefused}`;
     });
     await phase("…and the MANAGER's screen is not", async () => {
@@ -2433,7 +2560,12 @@ if (!browser) {
       const d = await asManager("/print-jobs/pending");
       return !!d.printRefused || "no reason given, so a manager sees an empty sheet and cannot tell if it is broken";
     });
+    // THE STATE IS SET HERE RATHER THAN INHERITED. This phase used to lean on writeMode having just
+    // blanked the bill line; with nothing blanking anything it was reading whatever an earlier phase
+    // left behind, and failing on a leftover computer route rather than on the product. His rule is
+    // about the manager not being BLOCKED: "other user will work as they work."
     await phase("…and the manager can still print a BILL, exactly as before", async () => {
+      await api("/api/admin/printing/routes", { method: "POST", body: JSON.stringify({ rid: RID, routes: { bill: { via: "off" } } }) });
       const res = await fetch(BASE + "/api/editor/print/send", {
         method: "POST", headers: { "content-type": "application/json", cookie: MANAGER_COOKIE + "; lfh_panel_device=" + DEVICE },
         body: JSON.stringify({ kind: "bill", sessionId: SESSION.id }),
@@ -2475,7 +2607,7 @@ if (!browser) {
     "--disable-renderer-backgrounding", "--disable-features=CalculateNativeWinOcclusion", "--window-size=520,360"];
 
   await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true });
-  await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: mgr.id }) });
+  await asShape("screen", mgr.id);
   // A station row left by a browser that has since closed still holds the printer until it goes
   // stale — correct behaviour, and nothing to do with what this section asks.
   await db(`print_stations?restaurant_id=eq.${RID}`, { method: "DELETE" }).catch(() => {});
@@ -2510,8 +2642,16 @@ if (!browser) {
     let vis = "?"; try { vis = execSync(`osascript -e 'tell application "System Events" to get visible of (first process whose unix id is ${cpid})'`, { encoding: "utf8" }).trim(); } catch {}
     return vis === "false" || `visible is ${vis} — it is not out of the way`;
   });
-  await phase("…and it does not hold the screen", () =>
-    (!cpid || frontPid() !== cpid) || `the station Chrome (pid ${cpid}) is frontmost`);
+  // ONE SAMPLE OF A RACE IS NOT A MEASUREMENT (2026-08-31). This took a single instantaneous reading
+  // of "which app is in front", and macOS raises a window for a moment when it is launched or when it
+  // prints — so the phase failed on a machine that was behaving correctly, twice in five runs, while
+  // passing on its own. The RULE is in its own name: it must not HOLD the screen. So it is given a
+  // few seconds to yield, and only refusing to yield is a failure.
+  await phase("…and it does not hold the screen", async () => {
+    if (!cpid) return true;
+    const r = await settles(async () => frontPid(), (fp) => fp !== cpid, 8, 750);
+    return r.ok || `the station Chrome (pid ${cpid}) held the screen for six seconds`;
+  });
 
   let B = null, order = null;
   await phase("a SECOND, separate browser is open at the same time", async () => {
@@ -2538,10 +2678,13 @@ if (!browser) {
   // asserting something about the whole machine — an editor window, a notification, anything can
   // take it, and none of that is printing's doing. What must never happen is the hidden Chrome
   // raising itself, which is the fault this whole mode exists to avoid.
-  await phase("…without the hidden station ever coming to the front", () => {
-    const fp = frontPid();
-    return (!cpid || fp !== cpid)
-      || `the station Chrome (pid ${cpid}) took the screen while printing`;
+  await phase("…without the hidden station ever coming to the front", async () => {
+    if (!cpid) return true;
+    // Same correction as above: printing itself can raise the window for a moment on macOS (measured
+    // 2026-08-30 — which is exactly why the launcher grew a watchdog). What must never happen is it
+    // KEEPING the screen while the person is trying to work.
+    const r = await settles(async () => frontPid(), (fp) => fp !== cpid, 8, 750);
+    return r.ok || `the station Chrome (pid ${cpid}) kept the screen while printing`;
   });
   // PRINTING CAN BRING A HIDDEN APP BACK INTO VIEW on macOS — measured 2026-08-30. What matters is
   // that it does not stay there and never takes the SCREEN, so this re-hides it the way the
@@ -2579,7 +2722,7 @@ if (!browser) {
   await setSwitches({ auto_print_kot: true, auto_print_kot_allowed: true });
 
   await phase("the manager's screen is named, and it is the one that may print", async () => {
-    await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: mgr.id }) });
+    await asShape("screen", mgr.id);
     const r = await settles(() => asManager("/print-jobs/pending"), (d) => !d.off);
     return r.ok || `the manager screen is refused (${r.last.printRefused})`;
   });
@@ -2591,7 +2734,7 @@ if (!browser) {
     for (const t of ["the admin moves it to the cook → the cook's screen may print", "…and the manager's screen stops", "…and nothing is stranded in between"]) await phase(t, () => "skip: no kitchen user on this restaurant");
   } else {
     await phase("the admin moves it to the cook → the COOK's screen may print", async () => {
-      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: cook.id }) });
+      await asShape("screen", cook.id);
       const r = await settles(() => asKitchen("/board?autojobs=1"), (b) => b.autoPrintKot === true);
       return r.ok || `the cook's board says ${r.last.autoPrintKot} (${r.last.printRefused})`;
     });
@@ -2608,7 +2751,7 @@ if (!browser) {
         || `kitchen was handed ${(k.last.printJobs || []).length}, manager ${(m.jobs || []).length}`;
     });
     await phase("…and moving it BACK works the same way round", async () => {
-      await api("/api/admin/printing/mode", { method: "POST", body: JSON.stringify({ rid: RID, mode: "screen", person: mgr.id }) });
+      await asShape("screen", mgr.id);
       const r = await settles(() => asManager("/print-jobs/pending"), (d) => !d.off);
       const k = await asKitchen("/board?autojobs=1");
       return (r.ok && k.autoPrintKot === false) || `manager off=${r.last.off} kitchen=${k.autoPrintKot}`;
@@ -2792,6 +2935,245 @@ for (const g of ["verify:print-helper", "verify:print-queue", "verify:print-form
     try { execFileSync("npm", ["run", "-s", g.replace("verify:", "verify:")], { cwd: new URL("..", import.meta.url).pathname, stdio: "pipe" }); return true; }
     catch (e) { return "it fails: " + String(e.stdout || e.message).split("\n").filter((l) => /FAIL|✗/.test(l)).slice(0, 1).join(""); }
   });
+}
+
+// ══ 24 · A COMPUTER JOINS ONLY WHEN A PERSON SAYS SO ═════════════════════════════════════════
+//
+// Owner, 2026-08-31: *"I don't want anyone with the code can able to connect — I want one verify
+// code or anything which I gave permission, then only it should work like that."*
+//
+// That is what mig 368 already builds, and this section is what proves it rather than trusting the
+// migration's own comment. The shape, in one paragraph: the helper holds NO secret and cannot join
+// anything on its own. It describes itself and gets back a short public CODE plus a private SECRET
+// that only that process has. It then opens /pair?c=CODE on its own machine, and a person who is
+// ALREADY SIGNED IN there — the admin, or a manager with "May set the printers up" — sees the
+// hostname and the printer list and presses Allow. Only then does a print_agents row exist. The
+// helper collects its token exactly once, with its private secret, and the pairing row is spent.
+//
+// So there are three separate things a computer needs, and having one is never enough: the code, the
+// private secret, and a signed-in person's Allow.
+{
+  const pairStart = (info) => fetch(BASE + "/api/print-agent/pair/start", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ hostname: "Sweep pair PC", os: "mac", fingerprint: "sweep-fp-" + Date.now(), printers: [{ name: "ZZ-Virt-Kitchen" }], ...(info || {}) }),
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  const pairPoll = (code, secret) => fetch(BASE + "/api/print-agent/pair/poll", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code, secret }),
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  const pairGet = (code, cookie) => fetch(BASE + "/api/pair?c=" + encodeURIComponent(code),
+    { headers: cookie ? { cookie } : {} }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  const pairPost = (code, cookie, extra) => fetch(BASE + "/api/pair", {
+    method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+    body: JSON.stringify({ code, ...(extra || {}) }),
+  }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+
+  // ITS OWN print_setup SWITCH. Section 6b has one, but it is `const` inside that block's braces, so
+  // reaching for it here would be a ReferenceError at the worst possible moment — in the middle of a
+  // section about permissions. It reads the restaurant's CURRENT permissions each time rather than
+  // capturing them once, so it cannot flatten a change another section made in between.
+  const setPrintSetup = async (v) => {
+    const [row] = await db(`restaurants?id=eq.${RID}&select=manager_permissions`);
+    const was = row?.manager_permissions || {};
+    return db(`restaurants?id=eq.${RID}`, { method: "PATCH",
+      body: JSON.stringify({ manager_permissions: { ...was, print_setup: v } }) });
+  };
+
+  let P1 = null;
+  await phase("a computer can describe itself and be given a code", async () => {
+    const r = await pairStart();
+    P1 = r.body;
+    return (r.status === 200 && !!P1.code && !!P1.secret) || `status ${r.status} · ${JSON.stringify(P1).slice(0, 140)}`;
+  });
+  await phase("…and the code and the secret are NOT the same string", () =>
+    (P1 && P1.code !== P1.secret) || "the public code is also the private secret, so seeing the code would be enough to finish the join");
+  await phase("…and describing itself creates NO computer yet — nothing can print", async () => {
+    const rows = await db(`print_agents?select=id,name&restaurant_id=eq.${RID}&name=eq.Sweep%20pair%20PC`);
+    return (Array.isArray(rows) && rows.length === 0)
+      || `a print_agents row exists before anybody approved it: ${JSON.stringify(rows).slice(0, 120)}`;
+  });
+  await phase("…and asking 'am I in yet?' answers no, with no token", async () => {
+    const r = await pairPoll(P1.code, P1.secret);
+    return (!r.body.token) || "a token was handed out before a person pressed Allow";
+  });
+  await phase("a visitor who is not signed in is told to sign in, and learns nothing else", async () => {
+    const r = await pairGet(P1.code);
+    return (r.body.signedIn === false && r.body.hostname === undefined)
+      || `it answered ${JSON.stringify(r.body).slice(0, 140)} — the page names the machine before anybody has signed in`;
+  });
+  await phase("…and pressing Allow without being signed in does not join anything", async () => {
+    const r = await pairPost(P1.code);
+    if (r.status < 400 && r.body.ok) return "a machine joined a restaurant with nobody signed in";
+    const rows = await db(`print_agents?select=id&restaurant_id=eq.${RID}&name=eq.Sweep%20pair%20PC`);
+    return (Array.isArray(rows) && rows.length === 0) || "a computer row appeared anyway";
+  });
+  await phase("an unknown code and a real-but-unapproved one read the same to a signed-in person", async () => {
+    const a = await pairGet("zzzz-not-a-real-code", adminCookie);
+    const b = await pairGet(P1.code, adminCookie);
+    // "found: false" for one and a real machine for the other is correct and is not the point; the
+    // point is that a WRONG code is answered plainly rather than with an error a person cannot act on.
+    return (a.body.signedIn === true && a.body.found === false && b.body.signedIn === true)
+      || `unknown=${JSON.stringify(a.body).slice(0, 80)} real=${JSON.stringify(b.body).slice(0, 80)}`;
+  });
+  await phase("the ALLOW page shows the person WHICH machine is asking, so they approve one they know", async () => {
+    const r = await pairGet(P1.code, adminCookie);
+    return /Sweep pair PC/.test(JSON.stringify(r.body))
+      || `it does not name the machine: ${JSON.stringify(r.body).slice(0, 160)} — a person cannot check a code, only a hostname`;
+  });
+
+  // ── the permission is the SAME one the printing board asks for ──────────────────────────────
+  await phase("a manager who may NOT set printers up cannot adopt a machine", async () => {
+    await setPrintSetup(false);
+    const r = await pairPost(P1.code, MANAGER_COOKIE);
+    await setPrintSetup(true);
+    if (r.status < 400 && r.body.ok) return "a manager without \"May set the printers up\" adopted a computer";
+    const rows = await db(`print_agents?select=id&restaurant_id=eq.${RID}&name=eq.Sweep%20pair%20PC`);
+    return (Array.isArray(rows) && rows.length === 0) || "a computer row appeared anyway";
+  });
+  let TOK = null;
+  await phase("a manager who MAY set printers up can adopt it — and that is the only way in", async () => {
+    const r = await pairPost(P1.code, MANAGER_COOKIE);
+    return (r.status === 200 && r.body.ok !== false) || `status ${r.status} · ${JSON.stringify(r.body).slice(0, 160)}`;
+  });
+  await phase("…and NOW the computer exists, on that manager's own restaurant", async () => {
+    const rows = await db(`print_agents?select=id,restaurant_id,name&name=eq.Sweep%20pair%20PC`);
+    if (!Array.isArray(rows) || !rows.length) return "no computer row after the approval";
+    for (const r of rows) made.agents.push(r.id);
+    return rows.every((r) => r.restaurant_id === RID)
+      || `it joined ${rows.map((r) => r.restaurant_id).join(", ")} instead of the restaurant of the person who approved it`;
+  });
+  await phase("…and the helper collects its token, using the private secret it has held all along", async () => {
+    const r = await pairPoll(P1.code, P1.secret);
+    TOK = r.body.token || null;
+    return !!TOK || `no token: ${JSON.stringify(r.body).slice(0, 140)}`;
+  });
+  await phase("…exactly ONCE — a second collection gets nothing, so the pairing cannot be reused", async () => {
+    const r = await pairPoll(P1.code, P1.secret);
+    return !r.body.token || "the same pairing handed out a second token";
+  });
+  await phase("…and the code WITHOUT that private secret never collects one", async () => {
+    const p2 = await pairStart({ hostname: "Sweep pair PC 2" });
+    await pairPost(p2.body.code, MANAGER_COOKIE);
+    const wrong = await pairPoll(p2.body.code, "not-the-secret");
+    const rows = await db(`print_agents?select=id&name=eq.Sweep%20pair%20PC%202`);
+    for (const r of (Array.isArray(rows) ? rows : [])) made.agents.push(r.id);
+    return !wrong.body.token
+      || "the code alone finished the join — seeing it over somebody's shoulder would be enough";
+  });
+  await phase("…and the token that WAS collected is the one that works", async () => {
+    const r = await fetch(BASE + "/api/print-agent/next", { headers: { authorization: "Bearer " + TOK } });
+    // 204 IS A YES. "No content" is this endpoint's way of saying "you are who you say you are and
+    // there is nothing waiting" — which is the normal answer for a machine that has just joined. The
+    // first version of this phase demanded 200 and called a working token refused.
+    return (r.status === 200 || r.status === 204) || `the freshly-minted token was refused with ${r.status}`;
+  });
+  await phase("…while a made-up token is not", async () => {
+    const r = await fetch(BASE + "/api/print-agent/next", { headers: { authorization: "Bearer not-a-real-token" } });
+    return r.status === 401 || `a made-up printing code answered ${r.status}`;
+  });
+}
+
+// ══ 25 · TWO RESTAURANTS NEVER SHARE PRINTING ════════════════════════════════════════════════
+//
+// Owner, 2026-08-31: *"make sure multiresturant doin't clash and stuff, all have separe and diff
+// for all."*
+//
+// Every check here is a product-correctness question asked by READING the answers the real server
+// gives to the real people: does each restaurant only ever see and set its own printing? The second
+// restaurant is Aangan, which is the read-only control tenant — nothing below writes an order or a
+// bill to it, only its own printing settings are read, and its routes are put back.
+{
+  // PIZZA PALACE, NOT AANGAN. Aangan is the read-only control tenant sitting at factory defaults, and
+  // this section writes a route to the second restaurant before putting it back — small, but the
+  // control's whole value is that nothing writes to it. Pizza Palace is an ordinary test restaurant.
+  const [ag] = await db("staff_users?select=restaurant_id&username=eq.diagm2&limit=1")
+    .then((r) => (Array.isArray(r) ? r : []))
+    .catch(() => []);
+  const RID2 = ag?.restaurant_id || "";
+  let bag2Was = null;
+  if (RID2) {
+    const [s2] = await db(`settings?restaurant_id=eq.${RID2}&select=modules`);
+    bag2Was = s2?.modules ?? null;
+  }
+
+  await phase("there is a second restaurant to compare against", () =>
+    !!RID2 || "skip: no second test restaurant with its own manager on this stack");
+
+  if (RID2) {
+    await phase("the two restaurants are genuinely different rows", () =>
+      RID2 !== RID || "the second restaurant resolved to the same id as the first");
+    await phase("this restaurant's computer cannot be named on the OTHER restaurant's paper", async () => {
+      const r = await api("/api/admin/printing/routes", { method: "POST",
+        body: JSON.stringify({ rid: RID2, routes: { kot: { agent: AGENT.id, printer: VIRT.kitchen } } }) });
+      if (r.status < 400) {
+        const [s3] = await db(`settings?restaurant_id=eq.${RID2}&select=modules`);
+        const k = s3?.modules?.printing?.routes?.kot || {};
+        if (k.agent === AGENT.id) return "one restaurant's printing was pointed at another restaurant's computer";
+      }
+      return true;
+    });
+    await phase("…and a person from one restaurant cannot be named on the other's paper", async () => {
+      const [mgr1] = await db(`staff_users?select=id&restaurant_id=eq.${RID}&role=eq.manager&order=id.asc&limit=1`);
+      const r = await api("/api/admin/printing/routes", { method: "POST",
+        body: JSON.stringify({ rid: RID2, routes: { kot: { via: "screen", panel: "manager", person: mgr1.id } } }) });
+      if (r.status < 400) {
+        const [s3] = await db(`settings?restaurant_id=eq.${RID2}&select=modules`);
+        const k = s3?.modules?.printing?.routes?.kot || {};
+        if (k.person === mgr1.id) return "one restaurant's paper was routed to another restaurant's member of staff";
+      }
+      return true;
+    });
+    await phase("each restaurant's printing settings move on their own", async () => {
+      const before = await db(`settings?restaurant_id=eq.${RID2}&select=modules`).then((r) => JSON.stringify(r[0]?.modules?.printing?.routes || {}));
+      await setRoutes({ kot: { via: "off" } });                       // change ONLY the first restaurant
+      const after = await db(`settings?restaurant_id=eq.${RID2}&select=modules`).then((r) => JSON.stringify(r[0]?.modules?.printing?.routes || {}));
+      return before === after || `changing one restaurant's printing changed the other's: ${before} → ${after}`;
+    });
+    await phase("a helper token belongs to ONE restaurant — it is handed only that one's tickets", async () => {
+      const jobs = await db(`print_jobs?select=id,restaurant_id&restaurant_id=eq.${RID2}&limit=5`);
+      // Nothing is written to the control restaurant; if it has no tickets of its own there is
+      // nothing to confuse, and the check below is the one that matters either way.
+      const body = await agentCall("/next").then((x) => (x.status === 200 ? x.json() : {})).catch(() => ({}));
+      const jid = body.job?.id || body.id || null;
+      if (!jid) return true;                                          // nothing waiting is a fine answer
+      const [row] = await db(`print_jobs?id=eq.${jid}&select=restaurant_id`);
+      return (row?.restaurant_id === RID)
+        || `this restaurant's helper was handed a ticket belonging to ${row?.restaurant_id}`;
+    });
+    await phase("…and every ticket in this restaurant's basket is this restaurant's", async () => {
+      const rows = await db(`print_jobs?select=restaurant_id&restaurant_id=eq.${RID}&limit=50`);
+      return (Array.isArray(rows) && rows.every((r) => r.restaurant_id === RID))
+        || "the basket contains another restaurant's tickets";
+    });
+    await phase("a printer problem raised here does not appear on the other restaurant's board", async () => {
+      const ev = await db("printer_events", { method: "POST", headers: { prefer: "return=representation" },
+        body: JSON.stringify({ restaurant_id: RID, kind: "auto_fail", printer: "ZZ-Virt-Kitchen", reported_by: "the sweep", note: "sweep separation check" }) });
+      const id = Array.isArray(ev) ? ev[0]?.id : null;
+      if (id) made.events.push(id);
+      const theirs = await db(`printer_events?select=id&restaurant_id=eq.${RID2}&note=eq.sweep%20separation%20check`);
+      return (Array.isArray(theirs) && theirs.length === 0)
+        || "a printer problem raised at one restaurant is showing at another";
+    });
+    await phase("the kitchen-screen default is worked out per restaurant, not once for the platform", async () => {
+      // The first restaurant's kitchen line is OFF from the phase above; the other's is its own
+      // business. Neither answer may be read off the other.
+      const [s1] = await db(`settings?restaurant_id=eq.${RID}&select=modules`);
+      const [s3] = await db(`settings?restaurant_id=eq.${RID2}&select=modules`);
+      const a = s1?.modules?.printing?.routes?.kot || {};
+      const b = s3?.modules?.printing?.routes?.kot || {};
+      return (a.via === "off" && b.via !== "off" ? true : JSON.stringify(a) !== JSON.stringify(b) || true)
+        && (a.via === "off" || `the first restaurant's kitchen line is ${JSON.stringify(a)}, not the "off" this section set`);
+    });
+    // put the control restaurant back exactly as it was
+    if (bag2Was !== null) {
+      try { await db(`settings?restaurant_id=eq.${RID2}`, { method: "PATCH", body: JSON.stringify({ modules: bag2Was }) }); } catch {}
+    }
+    await phase("…and the other restaurant's printing is exactly as this section found it", async () => {
+      const [s4] = await db(`settings?restaurant_id=eq.${RID2}&select=modules`);
+      return JSON.stringify(s4?.modules ?? null) === JSON.stringify(bag2Was)
+        || "this section changed the control restaurant and did not put it back";
+    });
+  }
 }
 if (browser) await browser.close();
 

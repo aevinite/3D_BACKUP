@@ -12,7 +12,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
   agentsView, createAgent, readRoutes, writeRoutes, mintAgentToken,
-  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch, writeMode, isPrintMode,
+  PRINT_KINDS, HELPER_STALE_MS, ROUTE_PANELS, syncKotSwitch,
 } from "@/lib/printHelpers";
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
@@ -287,7 +287,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     // book would say "nobody prints kitchen slips" while the trigger went on queueing them.
     if (Object.prototype.hasOwnProperty.call(patch, "kot")) {
       const k = patch.kot as Record<string, unknown> | null;
-      await syncKotSwitch(rid, !(k === null || k?.via === "off"));
+      // ⚠️ CLEARING THE LINE IS NOT SWITCHING PRINTING OFF (2026-08-31). This treated `null` — "no
+      // printer chosen yet" — the same as `via:"off"` — "we do not print this" — and switched
+      // auto-print off for both. That was defensible while an unanswered line meant nobody in
+      // particular. It is wrong now: an unanswered kitchen-slip line resolves to the KITCHEN SCREEN
+      // (lib/printHelpers → resolveTarget), so clearing it hands the slips to the kitchen rather than
+      // stopping them. Left as it was, "take the printer off this line" quietly stopped the
+      // restaurant printing, the trigger stopped queueing, and the board still said the kitchen
+      // screen was doing it. ONLY a deliberate "Nobody" turns it off.
+      await syncKotSwitch(rid, k?.via !== "off");
     }
     await logAction("admin", "print_routes_changed", { restaurant_id: rid, detail: `printing routes updated: ${Object.keys(patch).join(", ")}` });
     return NextResponse.json({ routes: saved.routes });
@@ -309,30 +317,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     return NextResponse.json({ ok: true });
   }
 
-  // ── WHICH OF THE TWO WAYS THIS RESTAURANT PRINTS ──────────────────────────────────────────
-  // One toggle, and the three paper lines come with it (lib/printHelpers → writeMode). If the mode
-  // moved on its own, a restaurant switched to Chrome would still have three routes pointing at a
-  // computer: the board would show the Chrome setup while the paper kept coming out of the helper.
-  if (seg[0] === "mode") {
-    if (!isPrintMode(body.mode)) return err("There are two ways to print: a computer, or a screen.");
-    const person = body.person ? String(body.person) : null;
-    if (person) {
-      // A named person must be this restaurant's, and must be able to stand at the panel — the same
-      // check writeRoutes makes, asked here too so the toggle cannot store an impossible pair.
-      const u = (await sb.from("staff_users").select("id, active").eq("id", person).eq("restaurant_id", rid).maybeSingle()).data as
-        { id: string; active?: boolean | null } | null;
-      if (!u || u.active === false) return err("That person is not one of this restaurant's active staff.");
-    }
-    const done = await writeMode(rid, body.mode, { person });
-    if ("error" in done) return err(done.error);
-    await logAction("admin", "print_switch", {
-      restaurant_id: rid,
-      detail: `printing mode → ${done.mode === "screen" ? "a screen (the restaurant's own Chrome)" : "a computer (the helper)"}`,
-    });
-    return NextResponse.json(done);
-  }
+// ── THE "mode" VERB IS GONE (owner, 2026-08-31) ───────────────────────────────────────────
+  // *"in admin panel also we don't need toggle."* There is nothing to switch: a computer prints if
+  // one is set up and named, and if none is, the kitchen screen does. The three paper lines are the
+  // only answer, written one at a time through `routes` below — which is where they always really
+  // lived. `writeMode` existed to keep a stored copy of the choice in step with those lines; with no
+  // stored copy there is nothing to keep in step. Do not re-add a mode: it can only ever disagree
+  // with the routes, and the routes are what the paper obeys.
 
-  // ── send one page to a printer ────────────────────────────────────────────────────────────
+    // ── send one page to a printer ────────────────────────────────────────────────────────────
   // A REAL job on the real road (kind='test'), because a test that takes a different path can pass
   // while the path that matters is broken.
   // ── THE QUEUE'S OWN CONTROLS (owner, 2026-08-29) ──────────────────────────────────────────

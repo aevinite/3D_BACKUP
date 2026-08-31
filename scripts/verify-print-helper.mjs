@@ -683,33 +683,41 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
     "…and there is no password in it, like the helper",
     "a password appeared in the station launcher. The person signs in ONCE in the window it opens; a credential in a text file on a shop counter is what the pairing handshake exists to avoid.");
 
-  // ── THE TOGGLE, and the fact that it MOVES THE ROUTES ───────────────────────────────────────
-  check(/export type PrintMode/.test(helpers) && /export async function writeMode/.test(helpers),
-    "the mode is a stored answer, and changing it is one function",
-    "PrintMode/writeMode are gone: the board has nothing to hang its one toggle off");
-  check(/ROUTABLE_KINDS/.test(helpers.slice(helpers.indexOf("export async function writeMode"))) && /syncKotSwitch\(rid/.test(helpers.slice(helpers.indexOf("export async function writeMode"))),
-    "…and it rewrites the three paper lines into the new mode's shape, re-asserting auto-print",
-    "writeMode stopped moving the routes with the mode. A restaurant switched to Chrome would keep three routes pointing at a computer: the board would say one thing and the paper would do another.");
-  check(/mode: PrintMode/.test(brd) && /export const stationFiles/.test(brd),
-    "…and the shared board carries the mode AND both launcher files, so neither screen invents its own",
-    "lib/printBoard.ts lost the mode or the station files: the two printing screens will drift apart again");
-
-  // ── ONLY THE CHOSEN MODE'S SETTINGS ARE RENDERED — on BOTH screens ──────────────────────────
-  check(/adm-mode/.test(page) && /mode === "computer" \?/.test(page),
-    "the console shows ONE toggle and only that mode's setup",
-    "the admin Printing board stopped branching on the mode — both modes' settings are on screen at once again, which is the twenty-control screen he called shit");
-  check(/pw-mode/.test(epanel) && /mode === "computer"/.test(epanel),
-    "…and so does the restaurant's own screen, the same way",
-    "the manager panel's Printing section is not mode-driven, so the two boards are two different products again");
-  check(/adm-mode/.test(read("app/globals.css")) && /pw-mode/.test(read("public/panels/editor/style.css")),
-    "…with the toggle styled from each side's own tokens, so both skins work",
-    "a mode toggle has no styling on one of the two screens");
+  // ── ⚠️ INVERTED: THERE IS NO TOGGLE (owner, 2026-08-31) ─────────────────────────────────────
+  //
+  // Previously (owner, 2026-08-28): *"there will be 2 mode… I want a toggle and the simplified UI —
+  // like you only see the option you have selected."* Six checks here REQUIRED that: a stored
+  // `PrintMode`, a `writeMode` that dragged the three paper lines with it, `mode: PrintMode` on the
+  // shared board, an `adm-mode` / `pw-mode` toggle styled on both screens, both screens branching on
+  // `mode === "computer"`, and a "mode" verb on both routes.
+  //
+  // LATEST (owner, 2026-08-31): *"in admin panel also we don't need toggle… with toggle gone it on
+  // and off will decide that the helper will be on and off and kitchen panel will always be on."*
+  //
+  // So all six are inverted. What replaced the toggle is not another setting — it is a DERIVATION:
+  // a computer prints if one is set up and named, and if none is, the kitchen screen does
+  // (lib/printHelpers → resolveTarget). The stored mode could disagree with the routes, which is the
+  // whole reason writeMode had to exist; with nothing stored there is nothing to keep in step.
+  check(!/export type PrintMode/.test(helpers) && !/export async function writeMode/.test(helpers),
+    "there is no stored printing mode, and no function to move it",
+    "PrintMode/writeMode are back: a stored choice of mechanism can disagree with the routes, and the routes are what the paper obeys");
+  check(!/mode: PrintMode/.test(brd) && /export const stationFiles/.test(brd),
+    "…the shared board carries no mode (and still carries both launcher files)",
+    "lib/printBoard.ts is publishing a mode again, so the screens will start branching on it");
+  check(!/adm-mode/.test(page) && !/pw-mode/.test(epanel),
+    "…neither printing screen renders a mechanism toggle",
+    "a mode toggle is back on one of the two printing screens");
+  check(!/b === "mode"/.test(code(eroute)) && !/seg\[0\] === "mode"/.test(code(adminR)),
+    "…and neither route will accept one",
+    "a route accepts a 'mode' verb again: something can store a choice that nothing reads");
+  // WHAT MUST STILL BE TRUE: both setups have to be REACHABLE, or "no toggle" would be satisfied by
+  // a board that offers neither. The helper's card and the kitchen-screen card are both present.
+  check(/The computer that prints|STEPS\.two/.test(page) && /The kitchen screen|STEPS\.screen/.test(page),
+    "…while BOTH setups are on screen at once, which is the point of removing the choice",
+    "one of the two setups vanished with the toggle: a restaurant can no longer set up the thing it needs");
   check(/function FileCard/.test(page),
     "…and the two launcher cards on the console share ONE component",
     "the helper file card and the station file card are two copies of one markup again — which is exactly how the wording drifted the first time");
-  check(/b === "mode"/.test(code(eroute)) && /seg\[0\] === "mode"/.test(code(adminR)),
-    "…and both screens have a door to change it, each gated as it already was",
-    "one of the two printing screens can show the toggle but not save it");
 
   check(/id="twoways"/.test(guideRaw) && /print-station file/.test(guideRaw),
     "the guide explains both ways and the print-station file",

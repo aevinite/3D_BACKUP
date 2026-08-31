@@ -38,7 +38,8 @@ type State = {
   agents: Agent[]; routes: Record<string, Route>; waiting: number; stuck?: Stuck; recent: Job[];
   kinds: string[]; printing: { allowed: boolean; on: boolean };
   panels?: string[]; people?: Person[]; devices?: Device[]; managerMayPrint?: boolean;
-  mode?: "computer" | "screen";
+  // no `mode` — see lib/printBoard.ts. Kept out of the type on purpose so a stale server
+  // sending one cannot quietly bring the toggle back.
   /** The queue is STOPPED: tickets keep being made and keep waiting until it is restarted. Not the
    *  same as printing being switched off, which stops them being made at all. */
   paused?: boolean;
@@ -170,13 +171,10 @@ function FileCard({ title, lead, files, os, setOs, copy, steps, footer }: {
 
 export default function AdminPrinting() {
 /** The mechanism, in the two words a person would use. */
-const MODE_CHOICES: [ "computer" | "screen", string, string ][] = [
-  ["computer", "A computer prints by itself", "A small program on the computer with the printer. No window, nobody signed in, nothing to keep open."],
-  ["screen", "One person's screen prints", "Kitchen tickets pop up on one person's screen. Nothing to install — just Chrome, out of the way."],
-];
+// MODE_CHOICES is gone (owner, 2026-08-31): the two big buttons, "A computer" and "A screen".
+// Both are now simply true at once — the helper prints if it is set up, the kitchen screen prints
+// the slips if it is not — so there was nothing left for the buttons to choose between.
 
-/** The picker is grouped by the screen a person actually stands at, so a cook is findable under
- *  "Kitchen" instead of being missing (owner, 2026-08-29: "there is not kitchen panel available"). */
 const PANEL_GROUPS: [ string, string ][] = [
   ["kitchen", "Kitchen screen"],
   ["manager", "Manager panel"],
@@ -194,10 +192,8 @@ const PANEL_GROUPS: [ string, string ][] = [
   // failed to ask (the fault the T17 sweep found on three other admin pages).
   const [loadErr, setLoadErr] = useState("");
   const [busy, setBusy] = useState("");
-  /** Which mode the confirmation strip is asking about, or null when it is not asking. It is a
-   *  strip in the page rather than confirm(): a grey browser box has no room to say what the switch
-   *  costs, and the owner asked for the confirmation to be part of the screen. */
-  const [ask, setAsk] = useState<"computer" | "screen" | null>(null);
+  // The mode confirmation strip is gone with the toggle it confirmed — there is no longer a switch
+  // whose cost has to be explained before it is paid.
   const [os, setOs] = useState<string>("mac");
   const [draft, setDraft] = useState<Record<string, Route>>({});
   const [over, setOver] = useState<Over | null>(null);
@@ -278,8 +274,6 @@ const PANEL_GROUPS: [ string, string ][] = [
   };
 
   // THE ONE TOGGLE'S VALUE. Read from the server, never guessed from the routes — the board has to
-  // show ONE setup before any paper has been answered, and a derived mode has no answer then.
-  const mode: "computer" | "screen" = st?.mode === "screen" ? "screen" : "computer";
 
   /** The person the kitchen tickets belong to right now — looked up so the screen can say their
    *  name and which panel it means, instead of leaving an id in a dropdown as the only feedback. */
@@ -327,8 +321,21 @@ const PANEL_GROUPS: [ string, string ][] = [
    */
   const pickPerson = async (value: string) => {
     if (value === "off") { await saveOff("kot"); return; }
-    const d = await post("mode", { mode: "screen", person: value || null });
-    if (d) { toast(value ? "Saved." : "Nobody chosen yet.", "ok"); void load(); }
+    // NARROWING, NOT SWITCHING ON. The kitchen screen already prints the slips with nobody named
+    // (lib/printHelpers → resolveTarget), so this only ever says "and it must be THIS person's
+    // screen". Clearing it goes back to the default rather than to silence.
+    if (!value) {
+      const d = await post("routes", { routes: { kot: null } });
+      if (d) { toast("Back to the kitchen screen.", "ok"); void load(); }
+      return;
+    }
+    // The panel FOLLOWS the person (lib/printHelpers → panelForRole), so nobody picks a "panel":
+    // writeRoutes refuses a person whose role cannot stand at the panel named, and this sends the
+    // one the board already knows they are on.
+    const who = (st?.people || []).find((x) => x.id === value);
+    const panel = (who?.panels || [])[0] || "manager";
+    const d = await post("routes", { routes: { kot: { via: "screen", panel, person: value } } });
+    if (d) { toast("Saved.", "ok"); void load(); }
   };
 
   const setR = (kind: string, patch: Partial<Route>) =>
@@ -493,62 +500,25 @@ const PANEL_GROUPS: [ string, string ][] = [
           ) : null}
 
           {/* ═══════════════════════════════════════════════════════════════════════════════════
-              2 · THE ONE QUESTION, AND ONLY THE CHOSEN ANSWER'S SETUP
+              THERE IS NO "WHICH WAY?" CARD ANY MORE (owner, 2026-08-31)
               ═══════════════════════════════════════════════════════════════════════════════════
-              Owner, 2026-08-29: *"I'm seeing so much buttons and it is getting very complicated…
-              make it very user friendly, right now it's completely hard."* And, on the switch
-              itself: *"whenever you switch, there is no UI for confirmation."*
+              It held two big buttons — "A computer (the helper)" / "A screen (this restaurant's own
+              Chrome)" — and an inline strip explaining what switching cost, because switching
+              rewrote all three paper lines.
 
-              So the mechanism is one pair of big buttons, the confirmation is an inline strip you
-              can read (a browser confirm() is a grey box with no room to explain what it costs),
-              and only the chosen mechanism's setup renders underneath. */}
-          <div className="adm-card" style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>2 · How does the paper come out?</h2>
-            <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-              Pick one. Only that one&apos;s setup is shown below — nothing from the other way stays on screen.
-            </p>
+              *"in admin panel also we don't need toggle… with toggle gone it on and off will decide
+              that the helper will be on and off, and kitchen panel will always be on."*
 
-            <div className="adm-who" role="group" aria-label="How this restaurant prints">
-              {MODE_CHOICES.map(([m, label, what]) => (
-                <button key={m} type="button" className={`adm-mode${mode === m ? " on" : ""}`}
-                  aria-pressed={mode === m} disabled={busy === "mode"}
-                  onClick={() => { if (mode !== m) setAsk(m); }}>
-                  <b>{label}</b>
-                  <small>{what}</small>
-                </button>
-              ))}
-            </div>
-
-            {/* THE CONFIRMATION, IN THE PAGE. It says what the switch costs before it costs it. */}
-            {ask ? (
-              <div className="adm-confirm" role="alertdialog" aria-label="Confirm the change">
-                <div className="txt">
-                  <b>Switch to “{MODE_CHOICES.find(([m]) => m === ask)?.[1]}”?</b>
-                  <span>
-                    {ask === "screen"
-                      ? "The printers you chose for each paper are cleared. Kitchen tickets will pop up on one person's screen; bills and banquet sheets go back to whoever presses Print."
-                      : "The person you chose is cleared. Each paper then needs a printer choosing on a computer running the helper."}
-                    {" "}A line set to <b>Nobody</b> stays that way.
-                  </span>
-                </div>
-                <div className="acts">
-                  <button className="adm-btn" onClick={() => setAsk(null)} disabled={busy === "mode"}>Cancel</button>
-                  <button className="adm-btn primary" disabled={busy === "mode"}
-                    onClick={async () => {
-                      const m = ask; setAsk(null);
-                      const d = await post("mode", { mode: m });
-                      if (d) { toast("Saved.", "ok"); void load(); }
-                    }}>Yes, switch</button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
+              So both setups are simply present, and each is true whenever it applies:
+                · the COMPUTER card is optional — set one up, or never look at it again
+                · the KITCHEN SCREEN card needs nothing switched on at all; it prints the slips
+                  whenever no computer is named for them
+              Nothing can contradict anything, because there is no stored choice left to disagree
+              with the routes. Do not re-add a mechanism toggle here. */}
           {/* ── the chosen mode's SETUP — one of these two, never both ───────────────────────── */}
-          {mode === "computer" ? (
-            <>
+          <>
               <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>3 · The computer that prints</h2>
+                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.two}</h2>
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
                   It runs the helper and reports its own printers, so the dropdowns in step 4 are built from
                   what that machine really has — nobody types a printer name.
@@ -609,8 +579,21 @@ const PANEL_GROUPS: [ string, string ][] = [
 
                   A line used to be five controls (On, Nobody, computer, printer, Save). It is one:
                   the options ARE the answers, grouped by machine, saved on change. */}
+              <FileCard title="The helper file — the same one for every restaurant"
+                lead={<>There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick. It links
+                  itself the first time it runs: the browser opens and you press <b>Allow</b>. <b>Nothing is
+                  downloaded by hand</b> — a downloaded script is blocked outright by a Mac and warned about by Windows.</>}
+                files={st.files} os={os} setOs={setOs} copy={copy}
+                steps={(k: string) => [
+                  <>On the computer with the printer, open <b>{k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</>,
+                  <>Press <b>Copy</b> below and paste it in.</>,
+                  <>Save it on the Desktop as <b>{st.files?.[k]?.filename}</b>{k === "windows" ? " with “Save as type: All Files”" : ""}.</>,
+                  k === "mac" ? <>In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click it.</> : <>Double-click it.</>,
+                  <>A page opens in that computer&apos;s browser. Press <b>Allow</b>. That is the whole setup.</>,
+                ]}
+                footer={(k: string) => <><b>Starting up again:</b> {st.files?.[k]?.autostart}</>} />
               <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>4 · What does the helper print?</h2>
+                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.three}</h2>
                 <p className="adm-muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
                   Tick the papers the helper takes — those come out on their own, with no window. Anything
                   left on <b>normal</b> prints the way it always has: a window opens when somebody taps Print.
@@ -677,44 +660,37 @@ const PANEL_GROUPS: [ string, string ][] = [
                 {agents.length === 0 ? <span id="no-computer-yet" className="adm-muted" style={{ fontSize: 12 }}>Set a computer up in step 3 first — the printers come from it.</span> : null}
               </div>
 
-              <FileCard title="The helper file — the same one for every restaurant"
-                lead={<>There is <b>nothing secret in it</b>, so keep it, email it, put it on a USB stick. It links
-                  itself the first time it runs: the browser opens and you press <b>Allow</b>. <b>Nothing is
-                  downloaded by hand</b> — a downloaded script is blocked outright by a Mac and warned about by Windows.</>}
-                files={st.files} os={os} setOs={setOs} copy={copy}
-                steps={(k: string) => [
-                  <>On the computer with the printer, open <b>{k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano"}</b>.</>,
-                  <>Press <b>Copy</b> below and paste it in.</>,
-                  <>Save it on the Desktop as <b>{st.files?.[k]?.filename}</b>{k === "windows" ? " with “Save as type: All Files”" : ""}.</>,
-                  k === "mac" ? <>In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click it.</> : <>Double-click it.</>,
-                  <>A page opens in that computer&apos;s browser. Press <b>Allow</b>. That is the whole setup.</>,
-                ]}
-                footer={(k: string) => <><b>Starting up again:</b> {st.files?.[k]?.autostart}</>} />
-            </>
-          ) : (
-            <>
-              {/* ═══ SCREEN MODE IS ONE QUESTION ═══════════════════════════════════════════════
-                  Owner, 2026-08-29: *"the person will be only choose for KOT… other user will work
-                  as they work — from the manager panel you can print the bill."*
+              {/* ═══ THE KITCHEN SCREEN — ON BY DEFAULT, NOTHING TO SWITCH ═════════════════════
+                  *"kitchen panel will always be on and there will be guide for it"* (owner,
+                  2026-08-31). So this card does not ask a question: it states what already happens,
+                  and offers the one thing a restaurant might want to change — WHICH screen, if not
+                  just "the kitchen".
 
-                  So: one dropdown, every panel in it (a cook, a waiter, a manager, the owner), and
-                  it decides ONE thing — whose screen the kitchen tickets pop up on. Bills and
-                  banquet sheets are not dragged onto that person's screen; writeMode() puts them
-                  back to "whoever presses Print". That is why there is no three-paper card here. */}
+                  His earlier ask still holds inside it: *"the person will be only choose for KOT…
+                  other user will work as they work — from the manager panel you can print the
+                  bill."* Naming somebody narrows the kitchen slips to their screen and touches
+                  nothing else; bills and banquet sheets stay with whoever presses Print. */}
               <div className="adm-card" style={{ marginTop: 14 }}>
-                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>3 · Whose screen prints the kitchen tickets</h2>
+                <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>{STEPS.screen}</h2>
+                <p style={{ margin: "0 0 4px", fontSize: 13 }}>
+                  <i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #30a46c)", marginRight: 7 }} />
+                  Kitchen slips print on the <b>kitchen screen</b> already &mdash; there is nothing to switch on.
+                  {(draft.kot?.agent && draft.kot?.printer)
+                    ? " Right now a computer above is set to print them, so it does that instead."
+                    : " No computer is set to print them, so the kitchen screen is doing it."}
+                </p>
                 <p className="adm-muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
-                  One person. When an order comes in, the ticket prints from <b>their</b> screen. Bills and
-                  banquet sheets are not affected — whoever presses Print gets the window, exactly as now.
+                  Only change this to send the slips to <b>one particular person&apos;s</b> screen instead.
+                  Bills and banquet sheets are never affected &mdash; whoever presses Print gets the window.
                 </p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                   <span className="adm-muted" style={{ fontSize: 12, minWidth: 96 }}>The person</span>
                   <select className="adm-input" style={{ minWidth: 280, flex: "1 1 280px" }}
-                    disabled={busy === "mode" || busy === "routes"}
+                    disabled={busy === "routes"}
                     value={draft.kot?.via === "off" ? "off" : (draft.kot?.person || "")}
                     onChange={(e) => void pickPerson(e.target.value)}>
                     <option value="off">Nobody — kitchen slips do not print by themselves</option>
-                    <option value="">— nobody chosen yet —</option>
+                    <option value="">The kitchen screen (anyone signed in there)</option>
                     {PANEL_GROUPS.map(([panel, groupLabel]) => {
                       const inGroup = (st.people || []).filter((x) => (x.panels || [])[0] === panel);
                       if (!inGroup.length) return null;
@@ -735,7 +711,9 @@ const PANEL_GROUPS: [ string, string ][] = [
                   </p>
                 ) : (
                   <p className="adm-muted" style={{ fontSize: 12.5, margin: "10px 0 0" }}>
-                    Nobody is chosen, so no kitchen slip prints by itself yet.
+                    {draft.kot?.via === "off"
+                      ? "Kitchen slips do not print by themselves for this restaurant."
+                      : "Anyone signed in on the kitchen screen prints them — no person to choose, nothing to set up."}
                   </p>
                 )}
               </div>
@@ -752,15 +730,14 @@ const PANEL_GROUPS: [ string, string ][] = [
                   <>Sign in as {chosenPerson ? <b>{chosenPerson.name}</b> : "that person"} once. Leave it running — it stays out of the way.</>,
                 ]}
                 footer={(k: string) => <><b>The first time it runs:</b> {st.stationFiles?.[k]?.firstRun}</>} />
-            </>
-          )}
+          </>
 
           </fieldset>
 
           {/* ── 4 · what has happened ───────────────────────────────────────────────────── */}
           <div className="adm-card" style={{ marginTop: 14, marginBottom: 30 }}>
             <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>
-              {mode === "computer" ? "5" : "4"} · {STEPS.four} — waiting: {st.waiting}
+              5 · {STEPS.four} — waiting: {st.waiting}
             </h2>
             <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
               The last few pieces of paper, and what became of them. Nothing here is a guess: a job says

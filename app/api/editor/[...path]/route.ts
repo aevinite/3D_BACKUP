@@ -52,7 +52,7 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
   agentForDevice, createAgent, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
-  writeMode, isPrintMode,
+  panelForRole,
 } from "@/lib/printHelpers";
 import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
@@ -4951,38 +4951,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ ok: true, cleared: Object.keys(patch) });
       }
 
-      // ── WHICH OF THE TWO WAYS THIS RESTAURANT PRINTS ─────────────────────────────────────────
-      // The same one toggle the admin console has, on the screen of the person standing at the
-      // printer — they are the one who knows whether a helper can be installed on that machine or
-      // whether it has to be Chrome. writeMode() brings the three paper lines with it, so the board
-      // and the paper can never say different things.
-      if (b === "mode") {
-        const m = (body as Record<string, unknown>)?.mode;
-        if (!isPrintMode(m)) return err("There are two ways to print: a computer, or a screen.", 400);
-        // A SCREEN ROUTE FROM HERE NAMES THIS PERSON. Choosing somebody else's screen from your own
-        // Settings would move another person's paper without telling them — that stays an admin act.
-        // TWO DIFFERENT INTENTS, and they must not be one call.
-        //
-        //   · flipping the toggle  → "print by computer / by a screen". A mechanism, nothing more.
-        //   · "Print them on this screen" → "and it is ME". A deliberate choice of a person.
-        //
-        // Naming a person switches the kitchen line back ON, because on this board the person IS the
-        // answer to "does it print?". So a plain toggle must NOT name one, or a manager flipping the
-        // mechanism would silently revive a line the restaurant had set to Nobody. The panel is no
-        // longer asked which PANEL: that follows the person's own role (panelForRole), so a cook
-        // setting this up from the kitchen screen names themselves and it means the kitchen screen.
-        const mine = (body as Record<string, unknown>)?.mine === true;
-        const done = await writeMode(rid, m, mine ? { person: g.user?.id || null } : {});
-        if ("error" in done) return err(done.error, 400);
-        await logAction("editor", "print_switch", {
-          restaurant_id: rid, device_id: dv,
-          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-          detail: `printing mode → ${done.mode === "screen" ? "a screen (this restaurant's own Chrome)" : "a computer (the helper)"}`,
-        });
-        return ok(done);
-      }
+// ── THE "mode" VERB IS GONE HERE TOO (owner, 2026-08-31) ─────────────────────────────────
+      // Same reason as the admin console: there is no mechanism left to choose. A manager who wants
+      // the slips on their own screen names themselves on the kitchen-slip line below ("a screen"),
+      // which is the same act with one fewer step and no stored copy to contradict it.
 
-      // ── who prints one kind of paper ──────────────────────────────────────────────────────────
+            // ── who prints one kind of paper ──────────────────────────────────────────────────────────
       // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
       // route from here always means THIS panel and THIS person — narrowing it to somebody else's
       // screen is an admin act, and letting a manager do it from their own settings would be a way
@@ -5014,10 +4988,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             paper: (body as Record<string, unknown>)?.paper ?? undefined,
           };
         } else if (who === "screen") {
-          // NO `device` HERE, deliberately. The mode toggle stores { person } with no device, and a
-          // per-paper "On" must produce the SAME shape — otherwise one line would be narrowed to this
-          // one PC and the others not, which is a difference nobody asked for and nothing shows.
-          patch = { via: "screen", panel: "manager", person: g.user?.id || null };
+          // NO `device` HERE, deliberately. A per-paper "On" must produce the SAME shape as naming a
+          // person on the admin board — otherwise one line would be narrowed to this one PC and the
+          // others not, which is a difference nobody asked for and nothing shows.
+          //
+          // THE PANEL FOLLOWS THE PERSON, and it is no longer hard-coded (2026-08-31). This said
+          // `panel: "manager"` outright, which is the same fault he reported on the admin picker
+          // ("choosing a person, there is not kitchen panel available"): writeRoutes then refuses a
+          // cook for not being a manager, so a cook pressing "print them on this screen" from the
+          // kitchen panel was told their own screen was not the kitchen panel. panelForRole is the
+          // one place that answers this, and it answers it for every role that has a screen.
+          patch = { via: "screen", panel: panelForRole(g.user?.role), person: g.user?.id || null };
         } else if (who === "off") {
           patch = { via: "off" };
         } else if (who === "none") {

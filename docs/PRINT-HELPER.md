@@ -221,22 +221,38 @@ writes it, and `verify:print-queue` now fails if any of seven files touches it a
 > *"if we run that .bat or .command file it will open that Chrome which runs minimised and doesn't
 > auto-open when printing required, doesn't affect other tabs while print. Test all that by yourself."*
 
-### The two modes
-| | **A computer** (default) | **A screen (Chrome)** |
+### The two ways — and there is NOTHING TO CHOOSE (owner, 2026-08-31)
+
+> ⚠️ **Previously** (owner, 2026-08-28): *"there will be 2 mode… I want a toggle and the simplified UI
+> — like you only see the option you have selected."* **Latest** (owner, 2026-08-31): *"in admin panel
+> also we don't need toggle… with toggle gone it on and off will decide that the helper will be on and
+> off and kitchen panel will always be on and there will be guide for it."* The toggle is gone.
+
+| | **A computer** (optional) | **The kitchen screen** (always on) |
 |---|---|---|
-| what runs | the helper program | a Chrome of its own, out of the way |
+| what runs | the helper program | the kitchen panel, in its own minimised Chrome |
 | anything open? | nothing | that Chrome stays running |
 | more than one printer? | **yes**, one per kind of paper | no — the machine's default printer |
 | someone signs in? | no | **once**, in the window it opens |
+| has to be set up? | yes, if you want it | **no** — it is the default |
 
-`settings.modules.printing.mode` (module bag — mig 326, no new column). It is **stored, not derived**:
-the board must show ONE setup before any paper has been answered, and a derived mode has no answer
-then. `writeMode()` **rewrites the three paper lines** into the new mode's shape — a `nobody` line is
-left alone (the decision outlives the mechanism), a computer route going back to "not answered"
-rather than inventing a printer, and `syncKotSwitch` re-asserted so a mode change can never silently
-stop printing.
+**What decides, in one sentence: a computer prints if one is set up and named; if none is, the kitchen
+screen does.** `settings.modules.printing.mode` is **deleted** (mig 372 swept the dead key out of the
+three restaurants still carrying one), and `PrintMode` / `readMode` / `writeMode` are gone with it.
+The answer is READ off `routes` by `lib/printHelpers.ts → resolveTarget`, which is where the paper
+always read it from — the stored mode was a second copy, and a second copy that can disagree is why
+it went. An **unanswered kitchen-slip line resolves to the kitchen screen**, with nobody named.
 
-### `lib/printStationScript.ts` — mode B's launcher, and four things it took
+Two consequences worth knowing:
+- **Clearing a paper line is not switching printing off.** Only a deliberate **Nobody** (`via:"off"`)
+  does that. `syncKotSwitch` treats `null` as on for exactly this reason — before the fix, taking the
+  printer off the kitchen line silently stopped the restaurant printing while the board still said
+  the kitchen screen was doing it.
+- **It cannot double-print.** A ticket is a ROW (mig 335) and `claimKotJobs` only wins rows still
+  `queued`, so two claimers racing means the second matches nothing. The queue guarantees one copy —
+  never the mode, which is part of why removing it cost nothing.
+
+### `lib/printStationScript.ts` — the kitchen screen's launcher, and four things it took
 1. **"runs minimised / doesn't auto-open"** — running the Chrome binary steals focus, and **so does
    `open -g -j -n` with a real URL**: measured, frontmost went `Finder → Google Chrome`. An
    `about:blank` test had said otherwise — the kind of easy test that ships a false promise. The mac

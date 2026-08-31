@@ -72,6 +72,17 @@ const mac = (a: StationArgs) => `#!/bin/zsh
 # Double-click once. It opens a small Chrome of its own, out of the way, which prints this
 # restaurant's kitchen slips. Nothing else on this Mac is touched.
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  THE TWO LINES YOU MAY CHANGE — and nothing else in this file.
+#
+#   SITE   the web address this station talks to. Change it to point this same
+#          file at a different site (a test site, a new address) without remaking
+#          the file. Keep the https:// and no trailing slash.
+#   PANEL  which screen it opens: kitchen  or  manager.
+#
+#  Everything below is machinery. If it stops working after an edit, the edit is
+#  the reason.
+# ══════════════════════════════════════════════════════════════════════════════
 SITE="${safe(a.origin)}"
 PANEL="${a.panel === "kitchen" ? "kitchen" : "manager"}"
 PROFILE="$HOME/.aevidine-print-station"
@@ -190,6 +201,17 @@ REM Double-click once. It opens a small Chrome of its own, minimised, which prin
 REM restaurant's kitchen slips. Nothing else on this PC is touched.
 setlocal enabledelayedexpansion
 
+REM ══════════════════════════════════════════════════════════════════════════════
+REM  THE TWO LINES YOU MAY CHANGE — and nothing else in this file.
+REM
+REM   SITE   the web address this station talks to. Change it to point this same
+REM          file at a different site (a test site, a new address) without
+REM          remaking the file. Keep the https:// and no trailing slash.
+REM   PANEL  which screen it opens: kitchen  or  manager.
+REM
+REM  Everything below is machinery. If it stops working after an edit, the edit
+REM  is the reason.
+REM ══════════════════════════════════════════════════════════════════════════════
 set "SITE=${safe(a.origin)}"
 set "PANEL=${a.panel === "kitchen" ? "kitchen" : "manager"}"
 set "PROFILE=%LOCALAPPDATA%\\AevidinePrintStation"
@@ -241,6 +263,17 @@ timeout /t 12 /nobreak >nul
 // ── Linux / Raspberry Pi ─────────────────────────────────────────────────────────────────────
 const linux = (a: StationArgs) => `#!/bin/sh
 # Aevidine print station${a.label ? " — " + safe(a.label) : ""}
+# ══════════════════════════════════════════════════════════════════════════════
+#  THE TWO LINES YOU MAY CHANGE — and nothing else in this file.
+#
+#   SITE   the web address this station talks to. Change it to point this same
+#          file at a different site (a test site, a new address) without remaking
+#          the file. Keep the https:// and no trailing slash.
+#   PANEL  which screen it opens: kitchen  or  manager.
+#
+#  Everything below is machinery. If it stops working after an edit, the edit is
+#  the reason.
+# ══════════════════════════════════════════════════════════════════════════════
 SITE="${safe(a.origin)}"
 PANEL="${a.panel === "kitchen" ? "kitchen" : "manager"}"
 PROFILE="$HOME/.aevidine-print-station"

@@ -297,43 +297,29 @@ export async function readRoutes(rid: string): Promise<PrintRoutes> {
   return out;
 }
 
-// ── WHICH OF THE TWO MODES THIS RESTAURANT IS ON ─────────────────────────────────────────────
+// ── THERE IS NO MODE ANY MORE (owner, 2026-08-31) ────────────────────────────────────────────
 //
-// Owner, 2026-08-28: *"there will be 2 mode… I want a toggle and the simplified UI — like you only
-// see the option you have selected, only the setting for that option will be shown."*
+// *"in admin panel also we don't need toggle"* … *"with toggle gone, it on and off will decide that
+// the helper will be on and off, and kitchen panel will always be on."*
 //
-//   · "computer" — a HELPER program prints, silently, with no browser and no login. Each kind of
-//     paper can go to a different printer, which is the thing a browser can never do.
-//   · "screen"   — the restaurant's own CHROME prints, opened by a launcher file, running out of the
-//     way, signed in as ONE named person (lib/printStationScript.ts).
+// WHAT WENT. `PrintMode`, `isPrintMode`, `readMode` and `writeMode` — a stored "computer" | "screen"
+// in the module bag, a pair of big buttons, a confirmation strip, and a function that rewrote all
+// three paper lines whenever the buttons moved.
 //
-// WHY IT IS STORED AND NOT DERIVED. It could be read off the routes — a route naming an agent means
-// "computer", one naming a panel means "screen". But the screen has to show ONE setup before any
-// paper has been answered at all, and a derived mode has no answer then. Storing it is what lets the
-// board show the helper's setup OR the Chrome setup and never both.
+// WHY IT WENT, in his terms and in the code's. His: one less thing to answer. The code's: the mode
+// was a SECOND answer to a question the routes already answered — `resolveTarget` reads "a route
+// naming an agent means a computer, a route naming a panel means a screen" straight off the data.
+// The stored copy existed only so the board could show ONE setup before anything was answered, and
+// it could disagree with the routes, which is why `writeMode` had to drag them along behind it.
 //
-// It lives in the module bag (mig 326: a new module adds no column to settings — there are 110).
-export type PrintMode = "computer" | "screen";
-export const isPrintMode = (v: unknown): v is PrintMode => v === "computer" || v === "screen";
-
-/** The default is "computer" because the helper is the better answer: no browser, no login, and one
- *  printer per kind of paper. A restaurant that has never chosen is shown the helper's setup. */
-export async function readMode(rid: string): Promise<PrintMode> {
-  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as
-    { modules?: unknown } | null;
-  const raw = bagOf(s?.modules)["printing"];
-  return isPrintMode(raw?.mode) ? raw.mode : "computer";
-}
-
-/**
- * Change the mode — and bring the three paper lines WITH it.
- *
- * This is the part that makes one toggle honest. If the mode moved on its own, a restaurant switched
- * to Chrome would still have three routes pointing at a computer, the board would show the Chrome
- * setup, and the paper would keep coming out of the helper. One toggle, one truth: every line that
- * was answered is rewritten into the new mode's shape, and a line set to "nobody" is left alone —
- * "we do not print this" survives a change of mechanism.
- */
+// WHAT DECIDES NOW, and it is one sentence: **a computer prints if one is set up and named; if none
+// is, the kitchen screen does.** The on/off switch turns the whole feature off. Nothing to choose,
+// nothing to keep in step, and no state that can contradict the paper.
+//
+// AND IT CANNOT DOUBLE-PRINT, which is the thing to check before believing any of this: a ticket is
+// a ROW (mig 335) and `claimKotJobs` only wins rows still 'queued'. Two claimers racing means the
+// second matches zero rows. The queue is what guarantees one copy — never the mode, which is part of
+// why removing it costs nothing.
 /**
  * Which panel a person actually stands at.
  *
@@ -347,78 +333,6 @@ export function panelForRole(role: string | null | undefined): RoutePanel {
   if (r === "kitchen") return "kitchen";
   if (r === "waiter" || r === "tablet") return "tablet";
   return "manager";                       // a manager, and an owner working the manager panel
-}
-
-/**
- * The one toggle, and what it means.
- *
- * ── A COMPUTER ──  the helper owns the paper. Each of the three lines can name a machine and one
- *                   of its printers. Nothing prints on anybody's screen.
- *
- * ── A SCREEN ──    ONE person's screen prints the KITCHEN TICKETS, and nothing else. Owner,
- *                   2026-08-29, in his own words: *"the person will be only choose for KOT… other
- *                   user will work as they work — from the manager panel you can print the bill."*
- *                   So bills and banquet sheets are put back to "whoever presses Print", which is
- *                   what every restaurant without a helper has always done. Before this they were
- *                   dragged onto the named person's screen too, and every ticket, bill and banquet
- *                   sheet in the restaurant popped up in front of one person.
- *
- * A deliberate "no, do not print this" (via:"off") outlives the mechanism either way.
- */
-export async function writeMode(
-  rid: string,
-  mode: PrintMode,
-  opts?: { person?: string | null },
-): Promise<{ mode: PrintMode; routes: PrintRoutes } | { error: string }> {
-  const current = await readRoutes(rid);
-  const patch: Record<string, unknown> = {};
-
-  // WHOSE SCREEN. The panel comes from their role, so a cook, a waiter and a manager are all
-  // choosable and none of them has to know what a "panel" is.
-  let personId: string | null = null, personPanel: RoutePanel = "manager";
-  if (mode === "screen" && opts?.person) {
-    const u = (await sb.from("staff_users").select("id, name, username, role, active")
-      .eq("id", String(opts.person)).eq("restaurant_id", rid).maybeSingle()).data as
-      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null } | null;
-    if (!u) return { error: "That person is not one of this restaurant's staff." };
-    if (u.active === false) return { error: `${u.name || u.username} is switched off, so their screen cannot be the printer.` };
-    personId = u.id;
-    personPanel = panelForRole(u.role);
-  }
-
-  for (const k of ROUTABLE_KINDS) {
-    const r = current[k];
-    // NAMING A PERSON *IS* SWITCHING IT BACK ON. Everywhere else a deliberate "no" outlives the
-    // mechanism, but choosing whose screen prints the kitchen tickets is not a change of mechanism —
-    // it is an answer to the very question "off" was answering, and it is the same one dropdown.
-    // Without this, picking a person after choosing "Nobody" saved nothing and the screen silently
-    // snapped back.
-    const namedNow = mode === "screen" && k === "kot" && !!personId;
-    if (r.via === "off" && !namedNow) continue;          // a deliberate no outlives the mechanism
-    if (mode === "screen") {
-      // Only the kitchen ticket can belong to a screen. The other two go back to the window.
-      if (k !== "kot") { if (r.via) patch[k] = null; continue; }
-      patch[k] = personId ? { via: "screen", panel: personPanel, person: personId } : (r.via ? null : undefined);
-      if (patch[k] === undefined) delete patch[k];
-      continue;
-    }
-    // Going back to the helper cannot invent a printer, so the line returns to "not answered yet"
-    // — which the board says out loud rather than pointing at a printer nobody chose.
-    if (r.via) patch[k] = null;
-  }
-
-  const s = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: unknown } | null;
-  const bag = { ...bagOf(s?.modules) };
-  bag["printing"] = { ...(bag["printing"] || {}), mode };
-  const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
-  if (up.error) return { error: "Could not save which way this restaurant prints." };
-  const after = Object.keys(patch).length ? await writeRoutes(rid, patch) : { routes: current };
-  if ("error" in after) return { error: after.error };
-  // Kitchen slips and auto_print_kot are one decision (syncKotSwitch) — a mode change must not
-  // silently switch printing off, so it is re-asserted from the line's new state.
-  const kot = after.routes.kot;
-  await syncKotSwitch(rid, kot.via !== "off");
-  return { mode, routes: after.routes };
 }
 
 /** Is this line pointing at a SCREEN (a panel/person/device) rather than a helper on a computer? */
@@ -744,25 +658,38 @@ export type PrintTarget =
 
 export async function targetFor(rid: string, kind: PrintKind): Promise<PrintTarget> {
   const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
-  return resolveTarget(routes[kind], agents);
+  return resolveTarget(routes[kind], agents, kind);
 }
 
 /** Same answer for several kinds in ONE pair of reads (the panels need three at a time). */
 export async function targetsFor(rid: string, kinds: PrintKind[]): Promise<Record<string, PrintTarget>> {
   const [routes, agents] = await Promise.all([readRoutes(rid), agentsView(rid)]);
-  return kinds.reduce<Record<string, PrintTarget>>((a, k) => { a[k] = resolveTarget(routes[k], agents); return a; }, {});
+  return kinds.reduce<Record<string, PrintTarget>>((a, k) => { a[k] = resolveTarget(routes[k], agents, k as PrintKind); return a; }, {});
 }
 
-function resolveTarget(r: PrintRoute | undefined, agents: AgentView[]): PrintTarget {
+function resolveTarget(r: PrintRoute | undefined, agents: AgentView[], kind?: PrintKind): PrintTarget {
   if (r?.via === "off") return { kind: "off" };
   if (isScreenRoute(r)) {
     return { kind: "screen", panel: r!.panel as RoutePanel, person: r!.person ?? null,
              personName: r!.personName ?? null, device: r!.device ?? null,
            };
   }
-  if (!r?.agent || !r.printer) return { kind: "none" };
+  // ── NOBODY HAS ANSWERED THIS LINE ──────────────────────────────────────────────────────────
+  // "kitchen panel will always be on" (owner, 2026-08-31). For KITCHEN SLIPS specifically, an
+  // unanswered line is not "nobody in particular" any more — it is the KITCHEN SCREEN, with no
+  // setup, no toggle and nobody named. A restaurant that plugs a printer into the kitchen PC and
+  // opens the panel gets its tickets, which is what he expects to happen by default.
+  //
+  // `person: null` matters: it means ANYONE on the kitchen panel, not one named cook. Naming a
+  // person is still possible and still wins — this is only what happens when nothing was chosen.
+  //
+  // The other papers keep the old answer ("none" → whoever presses Print), because a bill printing
+  // itself on a screen nobody is watching is not a default anyone asked for.
+  if (!r?.agent || !r.printer) return kind === "kot" ? { kind: "screen", panel: "kitchen", person: null, personName: null, device: null } : { kind: "none" };
   const a = agents.find((x) => x.id === r.agent);
-  if (!a) return { kind: "none" };                       // the machine was removed — screens may print again
+  // THE MACHINE WAS REMOVED. Same rule as never having been answered: the kitchen screen picks the
+  // slips back up, rather than the restaurant going quiet because a PC was thrown away.
+  if (!a) return kind === "kot" ? { kind: "screen", panel: "kitchen", person: null, personName: null, device: null } : { kind: "none" };
   return { kind: "computer", agent: a.name, printer: r.printer, connected: a.connected, secondsAgo: a.secondsAgo, };
 }
 

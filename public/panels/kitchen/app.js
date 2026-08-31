@@ -1784,12 +1784,18 @@ function openPrinterSheet() {
     ${status}
     <p class="prsheet-sub">Something wrong? One tap — the manager is told right away.</p>
     ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}
-    <!-- THE SETUP GUIDE HAS LEFT THIS SHEET (owner, 2026-08-29). It was put here on 2026-08-18
-         ("where is this setup in the app") when a cook's screen could still be talked through
-         becoming the printer. It cannot any more — the admin names one person on the Printing board
-         — so a link telling a cook how to set a printer up is an instruction to do something this
-         screen will not let them do. Reporting a problem, which IS this sheet's job, stays.
-         The guide lives with the setup, in the admin console, and nowhere else. -->
+    <!-- ⚠️ THE GUIDE IS BACK, AND THE REASON IT LEFT HAS GENUINELY EXPIRED.
+         Previously (owner, 2026-08-29): *"inside the kitchen screen also kitchen panel also there is
+         how to print… remove that completely"* — and it was right at the time. A cook's screen could
+         not be the printer: the admin named ONE person on the Printing board, so telling a cook how
+         to set a printer up was an instruction to do something this screen would refuse.
+         LATEST (owner, 2026-08-31): *"kitchen panel will always be on and there will be guide for
+         it."* The model changed underneath the old rule — THIS screen is now the default printer for
+         kitchen slips, with nobody named and nothing switched on (lib/printHelpers → resolveTarget).
+         So the guide is no longer an instruction to do the impossible; it is the instructions for the
+         machine this sheet is standing on. It goes straight to the print-station file — the .bat /
+         .command that opens this panel in its own minimised Chrome. -->
+    <a class="btn prsheet-row prsheet-help" href="/print-setup.html#station" target="_blank" rel="noopener"><span>🖨</span> Set this screen up to print</a>
     <button class="btn prsheet-row prsheet-help" type="button" data-prsettings><span>⚙️</span> Where printing stands</button></div>`;
   document.body.appendChild(ov);
   const close = () => { ov.remove(); if (prSheetOff) { const off = prSheetOff; prSheetOff = null; off(); } };

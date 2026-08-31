@@ -24,11 +24,18 @@ export type PaperSize = { name?: string; wMm: number; hMm: number };
  * then its printers) that choosing "a screen" does not, so the log is step 5 one way and step 4 the
  * other. Hard-coding "4 ·" put two cards called 4 on the same screen (2026-08-29).
  */
+// FOUR STEPS, AND NONE OF THEM IS A CHOICE OF MECHANISM (owner, 2026-08-31 — *"we don't need
+// toggle"*). Step 2 used to be "How does the paper come out?", the two big buttons. There is nothing
+// to ask: a computer prints if one is set up, and the kitchen screen prints the slips when none is.
+// So the steps are now the things a person actually DOES, in the order they do them.
 export const STEPS = {
   one:   "1 · Is printing switched on",
-  two:   "2 · How does the paper come out?",
+  two:   "2 · The computer that prints (optional)",
   three: "3 · Which printer gets which paper",
   four:  "What has printed",
+  // The kitchen screen needs no switching on, so its card is a statement and a file, not a step
+  // with a decision in it.
+  screen: "4 · The kitchen screen",
 } as const;
 
 /** The restaurant's words, never ours. "kot" means nothing to anybody outside this codebase. */
