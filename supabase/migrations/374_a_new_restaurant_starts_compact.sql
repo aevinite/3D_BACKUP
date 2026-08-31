@@ -1,4 +1,9 @@
--- 372 — a NEW restaurant's floor starts compact, the way the owner asked.
+-- 374 — a NEW restaurant's floor starts compact, the way the owner asked.
+--
+-- (Numbered 372 when it was written; renumbered on 2026-08-31 because another lane took 372 for
+-- `372_there_is_no_printing_mode.sql` and reached `main` first. `verify:ui-integrity` refuses a
+-- duplicated number, and it is right to: the next collision is the one that touches the same object.
+-- 373 was taken in the same window, so this is 374.)
 --
 -- WHAT WAS WRONG (T25 round 3, item 37, 2026-08-31).
 --
