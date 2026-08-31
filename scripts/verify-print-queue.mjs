@@ -342,9 +342,18 @@ const ownerSettings = read("app/owner/settings/page.tsx");
 check(/print-setup\.html/.test(admin),
   "the guide is reachable from the admin console, where the printer is actually set up",
   "the setup guide has no door at all — the admin console is the one place that must always reach it");
-check(!/print-setup\.html/.test(kpanel),
-  "…and the kitchen panel does NOT carry a second copy of it",
-  "the kitchen panel links the setup guide again: a cook cannot set a printer up, so it is an instruction to do something they cannot do");
+// ⚠️ INVERTED AGAIN, AND THE REASON THE OLD RULE EXISTED HAS GENUINELY EXPIRED.
+// Previously (owner, 2026-08-29): *"inside the kitchen screen also kitchen panel also there is how to
+// print… remove that completely"* — correct then. A cook's screen could not BE the printer (the admin
+// named one person on the Printing board), so a link telling a cook how to set a printer up was an
+// instruction to do something the screen would refuse.
+// LATEST (owner, 2026-08-31): *"kitchen panel will always be on and there will be guide for it."*
+// The kitchen screen is now the DEFAULT printer for kitchen slips — nobody named, nothing switched on
+// (lib/printHelpers → resolveTarget). The guide is no longer impossible advice; it is the
+// instructions for the machine the sheet is standing on.
+check(/print-setup\.html/.test(kpanel),
+  "the kitchen panel reaches the setup guide, because that screen is now the default printer",
+  "the kitchen sheet has no way to reach the print-station file, on the one screen that prints by default");
 check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
   "the manager panel has its own VISIBLE Printing section (the admin-only Kitchen one stays hidden)",
   "the manager panel's Printing section is gone — the printing status and the device answer would be unreachable there again");

@@ -1664,24 +1664,16 @@ function bindPrintingBoard(ed) {
         if (d) { toast(d.note || "Test page sent."); await loadPrintBoard(); }
         return;
       }
-      // THE CONFIRMATION IS PART OF THE SCREEN (owner, 2026-08-29: "whenever you switch, there is
-      // no UI for confirmation"). A browser confirm() is a grey box with no room to say what the
-      // switch costs, and on a phone it covers the very screen you are reading.
-      if (what === "mode") {
-        const m = el.dataset.mode;
-        if (m === (B().mode === "screen" ? "screen" : "computer")) return;
-        state.printAsk = m; renderEditor(); return;
-      }
-      if (what === "mode-cancel") { state.printAsk = null; renderEditor(); return; }
-      if (what === "mode-yes") {
-        const m = state.printAsk; state.printAsk = null;
-        const d = await post("mode", { mode: m });
-        if (d) { toast("Saved."); await loadPrintBoard(); } else { renderEditor(); }
-        return;
-      }
+      // THE MODE ACTIONS ARE GONE (owner, 2026-08-31 — "we don't need toggle"): `mode`,
+      // `mode-cancel` and `mode-yes`, plus the inline confirmation they existed to show. There is no
+      // mechanism to switch, so there is nothing whose cost has to be explained first. What is left
+      // is the one act that was always the real one: naming whose screen prints the slips.
       // "Print them on this screen" — screen mode's one action, and it names THIS person.
       if (what === "mine") {
-        const d = await post("mode", { mode: "screen", mine: true });
+        // A ROUTE, NOT A MODE. Same act as before — "the slips print on MY screen" — but said in the
+        // one place the paper actually reads. The panel follows the person on the server
+        // (lib/printHelpers → panelForRole), so nothing here has to know what a "panel" is.
+        const d = await post("route", { kind: "kot", who: "screen" });
         if (d) { toast("Kitchen tickets print here now."); await loadPrintBoard(); }
         return;
       }
@@ -1691,19 +1683,19 @@ function bindPrintingBoard(ed) {
         return;
       }
       if (what === "on") {
-        // "On" means whatever the MODE means. In screen mode that is one tap — the person is this
-        // person. In computer mode it needs a printer, and this device's first one is the honest
-        // default so that one tap really is one tap.
+        // "ON" IS DERIVED NOW, NOT READ OFF A MODE (owner, 2026-08-31). It used to ask the stored
+        // mode which of two things one tap meant. With no mode, the honest question is what this
+        // machine can actually DO: if the helper is running here and has listed printers, "on" means
+        // that printer; if it is not, "on" means this screen. Same one tap either way, and it can no
+        // longer mean "the helper" on a computer that has none — which is what the old branch did
+        // whenever the stored mode said "computer" and nothing was set up.
         const kind = el.dataset.kind;
-        const md = B().mode === "screen" ? "screen" : "computer";
-        if (md === "screen") {
+        const mine2 = B().thisComputer;
+        if (!mine2 || !(mine2.printers || []).length) {
           const d = await post("route", { kind, who: "screen" });
           if (d) { toast("Saved."); await loadPrintBoard(); }
           return;
         }
-        const mine2 = B().thisComputer;
-        if (!mine2) { toast("Set this computer up first — the section above.", "err"); return; }
-        if (!(mine2.printers || []).length) { toast("This computer has not listed any printers yet. Start the helper first.", "err"); return; }
         const r2 = (B().routes || {})[kind] || {};
         const printer = mine2.printers.some((p) => p.name === r2.printer) ? r2.printer : mine2.printers[0].name;
         const d = await post("route", { kind, who: "computer", printer });
@@ -13751,7 +13743,7 @@ function formPrinting(s) {
   const others = (B.agents || []).filter((a) => !mine || a.id !== mine.id);
   // NO NUMBER ON THIS ONE. It is not a step any more — it is what card 2's toggle reveals when the
   // answer is "a computer", and two cards both numbered "2 ·" is worse than neither being numbered.
-  const step2 = `<div class="card"><h3>3 · The computer that prints</h3>
+  const step2 = `<div class="card"><h3>2 · The computer that prints <span class="muted" style="font-weight:400;font-size:12.5px">(optional)</span></h3>
     <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
       A computer prints by running one small program — the <b>helper</b>. It asks us every two seconds
       whether there is anything to print, and prints it. No window has to be open, nobody has to stay
@@ -13806,42 +13798,15 @@ function formPrinting(s) {
 
   // ── 2 · HOW THIS RESTAURANT PRINTS — the one toggle, mirroring the console exactly ──────────
   // Owner, 2026-08-28: "I want a simple toggle… you only see the option you have selected, only the
-  // setting for that option will be shown." The admin console's card and this one are the SAME card:
-  // same two choices, same words, same order, and only the chosen mode's setup rendered. The person
-  // with "May set the printers up" can move it, because they are the one standing at the machine and
-  // they know whether a helper can be installed on it.
-  const mode = B.mode === "screen" ? "screen" : "computer";
-  const MODES = [
-    ["computer", "A computer", "A small program prints silently. No window, nobody logged in. Each paper can have its own printer."],
-    ["screen", "A screen (Chrome)", "This restaurant's own Chrome prints, out of the way, signed in as one person. Nothing to install."],
-  ];
-  const step2mode = `<div class="card"><h3>2 · How does the paper come out?</h3>
-    <p class="muted" style="font-size:13px;margin:0 0 12px;line-height:1.5">
-      ${may
-        ? "Pick one. Everything below changes to match it, and nothing from the other way stays on screen."
-        : "Set by Aevidine. Everything below follows it."}
-    </p>
-    <div class="pw-who" role="group" aria-label="How this restaurant prints">
-      ${MODES.map(([m, label, what]) => `<button type="button" class="pw-mode${mode === m ? " on" : ""}"
-          aria-pressed="${mode === m ? "true" : "false"}"${may ? ` data-pw="mode" data-mode="${esc(m)}"` : " disabled"}>
-          <b>${esc(label)}</b><small>${esc(what)}</small>
-        </button>`).join("")}
-    </div>
-    ${(may && state.printAsk) ? `
-    <div class="pw-confirm" role="alertdialog" aria-label="Confirm the change">
-      <div class="txt">
-        <b>Switch to “${esc((MODES.find(([m]) => m === state.printAsk) || [])[1] || "")}”?</b>
-        <span>${state.printAsk === "screen"
-          ? "The printers chosen for each paper are cleared. Kitchen tickets will print from one person's screen; bills and banquet sheets go back to whoever presses Print."
-          : "The person chosen is cleared. Each paper then needs a printer choosing on a computer running the helper."} A line set to <b>Nobody</b> stays that way.</span>
-      </div>
-      <div class="acts">
-        <button type="button" class="btn" data-pw="mode-cancel">Cancel</button>
-        <button type="button" class="btn primary" data-pw="mode-yes">Yes, switch</button>
-      </div>
-    </div>` : ""}
-  </div>`;
-
+  // setting for that option will be shown." — which was true until 2026-08-31, when he removed the
+  // choice itself. The admin console's card and this one are still the SAME card, deliberately: same
+  // sections, same words, same order, both setups present. The person with "May set the printers up"
+  // is the one standing at the machine, so they are the one who may change any of it.
+  // NO MODE (owner, 2026-08-31). `step2mode` held the same two big buttons as the admin board and
+  // the same inline confirmation. Both setups are simply shown now — a computer if the restaurant
+  // has one, and the kitchen screen which needs nothing — so there is nothing to pick between and
+  // no stored choice that can disagree with the paper. Do not re-add it here either: this panel and
+  // the admin board have drifted apart twice already, and a toggle in one of them is how it starts.
   // ── the chosen mode's SETUP — one of these two, never both ──────────────────────────────────
   const files = B.files || {};
   const sfiles = B.stationFiles || {};
@@ -13869,8 +13834,7 @@ function formPrinting(s) {
 
   const editorWord = (k) => k === "windows" ? "Notepad" : k === "mac" ? "TextEdit, then Format → Make Plain Text" : "nano";
 
-  const step2setup = mode === "computer"
-    ? step2 + fileCard(
+  const step2setup = step2 + fileCard(
         "The helper file",
         `The same file for every restaurant, with <b>nothing secret in it</b>. <b>Nothing is downloaded:</b>
          a downloaded script is blocked outright by a Mac and warned about by Windows, while a file you
@@ -13883,23 +13847,34 @@ function formPrinting(s) {
           k === "mac" ? `In Terminal, once: <b>chmod +x ~/Desktop/print-helper.command</b> — then double-click the file.` : "Double-click it.",
           `A page opens. Press <b>Allow</b>. That is the whole setup.`,
         ],
-        (k, f) => `<b>After a shutdown:</b> ${esc(f.autostart)}`)
-    : `<div class="card"><h3>3 · Whose screen prints the kitchen tickets</h3>
+        (k, f) => `<b>After a shutdown:</b> ${esc(f.autostart)}`);
+
+  // ── 4 · THE KITCHEN SCREEN — its own block, AFTER the paper lines ────────────────────────────
+  // Order matters more than it looks. Rendered inside step2setup it came out as "the computer", "the
+  // helper file", "the kitchen screen", "the print-station file", and only THEN "which printer gets
+  // which paper" — so the paper lines, which belong to the computer above them, were separated from
+  // it by a whole other subject. Read top to bottom it now goes: is it on · the computer · what that
+  // computer prints · the screen that prints when it does not · what has printed.
+  const stepScreen = `<div class="card"><h3>4 · The kitchen screen</h3>
+        <p style="font-size:13px;margin:0 0 4px;line-height:1.5">
+          Kitchen slips print on the <b>kitchen screen</b> already — there is nothing to switch on.
+          ${((B.routes || {}).kot || {}).agent ? "Right now a computer above is set to print them, so it does that instead." : "No computer is set to print them, so the kitchen screen is doing it."}
+        </p>
         <p class="muted" style="font-size:13px;margin:0 0 10px;line-height:1.5">
-          One person. When an order comes in, the ticket prints from <b>their</b> screen. Bills and banquet
-          sheets are not affected — whoever presses Print gets the window, exactly as now.
+          Only change this to send the slips to <b>one particular person's</b> screen instead. Bills and
+          banquet sheets are never affected — whoever presses Print gets the window.
         </p>
         ${(() => {
           const kot = (B.routes || {}).kot || {};
           const nm = kot.personName || "";
           const meIsIt = kot.person && B.person && kot.person === B.person.id;
           if (kot.via === "off") return `<p class="what"><b>Nobody</b> — kitchen slips do not print by themselves.</p>`;
-          if (!kot.person) return `<p class="what">Nobody is chosen yet, so no kitchen slip prints by itself.${may ? " Press below to make it this screen." : " Aevidine chooses who."}</p>`;
+          if (!kot.person) return `<p class="what">Anyone signed in on the <b>kitchen screen</b> prints them — no person to choose.${may ? " Press below to move them to this screen instead." : ""}</p>`;
           return `<p class="what"${meIsIt ? ' style="color:var(--green)"' : ""}>${meIsIt
             ? "Kitchen tickets print on <b>this</b> screen."
             : `Kitchen tickets print on <b>${esc(nm || "another person")}</b>'s screen.`}</p>`;
         })()}
-        ${may ? `<div style="margin-top:10px"><button type="button" class="btn primary" data-pw="mine">Print them on this screen</button></div>` : ""}
+        ${may ? `<div style="margin-top:10px"><button type="button" class="btn primary" data-pw="mine">Print them on this screen instead</button></div>` : ""}
       </div>` + fileCard(
         "The print-station file",
         `It opens a <b>separate</b> Chrome with its own profile, <b>out of the way</b>, with silent printing
@@ -13917,8 +13892,8 @@ function formPrinting(s) {
 
   // ── 3 · THE THREE PAPERS — the only question left ───────────────────────────────────────────
   // Each paper used to ask "who prints it" with three answers of its own, on top of the printer, the
-  // person and the device. The MODE answers "who" now, so a paper is simply on, or nobody — plus, in
-  // computer mode, which printer.
+  // person and the device. The ROUTE answers "who" — a paper names a computer's printer, or a screen,
+  // or nobody — and with no computer set up yet the dropdown simply has nothing to offer and says so.
   const agentName = (id) => ((B.agents || []).find((a) => a.id === id) || {}).name || "another computer";
 
   // ── ONE CONTROL PER PAPER ──────────────────────────────────────────────────────────────────
@@ -13967,11 +13942,16 @@ function formPrinting(s) {
   };
 
   // THE THREE PAPERS EXIST ONLY IN COMPUTER MODE.
-  // In screen mode there is nothing to answer here: one person's screen prints the KITCHEN TICKETS
-  // and the other two papers are printed by whoever presses Print, which is what a restaurant with
-  // no helper has always done (owner, 2026-08-29). Three lines saying "on" would be three controls
-  // that change nothing.
-  const step3 = mode !== "computer" ? "" : `<div class="card"><h3>4 · What does the helper print?</h3>
+  // With no computer set up there is little to answer here: the kitchen slips fall to the kitchen
+  // screen on their own, and the other two papers are printed by whoever presses Print, which is what
+  // a restaurant with no helper has always done (owner, 2026-08-29). The lines are still shown — a
+  // restaurant that adds a computer later answers them here — but they offer nothing until it has.
+  // THE PAPER LINES ARE ALWAYS SHOWN NOW. This read `const step3 = mode !== "computer" ? "" : …`,
+  // so with the mode gone the whole card threw `mode is not defined` and the board stopped at
+  // "Reading the printing setup…" — the section rendered nothing at all. Which printer gets which
+  // paper is a real question whether or not a computer is set up yet: the dropdowns simply have
+  // nothing to offer until one is, and say so.
+  const step3 = `<div class="card"><h3>3 · Which printer gets which paper</h3>
     <p class="muted" style="font-size:13px;margin:0 0 4px;line-height:1.5">
       The papers the helper takes come out on their own, with no window. Anything left on <b>normal</b>
       prints the way it always has: a window opens when somebody taps Print.
@@ -13996,7 +13976,7 @@ function formPrinting(s) {
   // Numbered by what came BEFORE it: choosing a computer adds a step that choosing a screen does not,
   // so this is 5 one way and 4 the other. The admin console numbers it the same way, from the same
   // rule, because two boards that number one setup differently are two setups to learn.
-  const step4 = `<div class="card"><h3>${mode === "computer" ? "5" : "4"} · ${esc(STEP.four || "What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
+  const step4 = `<div class="card"><h3>5 · ${esc(STEP.four || "What has printed")} — waiting: ${Number(B.waiting || 0)}</h3>
     <p class="muted" style="font-size:13px;margin:0 0 10px">
       Nothing here is a guess: a job says <b>printed</b> only after the printer confirmed it.
     </p>
@@ -14029,7 +14009,7 @@ function formPrinting(s) {
   // it explained a setup this panel can no longer perform, in different words from the board above.
   const guide = "";
 
-  return step1 + step2mode + step2setup + step3 + step4 + guide;
+  return step1 + step2setup + step3 + stepScreen + step4 + guide;
 }
 
 // One pass of the queue: what is waiting → claim it → print it → say what happened.

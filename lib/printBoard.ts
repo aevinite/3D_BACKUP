@@ -14,7 +14,7 @@
 // It holds no gate of its own. Every caller is already behind its own door — tokenIsValid for the
 // admin route, requireRole + managerCan("print_setup") for the panel route.
 import {
-  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS, readMode, type PrintMode,
+  agentsView, readRoutes, waitingCount, agentForDevice, ROUTABLE_KINDS,
   type AgentView, type PrintRoutes, type PaperSize, type RoutableKind,
 } from "@/lib/printHelpers";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -54,9 +54,10 @@ export type BoardState = {
    *  slips line's own answer, never as a second switch of its own (that duplicate is what made one
    *  board say ON while the other said OFF). */
   printing: { allowed: boolean; on: boolean };
-  /** WHICH OF THE TWO MODES this restaurant is on — the one toggle the whole card 3 hangs off
-   *  (owner, 2026-08-28: "you only see the option you have selected"). */
-  mode: PrintMode;
+  /** NO `mode` (owner, 2026-08-31 — *"we don't need toggle"*). The board no longer tells the screen
+   *  which of two setups to show, because there are not two: the helper's setup is always there to
+   *  be used or ignored, and the kitchen screen prints the slips when no computer is named. Whether
+   *  a computer is doing it is READ off `routes`, never off a stored choice. */
   /** The queue is stopped: tickets keep being made and keep waiting until it is restarted. */
   paused: boolean;
   /** The helper this browser set up, when a restaurant set itself up (mig 367). Null on the admin's
@@ -97,7 +98,7 @@ export const helperFiles = (origin: string) =>
 /** Everything both boards draw, in ONE set of reads. Scoped by restaurant, column lists, hard
  *  limits — the egress rule, same as every other read in this app. */
 export async function printBoardState(rid: string, opts?: { deviceId?: string | null; recent?: number }): Promise<BoardState> {
-  const [agents, routes, waiting, setRow, jobs, stuck, mode] = await Promise.all([
+  const [agents, routes, waiting, setRow, jobs, stuck] = await Promise.all([
     agentsView(rid),
     readRoutes(rid),
     waitingCount(rid),
@@ -107,7 +108,6 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     // Kitchen slips only: they are the paper with a person standing over it, and a bill waiting two
     // seconds for somebody to press Print is not a pile-up.
     waitingToPrint(rid, "kot"),
-    readMode(rid),
   ]);
   const s = (setRow.data || {}) as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean };
   const dv = String(opts?.deviceId || "").trim();
@@ -123,7 +123,6 @@ export async function printBoardState(rid: string, opts?: { deviceId?: string | 
     waiting,
     stuck: { ...stuck, afterMs: STUCK_AFTER_MS },
     recent: (jobs.data || []) as BoardJob[],
-    mode,
     // STOPPED, not switched off — the two are different answers and the board says which. Tickets go
     // on being made while it is stopped; restart it and they come out (owner, 2026-08-29).
     paused: (() => {
