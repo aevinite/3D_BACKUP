@@ -369,6 +369,73 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   }
 }
 
+// ── 10 · AN ANSWER ABOUT ONE RESTAURANT MUST NAME IT (T20 round 2, 2026-08-31) ───────────────────
+// /api/owner/printing answers for exactly ONE restaurant. The owner's Settings page renders a LIST —
+// one printing row per restaurant that has it on — and looked that single answer up ONCE, outside the
+// loop, so the printer and the computer named on row 2 came from whichever restaurant the route had
+// picked. Another tenant's hardware on this tenant's line: the class CLAUDE.md calls a recurring bug.
+//
+// Latent on the dev stack, and only by luck — exactly one restaurant has printing on, and for the
+// two-restaurant diag owner it happens to be `ids[0]`. Measured, not assumed. It stops being latent
+// the day a second restaurant switches printing on.
+{
+  const route = read("app/api/owner/printing/route.ts");
+  const pg = read("app/owner/settings/page.tsx");
+  if (!route || !pg) fail("owner/printing or the owner Settings page is missing");
+  else {
+    if (/restaurantId:\s*target/.test(route)) ok("owner/printing names the restaurant its answer is about");
+    else fail("owner/printing no longer echoes `restaurantId` — the Settings page cannot tell which restaurant its printing answer belongs to, so one restaurant's printer gets named on another's row");
+    if (/printing\.restaurantId\s*===\s*p\.restaurant_id/.test(pg)) ok("the Settings page applies the printing answer ONLY to the row it is about");
+    else fail("the owner Settings page uses one restaurant's printing answer for every row again — another restaurant's printer and computer would appear on this restaurant's line");
+  }
+}
+
+// ── 11 · A CACHED PAYLOAD'S VERSION MOVES WHEN ITS SHAPE DOES (T20 round 2, 2026-08-31) ──────────
+// `cachedOwnerPayload` serves a stored snapshot as-is until its FINGERPRINT moves, and the fingerprint
+// watches DATA, not the shape of the JSON. So adding a field without bumping the key's version means
+// some ranges carry it (uncached) and some do not (snapshot) — a field that exists on Tuesday and not
+// on Wednesday, which is worse for the screen than never having it.
+//
+// Both files already say this in their own comments. It was walked into anyway on 2026-08-31 while
+// adding `window`: the live check found `range=today` carrying it and `range=30d`, served from a
+// snapshot, not. So the pairing is checked here rather than left to whoever remembers the comment.
+{
+  const rep = read("app/api/owner/reports/route.ts");
+  const an = read("app/api/owner/analytics/route.ts");
+  // Each field is paired with the version that must be current for it. Add a row when you add a field.
+  const PAIRS = [
+    [rep, "app/api/owner/reports", /window:\s*\{\s*from,\s*to\s*\}/, /reports:v5:/, "`window` (the resolved from/to)"],
+    [an, "app/api/owner/analytics", /window:\s*\{\s*from,\s*to\s*\}/, /analytics:v6:/, "`window` (the resolved from/to)"],
+  ];
+  for (const [src, name, field, version, what] of PAIRS) {
+    if (!src) { fail(`${name} is missing`); continue; }
+    const hasField = field.test(src);
+    const hasVersion = version.test(src);
+    if (hasField && hasVersion) ok(`${name} carries ${what} AND the cache version that goes with it`);
+    else if (hasField && !hasVersion) fail(`${name} sends ${what} but its cache key version has moved on — a stored snapshot will serve the payload WITHOUT that field, so the screen gets it on some ranges and not others`);
+    else if (!hasField) ok(`${name} no longer sends ${what} — nothing to pair`);
+  }
+}
+
+// ── 12 · ONE IDEA OF WHAT MONTH IT IS, ON THE PLATFORM REVENUE PAGE (T20 round 2, 2026-08-31) ────
+// /api/admin/revenue corrects its YEAR boundary to IST, with the reason on the line ("a UTC year flips
+// ~5.5h late and mismatches the heading") — and left the 12-month chart's window, and the labels built
+// from it, on UTC. Measured: at UTC 2026-08-31T20:00 (IST 1 Sep 01:30) the chart's newest bucket was
+// 2026-08 while the IST month was 2026-09, so the CURRENT MONTH WAS MISSING from the chart for five
+// and a half hours; on 1 January IST it would say the new year while charting December of the old one.
+{
+  const rev = read("app/api/admin/revenue/route.ts");
+  if (!rev) fail("app/api/admin/revenue/route.ts is missing");
+  else {
+    const utcMonth = /getUTCMonth\(\)/g;
+    const onNow = [...rev.matchAll(/now\.getUTC(?:Month|FullYear)\(\)/g)].length;
+    if (!onNow) ok("the revenue page builds every month boundary from ONE IST clock");
+    else fail(`the revenue page is back to reading ${onNow} month/year boundar${onNow === 1 ? "y" : "ies"} off the UTC clock while its year boundary is IST — for 5.5h after IST midnight on the 1st the chart loses the current month`);
+    if (/const istNow = new Date\(now\.getTime\(\) \+ 330 \* 60000\)/.test(rev) && utcMonth.test(rev)) ok("…and that clock is IST (+5:30), used for both the window and the labels");
+    else if (!/istNow/.test(rev)) fail("the revenue page no longer has a single IST clock for its month maths");
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {

@@ -53,6 +53,21 @@ export async function GET(req: NextRequest) {
 
   const [agents, routes, waiting] = await Promise.all([agentsView(target), readRoutes(target), waitingCount(target)]);
   return NextResponse.json({
+    // ── WHICH RESTAURANT THIS IS ABOUT (T20 round 2, 2026-08-31) ──────────────────────────────────
+    // This route answers for ONE restaurant — `target` above, which is the `?rid=` when it is in
+    // scope and otherwise `ids[0]`. It never said which, and the owner's Settings page renders a LIST
+    // (one printing row per restaurant that has it on) while looking this answer up ONCE, outside the
+    // loop. So the helper/computer named on row 2 came from whichever restaurant `target` resolved to
+    // — another restaurant's hardware printed on this restaurant's line.
+    //
+    // Latent on this stack today, and only by luck: exactly one restaurant has printing switched on,
+    // and for the two-restaurant diag owner it happens to be `ids[0]`, so the row and the answer are
+    // the same restaurant. Measured, not assumed. The day a second restaurant turns printing on it
+    // stops being latent, and it is the "nothing may show restaurant #1's details on another tenant"
+    // class CLAUDE.md calls a recurring bug.
+    //
+    // So the answer names its subject and the page matches on it. One field; no extra read.
+    restaurantId: target,
     allowed: true, on: s?.auto_print_kot === true, waiting,
     // Only what an owner needs to READ: the computer's name, whether it is awake, and what it prints.
     // No codes, no fingerprints — there is nothing on this screen worth stealing.

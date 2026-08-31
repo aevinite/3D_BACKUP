@@ -26,10 +26,19 @@ export async function GET(req: NextRequest) {
   const now = new Date();
   // IST calendar year for the "collected this year" boundary (see /api/admin/billing) — the
   // page label is IST, so a UTC year flips ~5.5h late and mismatches the heading. UTC+5:30.
-  const yearStart = `${new Date(now.getTime() + 330 * 60000).getUTCFullYear()}-01-01`;
+  const yearStart = `${new Date(now.getTime() + 330 * 60000).getUTCFullYear()}-01-01`;   // see istNow below
 
-  // The 12-month chart's window, as a date the database can filter on.
-  const monthsFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  // ── THE CHART'S MONTHS ARE IST TOO (T20 round 2, 2026-08-31) ──────────────────────────────────
+  // The line above corrects the YEAR boundary to IST and says exactly why: "the page label is IST, so
+  // a UTC year flips ~5.5h late and mismatches the heading". This window, and the month labels built
+  // from it further down, were left on UTC — so for the 5½ hours after IST midnight on the 1st of a
+  // month, `getUTCMonth()` is still the previous month and the chart's window starts a month earlier
+  // than the page's own idea of "the last 12 months". On 1 January that is worse than a shifted edge:
+  // "collected this year" would already say the new year (IST) while the chart is still anchored to
+  // the old one.
+  // One `istNow`, used by both, so the page cannot disagree with itself about which month it is.
+  const istNow = new Date(now.getTime() + 330 * 60000);
+  const monthsFrom = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
 
   // ── EVERY FIGURE ON THIS PAGE NOW COUNTS EVERY ROW (owner-approved 2026-08-20, item 13) ───────
   // All three reads used to stop at PostgREST's row cap and say nothing about it, so MRR, the
@@ -103,8 +112,10 @@ export async function GET(req: NextRequest) {
   const byMonth = new Map<string, number>(Object.entries(coll?.months || {}).map(([k, v]) => [k, Number(v) || 0]));
   // Last 12 calendar months, zero-filled so the chart never has gaps.
   const monthly: { month: string; label: string; collected: number }[] = [];
+  // Built from the SAME istNow as `monthsFrom`, so a label can never name a month the window did not
+  // ask for (see the note on monthsFrom).
   for (let i = 11; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const d = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - i, 1));
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     monthly.push({ month: key, label: d.toLocaleDateString("en-IN", { month: "short" }), collected: Math.round(byMonth.get(key) || 0) });
   }
