@@ -61,12 +61,22 @@ function Tile({ label, value, loading, seg, on, pick }: {
   );
   if (!seg || !pick) return <div className="adm-stat">{body}</div>;
   const active = on === seg;
+  // ── A FIGURE YOU CAN TAP HAS TO LOOK LIKE ONE (owner, 2026-08-31 — item 9) ─────────────────────
+  // Three of the four figures filter the list and the fourth does not, and they were identical, so
+  // "New (last 30 days)" read as a dead tap. It stays un-tappable on purpose — it counts who FIRST
+  // CAME in 30 days, while "First-timers" counts who has been once, and a figure that opens a list
+  // with a different number in it is worse than one you cannot press. So the three that DO work say
+  // so instead: a small filter mark in the corner, and the active one keeps its outline as well.
+  // A mark, not a colour, and the pointer and `aria-pressed` were already there — three carriers.
   return (
     <button type="button" className="adm-stat" aria-pressed={active}
       title={`Show ${label.toLowerCase()}`}
       onClick={() => pick(seg)}
-      style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
+      style={{ position: "relative", textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
         outline: active ? "2px solid var(--accent, #16a34a)" : undefined, outlineOffset: -2 }}>
+      <i className={`fas fa-filter cust-tilemark${active ? " on" : ""}`} aria-hidden="true"
+        style={{ position: "absolute", top: 10, right: 12, fontSize: 10,
+          color: active ? "var(--accent, #16a34a)" : "var(--muted)", opacity: active ? 1 : 0.5 }} />
       {body}
     </button>
   );
@@ -332,6 +342,12 @@ export default function OwnerCustomers() {
             <Tile label="New (last 30 days)" value={summary?.newThisMonth} loading={!summary} />
             <Tile label="Blocked" value={summary?.blocked} loading={!summary} seg="blocked" on={seg} pick={setSeg} />
           </div>
+          {/* One line so the little filter mark is not a riddle. Muted, and it sits with the tiles
+              rather than shouting from a bar — nothing is wrong, it is just how they work. */}
+          <p className="adm-muted" style={{ fontSize: 12, margin: "-8px 0 14px" }}>
+            <i className="fas fa-filter" aria-hidden="true" style={{ fontSize: 9.5, marginRight: 5 }} />
+            Tap a figure with this mark to see the people behind it.
+          </p>
 
           {partial.length > 0 && (
             <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

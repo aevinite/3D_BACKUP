@@ -379,6 +379,14 @@ const RULES = [
       /\{multiRest && <td style=\{\{ padding: "9px 10px" \}\}><span className="adm-chip"/,
     ],
   },
+  {
+    item: 26, file: CUSTOMERS,
+    say: "a figure you can tap carries a mark, and one line says what the mark means",
+    must: [
+      /className=\{`fas fa-filter cust-tilemark\$\{active \? " on" : ""\}`\}/,
+      /Tap a figure with this mark to see the people behind it\./,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
