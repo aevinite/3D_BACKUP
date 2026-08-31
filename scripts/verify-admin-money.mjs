@@ -679,6 +679,38 @@ try {
       `the matched total survives the empty page (${first.summary?.matched} vs ${past.summary?.matched})`);
   }
 
+  // ── L(live) · the Deleted bucket does not present three events as one ──────────────────────
+  head("L(live) · Bills' Deleted tile names what its number is made of");
+  {
+    // He asked why this screen has a "Deleted" bucket at all when a bill can never be deleted. The
+    // count was right; the word was doing too much work. 2,956 tombstoned bills on backup, of which
+    // 16 had a person's name against them: 1,752 carry migration 291's own words ("every order on
+    // this bill was deleted" — the database closing out a bill whose last dish came off), and the
+    // rest have neither a person nor a reason, the exact fingerprint mig 291's header describes as
+    // scripts writing straight through the service role. The capability itself is his own (R27), and
+    // the headline stays the true total because compliance §3.0 wants every tombstone counted.
+    const j = await api("/api/admin/bills");
+    ok(typeof j.deletedEmptied === "number" && typeof j.deletedByPerson === "number",
+      `the endpoint sends the split (by a person ${j.deletedByPerson}, closed itself out ${j.deletedEmptied}, total ${j.deletedTotal})`);
+    ok((j.deletedByPerson ?? 0) + (j.deletedEmptied ?? 0) <= (j.deletedTotal ?? 0),
+      "…and the two parts never exceed the whole");
+    const src = R("app/aevinite/bill-audit/page.tsx");
+    ok(/deletedByPerson == null \|\| d\?\.deletedEmptied == null/.test(src),
+      "the tile falls back to its old sentence when the split cannot be read, rather than showing a zero");
+    ok(/This bill closed itself out/.test(src) && /marked deleted with nobody recorded/.test(src) && /This bill was deleted/.test(src),
+      "a deleted bill's own panel says WHICH of the three it was");
+    const c = await ctx();
+    const p = await c.newPage();
+    await p.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+    await settle(p);
+    const tile = await p.evaluate(() => [...document.querySelectorAll(".blz-stat")]
+      .map((e) => e.innerText.replace(/\n/g, " | ")).find((t) => /DELETED/.test(t)) || "");
+    ok(/removed by a person/.test(tile) && /last dish came off/.test(tile),
+      `on screen: ${tile.slice(0, 130)}`);
+    ok(/restorable/.test(tile), "…and it still says every one of them can be put back");
+    await p.close(); await c.close();
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {

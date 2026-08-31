@@ -26,6 +26,9 @@ type Data = {
   // the chip used to be able to say 0 while deleted bills existed. nextBefore is the paging
   // cursor: null once there is nothing older to fetch.
   deletedTotal?: number; nextBefore?: string | null;
+  // The Deleted bucket holds THREE different events; these split it. null means the split could not
+  // be read, and the tile falls back to its old single sentence rather than inventing a zero.
+  deletedEmptied?: number | null; deletedByPerson?: number | null;
 };
 type TrailEvent = { action: string; actor: string | null; detail: string | null; at: string };
 type InvEvent = { event: string; no: number | null; reason: string | null; actor: string | null; at: string };
@@ -44,6 +47,8 @@ const META: Record<BillState, { label: string; tone: string; icon: IconName }> =
   deleted:   { label: "Deleted",       tone: "#ef4444", icon: "deleted" },
 };
 const ORDER: BillState[] = ["running", "settled", "khata", "onhouse", "cancelled", "deleted"];
+// Grouped the Indian way, like every other count in this territory.
+const nf0 = (n: number) => (Number(n) || 0).toLocaleString("en-IN");
 
 // Bill-context wording, deliberately narrower than the shared map (this page is ONE bill's
 // trail, so "Invoice voided" reads better than the generic "Reopened the bill"). Anything not
@@ -302,7 +307,27 @@ export default function AdminBills() {
             {lostUnknown > 0 && <> · {inr(lostUnknown)} not answered</>}
             <br />walk-outs / cancels · on this page
           </>} />
-        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable · every one, all time" calculating={!d} />
+        {/* THREE EVENTS, NOT ONE (owner, 2026-08-31 — he asked why this screen has a "Deleted"
+            bucket at all when a bill can never be deleted). The count was right and the word was
+            doing too much work. Measured on backup: 2,956 tombstoned bills, of which **16** had a
+            person's name against them. 1,752 carry migration 291's own words, "every order on this
+            bill was deleted" — the DATABASE closing a bill out because its last dish came off, one
+            at a time; nobody deleted the bill. The rest have neither a person nor a reason, which is
+            precisely the fingerprint mig 291's header describes: scripts writing `deleted_at`
+            straight through the service role, not the product.
+            The headline stays the true total, because compliance §3.0 wants every tombstone counted
+            and the capability itself is his own (R27: "The Aevidine admin console keeps a soft delete
+            for support work"). What stops is the tile presenting three things as one number. Nothing
+            is renamed and no policy is decided here — the split comes from columns already stored. */}
+        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} calculating={!d}
+          sub={d?.deletedByPerson == null || d?.deletedEmptied == null
+            ? "restorable · every one, all time"
+            : <>
+                {nf0(d.deletedByPerson)} removed by a person · {nf0(d.deletedEmptied)} closed out when the last dish came off
+                {(d.deletedTotal ?? 0) - d.deletedByPerson - d.deletedEmptied > 0
+                  ? <> · {nf0((d.deletedTotal ?? 0) - d.deletedByPerson - d.deletedEmptied)} with nobody recorded</> : null}
+                <br />restorable · every one, all time
+              </>} />
       </div>
 
       {/* Filters */}
@@ -415,8 +440,28 @@ export default function AdminBills() {
                       <div style={{ display: "flex", gap: 11, padding: "12px 14px", borderRadius: 11, border: "1px solid var(--adm-danger)", background: "color-mix(in srgb, #ef4444 12%, transparent)", margin: "12px 0" }}>
                         <span style={{ color: "var(--adm-danger)", flex: "0 0 auto", marginTop: 1 }}><Ico n="trash" s={16} /></span>
                         <div style={{ fontSize: 13 }}>
-                          <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>{b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
-                          {b.deleteReason ? <div style={{ marginTop: 3 }}>Reason: <i>{b.deleteReason}</i></div> : <div style={{ marginTop: 3, opacity: 0.7 }}>No reason recorded.</div>}
+                          {/* WHICH of the three this bill was, in words, from what the record says.
+                              "This bill was deleted" read the same for a person's act, for the
+                              database closing out an emptied bill, and for a row a script wrote —
+                              and 2,940 of the 2,956 on this database are not the first one. */}
+                          {b.deleteReason === "every order on this bill was deleted" ? (
+                            <>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill closed itself out</b> — every dish on it was
+                              removed, one at a time, so nothing was left on the bill{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
+                              <div style={{ marginTop: 3, opacity: 0.7 }}>Nobody deleted the bill. Look at what happened to it below to see who took the dishes off.</div>
+                            </>
+                          ) : !b.deletedBy && !b.deleteReason ? (
+                            <>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill is marked deleted with nobody recorded</b>
+                              {b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
+                              <div style={{ marginTop: 3, opacity: 0.7 }}>No person and no reason were stored, so it did not come through the panels — a script wrote it straight to the database.</div>
+                            </>
+                          ) : (
+                            <>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>{b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
+                              {b.deleteReason ? <div style={{ marginTop: 3 }}>Reason: <i>{b.deleteReason}</i></div> : <div style={{ marginTop: 3, opacity: 0.7 }}>No reason recorded.</div>}
+                            </>
+                          )}
                           <div style={{ marginTop: 3, opacity: 0.7 }}>Kept in full for tax/audit — you can restore it.</div>
                         </div>
                       </div>
