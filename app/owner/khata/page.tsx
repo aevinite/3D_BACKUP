@@ -165,8 +165,21 @@ export default function OwnerKhata() {
           </div>
         )}
 
+        {/* ── A READ THAT FAILED IS NOT AN EMPTY BOOK (sweep 7 · T14 round 2, 2026-08-31) ──────────────────
+            The loading branch was guarded — `customers === null && !err` — but the EMPTY branch below it was
+            not, so a failed first load fell straight through to it. Measured: with the route answering 500,
+            Pay Later showed the red "Couldn't load" card AND, underneath it, **"No one owes anything right
+            now."** That is a claim about money made from no data, on the one screen whose whole job is to
+            say who owes what; Customers did the same with "No customers yet".
+            The sister screen already had this right — Feedback & complaints says "this is a loading error,
+            not 'no ratings'" — so this is the same sentence, in the same shape, on the two that lacked it. */}
         {customers === null && !err ? (
           <div className="adm-empty">Loading Pay Later…</div>
+        ) : customers === null ? (
+          <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
+            Couldn&apos;t read the credit book — this is a loading error, not &ldquo;nobody owes anything.&rdquo;{" "}
+            <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => load()}>Try again</button>
+          </div>
         ) : rows.length === 0 ? (
           // A SEARCH THAT FOUND NOBODY MUST SAY WHERE IT LOOKED (sweep 6 · T14, 2026-08-18). This box
           // filters the list already on the page, and that list is the biggest `shown.showing` debts

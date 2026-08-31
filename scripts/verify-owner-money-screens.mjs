@@ -458,6 +458,20 @@ const RULES = [
            /if \(!ok\(iso\)\) return "—";/,
            /const d = ok\(iso\) \? Math\.floor/],
   },
+  {
+    // ── ITEM 33 · A READ THAT FAILED IS NOT AN EMPTY BOOK ─────────────────────────────────────────
+    // The loading branch was guarded, the EMPTY branch below it was not, so a failed first load fell
+    // through to "No one owes anything right now" — a claim about money made from no data — under a
+    // red card saying the opposite. Both screens now say what Feedback & complaints has always said.
+    item: 33, file: KHATA,
+    say: "a failed credit-book read says so instead of \"nobody owes anything\"",
+    must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;nobody owes anything\.&rdquo;/],
+  },
+  {
+    item: 33, file: CUSTOMERS,
+    say: "a failed guest-list read says so instead of \"no customers yet\"",
+    must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;no customers\.&rdquo;/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");

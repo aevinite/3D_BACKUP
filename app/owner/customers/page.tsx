@@ -421,8 +421,19 @@ export default function OwnerCustomers() {
               </div>
             )}
 
+            {/* A READ THAT FAILED IS NOT AN EMPTY LIST (sweep 7 · T14 round 2, 2026-08-31). The
+                loading branch was guarded; the EMPTY branch below it was not, so a failed first load
+                fell through to "No customers yet" — under a red "Couldn't load" card saying the
+                opposite. Pay Later had the same hole and said "No one owes anything right now",
+                which is a claim about money. Same sentence shape as Feedback & complaints, which
+                has always got this right. */}
             {customers === null && !err ? (
               <div className="adm-empty">Loading customers…</div>
+            ) : customers === null ? (
+              <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
+                Couldn&apos;t read your guest list — this is a loading error, not &ldquo;no customers.&rdquo;{" "}
+                <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => load()}>Try again</button>
+              </div>
             ) : rows.length === 0 ? (
               <div className="adm-empty">{search ? "No customers match that search." : "No customers yet. They appear here once guests dine in and share a name/phone."}</div>
             ) : narrow ? (
