@@ -630,6 +630,25 @@ try {
     }
   }
 
+  // ── K · a Customers page past the end is empty, not a red error ────────────────────────────
+  head("K · asking Customers for a page that does not exist");
+  {
+    // PostgREST answers an offset beyond the last row with 416/PGRST103, which reached the screen as
+    // "Couldn't load the guest list" — the same words a real outage gets. 87 guests, ?page=2 was a
+    // 500 (T18 second 500, 2026-08-31).
+    for (const [q, what] of [["page=2", "one page past the end"], ["page=199", "far past the end"],
+                             ["page=2&seg=blocked", "past the end of a filtered group"]]) {
+      const r = await fetch(`${BASE}/api/admin/customers?${q}`, { headers: H, cache: "no-store" });
+      const j = await r.json();
+      ok(r.status === 200 && Array.isArray(j.customers) && j.customers.length === 0 && !j.error && j.summary,
+        `${what}: status ${r.status}, ${(j.customers || []).length} rows, summary ${j.summary ? "kept" : "LOST"}${j.error ? ", error: " + j.error : ""}`);
+    }
+    const first = await api("/api/admin/customers");
+    const past = await api("/api/admin/customers?page=199");
+    ok(first.summary?.matched === past.summary?.matched,
+      `the matched total survives the empty page (${first.summary?.matched} vs ${past.summary?.matched})`);
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {
