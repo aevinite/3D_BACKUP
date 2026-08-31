@@ -33,7 +33,16 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P46301`.**
+**Next free ID: `P46801`.**
+
+> **`P46301`–`P46800` is CLAIMED by T25's THIRD freshly-planned 500** (`lib/**` — every shared library
+> file no other terminal owns, 2026-08-31). The owner's word, after round 2 was merged and deployed:
+> *"re plan whole 500 phasess test in your boundaries and execute again so that you if any left you
+> can able to do it"* — i.e. plan it again, run it again, and pick up whatever the first two rounds
+> could not reach.
+>
+> Claimed by editing this line **before a single row was written**, taken from the mark AND checked
+> against the highest id actually on disk (`P46300`), and **pushed to `main` before any row existed**.
 
 > **`P45801`–`P46300` is T25's SECOND freshly-planned 500 — DONE: 500 written, 500 executed, 496 ✅ · 4 ⏭ · 0 ❌, and 10 problems found and fixed (items 24–33).** Four of the ten were *guards that stayed green when the thing they defend was broken* — found by sabotaging every guard this territory relies on, which is now part of the block (`P46241`–`P46262`). Originally claimed as: (`lib/**` — every shared
 > library file no other terminal owns, 2026-08-31). The owner's word, after his first 500 was merged
