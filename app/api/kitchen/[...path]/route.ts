@@ -298,10 +298,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // old coarse kitchen|counter|both target only speaks when no route does. Without this a route
       // saying "the kitchen screen prints" was still vetoed by an admin who had set "counter" months
       // ago — two settings, opposite answers, and the newer one losing (printing sweep, 2026-08-26).
-      // A screen route names the room. `backupPanel` counts too: the retired 'both' is now
-      // ONE ROOM PRINTS. "The kitchen prints and the counter picks up what it leaves" is gone with
-      // the backup screen (owner, 2026-08-30): paper appearing in a room nobody is standing in is
-      // worse than paper that has not appeared, because nobody learns the printer is broken.
+      // A screen route names ONE room, and that is the whole answer. "The kitchen prints and the
+      // counter picks up what it leaves" is gone with the backup screen (owner, 2026-08-30): paper
+      // appearing in a room nobody is standing in is worse than paper that has not appeared,
+      // because nobody learns the printer is broken. (This sentence was left spliced in half by
+      // that edit — it still said "`backupPanel` counts too" and then contradicted itself.)
       if (target.kind === "screen") kitchenMayAuto = target.panel === "kitchen";
       else if (target.kind === "off" || target.kind === "computer") kitchenMayAuto = false;
       const mayI = screenMayPrint(target, { panel: "kitchen", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });

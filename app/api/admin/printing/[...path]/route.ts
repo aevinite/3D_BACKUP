@@ -207,7 +207,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // asked the same question as the Kitchen slips line in older and vaguer words, and the two
       // could contradict each other — the printing sweep caught the OLDER one winning, so an owner
       // who named the manager screen was refused by a setting an admin had touched months before.
-      // Everything it expressed is a screen route with an optional backupPanel now.
+      // Everything it expressed is a screen route naming ONE room now (the backup went, 2026-08-30).
       printing: board.printing,
     });
   }
@@ -299,8 +299,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     if (typeof body.allowed === "boolean") patch.auto_print_kot_allowed = body.allowed;
     if (typeof body.on === "boolean") patch.auto_print_kot = body.on;
     // THE THIRD THING THIS VERB USED TO TAKE IS GONE (mig 369): `target`, the coarse
-    // kitchen|counter|both answer. It is a screen route with an optional backupPanel now, saved
-    // through `routes` above like every other printing decision — one door, not two.
+    // kitchen|counter|both answer. It is a screen route naming ONE room now — 'both' went with the
+    // backup screen (2026-08-30) — saved through `routes` above like every other printing decision:
+    // one door, not two.
     if (!Object.keys(patch).length) return err("Nothing to change.");
     const up = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
     if (up.error) return err("Could not save that.");

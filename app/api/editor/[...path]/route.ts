@@ -68,8 +68,9 @@ import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "
 // because an admin had once set "kitchen" months before. Two settings for one question is how the
 // owner's own choice ended up doing nothing, so there is one left.
 //
-// `backup` is no longer a separate setting either: it is `backupPanel` on the route, which is where
-// the retired 'both' went. Both rungs of mig 107 still gate everything (the admin allowed auto-print
+// `backup` is no longer a setting at all: the retired 'both' went to `backupPanel` on the route,
+// and then `backupPanel` itself went (owner, 2026-08-30 — there is no backup printer, a failure is
+// reported instead). Both rungs of mig 107 still gate everything (the admin allowed auto-print
 // AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
   const [stQ, helper, route] = await Promise.all([
@@ -5002,11 +5003,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           if (!agentId) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
           const printer = String((body as Record<string, unknown>)?.printer || "");
           if (!printer) return err("Which printer?", 400);
+          // NO BACKUP FIELDS (owner, 2026-08-30 — there is no backup printer). This still ACCEPTED
+          // `backupAgent` / `backupPrinter` off the request body and wrote them onto the route, weeks
+          // after everything that READ them was deleted. Nothing acted on them, so nothing looked
+          // wrong: it quietly stamped `backupAgent: null` onto every route it saved, and a caller
+          // passing a real one would have had it stored and silently ignored. A field that can still
+          // be WRITTEN is not a deleted field — it is a deleted field waiting to be read again.
           patch = {
             agent: agentId, printer,
             paper: (body as Record<string, unknown>)?.paper ?? undefined,
-            backupAgent: (body as Record<string, unknown>)?.backupAgent ?? null,
-            backupPrinter: (body as Record<string, unknown>)?.backupPrinter ?? null,
           };
         } else if (who === "screen") {
           // NO `device` HERE, deliberately. The mode toggle stores { person } with no device, and a
