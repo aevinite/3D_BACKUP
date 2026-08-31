@@ -22,7 +22,19 @@ export async function mapLimit<I, O>(
   const out = new Array<O>(items.length);
   if (!items.length) return out;
   let next = 0;
-  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length) }, async () => {
+  // ── A NONSENSE WIDTH RUNS ONE AT A TIME, NEVER NONE (T25 round 3, item 38, 2026-08-31) ──────────
+  // `Math.min(Math.max(1, NaN), n)` is NaN, and `Array.from({ length: NaN })` is an EMPTY array — so a
+  // limit that was not a number spawned NO workers, every slot stayed `undefined`, and this function
+  // handed back a full-length list of nothing with no error at all. MEASURED:
+  // `mapLimit([1,2,3], NaN, fn)` → `[null, null, null]`, fn never called.
+  //
+  // Every caller today passes FANOUT or FANOUT_HEAVY, so nothing is broken on the floor. But this is
+  // the fan-out under the owner's estate reads — the answer to "how is every restaurant doing?" — and
+  // "silently nothing, with a 200" is the one failure this codebase refuses to allow anywhere else.
+  // A width it cannot read now means ONE at a time: slower, and right.
+  const asked = Math.floor(Number(limit));
+  const width = Number.isFinite(asked) ? Math.min(Math.max(1, asked), items.length) : 1;
+  const workers = Array.from({ length: width }, async () => {
     for (;;) {
       const i = next++;
       if (i >= items.length) return;
