@@ -49,6 +49,19 @@ const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-
 // legacy uuid row into the same em dash a nameless row already uses, keeping the reference in the
 // hover text. So the local copy is DELETED rather than left beside it — one way, not two.
 const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
+// ── A DATE WE CANNOT READ SHOWS A DASH (sweep 7 · T14 round 2, 2026-08-31) ───────────────────────
+// `new Date("nope").toLocaleString()` returns the literal string "Invalid Date". Customers and Pay
+// Later were guarded in the same round (item 17) and this screen's three dates were not, so a
+// complaint with an unreadable `resolved_at` printed "· resolved Invalid Date" under an otherwise
+// correct card. Not reachable from our own data — all three columns are set by the server — but the
+// same dash these screens use for everything else is the honest answer.
+const okDate = (iso: string | null | undefined) => !!iso && Number.isFinite(new Date(iso).getTime());
+const dt = (iso: string) => (okDate(iso)
+  ? new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })
+  : "—");
+const dOnly = (iso: string) => (okDate(iso)
+  ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })
+  : "—");
 // ── ONE ODD ROW MUST NOT TAKE THE WHOLE SCREEN DOWN (sweep 7 · T14 round 2, 2026-08-31) ──────────
 // `"★".repeat(5 - n)` throws `RangeError: Invalid count value` the moment `n` is above 5, and
 // `"★".repeat(n)` throws below 0. A throw inside render is not a missing star — React unmounts the
@@ -366,7 +379,7 @@ export default function OwnerFeedback() {
                         </div>
                         {r.comment && <p style={{ margin: "8px 0 0", color: "var(--text)", fontSize: 13, lineHeight: 1.5, ...wrap }}>“{r.comment}”</p>}
                         <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)", ...wrap }}>
-                          {r.name ? <b>{r.name}</b> : <span>Guest</span>} · {new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
+                          {r.name ? <b>{r.name}</b> : <span>Guest</span>} · {dt(r.created_at)}
                           {/* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES (T12 sweep, 2026-08-29).
                               Five owner routes used to record the owner's uuid as the person; they
                               now record the login name (lib/ownerScope → ownerActorName). Rows
@@ -454,8 +467,8 @@ export default function OwnerFeedback() {
                         <audio controls preload="none" src={i.audio_url} style={{ display: "block", marginTop: 10, maxWidth: "100%" }} />
                       )}
                       <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
-                        Raised by <b title={actorTitle(i.raised_by)}>{actorLabel(i.raised_by)}</b> ({i.raised_role || "staff"}) · {new Date(i.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
-                        {i.resolved_at ? ` · resolved ${new Date(i.resolved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })}` : ""}
+                        Raised by <b title={actorTitle(i.raised_by)}>{actorLabel(i.raised_by)}</b> ({i.raised_role || "staff"}) · {dt(i.created_at)}
+                        {okDate(i.resolved_at) ? ` · resolved ${dOnly(i.resolved_at as string)}` : ""}
                       </div>
                     </div>
                   );

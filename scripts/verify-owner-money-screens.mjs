@@ -472,6 +472,13 @@ const RULES = [
     say: "a failed guest-list read says so instead of \"no customers yet\"",
     must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;no customers\.&rdquo;/],
   },
+  {
+    item: 32, file: ISSUES,
+    say: "…and Feedback & complaints never prints \"resolved Invalid Date\"",
+    must: [/const okDate = \(iso: string \| null \| undefined\) =>/, /const dt = \(iso: string\) => \(okDate\(iso\)/,
+           /\{okDate\(i\.resolved_at\) \? ` · resolved \$\{dOnly\(i\.resolved_at as string\)\}` : ""\}/],
+    mustNot: [/\{new Date\(r\.created_at\)\.toLocaleString/, /\{new Date\(i\.created_at\)\.toLocaleString/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
