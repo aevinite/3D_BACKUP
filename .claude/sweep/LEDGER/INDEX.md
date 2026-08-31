@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P48301`.**
+**Next free ID: `P48361`.** (T11 claimed `P48301`–`P48360` on 2026-09-01. It had claimed `P40501`–`P40560` on 2026-08-30 and **T7 took the same block in the same window and merged first** — the exact two-terminals-one-block shape warned about below, and it happened even though T11 edited this line before writing a row, because the claim sat in an unmerged branch where nobody could see it. **T11 renumbered, not T7**, because T7's rows were already on `main` and moving a merged id breaks every reference to it. **The lesson this file was still missing: a claim only counts once it is ON `main`.** Re-check the block against every ledger on disk immediately before you file, not only when you claim: `grep -ho '^| P[0-9]\{5\}' .claude/sweep/LEDGER/*.md | sort -u | tail -1`.)
 
 > **`P46301`–`P46800` is T25's THIRD freshly-planned 500 — DONE: 500 written, 500 executed, 11 problems found and fixed (items 34–44), and every one of this terminal's 1,810 earlier rows re-run in the same pass (4 had gone red, all four defending a feature the owner had deleted).** Planned by MEASURING what was left: 465 exported functions and constants in the territory, 156 of them never named by a single check — now 35. Originally claimed as: (`lib/**` — every shared library
 > file no other terminal owns, 2026-08-31). The owner's word, after round 2 was merged and deployed:
@@ -177,6 +177,8 @@ again. Read those before reporting anything.
 > | T30 · cross-panel truth, ROUND 2 | `P43501`–`P44000` | ✅ 500 written, 500 executed (470 ✅ · 30 ⏭ · **1 fault, found AND fixed on the branch**: the manager's Bills → Live list kept a bill's old status for up to a minute after the floor tile beside it had already moved, because the targeted refetch feeds the FLOOR and that list is built from a different array). Deliberately different ground from round 1 — not "does the plumbing work" but "what does the targeted path NOT refresh". `verify:board-sig` widened twice: it knew about two panels of three, and its stableRow check passed on a single mention. |
 >
 > | T29 · docs, tooling, root config and the remainder | `P29101`–`P29600` | ✅ 500 written, 500 executed, **500 ✅** — plus all 500 of `P14001`–`P14500` re-run: **NO REGRESSION** (494 ✅ · 6 ⏭ · 0 ❌), 3 rows **filed green in sweep #6 on a claim that was never true** (`P14044` nine documents in no index · `P14466` `next.config.ts` had no guard and no guard-map row · `P14188` a dead owner component), 4 expectations moved, 2 handoffs landed, and the 3 rows still red at the first pass (`P14317`/`P14460`/`P14462`, one fault in T2's file) FIXED on the owner's word. **11 items fixed, one commit each, 3 new CI guards; 2 more fixed then REVERTED on his word, with their guard checks removed in the same commit.** |
+> | T11 · the owner's reports and charts | `P20101`–`P20600` | ✅ 500 written, 500 executed, 500 ✅ (driven against a PRODUCTION build, not a dev server) — plus all 500 of `P05001`–`P05500` re-run: **no regression**, 31 rows `❌`→`✅` as last sweep's three handoffs all landed, 2 long-standing `⏭` closed, and **one row (`P05021`) that was red last sweep and was STILL red after the fault it was blamed on had been fixed** — a second, unrelated fence in the same function (migration 367) |
+> | T11 · the owner's own follow-up ("do 5 differently, do 7, 9 and 10") | `P48301`–`P48360` | ✅ 60 rows, all executed 2026-08-30 against a production build. Item 5 reshaped to his words, items 7 and 9 built, and **both of T11's long-standing `⏭` rows finally closed** — the composition-scheme Tax report and the entitlement flip, each written to French House and restored in a `finally` and on SIGINT |
 >
 > | T29 · the owner's own follow-up run | `P41501`–`P42000` | ✅ 500 written, 500 executed (499 ✅ · 1 ❌ left as HIS decision). Same territory, fresh block, planned against `origin/main` a5382a40 — which by then carried another session's 612-line rework of the admin Printing screen. **Band M2 (`P41611`–`P41676`) breaks every check in this terminal's own three guards ON PURPOSE — and EIGHT of them did not fire.** Four were real weaknesses (a key that matched `undefined`, two `||` fallbacks that made a check unfalsifiable, three substring matches a rename satisfied) and four were the sabotage being too gentle; all fixed. It also found and fixed one real product fault: an admin opening an ALREADY-LINKED pairing link was sent to a restaurant's own manager panel instead of the console. **Re-run band M2 FIRST — it is the only band that tells a live guard from a decorative one.** Renumbered from `P35237`–`P35736` on merge (T7 had it). |
 >
@@ -324,6 +326,15 @@ in the same minute and both took it (T7 and T28, at `P35237`). An overrun is one
 past its own block; this is two terminals allocating the same block, and nothing in the file
 prevents it. **Claim your block by editing *Next free ID* FIRST, before you write a single row** —
 then re-run `verify:ledger-index` before filing, not after.
+
+**AND A FOURTH, ON `main` RIGHT NOW (found by T11, 2026-08-30, NOT fixed here):**
+`npm run verify:ledger-index` is **RED on `origin/main`** — `T12.md` uses **`P05992`** on two different
+phase rows and **`P40435`** on two more. Proven pre-existing by running the guard with T11's own file
+replaced by `origin/main`'s copy: both are still reported, so neither belongs to T11.
+**Not repaired here on purpose** — this file's own rule is *"never renumber anyone else's"*, and T12 or
+the merge terminal should give the second row of each pair a fresh id from the repair block
+(`P15023`–`P15100` is free). It is recorded here so it is not lost, and so the next terminal that finds
+this guard red does not spend an hour deciding whether it caused it.
 
 **Two overruns in two sweeps, both the same shape:** a terminal writes a few more rows than its
 block holds and quietly lands in its neighbour's. Both were found by `npm run verify:ledger-index`

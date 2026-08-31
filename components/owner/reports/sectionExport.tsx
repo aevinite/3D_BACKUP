@@ -24,6 +24,29 @@ const inr = (n: number) => {
 const nfmt = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
 /** "8 PM" — the one clock this console writes (mirrors hour12 on the dashboard). */
 const hour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
+// ── MERGE BY CANONICAL METHOD, DON'T JUST RELABEL (T11 sweep #7, 2026-08-27) ─────────────────
+// The database groups the settlement by the RAW `payment_method` string, so one method stored
+// with two casings arrives as two rows — French House really holds both "Cash" and "cash". The
+// day sheet (2026-08-17) and the Payments table and the donut all merge them; the EXPORT ran the
+// raw rows through canonPayMethod for the LABEL and stopped, which is the exact bug that was
+// fixed on screen. So the downloaded file listed
+//     Cash,274,316864
+//     Cash,2,525
+// two lines apart (they sort by amount), where the screen shows one row of ₹3,17,389 — and anyone
+// pivoting the CSV by method in a spreadsheet got two "Cash" groups. The totals always
+// reconciled, which is why nobody noticed. Merge FIRST, then filter and sort, so a method split
+// across two casings can never be dropped in halves.
+const mergePays = <T extends { method: unknown; revenue: number; orders: number }>(rows: T[]) => {
+  const by = new Map<string, { method: string; revenue: number; orders: number }>();
+  for (const p of rows) {
+    const method = canonPayMethod(String(p.method ?? ""));
+    const row = by.get(method) || { method, revenue: 0, orders: 0 };
+    row.revenue += Number(p.revenue) || 0;
+    row.orders += Number(p.orders) || 0;
+    by.set(method, row);
+  }
+  return [...by.values()].sort((a, b) => b.revenue - a.revenue);
+};
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
@@ -121,8 +144,7 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       out.push({ title: `${meta.label} — where the money came from`, head: ["Line", "Amount"], cols: ["text", "money"], rows: flow });
 
       if (data.payments?.length) {
-        const pays = data.payments.map((x) => ({ method: canonPayMethod(String(x.method ?? "")), revenue: x.revenue, orders: x.orders }))
-          .filter((x) => x.orders > 0).sort((a, b) => b.revenue - a.revenue);
+        const pays = mergePays(data.payments).filter((x) => x.orders > 0);
         const paid = pays.reduce((a, x) => a + x.revenue, 0);
         if (pays.length) out.push({
           title: `${meta.label} — settlement (how the money arrived)`,
@@ -177,7 +199,22 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
   }
   if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Dish sales (GST included)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
   if (meta.kind === "categories") return [{ title, head: ["Category", "Qty sold", "Category sales (GST included)"], rows: ((data.rows ?? []) as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, Math.round(r.revenue)]) }];
-  if (meta.kind === "payments") return [{ title, head: ["Method", "Bills", "Revenue"], rows: ((data.rows ?? []) as { method: string; revenue: number; orders: number }[]).map((r) => [canonPayMethod(r.method), r.orders, Math.round(r.revenue)]) }];
+  if (meta.kind === "payments") {
+    // The same merged, biggest-first list the on-screen table and the donut show — plus the
+    // Total row and the % share the screen carries, so the file and the screen are one report.
+    const pays = mergePays((data.rows ?? []) as { method: string; revenue: number; orders: number }[]);
+    const paid = pays.reduce((a, x) => a + x.revenue, 0);
+    const bills = pays.reduce((a, x) => a + x.orders, 0);
+    return [{
+      title, head: ["Method", "Bills", "Revenue", "Share", "Avg bill"], cols: ["text", "num", "money", "pct", "money"],
+      rows: [
+        ...pays.map((r) => [r.method, r.orders, Math.round(r.revenue),
+          paid > 0 ? Math.round((r.revenue / paid) * 100) : 0,
+          r.orders ? Math.round(r.revenue / r.orders) : 0] as (string | number)[]),
+        ["Total", bills, Math.round(paid), 100, bills ? Math.round(paid / bills) : 0],
+      ],
+    }];
+  }
   // "8 PM", not "20:00" — the whole console (hour12(), the Studio's hourLabel, the Busy-times
   // tiles) speaks the 12-hour clock, and only the EXPORT of it spoke 24-hour (T5 sweep, 2026-08-11).
   if (meta.kind === "hourly") return [{ title, head: ["Hour", "Orders", "Revenue"], rows: ((data.rows ?? []) as { hour: number; orders: number; revenue: number }[]).map((r) => [hour12(r.hour), r.orders, Math.round(r.revenue)]) }];
