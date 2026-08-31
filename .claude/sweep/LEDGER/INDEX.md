@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P47301`.**
+**Next free ID: `P47801`.**
 
 > **`P46301`–`P46800` is T25's THIRD freshly-planned 500 — DONE: 500 written, 500 executed, 11 problems found and fixed (items 34–44), and every one of this terminal's 1,810 earlier rows re-run in the same pass (4 had gone red, all four defending a feature the owner had deleted).** Planned by MEASURING what was left: 465 exported functions and constants in the territory, 156 of them never named by a single check — now 35. Originally claimed as: (`lib/**` — every shared library
 > file no other terminal owns, 2026-08-31). The owner's word, after round 2 was merged and deployed:
@@ -182,6 +182,7 @@ again. Read those before reporting anything.
 >
 > | T29 · a THIRD freshly planned 500 | `P43001`–`P43500` (renumbered from `P42001`–`P42500`) | ✅ 500 written, 500 executed, **500 ✅ · 0 product faults**. A complete replan on the owner's word — ground the first 1,500 rows do not cover: **every CI step executed verbatim** (nothing had done that; "CI passes" was an assumption), **62 repo-only guards executed**, rule-against-rule between the rulebooks, dead code and dead assets in both directions, failure behaviour, keyboard and screen reader, and three widths × both skins driven on port 4229. **The near miss worth reading: the first Q2 filter read the npm COMMAND LINE and selected 148 guards, many of which write to the shared database — killed inside two minutes, `verify:fixtures` then confirmed all 12 throwaway tables were clear, and the filter was rewritten to read each SCRIPT (62, not 148).** Eighteen of my own checks were wrong and each is recorded in its own row. **Honest limit: these 500 are read-and-run, not proven-to-bite — a future run should sabotage THESE.** |
 > | T14 · the owner's Customers, Pay Later, Inventory, Complaints and Manager mode | `P21601`–`P22100` | ✅ 500 written, 500 executed (494 ✅ · 3 🟡 recorded for the owner · 2 ❌ fixed on the branch · 1 ❌ left to the lane that owns the file) — plus all 500 of `P06501`–`P07000` re-run: **no regression**, 4 expectations moved (all one reversal, R34), 4 long-standing `⏭` rows CLOSED, and one row (`P06616`) found to have been **filed green on a claim that was never true** |
+> | T14 · the same territory, a SECOND freshly planned 500 (round 2) | `P47301`–`P47800` | ✅ 500 written, 500 executed after his eight decisions had shipped and reached the live site (494 ✅ · 5 ⏭ each with its reason · **1 ❌ left in another lane's file**), and **five more faults found and fixed on the branch** — the worst being Pay Later reporting a FAILED READ as "No one owes anything right now". Deliberately does not re-walk `P21601`–`P22100`; new ground only. |
 >
 > | T20 · round 2, after items 1-29 went LIVE on backup | `P46801`–`P47300` | 🔒 CLAIMED 2026-08-31, pushed to `main` before a single row was written (the rule three collisions taught this file). 500 phases over the SAME territory — admin routes 26→end + all 13 owner routes — but new ground: the eight files other terminals changed there while T20 was away, the six migrations that landed with them, the four items he approved on 2026-08-31, and the live backup deployment itself. |
 

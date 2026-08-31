@@ -418,6 +418,67 @@ const RULES = [
       /Counted at \{fmtTime\(summary\.cachedAt\)\} · Refresh to count again\./,
     ],
   },
+  {
+    // ── ITEM 30 · ONE ODD ROW MUST NOT TAKE THE WHOLE SCREEN DOWN ─────────────────────────────────
+    // `"★".repeat(5 - n)` throws RangeError above 5 and `"★".repeat(n)` throws below 0, and a throw
+    // inside render loses the average, the distribution, every other rating and the complaints tab.
+    // The same six lines exist twice — here and in the manager panel — so both are checked, because
+    // fixing one and leaving the other is how the pair drifted in the first place.
+    item: 30, file: ISSUES,
+    say: "the owner's star row clamps its count, so a rating outside 1-5 cannot blank the screen",
+    must: [/const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\);/,
+           /\{"★"\.repeat\(filled\)\}<span[\s\S]{0,80}\{"★"\.repeat\(5 - filled\)\}/],
+    mustNot: [/\{"★"\.repeat\(n\)\}/],
+  },
+  {
+    item: 30, file: PANEL_MGR,
+    say: "the manager panel's copy of the same six lines clamps too",
+    must: [/const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\);/,
+           /\$\{"★"\.repeat\(filled\)\}<span style="color:var\(--line\)">\$\{"★"\.repeat\(5 - filled\)\}/],
+    mustNot: [/\$\{"★"\.repeat\(n\)\}/],
+  },
+  {
+    item: 31, file: CUSTOMERS,
+    say: "a name that is only spaces reads \"Guest\", not an empty cell",
+    must: [/const named = \(n: string \| null \| undefined\): string \| null =>/,
+           /\{named\(c\.name\) \|\| <span className="adm-muted">Guest<\/span>\}/,
+           /const label = named\(c\.name\) \|\| c\.phone \|\| "this customer";/],
+    mustNot: [/\{c\.name \|\| <span className="adm-muted">Guest/],
+  },
+  {
+    item: 32, file: CUSTOMERS,
+    say: "a date it cannot read shows a dash, never the words \"Invalid Date\"",
+    must: [/const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\);/,
+           /const fmt = \(iso: string\) => \(ok\(iso\) \?/, /const fmtTime = \(iso: string\) => \(ok\(iso\) \?/],
+  },
+  {
+    item: 32, file: KHATA,
+    say: "…and the credit book never prints \"oldest NaN days\"",
+    must: [/const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\);/,
+           /if \(!ok\(iso\)\) return "—";/,
+           /const d = ok\(iso\) \? Math\.floor/],
+  },
+  {
+    // ── ITEM 33 · A READ THAT FAILED IS NOT AN EMPTY BOOK ─────────────────────────────────────────
+    // The loading branch was guarded, the EMPTY branch below it was not, so a failed first load fell
+    // through to "No one owes anything right now" — a claim about money made from no data — under a
+    // red card saying the opposite. Both screens now say what Feedback & complaints has always said.
+    item: 33, file: KHATA,
+    say: "a failed credit-book read says so instead of \"nobody owes anything\"",
+    must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;nobody owes anything\.&rdquo;/],
+  },
+  {
+    item: 33, file: CUSTOMERS,
+    say: "a failed guest-list read says so instead of \"no customers yet\"",
+    must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;no customers\.&rdquo;/],
+  },
+  {
+    item: 32, file: ISSUES,
+    say: "…and Feedback & complaints never prints \"resolved Invalid Date\"",
+    must: [/const okDate = \(iso: string \| null \| undefined\) =>/, /const dt = \(iso: string\) => \(okDate\(iso\)/,
+           /\{okDate\(i\.resolved_at\) \? ` · resolved \$\{dOnly\(i\.resolved_at as string\)\}` : ""\}/],
+    mustNot: [/\{new Date\(r\.created_at\)\.toLocaleString/, /\{new Date\(i\.created_at\)\.toLocaleString/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
