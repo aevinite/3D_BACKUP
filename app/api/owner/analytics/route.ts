@@ -361,10 +361,12 @@ export async function GET(req: NextRequest) {
       const gIds = scope.all ? [] : scope.ids;
       const groupPayload = await cachedOwnerPayload({
         // v2: payload gained `heatmap` (mig 197); v3: gained `categories`; v5: gained
-        // `timeseriesPrev` (revenue-vs-previous-period overlay) — each shape change bumps
-        // the version so stale snapshots can't serve field-less JSON verbatim until their
-        // fingerprint happens to change (found 2026-07-26).
-        key: `analytics:v5:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
+        // `timeseriesPrev` (revenue-vs-previous-period overlay); v6 (2026-08-31): gained `window`,
+        // the resolved from/to — each shape change bumps the version so stale snapshots can't serve
+        // field-less JSON verbatim until their fingerprint happens to change (found 2026-07-26, and
+        // walked into again on 2026-08-31 by adding `window` without bumping: the live check found
+        // `range=today` carrying it and `range=30d`, served from a snapshot, not).
+        key: `analytics:v6:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
         fingerprint: () => fpWithStaffPay(scope.all ? null : gIds, from, to),
         compute: async () => {
@@ -512,7 +514,10 @@ export async function GET(req: NextRequest) {
       }));
       // Together, not one after another: they are independent reads over the same id list.
       const [staffPay, foodLoss] = await Promise.all([staffPayExpense(), foodLossExpense()]);
-      return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev,
+      // The resolved window rides along for the same reason it does on the reports route — see the
+      // long note there. `?range=custom` with unusable dates is answered as the last 30 days and
+      // still labelled "custom", and without this the screen cannot say which thirty days.
+      return { scope: "group", range, window: { from, to }, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev,
         staffPay, foodLoss,
         ...(partial.length ? { partial } : {}) };
         },
@@ -544,7 +549,7 @@ export async function GET(req: NextRequest) {
       // snapshot can't serve JSON that is MISSING a field the UI now reads. Here the change is
       // the other direction — an old snapshot merely carries two extra fields nothing reads —
       // so a bump would only buy a pointless recompute for every restaurant.
-      key: `analytics:v5:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
+      key: `analytics:v6:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
       fingerprint: () => fpWithStaffPay([rid], from, to),
       compute: async () => {
@@ -612,7 +617,7 @@ export async function GET(req: NextRequest) {
     // Together, not one after another — see the note on staffPayExpense.
     const [staffPay, foodLoss] = await Promise.all([staffPayExpense(), foodLossExpense()]);
     return {
-      scope: "restaurant", range, prev,
+      scope: "restaurant", range, window: { from, to }, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, topDish: dishRows[0]?.title || "—" },
       staffPay, foodLoss,

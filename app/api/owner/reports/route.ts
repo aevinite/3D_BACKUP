@@ -277,7 +277,13 @@ export async function GET(req: NextRequest) {
   const rangePart = range === "custom" ? `custom:${from}:${to}`
     : range === "day" ? `day:${from}`
     : `${range}:${from.slice(0, 10)}`;
-  const cacheKey = `reports:v4:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
+  // ── v5: THE PAYLOAD GAINED `window` (T20 round 2, 2026-08-31) ─────────────────────────────────
+  // Bumped for exactly the reason the note above states — "BUMP THIS VERSION WHENEVER A PAYLOAD SHAPE
+  // CHANGES, not just when the numbers change". I did not, and the live check caught it in the most
+  // convincing way possible: `range=today` (uncached, fresh) carried its window and `range=30d`
+  // (served from a stored snapshot) came back with `window: undefined`. The screen would have had the
+  // field on some ranges and not others, which is worse than not having it at all.
+  const cacheKey = `reports:v5:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
@@ -652,7 +658,21 @@ export async function GET(req: NextRequest) {
         }
       }
       } catch { inventory = null; costSeries = null; }
-      return { type, range, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows,
+      // ── THE ANSWER NAMES THE WINDOW IT ACTUALLY USED (T20 round 2, 2026-08-31) ──────────────────
+      // `range` is normalised, so an unknown value is answered as today AND labelled today — that was
+      // T9 finding F21 and it holds. But `custom` is IN the valid list, and `windowFor()` silently
+      // falls back to the LAST 30 DAYS when its dates are unusable. So `?range=custom&from=zzz` comes
+      // back labelled `range: "custom"` carrying thirty days of data, and nothing in the payload lets
+      // the screen say which thirty days. Measured live: 200, `range: "custom"`, a 30-day window.
+      //
+      // Same fault F21 fixed, one step deeper: it is not the range NAME that is wrong now, it is that
+      // the name is no longer enough to know the window. `/api/admin/usage` in this same territory
+      // already echoes its resolved window, with the reason on the line — "so the page labels its own
+      // columns from the server's answer rather than from what it hoped it asked for". This is that.
+      //
+      // Reachable by a stale client or a hand-edited link rather than by the date picker, so it is a
+      // wrong LABEL rather than a wrong number — which is exactly why it would have gone unnoticed.
+      return { type, range, window: { from, to }, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows,
         ...(partialKeys.length ? { partial: partialKeys } : {}) };
     }
 
@@ -694,7 +714,7 @@ export async function GET(req: NextRequest) {
       const rows: Row[] = mergeBy(rowsets, keyCol, numeric)
         .map((r) => ({ ...r, revenue: num(r.revenue) }));
       rows.sort((a, b) => (type === "hourly" ? Number(a.hour) - Number(b.hour) : Number(b.revenue) - Number(a.revenue)));
-      return { type, range, rows };
+      return { type, range, window: { from, to }, rows };
     }
 
     // ══ INVENTORY & STOCK (mig 227) ═══════════════════════════════════════════
@@ -818,7 +838,7 @@ export async function GET(req: NextRequest) {
         const wasteMRows = (wasteM.error ? [] : (wasteM.data || [])) as Row[];
         const expMMore = expMRows.length > MERGED_CAP, wasteMMore = wasteMRows.length > MERGED_CAP;
         return {
-          type, range, bucket, merged: true,
+          type, range, window: { from, to }, bucket, merged: true,
           summary: {
             stockValue: S("stock_value"), stockItems: I("stock_items"),
             lowCount: I("low_count"), negativeCount: I("negative_count"),
@@ -942,7 +962,7 @@ export async function GET(req: NextRequest) {
       const wasteMore = wasteRaw.length > LIST_CAP;
       const waste = wasteMore ? wasteRaw.slice(0, LIST_CAP) : wasteRaw;
       return {
-        type, range, bucket, rid: one,
+        type, range, window: { from, to }, bucket, rid: one,
         summary: {
           stockValue: num(s.stock_value), stockItems: Number(s.stock_items) || 0,
           lowCount: Number(s.low_count) || 0, negativeCount: Number(s.negative_count) || 0,
@@ -993,7 +1013,7 @@ export async function GET(req: NextRequest) {
         id: r.restaurant_id, name: r.name, accent: r.accent_color || "",
         revenue: num(r.revenue), orders: Number(r.orders) || 0,
       })).sort((a, b) => b.revenue - a.revenue);
-      return { type, range, rows };
+      return { type, range, window: { from, to }, rows };
     }
 
     if (type === "payments") {
@@ -1005,7 +1025,7 @@ export async function GET(req: NextRequest) {
       const rows = mergeBy(okData, "method", ["revenue", "orders"])
         .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
         .sort((a, b) => b.revenue - a.revenue);
-      return { type, range, rows };
+      return { type, range, window: { from, to }, rows };
     }
 
     // ── TEAM & PAY: the two money truths side by side ───────────────────────────
@@ -1077,7 +1097,7 @@ export async function GET(req: NextRequest) {
         advanceOutstanding: people.reduce((s2, r) => s2 + r.advanceOutstanding, 0),
         estExcluded: monthRows.reduce((s2, r) => Math.max(s2, r.est_excluded), 0),
       };
-      return { type, range, bucket, cashRows, monthRows, people, totals,
+      return { type, range, window: { from, to }, bucket, cashRows, monthRows, people, totals,
         ...(staffNamesUnread ? { partial: ["teamPay"] as PartialKey[] } : {}) };
     }
 
@@ -1122,7 +1142,7 @@ export async function GET(req: NextRequest) {
         hours: rows.reduce((s2, r) => s2 + r.hours, 0),
         paid: rows.reduce((s2, r) => s2 + r.paid, 0),
       };
-      return { type, range, rows, totals };
+      return { type, range, window: { from, to }, rows, totals };
     }
 
         throw new Error("unknown report type");
