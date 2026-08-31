@@ -395,6 +395,20 @@ const RULES = [
       /padding: "12px 14px", display: "flex", flexDirection: "column"[\s\S]{0,120}marginTop: "auto"/,
     ],
   },
+  {
+    // ── ITEM 28 · A FIGURE THE SCREEN CAN NAME MUST HAVE WORDS (owner, 2026-08-31) ────────────────
+    // `partialLabel` falls back to the raw key, so an unlisted one reaches the screen as CODE.
+    // `/api/owner/issues` sends `openCount`, and the note read "…and openCount just now". Every key
+    // any of these five screens can be sent must have an entry — this rule is the list of them.
+    item: 28, file: "lib/partialRead.ts",
+    say: "every unread-figure key these screens can receive has plain words",
+    must: [
+      /collectedToday: "money collected today"/,
+      /collectedMonth: "money collected this month"/,
+      /restaurantNames: "which restaurant each row belongs to"/,
+      /openCount: "how many complaints are still open"/,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
