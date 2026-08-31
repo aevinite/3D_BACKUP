@@ -437,6 +437,14 @@ const RULES = [
            /\$\{"★"\.repeat\(filled\)\}<span style="color:var\(--line\)">\$\{"★"\.repeat\(5 - filled\)\}/],
     mustNot: [/\$\{"★"\.repeat\(n\)\}/],
   },
+  {
+    item: 31, file: CUSTOMERS,
+    say: "a name that is only spaces reads \"Guest\", not an empty cell",
+    must: [/const named = \(n: string \| null \| undefined\): string \| null =>/,
+           /\{named\(c\.name\) \|\| <span className="adm-muted">Guest<\/span>\}/,
+           /const label = named\(c\.name\) \|\| c\.phone \|\| "this customer";/],
+    mustNot: [/\{c\.name \|\| <span className="adm-muted">Guest/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");

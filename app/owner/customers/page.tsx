@@ -46,6 +46,13 @@ type Detail = {
   rows: Array<Customer>;
 };
 
+// ── A NAME THAT IS ONLY SPACES IS NOT A NAME (sweep 7 · T14 round 2, 2026-08-31) ─────────────────
+// `c.name || "Guest"` treats "   " as a name, because a non-empty string is truthy. A guest saved
+// with a blank name at billing therefore got an EMPTY cell — no name, no "Guest", nothing that
+// reads as anything. Seen by driving the list with `name: "  "`. It reaches five places (the table
+// cell, the phone card, the card's spoken label, the erase button's spoken label and the confirm
+// text), so it is one helper rather than five `.trim()`s that can drift apart.
+const named = (n: string | null | undefined): string | null => { const t = (n ?? "").trim(); return t || null; };
 // 10 digits read as "97376 38206" — easier to read back to a guest than one long run.
 const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
 // The clock time a figure was counted, in India time like every other date on this page.
@@ -196,7 +203,7 @@ export default function OwnerCustomers() {
   // back-button manager). Scoped + entitlement-checked again server-side.
   const [erasing, setErasing] = useState<string | null>(null);
   const erase = useCallback(async (c: Customer) => {
-    const label = c.name || c.phone || "this customer";
+    const label = named(c.name) || c.phone || "this customer";
     // SAY WHAT SURVIVES, NOT JUST WHAT GOES (2026-08-11, T7 improvement I6). The erase correctly
     // leaves the SALES alone — a bill has to be kept for years (docs/COMPLIANCE-GUARDRAILS.md §3),
     // and the name + number were copied onto each bill when it was issued (mig 227), so they are
@@ -419,11 +426,11 @@ export default function OwnerCustomers() {
                     style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px",
                       border: "1px solid var(--border-c,#e5e7eb)", borderRadius: 13, opacity: c.blocked ? 0.65 : 1 }}>
                     <button type="button" onClick={() => openDetail(c.phone)}
-                      aria-label={`Open ${c.name || "this guest"}'s record`}
+                      aria-label={`Open ${named(c.name) || "this guest"}'s record`}
                       style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: 0,
                         color: "inherit", font: "inherit", padding: 0, cursor: "pointer" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                        <b style={{ fontSize: 14.5 }}>{c.name || <span className="adm-muted">Guest</span>}</b>
+                        <b style={{ fontSize: 14.5 }}>{named(c.name) || <span className="adm-muted">Guest</span>}</b>
                         {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented"
                           style={{ fontSize: 10.5, color: "var(--adm-ok,#16a34a)" }} />}
                         {c.blocked ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>
@@ -438,7 +445,7 @@ export default function OwnerCustomers() {
                       {/* The dates are NOT here on purpose — they live in the record this opens. */}
                       <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 3 }}>Tap for their visits, dates and bills</div>
                     </button>
-                    <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${c.name || c.phone}`}
+                    <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${named(c.name) || c.phone || "this customer"}`}
                       disabled={erasing === `${c.restaurant_id}:${c.phone}`}
                       onClick={(e) => { e.stopPropagation(); erase(c); }}
                       style={{ flex: "none", padding: "9px 11px", fontSize: 13, color: "var(--muted)", background: "transparent",
@@ -470,7 +477,7 @@ export default function OwnerCustomers() {
                         title="See this guest's visits and what they've spent"
                         style={{ borderTop: "1px solid var(--border-c,#e5e7eb)", opacity: c.blocked ? 0.65 : 1, cursor: "pointer" }}>
                         <td style={{ padding: "9px 10px", fontWeight: 700 }}>
-                          {c.name || <span className="adm-muted">Guest</span>}
+                          {named(c.name) || <span className="adm-muted">Guest</span>}
                           {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented" style={{ marginLeft: 6, fontSize: 11, color: "var(--adm-ok,#16a34a)" }} />}
                         </td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{showPhone(c.phone)}</td>
@@ -486,7 +493,7 @@ export default function OwnerCustomers() {
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap" }}>
                           {/* Erasing is permanent, so it stays available but quiet — muted
                               until you point at it, and it never competes with the row itself. */}
-                          <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${c.name || c.phone}`}
+                          <button className="adm-btn cust-erase" title="Erase this customer (permanent)" aria-label={`Erase ${named(c.name) || c.phone || "this customer"}`}
                             disabled={erasing === `${c.restaurant_id}:${c.phone}`}
                             onClick={(e) => { e.stopPropagation(); erase(c); }}
                             style={{ padding: "4px 9px", fontSize: 12, color: "var(--muted)", background: "transparent", border: "1px solid transparent" }}
@@ -525,7 +532,7 @@ export default function OwnerCustomers() {
                   <>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                       <div>
-                        <h2 style={{ fontSize: 19, margin: 0 }}>{detail.rows[0]?.name || "Guest"}</h2>
+                        <h2 style={{ fontSize: 19, margin: 0 }}>{named(detail.rows[0]?.name) || "Guest"}</h2>
                         <div className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}>
                           {detail.phone && detail.phone.length === 10 ? `${detail.phone.slice(0, 5)} ${detail.phone.slice(5)}` : detail.phone}
                         </div>
