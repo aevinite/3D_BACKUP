@@ -86,3 +86,30 @@ double-tap check), each deleted by its own key in the same run. One existing rat
 and reopened, then restored field by field. **Aangan was never written to; AV live was never read;
 `.claude/deploy.lock` was never taken; nothing was pushed to `main`.** One owner sign-in for the
 whole run.
+
+
+---
+
+# HIS DECISIONS, 2026-08-31 — all eight answered in one message, all eight closed
+
+> *"You can do the seventh number… for the eighth number, if the inventory is not switch on, then it
+> will not show — it will not even show that option… can do number nine… number 10th one also…
+> number 11 also… number 12 also… number 13 also… the 14th also."*
+
+| # | what he asked for | outcome |
+|---|---|---|
+| 7 | drop the "Restaurant" column for a single-restaurant owner | **built** — same condition the phone card list already used |
+| 8 | a section he has not been given must not be named to him at all | **built, and wider than offered** — Customers, Feedback & complaints (both off), Inventory and Manager mode now send a real owner to his dashboard and show nothing. The four sentences are deleted, not restyled. Pay Later untouched (R34). |
+| 9 | make the three tappable figures look tappable | **built** — a small filter mark on the three that work, plus one muted line saying what it means |
+| 10 | line the guest record's three figures up | **built** — tops now 118/118/118, previously 118/132/118 |
+| 11 | the database id in `acknowledged_by` | **already done upstream** — T12's sweep (2026-08-29) made the owner routes record the login name and added `lib/ownerActor.ts` for rows already written with an id. T14's own local `handledBy()` was DELETED rather than left beside it. |
+| 12 | `openCount` printed as a code word | **built** — one line in `lib/partialRead.ts`; it reads "how many complaints are still open" |
+| 13 | the tiles can be five minutes behind the list | **built** — the tiles now say "Counted at 10:44 pm · Refresh to count again."; the route had sent `cachedAt` all along and the screen never read it |
+| 14 | Manager mode offering to print the kitchen's tickets | **already gone upstream** — he had that band removed everywhere on 2026-08-29/30 (mig 372, "there is no mode toggle"). Re-driven inside the cockpit: absent. |
+
+**Guards:** `verify:owner-money` items 24 (×4), 25, 26, 27, 28, 29 — **35 rules, all green.** Item 7's
+old rule lost its `must` (the heading it asserted was deleted with its screen); its whole-app walk
+for the dead `adm-page-title` class survives, which is the part that actually enforces anything.
+
+**Two of his eight needed no work at all** — and both were found by re-reading the code as it is
+today rather than trusting my own report from four days earlier.
