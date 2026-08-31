@@ -14,6 +14,7 @@
 // /login. A manager granted "manage_staff" manages staff from the EDITOR panel, which
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { asSuffix, asValue } from "@/lib/ownerPin";
 
 type Perms = Record<string, boolean>;
@@ -54,6 +55,7 @@ const ROLES = ["manager", "kitchen", "tablet"];
 const money = (n: number | null | undefined) => "\u20b9" + Math.round(Number(n || 0)).toLocaleString("en-IN");
 
 export default function OwnerStaffPage() {
+  const router = useRouter();
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [actor, setActor] = useState<string>("");
@@ -69,6 +71,22 @@ export default function OwnerStaffPage() {
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [notEnabled, setNotEnabled] = useState<string | null>(null); // calm "section off" state, not an error
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31, extended 2026-09-01) ────
+  // *"it will not even show that option… it will not only show 'unable to access', that there is a
+  //  feature which contains inventory."* That is R36 from the page side: *"owner can't know which
+  // option are not given to them, only admin should know that."*
+  // The sidebar already hides a withheld section from a real owner (`OwnerShell` →
+  // `if (!on && (!adminViewing || simulated)) return null`). This page did not — reached by a typed
+  // URL or an old bookmark it printed "Staff management isn't enabled for your
+  // restaurant — contact Aevidine", which names a
+  // section he has not been given and tells him who to ask for it. The card is DELETED, not
+  // restyled (the standing "a new way replaces the old one" rule), and he goes back to his
+  // dashboard. `replace`, not `push`, so Back does not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner, so the X-ray
+  // view still opens every section — its nav says so outright.
+  // Done on his say-so of 2026-09-01 ("okay, give me permission") after T14 shipped the same change
+  // on Customers, Feedback & complaints, Inventory and Manager mode. Six screens, one rule.
+  useEffect(() => { if (notEnabled) router.replace("/owner"); }, [notEnabled, router]);
   // What the owner typed into "Find someone" — a view filter over the list already loaded, never a query.
   const [q, setQ] = useState("");
   const pwRef = useRef<HTMLInputElement>(null);
@@ -392,7 +410,8 @@ export default function OwnerStaffPage() {
       )}
 
       {loading && <div className="adm-empty">Loading…</div>}
-      {!loading && notEnabled && <div className="adm-card"><div className="adm-empty">{notEnabled}</div></div>}
+      {/* The card that used to say which section he had not been given is gone (R36) — he is
+          on his way back to the dashboard by the time this renders. */}
       {!loading && !notEnabled && restaurants.length === 0 && <div className="adm-empty">No restaurants are assigned to you yet. Ask the admin to assign one.</div>}
 
       {!notEnabled && restaurants.map((r) => {
