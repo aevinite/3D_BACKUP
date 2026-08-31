@@ -471,10 +471,24 @@ body.nav-rail .top-actions { margin-left: auto; }
 }
 .cat-chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 .cat-chip i { font-size: 12px; opacity: .85; }
+/* --gold-ink on the LABEL, --gold everywhere else (T26 sweep #7, 2026-08-31 — item 18). The chip
+   lays an 18% gold wash under itself and then wrote on it in --gold-strong, which is a FILL: on the
+   light skin the chosen category measured 2.71:1. Exactly the trap --gold-ink exists for, and the
+   same one items 5 and 16 closed on the Take-order and Bills screens. The fill and the border keep
+   the bright gold and look as they did; in the DARK skin --gold-ink IS --gold, so only the skin
+   that was wrong moves (dark was already 7.57). */
 .cat-chip.active {
   background: color-mix(in srgb, var(--gold) 18%, transparent);
-  color: var(--gold-strong); border-color: var(--gold);
+  color: var(--gold-ink); border-color: var(--gold);
 }
+/* ONE STEP PAST --gold-ink, AND ONLY ON THE LIGHT SKIN (item 18). This chip lays an 18% gold wash
+   under its own label, so the shared ink token lands at 4.31 here where it clears everywhere else.
+   60% measures 4.86.
+   It has to be light-only: my first attempt wrote the deeper mix on the BASE rule, which darkens
+   both skins — and on the dark chip that took a perfectly good 7.57 down to 2.46. That is the whole
+   reason --gold-ink is a per-skin token rather than a fixed mix, and I walked straight into it.
+   Written as a mix of --gold so a themed restaurant still gets its own hue. */
+html[data-theme="light"] .cat-chip.active { color: color-mix(in srgb, var(--gold) 60%, #000); }
 
 .list { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; }
 .list-item {
@@ -515,7 +529,9 @@ body.nav-rail .top-actions { margin-left: auto; }
 .bulk-bar .bulk-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 /* Editor-only dish code (#7) shown next to a dish on the list + on order/bill
    lines. Subtle, monospace digits so it reads as a reference, not a price. */
-.dish-no { font-size: 11px; font-weight: 700; color: var(--gold); opacity: 0.75; font-variant-numeric: tabular-nums; }
+/* --gold-ink, and no 0.75 veil on top of it (item 18): gold as ink at 75% opacity measured 2.37:1
+   on the light panel. The number identifies a dish in the list — it is read, not decoration. */
+.dish-no { font-size: 11px; font-weight: 700; color: var(--gold-ink); font-variant-numeric: tabular-nums; }
 
 /* ---------- editor panel ---------- */
 /* Right/left padding carries the landscape side insets too — see the note on .topbar. */
@@ -2749,7 +2765,7 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .sx-item-qty { font-weight: 800; color: var(--gold-strong); font-size: 15px; text-align: center; }
 .sx-item-info { min-width: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 2px; }
 .sx-item-name { font-weight: 600; }
-.dish-no { color: var(--gold); font-size: 11.5px; font-weight: 700; }
+.dish-no { color: var(--gold-ink); font-size: 11.5px; font-weight: 700; }   /* item 18 — was 2.37:1 on the light skin */
 .ord-line-opts { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 .ol-no { color: #ff9a9a; font-weight: 800; background: rgba(239,68,68,.13); border-radius: 5px; padding: 1px 6px; }
 .sx-item-price { margin-left: 0; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
