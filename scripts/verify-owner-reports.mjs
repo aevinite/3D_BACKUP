@@ -734,9 +734,48 @@ console.log("\nT11-H · the manager's till count names the same methods the owne
   // "Not recorded ₹1,932 / 4 bills" where the owner's day sheet said "Cash ₹1,932 / 4 bills".
   const editor = read("app/api/editor/[...path]/route.ts");
   const zi = editor.indexOf('if (p === "zreport") {');
-  const zblk = zi < 0 ? "" : editor.slice(zi, zi + 9000);
+  // The block runs to the next endpoint, not to a guessed character count — the payload is
+  // assembled ~330 lines in, and a 9,000-character window stopped short of it.
+  const zEnd = editor.indexOf('if (p === "gst-report"', zi);
+  const zblk = zi < 0 ? "" : editor.slice(zi, zEnd > zi ? zEnd : zi + 30000);
   const sel = (zblk.match(/from\("orders"\)\.select\("([^"]*)"\)/) || [])[1] || "";
   const reads = (zblk.match(/\.payment_method/g) || []).length;
+  // ── ITEM 11 · A LEG ON A TABLE THAT IS STILL SITTING IS NOT TODAY'S TAKINGS ───────────────
+  // The stated side already skipped a bill that was still open; the legs loop skipped nothing but
+  // a reversal, so a table that had part-paid and was still sitting was counted as money
+  // collected. Recomputed over one snapshot of the real rows, three ways:
+  //   before the fix (every leg + every bill)     → +₹1,932 over the day's takings
+  //   a NAIVE fix (leg only if the bill is 'paid')→ −₹966, because it throws away a bill CLOSED
+  //                                                 with one part on a tab, whose collected parts
+  //                                                 really were collected today (mig 364)
+  //   now (leg unless its table is STILL OPEN)    → keeps that ₹966, drops the double count
+  // Hence the test is the SESSION, not payment_status. These checks pin that choice down.
+  const zLegsBlock = zblk.slice(zblk.indexOf("HOW THE MONEY CAME IN"), zblk.indexOf("const payments = [...byMethod."));
+  check(
+    "the till count knows which of today's tables are still sitting",
+    /openSessions/.test(zLegsBlock) && /is\("closed_at", null\)/.test(zblk),
+    "app/api/editor/[...path]/route.ts — the day-close till list must read the OPEN sessions and set " +
+      "their payment legs aside. Without it a table that has part-paid is counted as money collected " +
+      "and the list totals more than the day's takings printed above it.",
+  );
+  check(
+    "…and it does NOT key that off payment_status",
+    !/openSessions[\s\S]{0,400}payment_status/.test(zLegsBlock),
+    "app/api/editor/[...path]/route.ts — a bill closed with one part on a TAB is deliberately not " +
+      "stamped 'paid' (money that never arrived is never claimed), but its collected parts WERE " +
+      "collected today. Keying off payment_status throws that cash out of the till count.",
+  );
+  check(
+    "…and the money it sets aside is still reported, not thrown away",
+    /aside: r2\(asideNet\), asideCount/.test(zblk),
+    "app/api/editor/[...path]/route.ts — the cash is in the drawer. Excluding it silently leaves a " +
+      "manager counting over with nothing on the report to explain it. Its own line, like a reversal.",
+  );
+  check(
+    "…and the manager's Z-report screen prints that line",
+    /z\.payments\.aside > 0 \?/.test(read("public/panels/editor/app.js")),
+    "public/panels/editor/app.js — a payload field nothing renders is not a fix.",
+  );
   check(
     "the Z-report asks for every order column it reads",
     !!sel && (reads === 0 || sel.split(",").includes("payment_method")),
