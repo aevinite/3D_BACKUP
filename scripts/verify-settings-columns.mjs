@@ -349,6 +349,45 @@ if (legacyReaders.length) {
   }
 }
 
+// ── A COLUMN DEFAULT ONLY DECIDES A VALUE THE INSERT LEAVES OUT (T25 round 3, item 47, 2026-08-31) ─
+//
+// `settings.floor_per_row` is how many table tiles the manager's floor puts in a row, and the answer
+// for a NEW restaurant is written down in three places that must agree:
+//
+//   1. lib/floorLayout.ts → FLOOR_PER_ROW_DEFAULT = 12, "compact by default (owner, 2026-07-31)";
+//   2. the column's DEFAULT in supabase/migrations (226 said 6, four days before that decision;
+//      373 moved it to 12);
+//   3. lib/settingsClone.ts, which is what actually runs when a restaurant is created — the admin
+//      route clones restaurant #1's whole settings row, so the INSERT names every column and the
+//      column default never gets a turn.
+//
+// Fixing (2) alone was half a fix: the clone still handed the insert French House's 7. Measured on
+// the dev estate that day: 13 of 17 restaurants on 6, 2 on 7, 2 on 12 — not one of them a choice.
+// So this asserts all three say the same number.
+{
+  const floorSrc = readFileSync(join(root, "lib/floorLayout.ts"), "utf8");
+  const constant = Number((/FLOOR_PER_ROW_DEFAULT\s*=\s*(\d+)/.exec(floorSrc) || [])[1]);
+  const clone = readFileSync(join(root, "lib/settingsClone.ts"), "utf8");
+  // The column default: the LAST migration that sets one wins, so read them in file order.
+  const migDir = join(root, "supabase/migrations");
+  let columnDefault = null, setBy = "";
+  for (const f of readdirSync(migDir).filter((f) => f.endsWith(".sql")).sort()) {
+    const m = /floor_per_row[\s\S]{0,120}?SET DEFAULT\s+(\d+)|floor_per_row[^;\n]*?\bDEFAULT\s+(\d+)/i.exec(readFileSync(join(migDir, f), "utf8"));
+    if (m) { columnDefault = Number(m[1] ?? m[2]); setBy = f; }
+  }
+  if (!Number.isFinite(constant)) {
+    fail("lib/floorLayout.ts no longer states FLOOR_PER_ROW_DEFAULT — there is nothing for the column and the clone to agree WITH");
+  } else if (columnDefault === null) {
+    fail("no migration sets a DEFAULT for settings.floor_per_row — a restaurant inserted without it would get NULL");
+  } else if (columnDefault !== constant) {
+    fail(`the tables-per-row default disagrees: lib/floorLayout.ts says ${constant}, the column says ${columnDefault} (set by ${setBy}) — the column is what a new restaurant gets`);
+  } else if (!/base\.floor_per_row\s*=\s*FLOOR_PER_ROW_DEFAULT/.test(clone)) {
+    fail("lib/settingsClone.ts does not reset floor_per_row to FLOOR_PER_ROW_DEFAULT — creating a restaurant clones #1's whole row, so the column default never applies and the new floor inherits restaurant #1's tile width");
+  } else {
+    pass(`a new restaurant starts on ${constant} tiles per row in all three places (the constant, ${setBy}, and the clone)`);
+  }
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — the settings row is growing again`
   : "\n✓ a new module needs no new column");

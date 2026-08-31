@@ -15,6 +15,8 @@ import { MODULE_DEFS, TABLET_PERM_KEYS } from "@/lib/accessModel";
 // The channel defaults are DERIVED from the Access screen's own rows, so "what the ⓘ says is the
 // default" and "what a new restaurant actually gets" are one sentence (see below).
 import { CHANNEL_DEFAULTS, MODULE_ALLOWED_DEFAULTS } from "@/lib/accessTree";
+// The one place the compact-floor decision is written down (owner, 2026-07-31).
+import { FLOOR_PER_ROW_DEFAULT } from "@/lib/floorLayout";
 
 // Columns that must NEVER be inherited from the template restaurant. (Only REAL, nullable
 // settings columns — verified against the live schema.)
@@ -49,6 +51,17 @@ export function cleanClonedSettings(
   base.geo_radius_m = 250;
   // A new restaurant shouldn't inherit #1's floor size.
   base.table_count = 10;
+  // …NOR #1's TILE WIDTH, and this was half a fix until 2026-08-31 (T25 round 3, item 47).
+  //
+  // Migration 373 set the COLUMN default for floor_per_row to 12, because FLOOR_PER_ROW_DEFAULT has
+  // said 12 since the owner asked for a compact floor on 2026-07-31 while the column still said 6.
+  // But a column default only decides the value when the INSERT leaves the column out — and this
+  // function hands the insert a full copy of restaurant #1's row, so the default never got a turn and
+  // a new restaurant inherited French House's 7. Exactly the class this file's header is about.
+  //
+  // Named here rather than left to the column so the three statements of "how wide does a new floor
+  // start" — the constant, the column default, and this clone — cannot drift apart again.
+  base.floor_per_row = FLOOR_PER_ROW_DEFAULT;
   // …nor #1's per-table NAMES (e.g. "Patio", "Banquet Hall") — those are #1's identity and
   // would otherwise show on the new tenant's tiles/bills/floor map for tables 1–10 until
   // renamed by hand (the "#1 leaks onto restaurant #2" class). Start with none. (mig 131.)
