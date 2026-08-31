@@ -5591,8 +5591,14 @@ function dashTodayBox(s) {
 // ── Guest ratings (mig 140): the manager's view of diner star-ratings, gated by
 // the view_ratings power. Fetch + acknowledge/note; scoped to this restaurant server-side.
 const RCHIP = "display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(127,127,127,.12)";
+// A rating outside 1-5 used to throw `RangeError: Invalid count value` out of `String.repeat` and
+// take this whole section's render with it (found on the owner's copy of these stars, sweep 7 · T14
+// round 2, 2026-08-31; the two are the same six lines). Not reachable from our own data — mig 037
+// constrains the column — so this is a guard: the worst a bad row can now do is draw the wrong
+// number of stars. Keep the two copies in step; `verify:owner-money` item 30 checks both.
 function ratingStars(n) {
-  return `<span style="color:#f5a623;letter-spacing:1px">${"★".repeat(n)}<span style="color:var(--line)">${"★".repeat(5 - n)}</span></span>`;
+  const filled = Math.max(0, Math.min(5, Math.round(Number(n) || 0)));
+  return `<span style="color:#f5a623;letter-spacing:1px">${"★".repeat(filled)}<span style="color:var(--line)">${"★".repeat(5 - filled)}</span></span>`;
 }
 async function loadRatings() {
   const body = document.getElementById("ratingsBody");

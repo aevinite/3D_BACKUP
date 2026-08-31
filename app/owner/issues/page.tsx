@@ -49,11 +49,25 @@ const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-
 // legacy uuid row into the same em dash a nameless row already uses, keeping the reference in the
 // hover text. So the local copy is DELETED rather than left beside it — one way, not two.
 const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
-const Stars = ({ n }: { n: number }) => (
-  <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
-    {"★".repeat(n)}<span style={{ color: "var(--border-c, #ccc)" }}>{"★".repeat(5 - n)}</span>
-  </span>
-);
+// ── ONE ODD ROW MUST NOT TAKE THE WHOLE SCREEN DOWN (sweep 7 · T14 round 2, 2026-08-31) ──────────
+// `"★".repeat(5 - n)` throws `RangeError: Invalid count value` the moment `n` is above 5, and
+// `"★".repeat(n)` throws below 0. A throw inside render is not a missing star — React unmounts the
+// tree and the owner gets the shell's error boundary: "We couldn't load this just now. Something
+// went wrong on our side." So a single bad number would lose the average, the distribution, every
+// other rating AND the complaints tab, with nothing on screen saying which row did it.
+// Measured 2026-08-31 by feeding the screen `rating: 6` and `rating: -1`: both blanked the page.
+// It is NOT reachable from this app's own data — `feedback.rating` is `CHECK (rating BETWEEN 1 AND
+// 5)` (mig 037) and `lfh_leave_feedback` refuses anything else — so this is a guard, not a repair.
+// It costs one clamp and it means the worst a bad row can ever do is draw the wrong number of
+// stars, which the `aria-label` beside it still reports honestly.
+const Stars = ({ n }: { n: number }) => {
+  const filled = Math.max(0, Math.min(5, Math.round(Number(n) || 0)));
+  return (
+    <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
+      {"★".repeat(filled)}<span style={{ color: "var(--border-c, #ccc)" }}>{"★".repeat(5 - filled)}</span>
+    </span>
+  );
+};
 
 export default function OwnerFeedback() {
   const router = useRouter();

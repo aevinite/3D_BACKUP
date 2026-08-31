@@ -418,6 +418,25 @@ const RULES = [
       /Counted at \{fmtTime\(summary\.cachedAt\)\} · Refresh to count again\./,
     ],
   },
+  {
+    // ── ITEM 30 · ONE ODD ROW MUST NOT TAKE THE WHOLE SCREEN DOWN ─────────────────────────────────
+    // `"★".repeat(5 - n)` throws RangeError above 5 and `"★".repeat(n)` throws below 0, and a throw
+    // inside render loses the average, the distribution, every other rating and the complaints tab.
+    // The same six lines exist twice — here and in the manager panel — so both are checked, because
+    // fixing one and leaving the other is how the pair drifted in the first place.
+    item: 30, file: ISSUES,
+    say: "the owner's star row clamps its count, so a rating outside 1-5 cannot blank the screen",
+    must: [/const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\);/,
+           /\{"★"\.repeat\(filled\)\}<span[\s\S]{0,80}\{"★"\.repeat\(5 - filled\)\}/],
+    mustNot: [/\{"★"\.repeat\(n\)\}/],
+  },
+  {
+    item: 30, file: PANEL_MGR,
+    say: "the manager panel's copy of the same six lines clamps too",
+    must: [/const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\);/,
+           /\$\{"★"\.repeat\(filled\)\}<span style="color:var\(--line\)">\$\{"★"\.repeat\(5 - filled\)\}/],
+    mustNot: [/\$\{"★"\.repeat\(n\)\}/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
