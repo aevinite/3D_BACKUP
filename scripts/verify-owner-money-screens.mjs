@@ -370,6 +370,15 @@ const RULES = [
     ],
     mustNot: [/This section isn&apos;t enabled for your restaurant/],
   },
+  {
+    item: 25, file: CUSTOMERS,
+    say: "one restaurant means no \"Restaurant\" column, the same rule the phone list already uses",
+    must: [
+      /const multiRest = rests\.length > 1;/,
+      /\{multiRest && <th style=\{\{ padding: "8px 10px" \}\}>Restaurant<\/th>\}/,
+      /\{multiRest && <td style=\{\{ padding: "9px 10px" \}\}><span className="adm-chip"/,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");

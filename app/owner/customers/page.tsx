@@ -266,6 +266,14 @@ export default function OwnerCustomers() {
   // The tiles ride the 5-minute snapshot while the list is live, so a stale tile can read LOWER than
   // the rows on screen — hence `> rows.length`, never `!==`: the line appears only when there really
   // is something past the end.
+  // ── ONE RESTAURANT, NO "RESTAURANT" COLUMN (owner, 2026-08-31 — item 7) ───────────────────────
+  // The phone card list has always dropped the restaurant chip for a single-restaurant owner
+  // (`rests.length > 1`); the desktop table showed the column regardless, so it printed the same
+  // brand on all 26 rows and spent a whole column saying nothing. Same condition as the card list
+  // and as the restaurant picker beside the search box, so all three agree. `rests` is the WHOLE
+  // scope from the server, not the rows on this page, so a second restaurant with no guests yet
+  // still brings the column back.
+  const multiRest = rests.length > 1;
   const LIST_PAGE = 300;   // /api/owner/customers → .limit(300)
   const segTotal = !summary ? null
     : seg === "regulars" ? summary.returning
@@ -412,7 +420,7 @@ export default function OwnerCustomers() {
                       <th style={{ padding: "8px 10px" }}>Name</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Phone</th>
                       <th style={{ padding: "8px 10px", textAlign: "center" }}>Visits</th>
-                      <th style={{ padding: "8px 10px" }}>Restaurant</th>
+                      {multiRest && <th style={{ padding: "8px 10px" }}>Restaurant</th>}
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>First visit</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Last visit</th>
                       <th style={{ padding: "8px 10px" }}></th>
@@ -430,7 +438,7 @@ export default function OwnerCustomers() {
                         </td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{showPhone(c.phone)}</td>
                         <td style={{ padding: "9px 10px", textAlign: "center", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.visits ?? 0}</td>
-                        <td style={{ padding: "9px 10px" }}><span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span></td>
+                        {multiRest && <td style={{ padding: "9px 10px" }}><span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span></td>}
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.first_seen_at)}</td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.last_seen_at)}</td>
                         <td style={{ padding: "9px 10px" }}>
