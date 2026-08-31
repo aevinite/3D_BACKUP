@@ -543,9 +543,12 @@ body.menu-scrolling .chef-call {
 }
 
 /* --- ANIMATIONS --- */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.fade-in { animation: fadeIn 0.5s var(--ease) forwards; }
-/* __ITEM13_PENDING__ */
+/* fadeIn and .fade-in were BOTH declared here and again ~35 lines further down, with different
+   values (10px/0.5s here, 20px/0.6s there). CSS gives the later declaration of a duplicated
+   @keyframes name and the later of two equal-specificity rules, so this pair could never run — it
+   was unreachable code that read like the live definition. Removed 2026-08-31 (item 13); the
+   surviving pair further down is the one that has always been in effect. Nothing on screen moves. */
+
 @keyframes reveal { from { opacity:0; transform: translateY(20px); } to { opacity:1; transform: translateY(0); } }
 .reveal { opacity: 0; animation: reveal 0.8s var(--ease) forwards; }
 
