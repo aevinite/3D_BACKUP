@@ -3031,8 +3031,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 /* The count chip — the same wording and shape as the floor's own "→ 15 more tables", because it
    is the same promise. A SIBLING of the row (inside it, it would scroll away), so its parent is
    the positioning context; swipehint.js sets that if the parent is static. */
+/* min-height 44 (owner said do it, 2026-08-31 — item 10): the "→ N more" hint measured 29px tall.
+   It is centred with translateY(-50%), so the extra height grows equally up and down about the
+   same centre — it does not move, and nothing sits above or below it in the rail. */
 .lfh-swipe-more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  z-index: 2; display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px;
+  z-index: 2; display: inline-flex; align-items: center; min-height: 44px; gap: 4px; padding: 5px 10px;
   border-radius: 999px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
   background: var(--panel); color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700;
   white-space: nowrap; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28); }
@@ -3040,7 +3043,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .lfh-swipe-more:hover { border-color: var(--gold); color: var(--text); }
 .lfh-swipe-more[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .lfh-swipe-more { transition: none; } }
-.to-cat { flex: 0 0 auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+/* min-height 44 (owner said do it, 2026-08-31 — item 10): these chips measured 34px tall, and they
+   are how a manager moves between courses mid-order. Height only — the rail scrolls sideways, so a
+   taller chip brings no neighbour nearer. */
+.to-cat { flex: 0 0 auto; min-height: 44px; display: inline-flex; align-items: center; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 .to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-ink); border-color: var(--gold); }
 .to-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 14px; }
@@ -3053,7 +3059,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-dish:active { transform: scale(.99); }
 /* Right side of a tile: the running ×N count on top, a big ✎ (the only button) below. */
 .to-dish-side { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
-.to-dish-edit { width: 40px; height: 40px; border-radius: 11px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line)); background: color-mix(in srgb, var(--gold) 10%, var(--panel-2)); color: var(--gold-strong); font-size: 17px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+/* 44px TALL, width unchanged at 40 (owner said do it, 2026-08-31 — item 10). Same nested case as
+   the tablet's ✎: measured on a real 294x78 dish row, the row keeps 21,172 of 21,332 px2 — it gives
+   up 0.75% of its own area, at the far right, away from the dish name a manager aims at. */
+.to-dish-edit { width: 40px; height: 44px; border-radius: 11px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line)); background: color-mix(in srgb, var(--gold) 10%, var(--panel-2)); color: var(--gold-strong); font-size: 17px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .to-dish-edit:hover { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
 /* Per-dish allergy/note popup from a tile's ✎ (mirrors the tablet). Sits over the modal. */
 .to-tileedit-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); border-radius: 18px; }
@@ -3125,6 +3134,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
      right way; this is the same treatment, at the widths that actually needed it too. Sending
      food to the kitchen is the last thing tapped on every order — it may not look half-drawn. */
   .to-foot { flex-wrap: wrap; row-gap: 8px; }
+  /* 44px, and only TALLER (owner said do it, 2026-08-31 — item 10). "Send to kitchen" is the last
+     thing tapped on every order and measured 36px tall on a phone; "− Discount" beside it the same.
+     Height only, and these two already own their own line here (the rule above gives .to-send
+     `flex: 1 1 100%`), so nothing wraps and no neighbour moves closer. */
+  .to-foot .btn { min-height: 44px; }
   .to-foot .to-send, .to-foot .to-pay { flex: 1 1 100%; margin-left: 0; justify-content: center; }
   .to-foot .to-pay { display: flex; gap: 8px; }
   .to-foot .to-pay .to-send { flex: 1 1 0; }
@@ -3193,7 +3207,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   .to-crail { display: flex; align-items: center; gap: 7px; padding: 8px 10px;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .to-crail::-webkit-scrollbar { display: none; }
-  .to-crail .to-cat { width: auto; flex: 0 0 auto; min-height: 34px; white-space: nowrap; font-size: 13px; padding: 6px 13px; }
+  /* 44, not 34 (owner said do it, 2026-08-31 — item 10). On a phone the left category box lies
+     down into this sideways strip, and 34px is the smallest thing a manager taps mid-order. The
+     strip already scrolls sideways, so a taller chip brings no neighbour nearer and nothing wraps. */
+  .to-crail .to-cat { width: auto; flex: 0 0 auto; min-height: 44px; white-space: nowrap; font-size: 13px; padding: 6px 13px; }
   /* …and real room on the right for the "→ N more" chip. It has to be a MARGIN on the scroller,
      not padding inside it: padding only adds space at the END of the scrolled content, so at the
      start of the row the floating chip sat on top of the third category (seen in the check).
@@ -3216,6 +3233,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
      its own: bigger to hit, and impossible to clip however many controls join the row later.
      Desktop is untouched — the whole rule is inside this phone query. */
   .to-foot { flex-wrap: wrap; row-gap: 8px; }
+  /* 44px, and only TALLER (owner said do it, 2026-08-31 — item 10). "Send to kitchen" is the last
+     thing tapped on every order and measured 36px tall on a phone; "− Discount" beside it the same.
+     Height only, and these two already own their own line here (the rule above gives .to-send
+     `flex: 1 1 100%`), so nothing wraps and no neighbour moves closer. */
+  .to-foot .btn { min-height: 44px; }
   .to-foot .to-send, .to-foot .to-pay { flex: 1 1 100%; margin-left: 0; justify-content: center; }
   .to-foot .qo-cartbtn { margin-left: auto; }
 

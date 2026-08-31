@@ -986,7 +986,14 @@ body.om-mode .panel.om-open { position: fixed; inset: 0; z-index: 40; border: 0;
 /* the category rail (wide) */
 .om-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; border-right: 1px solid var(--line); padding: 10px 8px; background: var(--panel); }
 .om-nav:empty { display: none; }                      /* searching hides the rail */
-.om-cat { text-align: left; border: 0; border-left: 3px solid transparent; background: transparent; color: var(--muted); font-family: inherit; font-size: 14px; padding: 11px 10px; border-radius: 10px; cursor: pointer; transition: background .15s, color .15s; }
+/* 44px on the TABLET sizes too, not just the phone (item 10, 2026-08-31). The ≤760px rule further
+   down had already been raised, but an iPad at 834 or 1194 is the device this panel is actually
+   held on, and there these chips measured 40px in the vertical rail. The rail scrolls
+   (.om-nav is overflow-y:auto), so four more pixels per chip costs scrolling, never a lost chip.
+   NOTE the manager panel's twin is deliberately NOT changed: its left category box sizes its chips
+   from --rail-h so all of them fit WITHOUT scrolling, which is the owner's own requirement for that
+   box — forcing 44 there would push categories out of a box that is not allowed to scroll. */
+.om-cat { text-align: left; border: 0; border-left: 3px solid transparent; background: transparent; color: var(--muted); font-family: inherit; font-size: 14px; min-height: 44px; display: flex; align-items: center; padding: 11px 10px; border-radius: 10px; cursor: pointer; transition: background .15s, color .15s; }
 .om-cat.on { background: color-mix(in srgb, var(--gold) 14%, transparent); color: var(--gold-strong); font-weight: 800; border-left-color: var(--gold); }
 /* the dish browser — ALL categories as sections, one scroll */
 .om-scroll { position: relative; overflow-y: auto; padding: 12px 14px 40px; scroll-behavior: smooth; }
@@ -1011,7 +1018,12 @@ body.om-mode .panel.om-open { position: fixed; inset: 0; z-index: 40; border: 0;
   /* rail → sticky chip row */
   .om-nav { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; gap: 6px; scrollbar-width: none; }
   .om-nav::-webkit-scrollbar { display: none; }
-  .om-cat { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; background: var(--bg); min-height: 40px; display: inline-flex; align-items: center; }
+  /* 44px, and only TALLER (owner said do it, 2026-08-31 — item 10). This is the category chip
+     row on the screen a waiter actually types an order on; the tablet FLOOR got the same 44px
+     treatment in August and this screen was not part of it. Height only: the chips sit in a
+     sideways-scrolling row, so growing them down cannot bring a neighbour nearer — which is the
+     whole of R40's recorded reasoning. Nothing wraps; the row already scrolls. */
+  .om-cat { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; background: var(--bg); min-height: 44px; display: inline-flex; align-items: center; }
   .om-cat.on { background: var(--gold); border-color: var(--gold); color: #14110d; }
   .om-scroll { padding: 10px 12px 20px; }
   /* cart docks below the browser — still ITS OWN scroll, never hidden */
@@ -1149,7 +1161,13 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 .dish { position: relative; }
 .dish .dname { padding-right: 36px; }                    /* clear the ✎ corner (#U4: bigger target) */
 /* #U4: bump the ✎ to a ~34px tap target with a clearer boundary vs the tile's quick-add zone. */
-.dedit { position: absolute; top: 5px; right: 5px; width: 40px; height: 40px; border-radius: 9px;
+/* 44px TALL, width unchanged at 40 (owner said do it, 2026-08-31 — item 10). This one is the
+   nested case R40 warns about: the ✎ sits INSIDE the dish tile, so every pixel it gains is a pixel
+   the dish itself loses. Measured on a real 158x90 tile: the dish keeps 12,462 of 12,620 px2 — it
+   gives up 1.3% of its own area, in the top-right corner, furthest from the name and price a
+   waiter aims at. The WIDTH is deliberately left at 40 so the ✎ comes no closer to the tile's
+   left-hand quick-add zone. */
+.dedit { position: absolute; top: 5px; right: 5px; width: 40px; height: 44px; border-radius: 9px;
   display: grid; place-items: center; font-size: 14px; line-height: 1; cursor: pointer;
   background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold-ink);
   border: 1px solid transparent; }   /* the ✎ is INK on its own tint — 2.76:1 in the light skin before --gold-ink */
