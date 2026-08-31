@@ -15,6 +15,7 @@
 // `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
 // wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
 import { asSuffix } from "@/lib/ownerPin";
@@ -22,13 +23,20 @@ import { useBackClose } from "@/lib/backStack";
 // Client-safe by design (lib/partialRead has zero imports) — see the header of that file for why it
 // is not lib/ownerScope. Pay Later has shown this note since August; this screen never did.
 import { partialNote } from "@/lib/partialRead";
+// Client-safe: lib/searchText has zero imports and no server-only code. It is the SAME cleaner the
+// route runs on `?q=`, so this screen can say what was really searched for. See `searched` below.
+import { safeSearch } from "@/lib/searchText";
 
 const IST = "Asia/Kolkata";
 type Customer = {
   restaurant_id: string; restaurantName: string; phone: string; name: string | null;
   blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string; returning: boolean;
 };
-type Summary = { total: number; returning: number; newThisMonth: number; blocked: number; shown: number };
+// `cachedAt` is when the four tiles were last COUNTED. They are aggregates, so they ride the
+// compute-on-view snapshot cache (`lib/ownerCache.ts`, 5-minute freshness) while the list below is
+// always live — which is why the tile can read 26 with 27 rows under it for a few minutes. The
+// route has always sent this; the screen never showed it. See the line under the tiles.
+type Summary = { total: number; returning: number; newThisMonth: number; blocked: number; shown: number; cachedAt?: string };
 // One guest's record: their bills here + the lifetime figures (mig 228). Money is the
 // OWNER's own takings, which is why it appears on this page and not the admin's.
 type Bill = { session_id: string; restaurant_id: string; bill_no: number | null; invoice_no: number | null; table_number: string | null; at: string; name: string | null; total: number };
@@ -40,6 +48,8 @@ type Detail = {
 
 // 10 digits read as "97376 38206" — easier to read back to a guest than one long run.
 const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
+// The clock time a figure was counted, in India time like every other date on this page.
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: IST });
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: IST });
 
 // One summary figure. When it names a `seg` it is a real button that puts the list on that
@@ -57,12 +67,22 @@ function Tile({ label, value, loading, seg, on, pick }: {
   );
   if (!seg || !pick) return <div className="adm-stat">{body}</div>;
   const active = on === seg;
+  // ── A FIGURE YOU CAN TAP HAS TO LOOK LIKE ONE (owner, 2026-08-31 — item 9) ─────────────────────
+  // Three of the four figures filter the list and the fourth does not, and they were identical, so
+  // "New (last 30 days)" read as a dead tap. It stays un-tappable on purpose — it counts who FIRST
+  // CAME in 30 days, while "First-timers" counts who has been once, and a figure that opens a list
+  // with a different number in it is worse than one you cannot press. So the three that DO work say
+  // so instead: a small filter mark in the corner, and the active one keeps its outline as well.
+  // A mark, not a colour, and the pointer and `aria-pressed` were already there — three carriers.
   return (
     <button type="button" className="adm-stat" aria-pressed={active}
       title={`Show ${label.toLowerCase()}`}
       onClick={() => pick(seg)}
-      style={{ textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
+      style={{ position: "relative", textAlign: "left", cursor: "pointer", font: "inherit", color: "inherit",
         outline: active ? "2px solid var(--accent, #16a34a)" : undefined, outlineOffset: -2 }}>
+      <i className={`fas fa-filter cust-tilemark${active ? " on" : ""}`} aria-hidden="true"
+        style={{ position: "absolute", top: 10, right: 12, fontSize: 10,
+          color: active ? "var(--accent, #16a34a)" : "var(--muted)", opacity: active ? 1 : 0.5 }} />
       {body}
     </button>
   );
@@ -72,9 +92,20 @@ export default function OwnerCustomers() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
 
+  const router = useRouter();
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [disabled, setDisabled] = useState(false);
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31) ─────────────────────────
+  // R36 again, from the page side: *"owner can't know which option are not given to them, only
+  // admin should know that."* The sidebar already hides a withheld section from a real owner;
+  // this page did not — reached by a typed URL or an old bookmark it printed "Customers isn't enabled for your restaurant — contact Aevidine",
+  // which names a feature he has not been given and tells him who to ask for it. The card is
+  // DELETED, not restyled, and he goes back to his dashboard. `replace`, not `push`, so Back does
+  // not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner
+  // (`if (!scope.all && !scope.admin)`), so the X-ray view still opens every section.
+  useEffect(() => { if (disabled) router.replace("/owner"); }, [disabled, router]);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [rid, setRid] = useState("");                       // one of MY restaurants
@@ -239,14 +270,67 @@ export default function OwnerCustomers() {
 
   const rows = customers || [];
 
+  // ── THE LINE UNDER THE LIST HAS TO BE ABOUT THE LIST YOU ARE LOOKING AT (sweep 7 · T14) ─────────
+  // It read `summary.total > summary.shown`, and `summary.total` is the head-count of EVERY guest in
+  // scope — it knows nothing about which group tab is open. So on "Blocked", with both blocked
+  // guests on screen, it said *"Showing the 2 most-recent of 26. Search to find an older guest."*
+  // Measured on French House 2026-08-27: Regulars 13 of 13 and Blocked 2 of 2 both carried it. An
+  // owner reads that as "24 more blocked guests are hidden from me", goes looking, and finds nothing.
+  // Every group has an exact head-count already in the reply, so each one can be asked its own
+  // question: Everyone → total · Regulars → visits ≥ 2 · Blocked → blocked · First-timers →
+  // total − regulars (both are head-counts over the same scope, so the subtraction is exact).
+  // The tiles ride the 5-minute snapshot while the list is live, so a stale tile can read LOWER than
+  // the rows on screen — hence `> rows.length`, never `!==`: the line appears only when there really
+  // is something past the end.
+  // ── ONE RESTAURANT, NO "RESTAURANT" COLUMN (owner, 2026-08-31 — item 7) ───────────────────────
+  // The phone card list has always dropped the restaurant chip for a single-restaurant owner
+  // (`rests.length > 1`); the desktop table showed the column regardless, so it printed the same
+  // brand on all 26 rows and spent a whole column saying nothing. Same condition as the card list
+  // and as the restaurant picker beside the search box, so all three agree. `rests` is the WHOLE
+  // scope from the server, not the rows on this page, so a second restaurant with no guests yet
+  // still brings the column back.
+  const multiRest = rests.length > 1;
+  const LIST_PAGE = 300;   // /api/owner/customers → .limit(300)
+  const segTotal = !summary ? null
+    : seg === "regulars" ? summary.returning
+    : seg === "blocked" ? summary.blocked
+    : seg === "new" ? Math.max(0, summary.total - summary.returning)
+    : summary.total;
+  const segNoun = seg === "regulars" ? " regulars" : seg === "blocked" ? " blocked" : seg === "new" ? " first-timers" : "";
+  // ── AND IT HAS TO QUOTE WHAT WAS ACTUALLY SEARCHED FOR (sweep 7 · T14) ──────────────────────────
+  // The route strips the characters that would change what an `ilike` MEANS (`%`, `*`, `,`, `(`,
+  // `)`, `\` — lib/searchText.ts), and sends no `q=` at all when nothing usable is left. The screen
+  // branched on the RAW box instead, so typing `*` fetched the whole list and then labelled it
+  // "26 matches for “*”", and typing two spaces produced "26 matches for “”". One cleaner, both ends.
+  const searched = safeSearch(search);
+  // One footer, rendered by both the phone list and the desktop table, so the two cannot drift.
+  // A plain function, not a component: a component declared inside render is a new type on every
+  // render (React remounts it, and `react-hooks/static-components` fails the lint on it).
+  const listFoot = (gap: number) => {
+    if (searched) return (
+      <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
+        {rows.length} match{rows.length === 1 ? "" : "es"} for “{searched}”.
+      </div>
+    );
+    // Nothing is hidden unless the read actually HIT the cap — and the tiles ride a 5-minute
+    // snapshot while the list is live, so without this a tile one guest ahead of the list would
+    // print the line on a page that is showing everybody.
+    if (rows.length < LIST_PAGE || segTotal === null || segTotal <= rows.length) return null;
+    return (
+      <div className="adm-muted" style={{ fontSize: 12, marginTop: gap }}>
+        Showing the {rows.length} most-recent of {segTotal.toLocaleString("en-IN")}{segNoun}. Search to find an older guest.
+      </div>
+    );
+  };
+
   return (
     <>
       <h1 className="adm-page-h">Customers</h1>
       <p className="adm-page-sub">The guests who&apos;ve dined with you — when they first came, when they were last in, and who keeps coming back.</p>
 
-      {disabled ? (
-        <div className="adm-card"><div className="adm-empty">Customers isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
-      ) : (
+      {/* Nothing at all while the redirect above runs — never a sentence naming a section he
+          has not been given (R36). */}
+      {disabled ? null : (
         <>
           {/* ── Summary tiles — and three of them are the filter (owner, 2026-08-18) ──────────────
               "We can do the twelfth one also." Tapping a figure shows you the people behind it.
@@ -263,6 +347,27 @@ export default function OwnerCustomers() {
             <Tile label="Regulars (came back)" value={summary?.returning} loading={!summary} seg="regulars" on={seg} pick={setSeg} />
             <Tile label="New (last 30 days)" value={summary?.newThisMonth} loading={!summary} />
             <Tile label="Blocked" value={summary?.blocked} loading={!summary} seg="blocked" on={seg} pick={setSeg} />
+          </div>
+          {/* One quiet line under the tiles, carrying the two things they do not say themselves:
+              which of them you can press, and WHEN they were counted.
+              ── HOW FRESH IS THAT NUMBER (owner, 2026-08-31 — item 13) ─────────────────────────────
+              Counting every guest is expensive, so the four figures ride the 5-minute snapshot cache
+              while the list under them is always live. Measured on French House: add a guest and the
+              list shows 27 while the tile still says 26, until Refresh. The numbers are never WRONG,
+              only a few minutes old — but the screen never said so, and two numbers disagreeing in
+              front of you with no explanation is the thing that makes a person stop trusting both.
+              The route has sent `cachedAt` all along; it just went unread. Plain text, not a warning
+              bar: nothing is wrong here. Refresh still forces a live recount, as it always did. */}
+          <div className="adm-muted" style={{ fontSize: 12, margin: "-8px 0 14px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+            <span>
+              <i className="fas fa-filter" aria-hidden="true" style={{ fontSize: 9.5, marginRight: 5 }} />
+              Tap a figure with this mark to see the people behind it.
+            </span>
+            {/* Right-aligned with the tiles above it on a computer; on a phone it drops to its own
+                line, where being pushed to the right edge would just look stranded. */}
+            {summary?.cachedAt && (
+              <span style={{ marginLeft: narrow ? undefined : "auto" }}>Counted at {fmtTime(summary.cachedAt)} · Refresh to count again.</span>
+            )}
           </div>
 
           {partial.length > 0 && (
@@ -342,15 +447,7 @@ export default function OwnerCustomers() {
                     </button>
                   </div>
                 ))}
-                {search ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
-                  </div>
-                ) : summary && summary.total > summary.shown ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
-                  </div>
-                ) : null}
+                {listFoot(2)}
               </div>
             ) : (
               <div className="adm-tablewrap" style={{ overflow: "auto" }}>
@@ -360,7 +457,7 @@ export default function OwnerCustomers() {
                       <th style={{ padding: "8px 10px" }}>Name</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Phone</th>
                       <th style={{ padding: "8px 10px", textAlign: "center" }}>Visits</th>
-                      <th style={{ padding: "8px 10px" }}>Restaurant</th>
+                      {multiRest && <th style={{ padding: "8px 10px" }}>Restaurant</th>}
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>First visit</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Last visit</th>
                       <th style={{ padding: "8px 10px" }}></th>
@@ -378,7 +475,7 @@ export default function OwnerCustomers() {
                         </td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{showPhone(c.phone)}</td>
                         <td style={{ padding: "9px 10px", textAlign: "center", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.visits ?? 0}</td>
-                        <td style={{ padding: "9px 10px" }}><span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span></td>
+                        {multiRest && <td style={{ padding: "9px 10px" }}><span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>{c.restaurantName}</span></td>}
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.first_seen_at)}</td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.last_seen_at)}</td>
                         <td style={{ padding: "9px 10px" }}>
@@ -404,16 +501,9 @@ export default function OwnerCustomers() {
                 </table>
                 {/* Only the UNFILTERED list is "the N most-recent of TOTAL" — during a search the
                     rows are matches, not the most-recent, and total is the whole-list head-count, so
-                    the line would be misleading (audit 2026-07-09). Show a plain match count instead. */}
-                {search ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
-                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
-                  </div>
-                ) : summary && summary.total > summary.shown ? (
-                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
-                    Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
-                  </div>
-                ) : null}
+                    the line would be misleading (audit 2026-07-09). Show a plain match count instead.
+                    The group tab narrows it further; see `segTotal` above. */}
+                {listFoot(10)}
               </div>
             )}
           </div>
@@ -443,13 +533,20 @@ export default function OwnerCustomers() {
                       <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={closeDetail} aria-label="Close">✕</button>
                     </div>
 
-                    <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))" }}>
-                      <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Bills</div>
-                        <div className="v" style={{ fontSize: 21 }}>{nfmt(detail.bill_count)}</div></div>
-                      <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Spent with you</div>
-                        <div className="v" style={{ fontSize: 21 }}>₹{nfmt(Math.round(detail.lifetime))}</div></div>
-                      <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Average bill</div>
-                        <div className="v" style={{ fontSize: 21 }}>₹{nfmt(Math.round(detail.avg_bill))}</div></div>
+                    {/* ── THE THREE FIGURES LINE UP (owner, 2026-08-31 — item 10) ────────────────
+                        "Spent with you" is a longer label, so at this width it wrapped to two lines
+                        and pushed its number a line below the other two. The boxes were always the
+                        same height (they are grid cells); it was the NUMBERS that did not line up,
+                        which is the thing the eye reads across. Each box is now a column with the
+                        label on top and the number pinned to the bottom, so the three numbers share
+                        a baseline whether a label wraps or not. */}
+                    <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", alignItems: "stretch" }}>
+                      <div className="adm-stat" style={{ padding: "12px 14px", display: "flex", flexDirection: "column" }}><div className="k">Bills</div>
+                        <div className="v" style={{ fontSize: 21, marginTop: "auto" }}>{nfmt(detail.bill_count)}</div></div>
+                      <div className="adm-stat" style={{ padding: "12px 14px", display: "flex", flexDirection: "column" }}><div className="k">Spent with you</div>
+                        <div className="v" style={{ fontSize: 21, marginTop: "auto" }}>₹{nfmt(Math.round(detail.lifetime))}</div></div>
+                      <div className="adm-stat" style={{ padding: "12px 14px", display: "flex", flexDirection: "column" }}><div className="k">Average bill</div>
+                        <div className="v" style={{ fontSize: 21, marginTop: "auto" }}>₹{nfmt(Math.round(detail.avg_bill))}</div></div>
                     </div>
 
                     {detail.rows.length > 1 && (
@@ -481,8 +578,19 @@ export default function OwnerCustomers() {
                     ) : (
                       <div style={{ display: "grid", gap: 6 }}>
                         {detail.bills.map((b) => (
-                          <div key={b.session_id} style={{ display: "flex", alignItems: "baseline", gap: 9, borderBottom: "1px solid var(--border-c,#e5e7eb)", padding: "7px 2px" }}>
+                          <div key={b.session_id} style={{ display: "flex", alignItems: "baseline", gap: 9, borderBottom: "1px solid var(--border-c,#e5e7eb)", padding: "7px 2px", flexWrap: "wrap" }}>
                             <span style={{ fontWeight: 700, fontSize: 13 }}>{b.bill_no != null ? `#${b.bill_no}` : "—"}</span>
+                            {/* WHOSE #41? (sweep 7 · T14). Bill numbers are a per-restaurant daily series
+                                (docs/NUMBERING.md), so two of an owner's restaurants can both issue #41 on
+                                the same day. This list mixes every restaurant the guest has eaten at — the
+                                line above literally says "this number has eaten at 2 of your restaurants" —
+                                and then named none of them. Only shown when there IS more than one, so a
+                                single-restaurant owner sees exactly what they saw before. */}
+                            {detail.rows.length > 1 && (
+                              <span className="adm-chip" style={{ textTransform: "none", fontWeight: 700, background: "var(--muted2)", color: "var(--text)" }}>
+                                {detail.rows.find((r) => r.restaurant_id === b.restaurant_id)?.restaurantName || "—"}
+                              </span>
+                            )}
                             <span className="adm-muted" style={{ fontSize: 12 }}>{b.table_number ? `Table ${b.table_number}` : ""}</span>
                             <span className="adm-muted" style={{ fontSize: 12, marginLeft: "auto" }}>{fmt(b.at)}</span>
                             <b style={{ fontVariantNumeric: "tabular-nums", minWidth: 66, textAlign: "right" }}>₹{nfmt(Math.round(b.total))}</b>
