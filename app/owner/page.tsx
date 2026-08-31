@@ -1532,7 +1532,9 @@ export default function OwnerDashboard() {
         loading={!offNote && !ov} pill={offNote ? undefined : "● live"}
         sub={offNote ? offSub
           : todayOrd === 0 ? "no orders yet today"
-          : todayRev === 0 ? `${todayOrd} order${todayOrd === 1 ? "" : "s"} today · nothing paid yet`
+          // "216 orders today · nothing paid yet" wrapped with "yet" alone on the second line of a
+          // ~180px tile (seen in the shot). Same fact, eight characters shorter, one clean wrap.
+          : todayRev === 0 ? `${todayOrd} order${todayOrd === 1 ? "" : "s"}, none paid yet`
           : `${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
       <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub
