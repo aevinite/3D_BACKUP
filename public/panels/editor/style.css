@@ -1615,6 +1615,11 @@ html[data-theme="light"] .lgcap,
 html[data-theme="light"] .floor-head .fstat-l,
 html[data-theme="light"] .fstat-l,
 html[data-theme="light"] .ft-seats { color: #6b5d46; }
+/* A JOINED tile is tinted 58% toward its state colour, so the same seat ink that reads 5.13:1 on a
+   plain tile measured 4.44:1 there — 0.06 under (item 12, 2026-08-31). One step deeper on the
+   joined tiles only; every other tile keeps the value above, unchanged. */
+html[data-theme="light"] .ftile.ft-merged .ft-seats,
+html[data-theme="light"] .ftile.ft-ready .ft-seats { color: #574a37; }
 html[data-theme="light"] .lgcap { opacity: 1; }   /* .75 of a pale ink was half the problem */
 /* The tile's live line ("0/6 served", "Free"): keep the state hue, but let the dark text carry it. */
 html[data-theme="light"] .ft-linenum,
