@@ -770,7 +770,10 @@ body.lfh-undobar-up .toast { bottom: calc(24px + var(--sab) + var(--lfh-undobar-
 .ord-pill.preparing { background: rgba(232,161,60,0.18); color: #e8a13c; }
 .ord-pill.ready { background: rgba(236,72,153,0.18); color: #f472b6; }
 .ord-pill.served { background: rgba(74,222,128,0.16); color: #4ade80; }
-.ord-pill.cancelled { background: rgba(239,68,68,0.16); color: #ef4444; }
+/* #f87171, not #ef4444 (T26 sweep #7, 2026-08-31 — item 16). On its own 16% red tint over the dark
+   card the deeper red measured 4.08:1, the only dark-skin pill still under the line. The lighter red
+   is the right direction on a dark ground, and it stays unmistakably red. */
+.ord-pill.cancelled { background: rgba(239,68,68,0.16); color: #f87171; }
 /* pre-order: in the shared cart, not sent yet. Blackish-grey ON PURPOSE (owner,
    2026-06-12): it used to be blue, which clashed with the blue "Preparing" on the
    floor board. Grey reads as "not real yet"; red stays reserved for alerts. */
@@ -3783,7 +3786,30 @@ html[data-theme="light"] .pay-pill.paid,
 html[data-theme="light"] .avail-toggle.on,
 html[data-theme="light"] .logstat-in-session,
 html[data-theme="light"] .tbl-paid .tbl-num, html[data-theme="light"] .tbl-paid .tbl-state{ color:#15803d; }
-html[data-theme="light"] .ord-pill.new{ color:#b45309; }
+html[data-theme="light"] .ord-pill.new{ color:#92400e; }
+/* THE REST OF THE SAME FAMILY (T26 sweep #7, 2026-08-31 — item 16). The 2026-07-23 pass above
+   deepened the pills it had in front of it and left the others, and it also deepened the class
+   `.ord-pill.new` while the one the Bills list actually renders is `.ord-pill.received`. Measured on
+   the running Bills screen, light skin, by mounting every state on a real .ord-card:
+       received "New order"  1.43   ready 1.59   cancelled 2.28
+       preparing 3.28        served 3.30        freed 3.43        new 3.64
+   Every value below is the shallowest deepening of that pill's OWN hue that clears 4.5 on its own
+   tint — measured, not chosen by eye. `.ord-pill.building` is deliberately absent: it is the one
+   pill with a DARK background, its pale ink reads 4.46, and every darker candidate measured 1.1-1.6
+   — darkening it would be the exact mistake this block exists to undo. */
+html[data-theme="light"] .ord-pill.received{ color:#92400e; }   /* 1.43 -> 4.74 */
+html[data-theme="light"] .ord-pill.ready{ color:#9d174d; }      /* 1.59 -> 4.74 */
+html[data-theme="light"] .ord-pill.cancelled{ color:#991b1b; }  /* 2.28 -> 5.03 */
+html[data-theme="light"] .ord-pill.freed-pill{ color:#4d4d4d; } /* 3.43 -> 5.42 */
+html[data-theme="light"] .ord-pill.served{ color:#166534; }     /* 3.30 -> 4.69, deeper than the 2026-07-23 value */
+/* .preparing IS in the 2026-07-23 list above, but that value only lifted it to 3.28 — the pass
+   moved it off "unreadable" and stopped short of the line. One step deeper: 4.64. */
+html[data-theme="light"] .ord-pill.preparing{ color:#92400e; }
+/* THE BILL'S OWN TOTAL was the worst of the lot: --gold is a FILL, and as ink on the total row it
+   measured 2.03:1 against the 3:1 a 24px/800 number needs — the single most important figure on the
+   screen where money is read. --gold-ink is what this file already uses wherever gold carries
+   words (see the note in the light block); it reads 4.28 here. Dark is untouched at 8.18. */
+html[data-theme="light"] .ord-card:not(.is-paid):not(.ord-cancelled) .ord-total span:last-child { color: var(--gold-ink); }
 html[data-theme="light"] .tp-pill-prep, html[data-theme="light"] .sx-tag-open,
 html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state{ color:#1d4ed8; }
 html[data-theme="light"] .khata-due{ color:#0369a1; }
