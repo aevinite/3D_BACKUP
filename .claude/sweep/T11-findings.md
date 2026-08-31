@@ -210,7 +210,7 @@ all eleven files the Reports Studio is actually made of**, including the six und
 `components/owner/reports/` that no terminal's bullet has ever named (1,856 lines between them).
 
 **609 assertions executed against a production build, condensed into 500 numbered rows
-(`P48362`–`P48861`). All green. One problem found.**
+(`P49001`–`P49500`). All green. One problem found.**
 
 ## Item 12 · Four reports downloaded a DIFFERENT report — FIXED
 
