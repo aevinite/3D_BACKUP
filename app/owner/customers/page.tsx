@@ -512,13 +512,20 @@ export default function OwnerCustomers() {
                       <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={closeDetail} aria-label="Close">✕</button>
                     </div>
 
-                    <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))" }}>
-                      <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Bills</div>
-                        <div className="v" style={{ fontSize: 21 }}>{nfmt(detail.bill_count)}</div></div>
-                      <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Spent with you</div>
-                        <div className="v" style={{ fontSize: 21 }}>₹{nfmt(Math.round(detail.lifetime))}</div></div>
-                      <div className="adm-stat" style={{ padding: "12px 14px" }}><div className="k">Average bill</div>
-                        <div className="v" style={{ fontSize: 21 }}>₹{nfmt(Math.round(detail.avg_bill))}</div></div>
+                    {/* ── THE THREE FIGURES LINE UP (owner, 2026-08-31 — item 10) ────────────────
+                        "Spent with you" is a longer label, so at this width it wrapped to two lines
+                        and pushed its number a line below the other two. The boxes were always the
+                        same height (they are grid cells); it was the NUMBERS that did not line up,
+                        which is the thing the eye reads across. Each box is now a column with the
+                        label on top and the number pinned to the bottom, so the three numbers share
+                        a baseline whether a label wraps or not. */}
+                    <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", alignItems: "stretch" }}>
+                      <div className="adm-stat" style={{ padding: "12px 14px", display: "flex", flexDirection: "column" }}><div className="k">Bills</div>
+                        <div className="v" style={{ fontSize: 21, marginTop: "auto" }}>{nfmt(detail.bill_count)}</div></div>
+                      <div className="adm-stat" style={{ padding: "12px 14px", display: "flex", flexDirection: "column" }}><div className="k">Spent with you</div>
+                        <div className="v" style={{ fontSize: 21, marginTop: "auto" }}>₹{nfmt(Math.round(detail.lifetime))}</div></div>
+                      <div className="adm-stat" style={{ padding: "12px 14px", display: "flex", flexDirection: "column" }}><div className="k">Average bill</div>
+                        <div className="v" style={{ fontSize: 21, marginTop: "auto" }}>₹{nfmt(Math.round(detail.avg_bill))}</div></div>
                     </div>
 
                     {detail.rows.length > 1 && (

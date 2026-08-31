@@ -387,6 +387,14 @@ const RULES = [
       /Tap a figure with this mark to see the people behind it\./,
     ],
   },
+  {
+    item: 27, file: CUSTOMERS,
+    say: "the guest record's three figures share a baseline even when a label wraps",
+    must: [
+      /gridTemplateColumns: "repeat\(auto-fit, minmax\(108px, 1fr\)\)", alignItems: "stretch"/,
+      /padding: "12px 14px", display: "flex", flexDirection: "column"[\s\S]{0,120}marginTop: "auto"/,
+    ],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");
