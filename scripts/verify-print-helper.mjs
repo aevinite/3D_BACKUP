@@ -740,8 +740,11 @@ check(!/\bkot\b/.test(page.replace(/kot:/g, "").replace(/"kot"/g, "").replace(/\
 //
 // …identically on mac, windows and linux. Asserted here on the GENERATED TEXT, not on the regex, so a
 // rewrite that sanitises differently still passes and one that stops sanitising cannot.
-{
-  const lib = readFileSync(new URL("../lib/printHelperScript.ts", import.meta.url), "utf8");
+for (const genFile of ["../lib/printHelperScript.ts", "../lib/printStationScript.ts"]) {
+  // BOTH generated files, because the station was the twin left behind: printHelperScript was fixed on
+  // 2026-08-31 (item 27) and printStationScript still let an ORIGIN add a line (item 40, same day,
+  // found by driving it).
+  const lib = readFileSync(new URL(genFile, import.meta.url), "utf8");
   const c = code(lib);
   check(/\[[^\]]*\\r[^\]]*\\n[^\]]*\]\+?\/g, " "/.test(c),
     "the helper's sanitiser folds line breaks to a space",
