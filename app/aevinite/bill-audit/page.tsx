@@ -381,7 +381,15 @@ export default function AdminBills() {
           </div>
         )
           : rows.map((b) => {
-            const m = META[b.state];
+            // A STATE THIS SCREEN HAS NEVER HEARD OF COSTS ONE ROW, NOT THE PAGE (T18 second 500,
+            // 2026-08-31). `META[b.state]` was read straight into `m.icon` and `m.tone`, so a bill
+            // whose state is missing or new threw on the first property and the error boundary
+            // replaced the whole ledger — every other bill on the page with it. The same shape as
+            // item 12 on Platform revenue and the Change log, on a third screen. A new bucket added
+            // to lib/billLedger tomorrow would do it too, which is the case that matters: the
+            // ledger's job is showing every bill, and an unknown one must be VISIBLE and plainly
+            // labelled rather than fatal.
+            const m = META[b.state] || { label: String(b.state || "Unknown"), tone: "#8b94a7", icon: "chev" as IconName };
             const isOpen = open === b.sessionId;
             const del = b.state === "deleted";
             return (

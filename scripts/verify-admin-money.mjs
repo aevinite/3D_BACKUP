@@ -585,6 +585,29 @@ try {
       ["/aevinite/analytics", "/api/admin/analytics", "trend", "Platform analytics"],
       ["/aevinite", "/api/admin/dashboard", "restaurants", "Dashboard"],
     ];
+    // …and the third shape of the same fault: a ROW whose state this screen has never heard of.
+    // META[b.state] was read straight into m.icon, so one unknown bucket took the whole ledger down.
+    {
+      const c = await ctx();
+      const p = await c.newPage();
+      await p.route("**/api/admin/bills**", async (route) => {
+        const r = await route.fetch();
+        let b; try { b = await r.json(); } catch { b = {}; }
+        if (Array.isArray(b.bills) && b.bills.length) b.bills[0] = { ...b.bills[0], state: "a_state_from_next_year" };
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
+      });
+      await p.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const seen = await p.evaluate(() => ({
+        h1: document.querySelector("h1")?.textContent?.trim() || "",
+        boundary: /Something went wrong on this screen/.test(document.body.innerText),
+        rows: document.querySelectorAll(".blz-row").length,
+      }));
+      ok(seen.h1 === "Bills" && !seen.boundary && seen.rows > 0,
+        `Bills with one row in an unknown state: ${seen.boundary ? "THE WHOLE LEDGER WAS REPLACED" : `keeps its heading and still lists ${seen.rows} bills`}`);
+      await p.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+      await p.close(); await c.close();
+    }
     for (const [url, ep, field, h1] of CASES) {
       const c = await ctx();
       const p = await c.newPage();
