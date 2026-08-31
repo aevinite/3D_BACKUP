@@ -331,6 +331,44 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   else fail("the handover sheet ignores its owner-link read again — it would print with no owner login and look complete");
 }
 
+// ── 9 · THE ONE-PRESS PASSWORD RESET STAYS REFUSED MID-SERVICE (owner, 2026-08-31 — item 28) ─────
+// He asked for a single button that gives every login at a restaurant a new password, for a handover,
+// and he was told the cost before it was built: a new password bumps `token_version`, which ends every
+// session that person has — so all of them at once signs out the waiter's tablet and the kitchen screen
+// in the same instant. Fine on a handover morning. On a Friday night it is a floor of staff staring at
+// a login page with food on the pass.
+//
+// So the button exists AND the server refuses while any table is open. That refusal is the whole
+// safety of the feature, it lives in one `if`, and it is exactly the kind of line a later
+// "simplification" removes because the happy path works without it. Checked here, in four parts, so
+// none of them can go quietly:
+//   · the mid-service read happens at all;
+//   · it refuses on a FAILED read too (guessing "nobody is sitting down" from a query that did not
+//     answer is the one direction this must never guess in);
+//   · the refusal is a 409 the screen can show, not a silent skip;
+//   · the one-at-a-time path is untouched, because that is what still works during service.
+{
+  const CRED = "app/api/admin/restaurants/credentials/route.ts";
+  const src = read(CRED);
+  if (!src) fail(`${CRED} is missing`);
+  else if (!/reset_all/.test(src)) {
+    ok("the whole-restaurant password reset is not built here — nothing to guard");
+  } else {
+    const impl = src.slice(src.indexOf("async function resetAll"));
+    if (/from\("sessions"\)[\s\S]{0,200}?\.in\(\s*"status"/.test(impl)) ok("reset_all asks whether the restaurant is mid-service before it touches a password");
+    else fail("reset_all no longer checks for open tables — one press would sign out every screen at a restaurant DURING SERVICE (item 28's whole safety)");
+    if (/openQ\.error[\s\S]{0,140}?return adminFail/.test(impl)) ok("reset_all refuses when it could not tell whether service is on");
+    else fail("reset_all decides 'nobody is sitting down' from a read it did not check — the one direction it must never guess in");
+    if (/reason:\s*"mid_service"[\s\S]{0,120}?status:\s*409/.test(impl)) ok("the mid-service refusal is a 409 with a sentence the console shows");
+    else fail("the mid-service refusal no longer answers a 409 the screen can render — a refusal nobody sees is not a refusal");
+    if (/vaultReady\(\)/.test(impl)) ok("reset_all refuses on a deployment with no credential key, rather than burning every password for nothing");
+    else fail("reset_all no longer checks the credential vault — it would reset every password and be unable to print any of them");
+    // The per-login route must survive: it is the ONLY one that works while the restaurant is serving.
+    if (/const userId = String\(body\.user_id/.test(src)) ok("the one-login-at-a-time reset still exists — the only path that works mid-service");
+    else fail("the single-login reset is gone; during service there would be no way to reset one password at all");
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
