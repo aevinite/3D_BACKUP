@@ -39,6 +39,13 @@ const KHATA = "app/owner/khata/page.tsx";
 const ISSUES = "app/owner/issues/page.tsx";
 const INVENTORY = "app/owner/inventory/page.tsx";
 const MANAGER = "app/owner/manager/page.tsx";
+// The three screens outside this terminal's own territory that carry the SAME rule (item 34).
+// He gave permission for them on 2026-09-01; the rule lives here because this is the file that
+// already states it for the other three, and one rule in one place is what stops six screens drifting.
+const ACTIVITY = "app/owner/activity/page.tsx";
+const STAFF = "app/owner/staff/page.tsx";
+const MENU = "app/owner/menu/page.tsx";
+const ACTOR = "lib/ownerActor.ts";
 const PANEL_MGR = "public/panels/editor/app.js";
 const PANEL_TAB = "public/panels/tablet/app.js";
 const INV_ROUTE = "app/api/owner/inventory/route.ts";
@@ -478,6 +485,44 @@ const RULES = [
     must: [/const okDate = \(iso: string \| null \| undefined\) =>/, /const dt = \(iso: string\) => \(okDate\(iso\)/,
            /\{okDate\(i\.resolved_at\) \? ` · resolved \$\{dOnly\(i\.resolved_at as string\)\}` : ""\}/],
     mustNot: [/\{new Date\(r\.created_at\)\.toLocaleString/, /\{new Date\(i\.created_at\)\.toLocaleString/],
+  },
+  {
+    // ── ITEM 34 · THE SAME RULE ON THE LAST THREE SCREENS (owner, 2026-09-01) ─────────────────────
+    // *"okay, give me permission."* Six owner screens can be reached by a typed URL when the admin
+    // has withheld that section. Three were fixed on 2026-08-31 (items 8/24); these are the other
+    // three. A rule that is true on five screens and false on three is worse than one that is false
+    // everywhere, because he stops trusting it. All six are checked here, in one place.
+    item: 34, file: ACTIVITY,
+    say: "Audit & logs sends a real owner home instead of naming a section he has not been given",
+    must: [/import \{ useRouter \} from "next\/navigation"/,
+           /useEffect\(\(\) => \{ if \(bothOff\) router\.replace\("\/owner"\); \}, \[bothOff, router\]\);/,
+           /\{bothOff \? null :/],
+    mustNot: [/isn&rsquo;t enabled for your restaurant/, /isn&apos;t enabled for your restaurant/],
+  },
+  {
+    item: 34, file: STAFF,
+    say: "Team does the same",
+    must: [/import \{ useRouter \} from "next\/navigation"/,
+           /useEffect\(\(\) => \{ if \(notEnabled\) router\.replace\("\/owner"\); \}, \[notEnabled, router\]\);/],
+    mustNot: [/\{!loading && notEnabled && <div className="adm-card">/],
+  },
+  {
+    item: 34, file: MENU,
+    say: "Menu does the same, and its \"a failed read is not a switched-off feature\" guard is untouched",
+    must: [/import \{ redirect \} from "next\/navigation"/,
+           /if \(!selected\) redirect\("\/owner"\);/,
+           /I COULDN'T ASK" IS NOT "IT IS SWITCHED OFF/],
+    mustNot: [/The menu editor isn&apos;t switched on for your restaurant/],
+  },
+  {
+    // ── ITEM 35 · A NAME OF ONLY SPACES IS NOT A NAME, IN THE SHARED HELPER TOO ───────────────────
+    // `!actor` is false for "  ", so a blank-but-present name rendered as nothing at all. The same
+    // fault item 16 fixed on the Customers page, in the file every owner log screen shares.
+    item: 35, file: ACTOR,
+    say: "the shared \"who did it\" helper trims before deciding there is no name",
+    must: [/const a = \(actor \?\? ""\)\.trim\(\);/, /if \(!a\) return "—";/,
+           /if \(!\(actor \?\? ""\)\.trim\(\)\) return undefined;/],
+    mustNot: [/if \(!actor\) return "—";/],
   },
 ];
 
