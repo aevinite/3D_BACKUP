@@ -10,6 +10,10 @@ import { asSuffix } from "@/lib/ownerPin";
 
 type Module = { restaurant_id: string; name: string; key: string; label: string; enabled: boolean };
 type PrintingState = {
+  // WHICH restaurant this answer is about. The route answers for exactly one, and this page renders a
+  // LIST — see the note in the map below for what went wrong when the two were not matched up.
+  // Optional so an older deployment's answer still parses; an absent id means "don't apply it".
+  restaurantId?: string;
   allowed: boolean; on: boolean; waiting: number;
   computers: { name: string; connected: boolean; secondsAgo: number | null; printers: string[] }[];
   routes: { kind: string; printer: string | null; computer: string | null; connected: boolean }[];
@@ -183,8 +187,17 @@ export default function OwnerSettings() {
             belongs to the computer the printer is attached to. */}
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
           {data.printing.map((p) => {
-            // Only for the restaurant this page is scoped to — /api/owner/printing answers for one.
-            const kotHelper = printing && printing.routes.find((r) => r.kind === "kot" && r.printer) || null;
+            // ── ONLY FOR THE RESTAURANT THIS ANSWER IS ACTUALLY ABOUT (T20 round 2, 2026-08-31) ────
+            // /api/owner/printing answers for ONE restaurant, and this is a LIST — so looking the
+            // answer up once and using it for every row named one restaurant's printer and computer
+            // on another restaurant's line. The comment here already said "answers for one"; the code
+            // then used it for all of them.
+            // The route now echoes `restaurantId`, so the match is explicit. `!printing.restaurantId`
+            // keeps an older deployment's answer working (it falls back to the screen branch, which
+            // is what a restaurant with no helper shows anyway) rather than trusting it blindly.
+            const kotHelper = (printing && printing.restaurantId === p.restaurant_id)
+              ? (printing.routes.find((r) => r.kind === "kot" && r.printer) || null)
+              : null;
             return (
             <div key={p.restaurant_id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", border: "var(--border)", borderRadius: 9, padding: "8px 11px" }}>
               <b style={{ fontSize: 13 }}>{p.name || "This restaurant"}</b>
