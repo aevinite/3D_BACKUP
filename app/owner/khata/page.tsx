@@ -34,8 +34,15 @@ type Person = {
 // zero — showing "₹0 collected today" for a read that failed is a claim about the till.
 type Summary = { totalOutstanding: number; peopleCount: number; billCount: number; collectedMonth: number | null; collectedToday: number | null };
 
-const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
+// ── A DATE WE CANNOT READ SHOWS A DASH, NEVER "Invalid Date" OR "oldest NaN days" ────────────────
+// (sweep 7 · T14 round 2, 2026-08-31.) `new Date("nope")` gives NaN and both of these printed it
+// straight out — measured: a row read "oldest NaN days" and its bill line read "Invalid Date". Not
+// reachable from real data (the route only returns rows whose `khata_at` is set), but a credit book
+// is the last screen that should ever look broken, and the guard is one function.
+const ok = (iso: string) => Number.isFinite(new Date(iso).getTime());
+const fmt = (iso: string) => (ok(iso) ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }) : "—");
 const ageDays = (iso: string) => {
+  if (!ok(iso)) return "—";
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
   return d <= 0 ? "today" : d === 1 ? "1 day" : `${d} days`;
 };
@@ -47,7 +54,7 @@ const ageDays = (iso: string) => {
 // The WORDS do not change ("oldest 92 days"), so the colour adds emphasis rather than carrying the
 // meaning on its own, and a fresh tab looks exactly as it always did.
 const OldestTab = ({ iso }: { iso: string }) => {
-  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  const d = ok(iso) ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : 0;
   const tone = d >= 60 ? "var(--adm-danger, #e5484d)" : d >= 30 ? "var(--adm-warn, #c98a2b)" : null;
   return (
     <span style={tone ? { color: tone, fontWeight: 700 } : undefined}

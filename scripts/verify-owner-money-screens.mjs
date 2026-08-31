@@ -445,6 +445,19 @@ const RULES = [
            /const label = named\(c\.name\) \|\| c\.phone \|\| "this customer";/],
     mustNot: [/\{c\.name \|\| <span className="adm-muted">Guest/],
   },
+  {
+    item: 32, file: CUSTOMERS,
+    say: "a date it cannot read shows a dash, never the words \"Invalid Date\"",
+    must: [/const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\);/,
+           /const fmt = \(iso: string\) => \(ok\(iso\) \?/, /const fmtTime = \(iso: string\) => \(ok\(iso\) \?/],
+  },
+  {
+    item: 32, file: KHATA,
+    say: "…and the credit book never prints \"oldest NaN days\"",
+    must: [/const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\);/,
+           /if \(!ok\(iso\)\) return "—";/,
+           /const d = ok\(iso\) \? Math\.floor/],
+  },
 ];
 
 console.log("The owner's money screens must use what the server already tells them\n");

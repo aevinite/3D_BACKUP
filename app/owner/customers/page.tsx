@@ -56,8 +56,14 @@ const named = (n: string | null | undefined): string | null => { const t = (n ??
 // 10 digits read as "97376 38206" — easier to read back to a guest than one long run.
 const showPhone = (p: string) => (p && p.length === 10 ? `${p.slice(0, 5)} ${p.slice(5)}` : p || "—");
 // The clock time a figure was counted, in India time like every other date on this page.
-const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: IST });
-const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: IST });
+// ── A DATE WE CANNOT READ SHOWS A DASH, NEVER "Invalid Date" (sweep 7 · T14 round 2) ─────────────
+// `new Date("nope").toLocaleDateString()` returns the literal string "Invalid Date" and it lands on
+// screen looking like a fault in the guest's record rather than in the value. Both columns here are
+// `NOT NULL DEFAULT NOW()` (mig 014) so it cannot happen from `customers` today — but the SAME
+// helper formats the bill dates that come out of an RPC, and a dash is the honest answer either way.
+const ok = (iso: string) => Number.isFinite(new Date(iso).getTime());
+const fmtTime = (iso: string) => (ok(iso) ? new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: IST }) : "—");
+const fmt = (iso: string) => (ok(iso) ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: IST }) : "—");
 
 // One summary figure. When it names a `seg` it is a real button that puts the list on that
 // segment — and it says so, both to a screen reader (aria-pressed) and to the eye (the pointer,
