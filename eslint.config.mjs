@@ -41,6 +41,18 @@ const eslintConfig = defineConfig([
     ".claude/**",
     "temp-admin-analytics/**",
     "temp-admin-console/**",
+    // THE SAME FAULT AGAIN, ONE DIRECTORY SHORT (added 2026-08-31, sweep #7 / T25 round 3, item 46).
+    //
+    // `.next/**` above is anchored and exact, so a dev server started with another build directory —
+    // `.next-8093/`, which parallel sessions on this folder do produce — is NOT ignored, and bare
+    // eslint walks straight into Next's own generated chunks. Measured today: **502 errors**, every
+    // one of them from `.next-8093/`, none of them from a file anybody wrote. Zero once it is ignored.
+    //
+    // `.gitignore` learned this on 2026-08-05 and carries `.next-*/` for exactly this reason (its
+    // comment even names `.next-8093/`); this file was never given the same line. So the lint half of
+    // CLAUDE.md's definition of done could be turned into a wall of noise by a build directory —
+    // the identical failure the `.claude/**` note above describes, six paragraphs up.
+    ".next-*/**",
   ]),
   {
     // Deliberate rule choices for this codebase. NONE of these change runtime
