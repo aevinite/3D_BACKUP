@@ -497,6 +497,23 @@ console.log(out.join("\n"));
     sess.indexOf('typeof s.token !== "string"') < sess.indexOf("table && s.table !== table"));
 }
 
+
+// ── A VALUE THAT IS NOT A COLOUR NEVER REACHES A STYLESHEET (T25 round 3, item 36, 2026-08-31) ─────
+// lib/accent.ts builds CSS custom properties from the restaurant's accent, which arrives from an admin
+// field. Measured before the fix: `accentPaletteCss('#fff;} body{display:none;')` produced
+// `--accent:#fff;} body{display:none;;--gold:…` — a rule of its own inside the stylesheet. The canvas
+// half already refused an unparseable colour; the palette half did not.
+{
+  const accent = read("lib/accent.ts").split("\n")
+    .filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*)/.test(l)).join("\n");
+  check("the accent palette refuses a value that is not a hex colour",
+    /if \(!isHexColor\(accentColor\)\) return "";/.test(accent));
+  check("…and the canvas half still refuses one too",
+    /if \(!hexToRgbTriplet\(accentColor\)\) return "";/.test(accent));
+  check("…and the colour test comes from the ONE branding helper, not a second copy",
+    /import \{ hexToRgbTriplet, isHexColor \} from ".\/brandTheme";/.test(accent));
+}
+
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);

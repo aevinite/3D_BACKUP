@@ -26,7 +26,7 @@
 // measured on the dev database every stored accent_color carries one. So the strict version is the
 // only one, and it is imported rather than re-typed.
 export { hexToRgbTriplet } from "./brandTheme";
-import { hexToRgbTriplet } from "./brandTheme";
+import { hexToRgbTriplet, isHexColor } from "./brandTheme";
 
 // WHICH INK READS ON THE ACCENT ITSELF — black or white, whichever genuinely has more contrast.
 //
@@ -57,6 +57,16 @@ export function inkOnAccent(accentColor: string): string {
 // The colour VARIABLES only (no page background) — safe to set on :root so the
 // whole document, including body-level widgets, follows the restaurant colour.
 export function accentPaletteCss(accentColor: string): string {
+  // ── A VALUE THAT IS NOT A COLOUR DOES NOT REACH A STYLESHEET (T25 round 3, item 36, 2026-08-31) ──
+  // These lines become CSS custom properties, and the value arrives from an admin field. Measured
+  // before this guard: `accentPaletteCss('#fff;} body{display:none;')` produced
+  // `--accent:#fff;} body{display:none;;--gold:…` — a rule of its own inside the stylesheet.
+  //
+  // Not reachable today: the only writer (app/api/admin/restaurants/branding) tests isHexColor before
+  // storing. So this is the same class as items 26, 30 and 35 — a trap one careless caller away —
+  // and it is closed the way accentCanvasCss below already closes it, by refusing outright rather
+  // than trusting every future writer to validate.
+  if (!isHexColor(accentColor)) return "";
   const rgb = hexToRgbTriplet(accentColor);
   const grad = `linear-gradient(135deg, ${accentColor} 0%, color-mix(in srgb, ${accentColor} 82%, #000) 100%)`;
   const lines = [
