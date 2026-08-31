@@ -52,7 +52,12 @@ const tableNamed = (settings: Settings, fallback: string) =>
   s((settings.table_names as Record<string, string> | undefined)?.["5"], fallback);
 
 /** The finished document as a standalone printable HTML page. */
-export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: Restaurant = {}): string {
+export function billPreviewHtml(settingsIn: Settings, mode: BillMode, restaurant: Restaurant = {}): string {
+  // NO SETTINGS IS A PREVIEW, NOT A CRASH (T25 round 3, item 44, 2026-08-31). The admin's billing
+  // screen renders this while its draft is still loading, and `null` came straight through to
+  // `settings.tax_components` — "Cannot read properties of null". Every other reader in this file
+  // already treats an absent value as a default; only the top of the function did not.
+  const settings: Settings = settingsIn && typeof settingsIn === "object" ? settingsIn : {};
   const bi = BILLDOC.billIdentity(settings, restaurant);
   const now = new Date();
   const dateStr =
