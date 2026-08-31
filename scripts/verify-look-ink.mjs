@@ -369,7 +369,9 @@ const PROBES = [
            <span class="dqty">2</span><span class="dadd">+</span><span class="dedit">e</span>
            <h3 class="om-sec-h">COFFEE</h3><span class="tmerge">one party T11 T12</span>
            <button class="fnav on">All <em>30</em></button>
-           <div class="tile"><span class="t-line-plain"><span class="t-linenum">0/6 served</span></span><span class="tseats">4</span></div>`,
+           <div class="tile"><span class="t-line-plain"><span class="t-linenum">0/6 served</span></span><span class="tseats">4</span></div>
+           <div class="tile t-new" style="--c:#f59e0b"><span class="t-top"><span class="tnum">6</span></span></div>
+           <div class="tile t-new" style="--c:#f59e0b"><span class="t-top"><span class="tnum tnum-xs" id="__tname">Patio 3</span></span></div>`,
     checks: [[".btn.primary", 4.5, "the primary button's label (was white on gold: 2.81 light / 2.23 dark)"],
              [".chip.on", 4.5, "the chosen category chip (same)"],
              [".dqty", 4.5, "the quantity pill on a dish tile (same)"],
@@ -379,7 +381,9 @@ const PROBES = [
              [".tmerge", 4.5, "the one-party label in an open table's header (was an orange at 1.89)"],
              [".t-linenum", 4.5, "the tile's x/y-served line — the manager floor's twin reads 6.43"],
              [".tseats", 4.5, "the tile's seat count — the manager floor's twin reads 6.40"],
-             [".fnav.on em", 4.5, "the count inside the chosen filter chip (was 3.89 on a 20% black wash)"]] },
+             [".fnav.on em", 4.5, "the count inside the chosen filter chip (was 3.89 on a 20% black wash)"],
+             [".t-new .tnum:not(.tnum-xs)", 3, "the TABLE NUMBER on a new-order tile (was 2.77 on the light board — amber on an amber wash, on the one tile that most wants reading)"],
+             ["#__tname", 4.5, "a table's NAME on a new-order tile — same class, smaller, so it needs the 4.5 floor rather than 3 (was 2.77)"]] },
   { name: "manager panel", role: "manager", url: "/manager", frame: "/panels/editor/",
     html: `<div class="ftile"><span class="ft-ico ft-ico-go">Y</span></div>
            <span class="brand" id="__brandword">Manager<span class="brand-rest">little French house</span></span>
@@ -389,6 +393,7 @@ const PROBES = [
            <div class="fstat warn"><div class="fstat-n">7</div></div>
            <div class="rr-made"><div class="rr-made-q">Was the food made?</div></div>
            <button class="ord-btn pay">Pay</button>
+           <div class="ftile ft-free" style="--c:#9aa0a6"><span class="ft-num">10</span></div>
            <div class="ftile"><span class="ft-num ft-num-sm">22</span>
              <div class="ft-merge ft-merge-parent">one party T12 T13</div></div>
            <span class="tab-badge">3</span>`,

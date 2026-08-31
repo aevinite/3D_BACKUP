@@ -227,6 +227,16 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    on white. Measured by the walkthrough's contrast check in BOTH skins. */
 .t-free .tnum, .t-free .t-linenum, .t-req .tnum, .t-req .t-linenum,
 .t-done .tnum, .t-done .t-linenum { color: color-mix(in srgb, var(--c) 30%, var(--text)); }
+/* …AND THE NEW-ORDER TILE, on the LIGHT skin only (T26 sweep #7, 2026-08-31 — item 20). The rule
+   above leans free/requested/done tiles on --text and left t-new on 78% of its own amber. On the
+   light board that is amber on an amber wash: the table number measured 2.77:1 against the 3:1 a
+   28px/800 figure needs — on the one tile that most wants reading, the one with a new order.
+   50%, not 60%: the SAME class also carries a table's NAME at .tnum-xs (16px), and a name is small
+   text needing 4.5 where the big number only needs 3. 60% cleared the number at 3.90 and left the
+   name short; 50% measures 4.79, which clears both floors, and the amber is still plainly amber.
+   DARK is untouched: it already reads 8.08, and moving a skin that is right is how this same round
+   nearly broke a chip. */
+html[data-theme="light"] .t-new .tnum { color: color-mix(in srgb, var(--c) 50%, var(--text)); }
 .tnum-sm { font-size: clamp(8.5px, 17cqw, 25px); }   /* two digits */
 .tnum-xs { font-size: clamp(7.5px, 12cqw, 18px); }   /* a NAME rather than a number */
 .tseats { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
