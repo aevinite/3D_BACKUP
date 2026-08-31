@@ -199,3 +199,57 @@ Each writes to French House and restores the exact prior value in a `finally` **
    `P40435` on two phase rows each. Proven pre-existing by re-running the guard with T11's file
    replaced by `origin/main`'s copy. Not repaired here — this project's own rule is "never renumber
    anyone else's". Noted in `INDEX.md` so the next terminal that sees it red does not lose an hour.
+
+---
+
+# ROUND 2 — THE WHOLE TERRITORY, 2026-09-01
+
+He asked for a fresh 500 that "should contain every single bit of thing in the boundaries", after
+items 1–11 went live on backup. Round 1 covered the three files the prompt named; **round 2 covers
+all eleven files the Reports Studio is actually made of**, including the six under
+`components/owner/reports/` that no terminal's bullet has ever named (1,856 lines between them).
+
+**609 assertions executed against a production build, condensed into 500 numbered rows
+(`P48362`–`P48861`). All green. One problem found.**
+
+## Item 12 · Four reports downloaded a DIFFERENT report — FIXED
+
+Owner → Reports → Export → CSV / Excel / Print. The file was headed with the report you were
+looking at and filled with another one. Measured on 30 days, French House:
+
+| report | what the screen shows | what the file contained |
+|---|---|---|
+| Times of day | Morning / Afternoon / Evening / Late night | 24 hourly rows |
+| Day of week | Monday…Sunday, days counted, avg/day | dated by-period rows (3 Aug, 4 Aug…) |
+| Which dishes earn | Dish · **Group** · Sold · % units · Sales · % sales | the plain dish list, no grouping at all |
+| Average bill | …Total collected · **Avg bill** · Cancelled | the same table **without** the Avg bill column |
+
+One cause: **the export branched on the payload SHAPE, and several reports share one.** By-hour and
+Times-of-day are both `hourly`; Day-of-week and Average-bill are both `money`. So the first report
+of each shape decided what everybody got, under everybody's heading. Nothing looked broken — proper
+title, real numbers, correct totals — which is why it survived every sweep so far.
+
+Fixed by telling the export which BODY is on screen, and by moving the groupings (`DAYPARTS`, the
+weekday names, the IST weekday helper) out of `page.tsx` and into `kit.tsx` so **one definition**
+feeds both the screen and the file. They were unreachable from the export before, which is precisely
+how the two came to describe different things.
+
+Verified by downloading all four and comparing row by row with the screen: Morning 714 / ₹1,00,334 /
+27.2% · Monday 2 / 69 / ₹39,312 / 10.7% / ₹19,656 · Pink Pineapple Smoothie / Star / 717 / 20.3% /
+₹2,10,156 / 57.0% · Avg bill ₹498 on 3 Aug — every one identical.
+
+Guard: a new `T11-I` section in `verify:owner-reports` (125 → 133 checks).
+
+## What round 2 found NOT to be faults
+
+- **`kit.tsx` says its CSS is "scoped to `.rs-root`" but really scopes by the `rs-` class prefix.**
+  Checked what that would actually break: no file outside the studio wears an `rs-` class, and the
+  one component that emits `rs-` markup from outside the folder (`Charts.tsx`) is only ever rendered
+  inside the Reports page. Loosely worded, correct in effect.
+- **The totals row disappears while a search is active in a long list.** Deliberate — a total of
+  everything under a filtered list would be a lie. Drove it: the row returns the moment the search
+  is cleared.
+- **A day-kind export's filename carries the date twice** (`day-summary-2026-08-31-2026-08-31`).
+  That is the period and the generated-on date, both of which belong in the name.
+- **The Times-of-day printed sheet is exactly one page.** It has four rows. A short report is short;
+  what matters is that it is not CLIPPED, and it is not.
