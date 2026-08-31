@@ -444,8 +444,12 @@ const PROBES = [
              [".ord-card .ol-qty", 4.5, "Bills → a line's ×N quantity (was 3.87)"],
              [".ord-card .ord-sub", 4.5, "Bills → the Subtotal / Tax rows (was 3.87)"]] },
   { name: "kitchen board", role: "kitchen", url: "/kitchen", frame: "/panels/kitchen/",
-    html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>`,
-    checks: [["#col-cooking h2", 4.5, "the Cooking lane heading"]] },
+    html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>
+           <div class="col" id="col-ready"><h2>✅ Ready</h2></div>
+           <div class="col" id="col-new"><h2>🆕 New</h2></div>`,
+    checks: [["#col-cooking h2", 4.5, "the Cooking lane heading"],
+             ["#col-ready h2", 4.5, "the Ready lane heading (was 4.23 on the light board — a green picked for a dark card)"],
+             ["#col-new h2", 4.5, "the New lane heading"]] },
   // THE GUEST SIDE HAD NO PROBE AT ALL until sweep #7, and three of that run's five faults were
   // here. It needs no login: the menu is the one door that opens to anybody.
   { name: "guest menu", role: null, url: "/menu?table=1", frame: null, skinKey: "lfh_theme",
