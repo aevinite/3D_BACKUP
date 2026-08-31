@@ -480,6 +480,23 @@ console.log(out.join("\n"));
     /url\.pathname \+ \(url\.searchParams\.toString\(\)/.test(menuView));
 }
 
+
+// ── A PARSED SESSION IS NOT A VALID ONE (T25 round 3, item 35, 2026-08-31) ─────────────────────────
+// lib/session.ts's getStoredSession() wrapped JSON.parse in a try/catch, which catches a THROW and
+// nothing else — and JSON.parse is happy to return a number, a string, null or an array. MEASURED with
+// `42` in the slot: it handed back the number 42, so a caller read `.token` as undefined and an RPC
+// went out with `p_token: undefined`. A guest sees that as a broken table, not as "join again".
+{
+  const sess = read("lib/session.ts").split("\n")
+    .filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*)/.test(l)).join("\n");
+  check("a stored session must be an OBJECT before it is trusted",
+    /if \(!s \|\| typeof s !== "object" \|\| Array\.isArray\(s\)\) return null;/.test(sess));
+  check("…and must actually carry a token, or it is not a session",
+    /if \(typeof s\.token !== "string" \|\| !s\.token\) return null;/.test(sess));
+  check("…and the table check still comes after both, so a token from table 7 is never used at table 8",
+    sess.indexOf('typeof s.token !== "string"') < sess.indexOf("table && s.table !== table"));
+}
+
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
