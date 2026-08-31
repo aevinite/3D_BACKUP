@@ -32,7 +32,7 @@
 //
 // So it checks exactly the readers whose id list is "an owner's whole estate" or "every restaurant
 // the admin can see" — the ones with no natural ceiling. Add a function here when you write another.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
@@ -51,7 +51,12 @@ const ESTATE_READERS = {
   // answer there marks a bill deleted while its food is live — the half-state that function's own
   // header says persisted for months. It returns one row per ORDER, so it crosses the 1,000-row cap
   // sooner than an estate read does. (T25 sweep, 2026-08-21.)
-  "lib/softDelete.ts": ["softDeleteOrders"],
+  // …and `restoreOrders` beside it (T25 sweep #7, 2026-08-28), for the mirror-image reason. It is
+  // the "you can restore them" promise the admin bill ledger prints, and its first read had the
+  // same unchunked, error-thrown-away shape: a failed read answered `{ restored: 0 }`, which the
+  // ledger renders as "nothing needed restoring" rather than "that did not work". Both functions'
+  // first reads now go through lib/inChunks.ts and throw on a failed chunk.
+  "lib/softDelete.ts": ["softDeleteOrders", "restoreOrders"],
 };
 
 // What counts as chunked: the shared helper, or restaurantNames' own equivalent loop.
@@ -127,8 +132,82 @@ for (const [rel, fns] of Object.entries(ESTATE_READERS)) {
   }
 }
 
+// ── AND THE GENERAL RULE THE FOUR NAMES ABOVE ARE A SPECIAL CASE OF ────────────────────────────
+//     NO TWO FILES IN lib/ MAY EXPORT THE SAME NAME. (T25, sweep #7, 2026-08-28.)
+//
+// The list above only protects four names somebody thought of. `hexToRgbTriplet` was exported from
+// BOTH lib/accent.ts and lib/brandTheme.ts, and the two DISAGREED on a real input: brandTheme's
+// checks isHexColor() first, which requires the leading `#`; accent's stripped the `#` before
+// testing, so "c0392b" came back as "192, 57, 43" from one and null from the other. And
+// components/AppShell.tsx imports from both files, so both answers sat in one module graph.
+//
+// Checked by walking lib/, so a fifth name nobody has thought of yet is covered on the day it lands.
+// A RE-EXPORT is not a duplicate — `export { x } from "./y"` is one definition reached two ways, and
+// this repo uses it deliberately (lib/ownerScope re-exports the partial-read words so a server route
+// needs one import; lib/printHelpers re-exports PaperSize so a client page never reaches the server
+// half). Only a second DEFINITION counts.
+{
+  const libDir = join(ROOT, "lib");
+  const byName = new Map();
+  for (const f of readdirSync(libDir).filter((n) => /\.tsx?$/.test(n))) {
+    const rel = `lib/${f}`;
+    const src = readFileSync(join(libDir, f), "utf8");
+    // Line comments dropped so a name QUOTED in prose is not counted. Never a block-comment
+    // stripper: a `/*` inside a regex literal pairs with a `*/` thousands of characters later.
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+    // Re-exports first, so they can be excluded rather than counted as definitions.
+    const reexported = new Set([...code.matchAll(/export\s*\{([^}]*)\}\s*from\s*["'][^"']+["']/g)]
+      .flatMap((m) => m[1].split(",").map((x) => x.trim().split(/\s+as\s+/).pop()).filter(Boolean)));
+    for (const m of code.matchAll(/^export\s+(?:async\s+)?(?:function|const|class)\s+(\w+)/gm)) {
+      if (reexported.has(m[1])) continue;
+      if (!byName.has(m[1])) byName.set(m[1], []);
+      if (!byName.get(m[1]).includes(rel)) byName.get(m[1]).push(rel);
+    }
+  }
+  // A pair that is allowed, NAMED with its reason and re-checked below so the allowance cannot rot
+  // into a hole (verify:admin-refusals' own count drifted from 2 to 3 exactly that way).
+  const ALLOWED = {
+    // Two unrelated things that happen to share a plain English word: the guest's order progress
+    // (received → preparing → served) and the four headings of the printing board. Nothing imports
+    // both, so nothing can pick the wrong one today. Renaming either would touch components and an
+    // admin page that belong to other territories, so it is offered rather than taken — T25, sweep
+    // #7, 2026-08-28.
+    STEPS: ["lib/orderStatus.ts", "lib/printBoardWords.ts"],
+  };
+  const clashes = [...byName.entries()]
+    .filter(([, files]) => files.length > 1)
+    .filter(([name, files]) => {
+      const allowed = ALLOWED[name];
+      return !(allowed && allowed.length === files.length && allowed.every((f) => files.includes(f)));
+    });
+  // …and the allowance is only valid while the two really are unrelated: no file may import both.
+  for (const [name, files] of Object.entries(ALLOWED)) {
+    for (const dir of ["app", "components", "lib"]) {
+      const stack = [join(ROOT, dir)];
+      while (stack.length) {
+        const d = stack.pop();
+        let entries = [];
+        try { entries = readdirSync(d, { withFileTypes: true }); } catch { continue; }
+        for (const e of entries) {
+          if (e.name.startsWith(".") || e.name === "node_modules") continue;
+          const full = join(d, e.name);
+          if (e.isDirectory()) { stack.push(full); continue; }
+          if (!/\.tsx?$/.test(e.name)) continue;
+          const src2 = readFileSync(full, "utf8");
+          const both = files.every((f) => src2.includes(f.replace(/^lib\//, "@/lib/").replace(/\.tsx?$/, "")));
+          if (both) bad.push(`${full.replace(ROOT + "/", "")} imports BOTH files that export \`${name}\` — the allowance for that name was granted on the basis that nothing does. Rename one of them.`);
+        }
+      }
+    }
+  }
+  for (const [name, files] of clashes) {
+    bad.push(`${files.join(" and ")} each DEFINE and export \`${name}\` — one name, two answers is how the next person picks the wrong behaviour by accident. Import one from the other, or give the different behaviour a name that says so (lib/liveBoard.ts \`pageBoard\` is the worked example).`);
+  }
+  if (!clashes.length) globalThis.__names = byName.size;
+}
+
 if (bad.length) {
-  console.log(`\n✗ verify:id-chunks — ${bad.length} estate-wide read(s) are not chunked:\n`);
+  console.log(`\n✗ verify:id-chunks — ${bad.length} problem(s): an estate-wide read that is not chunked, a shadowed helper name, or two files exporting one name:\n`);
   for (const b of bad) console.log("  · " + b);
   console.log(`
 An id list of 800 uuids is 29.6 KB of URL and PostgREST answers "Bad Request"; a select with no
@@ -176,10 +255,62 @@ for (const [rel] of Object.entries(ESTATE_READERS).concat([["lib/liveBoard.ts"]]
   }
 }
 
+// ── EVERY readInChunks READ IS ONE ROW PER ID (T25 round 2, item 28, 2026-08-31) ─────────────────
+//
+// `readInChunks` has a contract its own body enforces:
+//
+//     if (batch.length > chunk.length) return { error: new Error("…the read is not one-row-per-id") }
+//
+// So a callback that can return MANY rows per id does not get a longer list — it gets an error, and
+// whatever the caller already wrote stays written. lib/softDelete.ts did exactly that: it asked
+// "which of these sessions still has a live order" through readInChunks with `.limit(1000)` and a
+// note explaining that orders outnumber sessions on purpose. MEASURED against the real helper:
+//
+//     readInChunks: a chunk returned more rows than ids (1000 > 500) — the read is not one-row-per-id
+//
+// …thrown as `bill tombstone check failed` AFTER the bills had been stamped deleted, and unrepairable
+// by a retry (the second call finds nothing live, returns { deleted: 0 } and never reaches the
+// tombstone). Ten other chunked reads in the codebase all end `.limit(chunk.length)`. This makes that
+// shape the rule, so the next many-per-id read has to page instead of pretending.
+{
+  const files = [];
+  (function walk(d) {
+    for (const e of readdirSync(join(ROOT, d), { withFileTypes: true })) {
+      const rel = `${d}/${e.name}`;
+      if (e.isDirectory()) walk(rel);
+      else if (/\.tsx?$/.test(e.name)) files.push(rel);
+    }
+  })("lib");
+  let chunked = 0;
+  for (const rel of files) {
+    // lib/inChunks.ts is where readInChunks is DEFINED — its own signature is not a call.
+    if (rel === "lib/inChunks.ts") continue;
+    const src = readFileSync(join(ROOT, rel), "utf8");
+    if (!/readInChunks/.test(src)) continue;
+    // Take each readInChunks CALL by paren-matching, so a wrapped callback is seen whole. `<` after
+    // the name is the type argument every caller passes; the definition is excluded above.
+    for (const m of src.matchAll(/readInChunks\s*</g)) {
+      let i = src.indexOf("(", m.index), depth = 0, j = i;
+      for (; j < src.length; j++) {
+        if (src[j] === "(") depth++;
+        else if (src[j] === ")") { depth--; if (!depth) break; }
+      }
+      const call = src.slice(m.index, j + 1);
+      chunked++;
+      if (/\.limit\(\s*chunk\.length\s*\)/.test(call)) continue;
+      const shown = call.replace(/\s+/g, " ").slice(0, 150);
+      bad.push(`${rel}: a readInChunks read does not end .limit(chunk.length) — readInChunks REFUSES a batch bigger than its chunk ("the read is not one-row-per-id"), so a many-rows-per-id read gets an ERROR, not a longer list. Page it yourself instead (lib/softDelete.ts → sessionsWithLiveOrders is the worked example).\n         ${shown}…`);
+    }
+  }
+  if (chunked < 8) {
+    bad.push(`this check found only ${chunked} readInChunks call(s) — it should see ten or more. Its walk found nothing, so nothing was checked.`);
+  }
+}
+
 if (bad.length) {
   console.log(`\n✗ verify:id-chunks — ${bad.length} problem(s):\n`);
   for (const b of bad) console.log("  · " + b);
   process.exit(1);
 }
 
-console.log(`✓ verify:id-chunks — ${checked} estate-wide read(s) chunk their id list, and no lib/ file shadows a shared read helper`);
+console.log(`✓ verify:id-chunks — ${checked} estate-wide read(s) chunk their id list; no lib/ file shadows a shared read helper; and all ${globalThis.__names ?? 0} exported names in lib/ are unique`);

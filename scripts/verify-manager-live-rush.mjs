@@ -59,6 +59,28 @@ const head = (m) => console.log("\n" + m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The two restaurants to run simultaneously: each needs its own diag manager login.
+//
+// ── YES, THIS PLACES REAL ORDERS ON AANGAN, AND THAT IS ALLOWED (owner, 2026-08-28) ─────────────
+//
+// Asked directly whether this guard should be driving Aangan Garden at all — the restaurant every
+// sweep prompt calls "the READ-ONLY control at factory defaults" — he answered:
+//
+//     "you can do it on backup you can do anything you want on backup it's the test site only"
+//
+// So the rule and this guard were never actually in conflict; the rule is about Aangan's PERMISSION
+// AND FEATURE SWITCHES, which is the only part of a control restaurant that carries information.
+// Its access tree stays at factory defaults so that its differences from French House remain
+// evidence. Orders, tables and bills are not that.
+//
+// AND THE SECOND RESTAURANT IS HALF THE POINT. "Does one restaurant's rush bleed onto another" is
+// what this file exists to answer, and it cannot be answered with one restaurant. Dropping Aangan
+// would have kept a rule tidy on paper and thrown away the check.
+//
+// Still true, and unchanged: this guard touches no switch on either restaurant, picks only tables
+// nobody else has claimed (scripts/sweep/fixtureTables.mjs), and closes only the tables it opened.
+// None of this applies to AV LIVE, which is never driven by anything here.
+//
+// Do not re-raise this. It has now been asked and answered twice.
 const CREWS = [
   { name: "My Little French House", creds: { username: "diagm1", password: "diag-mgr-2026", route: "/manager" } },
   { name: "Aangan Garden", creds: { username: "diagm11", password: "diag-mgr-2026", route: "/manager" } },

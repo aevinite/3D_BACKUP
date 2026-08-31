@@ -39,10 +39,15 @@
 // cost nothing. Add a check here whenever a new bulk action or destination picker is added to the
 // waiter tablet.
 import fs from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import path from "node:path";
 import vm from "node:vm";
 
-const ROOT = process.argv[2] || process.cwd();
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be plain `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in eight more guards.)
+const ROOT = repoRootFrom(import.meta.url);
 const TABLET = "public/panels/tablet/app.js";
 const src = fs.readFileSync(path.join(ROOT, TABLET), "utf8");
 const HTML = "public/panels/tablet/index.html";
@@ -196,10 +201,13 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     `before returning. Without it the marker above is decoration and the tap is silent again.`,
   );
   check(
-    "tablet: the split-payment button it copies still refuses out loud too",
-    /goBtn\.onclick[\s\S]{0,600}?toast\(/.test(src),
-    `In ${TABLET}, the split "Take payment" button is the pattern #payBill now follows — if it ever\n    ` +
-    `goes back to being disabled, the two controls disagree about the same situation again.`,
+    "tablet: the one split screen's Take-payment button refuses out loud too",
+    /p\.querySelector\("\.sb-go"\)\.onclick = \(\) => \{/.test(src)
+      && /Every part needs an amount above zero/.test(src)
+      && !/sb-go[^>]*disabled/.test(src),
+    `${TABLET}: the pattern the money buttons on this panel all copy — stay ENABLED and say WHY it\n    ` +
+    `will not go. A disabled button that swallows the tap is indistinguishable from a broken one, and\n    ` +
+    `this is the most repeated money control in a service.`,
   );
 }
 
@@ -411,6 +419,517 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
     /\.t-act \{[^}]*min-height: clamp\(26px, 44cqw, 40px\)/.test(css),
     `${CSS}: .t-act's min-height IS the tap target (T14 sweep, 2026-08-05 — it was raised from 19px\n    ` +
     `precisely because a waiter could not hit it). Take the space from the wording, never from this.`,
+  );
+}
+
+// ── 9 · A FIGURE THE WAITER HAS TO MATCH IS NEVER ROUNDED (T7 sweep #7, 2026-08-22) ─────────
+// Measured on the running panel: a 40-paise shortfall in the split-payment panel came out of the
+// refusal as "₹0 of the bill is still uncovered." — a refusal that names nothing, on a button that
+// then refuses again, and again, with no way to tell from the screen what is wrong. The running
+// line twelve pixels above it already used inrExact and said "₹0.40 still to cover", so the two
+// halves of the same sentence disagreed about the same number.
+//
+// This panel declares BOTH helpers on purpose (see the note above inrExact): `inr` rounds to whole
+// rupees and is right for a heading, `inrExact` keeps the paise and is the only correct one for a
+// figure a person has to MATCH, because the server recomputes the due to the paise. So the rule is
+// narrow and checkable: inside the two split screens, every refusal that quotes a gap or a target
+// uses inrExact.
+{
+  // ONE SCREEN NOW (owner, 2026-08-28) — the KOT-menu split and the payment-sheet split were
+  // merged into renderSplitBill(), so its two refusals are the whole list. The third entry that
+  // used to be here ("the shares must add up to exactly …") belonged to the screen that is gone.
+  const shortfall = [
+    ["the split screen's shortfall refusal", /of the bill is still uncovered/],
+    ["the split screen's over-collect refusal", /more than the bill/],
+  ];
+  // Searched in the CODE, not in the comments (2026-08-30). The first version searched raw `src`
+  // and took the FIRST match — so writing a comment that QUOTES the refusal ("…refused with '₹0.25
+  // more than the bill'") pointed the check at a sentence in English and failed it. A guard must
+  // accuse the line that runs, never the line that explains it.
+  const codeSrc = src
+    .replace(/<!--[\s\S]*?-->/g, "")            // HTML comments inside the template literals
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+  for (const [what, re] of shortfall) {
+    const at = codeSrc.search(re);
+    const line = at < 0 ? "" : codeSrc.slice(codeSrc.lastIndexOf("\n", at) + 1, codeSrc.indexOf("\n", at));
+    check(
+      `tablet: ${what} quotes the gap to the PAISE (inrExact, never inr)`,
+      at >= 0 && /inrExact\(/.test(line) && !/[^a-zA-Z]inr\(/.test(line),
+      `${TABLET}: ${at < 0 ? "the refusal is gone — if it moved, move this check with it." : `this line rounds a figure the waiter must match:\n    ${line.trim().slice(0, 160)}`}\n    ` +
+      `inr() turns a 40-paise gap into "₹0", which refuses forever and names nothing. Use inrExact.`,
+    );
+  }
+  check(
+    "tablet: the split screen's running total line still uses inrExact too",
+    /const refreshSum = \(\) => \{[\s\S]{0,420}?inrExact\(left\)/.test(src),
+    `${TABLET}: the running total is the line the refusal has to AGREE with — the original fault was\n    ` +
+    `the two halves of one sentence quoting the same number differently ("₹0.40 still to cover" over\n    ` +
+    `"₹0 of the bill is still uncovered"). If either side starts rounding, that comes back.`,
+  );
+  check(
+    "tablet: the split's running line names an EMPTY part before it talks about the arithmetic",
+    /const refreshSum = \(\) => \{\s*\n\s*const blank = legs\.filter\(\(l\) => !\(Number\(l\.amount\) > 0\)\)\.length;\s*\n\s*if \(blank\)/.test(src),
+    `${TABLET}: an empty part contributes 0, so the arithmetic still balances and the line goes GREEN\n    ` +
+    `while Take payment refuses "Every part needs an amount above zero". One tap reaches it —\n    ` +
+    `＋ Add another part seeds "" when the bill is already covered. The line and the button under it\n    ` +
+    `must never disagree about the same state; that is the ₹0-shortfall fault wearing a different hat.`,
+  );
+  check(
+    "tablet: …and that check runs BEFORE the shortfall arithmetic, not after it",
+    src.indexOf("const blank = legs.filter") < src.indexOf("const left = legLeft();\n    sumEl.textContent = left === 0"),
+    `${TABLET}: if the arithmetic answers first, a balanced-but-empty split still reports ✓.`,
+  );
+  check(
+    "tablet: there is exactly ONE split screen, and both doors open it",
+    (src.match(/function renderSplitBill\(/g) || []).length === 1
+      && !/function renderSplitSettle\(/.test(src)
+      && /kotop === "split"\) renderSplitBill\(/.test(src)
+      // ANCHORED ON THE RULE, NOT THE PUNCTUATION (T28, 2026-08-30). This read `\) \{
+      // renderSplitBill\(` — the call had to be the very first thing inside the branch. The tip
+      // work landed `await recordTip(t, picked.tip);` in front of it, the door still opened the one
+      // split screen exactly as required, and this guard went red on a space. What the row is
+      // actually promising is that the pay sheet's split door reaches renderSplitBill, so that is
+      // what it now looks for, anywhere in that branch.
+      && /picked\.special === "split"\)[\s\S]{0,160}?renderSplitBill\(/.test(src),
+    `${TABLET}: splitting a bill must exist ONCE (owner, 2026-08-28: "both have same interface as the\n    ` +
+    `kot one"). It used to exist twice, with different abilities and different endpoints, so a waiter\n    ` +
+    `learned one and met the other. Both 🧾 KOT ▾ and the payment sheet's bottom line must call\n    ` +
+    `renderSplitBill(), and renderSplitSettle must not come back.`,
+  );
+  check(
+    "tablet: the one split screen offers all four ways to divide a bill",
+    ["equal", "custom", "dish", "ticket"].every((m) => new RegExp(`data-mode="${m}"`).test(src)),
+    `${TABLET}: he asked for "equally split custom amount by dish by Kitchen ticket" — all four tabs,\n    ` +
+    `on the one screen. Dropping one silently takes a way of dividing a bill away from a restaurant.`,
+  );
+  check(
+    "tablet: …and every part still pays its own way, pay-later included",
+    /const WAYS = \["UPI", "Cash", "Card", "Other"\]\.concat\(tabletKhataOn\(\) && tshow\("tablet_khata"\) \? \[PAY_LATER\] : \[\]\)/.test(src)
+      && /khataCustomerId: l\.khata\.customer_id/.test(src),
+    `${TABLET}: "by each part, pays its own way. One part on somebody's tab pay later like everything"\n    ` +
+    `(owner, 2026-08-28). Pay later is offered only where the restaurant HAS it and this waiter may\n    ` +
+    `use it — otherwise the screen offers a part the server will refuse.`,
+  );
+  check(
+    "tablet: the split posts to /pay-split, never the older /pay+splits",
+    /actGated\("POST", `\/tables\/\$\{t\}\/pay-split`/.test(src) && !/\/pay`, \{ splits \}/.test(src),
+    `${TABLET}: only /pay-split carries a pay-later part (mig 352 — it checks the khata module and\n    ` +
+    `tablet_khata on top of mark_paid, and parks the tab). The older /pay+splits route refuses one,\n    ` +
+    `so sending there would make "one part on somebody's tab" fail at the server.`,
+  );
+}
+
+// ── 10 · ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22 — completed T7 sweep #7) ───
+// `--scrim` was added to this panel's stylesheet on 2026-08-22 so that "every full-screen overlay
+// dims the page by the same amount", because two overlays on one screen dimming differently is what
+// makes one product feel like several. It reached the four overlays written in CSS and none of the
+// ten built in app.js, nor the table-detail backdrop — so, measured on the running panel, opening a
+// table (rgba(4,8,18,.5)) then its Discount (rgba(4,8,18,.66)) then a confirm (the token's
+// rgba(3,7,16,.6)) dimmed the floor by THREE different amounts inside one action.
+//
+// Every overlay this panel builds by hand sets its dim in an inline style, so the check is exact:
+// no hardcoded rgba() may sit in a `background:` beside `position: "fixed"`. The BLUR is deliberately
+// NOT unified — a heavier blur is how a stacked layer says it is on top.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  check(
+    "tablet: the --scrim token is declared",
+    /--scrim:\s*rgba\([\d\s,.]+\)/.test(css),
+    `${CSS}: the one dim every overlay reads. Do not inline it back into each overlay.`,
+  );
+  const inline = [...src.matchAll(/position: "fixed"[^}]*?background: "(rgba\([^"]+\))"/g)].map((m) => m[1]);
+  check(
+    "tablet: no hand-built overlay hardcodes its own dim",
+    inline.length === 0,
+    `${TABLET}: ${inline.length} overlay(s) still set their own dim (${[...new Set(inline)].join(", ")}).\n    ` +
+    `Use background: "var(--scrim)" so a sheet opened over another sheet dims by the same amount.`,
+  );
+  // Read the whole declaration BLOCK, never a fixed character window: these rules carry long
+  // explanatory comments between the selector and the declaration, so a window is a guard that
+  // fails on a comment someone added rather than on the thing it is watching.
+  const ruleBlock = (sel) => {
+    const at = css.indexOf(sel + " {");
+    if (at < 0) return null;
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    return close < 0 ? null : css.slice(open + 1, close);
+  };
+  const backdrop = ruleBlock("#panel:has(.detail-pop)");
+  check(
+    "tablet: the table-detail backdrop reads the token, not a value of its own",
+    !!backdrop && /background:\s*var\(--scrim\)/.test(backdrop),
+    `${CSS}: #panel:has(.detail-pop) is the backdrop a waiter sees more than any other. It read\n    ` +
+    `rgba(4,8,18,.5) while the sheets above it read something else.` +
+    (backdrop === null ? "\n    (the rule itself was not found — if the selector moved, move this check with it.)" : ""),
+  );
+  const cssDims = [...css.matchAll(/^\.(confirm-overlay|opt-overlay|qdest-overlay|tbl-drawer-backdrop)[^{]*\{[^}]*background:\s*([^;]+);/gm)].map((m) => [m[1], m[2].trim()]);
+  const strays = cssDims.filter(([, v]) => v !== "var(--scrim)");
+  check(
+    "tablet: the four CSS overlays still read the token",
+    strays.length === 0,
+    `${CSS}: ${strays.map(([k, v]) => `.${k} = ${v}`).join(", ")} — these were the ones the token\n    ` +
+    `already covered; a regression here undoes the whole point of it.`,
+  );
+}
+
+// ── 11 · A MONEY FIGURE A FINGER TYPES GETS NO SPINNER ARROWS (owner picked, 2026-08-28) ─────
+// The discount screen's three boxes are `type="number"`, so a browser draws its own ▲▼ pair inside
+// each one — measured on the A35 at dpr 3, about 7px per arrow inside a 41px box, and inside the
+// gold "They pay" field they were eating room from the one figure a manager reads and retypes.
+// `type="number"` and `inputmode="decimal"` STAY (that is what gives a phone the numeric keypad);
+// only the arrows go, and a spinner is a pseudo-element so it has to be done in the stylesheet.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  const boxes = ["disc-pct-input", "disc-amt-input", "disc-pay-input"];
+  for (const b of boxes) {
+    check(
+      `tablet: .${b} hides the browser's spinner arrows`,
+      new RegExp(`\\.${b}::-webkit-(?:outer|inner)-spin-button`).test(css)
+        && new RegExp(`\\.${b}[^{]*\\{[^}]*appearance: textfield`).test(css),
+      `${CSS}: the box needs BOTH halves — the WebKit pseudo-element rule and \`appearance: textfield\`\n    ` +
+      `for Firefox, which draws the arrows from the input itself. One without the other leaves them\n    ` +
+      `on half the devices in a restaurant.`,
+    );
+  }
+  check(
+    "tablet: …and those boxes keep type=number + inputmode=decimal (the numeric keypad)",
+    boxes.every((b) => new RegExp(`type="number"[^>]*inputmode="decimal"[^>]*class="${b}"|class="${b}"[^>]*type="number"|type="number" inputmode="decimal"[^>]*${b}`).test(src)),
+    `${TABLET}: dropping the arrows must not drop the keypad. A waiter on a phone typing a discount\n    ` +
+    `into a plain text box gets the full QWERTY keyboard.`,
+  );
+}
+
+// ── 12 · NO FUNCTION IN THIS PANEL IS DECLARED AND NEVER USED (T7 sweep #7, 2026-08-28) ──────
+// `ensureTableSlice()` sat here for weeks after `ensurePartySlices()` replaced it: ~35 lines with
+// no caller, and THREE comments still sending the next reader to it. That is worse than clutter in
+// the part of the panel that handles money — a caller who reached for it would have refreshed one
+// table of a merged party and under-counted the bill, which is the exact fault its replacement
+// exists to prevent. The ledger rows that check such a function's LOGIC keep passing while it is
+// dead, so nothing else catches this.
+//
+// Counting rule: a function is USED if it is called `name(` OR passed by reference (`setTimeout(fn,
+// 0)`, `.map(fn)`, `onclick = fn`, `LFH_BACK.layer("x", fn)`). Missing the reference case is what
+// made the first version of this check flag four healthy functions — a guard that cries wolf is
+// worse than no guard.
+{
+  const bare = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+  const declared = [...bare.matchAll(/^(?:async )?function ([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+  // EMPTY, AND IT SHOULD STAY EMPTY. It briefly held resolveTaxMode and taxableBaseOf, raised with
+  // the owner on 2026-08-28 because each was a deliberate MIRROR of a rule living in two other
+  // places; he said delete them, and they are gone. An entry here is an admission that dead code
+  // was kept on purpose — add one only with the reason, and only when somebody decided it.
+  const ALLOWED_DEAD = new Set([]);
+  const orphans = [];
+  for (const n of new Set(declared)) {
+    if (ALLOWED_DEAD.has(n)) continue;
+    const calls = (bare.match(new RegExp(String.raw`(?<![\w$.])` + n + String.raw`\s*\(`, "g")) || []).length;
+    const refs = (bare.match(new RegExp(String.raw`(?<![\w$.])` + n + String.raw`(?!\s*\()(?![\w$])`, "g")) || []).length;
+    if (calls <= 1 && refs === 0) orphans.push(n);
+  }
+  check(
+    "tablet: no function is declared here and never called or referenced",
+    orphans.length === 0,
+    `${TABLET}: ${orphans.join(", ")} — declared and used nowhere.\n    ` +
+    `Delete it, or give it a caller. If it is a deliberate mirror of a rule that lives elsewhere,\n    ` +
+    `add it to ALLOWED_DEAD above WITH the reason, so the next reader is not sent to dead code.`,
+  );
+  check(
+    "tablet: …and the allowance list has not quietly grown",
+    ALLOWED_DEAD.size === 0,
+    `scripts/verify-tablet-taps.mjs: ALLOWED_DEAD holds ${ALLOWED_DEAD.size} entr(ies). It was emptied\n    ` +
+    `on 2026-08-28 and should stay empty — every entry is dead code somebody decided to keep, so a\n    ` +
+    `new one needs a written reason and the owner's word, not a quiet addition to get green.`,
+  );
+  check(
+    "tablet: ensureTableSlice specifically has not come back",
+    !/^(?:async )?function ensureTableSlice\s*\(/m.test(src),
+    `${TABLET}: ensureTableSlice() is back. It refreshes ONE table; a merged party needs every\n    ` +
+    `member's slice or partyOrders() sees half the bill. Use ensurePartySlices().`,
+  );
+}
+
+// ── 13 · ONE SWITCH, EVERY DOOR TO SPLITTING ─────────────────────────────────────────────────
+//
+// Splitting a bill is a per-restaurant switch that starts OFF (mig 248). It has TWO doors on this
+// panel — 🧾 KOT ▾ → "Split the bill", and the small line at the bottom of the payment sheet —
+// and on 2026-08-30 only the first one asked the switch: a restaurant with splitting off still had
+// a waiter one tap from the whole split screen, and nothing on the server refuses a /pay-split, so
+// the panel is the only gate there is. Both doors and the screen itself now read one splitBillOn().
+{
+  check(
+    "tablet: the split switch is read through ONE splitBillOn(), not re-derived",
+    /function splitBillOn\s*\(\)/.test(src),
+    `${TABLET}: splitBillOn() is gone. Every door to splitting must ask the SAME function —\n    ` +
+    `re-deriving state.data.settings.split_bill_enabled at each door is how one of them was missed.`,
+  );
+  const rederived = (src.match(/settings\s*\|\|\s*\{\}\)\.split_bill_enabled/g) || []).length;
+  check(
+    "tablet: …and only that function reads the raw setting",
+    rederived <= 1,
+    `${TABLET}: split_bill_enabled is read raw in ${rederived} places. Read it once, inside\n    ` +
+    `splitBillOn(), and call that everywhere — a door that asks the setting itself is a door that\n    ` +
+    `can be added without asking it at all.`,
+  );
+  check(
+    "tablet: the KOT menu's split row asks the switch",
+    /\(splitBillOn\(\)\s*\n?\s*\?\s*row\("split"/.test(src),
+    `${TABLET}: the 🧾 KOT ▾ split row no longer asks splitBillOn().`,
+  );
+  check(
+    "tablet: the payment sheet's split line asks the same switch",
+    /split:\s*splitBillOn\(\)/.test(src),
+    `${TABLET}: payBillWithMethod() passes split: true. The small line at the bottom of the\n    ` +
+    `payment sheet is the SECOND door to the same screen — it must obey the same switch as the\n    ` +
+    `first, or turning splitting off does nothing for the waiter who uses that door.`,
+  );
+  check(
+    "tablet: and the split screen refuses to open when the switch is off",
+    /if \(!splitBillOn\(\)\) \{ toast\(/.test(src),
+    `${TABLET}: renderSplitBill() opens without asking splitBillOn(). Every door checks, and the\n    ` +
+    `screen checks too — a third door added later must not be able to reopen this hole.`,
+  );
+}
+
+// ── 14 · THE SPLIT SCREEN'S OWN TOTAL IS A FIGURE SOMEBODY MUST MATCH ────────────────────────
+//
+// inr() rounds to whole rupees; inrExact() keeps the paise and prints whole rupees when there are
+// none. The rule (2026-08-22) is that every figure a person has to MATCH uses inrExact — and on
+// 2026-08-30 the split screen was obeying it in its running line and its refusals while its own
+// TITLE and its Collect button still rounded. On a ₹1,065.75 bill both said ₹1,066, so a waiter
+// typing custom amounts to reach the number in front of them was refused by 25 paise they could
+// not see anywhere.
+{
+  // The WHOLE function, not a fixed number of characters: the first version of this check sliced
+  // 12,000 chars and stopped two lines before the Take-payment refusal, so it counted five figures
+  // and demanded six. A guard that measures an arbitrary window is a guard that will lie later.
+  const sbStart = src.indexOf("function renderSplitBill");
+  const sbEnd = src.indexOf("\nfunction ", sbStart + 10);
+  const sb = src.slice(sbStart, sbEnd > 0 ? sbEnd : src.length);
+  check(
+    "tablet: the split screen's Collect button names the bill to the paise",
+    /class="btn primary big sb-go"[^`]*\$\{inrExact\(due\)\}/.test(sb),
+    `${TABLET}: the split screen's Collect button uses inr(due). It is the figure the waiter types\n    ` +
+    `custom amounts to match, so it must be inrExact(due) — a rounded total refuses by paise that\n    ` +
+    `appear nowhere on screen.`,
+  );
+  check(
+    "tablet: …and so does its title",
+    /Split \$\{esc\(tableLabel\(t\)\)\}'s bill · \$\{inrExact\(due\)\}/.test(sb),
+    `${TABLET}: the split screen's title rounds the bill. Title, button and running line are three\n    ` +
+    `views of ONE number — if they disagree the waiter is asked to match a total that is not the total.`,
+  );
+  check(
+    "tablet: the split screen's running line and refusals still keep their paise",
+    (sb.match(/inrExact\(/g) || []).length >= 6,
+    `${TABLET}: renderSplitBill now has fewer than six inrExact() figures — something that a person\n    ` +
+    `must match has gone back to whole rupees.`,
+  );
+}
+
+// ── 15 · A MONEY BOX MUST ACCEPT THE NUMBER THE SCREEN PUTS IN IT ────────────────────────────
+//
+// The owner ruled on this for the split screen's amount box (2026-08-29) and it holds wherever the
+// panel fills a number box in itself: `step="1"` on a box the code writes 12.5 or 153.29 into is a
+// box refusing its own contents — a hardware ↑/↓ snaps it to a whole number and a waiter correcting
+// a figure by hand is pushed to whole rupees on a bill that carries paise. The discount sheet had
+// all three (2026-08-30): paint() writes the percent to one decimal and the amount with round2.
+{
+  for (const cls of ["disc-pct-input", "disc-amt-input", "disc-pay-input", "sb-amt"]) {
+    const line = (src.split("\n").find((l) => l.includes(`class="${cls}"`)) || "");
+    check(
+      `tablet: .${cls} steps in paise, not whole rupees`,
+      /step="0\.01"/.test(line),
+      `${TABLET}: .${cls} declares ${(line.match(/step="[^"]*"/) || ["no step"])[0]}. This screen writes\n    ` +
+      `fractional figures into that box itself, so step="1" makes it refuse its own contents.`,
+    );
+    check(
+      `tablet: .${cls} still asks for the numeric keypad`,
+      /inputmode="decimal"/.test(line) && /type="number"/.test(line),
+      `${TABLET}: .${cls} lost type="number" / inputmode="decimal" — a waiter on a tablet gets the\n    ` +
+      `letter keyboard for a money field.`,
+    );
+  }
+}
+
+// ── 16 · A MOVE THAT WORKED SAYS SO ──────────────────────────────────────────────────────────
+//
+// Moving a dish has always ended with "Dish moved to table N (new KOT)". Moving a KOT ended with
+// nothing at all (found 2026-08-30): the picker closed and the waiter was left to spot one missing
+// ticket on a bill that may have four. The manager panel's twin says "KOT moved to <table>", so
+// this was also two panels answering the same tap two different ways.
+{
+  const target = fnBody("renderMoveOrderTarget");
+  check(
+    "tablet: moving a kitchen ticket tells the waiter it happened",
+    /toast\(`KOT moved to \$\{tableLabel\(to\)\}`\)/.test(target),
+    `${TABLET}: renderMoveOrderTarget()'s runOptimistic has no success hook. A move that only\n    ` +
+    `repaints is indistinguishable from a tap that did nothing — its sibling (move a dish) and the\n    ` +
+    `manager panel both say it out loud.`,
+  );
+  check(
+    "tablet: …and names the table the way the waiter knows it",
+    /tableLabel\(to\)/.test(target) && !/moved to T\$\{to\}/.test(target),
+    `${TABLET}: that message names a bare table number. A renamed table (mig 131) must read by its\n    ` +
+    `name here, exactly as it does on the tile and on the paper.`,
+  );
+  check(
+    "tablet: moving a dish still says so too",
+    /toast: `Dish moved to table \$\{to\} \(new KOT\)`/.test(src),
+    `${TABLET}: the dish move lost its success message.`,
+  );
+}
+
+// ── 17 · THE ADMIN RIBBON ONLY LISTS CONTROLS THAT ARE ON THIS PANEL ─────────────────────────
+//
+// The ribbon counts "N controls off for waiters" and every one is meant to be a thing the admin can
+// see tinted cyan on the screen in front of them. Two keys have had to be removed for the same
+// reason: tablet_invoice (a waiter can never issue one) and, on 2026-08-30, tablet_parcel — 🥡
+// Parcel left this panel on 2026-08-03, so that switch takes nothing away here. Both inflated the
+// count with an invisible item and deep-linked the admin to a switch that changes nothing.
+{
+  const caps = (src.match(/const XRAY_CAPS = \[([\s\S]*?)\];/) || [])[1] || "";
+  const keys = [...caps.matchAll(/key:\s*"([^"]+)"/g)].map((m) => m[1]);
+  check(
+    "tablet: the admin ribbon lists only waiter controls this panel actually has",
+    keys.length > 0 && keys.every((k) => k === "tablet_table_ops" || (src.match(new RegExp(k, "g")) || []).length >= 2),
+    `${TABLET}: XRAY_CAPS lists ${keys.join(", ")} — one of them is mentioned nowhere else in this\n    ` +
+    `file, so nothing on this panel changes when it is off and the ribbon is counting a control the\n    ` +
+    `admin cannot see.`,
+  );
+  for (const dead of ["tablet_invoice", "tablet_parcel"]) {
+    check(
+      `tablet: …and ${dead} specifically has not come back to it`,
+      !keys.includes(dead),
+      `${TABLET}: XRAY_CAPS lists ${dead} again. ${dead === "tablet_invoice" ? "A waiter can never issue an invoice" : "🥡 Parcel left this panel on 2026-08-03"},\n    ` +
+      `so the row sends the admin to a switch that changes nothing here.`,
+    );
+  }
+  check(
+    "tablet: the ribbon still lists the controls that ARE here",
+    ["tablet_take_orders", "tablet_discount", "tablet_mark_paid", "tablet_table_ops", "tablet_khata"].every((k) => keys.includes(k)),
+    `${TABLET}: XRAY_CAPS has lost a control the panel really has — the admin would see it tinted\n    ` +
+    `with nothing in the list explaining why.`,
+  );
+}
+
+// ── 18 · EVERY CONTROL ON THIS PANEL IS 44px, INCLUDING THE ONES THAT ARE NOT `.btn` ─────────
+//
+// style.css line ~960 says `.panel .btn, .floor-nav button { min-height: 44px }`. ✓ Accept is its
+// own class (`.accept`), so the rule never reached it and it rendered 38px — the one control on the
+// table detail below the size the rest of the panel holds itself to, and the one a waiter hits most
+// often with a tray in the other hand (measured on an iPad, 2026-08-30).
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  for (const cls of ["accept", "qo-top"]) {
+    const rule = (css.match(new RegExp(`\\.${cls}\\s*\\{[^}]*\\}`)) || [])[0] || "";
+    check(
+      `tablet: .${cls} is at least 44px tall, like every other control here`,
+      /min-height:\s*44px/.test(rule),
+      `${CSS}: .${cls} declares no min-height of 44px. Every other button on this panel gets one\n    ` +
+      `from \`.panel .btn\`; a control with its own class has to say it itself, or it silently ends\n    ` +
+      `up smaller than the rule the panel holds itself to.`,
+    );
+  }
+  check(
+    "tablet: …and the panel-wide 44px rule is still there for the ones that ARE .btn",
+    /\.panel \.btn[^{]*\{[^}]*min-height:\s*44px/.test(css),
+    `${CSS}: the panel-wide \`min-height: 44px\` for .btn is gone. Every control on this panel is\n    ` +
+    `sized by that one line; without it they each drift on their own.`,
+  );
+}
+
+// ── 19 · A CLASH IS TWO SENTENCES, AND THE SECOND ONE IS THE USEFUL ONE ──────────────────────
+//
+// lib/clash.ts sends `plain` (what happened) and `todo` (what to do about it — "Your change was NOT
+// saved. Look at what it says now and redo yours if it's still right."). Two of the four places
+// this panel handles a clash showed only `plain`, so a waiter learned another device had changed
+// the order and never learned their own change had been dropped. Found 2026-08-30 by replaying the
+// server's own clash payload.
+{
+  // A STATEMENT, NOT A LINE. errText() is written across two lines — the condition tests
+  // `clash.plain` on one and the `+ clash.todo` is on the next — so a per-line regex accused the
+  // one place that has always been right. Read a small window from each mention instead.
+  const shows = [...src.matchAll(/clash\.plain/g)].map((m) => src.slice(m.index, m.index + 160).split("\n").slice(0, 2).join(" "));
+  check(
+    "tablet: every clash message shows the TODO as well as the plain sentence",
+    shows.length > 0 && shows.every((line) => /clash\.todo|\.todo/.test(line)),
+    `${TABLET}: ${shows.filter((l) => !/todo/.test(l)).length} of ${shows.length} clash messages show only\n    ` +
+    `clash.plain:\n    ${(shows.find((l) => !/todo/.test(l)) || "").trim().slice(0, 140)}\n    ` +
+    `\`todo\` is the half that says the change was NOT saved — without it the waiter does not know\n    ` +
+    `whether to do it again.`,
+  );
+  check(
+    "tablet: …and a clash is given longer on screen than an ordinary note",
+    shows.filter((l) => /toast\(/.test(l)).every((l) => /9000|\d{4}/.test(l)),
+    `${TABLET}: a clash message uses the default 2.6s. Two sentences about somebody else's edit\n    ` +
+    `need longer than a glance.`,
+  );
+}
+
+// ── 20 · NOTHING ON A TILE IS SMALLER THAN 9px, AND THE WORDS ARE 10px ───────────────────────
+//
+// The tile's text scales with the TILE (cqw) between a floor and a ceiling. On a 10-inch tablet
+// held upright at 6 per row the tiles come out 116px and the cqw term bottoms out, so what a waiter
+// actually reads is the FLOOR. Thirty-four strings sat at exactly 9px — "Free", "＋", "Take order"
+// (measured on five devices, 2026-08-30). The owner asked for it raised: the floors moved, the
+// scaling and the maxima did not, so nothing changed on a tile that was already big enough.
+// Re-measured at 360, 430, 834, 1024 and 1194px in both skins: nothing clips, nothing overflows.
+{
+  const css = (() => { try { return fs.readFileSync(path.join(ROOT, CSS), "utf8"); } catch { return ""; } })();
+  // Every clamp() that sets a font-size inside the tile block, with its floor.
+  const tileBlock = css.slice(css.indexOf(".t-top {"), css.indexOf("/* ── SHED DETAIL ON THE WAY DOWN"));
+  const floors = [...tileBlock.matchAll(/font-size:\s*clamp\(\s*([\d.]+)px/g)].map((m) => Number(m[1]));
+  check(
+    "tablet: no text on a floor tile can fall below 9px",
+    floors.length > 0 && floors.every((f) => f >= 9),
+    `${CSS}: ${floors.filter((f) => f < 9).length} tile font-size clamp(s) have a floor under 9px ` +
+    `(${floors.filter((f) => f < 9).join(", ")}).\n    ` +
+    `The floor is what a waiter actually reads on a dense floor — the cqw term has already bottomed ` +
+    `out there.`,
+  );
+  check(
+    "tablet: …and the WORDS on it are at least 10px",
+    /\.t-take \{[\s\S]{0,400}?font-size:\s*clamp\(\s*10px/.test(css) && /\.t-line-plain \.t-linenum \{ font-size: clamp\(10px/.test(css),
+    `${CSS}: ＋ Take order or the served line has dropped below a 10px floor. Those two are the ` +
+    `words on the tile;\n    the served line's two halves share one floor on purpose.`,
+  );
+  check(
+    "tablet: …and the table number keeps its own 10px floor",
+    /\.tnum \{ font-size: clamp\(10px/.test(css),
+    `${CSS}: .tnum's floor is no longer 10px. It is the biggest thing on the tile and the first ` +
+    `thing read.`,
+  );
+  // The destructive control on a dish row is at least as big as the harmless ones beside it.
+  const idel = (css.match(/\.idel \{[^}]*\}/) || [""])[0];
+  const qbtn = (css.match(/\.qbtn \{[^}]*\}/) || [""])[0];
+  const px = (rule, prop) => Number(((rule.match(new RegExp(prop + ":\\s*([\\d.]+)px")) || [])[1]) || 0);
+  check(
+    "tablet: 🗑 is at least as big as the − and + beside it",
+    px(idel, "height") >= px(qbtn, "height") && px(idel, "height") >= 40,
+    `${CSS}: .idel is ${px(idel, "height") || "auto"}px tall against .qbtn's ${px(qbtn, "height")}px. ` +
+    `It was 37px —\n    the smallest control on the panel and the only DESTRUCTIVE one, between two ` +
+    `40px buttons that merely change a number.`,
+  );
+  // …AND SO IS EVERY OTHER CONTROL ON THAT ROW. The first version of this check named .idel and
+  // .qbtn only, and missed ✓ Serve one line over at 29px — the button that does the actual job on
+  // a dish row, two-thirds the height of the − and + beside it (found by the fifth pass, hours
+  // after item 25 shipped). A rule written for two of the three controls on a row is half a rule.
+  {
+    const serve = (css.match(/\.ist-serve \{[^}]*\}/) || [""])[0];
+    check(
+      "tablet: ✓ Serve is as tall as the rest of its dish row",
+      Number(((serve.match(/min-height:\s*([\d.]+)px/) || [])[1]) || 0) >= 40,
+      `${CSS}: .ist-serve is ${(serve.match(/min-height:[^;]*/) || ["sized by padding"])[0]} against ` +
+      `.qbtn's 40px square.\n    It is the control that marks a dish delivered — the one thing on ` +
+      `that row a waiter taps on purpose.`,
+    );
+  }
+  check(
+    "tablet: …and 🗑 is a square, not a padded glyph that shrinks with its font",
+    /width:\s*40px/.test(idel) && /height:\s*40px/.test(idel),
+    `${CSS}: .idel is sized by padding again. A padded glyph changes size with its font; the − and + ` +
+    `beside it are a fixed square, and a delete should not be the odd one out.`,
   );
 }
 

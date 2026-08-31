@@ -37,6 +37,19 @@ const code = (p) => { const s = read(p); if (!s) return null;
           .replace(/^\s*\/\/.*$/gm, "").replace(/([^:"'`\\])\/\/[^\n"'`]*$/gm, "$1"); };
 const has = (s, ...n) => n.every((x) => s && s.includes(x));
 const rx  = (s, r) => !!(s && r.test(s));
+// AN OPEN QUESTION IS NEITHER A PASS NOR A FAULT (sweep #7 / T28, 2026-08-27).
+//
+// Built for a real disagreement: this file and verify:notfound asserted OPPOSITE things about who a
+// stray address belongs to, each quoting the owner from the same day. Rather than make one quietly
+// agree with the other — inventing his answer — the row was printed as a question, counted
+// separately, and kept out of the red. He read it and settled it on 2026-08-28, and the two guards
+// now agree (see the decision written out at the /signup case below).
+//
+// KEPT, because the state itself was the useful part and the next disagreement will not announce
+// itself either. It is still in use for a request THIS APP DID NOT MAKE being refused by somebody
+// else's server. A question nobody can see is how a decision gets made by accident.
+const openQuestion = (phase, name, note) => { results.push({ phase, name, ok: true, open: true, note }); };
+
 const check = (phase, name, fn) => {
   let ok = false, note = "";
   try { const r = fn(); if (r && typeof r === "object") { ok = !!r.ok; note = r.note || ""; } else ok = !!r; }
@@ -267,13 +280,24 @@ check("P15612", "a wake only happens on a REAL back-forward restore, in all thre
 // *"yes for this guest should be redirected to menu … and if written login or aevinite then only
 // locate to there"*). Dropping the "/r/" from a menu address landed a guest on the software
 // company's 404 whose only button led to the staff sign-in.
+// ASSERT THE BEHAVIOUR, NOT THE IMPLEMENTATION (sweep #7 / T28, 2026-08-27). These two used to
+// name the exact call the first version made — `router.replace(\`/r/${slug}/menu\`)` and
+// `{kind === "staff" && (` — so when the two picked 404 designs replaced the whole file, both went
+// red for the shape rather than for the behaviour, and the shape is not what the owner asked for.
+// (The behaviour really HAD been lost too; the live rows below are what proved it.)
 check("P15609", "the wrong-turn page resolves a guest address to its menu", () =>
-  has(F.nf, '"use client"', 'method: "HEAD"', "router.replace(`/r/${slug}/menu`)") &&
+  has(F.nf, '"use client"', 'method: "HEAD"') &&
   rx(F.nf, /const STAFF_WORDS = /) &&
+  // it must LEAVE for the menu, by whatever route — and replace, never push, so Back does not
+  // return the visitor to the same dead end.
+  rx(F.nf, /(location|router)\.replace\(\s*`\/r\/\$\{[^}]+\}\/menu`/) &&
   // HEAD, not GET: the menu is ~24KB and only the yes/no is wanted.
-  !rx(F.nf, /fetch\([^)]*menu-data[^)]*\)\s*\.then/));
+  rx(F.nf, /menu-data`?[^)]*\{\s*method:\s*"HEAD"/));
 check("P15610", "…and the staff sign-in is offered ONLY when the address says staff", () =>
-  rx(F.nf, /\{kind === "staff" && \(/) && !rx(F.nf, /href="\/"/));
+  // the way out is "/" (the staff door) on the STAFF screen only; every guest branch leaves for a
+  // menu, and the staff word list is what decides which.
+  rx(F.nf, /aud: "staff"[\s\S]{0,60}href: "\/"/) &&
+  !rx(F.nf, /aud: "guest"[\s\S]{0,80}href: "\/"/));
 
 // THE LIST VIEW ON A WIDE SCREEN (owner, 2026-08-26: "can do 8"). The list layout is mobile-first;
 // on a laptop the same row is 1100px and the name and price sat squeezed at the left with the
@@ -366,16 +390,45 @@ async function live(base) {
   let chromium;
   try { ({ chromium } = await import("playwright")); }
   catch { results.push({ phase: "live", name: "playwright unavailable — live half skipped", ok: true, note: "install playwright to run it" }); return; }
+
+  // IS THIS A REAL BUILD, OR `next dev`? Two live checks below depend on the answer, and neither is
+  // about the app. `next dev` mounts every effect TWICE (React StrictMode), so "the menu is fetched
+  // once per page load" reads 2 there on a menu that is perfectly correct — and this guard has been
+  // printing exactly that, with a note admitting it, while still calling it a failure. A guard that
+  // reports a fault it already knows is not one is a guard nobody believes the day it is right.
+  //
+  // Measured, not sniffed, the same way verify-offline.mjs does it: a production build serves its
+  // chunks `immutable`, `next dev` serves them `no-cache, must-revalidate`.
+  let realBuild = true;
+  try {
+    const html = await (await fetch(base + "/login", { cache: "no-store" })).text();
+    const chunk = (html.match(/\/_next\/static\/chunks\/[^"']+?\.js/) || [])[0];
+    if (chunk) {
+      const cc = (await fetch(base + chunk, { cache: "no-store" })).headers.get("cache-control") || "";
+      realBuild = /immutable/i.test(cc);
+    }
+  } catch { /* leave it as "real build" — never soften a check on a guess */ }
   const b = await chromium.launch();
   const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
   const open = async (p, ms = 6000) => {
     const c = await b.newContext(A35), pg = await c.newPage();
-    const bad = [], errs = [];
-    pg.on("response", (r) => { if (r.status() >= 400) bad.push(`${r.status()} ${r.url().replace(base, "").slice(0, 60)}`); });
+    const bad = [], errs = [], thirdParty = [];
+    // A REFUSAL FROM SOMEBODY ELSE'S SERVER IS NOT A FAULT IN THIS APP (sweep #7 / T28,
+    // 2026-08-27). This counted EVERY response of 400 or worse, whoever answered it — so three
+    // menus were reported broken because Sentry's ingest endpoint answered 429 to the crash
+    // reporter. That is a quota on a third-party service, and it is exactly what "don't cry wolf"
+    // means: the next time this line is red about a real 500 from our own API, nobody will look.
+    // Counted and printed separately, so nothing is hidden — just not blamed on the menu.
+    const OURS = (u) => { try { return new URL(u).origin === new URL(base).origin; } catch { return true; } };
+    pg.on("response", (r) => {
+      if (r.status() < 400) return;
+      const line = `${r.status()} ${r.url().replace(base, "").slice(0, 60)}`;
+      (OURS(r.url()) ? bad : thirdParty).push(line);
+    });
     pg.on("pageerror", (e) => errs.push(String(e.message).slice(0, 90)));
     const resp = await pg.goto(base + p, { waitUntil: "domcontentloaded", timeout: 60000 });
     await pg.waitForTimeout(ms);
-    return { c, pg, bad, errs, status: resp ? resp.status() : 0 };
+    return { c, pg, bad, errs, thirdParty, status: resp ? resp.status() : 0 };
   };
   try {
     // the QR menu must guard the back button — one press must NOT leave the site
@@ -402,7 +455,7 @@ async function live(base) {
       await c.close(); }
     // the menu itself, per restaurant, at the owner's phone width
     for (const slug of ["french-house", "aangan-garden-restaurant", "sakura-sushi"]) {
-      const { c, pg, bad, errs } = await open(`/r/${slug}/menu`, 6500);
+      const { c, pg, bad, errs, thirdParty } = await open(`/r/${slug}/menu`, 6500);
       const r = await pg.evaluate(() => ({ cards: document.querySelectorAll(".item-card").length,
         search: !!(document.querySelector("#search-input") || {}).offsetParent,
         title: document.title, txt: document.body.innerText }));
@@ -412,7 +465,8 @@ async function live(base) {
         !["-->", "${", "[object Object]"].some((m) => r.txt.includes(m)) && !/(^|\s)NaN(\s|$)/.test(r.txt));
       if (slug !== "french-house")
         check(485, `LIVE: ${slug} shows no "Little French House"`, () => !/little french house/i.test(r.txt));
-      check(499, `LIVE: ${slug} no failing requests`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
+      check(499, `LIVE: ${slug} no failing requests from THIS app`, () => ({ ok: bad.length === 0, note: bad.slice(0, 2).join(" | ") }));
+      if (thirdParty.length) openQuestion(499, `LIVE: ${slug} — ${thirdParty.length} request(s) refused by a THIRD-PARTY service, not by this app`, thirdParty.slice(0, 2).join(" | "));
       check(499, `LIVE: ${slug} no page errors`, () => ({ ok: errs.length === 0, note: errs.slice(0, 1).join("") }));
       await c.close(); }
     // LIVE: the menu is fetched ONCE per load, and a real back-forward restore still wakes it.
@@ -433,7 +487,8 @@ async function live(base) {
       await pg2.waitForTimeout(3000);
       const afterRestore = hits.length;
       check("P15612", "LIVE: one menu read per page load", () =>
-        ({ ok: onLoad === 1, note: `${onLoad} menu-data request(s) — this is 2 on a dev server, which double-mounts every effect` }));
+        ({ ok: realBuild ? onLoad === 1 : onLoad <= 2,
+           note: `${onLoad} menu-data request(s)` + (realBuild ? "" : " — dev server, so React mounts every effect twice; 2 is correct here, 3+ is not") }));
       check("P15612", "LIVE: an ordinary pageshow does not refetch", () =>
         ({ ok: afterPlain === onLoad, note: `${onLoad} → ${afterPlain}` }));
       check("P15612", "LIVE: a real back-forward restore still wakes the screen", () =>
@@ -457,13 +512,27 @@ async function live(base) {
       await pg.waitForTimeout(3800);
       const r = await pg.evaluate(() => ({ path: location.pathname,
         cards: document.querySelectorAll(".item-card").length,
-        signin: [...document.querySelectorAll("a")].some((a) => a.getAttribute("href") === "/login"),
+        // THE STAFF WAY OUT IS "/", NOT "/login" (owner, 2026-08-26, picking the burnt-toast screen:
+        // "their way out stays '/', because that IS their door"). This used to look for an anchor
+        // with href="/login" — the shape the FIRST 404 had — so after he picked the two screens it
+        // reported "the staff sign-in is missing" about a screen that is exactly what he asked for.
+        // Ask for the staff SCREEN and where its way out points; that is the rule, not the href.
+        staffScreen: !!document.querySelector(".nf-s"),
+        wayOut: (document.querySelector(".nf a.nf-home") || {}).getAttribute
+          ? document.querySelector(".nf a.nf-home").getAttribute("href") : null,
         guestWords: /scan the QR code/i.test(document.body.innerText) }));
+      // SETTLED 2026-08-28 — this file and verify:notfound now agree, and the decision is written
+      // out in full in both. A stray address, and a restaurant whose menu is switched off, belong
+      // to the GUEST: the advice, no staff sign-in, and no button when we cannot tell which
+      // restaurant they meant. For two days these two guards asserted opposite things about
+      // /signup, each quoting the owner from 2026-08-26; he was shown the disagreement and left the
+      // call to me. A guest sent to the workers' screen is handed a PASSWORD PROMPT, and that is a
+      // worse mistake than a worker being told to scan a QR code.
+      const note = `landed on ${r.path}, ${r.cards} dishes, staff screen=${r.staffScreen}, way out=${r.wayOut}, guest advice=${r.guestWords}`;
       const ok = want === "menu" ? (/^\/r\/[^/]+\/menu$/.test(r.path) && r.cards > 0)
-        : want === "staff" ? r.signin
-        : (r.guestWords && !r.signin);
-      check("P15609", `LIVE: ${label} (${url})`, () =>
-        ({ ok, note: `landed on ${r.path}, ${r.cards} dishes, sign-in offered=${r.signin}, guest advice=${r.guestWords}` }));
+        : want === "staff" ? (r.staffScreen && r.wayOut === "/")
+        : (r.guestWords && !r.staffScreen);
+      check("P15609", `LIVE: ${label} (${url})`, () => ({ ok, note }));
       await c.close();
     }
 
@@ -660,8 +729,11 @@ async function live(base) {
 if (BASE) await live(BASE);
 
 // ── report ───────────────────────────────────────────────────────────────────────────────
-const pass = results.filter((r) => r.ok).length, fail = results.length - pass;
+const opens = results.filter((r) => r.open);
+const pass = results.filter((r) => r.ok && !r.open).length, fail = results.filter((r) => !r.ok).length;
 for (const r of results) if (!r.ok) console.log(`  ❌ [${r.phase}] ${r.name}${r.note ? " — " + r.note : ""}`);
+for (const r of opens) console.log(`  ⏭  [${r.phase}] ${r.name}${r.note ? "\n       " + r.note : ""}`);
 console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed` +
+            (opens.length ? `, ${opens.length} OPEN QUESTION(S) waiting on the owner` : "") +
             (BASE ? ` (static + live against ${BASE})` : " (static only — pass --base <url> for the live half)"));
 process.exit(fail === 0 ? 0 : 1);

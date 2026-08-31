@@ -194,8 +194,25 @@ export default function SessionCartSync() {
           lastJson.current = mergedJson;
         } else if (res.ok) {
           lastJson.current = json; // server accepted but returned no cart — keep ours
+        } else {
+          // A FAILED PUSH NOW HEALS ITSELF (owner picked this, 2026-08-30).
+          //
+          // It used to "keep the local cart and retry on the next edit" — which, if the diner made
+          // no further edit, meant NEVER. Their dish stayed on their own phone and nobody else at
+          // the table ever saw it, so whoever tapped Place order sent five dishes out of six.
+          //
+          // WHY THIS IS NOT A RETRY OF THE DELTA, WHICH WOULD BE DANGEROUS. Migration 144 SUMS the
+          // quantity of an added line, so re-sending the same delta after a merge that actually
+          // succeeded — and only lost its reply — would order two of everything. Instead we clear
+          // the reconciled mark, which makes the next tick redo the FIRST-JOIN RECONCILE: read the
+          // server's cart, merge ours into it, and write the whole array back with the
+          // `cart_updated_at` it read. That write SETS rather than ADDS, and the timestamp makes it
+          // first-save-wins — so it is safe to run twice, and a co-diner's concurrent add is
+          // refused and re-merged rather than overwritten (the `cart_moved` branch above).
+          //
+          // Cost: one extra read+write on the next 60s tick, only after a failure.
+          reconciledToken.current = null;
         }
-        // On failure we simply keep the local cart and retry on the next edit/pull.
       }, 500);
     };
 

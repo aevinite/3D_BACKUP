@@ -47,8 +47,12 @@ const fnBody = (src, name) => {
 // ── manager panel ───────────────────────────────────────────────────────────
 check("manager: the bill preview gathers the WHOLE party (openBillPreview → partyOrders)",
   /async function openBillPreview[\s\S]{0,600}partyOrders\(/.test(editor));
-check("manager: splitting a bill splits the PARTY's bill (openSplitSettle → partyOrders)",
-  /async function openSplitSettle[\s\S]{0,600}partyOrders\(/.test(editor));
+// The manager's SECOND split screen (openSplitSettle) was retired on 2026-08-29 — the pay sheet's
+// own split carries all four ways to divide now, so there is one split screen per panel. The rule
+// is unchanged and still the one that matters: whatever opens the split must have gathered the
+// WHOLE party's orders first, or a joined table settles half a joint bill.
+check("manager: splitting a bill splits the PARTY's bill (markTablePaid → ensurePartySlices → partyOrders)",
+  /async function markTablePaid[\s\S]{0,400}ensurePartySlices\(t\)[\s\S]{0,400}partyOrders\(t\)/.test(editor));
 check("manager: a targeted poll refreshes the whole party (pollTables → partyTablesOf)",
   /async function pollTables[\s\S]{0,2000}partyTablesOf/.test(editor));
 check("manager: a targeted poll carries the fresh merges list",

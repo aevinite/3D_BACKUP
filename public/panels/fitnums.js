@@ -49,7 +49,11 @@
     }
     for (var pass = 0; pass < 5; pass++) {
       var over = el.scrollWidth - el.clientWidth;
-      if (over <= 1) return;
+      // `break`, not `return`: the tail of this function has to run even when the figure already
+      // fits, or a tooltip we added while it was clipped would still be quoting the old, longer
+      // value after the panel wrote a short one. Everything in the tail is gated on the figure
+      // still overflowing, so a value that fits reaches only the cleanup. (T9 sweep #7)
+      if (over <= 1) break;
       var w = el.getBoundingClientRect().width || 1;
       var cur = parseFloat(cs.fontSize) || 16; // cs is live — reads the current size
       var next = Math.max(MIN_PX, Math.floor(cur * ((w - over) / w) * 10) / 10);
@@ -72,6 +76,24 @@
       var full = el.textContent, sh = shortIndian(full);
       if (sh && sh.length < full.length) {
         el.dataset.lfhFull = full; el.dataset.lfhShort = sh; el.title = full; setText(el, sh);
+      }
+    }
+    // A CLIPPED EXACT FIGURE STILL HAS TO BE READABLE SOMEHOW (T9 sweep #7, 2026-08-22).
+    //
+    // The gate above is right: on a document, a rounded total is a different document, so an exact
+    // figure shrinks to the 11px floor and then clips. But a SHORTENED tile gets `title` (hover or
+    // long-press shows the whole figure) while the clipped exact one got nothing at all — measured
+    // on the manager's Bills tab geometry, a 44px box holding ₹1,23,45,678 shows a part-figure with
+    // no way to see the rest without leaving the screen. So it carries the same title. The digits on
+    // screen are unchanged; this only adds a way to read the ones the box cut off.
+    // Marked as OURS (data-lfh-title) for two reasons: a panel's own title is never overwritten,
+    // and when a later, shorter value fits we take ours back off instead of leaving a tooltip
+    // quoting a figure that is no longer on the tile.
+    if (el.childElementCount === 0 && isExact(el)) {
+      if (el.scrollWidth - el.clientWidth > 1) {
+        if (!el.title || el.dataset.lfhTitle) { el.title = el.textContent; el.dataset.lfhTitle = "1"; }
+      } else if (el.dataset.lfhTitle) {
+        el.removeAttribute("title"); delete el.dataset.lfhTitle;
       }
     }
   }

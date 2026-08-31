@@ -325,17 +325,23 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     return () => document.removeEventListener("click", close);
   }, [zonesOpen]);
 
+  // ── THE WRITES LIVE OUTSIDE THE STATE UPDATER (T12 sweep, 2026-08-27) ────────────────────────
+  // All three of these used to sit INSIDE setSkin's updater function. React requires an updater to
+  // be pure, and in development it deliberately calls it twice to catch exactly this — measured on
+  // one tap of the ☀/🌙 button, `lfh:owner-skin` fired twice with the same value. Nothing visibly
+  // broke (a production build calls it once, and Manager mode forwarding the same skin twice is
+  // harmless), but this is the one broadcast that drives the EMBEDDED panel's skin, and the project
+  // rule for it is that it has exactly one writer. A side effect in an updater is a writer nobody
+  // can count. `skin` is state we already hold, so the next value needs no updater at all.
   const toggleSkin = () => {
-    setSkin((cur) => {
-      const next = cur === "dark" ? "light" : "dark";
-      try { localStorage.setItem("aevidine_skin", next); } catch {}
-      // Persist to a cookie too so the NEXT server render starts on the right skin.
-      try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
-      // Tell live listeners (Manager mode forwards this into its embedded panel so the
-      // manager floor flips skin the same instant the cockpit does — owner, 2026-08-02).
-      try { window.dispatchEvent(new CustomEvent("lfh:owner-skin", { detail: next })); } catch {}
-      return next;
-    });
+    const next = skin === "dark" ? "light" : "dark";
+    setSkin(next);
+    try { localStorage.setItem("aevidine_skin", next); } catch {}
+    // Persist to a cookie too so the NEXT server render starts on the right skin.
+    try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
+    // Tell live listeners (Manager mode forwards this into its embedded panel so the
+    // manager floor flips skin the same instant the cockpit does — owner, 2026-08-02).
+    try { window.dispatchEvent(new CustomEvent("lfh:owner-skin", { detail: next })); } catch {}
   };
 
   // Admin "exit view": clear the act-as cookie, then back to the admin console.

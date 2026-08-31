@@ -31,16 +31,21 @@ import { createPortal } from "react-dom";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { openRestaurantPanel } from "@/components/admin/shared";
 
+// `canPurge` used to be here and is GONE (T16 sweep #7, 2026-08-27). The route still answers it,
+// always `true`, because migration 342 removed the 90-day lock — so it was a field that could only
+// ever say yes, read by nothing, sitting on the type that describes a permanent delete. A dead
+// permission flag beside a destructive action is the kind of thing a later reader wires back up.
+// `daysHeld` stays: it is a FACT ("in the bin 12 days"), not a permission.
 type Trashed = {
   id: string; slug: string; name: string;
   deletedAt: string; deletedBy: string | null; reason: string | null;
-  daysHeld: number; canPurge: boolean;
+  daysHeld: number;
 };
 
 type OwnerTrashed = {
   id: string; username: string; name: string; restaurants: number;
   deletedAt: string; deletedBy: string | null; reason: string | null;
-  daysHeld: number; canPurge: boolean;
+  daysHeld: number;
 };
 
 const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch { return iso; } };
@@ -156,6 +161,35 @@ type BinInside = {
   unread?: string[];
 };
 
+// ── A BLOCKED TAB IS NOT A LOCKED DOOR (T16 sweep #7, 2026-08-27) ─────────────────────────────
+// Every door on this page used to answer a blocked pop-up with "Your browser blocked that tab —
+// allow pop-ups for this site and try again", written into `insideErr` — the same slot a failed
+// count read uses, so the message arrived beside a "Retry" button that re-reads the COUNTS and
+// does nothing about the panel. Two faults in one line. The owner ruled on this wording for the
+// platform floor on 2026-08-20 ("admin has access to everything… it should take you to the
+// restaurant"), and the floor now offers a way in. So does this: the act-as redirect is an
+// ordinary navigation, so opening the panel in THIS tab needs no pop-up at all.
+const hereHref = (rid: string, to: string, opts: { uid?: string; bin?: boolean } = {}) =>
+  `/api/admin/act-as/go?rid=${encodeURIComponent(rid)}&to=${encodeURIComponent(to)}`
+  + (opts.uid ? `&uid=${encodeURIComponent(opts.uid)}` : "")
+  + (opts.bin ? "&bin=1" : "");
+
+function BlockedHere({ href, label, onClose }: { href: string; label: string; onClose: () => void }) {
+  return (
+    <div role="status" style={{ padding: "10px 12px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.55,
+      border: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)", background: "color-mix(in srgb, var(--accent) 9%, transparent)" }}>
+      <b>Your browser blocked the new tab.</b> Nothing else is in the way — you can open{" "}
+      <b>{label}</b> right here instead.
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
+        <a className="adm-btn primary" href={href}>
+          <i className="fas fa-arrow-right-to-bracket" style={{ marginRight: 7 }} aria-hidden="true" />Open {label} here
+        </a>
+        <button className="adm-btn" onClick={onClose}>Not now</button>
+      </div>
+    </div>
+  );
+}
+
 const PANEL_DOORS: { to: string; label: string; icon: string }[] = [
   { to: "/manager", label: "Manager", icon: "fa-table-columns" },
   { to: "/editor", label: "Menu editor", icon: "fa-pen-to-square" },
@@ -222,6 +256,8 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
   const [inside, setInside] = useState<BinInside | null>(null);
   const [insideErr, setInsideErr] = useState<string | null>(null);
   const [insideBusy, setInsideBusy] = useState(false);
+  // A blocked new tab, kept apart from insideErr — see BlockedHere above.
+  const [blocked, setBlocked] = useState<{ href: string; label: string } | null>(null);
   // Set when the server says its web address was taken while it sat here.
   const [clash, setClash] = useState<SlugClash | null>(null);
   const [clashErr, setClashErr] = useState<string | null>(null);
@@ -358,14 +394,17 @@ function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void
               {PANEL_DOORS.map((p) => (
                 <button key={p.to} className="adm-btn" style={{ fontSize: 12 }}
                   onClick={async () => {
+                    setBlocked(null);
                     const w = await openRestaurantPanel(r.id, p.to, undefined, true);
-                    // Never claim "now viewing" when the popup was blocked (audit 2026-07-08).
-                    if (!w) setInsideErr("Your browser blocked that tab — allow pop-ups for this site and try again.");
+                    // Never claim "now viewing" when the popup was blocked (audit 2026-07-08) —
+                    // and offer the same door in this tab rather than a browser-settings lecture.
+                    if (!w) setBlocked({ href: hereHref(r.id, p.to, { bin: true }), label: p.label });
                   }}>
                   <i className={`fas ${p.icon}`} style={{ marginRight: 6 }} aria-hidden="true" />{p.label}
                 </button>
               ))}
             </div>
+            {blocked && <div style={{ marginTop: 10 }}><BlockedHere href={blocked.href} label={blocked.label} onClose={() => setBlocked(null)} /></div>}
           </div>
         </div>
       )}
@@ -570,6 +609,8 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
   const [inside, setInside] = useState<OwnerInside | null>(null);
   const [insideErr, setInsideErr] = useState<string | null>(null);
   const [insideBusy, setInsideBusy] = useState(false);
+  // A blocked new tab, kept apart from insideErr — see BlockedHere above.
+  const [blocked, setBlocked] = useState<{ href: string; label: string } | null>(null);
   // Set when the server says this name was taken while the owner sat in the bin —
   // the admin picks who keeps it, then we re-send the same restore with a resolve.
   const [clash, setClash] = useState<NameClash | null>(null);
@@ -702,17 +743,19 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button className="adm-btn" style={{ fontSize: 11.5 }}
                     onClick={async () => {
+                      setBlocked(null);
                       // uid = THIS owner, so the cockpit opens through their eyes (ownerScope
                       // re-checks the membership server-side on every call).
                       const w = await openRestaurantPanel(rr.id, "/owner", o.id, rr.binned);
-                      if (!w) setInsideErr("Your browser blocked that tab — allow pop-ups for this site and try again.");
+                      if (!w) setBlocked({ href: hereHref(rr.id, "/owner", { uid: o.id, bin: rr.binned }), label: `${rr.name}'s owner panel` });
                     }}>
                     <i className="fas fa-crown" style={{ marginRight: 6 }} aria-hidden="true" />Their owner panel
                   </button>
                   <button className="adm-btn" style={{ fontSize: 11.5 }}
                     onClick={async () => {
+                      setBlocked(null);
                       const w = await openRestaurantPanel(rr.id, "/manager", undefined, rr.binned);
-                      if (!w) setInsideErr("Your browser blocked that tab — allow pop-ups for this site and try again.");
+                      if (!w) setBlocked({ href: hereHref(rr.id, "/manager", { bin: rr.binned }), label: `${rr.name}'s manager panel` });
                     }}>
                     <i className="fas fa-table-columns" style={{ marginRight: 6 }} aria-hidden="true" />Manager
                   </button>
@@ -720,6 +763,7 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
               )}
             </div>
           ))}
+          {blocked && <BlockedHere href={blocked.href} label={blocked.label} onClose={() => setBlocked(null)} />}
         </div>
       )}
 

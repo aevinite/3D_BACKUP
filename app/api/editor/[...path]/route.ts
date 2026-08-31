@@ -52,38 +52,60 @@ import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint 
 // the admin console draws, narrowed to this computer — same file, same four steps, same words.
 import {
   agentForDevice, createAgent, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
+  panelForRole,
 } from "@/lib/printHelpers";
-import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
-const BACKUP_PRINTER_MS = 30000;
+// BACKUP_PRINTER_MS is gone with the backup screen (owner, 2026-08-30): there is no second room
+// waiting its turn, so there is no window for it to wait.
 // May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
-// Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
-// mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
+//
+// It asks ONE thing now: the Kitchen slips route (mig 369). It used to ask two — the route AND
+// mig 336's coarse `kot_print_target` — and the printing sweep caught them disagreeing, with the
+// OLDER one winning: a route saying "the manager screen prints the kitchen slips" was refused
+// because an admin had once set "kitchen" months before. Two settings for one question is how the
+// owner's own choice ended up doing nothing, so there is one left.
+//
+// `backup` is no longer a setting at all: the retired 'both' went to `backupPanel` on the route,
+// and then `backupPanel` itself went (owner, 2026-08-30 — there is no backup printer, a failure is
+// reported instead). Both rungs of mig 107 still gate everything (the admin allowed auto-print
+// AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
-  const [stQ, helper] = await Promise.all([
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
+  const [stQ, helper, route] = await Promise.all([
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
+    targetFor(rid, "kot"),
   ]);
-  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
-  const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
-  const target = String(st?.kot_print_target || "kitchen");
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // A STOPPED QUEUE holds every screen too, not just the helper — otherwise "stop the queue" would
+  // stop the computer and let a screen carry on printing, which is not stopping anything.
+  const paused = st?.modules?.printing?.paused === true;
+  const on = !paused && st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
+  // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
+  // plain words. It is derived from the route now, never stored.
+  // "both" is gone with the backup screen: a room either prints the kitchen slips or it does not.
+  const target = route.kind === "screen"
+    ? (route.panel === "manager" ? "counter" : "kitchen")
+    : "kitchen";
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
   if (helper.owned) return { mayPrint: false, backup: false, target, helper };
-  // ── THE NEWER ANSWER WINS OVER THE OLDER ONE (found by the printing sweep, 2026-08-26) ────────
-  // mig 336's kot_print_target is the OLD, coarse question: kitchen | counter | both. mig 341's route
-  // can now name this very panel — and the sweep caught the two disagreeing: with a route saying
-  // "the manager screen prints the kitchen slips" and the old target still saying "kitchen", the
-  // manager screen was refused by the older setting and the owner's own choice did nothing.
-  // A route that names a panel IS the decision; the coarse target only speaks when no route does.
-  const screenRoute = await targetFor(rid, "kot");
-  if (screenRoute.kind === "screen") {
-    return { mayPrint: on && screenRoute.panel === "manager", backup: false, target, helper };
-  }
-  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
+  const may = screenMayPrint(route, { panel: "manager", personId: null, deviceId: null });
+  // A person/device narrowing is checked per-request elsewhere (this helper has no request in hand),
+  // so "may a manager screen print at all" is the panel-level answer only.
+  // WITH NO ROUTE AT ALL, THE DEFAULT ROOM IS THE KITCHEN — so a manager screen does NOT auto-print.
+  // That is exactly what the retired kot_print_target defaulted to ('kitchen'), and it matters: a
+  // manager panel left open on a restaurant that has never touched the Printing board would
+  // otherwise start pulling kitchen tickets it never used to. Caught by verify:printing-sweep phase
+  // 22 before this shipped; my first version returned true here.
+  // (After mig 369 every existing restaurant HAS a kitchen-slip route, so this branch is only a
+  // brand-new one — where "the kitchen prints" is the right thing to assume.)
+  const panelOk = route.kind === "screen" ? route.panel === "manager" : false;
+  return { mayPrint: on && panelOk, backup: !!may.backup, target, helper };
 }
+
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
@@ -487,6 +509,14 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
     }
   }
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   return rid;
 }
@@ -742,14 +772,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // customer-search?q=98250 — "who is this number?" for the bill's customer box.
     // Fired while the waiter is still typing, so it must stay tiny and quick: prefix-anchored
-    // on the (restaurant_id, phone) index, at most 6 rows, only phone + name + visit count.
+    // on the (restaurant_id, phone) index, at most 12 rows, only phone + name + visit count.
+    // TWELVE, not the four the sheet shows: an answer the database did NOT have to truncate can be
+    // narrowed on-device for every longer number, so one slightly bigger answer replaces several
+    // small ones (owner, 2026-08-28). The cap is real as of migration 365 — before that the LIMIT
+    // sat after a json_agg and capped nothing at all, so this asked for 6 and could get the lot.
     // A complete number is normalised first, so +91 / leading-0 spellings find the same row.
     if (p === "customer-search") {
       const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
       if (q.length < 3) return ok({ matches: [] });
-      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
+      const CUSTOMER_SEARCH_ROWS = 12;
+      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: CUSTOMER_SEARCH_ROWS });
       if (error) throw new Error(error.message);
-      return ok({ matches: Array.isArray(data) ? data : [] });
+      const matches = Array.isArray(data) ? data : [];
+      // `whole` — did this answer hold EVERY customer matching that prefix, or did we cut it off?
+      // The sheet reuses a complete answer for longer numbers without asking again, so it must
+      // never have to GUESS this from a row count and a constant of its own: the two would drift
+      // the moment either side's cap moved, and the sheet would silently narrow from a truncated
+      // list and lose a real customer. The server knows; the server says. A panel too old to
+      // understand the flag simply keeps asking, which is what it did before.
+      return ok({ matches, whole: matches.length < CUSTOMER_SEARCH_ROWS });
     }
 
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
@@ -2057,11 +2099,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
       const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
       const mayKot = screenMayPrint(targets.kot, whoAmI);
-      // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here"). Eligibility comes
-      // before the route: a manager the restaurant has switched off is not handed paper even if the
-      // route names their panel, and the answer is sent back so their screen says why rather than
-      // going quiet. Asked with `g.user` — the admin viewing (no user) is not a person to gate.
-      const mayBePrinter = g.user ? await managerCan(g, rid, "print_here") : true;
+      // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here").
+      //
+      // BEING NAMED BY THE ADMIN *IS* THE PERMISSION (owner, 2026-08-29). He was being sent off to
+      // Access & permissions in the middle of setting a printer up — "in the middle of thing, you
+      // tell me to go to the access and permission… remove it completely" — and worse, naming
+      // somebody whose general permission happened to be off produced a screen that was offered the
+      // job and then refused it, with the paper going nowhere. So an explicit, deliberate choice of
+      // ONE person on the Printing screen outranks the restaurant-wide default: the admin has
+      // already answered the question that permission asks. The permission still governs everyone
+      // the admin has NOT named.
+      const namedMe = targets.kot.kind === "screen" && !!g.user?.id && targets.kot.person === g.user.id;
+      const mayBePrinter = !g.user || namedMe ? true : await managerCan(g, rid, "print_here");
       if (!t.mayPrint || !mayKot.ok || !mayBePrinter) {
         return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners,
                     waiting, stuckAfterMs: STUCK_AFTER_MS,
@@ -2072,7 +2121,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
       // station's name instead, so it can offer "print here instead" rather than quietly racing.
       if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS });
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS, targets });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: 0 }), target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS, targets });
     }
 
 
@@ -2100,6 +2149,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // The same one generic file the admin console shows — same text, same source, so the two
         // screens cannot hand out different helpers (mig 368).
         files: helperFiles(originOfReq(req)),
+        // MODE B's launcher, sent beside MODE A's. Both are plain text with nothing secret in them,
+        // so the panel can show whichever the mode calls for with no second round trip.
+        stationFiles: stationFiles(originOfReq(req)),
         maySetup,
         deviceId: dv,
         // Which install text to show FIRST. The browser knows what it is running on, so nobody has to
@@ -2734,28 +2786,51 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ adminView: true, printer: own.printer, agent: own.agent });
       }
       const payload: Record<string, unknown> = {};
+      // What the diary line will call this piece of paper, filled in by whichever branch below
+      // resolves it — so the log says "bill #218 for table 6", not just "bill".
+      let printedWhat = kind === "bill" ? "bill" : "banquet sheet";
+      let printedTable: string | null = null;
       if (kind === "bill") {
         const sid = String((body as Record<string, unknown>)?.sessionId || "");
         if (!sid) return err("Which bill?", 400);
         // The session must be this restaurant's — the route handler never trusts the panel's word
         // for whose row it is (every other write here does the same).
-        const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        // `table_number` and `bill_no` ride along so the diary line can NAME the bill — see the
+        // note on logAction below. Same read, two more small columns.
+        const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; table_number: unknown; bill_no: unknown } | null;
         if (!sess) return err("That table's bill is not this restaurant's.", 404);
         payload.sessionId = sid;
         if ((body as Record<string, unknown>)?.parcel) payload.parcel = true;
+        printedTable = sess.table_number != null ? String(sess.table_number) : null;
+        printedWhat = `bill${sess.bill_no != null ? ` #${sess.bill_no}` : ""}`
+          + `${sess.table_number != null ? ` for table ${sess.table_number}` : ""}`;
       } else {
         const bid = String((body as Record<string, unknown>)?.billId || "");
         if (!bid) return err("Which banquet bill?", 400);
-        const bill = (await sb.from("banquet_bills").select("id").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; bill_no: unknown } | null;
         if (!bill) return err("That banquet bill is not this restaurant's.", 404);
         payload.billId = bid;
+        printedWhat = `banquet sheet${bill.bill_no != null ? ` #${bill.bill_no}` : ""}`;
       }
       const q = await queueJob(rid, kind, payload, { requestedBy: g.user?.name || g.user?.username || "manager" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      // ── THE DIARY LINE NAMES *WHICH* BILL (owner, 2026-08-28: "make log do that") ─────────────
+      // Asked for "say who printed a bill, on the bill itself", he answered: let the LOG answer it.
+      // It could not. The row read `bill sent to Printer_POS_80 on Shop's computer` — which says
+      // WHERE the paper came out and never WHICH bill came out of it, so on a night with forty
+      // prints no two rows could be told apart. Both facts were already in reach: `table_number`
+      // is a column logAction has always accepted and nothing here passed, and the bill number is
+      // one extra column on a read this branch already makes.
       await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
+        // Filterable as well as readable: the Audit & logs tab groups by table, so a bill print
+        // now sits with the rest of that table's story instead of floating loose. A banquet sheet
+        // has no table, and stays null rather than being given a pretend one.
+        table_number: printedTable,
         ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`
+        detail: `${printedWhat} sent to ${own.printer} on ${own.agent}`
           + (g.user ? "" : " — sent deliberately from the admin console"),
       });
       // What the person is told, in the words they need: where it went, and — honestly — that it is
@@ -4756,7 +4831,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         auto: t.mayPrint, roomAllowed: t.mayPrint, by: actorName || null,
       });
       if (!gate.ok) return ok({ won: [], refused: gate.reason, station: gate.station });
-      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), station: gate.station });
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: 0 }), station: gate.station });
     }
 
     if (a === "print-jobs" && c === "done") {
@@ -4865,8 +4940,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const routes = await readRoutes(rid);
         const patch: Record<string, unknown> = {};
         for (const k of ROUTABLE_KINDS) {
-          if (routes[k].agent === mine.id) patch[k] = null;
-          else if (routes[k].backupAgent === mine.id) patch[k] = { agent: routes[k].agent, printer: routes[k].printer };
+          if (routes[k].agent === mine.id) patch[k] = null;   // no backup line to fall back to
         }
         if (Object.keys(patch).length) await writeRoutes(rid, patch);
         await logAction("editor", "print_helper_removed", {
@@ -4877,7 +4951,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ ok: true, cleared: Object.keys(patch) });
       }
 
-      // ── who prints one kind of paper ──────────────────────────────────────────────────────────
+// ── THE "mode" VERB IS GONE HERE TOO (owner, 2026-08-31) ─────────────────────────────────
+      // Same reason as the admin console: there is no mechanism left to choose. A manager who wants
+      // the slips on their own screen names themselves on the kitchen-slip line below ("a screen"),
+      // which is the same act with one fewer step and no stored copy to contradict it.
+
+            // ── who prints one kind of paper ──────────────────────────────────────────────────────────
       // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
       // route from here always means THIS panel and THIS person — narrowing it to somebody else's
       // screen is an admin act, and letting a manager do it from their own settings would be a way
@@ -4889,19 +4968,43 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const mine = await agentForDevice(rid, dv);
         let patch: Record<string, unknown>;
         if (who === "computer") {
-          if (!mine) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
+          // WHICH machine, not necessarily THIS one. The board's dropdown is grouped by computer, so
+          // a restaurant with two machines can send the bills to the counter and the slips to the
+          // kitchen from either screen. It still falls back to this computer when none is named, so
+          // the older one-machine flow is unchanged.
+          const named = String((body as Record<string, unknown>)?.agent || "");
+          const agentId = named || mine?.id || "";
+          if (!agentId) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
           const printer = String((body as Record<string, unknown>)?.printer || "");
           if (!printer) return err("Which printer?", 400);
+          // NO BACKUP FIELDS (owner, 2026-08-30 — there is no backup printer). This still ACCEPTED
+          // `backupAgent` / `backupPrinter` off the request body and wrote them onto the route, weeks
+          // after everything that READ them was deleted. Nothing acted on them, so nothing looked
+          // wrong: it quietly stamped `backupAgent: null` onto every route it saved, and a caller
+          // passing a real one would have had it stored and silently ignored. A field that can still
+          // be WRITTEN is not a deleted field — it is a deleted field waiting to be read again.
           patch = {
-            agent: mine.id, printer,
+            agent: agentId, printer,
             paper: (body as Record<string, unknown>)?.paper ?? undefined,
-            backupAgent: (body as Record<string, unknown>)?.backupAgent ?? null,
-            backupPrinter: (body as Record<string, unknown>)?.backupPrinter ?? null,
           };
         } else if (who === "screen") {
-          patch = { via: "screen", panel: "manager", person: g.user?.id || null, device: dv };
+          // NO `device` HERE, deliberately. A per-paper "On" must produce the SAME shape as naming a
+          // person on the admin board — otherwise one line would be narrowed to this one PC and the
+          // others not, which is a difference nobody asked for and nothing shows.
+          //
+          // THE PANEL FOLLOWS THE PERSON, and it is no longer hard-coded (2026-08-31). This said
+          // `panel: "manager"` outright, which is the same fault he reported on the admin picker
+          // ("choosing a person, there is not kitchen panel available"): writeRoutes then refuses a
+          // cook for not being a manager, so a cook pressing "print them on this screen" from the
+          // kitchen panel was told their own screen was not the kitchen panel. panelForRole is the
+          // one place that answers this, and it answers it for every role that has a screen.
+          patch = { via: "screen", panel: panelForRole(g.user?.role), person: g.user?.id || null };
         } else if (who === "off") {
           patch = { via: "off" };
+        } else if (who === "none") {
+          // "— no printer chosen yet —". A real answer, and a different one from "nobody": the line
+          // is simply unanswered again, and every screen says so instead of going quiet.
+          patch = null as unknown as Record<string, unknown>;
         } else {
           return err("Say who prints it — this computer, a screen, or nobody.", 400);
         }
@@ -5622,8 +5725,15 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // RECORD, not a refusal: every cancel now writes an Audit row naming the person, the reason,
       // the KOT and the bill (below), so nothing can be cancelled quietly.
       //
-      // DELETING a bill keeps its own power (delete_bill + void_bills, further down) — that is the
-      // one that takes a sale out of the reports, and it stays deliberately handed over.
+      // AND DELETING A BILL IS NOT A POWER THIS RESTAURANT HAS AT ALL — do not read the paragraph
+      // above as saying it is. R27 (owner, 2026-08-16, re-confirmed 2026-08-21) retired the
+      // grantable "Delete a bill" row outright: *"I don't want to give permission to the restaurant
+      // owner to delete the bill because he will fake the bill and delete the bill"*. Cancel is the
+      // only route out of a bill for a manager AND for the owner; `canDeleteBill()` answers true for
+      // the Aevidine admin console only, and `npm run verify:one-bill-delete` asserts exactly that.
+      // This comment said the OPPOSITE until 2026-08-28 (sweep #7, T30) — written before R27 and
+      // never re-read, which is how a permission the owner refused gets rebuilt by somebody
+      // trusting a comment. The guard now fails if that wording ever comes back.
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to

@@ -69,4 +69,13 @@ if (missing.length) {
 if (fixed.length) {
   console.log(`Note: now declared, remove from KNOWN_UNDECLARED in this script: ${fixed.join(", ")}`);
 }
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (files.length < 50) {
+  console.error(`✗ verify:css-tokens walked only ${files.length} file(s) — it should see hundreds. Nothing was checked.`);
+  process.exit(1);
+}
 console.log(`OK — every --adm-*/--ow-* token that is read is declared (${used.size} read${KNOWN_UNDECLARED.size ? `, ${KNOWN_UNDECLARED.size} parked` : ""}).`);

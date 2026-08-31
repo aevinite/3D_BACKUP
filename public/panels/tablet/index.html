@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=889ee26b">
+  <link rel="stylesheet" href="style.css?v=4c8fe3cd">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
@@ -66,12 +66,12 @@
       </div>
     </div>
   </div>
-  <script src="/panels/maint.js?v=d47de242"></script>
-  <script src="/panels/realtime.js?v=627dd745"></script>
+  <script src="/panels/maint.js?v=918ba6bd"></script>
+  <script src="/panels/realtime.js?v=122c17eb"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=98da97e5"></script>
+  <script src="/panels/outbox.js?v=79344a64"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=190941c0"></script>
+  <script src="/panels/connbadge.js?v=50636b84"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
@@ -81,30 +81,30 @@
        opposite of the actual order in this file and would have sent the next person reordering
        these tags the wrong way. T4 sweep, 2026-08-11.) -->
   <script src="/panels/swreg.js?v=0d429b78"></script>
-  <script src="/panels/offline.js?v=ce110fa3"></script>
+  <script src="/panels/offline.js?v=9e03ae1a"></script>
   <!-- What the GUEST MENU is waiting for (owner, 2026-08-13): the 🔔 in the top bar + its sheet.
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
        After backstack.js, because its sheet registers a back layer. -->
-  <script src="/panels/guestbell.js?v=3826b621"></script>
+  <script src="/panels/guestbell.js?v=7f018bab"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
-  <script src="/panels/billcustomer.js?v=eb941f4b"></script>
+  <script src="/panels/billcustomer.js?v=78df0b22"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=4ba49df8"></script>
-  <script src="/panels/issue-raise.js?v=c383fa38"></script>
+  <script src="/panels/errlog.js?v=81a35c3c"></script>
+  <script src="/panels/issue-raise.js?v=2a56fffc"></script>
   <!-- My profile & pay (mig 220) — shared with the manager panel -->
-  <script src="/panels/myprofile.js?v=b6bc2e82"></script>
+  <script src="/panels/myprofile.js?v=e194a3d8"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Ready/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=e5a33483"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=3bf875b3" data-fit=".ordtotal,.ctotal"></script>
+  <script src="/panels/fitnums.js?v=49e195eb" data-fit=".ordtotal,.ctotal"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). This panel does
        not print, but it reads the shared money rules from here — discPct(), the one definition of
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
-  <script src="/panels/billdoc.js?v=e8eadd05"></script>
-  <script src="app.js?v=5b7283e6"></script>
+  <script src="/panels/billdoc.js?v=981b775d"></script>
+  <script src="app.js?v=c735aec6"></script>
 </body>
 </html>

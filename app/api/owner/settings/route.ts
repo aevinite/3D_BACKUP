@@ -138,16 +138,28 @@ export async function GET(req: NextRequest) {
   // He asked for printing to be visible in the owner panel too — "divide whole printing in both
   // manager as well as owner and kitchen" — and for nothing to show when it is off. So one row per
   // restaurant that HAS it on, saying which screen is printing right now (mig 338). No controls: the
-  // owner is not standing at the printer, and the two switches are the admin's (mig 107/336).
+  // owner is not standing at the printer, and the switch is the admin's (mig 107).
   // Two small indexed reads over restaurants this owner already has, and only when there is one.
   const printing: { restaurant_id: string; name: string; target: string; station: string | null; stale: boolean }[] = [];
+  // WAS THE LIST SHORTENED, OR IS PRINTING SIMPLY OFF? Those two produce the identical answer — an
+  // empty array — and the page showed the identical thing for both: no Kitchen printing section at
+  // all. So a wobble on either read made a section the owner had been given silently disappear and
+  // come back, which reads as "the feature was taken away from me". Neither read checked itself:
+  // `.data || []` turns a failed query into an empty list with no error anywhere.
+  // The page needs the difference, so it is answered here. A restaurant with printing genuinely off
+  // still shows nothing — that rule is his and does not change.
+  let printingOk = true;
   try {
     const ids = restaurants.map((r) => r.id);
     if (ids.length) {
       const [setRows, stRows] = await Promise.all([
-        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, kot_print_target").in("restaurant_id", ids),
+        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").in("restaurant_id", ids),
         sb.from("print_stations").select("restaurant_id, label, panel, claimed_by, last_seen_at").in("restaurant_id", ids).eq("active", true),
       ]);
+      // A read that failed is not a restaurant with no printing. `print_stations` is the softer of
+      // the two: without it the rows still render and just cannot say WHICH screen is printing, so
+      // it does not shorten anything and must not raise the flag.
+      if (setRows.error) printingOk = false;
       const byRid = new Map(((stRows.data || []) as Record<string, unknown>[]).map((r) => [String(r.restaurant_id), r]));
       const nameOf2 = new Map(restaurants.map((r) => [r.id, r.name]));
       for (const row of (setRows.data || []) as Record<string, unknown>[]) {
@@ -157,14 +169,25 @@ export async function GET(req: NextRequest) {
         printing.push({
           restaurant_id: rid2,
           name: nameOf2.get(rid2) || "",
-          target: String(row.kot_print_target || "kitchen"),
+          // DERIVED FROM THE KITCHEN SLIPS ROUTE (mig 369), never from the retired column. The three
+          // words the owner's page prints are unchanged, so nothing there had to be reworded.
+          target: (() => {
+            const bag = row.modules && typeof row.modules === "object" ? row.modules as Record<string, Record<string, unknown>> : {};
+            const k = ((bag.printing?.routes || {}) as Record<string, Record<string, unknown>>).kot || {};
+            if (k.via !== "screen") return "kitchen";
+            // "both" IS UNREACHABLE and stays deleted (owner, 2026-08-30). It meant "the kitchen
+            // prints and the counter picks up what it leaves" — the backup screen, which is gone.
+            // `k.backupPanel` had already stopped existing, so this read undefined every time and
+            // the branch was dead code that still LOOKED like a supported answer.
+            return k.panel === "manager" ? "counter" : "kitchen";
+          })(),
           station: st ? (st.label || (st.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (st.claimed_by ? ` · ${st.claimed_by}` : "") : null,
           stale: !!(st?.last_seen_at && Date.now() - Date.parse(st.last_seen_at) > 3 * 60 * 1000),
         });
       }
     }
-  } catch { /* a printing row is a nicety; never let it shorten the page */ }
-  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing });
+  } catch { printingOk = false; /* a printing row is a nicety; never let it shorten the page — but SAY it was shortened */ }
+  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing, printingOk });
   } catch (e) {
     // A half-read restaurant list must not silently shorten the admin's page (same rule as
     // `scopedRestaurantIds` everywhere else).

@@ -1073,7 +1073,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
       // The PIN state exists only where the row itself offers it (money rows) — the model says
       // which, so a floor row can't be set to "pin" and silently behave as "on".
       const modes = cap.pin ? ["on", "pin", "off"] : ["on", "off"];
-      if (!modes.includes(String(v))) return bad(`Bad value for "${k}" — use ${modes.join(", ")}, or null.`);
+      if (!modes.includes(String(v))) return bad(`"${k}" can only be set to ${modes.join(", ")} — or left unset, to go back to the default.`);
       // Least-privilege (audit 2026-07-07): a MANAGER may REDUCE a junior's power (off) or
       // reset it to default, but may NOT GRANT (on/pin) — only the owner/admin grants powers.
       if (s.actor === "manager" && (v === "on" || v === "pin"))

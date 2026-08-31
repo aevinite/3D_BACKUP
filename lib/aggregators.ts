@@ -177,12 +177,37 @@ export async function resolveWebhookRestaurant(
   payload: Record<string, unknown>,
 ): Promise<string | null> {
   const outlet = outletIdFrom(payload);
-  // Every restaurant with this channel switched ON. Small: it is an opt-in integration.
-  const r = await sb.from("settings").select("restaurant_id, platform_channels");
+  // Every restaurant with THIS channel switched on — asked of Postgres, not of every row in the
+  // table (T25, sweep #7, 2026-08-28).
+  //
+  // This read used to be a bare `select("restaurant_id, platform_channels")` with no filter and no
+  // limit, on the reasoning written beside it: "Small: it is an opt-in integration." True today —
+  // 17 rows, 2.3 KB, measured — and wrong in two ways that both get worse quietly:
+  //
+  //   · PostgREST caps an unlimited select at 1,000 rows with NO error, so past a thousand
+  //     restaurants an inbound order's own restaurant could simply not be in the answer, and the
+  //     only trace would be this function's honest "refusing to guess" line in the log;
+  //   · `platform_channels` holds the per-channel CONNECTION KEYS (it is on
+  //     lib/panelSettings.ts's PRIVATE_SETTINGS_COLUMNS for exactly that reason), and this pulled
+  //     every restaurant's copy across on a PUBLIC webhook path to read one boolean and one string.
+  //
+  // The filter is the same shape `aggregatorsEnabled()` moved to on 2026-08-21, and it is verified
+  // the same way rather than assumed: driven against the dev database, the Postgres-side filter
+  // returned the IDENTICAL set to the row-by-row test for all three channels — zomato 12 = 12,
+  // swiggy 12 = 12, own website 3 = 3. (`->>` renders a JSON boolean as the text "true".)
+  //
+  // The column still comes back, because the outlet id lives inside it and the "refuse rather than
+  // guess" logic below needs it. What changes is that only the LIVE handful travel, and the answer
+  // can no longer be silently short.
+  const r = await sb.from("settings").select("restaurant_id, platform_channels")
+    .eq(`platform_channels->${source}->>on`, "true")
+    .limit(500);
   if (r.error) {
     console.error("[aggregators] could not read channel mappings:", r.error.message);
     return null;                       // couldn't check → refuse, never guess
   }
+  // The JavaScript test stays as a second line of defence: it is what makes `on: "true"` (a string
+  // somebody hand-edited) or a future third state fail CLOSED here rather than resolve a restaurant.
   const live = ((r.data || []) as { restaurant_id: string; platform_channels: Record<string, { on?: boolean; outlet?: string }> | null }[])
     .filter((row) => row.platform_channels?.[source]?.on === true);
 
@@ -243,6 +268,11 @@ export async function ingestIncoming(source: AggSource, payload: Record<string, 
   return Array.isArray(data) ? data[0] : data;
 }
 
+/** How long a status ping to Zomato/Swiggy may take before we give up on it. Deliberately shorter
+ *  than the platform's own function ceiling, and the same order as lib/alerts.ts's 4s: a ping
+ *  nobody is waiting for must never be the thing that holds an instance open. */
+const NOTIFY_TIMEOUT_MS = 6000;
+
 // Push a status change back to the platform. No-op while the provider has no keys
 // (today). Best-effort: a notify failure must never break the local status update.
 export async function notifyAggregator(source: string, externalId: string | null | undefined, status: string): Promise<void> {
@@ -253,8 +283,29 @@ export async function notifyAggregator(source: string, externalId: string | null
   const verb = MAP[status];
   if (!verb) return;
   try {
+    // A DEADLINE, because this is an OUTBOUND call to somebody else's server (T25, sweep #7,
+    // 2026-08-28). lib/alerts.ts learned this on 2026-07-31 and wrote it down: "Both pushes are
+    // outbound HTTP to someone else's server, and they used to be awaited with no upper bound — so
+    // on a restaurant's flaky wifi a staff action could sit there waiting… Caught 2026-07-31: an
+    // invoice POST took 30s." Its answer was ALERT_TIMEOUT_MS = 4000.
+    //
+    // Both callers here already say `void notifyAggregator(...)`, so nothing on the floor WAITS for
+    // it — but an un-awaited fetch with no ceiling still holds the serverless instance open until
+    // the platform's own timeout, on the one path that talks to Zomato/Swiggy. 6 seconds is
+    // generous for a status ping and short enough that it cannot become a hang.
+    //
+    // Feature-guarded exactly like every other deadline in this repo: READING AbortSignal.timeout
+    // throws on a browser that has not got it (five files record that lesson, and
+    // npm run verify:abort-guard exists because lib/supabase.ts did it unguarded anyway). This is a
+    // server path today, so the guard is belt and braces — and it is what the guard asks for.
+    let signal: AbortSignal | undefined;
+    try {
+      signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(NOTIFY_TIMEOUT_MS) : undefined;
+    } catch { signal = undefined; }
     await fetch(`${url.replace(/\/$/, "")}/orders/${encodeURIComponent(externalId)}/${verb}`, {
       method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: "{}",
+      ...(signal ? { signal } : {}),
     });
   } catch { /* best-effort: the local status already moved */ }
 }

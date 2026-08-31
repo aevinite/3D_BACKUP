@@ -18,11 +18,12 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, detailForList, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
 import { trailOf } from "@/lib/logTrail";
+import { actorIsRawId, actorLabel, actorTitle } from "@/lib/ownerActor";
 // The sort orders, the type chips and the search, shared with the manager panel and the admin
 // console (see the file's header for why it lives in /panels).
 import AUDITSORT from "@/public/panels/auditsort.js";
@@ -48,6 +49,39 @@ type Removal = {
 const REMOVAL_KIND: Record<string, [string, string]> = Object.fromEntries(
   Object.keys(KIND_LABEL).map((k) => [k, [KIND_ICON[k] || "•", KIND_LABEL[k]] as [string, string]]),
 );
+// ── AND A KIND NOBODY MAPPED STILL HAS TO READ AS ENGLISH (T12 sweep, 2026-08-27) ──────────────
+// The row below used to fall back to ["•", r.kind] — the raw database word. That was not
+// hypothetical: app/api/owner/customers/route.ts writes `kind: "customer_erased"` into
+// deletion_audit, public/panels/auditsort.js had no KIND_LABEL entry for it, and the top row of
+// this record on French House read, verbatim:
+//
+//     • customer_erased · Guest ending 1601
+//
+// on the one screen whose whole job is to be the plain-English record.
+//
+// THAT ONE IS NOW PROPERLY NAMED (2026-08-29, the owner said do it): auditsort.js has
+// `customer_erased: "Guest record erased"` with the broom glyph, which fixes the owner panel, the
+// manager panel, the admin console and the removal-detail card in one place. So this function is
+// no longer carrying a live fault — it is the FLOOR under the next one. Every kind arrives here
+// through a map that a route can add to without anyone remembering to add words, and the day that
+// happens the screen should say something a person can read rather than a column value.
+// `npm run verify:owner-screen` prints a note naming any kind in that state.
+function humanKind(kind: string): string {
+  const words = String(kind || "").replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Something was removed";
+}
+/** KIND_LABEL, with a readable word filled in for anything nobody named — see humanKind above.
+ *  The CHIPS need this as much as the rows do: `AUDITSORT.kindCountsFrom` is handed the label map
+ *  and falls back to the raw kind itself, so the chip strip printed "• customer_erased 2" beside
+ *  ten properly-named chips (seen on a 360px screenshot, T12 sweep 2026-08-27). One map, so the
+ *  chip, the row, the search and the "· <kind>" line under it can never say four different things.
+ *  With customer_erased now named in auditsort.js this map is usually just KIND_LABEL — which is
+ *  the point: it costs nothing when nothing is missing. */
+function labelsWith(...sets: (string | null | undefined)[][]): Record<string, string> {
+  const out: Record<string, string> = { ...KIND_LABEL };
+  for (const set of sets) for (const k of set) if (k && !out[k]) out[k] = humanKind(k);
+  return out;
+}
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",
   guest_changed: "Guest changed their mind",
@@ -55,6 +89,14 @@ const REMOVAL_REASON: Record<string, string> = {
   sold_out: "Not available / sold out",
   kitchen_error: "Kitchen error",
   other: "Other reason",
+  // NOT one of the manager panel's six — this one is written by the OWNER console itself, when a
+  // guest asks for their personal data to be erased (app/api/owner/customers/route.ts). It was
+  // missing here, so the reason column printed the column value: seen on a light-skin screenshot,
+  //     data_erasure_request — Guest asked for their personal data to be erased
+  // with the plain-English half sitting right beside the raw half (T12 sweep, 2026-08-27). Kept
+  // SHORT on purpose, so the line reads the way every other reason row does — a label, an em dash,
+  // then the note the person actually wrote.
+  data_erasure_request: "Data erasure request",
 };
 
 export default function OwnerAuditLogs() {
@@ -352,13 +394,35 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
 
   // Chips are built from the WHOLE feed, not the filtered slice — a chip's count must not change
   // when you tap it, and a type must stay reachable once you have narrowed to another one.
-  const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KIND_LABEL, KIND_ICON);
-  // A type that vanished from the feed (a stale chip after Refresh) must not leave the list empty
-  // with no way back — fall back to All.
+  const KINDS = labelsWith((counts || []).map((c) => c.kind), (removals || []).map((r) => r.kind));
+  const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KINDS, KIND_ICON);
+  // See the note by the chip strip below. `narrow` matches the 760px step the rest of this console
+  // already uses, and it is re-read on change so rotating a phone stays honest.
+  const [allChips, setAllChips] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 760px)");
+    const on = () => setNarrow(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  const CHIP_FOLD = 5;
+  const folding = narrow && !allChips && chips.length > CHIP_FOLD + 1;
+  const shownChips = folding
+    ? chips.filter((c: { kind: string }, i: number) => i < CHIP_FOLD || c.kind === kind)
+    : chips;
+  const hiddenChipCount = chips.length - shownChips.length;
+  // NO CLIENT-SIDE FALLBACK HERE, AND THAT IS RIGHT — the comment that used to sit on this line
+  // described one that does not exist, which is worse than none (T12 sweep, 2026-08-27). The
+  // Activity half below really does need its fallback, because its chips are counted from the page
+  // in hand. This half's chips come from `kindCounts`, which /api/owner/audit computes over the
+  // WHOLE record and deliberately does NOT narrow by the chosen kind — so "All" is always offered
+  // and a kind that ran out still has the empty state's "Show all" button. Checked in the route.
   const activeKind = kind;
   // The SERVER already narrowed to `kind` — passing it again here would be harmless but it would also
   // hide a mismatch between the two, so the client only searches and sorts.
-  const list = AUDITSORT.view(removals || [], { q, sort, kindLabel: KIND_LABEL, reasonLabel: REMOVAL_REASON });
+  const list = AUDITSORT.view(removals || [], { q, sort, kindLabel: KINDS, reasonLabel: REMOVAL_REASON });
   // What the visible rows come to in money — the figure an owner is really after when they pick
   // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
   const shownMoney = AUDITSORT.sumAmount(list);
@@ -415,17 +479,34 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
       )}
       {/* WHAT IS THE LIST OF WHAT — one chip per type present, with its count. Only types that
           actually have rows are offered, so there is never a "0" chip to tap. */}
+      {/* ── AND ON A PHONE THE STRIP FOLDS (owner, 2026-08-29) ────────────────────────────────────
+          Measured on a 360px screenshot: eleven chips over eight lines, ~530px of them, which put
+          the search box below the fold on the screen you search from. Nothing was hidden and
+          nothing was broken — it was simply a lot of thumb before you reach the control you came
+          for. So the strip shows the busiest few and folds the rest behind one more chip.
+            . the chips arrive sorted by COUNT (auditsort's kindCountsFrom), so what folds away is
+              genuinely the rarest — the fold can never hide the type you use every day;
+            . "All" is never folded, so there is always a way back out;
+            . a chip you have SELECTED is never folded either, or narrowing to a rare type would
+              make the chip you are standing on vanish;
+            . once opened it stays open for the visit, and on a desktop — where all eleven fit two
+              lines — the fold is off entirely. This is a phone problem and only a phone problem. */}
       {chips.length > 1 && (
         <div className="own-range aud-chips" style={{ marginBottom: 10, flexWrap: "wrap" }}>
           <button className={activeKind === "" ? "on" : ""} onClick={() => setKind("")}>
             All <i>{(counts ? counts.reduce((a, c) => a + c.n, 0) : (removals || []).length).toLocaleString("en-IN")}</i>
           </button>
-          {chips.map((c) => (
+          {shownChips.map((c) => (
             <button key={c.kind} className={activeKind === c.kind ? "on" : ""} onClick={() => setKind(c.kind)}
               title={`Show only: ${c.label}`}>
               <span aria-hidden="true">{c.icon}</span> {c.label} <i>{c.count}</i>
             </button>
           ))}
+          {hiddenChipCount > 0 && (
+            <button onClick={() => setAllChips(true)} title="Show every type on this record">
+              + {hiddenChipCount} more
+            </button>
+          )}
         </div>
       )}
 
@@ -444,7 +525,11 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
             {AUDITSORT.SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
         </label>
-        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+        {/* marginRight, not the space in the markup: .owx .adm-btn is display:inline-flex, and a flex
+            container COLLAPSES the leading whitespace of a text run — so the glyph sat hard against
+            the word while the dashboard's own Refresh, which carries this margin, read correctly.
+            Measured: 0px here against 6px there (T12 sweep, 2026-08-27). */}
+        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" style={{ marginRight: 6 }} aria-hidden="true" /> Refresh</button>
       </div>
 
       {/* What is on screen, in one line — so picking "Deleted bills" answers "how much?" too.
@@ -461,7 +546,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
           {list.length.toLocaleString("en-IN")} {list.length === 1 ? "record" : "records"}
           {pages > 1 ? ` on this page of ${total.toLocaleString("en-IN")}` : ""}
-          {activeKind ? ` · ${KIND_LABEL[activeKind] || activeKind}` : ""}
+          {activeKind ? ` · ${KINDS[activeKind] || humanKind(activeKind)}` : ""}
           {shownMoney > 0 ? ` · ${inr(shownMoney)}${pages > 1 ? " on this page" : " in total"}` : ""}
         </p>
       )}
@@ -489,7 +574,7 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
         <div className="adm-logwrap aud-stack">
           <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
           {list.map((r) => {
-            const [ico, label] = REMOVAL_KIND[r.kind] || ["•", r.kind];
+            const [ico, label] = REMOVAL_KIND[r.kind] || ["•", KINDS[r.kind] || humanKind(r.kind)];
             const bits = [
               r.table_number ? `Table ${r.table_number}` : "",
               r.kot_no != null ? `KOT #${r.kot_no}` : "",
@@ -498,7 +583,9 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
               r.item_title ? `${r.item_title}${(r.qty || 0) > 1 ? ` ×${r.qty}` : ""}` : "",
               r.amount != null ? inr(parseFloat(String(r.amount)) || 0) : "",
             ].filter(Boolean).join(" · ");
-            const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || r.reason_code : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
+            // …and a FLOOR under any reason code nobody has named yet, for the same reason the kinds
+            // have one: whatever arrives, this column says something a person can read.
+            const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || humanKind(r.reason_code) : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
             return (
               <div
                 key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols, cursor: "pointer" }}
@@ -514,9 +601,14 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                   {/* ── THE TAGS (owner, 2026-08-18: "make tags for all kind of audit and stuff") ──
                       From the SAME module the manager panel and the admin console read, so one row
                       wears one set of words everywhere. For a cancellation the last tag is the answer
-                      to "was the food made?" — and READ-ONLY here: /api/owner/audit is GET-only and
-                      always answers canRestore:false (owner rule, 2026-08-04), so the owner SEES
-                      whether food was lost and changes nothing. A manager settles it in their panel. */}
+                      to "was the food made?" — and the owner may SETTLE that one question himself
+                      (owner, 2026-08-19: "can be change by owner or manager"), which is what the two
+                      buttons below the tags are. That is the single write this screen has, and it is
+                      a narrow one: it undoes no removal and edits no row, it records a fact only
+                      someone who was there can know. Everything else stays read-only — no restore,
+                      no delete, and /api/owner/audit still answers canRestore:false (owner rule,
+                      2026-08-04). This comment used to say the owner "changes nothing", two lines
+                      above the buttons that let him (T12 sweep, 2026-08-27). */}
                   {(() => {
                     const madeVal = r.made === true || r.made === "true" ? true
                       : r.made === false || r.made === "false" ? false : null;
@@ -550,7 +642,8 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontSize: 13 }}>{reason}</span>
-                  <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }}>{r.actor || "—"}{r.actor_role ? ` · ${r.actor_role}` : ""}</span>
+                  {/* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES — lib/ownerActor.ts. */}
+                  <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }} title={actorTitle(r.actor)}>{actorLabel(r.actor)}{r.actor_role ? ` · ${r.actor_role}` : ""}</span>
                 </div>
                 <div className="adm-when">{timeAgo(r.at)}</div>
               </div>
@@ -628,7 +721,7 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
           aria-label="Search the activity log"
           style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
         />
-        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+        <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" style={{ marginRight: 6 }} aria-hidden="true" /> Refresh</button>
       </div>
 
       {/* WHAT KIND OF THING HAPPENED — one chip per group, with its count. Only groups that have
@@ -663,9 +756,24 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
       ) : rows === null ? (
         <div className="adm-empty">Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="adm-empty">{scopeName
-          ? `No staff activity at ${scopeName} yet — pick another restaurant above, or All restaurants, to see the rest.`
-          : "No staff activity yet — it appears here as your team works."}</div>
+        /* ── AN EMPTY ANSWER IS NOT THE SAME AS AN EMPTY RECORD (T12 sweep, 2026-08-27) ──────────
+           The SEARCH BOX and the severity chips are both server-side (loadActivity puts `q` and
+           `level` on the request), so when either narrows the record to nothing the server answers
+           with zero rows — and this branch, which used to be worded for "your team has done nothing
+           yet", is the one that fires. Measured on French House: typing a word that matches nothing
+           printed "No staff activity yet — it appears here as your team works." over a log holding
+           8,829 entries. The removals half beside it has always told these three facts apart, and
+           this half is the one an owner searches. Search first, then severity, then the real
+           nothing-yet — and each narrowed state carries its own way back out. */
+        <div className="adm-empty">
+          {q.trim()
+            ? <>Nothing matches that. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setQ("")}>Clear the search</button></>
+            : level
+              ? <>Nothing marked {level === "warn" ? "Notable" : "Info"}{scopeName ? ` at ${scopeName}` : ""}. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setLevel("")}>Show all</button></>
+              : scopeName
+                ? `No staff activity at ${scopeName} yet — pick another restaurant above, or All restaurants, to see the rest.`
+                : "No staff activity yet — it appears here as your team works."}
+        </div>
       ) : !list || list.length === 0 ? (
         /* Narrowed to nothing. "Nothing of that kind" and "nothing has happened" are different
            facts, and a narrowed type needs a way back out of it — the same three-state treatment
@@ -683,7 +791,7 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
             const isWarn = a.level === "warn";
             const isResolved = isErr && !!a.resolved_at;
             const showRed = isErr && !isResolved;
-            const det = isErr ? (a.detail || "") : formatActionDetail(a.action, a.detail);
+            const det = isErr ? (a.detail || "") : detailForList(a.action, a.detail);
             // A non-empty actor on a tablet row = the manager whose PIN unlocked it (except
             // the person's own login/profile actions).
             const isPin = isManagerPinRow(a);
@@ -710,8 +818,11 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
                   {isPin
                     ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}
                         style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", ["--hue" as string]: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>
-                    : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
-                  {a.table_number && (isPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
+                    /* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES — lib/ownerActor.ts. An id
+                       tells the owner nothing and reads as the screen being broken, so the row
+                       simply carries no name, the way a row with no actor already does. */
+                    : a.actor && !actorIsRawId(a.actor) ? <span className="adm-muted"> · {a.actor}</span> : ""}
+                  {a.table_number && (isPin || !a.actor || actorIsRawId(a.actor)) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
                   {det ? <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span> : null}
                   {/* ── THE TRAIL, ON THE ROW ITSELF (owner, 2026-08-12) ──────────────────────
                       "in short it will show, but when you go in detail it will actually show the
@@ -765,8 +876,29 @@ function Pager({ page, pages, total, onGo }: { page: number; pages: number; tota
   if (pages <= 1) return null;
   const go = (p: number) => {
     onGo(Math.min(Math.max(1, p), pages));
-    // Back to the top: paging keeps the scroll position otherwise, so page 2 opens half way down.
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+    // ── BACK TO THE TOP, ON THE ELEMENT THAT ACTUALLY SCROLLS (T12 sweep, 2026-08-29) ────────────
+    // This used to be `window.scrollTo`, and the window NEVER scrolls on the owner console: above
+    // 900px the pane `.adm-main` is the scroller, at or below it globals.css makes `.adm-main`
+    // overflow-y:visible and `.adm` the 100dvh scroller instead. Measured at 1280x800 the document
+    // is 800/800; at 360x780 it is 780/780. So the line had never moved anything, on any width,
+    // since it was written.
+    //
+    // Paging DID still land you at the top, by a second route: changing the page re-runs the fetch
+    // effect, which sets the rows to null first, so the list collapses to "Loading…" and the
+    // scroller has nowhere left to be. That is real but accidental — the day someone keeps the old
+    // rows on screen while the next page loads (a perfectly reasonable change) the top-of-page
+    // behaviour would vanish with it and nobody would connect the two.
+    //
+    // Same shape as scrollPort() in app/owner/page.tsx and port() in
+    // app/aevinite/restaurants/page.tsx, which both solved this first: ask which element is really
+    // scrolling, then move THAT one. Verified after the change with the collapse still in place
+    // (22,483 -> 0) and with it defeated by holding the rows (also -> 0, which is the half that
+    // never worked before).
+    if (typeof document === "undefined") return;
+    for (const sel of [".adm-main", ".adm"]) {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (el && el.scrollHeight > el.clientHeight + 2) { el.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    }
   };
   // Which numbers to draw: always the first and last, plus a window around the current page.
   const nums: (number | "…")[] = [];

@@ -173,8 +173,10 @@ update the detail doc's section in the same commit.
 - **KOT/bills (migs 036–038):** daily `kot_no`/`bill_no`; discount apart from totals. Which of the
   THREE numbers is which, and why series have honest gaps: `docs/NUMBERING.md`. **Auto-print = a QUEUE
   (mig 335)**, never a tab noticing; no `document.hidden` refusal: `docs/KITCHEN-PRINT-SETUP.md`.
-  **A COMPUTER may own the paper (mig 341)** — a helper polls the queue and prints each kind on its own
-  printer; every screen then stands down. `docs/PRINT-HELPER.md`, `/aevinite/printing`, `verify:print-helper`.
+  **A COMPUTER may own the paper (mig 341), and THERE IS NO MODE TOGGLE (mig 372)** — a computer prints
+  if one is set up and named; if none is, the KITCHEN SCREEN does, with nothing switched on. Clearing a
+  paper line is not switching printing off (only "Nobody" is). `docs/PRINT-HELPER.md`,
+  `/aevinite/printing`, `verify:print-helper`.
   **New Postgres functions are PUBLIC-executable by default** — every staff-only fn needs
   REVOKE/GRANT (mig 038/267 lesson); `verify:grants` guards it.
 - **3D loading:** `lib/modelLoader.ts` singleton on `globalThis` — it is what makes "no re-fetch
@@ -208,8 +210,9 @@ update the detail doc's section in the same commit.
   staff outbox on a misreading.
 - **🔑 Access model v2 (the 4-rung ladder is RETIRED):** a toggle exists only where the owner
   listed one (`lib/accessTree.ts`); only the ADMIN holds permissions; hiding is never the only
-  guard. Spec: `docs/ACCESS-MODEL.md`; **still-unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
-  (12 open `☐`)**. Guards: `verify:access`, `verify:everything` (`--list` for
+  guard. Spec: `docs/ACCESS-MODEL.md`; **unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
+  (9 open `☐`; recount: `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`)**. Guards:
+  `verify:access`, `verify:everything` (`--list` for
   the phase map — never hard-code phase numbers). **French House is written to; Aangan is the
   READ-ONLY control at factory defaults.**
 - **👤 One profile shape for every person WHO HAS ONE — owner, manager, waiter. KITCHEN HAS NO
@@ -222,15 +225,16 @@ update the detail doc's section in the same commit.
   `LFH_BACK.layer(...)` (panels) the moment it's built — never hand-roll pushState/popstate.
 - **🧱 A new MODULE adds no column to `settings`** (110 already): declare `moduleBag: true` in
   `lib/accessModel.ts`, ladder goes in `settings.modules` (mig 326). `verify:settings-columns`.
+- **♻️ A NEW WAY REPLACES THE OLD ONE — never leave both** (owner, 2026-08-29, STANDING): adding a
+  thing REMOVES the thing that did that job, in the same change; changing how a feature works removes
+  the previous way. *"There is two printing things, one is working and one is just showing."* Delete
+  the old path, its buttons, its storage keys and its duplicate guides; leave an obituary comment.
+  Full text: `docs/CLAUDE-DETAIL.md` → "A new way replaces the old one".
 - **📍 EVERY problem / bug / improvement / idea you list MUST say WHERE IT LIVES** (owner,
-  2026-08-12, STANDING — he was left "completely lost" by a list that named files only). Each item
-  gets, in this order: **the panel** (guest menu / manager / kitchen / tablet / owner / admin /
-  none-it's-backend-only) → **the exact screen or tab** ("Bills tab", "Tables floor", "Reports →
-  Sales", "Recycle bin") → **what the person would SEE** → only then the file. If it has no screen,
-  say "backend only, nothing on screen" in those words — never leave him guessing which log, which
-  audit, which history. "History file" style shorthand is banned: name it as
-  `supabase/migrations/099…` AND say it is a migration file, not a log or an audit screen. Full text
-  + the panel→file map: `docs/CLAUDE-DETAIL.md` → "Where it lives".
+  2026-08-12, STANDING — he was left "completely lost" by a list that named files only): **panel →
+  exact screen or tab → what he would SEE → only then the file**, and **"backend only, nothing on
+  screen"** in those words when there is none. The four fields in full, the banned shorthands and
+  the panel→file map: `docs/CLAUDE-DETAIL.md` → "Where it lives".
 - **📋 Any list he must CHOOSE from uses the decision format** (owner, 2026-08-13, STANDING): per item
   — Where (panel→screen→what he'd SEE) · What it is · If yes · If no · Effort · Risk — numbered, grouped
   *can-do-now* / *needs-you*, ending with your recommendation. `docs/CLAUDE-DETAIL.md` → "The decision format".
@@ -249,15 +253,11 @@ update the detail doc's section in the same commit.
   every deploy; AV-live verification is READ-ONLY.
 - **Charts/data/egress feature work** → invoke the `data-cost-guard` skill BEFORE writing queries.
 - **🗑 NEVER ask permission to delete or remove anything here — just do it and report it** (owner,
-  2026-08-06, STANDING; full text in `~/.claude/CLAUDE.md`). Files, folders, branches, worktrees,
-  screenshots, temp scripts, dev rows, stale doc sections, dead code. Holds in **every** permission
-  mode and **especially bypass-permissions**, where a question defeats the mode he chose. Don't offer
-  removal as a question, don't leave junk "to be safe". **Ask-first survives for four things only,
-  and they are HIS rules:** the AV-live stack · the Brain vault (`~/Brain`) · another live session's
-  uncommitted work in this shared folder · force-pushing `main`. Guarded by
-  `npm run verify:no-ask` (auto-runs after any settings/CLAUDE.md edit) — it fails if an `ask`
-  permission rule reappears, if the standing order goes missing, **or if the AV-live `deny` rules are
-  ever removed in the name of "stop asking me"**.
+  2026-08-06, STANDING; full text in `~/.claude/CLAUDE.md`). Holds in **every** permission mode.
+  **Ask-first survives for four things only, and they are HIS rules:** the AV-live stack · the Brain
+  vault (`~/Brain`) · another live session's uncommitted work in this shared folder · force-pushing
+  `main`. Guarded by `npm run verify:no-ask`. What counts as "anything", and the three ways that
+  guard fails: `docs/CLAUDE-DETAIL.md` → "Never ask permission to delete".
 
 ## 🚦 Deploying & the folder ladder (pointer — invoke `ship-safety` AT the moment of deploying)
 

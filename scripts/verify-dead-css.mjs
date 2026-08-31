@@ -16,12 +16,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // Walk the tree directly rather than shelling out to grep — no shell, nothing to quote.
+let seen = 0;   // every .tsx the walk reached, not just the ones with a <style href> block
 function walk(dir, out = []) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.name === "node_modules" || e.name.startsWith(".")) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) walk(p, out);
-    else if (e.name.endsWith(".tsx") && readFileSync(p, "utf8").includes("<style href=")) out.push(p);
+    else if (e.name.endsWith(".tsx")) { seen++; if (readFileSync(p, "utf8").includes("<style href=")) out.push(p); }
   }
   return out;
 }
@@ -54,6 +55,15 @@ if (bad.length) {
   console.error(`✗ ${bad.length} :global() inside a plain <style href> block — the browser drops these rules entirely:\n`);
   for (const b of bad) console.error(`  ${b.file}:${b.line}`);
   console.error("\nA plain <style> needs no scoping escape — write the bare selector instead.");
+  process.exit(1);
+}
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (seen < 100) {
+  console.error(`✗ verify:dead-css reached only ${seen} .tsx file(s) under app/ and components/ — this app has hundreds. Its walk found nothing, so nothing was checked.`);
   process.exit(1);
 }
 console.log(`OK — no dead :global() rules (${files.length} file(s) with a plain <style href> block).`);

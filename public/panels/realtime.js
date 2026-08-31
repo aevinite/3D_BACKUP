@@ -81,10 +81,33 @@
   // The panel sat on its slow backstop while the device had a perfectly good connection, and the
   // badge said "weak" with no way back. Forgetting the rejection is what lets ensureClient()
   // (below) genuinely try again on the next wake.
+  /* THE ONE READ EVERY LIVE UPDATE WAITS ON NEEDS A DEADLINE (T9, second sweep of #7, 2026-08-30).
+     A server that REFUSES this read is handled below — the rejection drops the memo and the next
+     wake re-boots. A server that ACCEPTS it and never answers was not: a captive portal, an
+     overloaded box, a wifi that goes half-dead mid-shift. `fetch` has no timeout of its own, so
+     that promise stays PENDING for the life of the page, and because it is memoised in sbPromise,
+     every later getClient() — including the one behind coming back to the panel and the one behind
+     the "online" event — gets handed the same pending promise and makes no request at all.
+
+     Driven headless against a route that accepts and never replies: ONE request in the whole run,
+     the pill still reading "Connecting…" twelve seconds later, and a visibilitychange + online
+     wake changing nothing. A panel that has quietly stopped receiving live updates and will never
+     try again is worse than one that knows it is offline, because everything on screen still looks
+     current.
+
+     8s matches the deadline the rest of this app puts on a read that a person is waiting behind.
+     A timeout REJECTS, which is the point: the p.catch() below then drops the memo, so the next
+     wake genuinely re-boots. (AbortSignal.timeout is what verify:busy already requires of every
+     write; the fallback keeps an old tablet from losing live updates over a missing helper.) */
+  const RT_CONFIG_DEADLINE_MS = 8000;
+  function deadline(ms) {
+    try { if (AbortSignal && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms); } catch (e) { /* fall through */ }
+    try { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; } catch (e) { return undefined; }
+  }
   async function getClient() {
     if (sbPromise) return sbPromise;
     const p = sbPromise = (async () => {
-      const cfg = await (await fetch("/api/rt-config" + (RT_RID_Q ? "?rid=" + encodeURIComponent(RT_RID_Q) : ""), { cache: "no-store" })).json();
+      const cfg = await (await fetch("/api/rt-config" + (RT_RID_Q ? "?rid=" + encodeURIComponent(RT_RID_Q) : ""), { cache: "no-store", signal: deadline(RT_CONFIG_DEADLINE_MS) })).json();
       RT_RID = cfg.restaurantId || ""; // this panel's restaurant → cross-tenant event filter (noteEvent)
       // NOT CONFIGURED IS ITS OWN ANSWER (T9 improvement 6, 2026-08-06). /api/rt-config now replies
       // 503 { unconfigured:true } when the public Supabase values are missing, instead of 200 with

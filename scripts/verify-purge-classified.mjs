@@ -107,6 +107,25 @@ const UNDECIDED = new Map([
   ["inv_waste_entries", "waste log — operational"],
 ]);
 
+// ── SELF-CLEARING — a third answer, and the only one this file does not take on trust ────────────
+//
+// mig 078's rule is that tenant foreign keys have NO cascade, which is why the purge has to name
+// every table by hand. A handful of tables are a genuine exception: they hold a HANDSHAKE, not a
+// record, every row carries its own expiry, and something deletes expired rows for the whole
+// platform rather than per restaurant. Naming such a table in the purge would be dead code.
+//
+// "It cleans itself up" is exactly the kind of claim that rots, so an entry here is NOT an
+// allowance — it is a claim this guard PROVES on every run, against the live schema and the live
+// source. If the expiry column goes, or the sweeper starts filtering by restaurant, the entry fails
+// like any other missing table.
+const SELF_CLEARING = new Map([
+  ["print_pairings", {
+    expiry: "expires_at",
+    sweeper: "lib/printPair.ts",
+    why: "a print-helper handshake (mig 368), dead in 10 minutes; lib/printPair.ts deletes every expired row platform-wide at the start of each new pairing, so a purged restaurant's rows are gone within the hour whatever anyone does",
+  }],
+]);
+
 console.log("\nAdmin console → Restaurants → Recycle bin → purge: is every tenant table accounted for?");
 
 const tenant = (await q(`
@@ -127,7 +146,7 @@ for (const t of tenant) {
   if (new RegExp(`delete\\s+from\\s+(public\\.)?${t}\\b`, "i").test(def)) purged.add(t);
 }
 
-const unclassified = tenant.filter((t) => !purged.has(t) && !KEEP.has(t) && !UNDECIDED.has(t));
+const unclassified = tenant.filter((t) => !purged.has(t) && !KEEP.has(t) && !UNDECIDED.has(t) && !SELF_CLEARING.has(t));
 
 pass(`${tenant.length} tables carry a restaurant_id`);
 pass(`${purged.size} are cleared by the purge`);
@@ -141,11 +160,34 @@ else for (const t of unclassified) {
   fail(`${t} carries a restaurant_id but the purge neither clears it nor keeps it on purpose — add it to admin_purge_restaurant(), or to KEEP/UNDECIDED in this file with the reason`);
 }
 
+// ── PROVE every SELF_CLEARING claim, rather than believing it ──────────────────────────────────
+for (const [t, c] of SELF_CLEARING) {
+  if (!tenant.includes(t)) { fail(`${t} is listed as self-clearing but no longer carries a restaurant_id — remove the stale entry`); continue; }
+  // (a) the expiry column is really there, and really has a default, so a row cannot be immortal.
+  const col = await q(`
+    SELECT a.attname AS n, pg_get_expr(d.adbin, d.adrelid) AS dflt
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace AND ns.nspname = 'public'
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = '${c.expiry}' AND NOT a.attisdropped
+    LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+    WHERE c.relname = '${t}'`);
+  if (!col.length) { fail(`${t} is listed as self-clearing on ${c.expiry}, but that column is gone — it now needs a line in admin_purge_restaurant()`); continue; }
+  if (!col[0].dflt) { fail(`${t}.${c.expiry} has no default, so a row can be written with no expiry and live for ever — it needs a purge line`); continue; }
+  // (b) something really deletes the expired rows, and does it for the WHOLE platform. A sweeper
+  //     that filtered by restaurant_id would never reach a purged restaurant's leftovers.
+  let src = "";
+  try { src = readFileSync(join(root, c.sweeper), "utf8"); } catch { }
+  const sweep = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?\\.lt\\(\\s*"${c.expiry}"`).test(src);
+  const scoped = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?restaurant_id`).test(src);
+  if (!sweep) fail(`${c.sweeper} no longer sweeps expired ${t} rows — ${t} is not self-clearing any more and needs a line in admin_purge_restaurant()`);
+  else if (scoped) fail(`${c.sweeper} now sweeps ${t} per restaurant, so a purged restaurant's rows would never be reached — ${t} needs a purge line`);
+  else pass(`${t} is left out of the purge on purpose, and it really does clear itself: ${c.why}`);
+}
+
 // A stale name in either list is just as misleading as a missing table.
-for (const t of [...KEEP.keys(), ...UNDECIDED.keys()]) {
+for (const t of [...KEEP.keys(), ...UNDECIDED.keys(), ...SELF_CLEARING.keys()]) {
   if (!tenant.includes(t)) fail(`${t} is listed here but no longer has a restaurant_id column — remove the stale entry`);
 }
-if (![...KEEP.keys(), ...UNDECIDED.keys()].some((t) => !tenant.includes(t))) pass("no stale entries in either list");
+if (![...KEEP.keys(), ...UNDECIDED.keys(), ...SELF_CLEARING.keys()].some((t) => !tenant.includes(t))) pass("no stale entries in any list");
 
 // The two guards the owner's own rules put on this function must still be there.
 if (/never be purged/i.test(def)) pass("restaurant #1 still can never be purged");

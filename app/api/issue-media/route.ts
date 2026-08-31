@@ -63,6 +63,14 @@ export async function POST(req: NextRequest) {
   // may name one — and only the admin's cookie makes `?rid=` mean anything (see lib/panelScope.ts).
 
   const rid = panelRestaurantId(req, { user: staff });
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return bad("No restaurant scope — open this panel from the admin console.", 400);
 
   const form = await req.formData().catch(() => null);

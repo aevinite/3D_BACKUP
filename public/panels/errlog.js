@@ -74,9 +74,16 @@
       list.forEach(function (p, i) {
         setTimeout(function () {
           // Say it happened EARLIER, so a replayed row is never read as a fault happening now.
+          // ONCE, however many attempts it takes (T9 sweep #7, 2026-08-22). A delivery the browser
+          // refuses re-stashes the row, and the row already carries this note — so the next attempt
+          // appended a second one and the third a third: "… · offline, 3 min earlier · offline,
+          // 9 min earlier". The field is 120 characters and its first job is naming the code line,
+          // so the stack pushed the useful half towards the cut. One note, and its age is measured
+          // from when the crash HAPPENED, which is what a re-stash preserves.
           var mins = Math.round((Date.now() - (p.offlineAt || Date.now())) / 60000);
           delete p.offlineAt;
-          p.where = String((p.where || "") + " · offline, " + (mins < 1 ? "under a minute" : mins + " min") + " earlier").slice(0, 120);
+          var here = String(p.where || "").replace(/ · offline, [^·]*earlier/g, "");
+          p.where = (here + " · offline, " + (mins < 1 ? "under a minute" : mins + " min") + " earlier").slice(0, 120);
           send(p);
         }, i * 1500);
       });

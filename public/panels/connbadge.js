@@ -173,6 +173,16 @@
   }
 
   function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
+  // The reason a change is still waiting, in the words the rest of the app already uses. Anything
+  // unrecognised falls back to the plainest true sentence rather than printing a code at somebody.
+  var WHY = {
+    offline: "no internet when this was done",
+    slow: "the system did not answer",
+    busy: "the system was busy",
+    behind: "waiting for an earlier change on this table",
+    signedout: "this device was signed out",
+  };
+  function whyLine(it) { return (it && WHY[it.why]) || "waiting to send"; }
   function fmtAgo(ts) { var m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? "just now" : m < 60 ? m + "m ago" : Math.floor(m / 60) + "h ago"; }
 
   // Three signal bars; `lit` coloured, the rest faint. big = larger (popover).
@@ -352,7 +362,18 @@
         var row = el("span", "lfh-conn-row");
         var t = el("span", "lfh-conn-row-t");
         t.appendChild(el("b", null, it.label || "Action"));
-        t.appendChild(el("small", null, fmtAgo(it.at)));
+        // WHY THIS ONE IS WAITING, not just how long (owner, 2026-08-28).
+        //
+        // The queue has recorded a reason per change since 2026-08-02 — offline / slow / busy /
+        // behind — and nothing ever showed it. Two changes on the same table rendered as two
+        // identical rows with a time under each, so "nothing is moving" and "this one is being
+        // held until the one above it goes through" looked exactly alike. That got worse the day
+        // the hold became real: a change queued behind a failed one is now genuinely held, and a
+        // manager chasing a discount that has not applied has no way to tell that from a fault.
+        //
+        // The words are the ones already used elsewhere for the same states, so the pill, the
+        // offline bar and this row cannot describe one moment three ways.
+        t.appendChild(el("small", null, whyLine(it) + " · " + fmtAgo(it.at)));
         row.appendChild(t);
         var pill = el("span", "lfh-conn-pill", st.word);
         pill.style.background = st.sending ? "rgba(34,197,94,.18)" : "rgba(239,68,68,.18)";

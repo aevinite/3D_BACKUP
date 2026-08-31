@@ -166,8 +166,13 @@ export async function GET(req: NextRequest) {
     // raw `already been purged` exception, and "Restore" brought back a shell with no menu, no
     // staff, no settings and no owner. Filtering it here is what makes the purge look like what it
     // is — gone from every list a person can see.
+    // BOUNDED (T16 sweep #7, 2026-08-29). The sibling billing route was given a bound on
+    // 2026-08-04 with the reasoning "one row per restaurant makes it small today, but it grows
+    // with exactly the number this product is built to increase". These four platform-wide reads
+    // were left without one. Egress is this product's cost (CLAUDE.md), and a console read with
+    // no ceiling is the shape that gets expensive quietly.
     const binQ = await sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason, purged_at")
-      .not("deleted_at", "is", null).is("purged_at", null).order("deleted_at", { ascending: false });
+      .not("deleted_at", "is", null).is("purged_at", null).order("deleted_at", { ascending: false }).limit(2000);
     // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
     if (binQ.error) return adminFail("the recycle bin", binQ.error, { action: "load" });
     const now = Date.now();
@@ -190,11 +195,11 @@ export async function GET(req: NextRequest) {
   const [restQ, setQ, ownersQ] = await Promise.all([
     // deleted_at IS NULL → the live/suspended list; trashed restaurants are hidden
     // here (they live in the recycle bin above).
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id, created_at").is("deleted_at", null).order("name"),
+    sb.from("restaurants").select("id, slug, name, active, owner_user_id, created_at").is("deleted_at", null).order("name").limit(2000),
     // enabled_panels rides along (tiny JSONB) so the admin home can show each
     // restaurant's M/K/T/O panel chips WITHOUT a per-row fetch. Read-only add.
-    sb.from("settings").select("restaurant_id, enabled_panels"),
-    sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name"),
+    sb.from("settings").select("restaurant_id, enabled_panels").limit(2000),
+    sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name").limit(2000),
   ]);
   if (restQ.error) return adminFail("the restaurant list", restQ.error, { action: "load" });
   const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
@@ -430,7 +435,7 @@ export async function POST(req: NextRequest) {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
     if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
-    if (rid === DEFAULT_RID) return bad("The default restaurant can't be purged.", 400);
+    if (rid === DEFAULT_RID) return bad("The default restaurant can’t be permanently removed.", 400);
     // A FAILED READ IS NOT "NOT FOUND". Deciding a refusal from an unchecked read is the fault
     // fixed in this same file's banquet-numbering gate (T20 item 4) — here it would mean answering
     // "Restaurant not found" for a blip, which sends the admin looking for a row that is right there.
@@ -518,8 +523,11 @@ export async function POST(req: NextRequest) {
     // which DERIVES from managerGrantValue() — i.e. it stores exactly what the Access screen
     // displays, so the row and the screen agree from the first second. `owner_entitlements` is
     // left absent, which the model reads as "all on". Everything on `settings` comes from
-    // cleanClonedSettings (money caps off, floor caps on, modules off). Permissions are changed
-    // afterwards on ONE screen: /aevinite/access.
+    // cleanClonedSettings (money caps off, floor caps on, and each module's admin rung DERIVED
+    // from its own row on the Access screen — the three floor ones on, the premium ones off;
+    // said "modules off" until 2026-08-28, when that stopped being true for take-orders,
+    // move/merge/split and table types). Permissions are changed afterwards on ONE screen:
+    // /aevinite/access.
     const managerPerms: Record<string, boolean> = { ...MP_DEFAULT };
     // 1) the restaurant row (id auto-uuid, active) + the model's own grant baseline.
     const rest = await sb.from("restaurants").insert({

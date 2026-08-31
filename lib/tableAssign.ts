@@ -157,11 +157,16 @@ export const notYoursMessage = (t: string) =>
  */
 export async function blockedReason(
   limit: SectionLimit | null,
+  rid: string,
   a: string, b: string | undefined, c: string | undefined,
   body: Record<string, unknown> | null | undefined,
 ): Promise<string | null> {
   if (limit === null) return null;                       // not a restricted caller
-  const { tables, unknown } = await affectedTables(a, b, c, body);
+  // `rid` is not optional and is deliberately second: affectedTables reads rows by id with the
+  // service-role key, so without the restaurant it would answer from whichever restaurant owns the
+  // id (T25 round 2, item 29). A missing one comes back `unknown`, which this function already
+  // refuses on.
+  const { tables, unknown } = await affectedTables(rid, a, b, c, body);
   if (unknown) return notYoursMessage("");
   const bad = tables.find((t) => t && !allows(limit, t));
   return bad ? notYoursMessage(bad) : null;

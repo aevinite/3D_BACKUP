@@ -1,7 +1,7 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (100 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (132 checks, in `verify:static`) and `npm run verify:printing-sweep` (125 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -170,6 +170,118 @@ run to ~1015px, so it covered the left half of every card and left the right hal
 chopped mid-word with the count pills still glowing beside them. It now has a **scrim that dims AND
 blurs**; a dim alone was measured at rgb(16,20,27) → rgb(10,15,23) on the dark skin, which is a real
 change and invisible to a human.
+
+## 2026-08-28 — the coarse "which screen prints" setting is retired (mig 369)
+
+> Owner: *"right now I don't understand three options — 'With no answer on the Kitchen slips line
+> below, which screen prints them?' — what do you mean by this option?"* Then: *"do what's left."*
+
+`settings.kot_print_target` (mig 336, `kitchen | counter | both`) asked **the same question** as the
+Kitchen slips line, in older and vaguer words, and the two could contradict each other — the printing
+sweep caught the older one winning on 2026-08-26. It is gone from every screen and every code path.
+
+**It was not a deleted dropdown.** On the dev stack **2 of 17** restaurants — French House and Aangan,
+the two he tests with — were on **`both`** with the Kitchen slips line unanswered. Deleting the
+setting would have silently removed their safety net. So the meaning moved first:
+
+| old value | the route it became |
+|---|---|
+| `kitchen` | `{ via:"screen", panel:"kitchen" }` |
+| `counter` | `{ via:"screen", panel:"manager" }` |
+| `both` | `{ via:"screen", panel:"kitchen", backupPanel:"manager", backupAfterMs:30000 }` |
+
+**`backupPanel` is new** — a screen route can now name a second screen that may take a slip the first
+has left sitting, which is the mirror of `backupAgent` on a computer route. `screenMayPrint` answers
+`{ ok:true, backup:true, afterMs }` for it, and the **age** window is what holds the second screen
+back, not a refusal. A screen cannot be its own backup (an age window nothing can satisfy looks like a
+rule and is not one).
+
+Migration 369 is **idempotent** and only touches restaurants that have **not** answered the Kitchen
+slips line — a newer decision is never overwritten. **The column stays** (schema changes here are
+additive, one folder feeds two databases) with a `COMMENT` saying it is retired; nothing reads or
+writes it, and `verify:print-queue` now fails if any of seven files touches it again.
+
+### Two faults found before shipping, one mine and one the sweep's own
+
+1. **With no route at all my first version let the MANAGER screen auto-print.** The retired column
+   defaulted to `kitchen`, so a manager panel left open on a restaurant that had never touched the
+   Printing board would have started pulling kitchen tickets it never used to. Sweep phase 22.
+2. **The sweep's "a DIFFERENT person" shape read an owner with no restaurant filter**, so it could
+   pick another restaurant's owner — the server correctly refused the shape and three phases blamed
+   the product. A sweep that cannot tell its own bad data from a real fault is worse than no sweep.
+   (And my new self-backup phase wrote the jsonb straight to the database, which never runs the
+   validator it was testing. It goes through `/api/admin/printing/routes` now.)
+
+`verify:printing-sweep` **112 → 118 phases**, 0 failed.
+
+## 2026-08-28 — TWO MODES behind one toggle, and only the chosen one on screen
+
+> Owner: *"I want both A and B — I want the toggle AND the simplified UI, and do one thing: you only
+> see the option you have selected, only the setting for that option will be shown."* And on mode B:
+> *"if we run that .bat or .command file it will open that Chrome which runs minimised and doesn't
+> auto-open when printing required, doesn't affect other tabs while print. Test all that by yourself."*
+
+### The two ways — and there is NOTHING TO CHOOSE (owner, 2026-08-31)
+
+> ⚠️ **Previously** (owner, 2026-08-28): *"there will be 2 mode… I want a toggle and the simplified UI
+> — like you only see the option you have selected."* **Latest** (owner, 2026-08-31): *"in admin panel
+> also we don't need toggle… with toggle gone it on and off will decide that the helper will be on and
+> off and kitchen panel will always be on and there will be guide for it."* The toggle is gone.
+
+| | **A computer** (optional) | **The kitchen screen** (always on) |
+|---|---|---|
+| what runs | the helper program | the kitchen panel, in its own minimised Chrome |
+| anything open? | nothing | that Chrome stays running |
+| more than one printer? | **yes**, one per kind of paper | no — the machine's default printer |
+| someone signs in? | no | **once**, in the window it opens |
+| has to be set up? | yes, if you want it | **no** — it is the default |
+
+**What decides, in one sentence: a computer prints if one is set up and named; if none is, the kitchen
+screen does.** `settings.modules.printing.mode` is **deleted** (mig 372 swept the dead key out of the
+three restaurants still carrying one), and `PrintMode` / `readMode` / `writeMode` are gone with it.
+The answer is READ off `routes` by `lib/printHelpers.ts → resolveTarget`, which is where the paper
+always read it from — the stored mode was a second copy, and a second copy that can disagree is why
+it went. An **unanswered kitchen-slip line resolves to the kitchen screen**, with nobody named.
+
+Two consequences worth knowing:
+- **Clearing a paper line is not switching printing off.** Only a deliberate **Nobody** (`via:"off"`)
+  does that. `syncKotSwitch` treats `null` as on for exactly this reason — before the fix, taking the
+  printer off the kitchen line silently stopped the restaurant printing while the board still said
+  the kitchen screen was doing it.
+- **It cannot double-print.** A ticket is a ROW (mig 335) and `claimKotJobs` only wins rows still
+  `queued`, so two claimers racing means the second matches nothing. The queue guarantees one copy —
+  never the mode, which is part of why removing it cost nothing.
+
+### `lib/printStationScript.ts` — the kitchen screen's launcher, and four things it took
+1. **"runs minimised / doesn't auto-open"** — running the Chrome binary steals focus, and **so does
+   `open -g -j -n` with a real URL**: measured, frontmost went `Finder → Google Chrome`. An
+   `about:blank` test had said otherwise — the kind of easy test that ships a false promise. The mac
+   launcher now **remembers who had the screen and hands it back**; measured after that,
+   `Finder → Chrome → Finder`. Windows uses `start /min`.
+2. **"doesn't affect other tabs"** — its own `--user-data-dir`, i.e. a separate Chrome instance. Their
+   ordinary Chrome, tabs, history and logins are untouched, and quitting one does not quit the other.
+3. **"doesn't auto-open when printing"** — `--kiosk-printing`. Deliberately **not** `--kiosk`, which is
+   fullscreen kiosk — the opposite — and is what the old setup guide told people to use for this.
+4. **The one nobody would guess: a hidden Chrome must still run its timers.** Chrome throttles
+   background and occluded windows hard, and a throttled panel stops polling — the tickets simply
+   queue while everything looks fine. The three `--disable-*throttling/backgrounding` flags are
+   load-bearing: a hidden instance carrying them **beaconed 13 times in 14 seconds** against a local
+   counter, i.e. full rate.
+
+No password in it, like the helper: the person signs in once and that Chrome profile remembers.
+
+### The screens, on both sides
+Card 3 was three papers × (two shape buttons + computer + printer + paper + screen + person + device
++ two backup pickers) with **five** Save buttons — about twenty controls, all on screen whether they
+applied or not. Now: **one toggle → only that mode's setup → the three papers**, each just
+*On / Nobody* plus a printer in computer mode. Measured on screen: **22 controls in computer mode, 14
+in screen mode** on the console, and **14** on the manager panel. Refinements behind **More**. The two
+launcher cards share ONE component on each side, because two copies of that markup is how the boards
+became "not identical" the first time.
+
+Guarded by 16 new `verify:print-helper` checks (**132** total) and 7 new sweep phases (**125** total,
+0 failed) — including that a `nobody` line survives a mode change and that a mode change re-asserts
+auto-print.
 
 ## Why the browser can never do this
 

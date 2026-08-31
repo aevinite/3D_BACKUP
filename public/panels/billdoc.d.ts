@@ -82,12 +82,19 @@ export interface BillDocData {
    *  caller could not render this document at all — on the one flag the whole sheet's identity
    *  turns on. */
   cancelled?: boolean;
+  /** The TIP taken at payment, in whole rupees — extra money for the staff on top of a finished
+   *  bill (migration 154). It is NOT part of the sale: it never enters the subtotal, the tax, the
+   *  discount or the TOTAL, and on paper it prints BELOW the TOTAL with the cash actually handed
+   *  over ("PAID"). Above the line it would read as an untaxed sale, which is a different and much
+   *  worse document. `billData()` derives it from the orders it is given, so a caller building this
+   *  object by hand simply omits it and nothing prints. Never on a cancelled sheet. */
+  tip?: number;
   /* REJECTED (owner, 2026-08-19): there is no `reprint` on a BILL. The band was live 2026-08-17 →
    * 2026-08-19 and the owner removed it — a second copy of a bill is a service action, not an
    * incident. Declaring the flag again is what would let a caller pass it, so it stays undeclared.
    * The kitchen TICKET keeps its own `reprint` (BillDocKot below) — that one he confirmed.
    * R37 in docs/REJECTED-IDEAS.md. */
-  /** The bill's position in the signed chain (mig 332) and its `chain_hash`. Supply BOTH or the
+  /** REJECTED (R50) — never rendered. The bill's position in the signed chain (mig 332). Supply BOTH or the
    *  verification line does not print at all. The document takes the first 12 characters of the
    *  hash — enough to identify one bill, short enough for a 66mm roll — and formats the line
    *  itself, so every panel prints the same reference for the same bill.
@@ -139,7 +146,14 @@ export interface BillIdentity {
   gstin: string;
   prefix: string;
   footer: string;
+  /** The word the PAPER uses for tax where it needs a generic one (the MRP note, and the fallback
+   *  line when the configured components do not describe this bill's rate). Defaults to **"GST"** —
+   *  it sits beside CGST/SGST on a document a customer and an inspector read. */
   taxLabel: string;
+  /** The word a STAFF PANEL uses on screen. Defaults to **"Tax"** — a panel is not a tax document
+   *  and does not commit to a regime's name (owner, 2026-08-28). Same setting, different fallback:
+   *  a restaurant that types its own word gets it in both places. */
+  taxLabelScreen: string;
 }
 
 export function billDocHtml(d: BillDocData): string;
@@ -165,6 +179,15 @@ export function splitTax(
 /** A discount as a percentage of the pre-discount subtotal — "10%" / "12.5%", "" when there
  *  is nothing to show. Derived in ONE place so the paper and every screen quote the same figure. */
 export function discPct(subtotal: number, disc: number): string;
+/** What is due, what they handed over → the tip. Never negative: handing over LESS than the bill
+ *  is a part payment, not a small tip, and the app has a separate thing for that. */
+export function tipFromPaid(due: number, paid: number): number;
+/** A tip written as a percentage of the bill it sits on — same rounding rule as `discPct`, and ""
+ *  when there is nothing to say. */
+export function tipPct(due: number, tip: number): string;
+/** The server's own ceiling on a single tip, repeated here so a panel can refuse a typo BEFORE
+ *  sending rather than have it silently trimmed on arrival. */
+export const TIP_MAX: number;
 export function inr(v: number | string): string;
 
 // ── the bill's MONEY and the assembly of its data (moved here 2026-08-04) ────────────────────
@@ -214,6 +237,8 @@ export function orderTaxRate(
   settingsRate: number,
 ): number;
 /** Everything the paper needs, assembled once. Pass what only the panel knows. */
+/** REJECTED (owner, 2026-08-28, R50): the bill prints NO verification line. `billData`
+ * carries no chain field, and `billDocHtml` renders none. See the note in billdoc.js. */
 export function billData(a: {
   settings?: Record<string, unknown>;
   restaurant?: Record<string, unknown>;

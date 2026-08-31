@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 // entirely. A check that tests something other than what you asked for is worse than no check.
 const env = Object.fromEntries(readFileSync(new URL("../../../.env.local", import.meta.url),"utf8").split("\n").filter(l=>l.includes("=")).map(l=>[l.slice(0,l.indexOf("=")).trim(), l.slice(l.indexOf("=")+1).trim()]));
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-const FH = "00000000-0000-0000-0000-000000000001", BASE = "http://localhost:4103";
+const FH = "00000000-0000-0000-0000-000000000001", BASE = process.env.T3_BASE || "http://localhost:4103";
 // DON'T PRE-CHECK AND HOPE — HANDLE WHAT THE GATE ACTUALLY SHOWS.
 // The first version of this picked a table with no open session, then asserted the gate would show
 // "your table isn't open yet". It went red because a session appeared at that table BETWEEN the

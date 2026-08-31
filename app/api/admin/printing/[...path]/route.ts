@@ -17,9 +17,9 @@ import {
 // The board itself — headings, words, paper sizes and the four steps — is shared with the panel, so
 // the two screens cannot drift into two different products (owner, 2026-08-27: "the UI/UX is also
 // not identical"). lib/printBoard.ts is the single copy.
-import { printBoardState, helperFiles } from "@/lib/printBoard";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
 import { STUCK_AFTER_MS } from "@/lib/printQueue";
-import { managerGrantValue } from "@/lib/accessTree";
+import { managerHasFlag } from "@/lib/managerCan";
 import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 import { queueJob } from "@/lib/printHelpers";
 
@@ -69,7 +69,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // N+1 shape the egress rule exists to refuse, and it would get slower with every client signed.
   if (seg[0] === "overview") {
     const [rests, agents, sets, jobs] = await Promise.all([
-      sb.from("restaurants").select("id, name, slug").order("name"),
+      // .limit(400) like its three siblings below — NOT decoration. Without a ceiling PostgREST
+      // applies its own default cap and silently returns a SHORT list, so the overview would stop
+      // showing later restaurants with no error anywhere. (sweep #7 / T28: verify:admin-api-a was
+      // red on clean main for this one line.)
+      sb.from("restaurants").select("id, name, slug").order("name").limit(400),
       sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
         .is("revoked_at", null).limit(400),
       sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
@@ -131,8 +135,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // ONE read of the shared board — the same call the restaurant's own Settings → Printing makes,
     // so neither screen can show a fact the other does not have.
     const board = await printBoardState(rid, { recent: 12 });
-    const tgtRow = (await sb.from("settings").select("kot_print_target").eq("restaurant_id", rid).maybeSingle()).data as
-      { kot_print_target?: string } | null;
     // ── WHO can be picked as the printing SCREEN, and WHICH PC ────────────────────────────────
     // The owner asked to choose the panel, the person and the machine ("which particular manager…
     // which owner panel… which PC will be open"). All three lists are read from real rows, so the
@@ -142,22 +144,44 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     //     A person switched off is not offered, which is what makes that permission mean something.
     //   · devices — the screens that have actually been the printer before (print_stations), so "that
     //     same PC" is a thing he recognises rather than a hex id he has to guess at.
-    const staff = ((await sb.from("staff_users").select("id, name, username, role, active")
+    const staff = ((await sb.from("staff_users").select("id, name, username, role, active, permissions")
       // A CEILING, so PostgREST's own default cannot silently shorten this picker (T17 sweep #7,
       // 2026-08-27). One restaurant's staff, and every other read in this file already states one.
       .eq("restaurant_id", rid).order("role").limit(500)).data || []) as
-      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null }[];
-    // The manager side of that permission, read the way every other route reads one: the stored value
-    // if the admin set it, else what the Access screen shows as the default (managerGrantValue).
-    const perms = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as
-      { manager_permissions?: Record<string, unknown> | null } | null;
-    const mgrPerm = managerGrantValue("print_here", (perms?.manager_permissions || {})["print_here"]);
+      { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null;
+        permissions?: Record<string, string> | null }[];
+    // ── PER PERSON, NOT PER RESTAURANT (owner's review, 2026-08-28) ───────────────────────────
+    // This resolved "may be the printer" from the restaurant-wide grant ALONE, while the comment
+    // above claimed it was each person's own permission. So a manager switched off INDIVIDUALLY was
+    // still offered here — pick them, the board says their screen is the printer, and their screen
+    // is refused by managerCan: the kitchen never gets the paper and neither screen says why. It
+    // failed the other way too — a manager allowed individually could not be picked at all while the
+    // restaurant default was off.
+    //
+    // Both sides call managerHasFlag() now, so the picker and the gate cannot disagree. `access_config`
+    // is read as well because it is the CAP: switched off there, nobody may, whatever their own
+    // setting says. Still ONE extra column on a query already being made.
+    const perms = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+      { manager_permissions?: Record<string, unknown> | null; access_config?: Record<string, { on?: boolean }> | null } | null;
+    const mayBePrinter = (u: { role?: string | null; permissions?: Record<string, string> | null }) =>
+      managerHasFlag("print_here", {
+        accessConfig: perms?.access_config,
+        managerPermissions: perms?.manager_permissions,
+        ownOverride: u.permissions?.["print_here"],
+      });
+    // EVERY ACTIVE PERSON IS OFFERED, and the panel is simply the screen they stand at.
+    //
+    // It used to hide any manager whose "May be the printer" permission was off, which is how the
+    // owner ended up being sent to Access & permissions in the middle of setting a printer up —
+    // and, when the kitchen was the only role never gated, why he found "there is not kitchen panel
+    // available" for the people he most wanted to name. Naming somebody here IS the permission now
+    // (the pending gate honours an explicit choice), so the picker's job is only to list who exists.
     const people = staff.filter((u) => u.active !== false).map((u) => {
       const role = String(u.role || "");
       const panels = role === "kitchen" ? ["kitchen"]
-        : role === "manager" ? (mgrPerm ? ["manager"] : [])
-        : role === "owner" ? ["owner", "manager"]
-        : role === "tablet" || role === "waiter" ? ["tablet"] : [];
+        : role === "owner" ? ["manager", "owner"]
+        : role === "tablet" || role === "waiter" ? ["tablet"]
+        : role === "manager" ? ["manager"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
     const devices = ((await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
@@ -169,12 +193,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       // not need a "shown only once" ceremony any more — that whole dance existed because the old
       // file carried a token (mig 368).
       files: helperFiles(originOf(req)),
+      // MODE B's launcher, sent alongside. Both are plain text with nothing secret in them, so the
+      // board can show whichever one the mode calls for without a second round trip.
+      stationFiles: stationFiles(originOf(req)),
       staleMs: HELPER_STALE_MS,
       panels: ROUTE_PANELS, people, devices,
       // Stated so the screen can say it rather than implying it: a manager whose permission is off is
       // missing from `people` on purpose, and this is the link that explains where to switch it on.
-      managerMayPrint: mgrPerm,
-      printing: { ...board.printing, target: tgtRow?.kot_print_target || "kitchen" },
+      // "Is ANY manager offered?" — used only to explain an empty picker. Per person now, so a
+      // restaurant where the default is off but one manager is allowed no longer says "nobody".
+      managerMayPrint: staff.some((u) => u.active !== false && String(u.role || "") === "manager" && mayBePrinter(u)),
+      // `target` has left this payload (mig 369). It was the coarse kitchen|counter|both answer, it
+      // asked the same question as the Kitchen slips line in older and vaguer words, and the two
+      // could contradict each other — the printing sweep caught the OLDER one winning, so an owner
+      // who named the manager screen was refused by a setting an admin had touched months before.
+      // Everything it expressed is a screen route naming ONE room now (the backup went, 2026-08-30).
+      printing: board.printing,
     });
   }
   return err("Unknown request", 404);
@@ -233,8 +267,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     const routes = await readRoutes(rid);
     const patch: Record<string, unknown> = {};
     for (const k of PRINT_KINDS) {
+      // Removing a computer clears the lines it owned. There is no second branch for "it was the
+      // BACKUP of this line" any more — there is no backup (owner, 2026-08-30).
       if (routes[k].agent === row.id) patch[k] = null;
-      else if (routes[k].backupAgent === row.id) patch[k] = { agent: routes[k].agent, printer: routes[k].printer };
     }
     if (Object.keys(patch).length) await writeRoutes(rid, patch);
     await logAction("admin", "print_helper_removed", { restaurant_id: rid, detail: `“${row.name}” can no longer print` });
@@ -252,7 +287,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     // book would say "nobody prints kitchen slips" while the trigger went on queueing them.
     if (Object.prototype.hasOwnProperty.call(patch, "kot")) {
       const k = patch.kot as Record<string, unknown> | null;
-      await syncKotSwitch(rid, !(k === null || k?.via === "off"));
+      // ⚠️ CLEARING THE LINE IS NOT SWITCHING PRINTING OFF (2026-08-31). This treated `null` — "no
+      // printer chosen yet" — the same as `via:"off"` — "we do not print this" — and switched
+      // auto-print off for both. That was defensible while an unanswered line meant nobody in
+      // particular. It is wrong now: an unanswered kitchen-slip line resolves to the KITCHEN SCREEN
+      // (lib/printHelpers → resolveTarget), so clearing it hands the slips to the kitchen rather than
+      // stopping them. Left as it was, "take the printer off this line" quietly stopped the
+      // restaurant printing, the trigger stopped queueing, and the board still said the kitchen
+      // screen was doing it. ONLY a deliberate "Nobody" turns it off.
+      await syncKotSwitch(rid, k?.via !== "off");
     }
     await logAction("admin", "print_routes_changed", { restaurant_id: rid, detail: `printing routes updated: ${Object.keys(patch).join(", ")}` });
     return NextResponse.json({ routes: saved.routes });
@@ -261,28 +304,73 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // ── the two switches, in the same place as everything else about printing ──────────────────
   if (seg[0] === "switch") {
     const patch: Record<string, boolean> = {};
-    const patch2: Record<string, string> = {};
     if (typeof body.allowed === "boolean") patch.auto_print_kot_allowed = body.allowed;
     if (typeof body.on === "boolean") patch.auto_print_kot = body.on;
-    // THE COARSE FALLBACK (mig 336: kitchen | counter | both). It used to be three radio cards in the
-    // Access card's KOT block; it lives HERE now, because this is the board that owns printing and two
-    // screens answering "who prints" was the confusion the owner asked to end. It still matters: it is
-    // what decides which screen prints for a restaurant with NO route at all, and a route (mig 341)
-    // overrules it whenever one exists.
-    if (typeof body.target === "string") {
-      if (!["kitchen", "counter", "both"].includes(body.target)) return err("That is not one of the three answers.");
-      patch2.kot_print_target = body.target;
-    }
-    if (!Object.keys(patch).length && !Object.keys(patch2).length) return err("Nothing to change.");
-    const up = await sb.from("settings").update({ ...patch, ...patch2 }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    // THE THIRD THING THIS VERB USED TO TAKE IS GONE (mig 369): `target`, the coarse
+    // kitchen|counter|both answer. It is a screen route naming ONE room now — 'both' went with the
+    // backup screen (2026-08-30) — saved through `routes` above like every other printing decision:
+    // one door, not two.
+    if (!Object.keys(patch).length) return err("Nothing to change.");
+    const up = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
     if (up.error) return err("Could not save that.");
-    await logAction("admin", "print_switch", { restaurant_id: rid, detail: [...Object.entries(patch), ...Object.entries(patch2)].map(([k, v]) => `${k}=${v}`).join(" ") });
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(" ") });
     return NextResponse.json({ ok: true });
   }
 
-  // ── send one page to a printer ────────────────────────────────────────────────────────────
+// ── THE "mode" VERB IS GONE (owner, 2026-08-31) ───────────────────────────────────────────
+  // *"in admin panel also we don't need toggle."* There is nothing to switch: a computer prints if
+  // one is set up and named, and if none is, the kitchen screen does. The three paper lines are the
+  // only answer, written one at a time through `routes` below — which is where they always really
+  // lived. `writeMode` existed to keep a stored copy of the choice in step with those lines; with no
+  // stored copy there is nothing to keep in step. Do not re-add a mode: it can only ever disagree
+  // with the routes, and the routes are what the paper obeys.
+
+    // ── send one page to a printer ────────────────────────────────────────────────────────────
   // A REAL job on the real road (kind='test'), because a test that takes a different path can pass
   // while the path that matters is broken.
+  // ── THE QUEUE'S OWN CONTROLS (owner, 2026-08-29) ──────────────────────────────────────────
+  // "Make a button also in the printing queue — you can delete one of the prints from the queue, or
+  // maybe you can stop the queue, restart the queue."
+  //
+  // A TICKET IS NEVER DELETED, it is DISMISSED: the row and its reason stay, so "why did table 6's
+  // slip never come out" has an answer months later. This is the same rule the bills live under and
+  // it costs nothing to keep.
+  if (seg[0] === "job" && seg[1] && seg[2] === "cancel") {
+    const upd = await sb.from("print_jobs")
+      .update({ status: "dismissed", done_at: new Date().toISOString(), error: "cancelled by Aevidine from the printing queue" })
+      .eq("id", seg[1]).eq("restaurant_id", rid).in("status", ["queued", "printing", "failed"])
+      .select("id, kind").maybeSingle();
+    if (upd.error) return err("Could not take that one out of the queue.");
+    if (!upd.data) return err("That ticket has already printed or is not this restaurant's.", 404);
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: `cancelled a ${(upd.data as { kind?: string }).kind || "print"} from the queue` });
+    return NextResponse.json({ ok: true });
+  }
+  // PUT IT BACK IN THE QUEUE — for one that gave up after five tries. Its attempt count resets,
+  // because the thing that was wrong (paper, power, a cable) has presumably been fixed.
+  if (seg[0] === "job" && seg[1] && seg[2] === "retry") {
+    const upd = await sb.from("print_jobs")
+      .update({ status: "queued", attempts: 0, claimed_at: null, error: null })
+      .eq("id", seg[1]).eq("restaurant_id", rid).in("status", ["failed", "dismissed"])
+      .select("id").maybeSingle();
+    if (upd.error) return err("Could not put that one back in the queue.");
+    if (!upd.data) return err("Only a ticket that failed or was cancelled can go back in.", 404);
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: "put a ticket back in the printing queue" });
+    return NextResponse.json({ ok: true });
+  }
+  // STOP / RESTART THE WHOLE QUEUE. Deliberately NOT the same as switching printing off: tickets go
+  // on being made and go on waiting, and the moment it restarts they come out. Switching printing
+  // off instead would stop them being made at all, and the paper for those orders would never exist.
+  if (seg[0] === "queue") {
+    const paused = body.paused === true;
+    const cur = (await sb.from("settings").select("modules").eq("restaurant_id", rid).maybeSingle()).data as { modules?: Record<string, Record<string, unknown>> } | null;
+    const bag = { ...(cur?.modules || {}) };
+    bag["printing"] = { ...(bag["printing"] || {}), paused };
+    const up = await sb.from("settings").update({ modules: bag }).eq("restaurant_id", rid).select("restaurant_id").maybeSingle();
+    if (up.error) return err("Could not change the queue.");
+    await logAction("admin", "print_switch", { restaurant_id: rid, detail: paused ? "printing queue STOPPED — tickets wait" : "printing queue restarted" });
+    return NextResponse.json({ ok: true, paused });
+  }
+
   if (seg[0] === "test") {
     const agentId = String(body.agentId || ""), printer = String(body.printer || "");
     if (!agentId || !printer) return err("Pick a computer and one of its printers.");

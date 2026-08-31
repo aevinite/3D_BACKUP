@@ -119,6 +119,14 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl, scopeKey }
       {/* Logo: the flagship's hardcoded mark for #1; any other restaurant shows its
           OWN uploaded logo if it has one (else just its name — white-label). */}
       {logoUrl ? <img className="intro-logo" src={logoUrl} alt="" /> : (isDefault && <img className="intro-logo" src={LOGO} alt="" />)}
+      {/* ⛔ REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. Arabic comes out of THIS
+          split as disconnected, backwards letters: each grapheme gets its own inline-block span
+          (app/globals.css), and a browser can neither join Arabic letters nor order them
+          right-to-left ACROSS two atomic boxes. It is measured, screenshotted and PARKED — the
+          owner asked not to be offered it — so do not helpfully fix it, and do not file it as new.
+          The full note is at lib/i18n.ts → useTranslation. (Pointer added by the T27 sweep,
+          2026-08-27, which re-found the fault, fixed it, and had to revert: the decision was three
+          files away.) */}
       {/* The wordmark, split into one <span> per letter-as-a-reader-sees-it so each can pop in
           (splitGraphemes, not .split("") — a restaurant with a Devanagari name would otherwise
           have its own wordmark broken apart; see lib/brandText.ts).

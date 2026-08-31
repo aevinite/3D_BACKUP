@@ -14,7 +14,7 @@
 //   node scripts/shot-access-help.mjs staff        # only the staff batch
 //
 // Logins: guest needs none; staff use the per-restaurant diag users (french-house).
-import { chromium } from "playwright";
+import { chromium } from "playwright";  // resolved from the repo root
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,12 +23,22 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PUB = path.join(ROOT, "public", "admin-help");
 const BASE = process.env.SHOT_BASE || "http://localhost:4000";
 const only = process.argv[2]; // "guest" | "staff" | undefined (both)
+// ONE JOB AT A TIME (sweep #7 T15, 2026-08-28). Adding two pictures meant running the guest batch,
+// which rewrote the twelve existing ones as collateral — a dozen unrelated files in a pull request,
+// each re-shot against whatever the UI happened to look like that morning. The owner's rule above
+// ("whenever a panel's UI changes, RE-RUN THIS") is about refreshing a picture ON PURPOSE, not by
+// accident. So: `node scripts/shot-access-help.mjs guest allergy-other` does exactly that one.
+const onlyId = process.argv[3] || "";
+const wanted = (id) => !onlyId || id === onlyId;
 fs.mkdirSync(PUB, { recursive: true });
 const RID = "00000000-0000-0000-0000-000000000001";
 const M = "/r/french-house/menu?table=5";
 const LOGIN = { manager: ["diagm1", "diag-mgr-2026", "/manager"], owner: ["diago1", "diag-o1-2026", "/owner"], kitchen: ["diagkitchen", "diag-kitchen-2026", "/kitchen"], tablet: ["diagt1", "diag-t1-2026", "/tablet"] };
 
 const DRAW = `()=>{
+  // The dev server's own error/issue badge is not part of the product and must not be baked into
+  // a picture an admin is shown. (sweep #7 T15, 2026-08-28)
+  document.querySelectorAll('nextjs-portal').forEach(function(e){ e.remove(); });
   const ring=(el,o)=>{const r=el.getBoundingClientRect();const d=document.createElement('div');d.className='shot-inj';Object.assign(d.style,{position:'fixed',left:(r.left-o.pad)+'px',top:(r.top-o.pad)+'px',width:(r.width+o.pad*2)+'px',height:(r.height+o.pad*2)+'px',borderRadius:o.radius,border:o.border,boxShadow:o.shadow||'none',background:o.bg||'transparent',zIndex:o.z,pointerEvents:'none'});document.body.appendChild(d);};
   const card=document.querySelector('[data-shotcard]'), tgt=document.querySelector('[data-shottgt]');
   if(card) ring(card,{pad:6,radius:'14px',border:'3px solid #e6b800',shadow:'0 0 0 9999px rgba(0,0,0,.34)',z:99998});
@@ -49,6 +59,35 @@ async function comp(label, w, h, raw, out) {
 }
 
 // ── GUEST batch (no login) ───────────────────────────────────────────────────
+// Opens the Customize sheet on a dish that really has allergens, by firing the same event
+// FoodCard fires. Dispatched directly rather than clicked, because the click goes through the
+// table gate (gateAddToCart) and a screenshot has no table session — the sheet itself is
+// identical either way. Falls back to the first dish if none declares an allergen.
+const OPEN_CUSTOMIZE = `
+  // A REAL dish, read off the page — its name, price and photo. The first draft passed a
+  // placeholder and the picture showed "Dish · ₹0 BASE · TOTAL ₹0" with a broken image icon,
+  // which is not what a guest sees and is not what an admin is being asked to approve.
+  const card=[...document.querySelectorAll('.item-card')].find(c=>c.querySelector('img')) || document.querySelector('.item-card');
+  // NO BACKSLASH ESCAPES IN HERE. This block is a JS string in a BACKTICK template literal, and a
+  // template literal eats \\s as a bare "s" — so a tidy .replace(/\\s+/g,' ') became /s+/g and
+  // stripped every letter "s" from the dish name: the picture said "E pre o" instead of "Espresso".
+  // Spell whitespace as an explicit character class. (sweep #7 T15, 2026-08-28)
+  //
+  // Name and price MUST come off the SAME card, and off the real class names FoodCard renders
+  // (.dish-name / .dish-price). The first draft guessed at h3/h4 and paired one dish's name with
+  // another's price — the picture read "Cappuccino ₹250" over a menu that says ₹340, which is a
+  // small lie in a picture whose whole job is to show an admin the truth.
+  const title=((card&&card.querySelector('.dish-name')||{}).textContent||'').trim().replace(/[ \\t\\n\\r]+/g,' ');
+  const priceTxt=((card&&card.querySelector('.dish-price')||{}).textContent||'').replace(/[^0-9.]/g,'');
+  const img=(card&&card.querySelector('img')&&card.querySelector('img').src)||'';
+  const id=(card&&(card.dataset.id||card.getAttribute('data-id')))||'';
+  window.dispatchEvent(new CustomEvent('lfh:open-order-confirm',{ detail:{
+    item:{ id, title: title || 'Espresso', price: priceTxt || '250', image:img },
+    options:[],
+    allergens:['gluten','dairy','nuts'],
+  }}));
+`;
+
 const guestJobs = [
   { id: "ratings", url: M, wait: ".dish-meta", label: "Guest menu  ›  dish card  ›  Star rating (★ average)", pick: `const m=[...document.querySelectorAll('.dish-meta')].find(e=>e.textContent.includes('★'));return [m&&m.closest('.item-card'),m];` },
   { id: "reviews", url: "/r/french-house/item/cappuccino?cat=coffee", wait: ".rating-row", vp: [780, 900], label: "Guest menu  ›  dish page  ›  Ratings & written reviews", pick: `const r=document.querySelector('.rating-row');return [r,r];` },
@@ -73,9 +112,24 @@ const guestJobs = [
   { id: "favorites-heart", url: "/r/french-house/item/cappuccino?cat=coffee", wait: ".btn", vp: [780, 900],
     label: "Guest menu  ›  dish page  ›  the ♥ that saves a dish to Favourites",
     pick: `const h=document.getElementById('detail-fav');return [h&&h.parentElement,h];` },
+  // ── added 2026-08-28 (sweep #7 T15) ────────────────────────────────────────────────────────
+  // These two rows on Access & permissions each had a picture filed against them BY NAME and
+  // neither file had ever been in public/admin-help, so both said "there wasn't a good picture for
+  // this one" while the code claimed one. Both controls live in the Customize sheet — the popup
+  // that opens when a guest adds a dish — which no job here had ever opened, which is why they
+  // were the two that got missed. `setup` opens it; see the note on the runner below.
+  { id: "allergy-other", url: M, wait: ".item-card", vp: [820, 900],
+    setup: OPEN_CUSTOMIZE,
+    label: "Guest menu  ›  Customize a dish  ›  “➕ Other allergy” (the guest types their own)",
+    pick: `const b=document.querySelector('.oc-other');return [b&&(b.closest('.oc-allergens')||b.parentElement),b];` },
+  { id: "guest-note", url: M, wait: ".item-card", vp: [820, 900],
+    setup: OPEN_CUSTOMIZE,
+    label: "Guest menu  ›  Customize a dish  ›  the note a guest writes to the kitchen",
+    pick: `const n=document.querySelector('.oc-note');return [n&&(n.closest('.oc-note-wrap')||n.parentElement),n];` },
 ];
 async function runGuest() {
   for (const j of guestJobs) {
+    if (!wanted(j.id)) continue;
     const [w, h] = j.vp || [900, 660];
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
     const page = await ctx.newPage();
@@ -83,6 +137,11 @@ async function runGuest() {
       await page.goto(BASE + j.url, { waitUntil: "networkidle", timeout: 40000 });
       if (j.wait) await page.waitForSelector(j.wait, { timeout: 15000 }).catch(() => {});
       await page.waitForTimeout(400);
+      // `setup` (optional): JS that puts the page into the state the picture is OF — opening a
+      // popup, switching a tab. It runs after the page has settled and before the pick, with a
+      // pause afterwards so whatever it opened has finished animating in. Added for the two
+      // Customize-sheet rows, which no job could reach without it. (sweep #7 T15, 2026-08-28)
+      if (j.setup) { await page.evaluate(new Function(j.setup)); await page.waitForTimeout(900); }
       const found = await page.evaluate(new Function(asExpr("return (" + tagPick(j.pick) + ")()")));
       await page.evaluate(() => document.querySelector("[data-shotcard]")?.scrollIntoView({ block: "center", inline: "center" }));
       await page.waitForTimeout(500);
@@ -147,7 +206,7 @@ const ownerJobs = [
 ];
 const panelJobs = {
   manager: [{ id: "panel_manager", pick: `return [null,null];`, label: "Staff apps  ›  Manager panel (the control room)" }],
-  kitchen: [{ id: "panel_kitchen", pick: `return [null,null];`, label: "Staff apps  ›  Kitchen display (New → Cooking → Ready)" }, { id: "auto_print_kot", pick: `const s=document.querySelector('.reprint')||document.querySelector('button');return [s,s];`, label: "Kitchen display  ›  ticket 🖨 — Auto-print kitchen tickets (admin hardware setting)" }],
+  kitchen: [{ id: "panel_kitchen", pick: `return [null,null];`, label: "Staff apps  ›  Kitchen display (New → Cooking → Ready)" }],
   tablet: [{ id: "panel_tablet", pick: `return [null,null];`, label: "Staff apps  ›  Waiter tablet (floor + take order)" }],
   owner: [{ id: "panel_owner", pick: `return [null,null];`, label: "Staff apps  ›  Owner panel (dashboard, staff, reports)" }],
 };

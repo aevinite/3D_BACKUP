@@ -112,6 +112,7 @@ export async function getFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID):
       .then((s) => {
         const map = { ...FEATURE_DEFAULTS, ...(s.features || {}) } as FeatureMap;
         cached.set(restaurantId, map);
+        // best-effort: a phone with storage switched off still gets the flags from the fetch above
         try { localStorage.setItem(lsKey(restaurantId), JSON.stringify(map)); } catch {}
         return map;
       })
