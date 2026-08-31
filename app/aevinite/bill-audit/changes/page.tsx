@@ -104,8 +104,14 @@ export default function AdminBillChanges() {
 
   const pages = meta?.pages ?? null;
   const total = meta?.total ?? null;
+  // A REPLY WITH A FIELD MISSING MUST NOT COST THE WHOLE SCREEN (T18 second 500, 2026-08-31).
+  // `d` being present was taken as `d.rows` being present, so a body without it threw on `.length`
+  // and the error boundary replaced the entire page — heading and all — with the generic
+  // "Something went wrong" card. Its sibling screens degrade in place. Not reachable through
+  // today's endpoint; this is about surviving a partial answer at all.
+  const rows = d?.rows ?? [];
   const firstShown = d ? (d.page - 1) * d.per + 1 : 0;
-  const lastShown = d ? firstShown + d.rows.length - 1 : 0;
+  const lastShown = d ? firstShown + rows.length - 1 : 0;
   const go = (p: number) => setPage(Math.max(1, pages ? Math.min(pages, p) : p));
   const goJump = () => {
     const n = parseInt(jump, 10);
@@ -200,7 +206,7 @@ export default function AdminBillChanges() {
       </div>
 
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-        {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading changes" />) : d.rows.length === 0 ? (
+        {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading changes" />) : rows.length === 0 ? (
           <div className="adm-empty">No bill changes recorded in this view.</div>
         ) : (
           <div className="adm-logwrap chg-wrap" style={{ border: 0 }}>
@@ -208,7 +214,7 @@ export default function AdminBillChanges() {
               <span className="c-change">Change</span><span className="c-rest">Restaurant</span><span className="c-tbl">Table</span>
               <span className="c-by">By</span><span className="c-why">Reason</span><span className="c-when" style={{ textAlign: "right" }}>When</span>
             </div>
-            {d.rows.map((r) => {
+            {rows.map((r) => {
               // No entry → the shared plain-words map, then Sentence Case. Never the raw code.
               const a = ACT[r.action] || { t: actLabel(r.action), risk: r.risk };
               return (

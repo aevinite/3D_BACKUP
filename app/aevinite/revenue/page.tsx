@@ -103,7 +103,15 @@ export default function AdminRevenue() {
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
-  const statusMax = d ? Math.max(1, ...Object.values(d.byStatus)) : 1;
+  // A REPLY WITH A FIELD MISSING MUST NOT COST THE WHOLE SCREEN (T18 second 500, 2026-08-31).
+  // `d` being present was taken as every field inside it being present, so a body without
+  // `byStatus` made `Object.values(null)` throw — "Cannot convert undefined or null to object" —
+  // and the error boundary replaced the entire page with the generic "Something went wrong" card.
+  // Its four sibling money screens all degrade IN PLACE instead, keeping their heading and offering
+  // Retry. Not reachable through today's endpoint, which always sends the field; this is about the
+  // screen being able to survive a partial answer at all, which is what the four others already do.
+  const byStatus: Record<string, number> = d?.byStatus ?? {};
+  const statusMax = d ? Math.max(1, ...Object.values(byStatus)) : 1;
   const num = (v: number | undefined) => (v == null ? "…" : v);
 
   const STATS: { k: string; v: string | number; hint?: string; accent?: boolean }[] = [
@@ -176,7 +184,7 @@ export default function AdminRevenue() {
           {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : (
             <div style={{ display: "grid", gap: 10 }}>
               {(["active", "trial", "paused", "cancelled"] as const).map((st) => {
-                const n = d.byStatus[st] || 0;
+                const n = byStatus[st] || 0;
                 return (
                   <div key={st} style={{ display: "grid", gridTemplateColumns: "120px 1fr 34px", gap: 10, alignItems: "center", fontSize: 13 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ width: 8, height: 8, borderRadius: 999, background: STATUS_COLOR[st] }} />{STATUS_LABEL[st]}</span>

@@ -568,6 +568,45 @@ try {
       "…and it is the same \"Admin\" the removals record and the credit note already write");
   }
 
+  // ── J(live) · a reply with a field missing costs a number, never the whole screen ──────────
+  head("J(live) · every money screen survives a reply that is missing one field");
+  {
+    // Found by the second 500 (2026-08-31): `d` being present was taken as every field inside it
+    // being present. A body without `byStatus` made Platform revenue throw on Object.values(null);
+    // one without `rows` made the Change log throw on .length. Both times the error boundary
+    // replaced the ENTIRE page — heading and all — with the generic "Something went wrong" card,
+    // while the four sibling screens degrade in place and keep offering Retry. Not reachable
+    // through today's endpoints; this is about surviving a partial answer at all.
+    const CASES = [
+      ["/aevinite/revenue", "/api/admin/revenue", "byStatus", "Platform revenue"],
+      ["/aevinite/bill-audit/changes", "/api/admin/bill-audit", "rows", "Bills · Change log"],
+      ["/aevinite/customers", "/api/admin/customers", "customers", "Customers"],
+      ["/aevinite/bill-audit", "/api/admin/bills", "bills", "Bills"],
+      ["/aevinite/analytics", "/api/admin/analytics", "trend", "Platform analytics"],
+      ["/aevinite", "/api/admin/dashboard", "restaurants", "Dashboard"],
+    ];
+    for (const [url, ep, field, h1] of CASES) {
+      const c = await ctx();
+      const p = await c.newPage();
+      await p.route(`**${ep}**`, async (route) => {
+        const r = await route.fetch();
+        let b; try { b = await r.json(); } catch { b = {}; }
+        delete b[field];
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
+      });
+      await p.goto(BASE + url, { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const seen = await p.evaluate(() => ({
+        h1: document.querySelector("h1")?.textContent?.trim() || "",
+        boundary: /Something went wrong on this screen/.test(document.body.innerText),
+      }));
+      ok(seen.h1 === h1 && !seen.boundary,
+        `${h1} without "${field}": ${seen.boundary ? "THE WHOLE SCREEN WAS REPLACED by the error card" : `keeps its heading (${JSON.stringify(seen.h1)})`}`);
+      await p.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+      await p.close(); await c.close();
+    }
+  }
+
   // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
   head("D2(live) · a state chip that comes back empty is not a dead end");
   {
