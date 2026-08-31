@@ -493,7 +493,7 @@ env vars are reliable in the Node runtime, which edge middleware could not promi
 actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 - **`/aevinite` (the admin console)** — `app/aevinite/layout.tsx` checks `tokenIsValid` server-side.
-- **`/api/admin/**`** — every one of the 50 route files checks `tokenIsValid` (usually via a local
+- **`/api/admin/**`** — every one of the 49 route files checks `tokenIsValid` (usually via a local
   `admin(req)` / `requireAdmin(req)` helper), and in every handler the gate call precedes any
   database call. `/api/staff-login` stores the hashed `ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`).
 - **`/api/{editor,kitchen,tablet,inventory}/**`** — `requireRole()` (`lib/userAuth.ts`), which ALSO

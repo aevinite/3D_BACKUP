@@ -28,6 +28,11 @@ Part B (tablet phone-responsive redesign) is a SEPARATE spec, built after this.
 
 ## 3. Panels
 - Set `settings.enabled_panels` for Aangan to `{ manager:true, tablet:true, kitchen:false, owner:false }` via the admin panels route (`/api/admin/restaurants/panels`). Kitchen login blocked; tablet+manager only.
+  > **⚠️ SUPERSEDED 2026-07-31, and the route is GONE (noted 2026-08-31).** The owner removed the
+  > per-restaurant panel switches entirely — "all panels always on" — so `enabled_panels` decides
+  > nothing and `/api/admin/restaurants/panels` no longer exists. This line is kept because it records
+  > what was approved and done in June; it is **not** an instruction to follow today. Every restaurant,
+  > Aangan included, has all four staff apps.
 
 ## 4. KOT on the manager panel (small new feature — no kitchen screen)
 KOTs are already generated (daily `kot_no`) and shown on the manager panel. Add **printing** to the manager panel since there's no kitchen screen:

@@ -795,7 +795,6 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 // section (owner 2026-07-26). Having it in both places showed two toggles that shared one
 // saved value but not one on-screen state, so they looked out of sync — one control now.
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
-  const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
   // (The per-switch in-flight tracker went with the toggle grids — this page has no
   // switches left to disable while a save is in flight.)
@@ -926,23 +925,24 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     });
   }, []);
 
-  // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
-  // load leaves the switches disabled, so without a message you couldn't tell why (audit 2026-07-07).
-  const loadPanels = useCallback(async () => {
-    try {
-      const j = await (await fetch(`/api/admin/restaurants/panels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setPanels(j.panels || {}); else flash("Couldn't load panels.");
-    } catch { flash("Couldn't load panels."); }
-  }, [restaurant.id, flash]);
-  useEffect(() => { loadPanels(); }, [loadPanels]);
+  // ── THE PANELS READ IS GONE, AND SO IS THE ROUTE (owner, 2026-08-31 — item 27) ────────────────
+  // This fetched /api/admin/restaurants/panels on every open of a restaurant, to decide which Enter
+  // buttons to draw. That route has answered a CONSTANT since 2026-07-31 ("remove it completely, all
+  // panels always on"): it returns all four regardless of what is stored, and its own comment explains
+  // why it must — "merging a stale `false` would hide a door into a panel that actually opens". Its
+  // POST already answered 410 Gone, and its header ended with "the whole route can go once the Enter
+  // card stops calling its GET". This is that.
+  //
+  // So a round trip, a piece of state, a loader and a failure toast all existed to compute a value
+  // that could not vary. The doors are drawn unconditionally now — which is exactly what the server
+  // was answering — and the route directory is deleted in the same commit.
 
   // (The staff-feature entitlement read that used to live here went with the "Main features"
   // card — those switches are Access & permissions → Main features now, and fetching them
   // here would have been a request whose answer nothing on this page renders.)
 
-  // (The panel on/off switches moved to Access & permissions → Staff apps with the rest
-  // of the permissions. `panels` is still read above because the Enter card needs to know
-  // which apps exist before offering a door into them.)
+  // (The panel on/off switches moved to Access & permissions → Staff apps with the rest of the
+  // permissions, and then away entirely on 2026-07-31. Nothing here reads them any more.)
 
   if (showReport) {
     return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
@@ -988,7 +988,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
           <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
 
-          <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
+          <div id="det-enter"><EnterCard restaurant={restaurant} /></div>
 
           {/* WHO CAN SIGN IN, AND WITH WHAT — plus the printable handover sheet (owner,
               2026-08-16). It sits directly under "Open & manage this restaurant" because that is
@@ -1221,7 +1221,7 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
 // exactly what its own staff see. This flow is the ONLY way an admin reaches a
 // panel: a bare /tablet etc. with no restaurant scope bounces back to /aevinite.
 // "Stop" clears the cookie; already-open tabs stay pinned by their ?rid=.
-function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Record<string, boolean> | null }) {
+function EnterCard({ restaurant }: { restaurant: Restaurant }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -1232,13 +1232,12 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
   const hereHref = (path: string) =>
     `/api/admin/act-as/go?rid=${encodeURIComponent(restaurant.id)}&to=${encodeURIComponent(path)}`;
 
-  // Only show the Enter buttons for panels this restaurant HAS. Until the panels load
-  // (null) show all, so the buttons never flicker missing. (mig 106)
-  const panelOn = (k: string) => !panels || panels[k] !== false;
-  const PANELS: [string, string, string, string][] = [
-    ["/editor", "Manager panel", "fa-table-columns", "manager"],
-    ["/kitchen", "Kitchen display", "fa-fire-burner", "kitchen"],
-    ["/tablet", "Waiter tablet", "fa-mobile-screen-button", "tablet"],
+  // EVERY restaurant has every staff app (owner, 2026-07-31). There is no per-restaurant switch left
+  // to consult — see the note on the deleted panels read above — so all four doors are always offered.
+  const PANELS: [string, string, string][] = [
+    ["/editor", "Manager panel", "fa-table-columns"],
+    ["/kitchen", "Kitchen display", "fa-fire-burner"],
+    ["/tablet", "Waiter tablet", "fa-mobile-screen-button"],
   ];
 
   // ── A BLOCKED TAB IS NOT A LOCKED DOOR (T16 sweep #7, 2026-08-27) ───────────────────────────
@@ -1286,12 +1285,12 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
             <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu offline
           </button>
         )}
-        {panelOn("owner") && (
+        {(
           <button className="adm-btn" disabled={busy} onClick={() => openPanel("/owner", "Owner dashboard")} title={`Open ${restaurant.name}'s owner dashboard`}>
             <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
           </button>
         )}
-        {PANELS.filter(([, , , k]) => panelOn(k)).map(([path, label, icon]) => (
+        {PANELS.map(([path, label, icon]) => (
           <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path, label)} title={`Open ${label} as ${restaurant.name}`}>
             <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}
           </button>
