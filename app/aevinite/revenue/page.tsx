@@ -110,7 +110,16 @@ export default function AdminRevenue() {
   // Its four sibling money screens all degrade IN PLACE instead, keeping their heading and offering
   // Retry. Not reachable through today's endpoint, which always sends the field; this is about the
   // screen being able to survive a partial answer at all, which is what the four others already do.
+  // ALL FOUR FIELDS, not just the one that threw first (T18 second 500, 2026-08-31). Item 12
+  // guarded `byStatus` and the screen still died on a reply with everything missing, because the
+  // chart reads `monthly`, the plan table reads `mrrByPlan` and the paying table reads `paying` —
+  // three more `.length`/`.map` calls on undefined, each one enough to lose the whole page. Fixing
+  // the first of four and calling it done is exactly the shape of mistake the block was written to
+  // catch, and it caught mine.
   const byStatus: Record<string, number> = d?.byStatus ?? {};
+  const monthly = d?.monthly ?? [];
+  const mrrByPlan = d?.mrrByPlan ?? [];
+  const paying = d?.paying ?? [];
   const statusMax = d ? Math.max(1, ...Object.values(byStatus)) : 1;
   const num = (v: number | undefined) => (v == null ? "…" : v);
 
@@ -174,7 +183,7 @@ export default function AdminRevenue() {
       <div className="adm-card" style={{ marginBottom: 12 }}>
         <h2 style={{ margin: "0 0 2px" }}>Collected — last 12 months</h2>
         <p className="hint" style={{ marginTop: 0 }}>Real subscription payments recorded each month.</p>
-        {d ? <CollectedChart data={d.monthly} /> : <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>}
+        {d ? <CollectedChart data={monthly} /> : <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>}
       </div>
 
       <div className="adx-grid2col">
@@ -202,12 +211,12 @@ export default function AdminRevenue() {
         {/* MRR by plan */}
         <div className="adm-card">
           <h2 style={{ margin: "0 0 10px" }}>MRR by plan</h2>
-          {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.mrrByPlan.length === 0 ? (
+          {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : mrrByPlan.length === 0 ? (
             <div className="adm-empty">No active paid plans yet.</div>
           ) : (
             <div className="adm-logwrap">
               <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 60px 100px" }}><span>Plan</span><span style={{ textAlign: "right" }}>Subs</span><span style={{ textAlign: "right" }}>MRR</span></div>
-              {d.mrrByPlan.map((p) => (
+              {mrrByPlan.map((p) => (
                 <div key={p.plan} className="adm-logrow" style={{ gridTemplateColumns: "1fr 60px 100px" }}>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.plan}</span>
                   <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p.count}</span>
@@ -222,14 +231,14 @@ export default function AdminRevenue() {
       {/* Paying restaurants */}
       <div className="adm-card" style={{ marginTop: 12 }}>
         <h2 style={{ margin: "0 0 10px" }}>Paying restaurants</h2>
-        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.paying.length === 0 ? (
+        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : paying.length === 0 ? (
           <div className="adm-empty">No active paying subscriptions yet — set a plan on Billing &amp; plans.</div>
         ) : (
           <div className="adm-logwrap">
             <div className="adm-logrow head" style={{ gridTemplateColumns: "1.4fr 1fr 80px 110px 120px" }}>
               <span>Restaurant</span><span>Plan</span><span>Cycle</span><span style={{ textAlign: "right" }}>Monthly</span><span style={{ textAlign: "right" }}>Next due</span>
             </div>
-            {d.paying.map((r, i) => (
+            {paying.map((r, i) => (
               <div key={i} className="adm-logrow" style={{ gridTemplateColumns: "1.4fr 1fr 80px 110px 120px" }}>
                 <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
                 <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.plan}</span>

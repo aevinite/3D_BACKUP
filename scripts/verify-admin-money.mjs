@@ -584,7 +584,37 @@ try {
       ["/aevinite/bill-audit", "/api/admin/bills", "bills", "Bills"],
       ["/aevinite/analytics", "/api/admin/analytics", "trend", "Platform analytics"],
       ["/aevinite", "/api/admin/dashboard", "restaurants", "Dashboard"],
+      // Platform revenue reads FOUR lists, and guarding only the first left the screen dying on the
+      // other three. Each is deleted on its own so a future guard cannot be half-applied again.
+      ["/aevinite/revenue", "/api/admin/revenue", "monthly", "Platform revenue"],
+      ["/aevinite/revenue", "/api/admin/revenue", "mrrByPlan", "Platform revenue"],
+      ["/aevinite/revenue", "/api/admin/revenue", "paying", "Platform revenue"],
     ];
+    // …an EMPTY body, which is the shape that caught the half-applied guard: `{}` is truthy, so a
+    // page that only checks "did I get an answer" walks straight into every field inside it.
+    for (const [url, ep, h1] of [
+      ["/aevinite/revenue", "/api/admin/revenue", "Platform revenue"],
+      ["/aevinite/bill-audit/changes", "/api/admin/bill-audit", "Bills · Change log"],
+      ["/aevinite/bill-audit", "/api/admin/bills", "Bills"],
+      ["/aevinite/customers", "/api/admin/customers", "Customers"],
+      ["/aevinite/analytics", "/api/admin/analytics", "Platform analytics"],
+      ["/aevinite", "/api/admin/dashboard", "Dashboard"],
+    ]) {
+      const c = await ctx();
+      const p = await c.newPage();
+      await p.route(`**${ep}**`, (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }).catch(() => {}));
+      await p.goto(BASE + url, { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const seen = await p.evaluate(() => ({
+        h1: document.querySelector("h1")?.textContent?.trim() || "",
+        boundary: /Something went wrong on this screen/.test(document.body.innerText),
+      }));
+      ok(seen.h1 === h1 && !seen.boundary,
+        `${h1} given an empty body: ${seen.boundary ? "THE WHOLE SCREEN WAS REPLACED" : "keeps its heading"}`);
+      await p.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+      await p.close(); await c.close();
+    }
+
     // …and the third shape of the same fault: a ROW whose state this screen has never heard of.
     // META[b.state] was read straight into m.icon, so one unknown bucket took the whole ledger down.
     {
