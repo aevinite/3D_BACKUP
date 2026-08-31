@@ -8,6 +8,10 @@
 // ADMIN-GATED like all its siblings — tokenIsValid BEFORE any database call, on every verb.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+// Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
+// Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
+import { adminFail } from "@/lib/adminFail";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import {
@@ -69,11 +73,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // N+1 shape the egress rule exists to refuse, and it would get slower with every client signed.
   if (seg[0] === "overview") {
     const [rests, agents, sets, jobs] = await Promise.all([
-      // .limit(400) like its three siblings below — NOT decoration. Without a ceiling PostgREST
-      // applies its own default cap and silently returns a SHORT list, so the overview would stop
-      // showing later restaurants with no error anywhere. (sweep #7 / T28: verify:admin-api-a was
-      // red on clean main for this one line.)
-      sb.from("restaurants").select("id, name, slug").order("name").limit(400),
+      // ── PAGED — THE COMBINED VERSION (T28 + T20, 2026-08-31) ────────────────────────────────────
+      // Two sessions fixed this line independently. T28 added `.limit(400)` to match its three
+      // siblings below, with the right diagnosis: without a ceiling PostgREST applies its own default
+      // cap and silently returns a SHORT list, so the overview would stop showing later restaurants
+      // with no error anywhere. T20 moved it onto lib/pageAll.
+      //
+      // Paging wins here for one reason: this list IS the board — every row on the Printing overview
+      // is one of these restaurants — so a ceiling of any size is still a board that silently stops
+      // being the whole platform, which is the exact fault being fixed, moved to a different number.
+      // The comment above the batch is right that four whole-platform reads beat an N+1 loop; paging
+      // keeps that (no extra round trip below a thousand restaurants) and removes the silent cut.
+      pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
+        sb.from("restaurants").select("id, name, slug").order("name").range(from, to)),
       sb.from("print_agents").select("id, restaurant_id, name, last_seen_at, printers")
         .is("revoked_at", null).limit(400),
       sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").limit(400),
@@ -81,6 +93,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       sb.from("print_jobs").select("restaurant_id, kind, created_at")
         .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
     ]);
+    // AN EMPTY BOARD IS NOT "NO RESTAURANTS". Every row below is built from this list, so a failed
+    // read answered a 200 with `rows: []` — a Printing overview showing nothing at all, which reads
+    // as a healthy platform with nobody printing. Same rule as its neighbours in this console.
+    if (rests.error) return adminFail("the printing overview", rests.error as { message?: string }, { action: "load" });
     const now = Date.now();
     const byRest = new Map<string, { n: number; oldest: number | null }>();
     for (const j of (jobs.data || []) as { restaurant_id: string; created_at: string }[]) {
@@ -96,7 +112,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     }
     const setBy = new Map((((sets.data || []) as { restaurant_id: string }[])).map((x) => [x.restaurant_id, x as Record<string, unknown>]));
 
-    const rows = (((rests.data || []) as { id: string; name: string; slug: string }[])).map((r) => {
+    const rows = ((rests.rows || [])).map((r) => {
       const mine = agentsBy.get(r.id) || [];
       const alive = mine.filter((a) => a.last_seen_at && now - new Date(a.last_seen_at).getTime() < HELPER_STALE_MS);
       const st = setBy.get(r.id) || {};

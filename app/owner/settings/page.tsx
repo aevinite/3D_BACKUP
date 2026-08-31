@@ -204,13 +204,30 @@ export default function OwnerSettings() {
                 </>
               ) : (
                 <>
+                  {/* "both" is GONE, not defaulted (owner, 2026-08-30). It meant "the kitchen prints
+                      and the counter picks up what it leaves" — the backup screen, which was removed —
+                      and the route stopped being able to answer it, so this branch was dead code that
+                      still LOOKED like a supported answer. */}
                   <span className="adm-muted" style={{ fontSize: 12 }}>
-                    tickets print on {p.target === "counter" ? "the counter screen" : p.target === "both" ? "the kitchen screen (counter as backup)" : "the kitchen screen"}
+                    tickets print on {p.target === "counter" ? "the counter screen" : "the kitchen screen"}
                   </span>
+                  {/* ── "GONE QUIET" IS A WARNING, NOT A FOOTNOTE (owner, 2026-08-31 — item 29) ─────
+                      This said "printing now: Kitchen screen · gone quiet" with the second half in
+                      muted grey, i.e. styled as background detail. It is not background detail: the
+                      screen that is supposed to be printing has not checked in for three minutes, so
+                      tickets may not be coming out of the printer at all. That is the one thing on
+                      this card worth interrupting somebody for.
+                      The helper branch above already gets this right — it says "asleep, tickets
+                      waiting", naming the CONSEQUENCE rather than the symptom. This branch now matches
+                      it in both wording and weight: amber, and it says what it means for the food. */}
                   <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
                     {p.station
-                      ? <>printing now: <b>{p.station}</b>{p.stale ? <span className="adm-muted"> · gone quiet</span> : null}</>
-                      : <span className="adm-muted">no screen has taken it yet</span>}
+                      ? p.stale
+                        ? <>printing now: <b>{p.station}</b>
+                            <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}> · gone quiet for 3+ min — tickets may not be printing</span>
+                          </>
+                        : <>printing now: <b>{p.station}</b></>
+                      : <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}>no screen has taken it yet — tickets are waiting</span>}
                   </span>
                 </>
               )}
@@ -221,9 +238,17 @@ export default function OwnerSettings() {
           <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Where your paper comes out right now</div>
             <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+              {/* ── THE TWO SENTENCES READ AS AN ARGUMENT (owner, 2026-08-31 — item 29) ──────────
+                  The row above says "printing now: Kitchen screen" and this said "No computer is set
+                  up to print yet". Both are true and they are about different things — which screen is
+                  taking the paper, versus whether a dedicated printer computer exists — but read one
+                  after the other they sound like the page contradicting itself. Seen in a screenshot
+                  during the T20 sweep's visual pass.
+                  Reworded so the pair is ONE statement: the second sentence now explains the first
+                  rather than appearing to deny it. */}
               {printing.computers.length
                 ? "A printer program on your own computer does this — no screen has to be open, and nothing you close can stop it."
-                : "No computer is set up to print yet, so a screen has to do it. Ask us to set one up and this becomes automatic."}
+                : "A screen is doing this because no printer computer is set up here yet — so whichever screen has taken it has to stay open. Ask us to set one up and it becomes automatic."}
             </p>
             {printing.computers.map((c) => (
               <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "5px 0" }}>

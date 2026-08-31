@@ -148,6 +148,20 @@ export async function GET(req: NextRequest) {
   // `.data || []` turns a failed query into an empty list with no error anywhere.
   // The page needs the difference, so it is answered here. A restaurant with printing genuinely off
   // still shows nothing — that rule is his and does not change.
+  //
+  // ── TWO SESSIONS FOUND THIS INDEPENDENTLY, AND THIS IS THE COMBINED VERSION (T20 sweep #7,
+  //    2026-08-31) ─────────────────────────────────────────────────────────────────────────────────
+  // T20 reached the same conclusion on 2026-08-27 and shipped `printingUnread` (present only when
+  // true). THIS contract — `printingOk`, always present — is the one on main and the one the page
+  // reads, so it stays. What T20 kept from its own version is the two `console.error` lines below:
+  // the flag tells the SCREEN that something was unread, and the log is the only place that says
+  // WHICH read and why, which is what a support question actually needs.
+  //
+  // T20's version also raised the flag for a failed `print_stations` read. That was WRONG and this
+  // version is right: a missing station line does not shorten anything — it nulls "which screen is
+  // printing", which already renders null for a restaurant whose helper is asleep — so flagging it
+  // would put a warning on the page for a state that is normal. That is crying wolf, and the project
+  // has a standing rule against it.
   let printingOk = true;
   try {
     const ids = restaurants.map((r) => r.id);
@@ -159,7 +173,10 @@ export async function GET(req: NextRequest) {
       // A read that failed is not a restaurant with no printing. `print_stations` is the softer of
       // the two: without it the rows still render and just cannot say WHICH screen is printing, so
       // it does not shorten anything and must not raise the flag.
-      if (setRows.error) printingOk = false;
+      if (setRows.error) { console.error("[owner/settings] printing rows unread:", setRows.error.message); printingOk = false; }
+      // NOT flagged, but still logged — see the note above the block. The screen is right to stay
+      // quiet about this one; we still want to know it happened.
+      if (stRows.error) console.error("[owner/settings] print stations unread (the rows still render):", stRows.error.message);
       const byRid = new Map(((stRows.data || []) as Record<string, unknown>[]).map((r) => [String(r.restaurant_id), r]));
       const nameOf2 = new Map(restaurants.map((r) => [r.id, r.name]));
       for (const row of (setRows.data || []) as Record<string, unknown>[]) {
@@ -189,7 +206,12 @@ export async function GET(req: NextRequest) {
         });
       }
     }
-  } catch { printingOk = false; /* a printing row is a nicety; never let it shorten the page — but SAY it was shortened */ }
+  } catch (e) {
+    // Never fatal — a printing row is a nicety and must not shorten the page — but no longer silent
+    // in either direction: the flag tells the screen, the log says what happened.
+    console.error("[owner/settings] the printing block failed:", e instanceof Error ? e.message : e);
+    printingOk = false;
+  }
   return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing, printingOk });
   } catch (e) {
     // A half-read restaurant list must not silently shorten the admin's page (same rule as
@@ -218,7 +240,16 @@ export async function PATCH(req: NextRequest) {
   if (!scope.all && !scope.admin && !(await entitledSubset([rid], "settings")).length)
     return NextResponse.json({ error: "The admin hasn't given you settings for this restaurant." }, { status: 403 });
   // The toggle only works while the admin has transferred control (and the feature exists).
-  const s = (await sb.from("settings").select(`${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle()).data as Record<string, boolean> | null;
+  // ── A BLIP MUST NOT TELL AN OWNER THEY DON'T HAVE A FEATURE THEY DO HAVE (T20 sweep #7,
+  //    2026-08-27) ─────────────────────────────────────────────────────────────────────────────────
+  // `.error` was never inspected, so a failed read made `s` null and the two refusals below fired:
+  // "This feature isn't enabled for that restaurant." — a confident, non-retryable 403 about the
+  // restaurant's setup, for a switch the admin genuinely handed over. The owner's only move is to
+  // contact us about a configuration that was never wrong. `dbFail` gives them a retry instead, which
+  // is the same answer the GET's own module-switch chunks already give.
+  const sq = await sb.from("settings").select(`${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle();
+  if (sq.error) return dbFail("owner/settings.moduleGate", sq.error, { message: "Couldn't check that switch just now — please try again." });
+  const s = sq.data as Record<string, boolean> | null;
   if (!s?.[def.allowed]) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
   if (!s[def.control]) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
   const { error } = await sb.from("settings").update({ [def.enabled]: enabled }).eq("restaurant_id", rid);

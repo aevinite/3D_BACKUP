@@ -191,7 +191,7 @@ export const ACT_LABEL: Record<string, string> = {
   // ── sign-in safety ────────────────────────────────────────────────────────
   login_failed: "Wrong password", login_blocked: "Sign-in blocked", login_denied: "Sign-in refused",
   rate_limited: "Limit reached", rate_limit_edit: "Edited a limit rule", rate_limit_allow: "Allowed through a limit",
-  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_lockout_clear: "Cleared a lockout",
+  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_unblock_denied: "Said no to an unblock request", admin_lockout_clear: "Cleared a lockout",
   blocklist_add: "Added to the blocklist", blocklist_remove: "Removed from the blocklist",
   // ── the admin console ─────────────────────────────────────────────────────
   restaurant_create: "Created a restaurant", restaurant_settings: "Changed settings",

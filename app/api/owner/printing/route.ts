@@ -29,8 +29,26 @@ export async function GET(req: NextRequest) {
   const target = rid && (scope.all || ids.includes(rid)) ? rid : ids[0];
   if (!target) return NextResponse.json({ allowed: false });
 
-  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed")
-    .eq("restaurant_id", target).maybeSingle()).data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+  // ── R36 SAYS HIDE WHAT IS WITHHELD — IT DOES NOT SAY HIDE WHAT WE FAILED TO READ (T20 sweep #7,
+  //    2026-08-27) ─────────────────────────────────────────────────────────────────────────────────
+  // `.error` was never inspected, so a blip answered `allowed: false` — which is the same answer as
+  // "printing is not granted to this restaurant", and the panel draws NOTHING for that (deliberately:
+  // the owner never sees what is withheld). So the whole Printing card vanished from the owner's screen
+  // during a hiccup, with nothing anywhere saying why, and reappeared on the next load.
+  //
+  // A retryable 503 keeps both rules intact: still nothing is revealed about a feature the admin
+  // withheld (a refused restaurant never reaches this read's answer differently), and a failure the
+  // owner can act on says so. Same shape as ownerScopeOr503 at the top of this handler.
+  const sq = await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed")
+    .eq("restaurant_id", target).maybeSingle();
+  if (sq.error) {
+    console.error("[owner/printing] could not read the printing switches:", sq.error.message);
+    return NextResponse.json(
+      { error: "Couldn't check your printing just now — please try again.", transient: true },
+      { status: 503 },
+    );
+  }
+  const s = sq.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
   if (s?.auto_print_kot_allowed !== true) return NextResponse.json({ allowed: false });
 
   const [agents, routes, waiting] = await Promise.all([agentsView(target), readRoutes(target), waitingCount(target)]);

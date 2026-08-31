@@ -18,6 +18,8 @@ import { cleanClonedSettings } from "@/lib/settingsClone";
 import { MP_DEFAULT } from "@/lib/accessConfig";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 
 // The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
@@ -166,17 +168,27 @@ export async function GET(req: NextRequest) {
     // raw `already been purged` exception, and "Restore" brought back a shell with no menu, no
     // staff, no settings and no owner. Filtering it here is what makes the purge look like what it
     // is — gone from every list a person can see.
-    // BOUNDED (T16 sweep #7, 2026-08-29). The sibling billing route was given a bound on
-    // 2026-08-04 with the reasoning "one row per restaurant makes it small today, but it grows
-    // with exactly the number this product is built to increase". These four platform-wide reads
-    // were left without one. Egress is this product's cost (CLAUDE.md), and a console read with
-    // no ceiling is the shape that gets expensive quietly.
-    const binQ = await sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason, purged_at")
-      .not("deleted_at", "is", null).is("purged_at", null).order("deleted_at", { ascending: false }).limit(2000);
+    // ── ONE-ROW-PER-RESTAURANT, SO IT IS PAGED — THE COMBINED VERSION (T16 + T20, 2026-08-31) ────
+    // Two sessions fixed this independently and reached different answers. T16 (2026-08-29) added
+    // `.limit(2000)` with the right reasoning: "one row per restaurant makes it small today, but it
+    // grows with exactly the number this product is built to increase" — egress is this product's
+    // cost, and a console read with no ceiling gets expensive quietly. T20 (2026-08-27) moved it onto
+    // lib/pageAll.
+    //
+    // PAGING WINS, and T16's concern is fully answered by it: pageAll costs NO extra round trip below
+    // a thousand restaurants, so the cost argument is neutral — and `.limit(2000)` merely moves the
+    // silent cut from PostgREST's default to ours. lib/pageAll.ts's own header names this exact case
+    // ("USE IT for a table with ONE ROW PER RESTAURANT that must be complete: restaurants,
+    // restaurant_billing, settings"), it refuses past 50,000 rather than truncating, and it can never
+    // return a partial list with no error. The recycle bin is a list a person acts on, and a bin that
+    // silently stops listing is how something gets permanently removed that nobody meant to touch.
+    const binQ = await pageAll<{ id: string; slug: string; name: string; deleted_at: string; deleted_by: string | null; delete_reason: string | null; purged_at: string | null }>(
+      "restaurants (bin)", (from, to) => sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason, purged_at")
+        .not("deleted_at", "is", null).is("purged_at", null).order("deleted_at", { ascending: false }).range(from, to));
     // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
-    if (binQ.error) return adminFail("the recycle bin", binQ.error, { action: "load" });
+    if (binQ.error) return adminFail("the recycle bin", binQ.error as { message?: string }, { action: "load" });
     const now = Date.now();
-    const trashed = (binQ.data || []).map((r) => {
+    const trashed = (binQ.rows || []).map((r) => {
       const deletedAt = r.deleted_at as string;
       // How long it has SAT here — a fact, not a permission. `canPurge` is now always true (the
       // default restaurant is the one thing the purge itself still refuses, and it can't be binned
@@ -192,30 +204,53 @@ export async function GET(req: NextRequest) {
     return ok({ trashed, retentionDays: RETENTION_DAYS });
   }
 
+  // Paged for the reason spelled out on the recycle-bin read above (T16 + T20, 2026-08-31).
+  // (`staff_users` filtered to active OWNERS is not one-row-per-restaurant, but it is the same shape
+  //  of small complete list, and the dropdown it fills has to hold every owner or you cannot assign
+  //  one — so it is paged too.)
   const [restQ, setQ, ownersQ] = await Promise.all([
     // deleted_at IS NULL → the live/suspended list; trashed restaurants are hidden
     // here (they live in the recycle bin above).
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id, created_at").is("deleted_at", null).order("name").limit(2000),
+    pageAll<{ id: string; slug: string; name: string; active: boolean; owner_user_id: string | null; created_at: string | null }>(
+      "restaurants", (from, to) => sb.from("restaurants").select("id, slug, name, active, owner_user_id, created_at")
+        .is("deleted_at", null).order("name").range(from, to)),
     // enabled_panels rides along (tiny JSONB) so the admin home can show each
     // restaurant's M/K/T/O panel chips WITHOUT a per-row fetch. Read-only add.
-    sb.from("settings").select("restaurant_id, enabled_panels").limit(2000),
-    sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name").limit(2000),
+    pageAll<{ restaurant_id: string | null; enabled_panels: Record<string, boolean> | null }>(
+      "settings", (from, to) => sb.from("settings").select("restaurant_id, enabled_panels").order("restaurant_id").range(from, to)),
+    pageAll<{ id: string; name: string | null; username: string }>(
+      "owners", (from, to) => sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name").range(from, to)),
   ]);
-  if (restQ.error) return adminFail("the restaurant list", restQ.error, { action: "load" });
-  const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
-  const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
-  const owners = (ownersQ.data || []).map((o) => ({ id: o.id, name: o.name || o.username }));
+  if (restQ.error) return adminFail("the restaurant list", restQ.error as { message?: string }, { action: "load" });
+  // ── THE OWNER COLUMN WENT BLANK AND NOTHING SAID WHY (T20 sweep #7, 2026-08-27) ─────────────────
+  // Only `restQ` answered for itself. The other two are what the list is actually made of:
+  //   · `ownersQ` fills BOTH the owner-picker dropdown and the per-row owner name, so a failed read
+  //     drew "—" in the Owner column of every restaurant that HAS one — a confident "nobody owns
+  //     this" on the screen where the admin assigns ownership — and an empty dropdown to fix it with.
+  //   · `setQ` decides `hasSettings` and the M/K/T/O panel chips, so a failed read reported every
+  //     restaurant as un-set-up with no panels.
+  // Neither is worth throwing the whole list away for — the names, slugs and active flags are all
+  // perfectly readable — so they degrade and NAME themselves, the same `partial` convention this
+  // console's own Full report adopted (`/api/admin/restaurants/report`, T20 item 14).
+  const unread: string[] = [];
+  if (setQ.error) { console.error("[admin/restaurants] settings read failed:", (setQ.error as { message?: string })?.message); unread.push("panels"); }
+  if (ownersQ.error) { console.error("[admin/restaurants] owners read failed:", (ownersQ.error as { message?: string })?.message); unread.push("owners"); }
+  const withSettings = new Set((setQ.rows || []).map((r) => r.restaurant_id).filter(Boolean));
+  const panelsByRid = new Map((setQ.rows || []).map((r) => [r.restaurant_id, r.enabled_panels || null]));
+  const owners = (ownersQ.rows || []).map((o) => ({ id: o.id, name: o.name || o.username }));
   const ownerName = new Map(owners.map((o) => [o.id, o.name]));
-  const restaurants = (restQ.data || []).map((r) => ({
+  const restaurants = (restQ.rows || []).map((r) => ({
     id: r.id, slug: r.slug, name: r.name, active: r.active === true,
     createdAt: r.created_at || null, // lets the list tell "New" (just set up) from long-Dormant
     hasSettings: withSettings.has(r.id),
     ownerUserId: r.owner_user_id || null,
-    ownerName: r.owner_user_id ? (ownerName.get(r.owner_user_id) || "—") : null,
+    // `null` when the name could not be READ, so the screen shows nothing rather than the "—" it
+    // draws for a genuinely un-owned restaurant. `unread` below is what lets it say so.
+    ownerName: r.owner_user_id ? (ownersQ.error ? null : (ownerName.get(r.owner_user_id) || "—")) : null,
     // Panel flags: a panel is ON unless explicitly false (matches /panels route semantics).
     panels: panelsByRid.get(r.id) || null,
   }));
-  return ok({ restaurants, owners });
+  return ok({ restaurants, owners, ...(unread.length ? { unread } : {}) });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -283,7 +318,14 @@ export async function POST(req: NextRequest) {
     const rid = String(body?.restaurant_id || "");
     const active = !!body?.active;
     if (!rid) return bad("Missing restaurant_id.");
-    const r = (await sb.from("restaurants").select("id, name").eq("id", rid).limit(1)).data?.[0];
+    if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
+    // A FAILED READ IS NOT "NOT FOUND" — the rule this file's own purge branch states, applied to the
+    // three siblings that were left deciding a refusal from an unchecked `.data` (T20 sweep #7,
+    // 2026-08-27). Answering "Restaurant not found." on a blip sends the admin looking for a row that
+    // is right there, and no client retries a 404.
+    const rQ0 = await sb.from("restaurants").select("id, name").eq("id", rid).limit(1);
+    if (rQ0.error) return adminFail("this restaurant", rQ0.error, { action: "load" });
+    const r = rQ0.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     const { error } = await sb.from("restaurants").update({ active }).eq("id", rid);
     if (error) return adminFail(active ? "reactivating this restaurant" : "suspending this restaurant", error, { action: "save" });
@@ -300,7 +342,10 @@ export async function POST(req: NextRequest) {
     if (!rid) return bad("Missing restaurant_id.");
     if (rid === DEFAULT_RID) return bad("The default restaurant can't be deleted.", 400);
     const reason = String(body?.reason ?? "").trim().slice(0, 300) || null;
-    const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
+    const rQ1 = await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1);
+    if (rQ1.error) return adminFail("this restaurant", rQ1.error, { action: "load" });   // see set_restaurant_active
+    const r = rQ1.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     if (r.deleted_at) return bad("That restaurant is already in the recycle bin.", 409);
     // deleted_at drives the resolver + login gates; active=false too so nothing
@@ -320,7 +365,10 @@ export async function POST(req: NextRequest) {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
     const activate = body?.activate === true;
-    const r = (await sb.from("restaurants").select("id, name, slug, deleted_at, purged_at").eq("id", rid).limit(1)).data?.[0];
+    if (!UUID.test(rid)) return bad("Restaurant not found.", 404);
+    const rQ2 = await sb.from("restaurants").select("id, name, slug, deleted_at, purged_at").eq("id", rid).limit(1);
+    if (rQ2.error) return adminFail("this restaurant", rQ2.error, { action: "load" });   // see set_restaurant_active
+    const r = rQ2.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     if (!r.deleted_at) return bad("That restaurant isn't in the recycle bin.", 409);
     // Restoring a PURGED restaurant would hand back a shell — its menu, staff, settings and owner
@@ -614,8 +662,18 @@ export async function POST(req: NextRequest) {
       if (ins.error) { loginErrors.push(panel); continue; } // don't fail the whole create over one login; report what we made
       logins.push({ panel, role: panel, username: panel, password: pw });
       if (panel === "owner") {
-        await sb.from("restaurants").update({ owner_user_id: ins.data.id }).eq("id", rid);
-        await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ins.data.id }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+        // THE LOGIN EXISTS BUT NOBODY OWNS THE RESTAURANT (T20 sweep #7, 2026-08-27). Both writes'
+        // errors were dropped, so the owner login could be created and handed over while
+        // `owner_user_id` and the `restaurant_owners` membership stayed empty — and membership is the
+        // SCOPING source of truth (mig 097), so that owner signs in and sees nothing. It is reported
+        // rather than fatal (the restaurant and its logins are real and usable), through the same
+        // `loginErrors` channel the create already answers with, so the console can say so.
+        const link = await sb.from("restaurants").update({ owner_user_id: ins.data.id }).eq("id", rid);
+        const mem = await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ins.data.id }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+        if (link.error || mem.error) {
+          console.error("[admin/restaurants] owner link failed:", link.error?.message || mem.error?.message);
+          loginErrors.push("owner-link");
+        }
       }
     }
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
@@ -659,7 +717,13 @@ export async function POST(req: NextRequest) {
   const { data, error } = await sb.from("staff_users")
     .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, ...(await passwordFields(password)), active: true })
     .select("id, name").single();
-  if (error) return bad(error.code === "23505" ? "That username is taken — pick another." : error.message, error.code === "23505" ? 409 : 500);
+  // A taken name keeps its own sentence; anything else goes through adminFail, so the console gets a
+  // plain line and the database's words stay in `detail` + the log (T20 sweep #7, 2026-08-27 — this
+  // was the last handler in the file still answering `error.message` raw).
+  if (error) {
+    if (error.code === "23505") return bad("That username is taken — pick another.", 409);
+    return adminFail("the new owner login", error, { action: "save" });
+  }
   await logAction("admin", "owner_create", { actor: "admin", detail: `created owner "${display}" · id ${data!.id}` });
   return ok({ ok: true, id: data!.id, name: display, password });
 }

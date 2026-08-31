@@ -98,8 +98,19 @@ async function handler(req: NextRequest) {
       if (!owns.invoice_no) return err("This bill has no invoice to void.", 409);
       // What the bill stood at BEFORE it was reopened, so the audit row can say what changed —
       // the same figures the manager's own void records (editor route, invoice_void).
-      const beforeVoid = (await sb.from("orders").select("total, discount").eq("session_id", sessionId).eq("restaurant_id", rid)).data as
-        { total: number | null; discount: number | null }[] | null;
+      // ── THE AUDIT'S AMOUNT IS THE POINT OF THE AUDIT ROW (T20 sweep #7, 2026-08-27) ──────────────
+      // `.error` was never inspected, so a failed read summed to 0 — and that 0 went straight into
+      // `recordRemoval({ amount: wasTotal })`. The Removals record would then show a reopened invoice
+      // worth ₹0, which is not "we don't know", it is a wrong figure on the screen the owner and the
+      // manager open to answer "what came off my bills, and how much?". Refuse before touching the
+      // invoice: reopening a bill is not urgent enough to record it wrongly, and the same request
+      // succeeds a second later.
+      // `.limit(2000)` is a runaway guard, not a business bound — the same shape and the same reason as
+      // the khata balance read in /api/owner/customers. One sitting with 2000 orders on it is a
+      // different conversation; leaving it unbounded meant PostgREST's own cap decided the sum instead.
+      const beforeQ = await sb.from("orders").select("total, discount").eq("session_id", sessionId).eq("restaurant_id", rid).limit(2000);
+      if (beforeQ.error) return adminFail("this bill's figures before reopening it", beforeQ.error, { action: "load" });
+      const beforeVoid = beforeQ.data as { total: number | null; discount: number | null }[] | null;
       const wasTotal = (beforeVoid || []).reduce((s, o) => s + (Number(o.total) || 0), 0);
       // p_actor was missing, so the append-only invoice history recorded a void with NO actor —
       // the one field whose whole job is answering "who did this?".
@@ -158,11 +169,21 @@ async function handler(req: NextRequest) {
       });
       if (error) throw new Error(error.message);
       // Optionally cancel the broken original so it doesn't linger.
+      // ── NEVER RECORD A CHANGE THAT DIDN'T HAPPEN (T20 sweep #7, 2026-08-27) ──────────────────────
+      // This write's error was dropped and the diary line said "· old cancelled" regardless — so a
+      // failed cancel left the broken original LIVE on the kitchen board while the permanent record
+      // claimed it had been cancelled. The re-fire itself has already succeeded (a new KOT is on the
+      // paper), so this must not fail the request; it tells the truth in the line instead, and says
+      // so in the reply so the admin knows the old ticket still needs dealing with.
+      let oldCancelled: boolean | null = null;
       if (body.cancel_old === true) {
-        await sb.from("orders").update({ status: "cancelled", archived: true, archived_at: nowIso(), cancelled_at: nowIso() }).eq("id", orderId).eq("restaurant_id", rid);
+        const c = await sb.from("orders").update({ status: "cancelled", archived: true, archived_at: nowIso(), cancelled_at: nowIso() }).eq("id", orderId).eq("restaurant_id", rid);
+        oldCancelled = !c.error;
+        if (c.error) console.error("[admin/repair] re-fired but could not cancel the original:", c.error.message);
       }
-      await logRepair("repair_refire_order", { order_id: orderId, table_number: table, detail: `new KOT ${(data as { kot_no?: number })?.kot_no ?? "?"}${body.cancel_old === true ? " · old cancelled" : ""}` });
-      return NextResponse.json({ ok: true, kot_no: (data as { kot_no?: number })?.kot_no ?? null });
+      await logRepair("repair_refire_order", { order_id: orderId, table_number: table, detail: `new KOT ${(data as { kot_no?: number })?.kot_no ?? "?"}${oldCancelled === true ? " · old cancelled" : oldCancelled === false ? " · THE OLD ORDER IS STILL LIVE (the cancel failed)" : ""}` });
+      return NextResponse.json({ ok: true, kot_no: (data as { kot_no?: number })?.kot_no ?? null,
+        ...(oldCancelled === false ? { oldCancelFailed: true } : {}) });
     }
 
     // ── Unstick a jammed table: force-close an open/pending session ────────────────

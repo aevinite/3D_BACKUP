@@ -20,6 +20,12 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readRaw = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
 
+// Declared before read(), because read()'s own sanity check reports through it.
+const fails = [];
+const oks = [];
+const ok = (m) => oks.push(m);
+const fail = (m) => fails.push(m);
+
 /**
  * Source with COMMENTS REMOVED.
  *
@@ -28,14 +34,54 @@ const readRaw = (p) => { try { return readFileSync(join(root, p), "utf8"); } cat
  * right code. A guard that greps the raw file therefore fires on the very comment that documents the
  * fix. (Both of this file's rules did exactly that on their first run.) So: strip comments, then
  * grep. The prose is for humans; the check is about what actually executes.
+ *
+ * ── LINE COMMENTS COME OFF FIRST, AND THIS FILE HAD IT BACKWARDS (T20 sweep #7, 2026-08-27) ───────
+ * These files describe themselves in prose, and that prose says things like
+ * "same cookie as every other /api/admin/* route" — a LINE comment containing `/*`. Strip BLOCK
+ * comments first and that `/*` opens one, which then runs to the next real `*\/` further down and
+ * silently swallows every line in between.
+ *
+ * Measured on this branch: `app/api/admin/restaurants/credentials/route.ts` came out of the old
+ * stripper at 1,830 characters instead of 6,888 — SEVENTY-THREE PER CENT of the file gone, including
+ * every read rule 8 below is about. So a check written against that file could only ever pass, which
+ * is worse than not having it: a dead check looks exactly like a satisfied one.
+ *
+ * verify-admin-api-a.mjs hit this on the SAME FILE and wrote the reason into its own header; this
+ * copy of the helper was never corrected. Order fixed, and the sanity check below proves nothing was
+ * eaten rather than trusting the order to stay right.
  */
-const read = (p) => readRaw(p)
-  .replace(/\/\*[\s\S]*?\*\//g, "")            // block comments
-  .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1");  // line comments, without eating a URL's "//"
-const fails = [];
-const oks = [];
-const ok = (m) => oks.push(m);
-const fail = (m) => fails.push(m);
+const read = (p) => {
+  const raw = readRaw(p);
+  const out = raw
+    .replace(/(^|[^:'"`\\])\/\/[^\n]*/gm, "$1")   // line comments FIRST (see the note above)
+    .replace(/\/\*[\s\S]*?\*\//g, "");           // …then block comments
+  return out;
+};
+
+// ── 0 · THE STRIPPER ITSELF, CHECKED AGAINST A FIXTURE (T20 sweep #7, 2026-08-27) ────────────────
+// A ratio ("did this file lose too much?") cannot do this job: these files really are three-quarters
+// prose, so a comment-heavy file and an eaten one look the same. What CAN do it is a fixture — one
+// file known to carry the hazard, and one line of real code near the bottom of it that only survives
+// when line comments come off first.
+//
+// `app/api/admin/restaurants/credentials/route.ts` is that file. Its header says "same cookie as every
+// other /api/admin/* route" — a line comment containing `/*` — and under the old block-comments-first
+// order that `/*` ran to the next real `*\/` and took 73% of the file with it (6,888 chars → 1,830),
+// including `linkQ.error`, which rule 8 below is entirely about. Every check on that file could only
+// ever pass.
+//
+// So: read it through the real helper and assert a late line of its code is still there. If the order
+// regresses, THIS goes red and names why, instead of eight checks quietly agreeing with themselves.
+{
+  const FIXTURE = "app/api/admin/restaurants/credentials/route.ts";
+  const src = read(FIXTURE);
+  if (!readRaw(FIXTURE)) ok(`${FIXTURE} is gone — the stripper fixture needs a new file with "/*" in a line comment`);
+  else if (/linkQ\.error/.test(src) && /genPassword/.test(src)) {
+    ok("the comment stripper reaches the END of a file whose header quotes a \"/api/admin/*\" path");
+  } else {
+    fail(`the comment stripper is eating ${FIXTURE} again — a "/*" inside a line comment opens a block comment when blocks are stripped FIRST, so every rule below that reads this file silently passes. Strip LINE comments first.`);
+  }
+}
 
 // ── 1. the log-visibility switch fails CLOSED ────────────────────────────────────────────────────
 const VIS = read("lib/logVisibility.ts");
@@ -210,6 +256,116 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
     if (!/restaurantNames\s*\(/.test(src)) { fail(`${p2} no longer uses the shared name lookup — that is F17's local copy coming back`); continue; }
     if (/names\.partial/.test(src)) ok(`${p2} says so when it could not read ${what}`);
     else fail(`${p2} drops the name lookup's partial flag — every row would render its restaurant as "—" with nothing saying why (F17)`);
+  }
+}
+
+// ── 7 · "COULDN'T READ IT" MUST NOT DECIDE A REFUSAL (T20 sweep #7, 2026-08-27) ─────────────────
+// Rules 1–6 above are all about a wrong NUMBER. This one is about a wrong SENTENCE, and it cost more:
+// a read whose `.error` is dropped makes its variable null, and a handler that then branches on null
+// answers a confident, non-retryable refusal about the person's setup or their scope. Six of those
+// were live in this territory:
+//
+//   · /api/owner/staff  — `payrollByRid()` came back empty on a blip, so `target()` (the front door
+//     for EVERY profile and pay write) refused with "Staff profiles & pay aren't enabled for this
+//     restaurant." 403. Saving a salary during a hiccup was simply lost. This is finding F7 again, on
+//     the read one line below the one F7 fixed.
+//   · /api/owner/staff  — the person read behind reset_password / set_active / set_role /
+//     set_permissions / edit, and the one behind DELETE, both answered "That person isn't on your
+//     staff." 404. F7 fixed the other two reads in the same file and missed these.
+//   · /api/owner/settings PATCH — "This feature isn't enabled for that restaurant." for a switch the
+//     admin genuinely handed over.
+//   · /api/owner/printing — `allowed: false`, which is what a WITHHELD feature looks like, so the
+//     whole card silently vanished (R36 says hide what is withheld; it says nothing about hiding what
+//     we failed to read).
+//   · /api/owner/issues + /api/owner/ratings — a bare `{"error":"not found"}` 404, so a resolve tap or
+//     a reply note disappeared with nothing retryable.
+//
+// Checked by SHAPE: each refusal's own sentence must have a `transient()` / `dbFail(` / 503 answer
+// somewhere between the read and it. Spelling out the sentences means a rename has to come here too,
+// which is the point — these are the words a person reads.
+{
+  const REFUSALS = [
+    ["app/api/owner/staff/route.ts", /payrollByRid/, /Promise<Record<string, boolean> \| null>/,
+      "payrollByRid must be able to say 'I could not check' — an empty map reads as 'this restaurant has no payroll' and refuses a salary save"],
+    ["app/api/owner/staff/route.ts", /isn't on your staff/, /rd\("account"/,
+      "the account-action and delete reads must tell a blip from 'not yours' (F7's third and fourth reads)"],
+    ["app/api/owner/settings/route.ts", /isn't enabled for that restaurant/, /owner\/settings\.moduleGate/,
+      "the module-ladder read must answer for itself before its 403 says the feature is off"],
+    ["app/api/owner/printing/route.ts", /allowed: false/, /transient: true/,
+      "an unreadable printing switch must be a retryable 503, not the same answer as 'withheld'"],
+    ["app/api/owner/issues/route.ts", /"not found"/, /owner\/issues\.lookup/,
+      "the complaint lookup must tell a blip from a missing complaint"],
+    ["app/api/owner/ratings/route.ts", /"not found"/, /owner\/ratings\.lookup/,
+      "the rating lookup must tell a blip from a missing rating"],
+  ];
+  for (const [p3, refusal, guardShape, why] of REFUSALS) {
+    const src = read(p3);
+    if (!src) { fail(`${p3} is missing`); continue; }
+    if (!refusal.test(src)) { ok(`${p3} no longer carries that refusal at all — nothing to guard`); continue; }
+    if (guardShape.test(src)) ok(`${p3}: ${why}`);
+    else fail(`${p3} decides a refusal from a read that no longer answers for itself — ${why}`);
+  }
+}
+
+// ── 8 · A LIST THAT IS THE PAGE, ON THE ADMIN SIDE TOO (T20 sweep #7, 2026-08-27) ────────────────
+// The same shape as rule 5, in the two admin-console answers where an unread companion list turns
+// into a confident claim rather than a shorter page:
+//   · /api/admin/restaurants — a failed `owners` read drew "—" in the Owner column of every
+//     restaurant that HAS one, on the screen where ownership is assigned, with an empty dropdown to
+//     fix it from. A failed `settings` read reported every restaurant as un-set-up.
+//   · /api/admin/restaurants/credentials — a failed `restaurant_owners` read printed a
+//     complete-looking handover sheet with every panel login on it and NO OWNER LOGIN. The admin
+//     hands that sheet to the client.
+{
+  const rests = read("app/api/admin/restaurants/route.ts");
+  if (/unread\.push\("owners"\)/.test(rests) && /unread\.push\("panels"\)/.test(rests)) {
+    ok("admin/restaurants names an unread owners / panels list instead of drawing 'no owner'");
+  } else {
+    fail("admin/restaurants swallows its owners or settings read error again — the Owner column reads '—' for restaurants that have one");
+  }
+  if (/pageAll/.test(rests)) ok("admin/restaurants pages its one-row-per-restaurant lists past PostgREST's cap");
+  else fail("admin/restaurants is back on a plain .select() for the restaurant list — the tail past the row cap disappears");
+
+  const creds = read("app/api/admin/restaurants/credentials/route.ts");
+  if (/linkQ\.error/.test(creds)) ok("the handover sheet refuses rather than printing itself without the owner's login");
+  else fail("the handover sheet ignores its owner-link read again — it would print with no owner login and look complete");
+}
+
+// ── 9 · THE ONE-PRESS PASSWORD RESET STAYS REFUSED MID-SERVICE (owner, 2026-08-31 — item 28) ─────
+// He asked for a single button that gives every login at a restaurant a new password, for a handover,
+// and he was told the cost before it was built: a new password bumps `token_version`, which ends every
+// session that person has — so all of them at once signs out the waiter's tablet and the kitchen screen
+// in the same instant. Fine on a handover morning. On a Friday night it is a floor of staff staring at
+// a login page with food on the pass.
+//
+// So the button exists AND the server refuses while any table is open. That refusal is the whole
+// safety of the feature, it lives in one `if`, and it is exactly the kind of line a later
+// "simplification" removes because the happy path works without it. Checked here, in four parts, so
+// none of them can go quietly:
+//   · the mid-service read happens at all;
+//   · it refuses on a FAILED read too (guessing "nobody is sitting down" from a query that did not
+//     answer is the one direction this must never guess in);
+//   · the refusal is a 409 the screen can show, not a silent skip;
+//   · the one-at-a-time path is untouched, because that is what still works during service.
+{
+  const CRED = "app/api/admin/restaurants/credentials/route.ts";
+  const src = read(CRED);
+  if (!src) fail(`${CRED} is missing`);
+  else if (!/reset_all/.test(src)) {
+    ok("the whole-restaurant password reset is not built here — nothing to guard");
+  } else {
+    const impl = src.slice(src.indexOf("async function resetAll"));
+    if (/from\("sessions"\)[\s\S]{0,200}?\.in\(\s*"status"/.test(impl)) ok("reset_all asks whether the restaurant is mid-service before it touches a password");
+    else fail("reset_all no longer checks for open tables — one press would sign out every screen at a restaurant DURING SERVICE (item 28's whole safety)");
+    if (/openQ\.error[\s\S]{0,140}?return adminFail/.test(impl)) ok("reset_all refuses when it could not tell whether service is on");
+    else fail("reset_all decides 'nobody is sitting down' from a read it did not check — the one direction it must never guess in");
+    if (/reason:\s*"mid_service"[\s\S]{0,120}?status:\s*409/.test(impl)) ok("the mid-service refusal is a 409 with a sentence the console shows");
+    else fail("the mid-service refusal no longer answers a 409 the screen can render — a refusal nobody sees is not a refusal");
+    if (/vaultReady\(\)/.test(impl)) ok("reset_all refuses on a deployment with no credential key, rather than burning every password for nothing");
+    else fail("reset_all no longer checks the credential vault — it would reset every password and be unable to print any of them");
+    // The per-login route must survive: it is the ONLY one that works while the restaurant is serving.
+    if (/const userId = String\(body\.user_id/.test(src)) ok("the one-login-at-a-time reset still exists — the only path that works mid-service");
+    else fail("the single-login reset is gone; during service there would be no way to reset one password at all");
   }
 }
 
