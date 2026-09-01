@@ -427,12 +427,23 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   const rev = read("app/api/admin/revenue/route.ts");
   if (!rev) fail("app/api/admin/revenue/route.ts is missing");
   else {
-    const utcMonth = /getUTCMonth\(\)/g;
     const onNow = [...rev.matchAll(/now\.getUTC(?:Month|FullYear)\(\)/g)].length;
     if (!onNow) ok("the revenue page builds every month boundary from ONE IST clock");
     else fail(`the revenue page is back to reading ${onNow} month/year boundar${onNow === 1 ? "y" : "ies"} off the UTC clock while its year boundary is IST — for 5.5h after IST midnight on the 1st the chart loses the current month`);
-    if (/const istNow = new Date\(now\.getTime\(\) \+ 330 \* 60000\)/.test(rev) && utcMonth.test(rev)) ok("…and that clock is IST (+5:30), used for both the window and the labels");
-    else if (!/istNow/.test(rev)) fail("the revenue page no longer has a single IST clock for its month maths");
+    // ── THIS BRANCH WENT SILENT, IN THE GUARD WRITTEN TO CATCH SILENT DRIFT (T20 round 4, 2026-09-01) ──
+    // It used to be `if (<literal 330 * 60000> && …) ok() else if (!istNow) fail()`. Another terminal
+    // then did the RIGHT thing and named the constant — `new Date(now.getTime() + IST_SHIFT_MS)` — so
+    // `istNow` was still there (no fail) and the literal was not (no ok). NEITHER BRANCH RAN. The check
+    // stopped existing and the suite went 66 → 65 with nothing red, which is exactly the "a dead check
+    // looks like a satisfied one" trap this file's own fixture rule exists for.
+    //
+    // Two corrections. First, match the INTENT — an IST clock is +5:30 however it is spelled — instead
+    // of one spelling of it. Second, and more importantly, every path now ends in ok or fail: an
+    // `if / else if` with no final `else` is the SHAPE that lets a check disappear, not a one-off typo.
+    const istShift = /const istNow\s*=\s*new Date\(now\.getTime\(\)\s*\+\s*(?:330\s*\*\s*60000|IST_SHIFT_MS|5\.5\s*\*\s*3600_?000)\)/;
+    if (istShift.test(rev)) ok("…and that clock is IST (+5:30), however the shift is spelled");
+    else if (/istNow/.test(rev)) fail("app/api/admin/revenue has an `istNow` this guard no longer recognises as a +5:30 shift — teach it the new spelling rather than leaving the check silent");
+    else fail("the revenue page no longer has a single IST clock for its month maths");
   }
 }
 
@@ -535,6 +546,20 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
     if (/printing\.restaurantId/.test(box) && /data\.printing/.test(box)) ok("the printing box names the restaurant it is about when there is more than one");
     else fail("the printing box no longer names its restaurant — under a two-restaurant list it describes one of them and says which nowhere");
   }
+}
+
+// ── 17 · THIS SUITE ASSERTS ITS OWN SIZE (T20 round 4, 2026-09-01) ───────────────────────────────
+// Rule 12 lost a branch to a refactor and NOTHING went red: the count slid 66 → 65 and every remaining
+// check still passed. A guard that quietly shrinks is the same failure as a guard that quietly passes,
+// and this file already carries two scars from that family (the comment stripper that ate 73% of a
+// file, and the four days of red CI nobody was running).
+//
+// So the suite counts itself. The floor is deliberately a FLOOR, not an equality: adding checks is the
+// normal direction and must never need a second edit. LOSING them is the thing that has to be loud.
+// Raise this number when you add a rule — the failure message tells you to.
+const CHECK_FLOOR = 66;
+if (oks.length + fails.length < CHECK_FLOOR) {
+  fail(`this suite ran ${oks.length + fails.length} checks and the floor is ${CHECK_FLOOR} — ${CHECK_FLOOR - (oks.length + fails.length)} stopped running without going red. That is how rule 12 disappeared: an if/else-if with no final else, silently satisfied by neither. Find the branch that ends in nothing, or raise CHECK_FLOOR if you deliberately removed one.`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
