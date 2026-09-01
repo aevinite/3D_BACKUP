@@ -766,7 +766,12 @@ export default function CartPanel() {
       // If the server rejected because a dish went sold-out (or is unknown) between
       // loading and placing, say WHICH dish rather than a generic "try again" — the
       // message carries "sold_out (Title)" from createOrder (audit fix 2026-07-06).
-      const msg = String((err as Error)?.message || "");
+      //
+      // The `const msg = String((err as Error)?.message || "")` that used to sit here is GONE
+      // (sweep #8 T3, item 8): it was left behind when refusalOf(err) took over the job of pulling
+      // the code out of that message, and it read the error only to throw the string away. One dead
+      // line, one lint warning, and one more place a future reader might think prose is being
+      // matched — which is the very thing refusalOf exists to stop.
       // THE RESTAURANT COULDN'T TAKE IT THIS SECOND (its system is swamped, or the reply never
       // came). That is not the diner's problem and not a refusal, so do exactly what being
       // offline does: keep the order on this device under the SAME at-most-once key and let the

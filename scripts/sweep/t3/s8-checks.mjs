@@ -49,7 +49,6 @@ const between = (src, from, to) => {
   const b = to ? rest.indexOf(to) : -1;
   return b > 0 ? rest.slice(0, b) : rest;
 };
-const has = (src, re) => re.test(src);
 const count = (src, re) => (src.match(re) || []).length;
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
