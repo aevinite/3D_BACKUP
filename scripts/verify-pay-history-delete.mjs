@@ -16,10 +16,14 @@
 // else's rows, and the finally block runs even on a crash. One sign-in, through the shared cached
 // helper, so it cannot trip a login limit.
 import { readFileSync } from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
 const RID = arg("--rid") || "00000000-0000-0000-0000-000000000001";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the payment-history walk");
 const TAG = "zzpay" + Date.now().toString().slice(-5);
 
 let pass = 0, fail = 0;

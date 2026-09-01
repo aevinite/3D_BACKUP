@@ -8,6 +8,10 @@
 import { useEffect, useRef } from "react";
 import { createClient, type SupabaseClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { reportRealtime, reportLatency } from "@/lib/connectionStatus";
+import { deadline } from "@/lib/partialRead";
+
+/** 10s for the one tiny config read the /api/rt-config fallback makes. */
+const rtDeadline = () => deadline(10_000);
 
 // `audit` carries staff_actions only, and exists so the activity log does NOT ride `ops`
 // (mig 267 / sweep F3): an ops breadcrumb with no table_number means "reload the whole
@@ -55,7 +59,13 @@ async function getClient(): Promise<SupabaseClient> {
     return clientPromise;
   }
   clientPromise = (async () => {
-    const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
+    // A CEILING on the fallback too (owner picked item 18, 2026-08-30). This is the path a
+    // deployment without the public values takes, and it decides whether live updates exist at all —
+    // so a stalled read here left `clientPromise` pending for ever and every caller awaiting it.
+    // 10s: it is one tiny config read. Feature-guarded through the shared helper, because READING
+    // AbortSignal.timeout throws on a browser that has not got it — which is the whole reason
+    // verify:abort-guard exists, and this file's own fallback is what it protects.
+    const cfg = await (await fetch("/api/rt-config", { cache: "no-store", ...(rtDeadline() ? { signal: rtDeadline() } : {}) })).json();
     // See the note in public/panels/realtime.js: a 503 { unconfigured:true } is a real answer, and
     // passing its empty values into createClient would surface as "Invalid URL" (T9 improvement 6).
     if (cfg?.unconfigured || !cfg?.url || !cfg?.anonKey) {
@@ -108,7 +118,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     };
     const subscribe = () => {
       if (!sb || disposed) return;
-      channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
+      channels.forEach((c) => { try { sb!.removeChannel(c); } catch { /* a channel already dropped by the client throws here; that is the state we wanted */ } });
       const rid = ridRef.current;
       channels = topics.map((topic) => {
         // GUEST (rid set): filter the socket to THIS restaurant's THIS-topic events
@@ -153,7 +163,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     let torndown = false;
     const teardown = () => {
       if (!sb) return;
-      channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
+      channels.forEach((c) => { try { sb!.removeChannel(c); } catch { /* a channel already dropped by the client throws here; that is the state we wanted */ } });
       channels = [];
       torndown = true;
     };
@@ -182,7 +192,20 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     // bfcache restore, which is why this was only ever a narrow gap — but iOS Safari does not fire
     // it reliably on a gesture-restore, and that is exactly the case the panel twin added it for.
     // `wake` is throttled to one socket rebuild per 1.5s, so the extra signal costs a refetch at most.
-    window.addEventListener("pageshow", wake);
+    // ONLY A REAL BACK-FORWARD RESTORE (guest sweep, 2026-08-26).
+    //
+    // `pageshow` fires on EVERY page load, not only on a bfcache restore — and on an ordinary load
+    // it arrives AFTER this effect has already done its initial fetch. So every fresh load woke the
+    // screen for no reason: a second full refetch, and a needless socket teardown-and-rebuild.
+    // Measured on a production build of the guest menu, first ever visit:
+    //     261ms  fetch /menu-data      (the real one)
+    //     460ms  pageshow persisted=false
+    //     762ms  fetch /menu-data      (this listener)
+    // `persisted` is the flag that tells the two apart, and it is true for exactly the case this
+    // listener was added for — a phone returning from another app, or an iOS gesture-back, where
+    // visibilitychange is not reliable.
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) wake(); };
+    window.addEventListener("pageshow", onPageShow);
     window.addEventListener("online", wake);
     const poll = setInterval(() => { if (!document.hidden) fireAll(); }, 60000); // safety net — paused while hidden
 
@@ -195,7 +218,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
       Object.values(timers).forEach((t) => t && clearTimeout(t));
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", wake);
-      window.removeEventListener("pageshow", wake);
+      window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("online", wake);
       getClient().then((sb) => channels.forEach((c) => sb.removeChannel(c))).catch(() => {});
     };

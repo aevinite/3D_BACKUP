@@ -35,6 +35,8 @@
 
 import { chromium } from "playwright";
 import { loginAs as loginOnce } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 
 // Signing in occasionally times out on a busy dev server — a blip in the test rig, not in the
 // app (the same request answers in under a second by hand). One retry keeps a 54-check run
@@ -51,6 +53,9 @@ async function loginAs(ctx, role, base, creds) {
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the offline walk");
 const KEEP = args.includes("--keep");
 // Optional: the origin of scripts/slow-proxy.mjs, to also test a HANGING connection.
 const SLOW = args.includes("--slow-proxy") ? args[args.indexOf("--slow-proxy") + 1] : "";
@@ -322,7 +327,10 @@ async function refuseUnlessCacheableBuild(base) {
     "     npm run verify:offline -- --base http://localhost:4938",
     "",
   ].join("\n"));
-  process.exit(1);
+  // EXIT 2, NOT 1 — "could not run" is not "ran and found a fault" (sweep #6 / T28, 2026-08-22).
+  // This file's own words are that "nothing below was run"; answering 1 puts it in the same bucket as
+  // a real offline regression, which is exactly the confusion scripts/sweep/appUp.mjs exists to end.
+  process.exit(2);
 }
 
 async function run() {
@@ -361,6 +369,18 @@ async function run() {
   };
   const closeSession = (id) => setupPost(`/api/editor/sessions/${id}/close`, { force: true });
 
+  // HOW MANY TABLES THIS RESTAURANT REALLY HAS — asked once, shared by BOTH pickers below.
+  // It used to live inside pickFreeTable, so the second picker (§5b) hard-coded 30 instead and
+  // inherited none of the reasoning written above it. One definition, one answer.
+  let floorCountCache = null;
+  const getFloorCount = async () => {
+    if (floorCountCache !== null) return floorCountCache;
+    const r = await staff.request.get(`${BASE}/api/editor/all`).then((x) => x.json()).catch(() => null);
+    const n = Number(r && (r.table_count ?? (r.settings && r.settings.table_count)));
+    floorCountCache = Number.isFinite(n) && n > 0 ? n : 30;
+    return floorCountCache;
+  };
+
   // A genuinely FREE table to test on. On a real floor (and after a few runs of this
   // script) there may not be one, so if every table is occupied we free the longest-running
   // one first. Scans the tile keys themselves rather than 1..table_count, because a table
@@ -378,12 +398,16 @@ async function run() {
     // that number in here. Picking one made the app refuse the order it was asked to place —
     // "Table 992 doesn't exist (this place has 30 tables)" — and the whole offline section then
     // failed for a reason that was the fixture's, not the product's. (2026-07-31)
-    const floorCount = await (async () => {
-      const r = await staff.request.get(`${BASE}/api/editor/all`).then((x) => x.json()).catch(() => null);
-      const n = Number(r && (r.table_count ?? (r.settings && r.settings.table_count)));
-      return Number.isFinite(n) && n > 0 ? n : 30;
-    })();
+    const floorCount = await getFloorCount();
     keys = keys.filter((k) => { const n = Number(k); return Number.isFinite(n) && n >= 1 && n <= floorCount; });
+    // …AND NEVER A TABLE ANOTHER GUARD OWNS (sweep #6 / T28, 2026-08-22). The fallback below BORROWS a
+    // table by closing its bill, which on a shared dev database means ending another lane's party
+    // mid-run — and closing a session cancels and archives every unpaid live order on it (mig 232).
+    // Measured: this took table 28 out from under verify-void-on-joined-party, which then reported a
+    // void that had destroyed a whole party. It had not; this had. scripts/sweep/fixtureTables.mjs is
+    // the list of tables that are somebody's, so they are simply not candidates.
+    const owned = new Set(claimedTables());
+    keys = keys.filter((k) => !owned.has(String(k)));
     for (const k of keys) {
       const t = tiles[k];
       if (!t || t.state === "free") {
@@ -729,8 +753,23 @@ async function run() {
       //   t2  staff close and bill the table
       // then we replay with queued-at = t1, which is after the party arrived and before it
       // was billed — exactly the situation the guard exists for.
+      // …AND NEVER A TABLE ANOTHER GUARD OWNS. pickFreeTable() above was taught this in sweep #6
+      // and this loop, added separately, walked DOWN from 30 by hand and re-opened the identical
+      // hole — on the identical table. Measured 2026-08-22: it took table 28, which
+      // scripts/sweep/fixtureTables.mjs reserves for verify-void-on-joined-party ("the joined table
+      // whose food must survive"), and then closed and billed it at t2 below. Closing a session
+      // cancels and archives every unpaid live order on it (mig 232), so the other guard's party is
+      // destroyed mid-run and IT reports a void that had worked perfectly. A collision like that
+      // looks exactly like a real product fault and only happens when the two runs overlap.
+      //
+      // The floor count matters for the same reason it does up there: a hard-coded 30 probes a
+      // table a smaller restaurant does not have, and the app then refuses the order this check is
+      // built on ("Table 30 doesn't exist").
+      const ownedTables = new Set(claimedTables());
+      const gFloor = await getFloorCount();
       let gt = null;
-      for (let i = 30; i >= 1; i--) {
+      for (let i = gFloor; i >= 1; i--) {
+        if (ownedTables.has(String(i))) continue;
         const probe = await staff.request.get(`${BASE}/api/editor/sessions?table=${i}`).then((r) => r.json()).catch(() => null);
         const list = Array.isArray(probe) ? probe : (probe && (probe.sessions || probe.rows)) || [];
         if (!list.some((r) => r && r.status !== "closed")) { gt = String(i); break; }
@@ -817,7 +856,7 @@ async function run() {
     await own.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     await sleep(5000);
     const oText = (await own.locator("body").textContent().catch(() => "")) || "";
-    !/This screen hasn't been opened on this device/i.test(oText)
+    !/This screen hasn['\u2019]t been opened on this device/i.test(oText)
       ? ok("the owner panel still opens offline")
       : bad("the owner panel fell through to the last-resort page");
     // Same reason as the guest menu below: the owner dashboard's offline bar appears only after
@@ -836,6 +875,32 @@ async function run() {
     watch(guest);
     await guest.goto(`${BASE}/r/french-house/menu`, { waitUntil: "domcontentloaded" });
     await waitControlled(guest);
+
+    // WHOSE MENU IS THIS? The last-resort page cannot fetch anything, so the only way it can name
+    // the restaurant is if a real guest visit stored it. This check exists because the first
+    // version of that feature SHIPPED BROKEN on restaurant #1: MenuView hands the shell
+    // `logoText={undefined}` for the flagship, so nothing was ever written, and the static
+    // "writer and reader agree on the key" check passed the whole time. Caught on the deployed
+    // site by reading the value, which is what this now does.
+    {
+      // POLL, don't read once. `waitControlled` resolves when the service worker takes the client,
+      // which is BEFORE React has finished hydrating and run the effect that writes this. Reading
+      // once here reported "no name stored" on a build that stores it correctly — the same lesson
+      // as the tile-chip check in section 3.
+      const stored = await waitFor(
+        () => guest.evaluate(() => { try { return localStorage.getItem("lfh_brand"); } catch { return null; } }),
+        8000);
+      let parsed = null; try { parsed = JSON.parse(stored || "null"); } catch { /* not JSON */ }
+      parsed && typeof parsed.name === "string" && parsed.name.trim()
+        ? ok(`a real guest visit stored the restaurant's name for the offline card ("${parsed.name}")`)
+        : bad("a guest visit stored no restaurant name",
+          `localStorage.lfh_brand = ${JSON.stringify(stored)} — the no-signal screen will stay anonymous`);
+      // …and under the slug the offline page derives for THIS path, or it will refuse to print it.
+      parsed && String(parsed.slug ?? "") === "french-house"
+        ? ok("…under the slug the last-resort page derives for this path")
+        : bad("the stored slug is not the one the offline page will look for",
+          `stored ${JSON.stringify(parsed && parsed.slug)}, this path resolves to "french-house"`);
+    }
     await guest.reload({ waitUntil: "domcontentloaded" });
     // 75s. This is the SETUP step for everything below it: if the menu hasn't painted live, the
     // saved-copy and offline checks all fail too, and the whole section reports four faults for
@@ -855,7 +920,7 @@ async function run() {
     // Match the last-resort page by the ONE line only it says. Its headline is decided at
     // runtime now (it names the real reason), so keying this check on a headline would make
     // it pass for the wrong reason the moment that wording changes.
-    !/This screen hasn't been opened on this device/i.test(body)
+    !/This screen hasn['\u2019]t been opened on this device/i.test(body)
       ? ok("the guest menu opens from the device (not the last-resort page)")
       : bad("the guest menu fell through to the last-resort offline page");
     // 45s, not 25s. Against the DEPLOYED site a cold guest menu can take past 30 seconds to
@@ -1010,8 +1075,16 @@ async function run() {
     for (let i = 0; i < 20 && !(await fresh.evaluate(() => navigator.onLine === false).catch(() => false)); i++) await sleep(250);
     // A URL that certainly has no saved copy on this device.
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
-    const lastResort = await bodyWhenSettled(fresh, /This screen hasn't been opened on this device/i);
-    /This screen hasn't been opened on this device/i.test(lastResort)
+    // IS THIS OUR PAGE? Asked STRUCTURALLY, not by a sentence. It used to look for "This screen
+    // hasn't been opened on this device", and that sentence was cut on 2026-08-26 when the owner
+    // said the screen had too much text — so a wording change read as "the branded page was not
+    // served". The signal meter plus both ways out exist on no other page in this app, and they
+    // cannot be trimmed away without the checks below failing for their own reasons.
+    const lastResort = await bodyWhenSettled(fresh, /No internet|isn['\u2019]t answering|Can['\u2019]t open this screen/i);
+    const isOurPage = await fresh.evaluate(() =>
+      !!document.getElementById("m-label") && !!document.getElementById("retry") && !!document.getElementById("home")
+    ).catch(() => false);
+    isOurPage
       ? ok("it shows our own page, not the browser's error page")
       : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
     // The reassurance has to be TRUE as well as present. It used to promise that "any orders or
@@ -1019,7 +1092,9 @@ async function run() {
     // storage was refused, and false for the guest actions that have no queue. So the check is now
     // for the honest form (what was SAVED is safe) and it FAILS on the old blanket promise, which
     // is the only way a well-meaning revert gets noticed.
-    const reassures = /already saved on this device is safe/i.test(lastResort);
+    // "on this device" was cut with the rest of the trimming; the precision that matters is
+    // ALREADY SAVED, which is what makes the sentence true rather than a blanket promise.
+    const reassures = /already saved[^.]*is safe/i.test(lastResort);
     const overPromises = /Nothing you did is lost/i.test(lastResort) || /any orders or changes you made/i.test(lastResort);
     reassures && !overPromises
       ? ok("and it reassures them their work is safe, without promising more than we keep")
@@ -1044,7 +1119,9 @@ async function run() {
     };
     const verdict = await waitFor(async () => {
       const v = await verdictOf();
-      return /This device is offline|can't reach the internet/i.test(v) ? v : null;
+      // Any of the wordings that name THE DEVICE as the problem. Shortened 2026-08-26; the rule
+      // being asserted — blame the right side — is exactly the same.
+      return /This device is offline|can't reach the internet|No internet right now|Not connected to Wi-Fi|Wi-Fi can look connected/i.test(v) ? v : null;
     }, 10000);
     verdict
       ? ok("and it says WHY it couldn't open (this device is offline)")
@@ -1056,7 +1133,26 @@ async function run() {
     (await fresh.locator("#home").count()) > 0 && (await fresh.locator("#home").isVisible())
       ? ok("and it offers the way out (go to the home screen)")
       : bad("the last-resort page has no way out");
+    // ── AND IT TAKES YOU BACK BY ITSELF ─────────────────────────────────────────────────────
+    // The owner's requirement, in his words (2026-08-26): "if the connection is there it should
+    // auto take you to the thing". The page has always claimed to — "this screen opens itself the
+    // moment it's back" — and NOTHING checked it. A promise printed on a screen with nothing
+    // asserting it is the shape of every stale claim this project has had to unpick.
+    //
+    // So: restore the connection and touch NOTHING. It must leave the no-signal screen on its own
+    // and land on a real page. The signal meter is the marker for "still the no-signal screen",
+    // because it exists on no other page.
     await goOnline(ctx);
+    {
+      const left = await fresh.waitForFunction(() => !document.getElementById("m-label"), null, { timeout: 90000 })
+        .then(() => true).catch(() => false);
+      await sleep(1200);
+      const stillOffline = await fresh.evaluate(() => !!document.getElementById("m-label")).catch(() => true);
+      left && !stillOffline
+        ? ok("and when the connection comes back it takes you off that screen by itself, with nothing tapped")
+        : bad("the last-resort page did not move on by itself once the connection returned",
+          "it prints \"this screen opens itself the moment it's back\" — if that is not true it is a promise on a screen that cannot keep it");
+    }
     await fresh.close();
 
     // ══ NO FALSE ALARMS ON A HEALTHY CONNECTION ════════════════════════════════

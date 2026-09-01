@@ -348,7 +348,7 @@ export async function replayClash(
   const { queuedAt } = markers;
 
   try {
-    const { tables, unknown } = await affectedTables(a, b, c, body);
+    const { tables, unknown } = await affectedTables(rid, a, b, c, body);
     // Not table-scoped (a parcel, a floor issue) or unresolvable → let the handler's own
     // validation speak. "Couldn't tell" must not become a refusal here: this check exists
     // to protect other people's work, not to invent failures.

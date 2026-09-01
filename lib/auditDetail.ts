@@ -91,6 +91,60 @@ export async function auditAfter(rid: string, orderId: string | null | undefined
 }
 
 /**
+ * WHAT THE WHOLE BILL WAS WORTH BEFORE THIS, AND WHAT IT IS WORTH NOW (owner, 2026-08-26).
+ *
+ * His words: *"the before and after in the audit section should be shown like actual … previously
+ * the whole bill was this much and after cutting, this has been removed and the bill is this much."*
+ *
+ * The two boxes above this one compare the KOT with ITSELF, which answers "what was on the ticket"
+ * but never "what did this do to the table's bill" — and that second question is the one a manager
+ * and an officer both actually ask.
+ *
+ * HOW THE TWO NUMBERS ARE GOT, and why neither is invented:
+ *   · AFTER  = the live (non-cancelled, non-tombstoned) orders on this session, summed NOW.
+ *   · REMOVED = what this record took out, from the snapshot the audit row already stores.
+ *   · BEFORE = AFTER + REMOVED. No bill history is needed and none is guessed: the bill before the
+ *     removal is, by definition, the bill after it plus the thing that came out.
+ *
+ * Returns null when the removal was never about a table's bill (a dish taken off the MENU has no
+ * session), so the card simply does not draw the row — an older server that sends nothing leaves
+ * the card exactly as it was.
+ *
+ * Scoped to the restaurant, column-listed, capped, and read only when someone opens a card.
+ */
+export async function auditBillSides(
+  rid: string,
+  sessionId: string | null | undefined,
+  was: Record<string, unknown> | null | undefined,
+  removedOrderId: string | null | undefined,
+): Promise<{ before: number; after: number; removed: number; lines_before: number; lines_after: number } | null> {
+  if (!sessionId) return null;
+  const rows = (await sb.from("orders")
+    .select("id, total, status, deleted_at, items")
+    .eq("session_id", sessionId).eq("restaurant_id", rid).limit(200)).data as Record<string, unknown>[] | null;
+  if (!rows) return null;
+  const live = rows.filter((o) => !o.deleted_at && o.status !== "cancelled");
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const after = r2(live.reduce((a, o) => a + (Number(o.total) || 0), 0));
+  const linesAfter = live.reduce((a, o) => a + (Array.isArray(o.items) ? (o.items as unknown[]).length : 0), 0);
+  // What came out. The snapshot is the honest source — the row itself may since have been read
+  // again, and on a tombstoned order it may not be readable at all.
+  const removed = r2(Number((was && was.total) ?? 0) || 0);
+  const linesRemoved = Array.isArray(was && was.items) ? (was!.items as unknown[]).length : 0;
+  // A guard against double-counting: if the removed order is somehow STILL live (a restore, or a
+  // record about something that was never actually taken out), `after` already contains it and
+  // adding it again would invent money. Then before === after, which is the truth.
+  const stillLive = !!removedOrderId && live.some((o) => String(o.id) === String(removedOrderId));
+  return {
+    before: stillLive ? after : r2(after + removed),
+    after,
+    removed: stillLive ? 0 : removed,
+    lines_before: stillLive ? linesAfter : linesAfter + linesRemoved,
+    lines_after: linesAfter,
+  };
+}
+
+/**
  * THE BILL AS IT STOOD WHEN IT WAS REMOVED — real HTML from the real document builder.
  *
  * Returns null when there is no bill to draw (no snapshot, or a snapshot with no lines — a dish off
@@ -104,7 +158,7 @@ export async function auditBillHtml(rid: string, was: Record<string, unknown> | 
     if (!lines.length) return null;
 
     const [setQ, restQ] = await Promise.all([
-      sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label`).eq("restaurant_id", rid).maybeSingle(),
+      sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label, table_names`).eq("restaurant_id", rid).maybeSingle(),
       sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
     ]);
     const settings = (setQ.data || {}) as Record<string, unknown>;
@@ -133,7 +187,20 @@ export async function auditBillHtml(rid: string, was: Record<string, unknown> | 
         ? BILLDOC.invFmt(Number(was.invoice_no), (was.ordered_at as string) || null, bi.prefix)
         : "",
       billNo: was.bill_no != null ? String(was.bill_no) : "",
-      tableDisp: was.table_number != null ? String(was.table_number) : "—",
+      /* THE RECORD NAMES THE TABLE THE WAY THE RESTAURANT DOES (owner, 2026-08-28 — item 22).
+         Every other document in this product resolves a renamed table before printing it: the bill
+         and the KOT through tableDisp / tablePrintLabel, the banquet sheet inside banquetDocHtml
+         itself. This card printed the bare digit, so a restaurant that renamed T5 to "Terrace 2"
+         saw "Terrace 2" on the paper the guest was handed and "5" on the record of that bill being
+         removed — the two documents that most need to match, not matching.
+         `settings.table_names` is already fetched three lines above for the identity, so this costs
+         no extra read. A table with no name still shows its number, which is what it is called. */
+      tableDisp: (() => {
+        const t = String(was.table_number ?? "").trim();
+        if (!t) return "—";
+        const names = (settings.table_names as Record<string, string> | undefined) || {};
+        return (names[t] || "").trim() || t;
+      })(),
       dateStr: was.ordered_at
         ? new Date(String(was.ordered_at)).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })
         : "",

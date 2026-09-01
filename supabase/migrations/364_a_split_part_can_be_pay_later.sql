@@ -1,17 +1,19 @@
 -- 364_a_split_part_can_be_pay_later.sql
 --
--- ⚠ RENUMBERED 352 → 364 (T28 sweep, 2026-08-22). Two parallel branches both took 352 — this file
---   and `352_a_reseed_cannot_undo_an_admins_choice.sql` — and `npm run verify:db-parity` refuses a
---   NEW duplicate number: with two files at one number the outcome depends on filename sort order,
---   which is not a decision anybody made. (Eighteen historical duplicates are grandfathered; new
---   ones are not.) This is the newer of the two by 75 seconds, so it moved.
+-- ⚠ RENUMBERED 352 → 364 (2026-08-22). Two migrations were merged as 352 within twenty minutes of
+-- each other — this one and `a_reseed_cannot_undo_an_admins_choice` — and `npm run verify:db-parity`
+-- had been red for it ever since: "new duplicated migration number(s): 352 … renumber the newer file".
+-- This is the newer of the two by git (18:09 against 17:48), so it is the one that moved.
 --
---   Checked before moving: this file defines lfh_khata_outstanding, lfh_khata_outstanding_summary,
---   idx_session_payments_khata_open, idx_session_payments_group and columns on session_payments —
---   and NONE of the eleven migrations numbered above 352 touches any of them, so running it later
---   changes nothing. Every statement in it is CREATE OR REPLACE / IF NOT EXISTS, so re-running it
---   at its new position is safe. Nothing else in the repo referenced the old filename except
---   scripts/verify-split-payment.mjs, updated in the same commit.
+-- WHY THE MOVE IS SAFE, checked rather than assumed. A re-seed runs this folder in FILENAME order, so
+-- renumbering changes WHEN this file runs — nothing else. Everything it touches is additive and its
+-- own: three columns on `session_payments`, two indexes, one view and two functions, all of which
+-- existed by 352 or are created here. Nothing between 353 and 363 needs any of them (the single grep
+-- hit, in 354, is a COMMENT about `orders.khata_customer_id` — a different column on a different
+-- table). And nothing this file needs is created after 352, because it used to run at 352. Moving a
+-- migration LATER can only ever be safer than moving one earlier.
+--
+-- Already applied on both databases, so this is a rename on disk only — no re-run, no data change.
 --
 -- SPLIT PAYMENT IS MARK-PAID, AND ONE OF THE PARTS MAY BE "PAY LATER" (owner, 2026-08-21).
 --

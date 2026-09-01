@@ -41,6 +41,13 @@ class ModelWatchlist {
   // Given a model URL that just loaded/failed, find which watched dish it belongs
   // to (matching either the small or optimized link). Returns null if nobody's waiting.
   findByUrl(url: string): WatchEntry | null {
+    // AN ABSENT URL MATCHES NOTHING (T25 round 2, 2026-08-31). An entry whose `smallUrl` and
+    // `optimizedUrl` were never set holds `undefined` in both, so `e.smallUrl === url` with an
+    // undefined `url` was TRUE — and the caller got somebody else's dish. Both callers in
+    // components/ModelToastHost.tsx already guard with `if (!url) return;`, so this was a trap rather
+    // than a live fault: the wrong dish's "3D ready" toast, one careless call away. Closed here,
+    // where the answer is decided, rather than trusting every future caller to remember.
+    if (!url) return null;
     for (const e of this.byFolder.values()) {
       if (e.smallUrl === url || e.optimizedUrl === url) return e;
     }

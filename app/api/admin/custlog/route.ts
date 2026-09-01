@@ -7,6 +7,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -22,31 +26,45 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   try {
     // The guest + blocklist lists are independent — read them in parallel.
-    // (session_members carries restaurant_id so we can tag each row with its restaurant;
-    // blocklist keeps select(*) — it carries no money column, only contact info.)
+    // (session_members carries restaurant_id so we can tag each row with its restaurant.)
+    //
+    // THE BLOCKLIST NAMES ITS COLUMNS TOO (T17 sweep #7, 2026-08-27; owner said do it).
+    // This was `select("*")`, justified in the old note as "it carries no money column, only
+    // contact info". Money was never the only reason for the rule. The table holds TEN columns
+    // and the Customers tab renders six; two of the four it never shows are `unban_phone` and
+    // `unban_requested_at` — the number a banned guest gives when asking to be let back in. That
+    // travelled to the browser on every open of that tab and was thrown away unread. Naming the
+    // columns costs nothing and stops it.
+    // `restaurant_id` is not rendered but IS needed: `tag()` below turns it into the restaurant
+    // NAME that each row shows.
     // NB: the `customers` table used to be fetched here too but the Logs page never rendered
     // it (CustData = members/blocklist/orders/calls) — dropped to stop shipping an unused
     // 120-row payload on every load (audit 2026-07-23).
     let membersQ = sb.from("session_members")
       .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, restaurant_id, session:sessions(table_number, status)")
       .order("joined_at", { ascending: false }).limit(120);
-    let blocklistQ = sb.from("blocklist").select("*").order("blocked_at", { ascending: false }).limit(200);
+    let blocklistQ = sb.from("blocklist")
+      .select("id, phone, device_id, table_number, reason, blocked_at, restaurant_id")
+      .order("blocked_at", { ascending: false }).limit(200);
     if (rid) {
       membersQ = membersQ.eq("restaurant_id", rid);
       blocklistQ = blocklistQ.eq("restaurant_id", rid);
     }
-    const [members, blocklist] = await Promise.all([membersQ, blocklistQ]);
+    const reads = new ReadSet("admin/custlog", await Promise.all([
+      rd("members", () => membersQ),
+      rd("blocklist", () => blocklistQ),
+    ]));
     // Surface a failed read — otherwise a broken query shows an EMPTY customer log ("no
     // customers") with a 200 instead of an error the page can retry (audit).
-    const cErr = members.error || blocklist.error;
+    const cErr = reads.firstError;
     // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
     // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
     // right for a developer, useless on the screen the owner runs his platform from. adminFail
     // keeps the raw text where it is actually useful (the response `detail` and the server log)
     // and gives the screen a sentence that names the thing and says whether anything changed.
     if (cErr) return adminFail("the customer log", cErr, { action: "load" });
-    const memberRows = members.data ?? [];
-    const blockRows = blocklist.data ?? [];
+    const memberRows = reads.rows<{ id: string; restaurant_id?: string | null }>("members");
+    const blockRows = reads.rows<{ id: string; restaurant_id?: string | null }>("blocklist");
 
     // Order/call counts: fetch ONLY for the members we're actually showing (scoped by their
     // ids). The old code took the 400 most-recent rows platform-wide, so a member whose orders
@@ -63,15 +81,14 @@ export async function GET(req: NextRequest) {
     // a heavier day than either table has ever seen.
     const MEMBER_ROW_CAP = 8000;
     const memberIds = memberRows.map((m) => m.id).filter(Boolean);
-    const [orders, calls] = memberIds.length
+    const counts = new ReadSet("admin/custlog:counts", memberIds.length
       ? await Promise.all([
-          sb.from("orders").select("member_id, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
-          sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP),
+          rd("orders", () => sb.from("orders").select("member_id, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP)),
+          rd("calls", () => sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds).limit(MEMBER_ROW_CAP)),
         ])
-      : [{ data: [], error: null }, { data: [], error: null }];
+      : []);
     // Same rule as the reads above: plain words on the screen, the raw text in the log.
-    if (orders.error || calls.error)
-      return adminFail("the customer log", (orders.error || calls.error)!, { action: "load" });
+    if (counts.anyFailed) return adminFail("the customer log", counts.firstError, { action: "load" });
 
     // Stamp each row with its restaurant name so the admin (who sees every restaurant at
     // once) can tell tenants apart instead of one indistinguishable jumble.
@@ -90,9 +107,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       members: memberRows.map(tag),
       blocklist: blockRows.map((b) => tag(b as { restaurant_id?: string | null })),
-      orders: orders.data ?? [], calls: calls.data ?? [],
+      orders: memberIds.length ? counts.rows("orders") : [], calls: memberIds.length ? counts.rows("calls") : [],
     });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // The last door the database's own sentence could walk out of on this route (T19 sweep #7,
+    // 2026-09-01): every read above answers through adminFail, and then the catch handed the raw text
+    // to the console anyway. Logged in full, answered in words, with the raw text kept in `detail`
+    // exactly as adminFail does it.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[admin] unexpected failure in app/api/admin/custlog/route.ts", msg);
+    return NextResponse.json({ error: "Couldn't load the customer log just now. Please try again.", detail: msg }, { status: 500 });
   }
 }

@@ -182,6 +182,40 @@ const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
             "transform does nothing to a plain inline box, so the greeting would stop moving");
 }
 
+// ── 6 · one apostrophe, not two kinds, inside a language ────────────────────
+// The dictionary writes its apostrophes as the typographic ’ (’) — "hasn’t", "Chef’s",
+// "l’instant". French had four values doing that and three still using the typewriter ' from a
+// keyboard: "pas encore d'avis", "Soumettre l'avis", "L'article … n'existe pas." So a French
+// diner met two different apostrophes on one menu — one shape on the empty-menu screen and
+// another on the review button (sweep #7 / T4, 2026-08-22).
+//
+// This is not a preference. Mixed punctuation inside one language is the kind of thing nobody can
+// name but everybody registers as "slightly cheap", on the screen a restaurant is paying us for.
+// The check is per LANGUAGE, not global: a language that consistently uses the typewriter form
+// everywhere is internally consistent and passes.
+{
+  const LANGS = ["en", "de", "fr", "ar", "hi", "ko"];
+  const decode = (s) => s.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  let mixed = 0;
+  const i18nSrc = read("lib/i18n.ts");
+  for (const lang of LANGS) {
+    const start = i18nSrc.indexOf(`\n  ${lang}: {`);
+    const end = i18nSrc.indexOf("\n  },", start);
+    if (start < 0 || end < 0) { fail(`the ${lang} block could not be read to check its punctuation`); continue; }
+    const rows = [...i18nSrc.slice(start, end).matchAll(/^\s{4}(\w+): "((?:[^"\\]|\\.)*)",$/gm)]
+      .map((m) => [m[1], decode(m[2])]);
+    const curly = rows.filter(([, v]) => v.includes("’")).map(([k]) => k);
+    const straight = rows.filter(([, v]) => v.includes("'")).map(([k]) => k);
+    if (curly.length && straight.length) {
+      mixed++;
+      fail(`${lang} mixes two kinds of apostrophe: ${curly.length} value(s) use the typographic ’ ` +
+        `(${curly.slice(0, 3).join(", ")}) and ${straight.length} use the typewriter ' ` +
+        `(${straight.join(", ")}). Pick one per language — the dictionary's own convention is ’ (\\u2019).`);
+    }
+  }
+  if (!mixed) ok("no language mixes the typographic ’ with the typewriter ' apostrophe");
+}
+
 console.log("");
 if (failed) {
   console.log(`${failed} check(s) failed — see above.`);

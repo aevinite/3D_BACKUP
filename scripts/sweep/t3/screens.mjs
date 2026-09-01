@@ -1,7 +1,13 @@
 // Block 4 — the captures I open and look at, plus the hit-test behind P01404/P01405.
 import { chromium } from "playwright";
-const OUT = "/private/tmp/claude-501/-Users-aevinite-Documents-Projects-backup-Menu/1bc01544-75e9-4b99-86fa-71e1146bb7df/scratchpad/shots";
-const BASE = "http://localhost:4103", AA = "/r/aangan-garden-restaurant/menu";
+import { mkdirSync } from "node:fs";
+// WHERE THE CAPTURES LAND. This was an absolute path into ONE Claude session's scratch folder —
+// the session that first wrote this file, in sweep #6. Every later run wrote its shots into a dead
+// session's directory, which is both un-findable and not where the sweep rules say shots go
+// (`.claude/sweep/shots/T3/`). Default to that, overridable with T3_SHOTS.
+const OUT = process.env.T3_SHOTS || new URL("../../../.claude/sweep/shots/T3", import.meta.url).pathname;
+const BASE = process.env.T3_BASE || "http://localhost:4103", AA = "/r/aangan-garden-restaurant/menu";
+mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch();
 const A35 = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 const DESK = { viewport: { width: 1280, height: 800 } };

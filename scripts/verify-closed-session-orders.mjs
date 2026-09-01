@@ -85,11 +85,17 @@ async function cleanup() {
   const now = new Date().toISOString();
   const t = encodeURIComponent(TABLE);
   // Soft-delete + archive: off every floor, off every report, record intact (see the header).
-  await patch(`orders?table_number=eq.${t}`, { deleted_at: now, archived: true, archived_at: now });
+  // SCOPED TO THE RESTAURANT AS WELL (sweep #6 / T28, 2026-08-22). The table name here is random per
+  // run, so an unscoped filter could only ever have matched this run's own rows — but the SHAPE is the
+  // one that measurably closed another restaurant's table 11 from verify-edge-cases' teardown, and a
+  // rule with an exception nobody can see from the line itself is a rule that comes back. It costs a
+  // clause. Before `rid` is resolved the fixture cannot exist yet, so there is nothing to clean.
+  const scope = rid ? `restaurant_id=eq.${rid}&` : "";
+  await patch(`orders?${scope}table_number=eq.${t}`, { deleted_at: now, archived: true, archived_at: now });
   // A session left OPEN would keep its table looking occupied to every panel.
-  await patch(`sessions?table_number=eq.${t}&status=eq.open`, { status: "closed" });
-  const onFloor = await get(`orders?select=id&table_number=eq.${t}&archived=eq.false`);
-  const stillOpen = await get(`sessions?select=id&table_number=eq.${t}&status=eq.open`);
+  await patch(`sessions?${scope}table_number=eq.${t}&status=eq.open`, { status: "closed" });
+  const onFloor = await get(`orders?select=id&${scope}table_number=eq.${t}&archived=eq.false`);
+  const stillOpen = await get(`sessions?select=id&${scope}table_number=eq.${t}&status=eq.open`);
   const n = (Array.isArray(onFloor) ? onFloor.length : 0) + (Array.isArray(stillOpen) ? stillOpen.length : 0);
   console.log(n === 0
     ? `  cleaned up: nothing from ${TABLE} is on any floor`

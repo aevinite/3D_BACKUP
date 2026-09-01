@@ -1,139 +1,170 @@
-# Sweep 6 — T3 findings (guest basket · table session · placing an order)
+# Sweep 7 — T3 findings (guest basket · table session · placing an order)
 
-Seven real problems, all **fixed in this branch**. One 🔗 HANDOFF for a file outside this territory.
-Every row passed the four-test gate before a line of working code was changed.
+**Branch** `sweep7/t3-basket-and-order` · run 2026-08-22/23 against `origin/main` **b64951ad** ·
+port **4203** (proved mine). Ledger: `.claude/sweep/LEDGER/T3.md`, now **1002 rows**.
 
-Guard for all of them: `npm run verify:guest-doors` (new, 27 checks, also wired as a PostToolUse
-hook). Proved it goes RED on `origin/main`'s versions of these files — 20 of the 27 fail there.
-
----
-
-## FIX-1 · A diner who scans the sticker on their own table could not order — HIGH · confirmed
-
-- **Where:** guest menu → the door `/q/<code>`, i.e. the QR sticker printed for a table → the diner
-  taps "+" on a dish and, instead of the dish going into the basket, a "join a table" popup opens.
-  On a restaurant that has the table-session system switched off, that popup should not exist at
-  all. Basket stays empty.
-- **Who is worse off:** every diner at every restaurant except restaurant #1, and that restaurant's
-  owner, who has printed stickers that do not work.
-- **When:** always, on `/q/<code>`, for any restaurant that is not #1.
-- **Why:** `lib/restaurant-context.tsx` decided the restaurant from the URL alone (`/r/<slug>`).
-  `/q/<code>` keeps its own URL on purpose (the table number must not go back in the address bar),
-  so there is no slug in the path — and the provider answered "restaurant #1" for every global
-  widget: the basket, the session gate, the feature switches, the tax rate, the bell.
-  `lib/tenantStorage.ts` already had the right rule (it reads the tenant the tab was pinned to by
-  `app/q/[code]/page.tsx` before hydration), but there were two copies of the rule and only one
-  was correct. Restaurant #1's own stickers resolve to #1 by accident, which is why nobody saw it.
-- **Watched:** Aangan's own table-1 sticker. Sessions are OFF at Aangan; the widgets read #1's
-  settings where they are ON, so the gate opened ("What should we call you?") and nothing was
-  added. Via `/r/aangan-garden-restaurant/menu` the same tap added the dish.
-- **Fix:** the provider now calls the exported `tenantSlug()` — one rule, imported, not re-derived.
-  Read inside the effect (there is no `sessionStorage` on the server), so the first render is still
-  SSR-safe. `ready` now starts true only for the routes that genuinely ARE #1 (`/menu`, `/item`).
-- **Also fixed by it:** "Change table" from a sticker used to bounce the diner to restaurant #1's
-  menu; the 3D viewer route had the same wrong answer.
-
-## FIX-2 · "We've let the staff know" was shown whether or not anyone had been told — HIGH · code-read
-
-- **Where:** guest menu → the table-session popup → "Your table isn't open yet" and the
-  "Call a waiter instead" links → the screen that says *"We've let the staff know — keep this open
-  and your order is sent automatically."*
-- **Who is worse off:** a diner sitting at a table nobody has opened. They stop trying, because the
-  screen says it worked. And the restaurant, which has a table waiting that it never heard about.
-- **When:** any time `lfh_request` does not land — a timeout (`rpc()` returns
-  `{ ok:false, reason:"timed_out" }`, it never throws), a tripped per-table limit, a blocked table.
-- **Why:** both request paths discarded the answer and went straight to the reassurance screen.
-- **Fix:** read the answer; only advance when it landed. `already_sent` still counts as landed.
-  The reason is TOASTED rather than written into `note`, because three of the five screens that can
-  send a request never render `note`, and one renders it inside a reassuring sentence.
-
-## FIX-3 · The table-session gate cached one restaurant's settings for the life of the page — MEDIUM · code-read
-
-- **Where:** backend only, nothing on screen — but it decides the geofence, the table-number range
-  and whether a location check is needed for the whole visit.
-- **Who is worse off:** a diner whose restaurant resolved a beat after they tapped, at whichever
-  restaurant was cached in that window.
-- **When:** the gate is mounted in the root layout and survives a move between restaurants; and
-  `ridRef.current` is #1's placeholder for the few hundred ms the slug lookup takes.
-- **Fix:** the settings are keyed by restaurant id.
-
-## FIX-4 · The order tracker reverted whatever happened while it was waiting for the server — MEDIUM · code-read
-
-- **Where:** guest menu → the floating live-status strip, and the bill's Live-status tab. The diner
-  drags the strip away to hide it and it comes back; or an order the phone saved offline finally
-  sends, is recorded, and then disappears from their list although the kitchen has it.
-- **Who is worse off:** the diner, who loses sight of an order that is really being cooked.
-- **When:** any status poll that spans a concurrent write — the poll reads the list, makes one
-  network call per order, then wrote back the copy it had read. Every other writer of that list
-  reads and writes in one synchronous step, which is why only this one is affected.
-- **Fix:** the poll now remembers only what it learned, keyed by order id, and applies it to a fresh
-  read. An order that has since left the list is not resurrected.
-
-## FIX-5 · Clearing the table number in the waiter popup left it waiting in the bill — LOW · code-read
-
-- **Where:** guest menu → the "Need something?" waiter popup → the ✕ on the table box. The number
-  looks cleared, but opening the bill shows it still sitting in the table field.
-- **Who is worse off:** a diner correcting a wrong table — their food can still go to the table
-  they were trying to get away from.
-- **Fix:** the ✕ announces the wipe (`lfh:table-scanned`), and the bill lets go of a number that was
-  only ever a prefill — never one the guest typed into the bill itself.
-
-## FIX-6 · The returning-guest greeting asked about the placeholder restaurant — MEDIUM · code-read
-
-- **Where:** guest menu → the "Welcome back, <name> 👋" toast a moment after the menu opens.
-- **Who is worse off:** a diner at restaurant B greeted by name off restaurant A's customer record —
-  one restaurant's customer showing up on another's menu.
-- **When:** when the slug lookup takes longer than the greeting's 1.8-second delay (a slow first
-  load), which is exactly what the context's `ready` flag exists for; this was the one
-  restaurant-keyed network call that did not wait for it.
-- **Fix:** wait for `ready`.
-
-## FIX-7 · "Order the rest" could refuse and say nothing — LOW · code-read
-
-- **Where:** guest menu → the "1 order couldn't send" chip (bottom-left) → the list → the
-  "Order the rest" button on a saved order that one sold-out dish blocked.
-- **Who is worse off:** a diner who has already waited, tapping a button that does nothing.
-- **When:** `orderRestWithout` also refuses when it cannot identify the line to drop, or when
-  nothing is left afterwards — it returns `{ ok:false }` and the handler discarded it.
-- **Fix:** read the result; say so when it could not work it out, and leave the order in place so
-  "Try again" is still there.
-
-## FIX-8 · `npm run verify:closed-session` was dead on `origin/main` — MEDIUM · confirmed
-
-- **Where:** backend only, nothing on screen. A guard the sweep prompt names as a gate.
-- **What:** `scripts/verify-closed-session-orders.mjs` calls `refuseUnlessDevTestDb(...)` and never
-  imported it, so the whole guard died with a `ReferenceError` before running one check. It looked
-  like it existed and proved nothing.
-- **Fix:** the missing one-line import. It now runs and passes its 7 checks.
-- **Note:** this file is outside the territory list; §7 of the rules explicitly covers extending and
-  repairing `verify:*` guards, and I could not honestly report the gate as passing otherwise. Called
-  out separately in the PR body.
+**Improvement ideas are NOT in this file.** The owner's instruction for sweep 7 is that they go in
+the terminal window, and they did.
 
 ---
 
-## 🔗 HANDOFF — `scripts/verify-order.mjs` (not my territory)
+## First, the thing this run was mainly for: the 500 existing rows
 
-`npm run verify:order` **fails on `origin/main`** and this branch alike, for a reason that has
-nothing to do with any guest file. Its step 4 cleans up its own test order with
+**All 500 re-run. Zero regressions.** `npm run sweep:t3` green in ONE sitting — all five blocks —
+which sweep 6's own pass 5 could not achieve (its block 5 only passed alone). Blocks 3a/3b/5 printed
+52 + 31 + 25 rows ok; `verify:guest-doors` and the six named gates all green; typecheck clean; all
+eight block-4 captures opened and read.
 
-```sql
-DELETE FROM orders WHERE id = '<the order it just placed>';
-```
+**Two rows had their EXPECTATION corrected — they were wrong when written, not broken now. Both
+keep their ids:**
 
-and the billing-compliance trigger `lfh_block_issued_delete()` now refuses that:
+- **P01422** said the basket pill "is a phone-only bar and does not appear at desktop width —
+  CSS-hidden, as designed". The stylesheet does not do that. `.mini-cart` is `display:flex;
+  position:fixed; left:50%` at every width, and its only media query (`max-width:700px`) turns it
+  into a full-width bar; its own comment says *"a compact centred pill on desktop, a full-width bar
+  on phones"*. Measured at 1280 wide: x=512, width=257, centred on 640. Sweep 6 judged it from a
+  capture with the bill OPEN — and the pill hides while the bill is open, which is a **different
+  rule**. Both halves are now asserted live (P16458, P16458b).
+- **P01423** said the pill "does not cover a dish's +". A fixed bottom bar does overlap some, mid-
+  scroll, and that is normal. What matters is the END of the list, where nudging is impossible — and
+  there the last row is cleared by a documented 96px reservation. See the withdrawn finding below.
 
-> `lfh: an issued bill cannot be hard-deleted — soft-delete it (deleted_at) instead`
-> `HINT: Corrections use void / soft-delete; permanent erase only via the 90-day restaurant purge.`
+---
 
-The trigger is right and must not be weakened — the compliance rule is "a sale can be cancelled, a
-sale can never disappear". The guard's cleanup is what has to change, to the route the trigger's own
-hint names:
+## Six real problems, all fixed in this branch
 
-```sql
-UPDATE orders SET status = 'cancelled', deleted_at = NOW() WHERE id = '<id>';
-```
+Guard for items 2–6: **`npm run verify:guest-doors`** — 26 new checks in five sections, each naming
+its item number. **Proved it can fail: with the five component files replaced by `origin/main`'s
+copies, 25 of the 26 go red.**
 
-I did **not** make that change: it is another terminal's file and it is a compliance-adjacent
-decision about how a test disposes of a sale row, which the owner should sign off rather than a
-sweep terminal deciding alone. (I hit the same wall cleaning up my own probe rows and used exactly
-that compliant route.)
+### ITEM 1 · The T3 runners were pinned to another session's port and another session's folder — MEDIUM · confirmed
+- **Where:** backend only, nothing on screen — but it is the thing that decides whether re-running
+  this territory's 500 checks means anything.
+- **What:** all four runners hard-coded `http://localhost:4103`, sweep 6's port. A later terminal is
+  given a different one, so a re-run either measured NOTHING or — far worse — measured whatever
+  OTHER live session happened to be serving there and reported its state as this branch's.
+  CLAUDE.md's own rule is *"verify on a port you PROVED is yours"*. The screenshots were written to
+  an absolute path inside ONE dead Claude session's scratch directory.
+- **Fix:** `T3_BASE` and `T3_SHOTS`, with the old values as defaults so nothing that worked stops.
+  Shots now land in `.claude/sweep/shots/T3/`, where the sweep rules say they go.
+
+### ITEM 2 · A request for water waiting on the phone read as "0 items" — MEDIUM · watched
+- **Where:** guest menu → the bell ("Need something?") with no signal → the "saved on this phone"
+  chip in the bottom-left corner → tap it. The row said, in these words: **`0 items` /
+  `Waiting to send · a moment ago`**, under a chip reading **"1 order waiting to send"**. The diner
+  had not ordered anything. They had asked for water.
+- **Who is worse off:** any diner who taps the bell in a dead spot — the corner of a restaurant with
+  no bars is exactly where you press a bell rather than wait.
+- **Why:** the queue has held two kinds of thing since 2026-08-06 (`GuestOrder.kind` is `"order"`
+  or `"call"`) and this list was only ever written for the first. A call carries no items and no
+  track summary, so every line fell through to the item count and printed the count of an empty
+  basket. `reason` — the exact label they tapped, "Water", "Bring the bill" — was never rendered.
+- **Fix:** the row names what was asked for and says "Staff will be called"; the chip counts
+  "requests for staff". **Item 2b:** a MIXED queue drops the noun entirely ("2 waiting to send"),
+  matching the connection badge at the top of the same screen, because "2 orders" would be untrue
+  about one of them.
+- **Watched:** before → `CHIP: 1 order waiting to send / ROW: 0 items`. After → `CHIP: 1 request for
+  staff waiting to send / ROW: Water / Staff will be called`. Captures kept.
+
+### ITEM 3 · The table gate could never let go of a restaurant's own rules — MEDIUM · code-read
+- **Where:** guest menu → "+" on a dish at a restaurant with table sessions on → the "Which table
+  are you at?" popup. It decides the table-number range that popup accepts, whether a location check
+  is needed, and how far from the restaurant still counts as being there.
+- **What:** the gate kept a private map of settings per restaurant and READ it in preference to
+  asking, so the FIRST time a guest opened the popup fixed those three answers for the whole life of
+  the page. A restaurant that added tables mid-service kept refusing the new ones: at 40 tables, a
+  diner at table 35 was still told *"This place has tables 1–30"*.
+- **Why it was missed:** sweep 6 keyed that map by restaurant, which fixed a *different* fault.
+  Nothing gave it a way to be DROPPED — and a cache in front of a breadcrumb is the known way these
+  updates die in this codebase; it is written up on `invalidateSettings()` itself.
+- **Fix:** always ask `getSettings()` (which dedups, holds a short TTL, and IS dropped by a realtime
+  breadcrumb). The map stays as a **fallback only**, so a blip no longer dead-ends a diner on "check
+  your internet" — better in both directions.
+
+### ITEM 4 · "You left the table" was said whether or not the restaurant heard it — MEDIUM · code-read
+- **Where:** guest menu → the floating table card ("Hosting Table 12") → "Leave" → "Yes, leave",
+  and "Change table" beside it.
+- **Who is worse off:** a diner on a bad connection, and the restaurant. If they were the HEAD, the
+  table still had a head who had walked off, and anyone waiting to be let in never would be.
+  "Change table" was worse: it cleared the phone and navigated away, so they went to sit elsewhere
+  believing the old table was released.
+- **Why:** both handlers threw the answer away, and `leaveSession()` never throws — a timeout comes
+  back as `{ ok:false, reason:"timed_out" }`. Same shape as the false "we've let the staff know"
+  that FIX-2 of sweep 6 fixed in this same territory.
+- **Fix:** read the answer. The local clean-up still happens either way, deliberately — refusing to
+  let someone go because the network is down would TRAP them. "Change table" now stops before
+  navigating, so the sentence is not wiped by the page load. `ok === true` cannot cry wolf here:
+  `lfh_leave_session` (mig 146) has **no refusing branch at all**, so anything else is transport.
+
+### ITEM 5 · The host's "Let them in" could fail and say nothing at all — MEDIUM · code-read
+- **Where:** guest menu → the popup on the HOST's phone when someone asks to join ("Mia wants to
+  join") → "Let them in", "Not them", and the link "Let anyone join automatically".
+- **Who is worse off:** the host, and the friend physically standing at the table. The popup simply
+  stayed with the same person first in the queue; the host tapped again, and again, and nothing ever
+  said why.
+- **Fix:** read the answer and say so. The popup STAYING is correct — the person really is still
+  waiting — so only the sentence was missing. "Let anyone join automatically" does two things, so a
+  PARTIAL result now says which half worked. The one genuine refusal (`not_owner`, mig 015: this
+  device is no longer the head) gets its own sentence instead of a useless "try again in a moment".
+
+### ITEM 6 · The Live-status tab shimmered for ever when the first read never landed — MEDIUM · watched
+- **Where:** guest menu → the bill → the "Live status" tab (the shared table bill, "Your table").
+  With no signal, three pulsing grey bars and nothing else, for as long as the tab stayed open.
+  Measured: the whole tab's text was the two words **"YOUR TABLE"**.
+- **Why:** `loaded` only flips true on a SUCCESSFUL read, and a transient failure deliberately
+  returns early without touching it — that early return is what keeps an already-drawn bill on
+  screen through a blip, and it is right. Nobody joined the two facts up: if the FIRST read fails
+  there is no bill to protect and the skeleton has nothing to become.
+- **Fix:** an honest sentence — *"We can't reach the restaurant's system right now… Nothing is lost
+  — it appears here as soon as the connection is back"* — with a "Try again". Once anything HAS
+  loaded, the old behaviour is untouched. The green pulsing dot also goes grey while that message is
+  up, because a live dot beside "we can't reach the system" claims the opposite.
+- **Watched both ways:** before → `SKELETON still shimmering: 1`, text "YOUR TABLE", no Try again.
+  After → `0`, the sentence, Try again visible. Captures kept, both skins.
+
+---
+
+## Candidates I measured and WITHDREW — do not re-file these
+
+These are in the ledger as `🔎` rows (P16490, P16571–P16584) so the next sweep does not spend the
+same hours. Three of them are cases where **my own measurement, not the product, was the wrong
+thing** — which is the same lesson sweep 6 recorded and worth recording again.
+
+1. **"The basket bar covers a dish's + at the end of the menu" (P16490).** Measured three ways.
+   (a) Right after adding, one "+" at y=727 resolved to `.mini-cart` — real, but mid-scroll.
+   (b) Walking all 69 add-buttons: covered at 445 positions, **0 permanently unreachable**.
+   (c) At the list's TRUE end the last "+" is at y=592 with the pill at 710–762 — clear, because of
+   a documented 96px reservation whose comment names this exact failure from 2026-08-04. My first
+   "broken" reading came from a probe that set `scrollTop` to an end captured BEFORE lazy content
+   grew the list. **Not a fault.**
+2. **"A failed shared-basket sync is never retried" (P16572).** True, and deliberate: migration 144
+   **SUMS** quantities for an added line, so a blind retry after a merge that succeeded but whose
+   reply was lost would order two of everything. Raised as an improvement instead, with the cost
+   stated.
+3. **"`getMenuItem` uses `select(*)`" (P16346).** Deliberate: `mapRow`'s `has(row, "col")`
+   mechanism exists precisely to tell "column not selected" from "selected but null", and the
+   narrowing was applied to the CARD payload on purpose — its own comment says *"this must shrink
+   the CARD payload only"*. Narrowing it would silently drop keys the dish page reads.
+4. **"The live order path ignores a clash message" (P16571).** Correct as written: only a REPLAY
+   carries the markers a clash is judged on, so a live order can never receive one.
+5. **`ActiveOrder.itemCount` is inconsistent after "Order the rest" (P16573).** True, and **dead
+   data** — nothing renders that field for an active order.
+6. Plus nine more standing pre-empts (P16574–P16584): the 4-second approve poll, the keystroke-by-
+   keystroke remembered table, fire-and-forget `setMemberName` and the heartbeat, the dev-only
+   offline-reload chip, the unscoped device preferences, the deliberate absence of a cancel button
+   on a waiting order, the tax-free mini-cart, and Aangan's differences.
+
+---
+
+## 🔗 Two handoffs — files outside this territory
+
+1. **`components/OfflineNotice.tsx` (T4 — the offline layer).** The red strip along the bottom says
+   *"Your **order** is saved and will send by itself"* whatever the phone is holding. After item 2
+   the panel directly above it says "Water / Staff will be called", so the two now disagree on the
+   same screen. One sentence; I have not touched another terminal's file on the last leg of my run.
+2. **`.claude/sweep/LEDGER/INDEX.md` (T40 — the ledger and the scaffolding).** Its registry said
+   "next free ID `P15101`", which `npm run verify:ledger-index` correctly fails against any sweep-7
+   ledger. I moved that one line to `P35101` — past sweep 7's whole `P15601`–`P35100` allocation —
+   because the guard's own message says to, and left a note saying T40 owns the file and should
+   overwrite the block with its rebuild. Any other terminal needing the same line should write
+   exactly this value, so the conflict is trivial. Also corrected T3's own row (500 → 1002 rows).

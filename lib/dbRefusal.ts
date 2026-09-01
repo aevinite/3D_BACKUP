@@ -182,6 +182,20 @@ const UNREACHABLE_CODES = new Set([
   "55P03", // lock not available
   "40001", // serialization failure (retryable by definition)
   "40P01", // deadlock detected
+  // ── THE POOLER RECYCLING US IS "IT DIDN'T ANSWER", NOT "THE APP BROKE" ──────────────────────
+  // (T25 round 3, item 42, 2026-08-31.) lib/readRetry.ts has treated these three as transient since
+  // it was written — it retries them once, and its own comment names the cause: "the pooler recycled
+  // us". This file did not have them, so the SAME failure was "retry me" to one file and "an app bug"
+  // to the other: a 500 with "something went wrong at our end" instead of a 503 with "the system is
+  // very busy — this will come back by itself", and a red crash row on the Repair board for a
+  // connection that was simply taken away mid-request.
+  //
+  // Only these three, and deliberately not readRetry's `XX000` (internal_error): the pooler reports
+  // some drops as XX000, but so does a genuine bug, and calling every internal error "busy" would
+  // hide the faults this board exists to show.
+  "57P01", // admin_shutdown     — the pooler recycled the connection
+  "57P02", // crash_shutdown
+  "57P03", // cannot_connect_now — still starting up
 ]);
 
 // The same conditions as prose, for the paths where only a message survives — a fetch that never

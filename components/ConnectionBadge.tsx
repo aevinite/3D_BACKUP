@@ -343,11 +343,17 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
         .lfh-conn-row-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
         .lfh-conn-row-t b { font-size: 12.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .lfh-conn-row-t small { font-size: 11px; opacity: 0.7; }
-        .lfh-conn-row-t small.err { color: #fca5a5; opacity: 1; }
-        .lfh-conn-pill { font-size: 10.5px; font-weight: 800; padding: 3px 8px; border-radius: 999px; background: rgba(34,197,94,.16); color: #86efac; flex: 0 0 auto; }
-        .lfh-conn-x { border: 0; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; background: #64748b; color: #fff; flex: 0 0 auto; }
-        /* The action we want tapped, so it carries the colour; Dismiss stays grey beside it. */
-        .lfh-conn-go { border: 0; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; background: #16a34a; color: #fff; flex: 0 0 auto; }
+        /* REMOVED 2026-08-26 (owner said yes): the rules for small.err, .lfh-conn-pill,
+           .lfh-conn-x and .lfh-conn-go — the styling for the per-order rows and their
+           Retry / Dismiss / Order-the-rest buttons. This badge stopped rendering that list on
+           2026-08-13 (one place for an order that couldn't send, not two), and the rules have
+           matched nothing since. Dead CSS in a styled-jsx template is invisible, which is exactly
+           why it survived two sweeps.
+           NOTE FOR ANYONE GREPPING: .lfh-conn-pill and .lfh-conn-x still exist in
+           public/panels/connbadge.js and are LIVE there. They are not shared — styled-jsx scopes
+           its selectors to this component, so this copy could never have styled that panel.
+           NO BACKTICKS IN THIS BLOCK: it is a template literal, and one ends it early. The header
+           of this very file says so, and this comment originally had three. */
         .lfh-conn-pop-ok { font-size: 11.5px; opacity: 0.6; border-top: 1px solid var(--line, rgba(127,127,127,.14)); padding-top: 10px; }
 
         @media (prefers-reduced-motion: reduce) {

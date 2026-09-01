@@ -1,263 +1,157 @@
-# T23 findings — the database, migrations 231 → the newest
+# T23 findings — the database, migrations at POSITIONS 231–339 of the sorted folder
 
-Working machinery for the merge terminal. The report the owner reads is the terminal window.
-Territory: `supabase/migrations/`, every file numbered 231 or higher (115 files, ~15,900 lines).
-500 phases, ledger `LEDGER/T23.md`. Three real problems, all fixed. One 🟡 for him. One 🔗 handoff.
+Working machinery for the merge terminal. **The report the owner reads is the terminal window.**
+
+Territory (sweep #7): `ls supabase/migrations/*.sql | sort | sed -n '231,339p'` — **109 files,
+16,120 lines**, `223_waiter_sections_full_access_backfill.sql` → `332_every_bill_is_signed_and_chained.sql`.
+Ledger: `LEDGER/T23.md` — 500 old rows re-run, 500 new rows written (`P26101`–`P26600`).
+
+**One real problem, fixed. Two improvements built. Two questions recorded for the owner.**
 
 ---
 
-## F1 — `npm run verify:db-parity` was RED on clean main: two migrations share the number 346
+## ✅ F1 — a re-seed hands a narrowed waiter section back to the whole floor (migration 225)
 
-**Severity:** medium (a shared guard nobody can trust) · **confirmed** (ran it on a clean checkout of `origin/main`)
+**Severity:** medium · **confirmed by reading, and proved by running the fix in a transaction that rolled back**
+
+**Where it lives:** the WAITER TABLET → the tables a waiter can see and open; and Owner panel →
+Team → a waiter → their section, which would show the whole floor again.
+
+**Who is worse off:** the manager who set the section, and the waiter who suddenly holds tables that
+are not theirs. Migration 225's trailing backfill is:
+
+```sql
+UPDATE staff_users su SET assigned_tables = <everything they hold ∪ 1..settings.table_count>
+ WHERE su.role = 'tablet'
+   AND COALESCE(array_length(su.assigned_tables,1),0) > 0
+   AND EXISTS (SELECT 1 FROM generate_series(1, table_count) g(t)
+                WHERE NOT (g.t = ANY (su.assigned_tables)));
+```
+
+The WHERE tests **"is this waiter missing a table"**. That is true of the gap migration 225 was
+written to close — and equally true of **every section a manager has deliberately narrowed since**.
+Narrowing is the whole point of the feature; the file's own header says *"a section is only ever a
+SUBTRACTION from the floor, never a hole in it"*.
+
+This is the shape migration 321 named for 198 / 209 / 295 / 288 and migration 352 for 235 / 301:
+*"a WHERE that tests 'is it not the value I want' rather than absence"*. `scripts/seed-supabase.mjs`
+step 1 re-runs every file in this folder with no ledger, so it is reachable, not theoretical.
+
+**Why nobody found it before:** sweep #6's T23 territory was *"every file numbered 231 or higher"*.
+Sweep #7 redefined it by POSITION (231–339 of the sorted list), which begins at `223_…` — so files
+223–230 were read by this terminal for the first time. Migration 225 is one of them.
+
+**Measured on the backup database, 2026-08-28:** **0 waiters are narrowed today.** Migration 223's
+backfill gave every one of them the whole floor and nobody has cut a section yet. So the guard costs
+nothing now — and the day someone uses the feature is the day a re-seed would take it away again,
+which is exactly the day nobody would be looking.
+
+**Fixed:** the statement is wrapped in the migration-307 ledger guard (`DO $reseed_guard$` +
+`to_regprocedure` + `EXECUTE`, migration 043's pattern, because `lfh_already_applied` is created 82
+files later). Key `225_sections_follow_table_count`, recorded by the new **migration 369**.
+The TRIGGER beside it is deliberately left unguarded and must stay so: it only ever fires when the
+floor GROWS, which is the behaviour the file exists for.
+
+**Proved, not assumed.** Ran the guarded block and the ledger INSERT on the dev database inside
+`BEGIN … ROLLBACK`:
+
+```
+before_key        false     ← unapplied: the block RUNS its one legitimate time
+after_key         true      ← recorded: the second run SKIPS with a NOTICE
+rows_now_narrowed 0         ← and the one legitimate run changes nothing today
+```
+…then confirmed `select count(*) from lfh_applied_once where key='225_…'` = **0**. Nothing was left
+on the shared database; the migration ships unapplied, in the PR.
+
+**Guard:** `npm run verify:grants` already derives the one-time-key population from the folder and
+checks BOTH directions. It now reports **17** keys instead of 16, and would fail if the key stopped
+being checked or stopped being recorded. Ledger rows `P26502`, `P26521`–`P26523`, `P26596`.
+
+---
+
+## ✅ I1 — the purge guard could promise a table was kept forever while the purge deleted it
+
+**Where it lives:** backend only, nothing on screen — but it is the check standing behind
+Admin console → Restaurants → Recycle bin → "Remove permanently".
+
+`scripts/verify-purge-classified.mjs` asked one question: *is this tenant table accounted for
+SOMEWHERE* — deleted, or on KEEP, or on UNDECIDED. It never compared KEEP **against** the delete
+list. So a table could sit on KEEP, with a written reason saying it survives forever, while
+`admin_purge_restaurant()` deleted it, and the guard stayed green. **Four tables were in exactly
+that state** — see D1/D2 below.
+
+**Built:** KEEP now has to mean KEPT. A KEEP table the purge deletes is a FAILURE. Two supporting
+changes so the guard is honest rather than merely strict:
+* `settings` and `staff_users` moved to a new **`DELETED_LAST`** map — their KEEP notes already said
+  they are deleted last, which made KEEP mean two different things;
+* the four financial tables moved to a new **`DISPUTED`** map, printed loudly on every run, because
+  what a purge removes is the owner's decision and not a guard's.
+* and the other half of the same blind spot is now counted: **22 of the 47 tables the purge deletes
+  carry no written reason anywhere**. Reported, not failed — writing those 22 reasons is deliberate
+  work somebody has to choose to do.
+
+Verified it can actually fail: with the three tables left on KEEP it went red with three named
+failures; moved to DISPUTED, green. Ledger rows `P26593`–`P26595`.
+
+---
+
+## ✅ I2 — two guarded migrations pointed the reader at an unrelated file
 
 **Where it lives:** backend only, nothing on screen.
 
-**Who is worse off:** everyone who runs the database guards. `verify:db-parity` section A2 failed on
-clean `origin/main` before a line of this sweep was written:
+`235_access_model_v2.sql` and `301_a_discount_is_grossed_at_the_rate_it_was_charged.sql` both said
+*"migration 360 records the key"*. The recording file was written as 360, renumbered to **352** on
+merge, and neither pointer followed — so both aimed at `360_the_last_half_of_a_retired_stub.sql`,
+an unrelated migration. Nothing breaks (the key is matched by its TEXT), but the next person reading
+a one-time data rewrite is misdirected at exactly the wrong moment. This is the same fault sweep #6
+fixed for two other files; it came back through a renumber.
 
-```
-✗ new duplicated migration number(s): 346 → 346_a_purge_clears_the_printing_setup.sql
-                                          + 346_usage_and_cost_answers_for_any_window.sql
-                                          — renumber the newer file
-```
+**Built:** both pointers corrected to 352, each with a line recording what moved and the warning that
+the KEY must never be renamed (it is already in `lfh_applied_once` on every live database).
 
-A guard that is red for something nobody is going to fix is a guard people learn to scroll past —
-which is how the two cron jobs went missing for months (mig 267 F4).
-
-**Reachable:** always. `npm run verify:db-parity` on any checkout of main.
-
-**Not deliberate:** the opposite. `scripts/verify-db-grants.mjs` KNOWN_GAPS says in as many words:
-*"Whichever of the two 346s lands first keeps the number and this line goes away; if the other is
-renumbered, it should take 347"*, and 347 was left free *"as headroom for the second of the two
-colliding 346s to be renumbered into. Expected to be filled, not to stay a gap."*
-
-**Fixed:** `346_usage_and_cost_answers_for_any_window.sql` → `347_…`. The purge file landed first
-(553fca40), so it keeps 346. The two touch no object in common, so nothing about the outcome moves —
-`verify:db-parity` itself asserts that. Both guards are now green.
-
-**Guard:** already exists and is now green — `verify:db-parity` A2 and `verify:grants`' gap check.
+**Guard:** new, in `scripts/verify-db-grants.mjs` — a file that tells the reader *"migration NNN
+records the key"* must name a migration that really records one of the keys that file checks.
+Proved it fails: reverting 235's pointer to 360 turned `verify:grants` red with the exact sentence.
 
 ---
 
-## F2 — a re-seed silently undoes an admin's choice: migration 235's two settings backfills
+## 🟡 D1 — a purge deletes parcel and platform SALES (recorded, not changed)
 
-**Severity:** medium · **confirmed** (measured on the backup database, then proved by simulating the re-seed)
+`aggregator_orders` carries `total`, `paid`, `paid_at`, `payment_method`, `bill_no`, `invoice_no`
+and `invoice_at`. Migration **261** — in this territory — draws those numbers from the **same series
+a dine-in bill uses**. Measured 2026-08-28: **43 rows, 32 of them invoiced, and not one has a mirror
+row in `orders`** (`order_id` is null on all 43). `admin_purge_restaurant()` deletes the table
+outright, and it is on no list in the purge guard, so nobody ever wrote down why.
 
-**Where it lives:**
-* the GUEST MENU's language / currency switchers — what a diner sees on their phone;
-* Admin console → a restaurant → Access & permissions → Pay later (khata).
+The guard's own KEEP list says *"a banquet bill IS a sale"*. A parcel bill is the same thing.
 
-**Who is worse off:** the admin, and the diner. `scripts/seed-supabase.mjs` step 1 re-runs every file
-in this folder with no ledger. Two of migration 235's statements test *"is it not the value I want"*
-rather than absence — the exact shape migration 321 named for 198 / 209 / 295 / 288 (findings
-7510 / 7822). 321's sweep covered 151–308; 235 is inside that range and was missed.
+**Not changed on my own**, per `docs/COMPLIANCE-GUARDRAILS.md`: name the risk, offer the compliant
+path, let the owner decide. Now printed by `verify:purge` on every run. Ledger rows `P26404`,
+`P26416`, `P26594`.
 
-Measured on the backup database, 2026-08-21, before the fix:
+## 🟡 D2 — a purge deletes money-OUT records the guard said were kept forever (recorded, not changed)
 
-| statement | rows a re-seed would rewrite | what it would do |
-|---|---|---|
-| `menu_languages` / `menu_currencies` re-expansion | **4 restaurants**, one of them **AANGAN GARDEN RESTAURANT — live, not binned** | hand five languages back to a menu the admin narrowed to English |
-| `khata_allowed = table_tags_allowed` | **1 settings row** | drag pay-later back onto the table-types switch, discarding the admin's own setting |
-
-Nothing on screen and nothing in the Activity log would say either had happened.
-
-**Reachable:** anyone running `node scripts/seed-supabase.mjs`. CLAUDE.md documents that command and
-warns about this exact hazard; migrations 307 / 313 / 321 / 344 all exist because of it.
-
-**Fixed:** both statements wrapped in the migration-307 ledger guard, using migration 043's
-`to_regprocedure` + `EXECUTE` pattern (the helper is created 72 files later, so a fresh database still
-runs each one its single legitimate time). Keys `235_menu_language_defaults` and
-`235_khata_follows_table_tags`, recorded by the new migration 350.
-
-The third statement in that file — `takeaway_allowed = TRUE` — is deliberately left **unguarded**, and
-the file now says why: migration 263 sets both halves TRUE for every restaurant unconditionally and
-sorts later, so a full pass always ends the same way. A guard there would be noise pretending to be
-safety.
-
-**Proved, not assumed.** Recorded the keys, then re-ran migrations 235 and 301 against the dev
-database — the re-seed, simulated:
-
-```
-BEFORE  aangan-garden-restaurant  menu_languages ["en"]        khata_allowed false
-        french-house              menu_languages ["en","fr","hi"]  khata_allowed true
-AFTER   aangan-garden-restaurant  menu_languages ["en"]        khata_allowed false
-        french-house              menu_languages ["en","fr","hi"]  khata_allowed true
-```
-
-Unguarded, Aangan Garden's guest menu would have gained five languages at that point.
-
-**Guard:** 🔗 HANDOFF H1 below — the automated half lives in `scripts/`, which is not this
-terminal's territory. Manual check written into ledger rows P11023 / P11024 meanwhile.
+`expenses`, `inv_purchases` and `inv_purchase_lines` sat on KEEP with the reasons *"money out — a
+financial record, same reasoning as a sale"*, *"stock bought — money out"* and *"the lines of those
+purchases"*. The purge deletes all three. One of the two is wrong; which one is the owner's call.
+Ledger row `P26595`.
 
 ---
 
-## F3 — a re-seed after a GST change re-prices filed months: migration 301's `disc_gross` backfill
+## Things checked and NOT filed
 
-**Severity:** medium · **confirmed** (code-read + measured population)
-
-**Where it lives:** backend only, nothing on screen — but it reaches Owner panel → Dashboard and
-Owner panel → Reports → Sales.
-
-**Who is worse off:** the owner. Migration 301's backfill is
-
-```sql
-UPDATE orders SET disc_gross = discount * (1 + COALESCE(NULLIF(tax_rate, 0),
-                               lfh_effective_tax_rate(restaurant_id)))
-WHERE COALESCE(discount, 0) <> 0;
-```
-
-For a row that carries a stamped rate this is a deterministic recompute — harmless twice. For a row
-whose `tax_rate` is NULL or 0 it falls back to **the rate configured right now**, which is correct on
-the day the migration first runs and wrong every day after. And `orders.net_amount` is
-`GENERATED ALWAYS AS (total − disc_gross) STORED` (mig 310), so moving `disc_gross` moves the owner's
-revenue for months that are already filed.
-
-This is the fault migration 321 recorded for `288_null_implausible_tax_rates` — *"after a GST change a
-re-run would un-stamp all history and re-price it"* — one column over, in a file the same sweep read
-and did not catch.
-
-**Measured, 2026-08-21:** 11 discounted orders carry no stamped rate, out of 2,382 discounted rows.
-Small, and it grows with every legacy or hand-made row.
-
-**Reachable:** a re-seed after any change to a restaurant's tax setup.
-
-**Fixed:** wrapped in the migration-307 guard, key `301_backfill_disc_gross`, recorded by migration 350.
-The trigger `zz_orders_disc_gross` is deliberately untouched and keeps the same fallback — at INSERT
-time "now" genuinely *is* the rate being charged. Only the re-run of a historical backfill turns that
-fallback into a re-pricing.
-
-**Guard:** 🔗 HANDOFF H1.
-
----
-
-## ✅ F4 — the bill-chain verifier could not tell a BINNED bill from an ALTERED one
-
-**FIXED — migration 353, on the owner's instruction (2026-08-21). It was reported as a 🟡 first; he
-read it and said do it.** Severity: **high**, higher than first written up — see WHERE below.
-
-**Where it lives:** Manager panel → 🧾 KOT ▾ → **Z-report**, the day-close sheet. Migration 332's
-verification is PRINTED there on purpose — *"that is the moment a restaurant states its takings, it
-is the paper an inspector is handed"*. That is what raises this from untidy to serious: the sheet was
-printing `⚠ Bill ledger — 11 problems — tell the owner` every single day-close.
-
-**What happens:** migration 332 signs every issued bill into an append-only chain and
-`lfh_verify_bill_chain` reports three things — `row_rewritten`, `chain_broken`, and `bill_changed`
-("signed at ₹105.00, the bill now adds up to ₹0.00"). `bill_changed` is computed as *"the live orders
-on this session no longer add up to what was signed"*.
-
-A bill that is **soft-deleted into the admin recycle bin** after its invoice was issued satisfies that
-exactly — every order on it is tombstoned, so it now adds up to ₹0. So does a bill whose session row
-was removed. Both are permitted, recorded, reversible acts with their own audit rows; neither is
-tampering. Measured on the backup database, calling the verifier for French House over all time:
-
-```
-11 of 12 signed bills came back  bill_changed
-  · 8 are bills binned into the recycle bin after their invoice was issued
-  · 2 point at a session row that no longer exists (bill_chain.session_id has no FK)
-  · 1 is the arithmetic of a live bill, which verifies correctly
-```
-
-Admin → Bills shows **831 deleted bills** on this stack. On a real restaurant that number is small
-(R27: the restaurant has no delete-a-bill permission at all; only the admin, with a reason) — but the
-mechanism is the same, and the whole value of 332 is that the report is *readable*. If every lawfully
-binned bill lights up as changed, the one bill that really was altered is buried in the list, and the
-owner learns to stop reading the page — which is precisely the failure migration 344 was written to
-undo on the Repair board.
-
-**Fixed as shape (1) — the recommendation, which he approved.** `bill_binned`, `bill_cancelled` and
-`bill_gone` join `row_rewritten`, `chain_broken` and `bill_changed`; the `checked` summary counts each,
-so nothing can be silently dropped. The route splits problems from notes and the Z-report prints the
-notes as information under a verified ledger.
-
-**THE TAMPER TEST IS NOT WEAKENED**, and this is the load-bearing line: a bill is only re-labelled when
-it has **no live orders left** AND the reason is visible in the data. Proved on the dev database after
-applying migration 353:
-
-```
-french-house              bill_binned 9 · bill_gone 2 · checked 1
-                          "12 bill(s) verified · 11 cancelled or binned (recorded)"
-                          Z-report now prints: ✓ Bill ledger verified (notes listed below it)
-
-aangan-garden-restaurant  bill_changed 1 · checked 1
-                          "2 bill(s) verified · 1 unexplained"
-                          Z-report still prints: ⚠ 1 problem
-                          [bill_changed] signed at 1450.58, the bill now adds up to 1933.38
-```
-
-Aangan's one real finding **survived** — a bill that still holds live orders whose total moved up by
-₹482.80 after it was signed. That is the shape an actual alteration takes, and it is still flagged.
-
----
-
-## ✅ H1 — the re-seed guard now asserts the invariant instead of a list (BUILT on his instruction)
-
-Reported as a handoff first because `scripts/` was outside this terminal's fence; he read it and said
-do it. Below is the write-up as it stood, then what was actually built.
-
-`scripts/verify-db-grants.mjs` already has the machinery. Around line 460 it carries:
-
-```js
-const GUARDED = {
-  "043_inr_base_currency.sql": "043_inr_base_currency",
-  "093_grandfather_r1_manager_powers.sql": "093_grandfather_r1_manager_powers",
-};
-```
-
-That map is what stops anyone "tidying" a `DO $reseed_guard$` block away. It names 2 of the now **12**
-one-time data rewrites in this folder. Please extend it to all twelve — the three this sweep added are:
-
-```js
-  "235_access_model_v2.sql": ["235_menu_language_defaults", "235_khata_follows_table_tags"],
-  "301_a_discount_is_grossed_at_the_rate_it_was_charged.sql": "301_backfill_disc_gross",
-```
-
-(the map currently takes one key per file; these two files need it to take an array, or two entries.)
-The other seven already-wrapped ones worth adding while you are there: 198, 209, 288, 295 (from mig 321),
-049, 051, 311 (from mig 313), 344 ×2.
-
-Stronger still, and cheap: instead of a hand-typed list, assert the invariant directly —
-**every `lfh_already_applied('<key>')` in the folder must have a matching row inserted somewhere in the
-folder, and vice versa.** That version cannot rot.
-
-**BUILT, as the invariant.** The map is gone. The guard derives the population from the folder and
-checks both directions, plus 043/093 still named individually for their measured blast radius. It now
-covers **14 keys instead of 2**. Checked against two deliberate faults — an orphaned check and an
-orphaned ledger row — and it caught both, naming the file and what to do. And it invented a failure on
-its very first run, which is recorded in the code: the terminator for an `INSERT … lfh_applied_once`
-block is `on conflict`, not `;`, because migration 344's note text contains a semicolon.
-
----
-
-## Deliberately NOT reported (checked, and each one is a decision already taken)
-
-* migration 238's one-pass floor summary — measured, and CLAUDE.md forbids simplifying it back. Re-timed
-  this run: 305 ms round trip for a 31-table floor, 234 ms for a 10-table one.
-* the gaps in the number series — 90, 165, 168–171, 216, 252, 255, 275, 276 are all explained in
-  KNOWN_GAPS. 346/347 stop being gaps with F1's fix.
-* `347_usage_and_cost_answers_for_any_window.sql` being plain `STABLE` rather than SECURITY DEFINER —
-  migration 153's `lfh_admin_usage`, which it is modelled on, is the same, and only service_role can
-  call either.
-* mig 286 reverting 278's `LFH01` error code — already found and fixed by migration 300 B1.
-* the ban-function churn across 267 / 281 / 290 / 291 / 293 — a closed argument, settled in 293.
-* 14-day-old tickets sitting on the kitchen board — dev fixture data whose sessions are still open, not
-  a product fault. Migrations 232 / 243 / 302 / 303 handle the ownerless case.
-* the whole-portfolio heatmap still crossing the 8 s wall over a long range — known, measured in
-  migration 241's own header, written up in `docs/FLOOR-TIMEOUT-WATCH.md`, and the fix (a pre-aggregated
-  day-of-week × hour table) is not this terminal's territory.
-
-## An incident, recorded honestly
-
-While proving F2/F3 I ran `node scripts/run-migration.mjs 301_…sql` to watch the new guard fire. It did —
-but re-running that ONE file also re-created the twelve functions it defines, and six of them had been
-rewritten by later migrations (310 / 315 / 317 / 321 / 327 / 337). `verify:one-number` went red with 5
-failures: four owner functions were back to computing `total − disc_gross` by hand, and 2,245 rollup
-rows had lost `net_paid`. That is the documented *"a migration that recreates a function reverts a later
-fix"* trap, and the single-file applier has no ordering awareness of it.
-
-Repaired by replaying the newest definition of every affected object, in ascending order (310, 315, 317,
-321, 327, 337, 346 — 346 because 321 also defines `admin_purge_restaurant`). All four database guards are
-green again, `verify:db-parity`'s *"no live function body looks hand-edited away from its migration"*
-included, and `orders.net_amount` disagrees with `total − disc_gross` on 0 of 30,602 rows.
-
-**A re-seed itself is not exposed to this** — it runs the whole folder in order, so the later files always
-win. Only a single-file re-run is. Worth a line in `docs/` for whoever reaches for that command next.
+* **`verify:purge` red on `print_pairings`.** It was red on the first run of this session and it was
+  **not** a regression: the shared dev database was mid-way through another terminal's migration 368,
+  so the purge's live body did not yet clear a table that had only just appeared. Green twenty
+  minutes later, and `wt-s7-t24` turned out to be holding the very migration that closes it.
+  Recorded in ledger row `P11463` so the next sweep does not re-file it.
+* **48 numbered bills whose every order is cancelled or deleted.** All 48 explained: 4 voided (an
+  issued invoice keeps its retired number), 39 binned bills, 5 numbered while live and cancelled
+  afterwards. Migration 331 refuses to MINT a number for an already-cancelled bill; it never
+  retracts one, which is P11303's own rule. Ledger row `P26586`.
+* **`DELETE FROM order_items` in migrations 270/272.** That is `lfh_delete_order_item` — taking one
+  dish off an UNPAID ticket. It refuses a paid bill, re-prices the order in the same transaction,
+  and both routes that call it write a `dish_removed` Audit row with the dish's own worth first.
+* **`verify:guards-alive` is red** on `verify-notfound-audience`, `verify-printing-sweep` and
+  `verify-sw-version-report` — three scripts this branch does not touch, red on clean main, and the
+  guards terminal's territory this wave.

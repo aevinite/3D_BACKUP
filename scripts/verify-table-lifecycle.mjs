@@ -23,7 +23,9 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { dismissTicketsFor } from "./sweep/tickets.mjs";
 import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
@@ -59,9 +61,34 @@ const busy = new Set([
 // one dev DB) both "reserved" the SAME pair and stomped on each other's fixture. That is what
 // produced "the surviving table has 0 order(s) across 0 session(s)": the other run had already
 // cleaned it. Random picks make concurrent runs diverge instead of collide. (2026-07-31)
+// AND THE TABLES ANOTHER GUARD OWNS ARE BUSY TOO, EVEN WHEN THEY ARE EMPTY (item 23, 2026-08-29).
+//
+// The shuffle above stops two copies of THIS file taking the same pair. It does nothing about a
+// DIFFERENT guard's reserved tables, and this picker ranges over the whole floor — so it can and
+// does land on 27/28, which belong to verify-void-on-joined-party (the joined party whose food must
+// survive a void).
+//
+// Found by running the floor guards two at a time on purpose: alone, both are green; together,
+// verify:void-party reported "both tables carry live food — {}" and "they are ONE party — open" and
+// this file reported "the new table shows 2 order(s) / ₹0 due". Two guards destroying each other's
+// fixture, and both blaming the product. That is worse than a flake, because it is not reproducible
+// on its own and it reads exactly like a real fault.
+//
+// scripts/sweep/fixtureTables.mjs is the one place that says which table belongs to which guard.
+for (const t of claimedTables()) busy.add(String(t));
 const free = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n))
   .map((t) => [Math.random(), t]).sort((a, b) => a[0] - b[0]).map(([, t]) => t);
-if (free.length < 2) { console.error("need two completely free tables; the floor is busy right now"); process.exit(1); }
+// A FULL FLOOR IS "COULD NOT RUN", NOT "RAN AND FOUND A FAULT" — SO IT IS EXIT 2 (item 23,
+// 2026-08-29). This repo's most useful convention is that 1 means a fault and 2 means the check
+// never happened; verify:guards-alive enforces it for a stopped server, and four entries came
+// back 2 in this sweep with not one of them being a fault. A busy floor is exactly that case:
+// nothing about the product is wrong, there is simply nowhere to seat a test party. Exiting 1
+// made it read as a red in every summary, which is how a suite trains people to scroll past it.
+if (free.length < 2) {
+  console.error(`need two completely free tables; the floor is busy right now (${count} tables, ${busy.size} carrying a live session, an order, or another guard's claim).`);
+  console.error("Nothing is wrong with the app — close the stale parties, or run this when the other lanes are idle.");
+  process.exit(2);
+}
 const [TA, TB] = free;
 
 const openTable = async (t) => {
@@ -322,6 +349,9 @@ try {
     await sb.from("table_tags").delete().eq("restaurant_id", RID).eq("table_number", t);
     await sb.from("waiter_calls").update({ resolved: true }).eq("restaurant_id", RID).eq("table_number", t).eq("resolved", false);
   }
+  // …and the kitchen tickets they queued, by order id, or the manager's floor keeps a red "hasn't
+  // printed — is the kitchen screen open?" banner for each. (T28, 2026-08-22)
+  await dismissTicketsFor(sb, RID, made.orders);
   console.log(`\n· cleaned up ${made.orders.length} test orders on T${TA}/T${TB}`);
 }
 console.log(failed ? `\n✗ ${failed} check(s) failed — a table can still hand something to the next party` : "\n✓ every way a table changes hands: the next party starts clean, the record survives");

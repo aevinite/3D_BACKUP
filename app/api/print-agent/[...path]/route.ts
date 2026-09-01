@@ -18,8 +18,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { agentByToken, helloAgent, claimNext, readRoutes, paperFor, PRINT_KINDS, type AgentRow } from "@/lib/printHelpers";
+import { startPairing, pollPairing } from "@/lib/printPair";
 import { finishKotJob } from "@/lib/printQueue";
-import { kotHtmlForOrder, billHtmlForSession, testHtml, withPaper } from "@/lib/printDocs";
+import { kotHtmlForOrder, billHtmlForSession, banquetHtmlForBill, testHtml, withPaper } from "@/lib/printDocs";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,15 @@ const err = (m: string, status = 400) => NextResponse.json({ error: m }, { statu
 // it is the price of paper appearing without anybody watching a screen.
 const POLL_MS = 2000;
 
+// The site the helper must talk to, taken from THIS request rather than a constant, so a pairing
+// started on backup points at backup and one on the live site points at the live site.
+const originOf = (req: NextRequest) => {
+  const h = req.headers;
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  return host ? `${proto}://${host}` : new URL(req.url).origin;
+};
+
 async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
   const t = req.headers.get("x-lfh-agent") || req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
   return t ? agentByToken(t) : null;
@@ -40,14 +50,46 @@ async function whoIsAsking(req: NextRequest): Promise<AgentRow | null> {
  *  auto-print must be on. When either is off the helper is told "nothing to print" and idles — it
  *  is not an error, and a restaurant that pauses printing must not fill a log with refusals. */
 async function printingOn(rid: string): Promise<boolean> {
-  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle())
-    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean } | null;
+  const s = (await sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle())
+    .data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // …AND THE QUEUE MUST NOT BE STOPPED (owner, 2026-08-29: "you can stop the queue, restart the
+  // queue"). Stopping is deliberately NOT the same as switching printing off: the tickets go on
+  // being made and go on waiting, so the moment it restarts they all come out. Switching printing
+  // off instead stops them being made at all, and that paper would never exist.
+  if (s?.modules?.printing?.paused === true) return false;
   return s?.auto_print_kot === true && s?.auto_print_kot_allowed === true;
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
   const seg = (path || []).map(String);
+
+  // ── PAIRING COMES BEFORE THE GATE, because an unpaired helper has nothing to be gated by ──────
+  //
+  // These two verbs are the ONLY unauthenticated ones in this file, and neither grants anything:
+  //   · pair/start — a machine describes itself and gets a code + a private secret. The row it
+  //     creates can do exactly one thing: be shown to a signed-in human for approval (mig 368).
+  //   · pair/poll  — asks "am I in yet?", and answers with the token exactly ONCE, and only to the
+  //     process holding that private secret. A wrong secret is answered identically to a code that
+  //     does not exist, so this cannot be used to discover codes.
+  //
+  // The restaurant is chosen by the APPROVER, never by the helper. Nothing here can join a
+  // restaurant on its own.
+  if (seg[0] === "pair" && seg[1] === "start") {
+    const b = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const r = await startPairing({
+      fingerprint: b.fingerprint, hostname: b.hostname, printers: b.printers, os: b.os,
+      origin: originOf(req),
+    });
+    if ("error" in r) return err(r.error, 500);
+    return NextResponse.json(r);
+  }
+  if (seg[0] === "pair" && seg[1] === "poll") {
+    const b = await req.json().catch(() => ({})) as Record<string, unknown>;
+    const r = await pollPairing(String(b.code || ""), String(b.secret || ""));
+    return NextResponse.json(r);
+  }
+
   const agent = await whoIsAsking(req);
   if (!agent) return err("This computer's printing code is not valid any more.", 401);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
@@ -64,7 +106,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       // What this machine is expected to print, so a helper can say so in its own log and a person
       // reading that log can tell "not my job" from "something is broken".
       mine: PRINT_KINDS.filter((k) => routes[k].agent === agent.id),
-      backupFor: PRINT_KINDS.filter((k) => routes[k].backupAgent === agent.id && routes[k].agent !== agent.id),
+      // `backupFor` is gone: a helper is never a second machine's fallback (owner, 2026-08-30).
+      backupFor: [] as string[],
       // Two machines sharing one code: no paper is duplicated (the claim prevents it) but half the
       // tickets would come out in the wrong room, so the helper is told and the admin screen shows
       // it. Copying the file to a second computer is the way this happens.
@@ -162,6 +205,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     let html: string | null = null;
     if (job.kind === "kot" && job.order_id) html = await kotHtmlForOrder(agent.restaurant_id, job.order_id, job.reprint !== false);
     else if (job.kind === "bill" && payload.sessionId) html = await billHtmlForSession(agent.restaurant_id, String(payload.sessionId), { parcel: !!payload.parcel });
+    // THE BANQUET SHEET. Missing until 2026-08-29, and it failed in the worst way there is: the
+    // admin screen offers a Banquet line and lets a restaurant point it at a computer and a printer,
+    // the ticket was handed to the helper, and then this endpoint answered "no document" and marked
+    // the ticket dismissed. No paper, no error, nothing on any screen — an event sheet that simply
+    // never came out. The builder had existed the whole time (lib/printDocs.banquetHtmlForBill); the
+    // helper was never told to call it. The panel queues these with `billId` (public/panels/editor/
+    // app.js → /print/send), which is the key read here.
+    else if (job.kind === "banquet" && payload.billId) html = await banquetHtmlForBill(agent.restaurant_id, String(payload.billId));
     else if (job.kind === "test") {
       const rest = (await sb.from("restaurants").select("name").eq("id", agent.restaurant_id).maybeSingle()).data as { name?: string } | null;
       html = testHtml({

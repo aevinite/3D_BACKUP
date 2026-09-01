@@ -15,6 +15,16 @@ import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
 const IDENTITY_COLUMNS = "restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label, table_names";
 
+// THE BANQUET SHEET'S OWN PAPER (mig 237). `bqPaper(settings)` reads these eight, and a column that
+// is not SELECTED comes back undefined — so it fell back to every default and the helper printed a
+// sheet the restaurant had not set up: A5 when they had chosen A4, 33/14/6mm margins whatever they
+// had typed, the signature line and the filler rows back on. The manager's own screen was always
+// right because it hands the whole settings row to the same function; only the helper's copy was
+// short. Found by the printing sweep on 2026-08-29, asking for A4 and measuring A5.
+const BANQUET_PAPER_COLUMNS =
+  "banquet_paper, banquet_paper_size, banquet_paper_top, banquet_paper_bot, banquet_paper_side, " +
+  "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill";
+
 /**
  * The table as the FLOOR knows it — the table's NAME when the owner set one, else "T7", and "T?"
  * when a row has no table at all (a banquet bill with the table left blank).
@@ -90,7 +100,10 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
   ]);
   const session = sessQ.data as Record<string, unknown> | null;
   if (!session) return null;
-  const orders = ((await sb.from("orders").select("*").eq("session_id", sessionId).eq("restaurant_id", rid)).data || []) as Record<string, unknown>[];
+  // BOUNDED (T25 round 2, item 31): every order on ONE table. 500 is far past a real bill, and an
+  // unbounded read is capped at 1,000 by PostgREST without telling anyone — on a printed bill, a
+  // silent truncation is a missing line of food.
+  const orders = ((await sb.from("orders").select("*").eq("session_id", sessionId).eq("restaurant_id", rid).limit(500)).data || []) as Record<string, unknown>[];
   if (!orders.length) return null;
   const settings = (setQ.data || {}) as Record<string, unknown>;
   const tnum = session.table_number == null ? "" : String(session.table_number);
@@ -166,8 +179,49 @@ export function testHtml(o: { restaurant: string; printer: string; agent: string
 export function withPaper(html: string, paper: { wMm: number; hMm: number } | null): string {
   if (!paper) return html;
   if (/@page\s*\{[^}]*\bsize\s*:/.test(html)) return html;
-  const rule = `<style>@page{size:${paper.wMm}mm ${paper.hMm}mm;margin:0}</style>`;
-  return html.includes("</head>") ? html.replace("</head>", rule + "</head>") : rule + html;
+  // ── AND THE INK MUST FIT THE ROLL (found by the printing sweep, 2026-08-26) ─────────────────
+  // The document's column is 66mm, which is right for the 80mm roll it was designed on. On a 58mm
+  // roll the sweep measured ink reaching 52.9mm against about 52mm of printable width — so the
+  // right-hand edge of every bill would have been shaved off at any restaurant using narrow rolls,
+  // and nothing on screen would have shown it.
+  //
+  // So a narrow roll narrows the column: the paper minus ~8mm for the two unprintable edges, and
+  // never WIDER than the 66mm the layout was drawn for (a 3-inch roll keeps today's paper exactly).
+  // Big paper is untouched — a banquet sheet declares its own size and returns above.
+  // The head cannot reach the paper's edges. The ZJ-80's own driver file says how far: an 79.7mm sheet
+  // has an imageable area of 4.9–74.8mm, i.e. ~4.9mm unreachable on EACH side. So the widest ink a roll
+  // can take is its width minus 9.8mm — 48mm on a 58mm roll — and 66mm stays 66mm on an 80mm roll,
+  // which is the paper he already approved. Measured, not guessed: with `- 8` instead the sweep still
+  // put ink 1.4mm past where the head stops.
+  const EDGE = 4.9;
+  const ink = Math.min(66, Math.max(30, Math.round((paper.wMm - EDGE * 2) * 10) / 10));
+  const narrow = ink < 66
+    // CENTRED, and measured rather than reasoned. The head's imageable area starts ~4.9mm in from the
+    // paper edge and is `ink` wide, so a column centred in the page lands exactly on it: 4.9–52.9mm of
+    // a 57.8mm roll. Anchoring it LEFT instead (which I tried first, reasoning that the chain crops
+    // from the left) pushed 4.9mm of every line off the head — the sweep measured 43.0mm of ink where
+    // the document laid out 48mm. Centred, all 48mm arrives.
+    ? `html body{width:${ink}mm !important;margin:0 auto !important}` +
+      // A table laid out for a wider column will otherwise push its last figure out of view.
+      `table{width:100% !important}` +
+      // 12.5px in a 50mm column is about 26 characters a line; a dish name wraps rather than clips.
+      `body,td,.t,.kv,.sub{word-break:break-word}` +
+      // …but a COLUMN HEADING must never wrap: on a 58mm roll "AMT" broke into "AM / T" over two lines
+      // (seen on the virtual printer's paper). A heading is three or four letters — it is allowed to be
+      // a point smaller and it is not allowed to break.
+      `thead td,thead th{font-size:10px !important;white-space:nowrap !important;letter-spacing:0 !important}`
+    : "";
+  const rule = `<style>@page{size:${paper.wMm}mm ${paper.hMm}mm;margin:0}` +
+    (narrow ? `@media print{${narrow}}` : "") + `</style>`;
+  // ── IT MUST GO LAST, NOT FIRST ────────────────────────────────────────────────────────────────
+  // billdoc's documents have NO `</head>` — the old line fell through to `rule + html`, which put this
+  // BEFORE the document's own `body{width:66mm !important}`. Equal specificity, both !important, so the
+  // later one wins: the 66mm column won, and a 58mm roll printed a bill laid out for 80mm and CHOPPED
+  // — "LITTLE FRENCH HOUS", the amounts column gone. The virtual printer's picture is what showed it;
+  // the ink measurement alone said "fits", because clipped ink always fits.
+  // So it is appended at the very END, after every stylesheet the document carries.
+  if (html.includes("</body>")) return html.replace("</body>", rule + "</body>");
+  return html + rule;
 }
 
 /**
@@ -178,7 +232,7 @@ export function withPaper(html: string, paper: { wMm: number; hMm: number } | nu
 export async function banquetHtmlForBill(rid: string, billId: string): Promise<string | null> {
   const [billQ, setQ, restQ] = await Promise.all([
     sb.from("banquet_bills").select("*").eq("id", billId).eq("restaurant_id", rid).maybeSingle(),
-    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BANQUET_PAPER_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
   ]);
   const bill = billQ.data as Record<string, unknown> | null;

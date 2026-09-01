@@ -19,10 +19,15 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import { loginAs } from "./sweep/login.mjs";
+import { dismissTicketsForSql } from "./sweep/tickets.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const B = ARG("--base", "http://localhost:4937");
 const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(B, "the void-on-a-party walk");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 const TOK = g("SUPABASE_ACCESS_TOKEN"), RID = "00000000-0000-0000-0000-000000000001";
 const REF = ARG("--db", "wnsfcizclkbobwzcxqsf");
@@ -37,12 +42,44 @@ const PARENT = "27", CHILD = "28", BOTH = `'${PARENT}','${CHILD}'`;
 let fails = 0;
 const check = (name, ok, detail = "") => { console.log(`  ${ok ? "ok  " : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails++; };
 
+// THE REMOVAL SHEET ASKS **TWO** QUESTIONS NOW, AND BOTH ARE REQUIRED (owner, 2026-08-18: "while kot
+// delete button there will be one thing order was mode and order was not made like in red they have to
+// choose"). askRemovalReason(what, { askMade: true }) — which is what cancelOrder passes — adds "Was
+// the food actually made?" above the reason grid, and its `sync()` keeps the Remove button disabled
+// until BOTH are answered. `go.onclick` then returns early while disabled.
+//
+// This guard answered only the reason, clicked Remove into a dead button, and reported three failures
+// on behaviour that is exactly right: "the parent's ticket really was voided" and both halves of the
+// solo walk-out. The two answers do completely different things to the kitchen's stock — cooked means
+// the ingredients are gone, never started puts them back — so neither may be guessed, and a guard that
+// skips one is testing a flow no waiter can perform. Answer both, the way a waiter does.
+async function answerRemovalSheet(fr, page, { made = false, code = "mistake" } = {}) {
+  const madeBtn = fr.locator(`.rr-made-opt[data-made="${made ? 1 : 0}"]`).first();
+  if (await madeBtn.count()) { await madeBtn.click({ force: true }); await page.waitForTimeout(400); }
+  const reason = fr.locator(`.rr-opt[data-code="${code}"]`).first();
+  await reason.waitFor({ timeout: 15000 });
+  await reason.click({ force: true });
+  await page.waitForTimeout(600);
+  const go = fr.locator(".rr-go").first();
+  // A disabled Remove means a question is still unanswered — say which, instead of clicking a dead
+  // button and blaming the app eleven seconds later.
+  if (await go.isDisabled().catch(() => false)) {
+    const asked = (await fr.locator(".rr-modal").first().innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+    throw new Error("the removal sheet still refuses Remove after both answers — it is asking something new: " + asked);
+  }
+  await go.click({ force: true });
+}
+
 const wipe = async () => {
   await q(`delete from table_merges where restaurant_id='${RID}' and (child_table in (${BOTH}) or parent_table in (${BOTH}))`);
   await q(`update orders set status='cancelled', archived=true, archived_at=now(), cancelled_at=now()
            where restaurant_id='${RID}' and table_number in (${BOTH}) and not archived`);
   await q(`update sessions set status='closed', closed_at=now()
            where restaurant_id='${RID}' and table_number in (${BOTH}) and status='open'`);
+  // …and the kitchen tickets those orders queued. Nothing polls the print basket on a stack with no
+  // kitchen screen open, so lib/printQueue's own "cancelled before this ticket printed" dismissal never
+  // runs and the manager's floor keeps a red "hasn't printed" banner for each. (T28, 2026-08-22)
+  await dismissTicketsForSql(q, RID, [PARENT, CHILD]);
 };
 const snap = async () => {
   const o = await q(`select table_number, status, archived, payment_status from orders
@@ -58,20 +95,27 @@ console.log(`\nVOID ON A JOINED PARTY — ${B}\n`);
 await wipe();
 const dish = (await q(`select id from menu_items where restaurant_id='${RID}' limit 1`))[0].id;
 // One ticket on each table, then join the child onto the parent.
-//
-// CHECK THE FIXTURE WRITE (T28 sweep, 2026-08-22). This discarded what place_order returned. The RPC
-// answers HTTP 200 whatever it decides, so `q()` — which only throws on a non-200 — could not see a
-// refusal: `{ok:false, reason:…}` looked exactly like success. When it refused, the run carried on
-// with no ticket and the first real assertion blamed the void. Read the reply, and say the reason.
-const placed = [];
-for (const t of [PARENT, CHILD]) {
-  const r = (await q(`select lfh_staff_place_order('${t}','[{"id":"${dish}","qty":2}]'::jsonb,'{}',null,'${RID}',true) as result`))[0]?.result;
-  placed.push({ table: t, r });
-  check(`fixture: table ${t} took its ticket`, !!(r && r.ok && r.kot_no != null),
-    r ? `place_order replied ${JSON.stringify(r)}` : "place_order returned nothing at all");
-}
+
+// A FIXTURE THAT DID NOT LAND MUST SAY SO, HERE (sweep #6 / T28, 2026-08-22). These three calls threw
+// their answer away, so when the RPC refused one — sold out, an unknown dish, a duplicate window — the
+// first sign was "fixture: both tables carry live food — {}" four checks later, or a TypeError reading
+// `.id` of undefined eighty lines further on. Neither names the cause. The RPC always answers
+// { ok, reason }; read it.
+const place = async (table, qty) => {
+  const r = await q(`select lfh_staff_place_order('${table}','[{"id":"${dish}","qty":${qty}}]'::jsonb,'{}',null,'${RID}',true) as res`);
+  const res = r[0] && r[0].res;
+  if (!res || res.ok !== true) throw new Error(`could not seat the fixture on table ${table}: ${JSON.stringify(res)}`);
+  return res;
+};
+for (const t of [PARENT, CHILD]) await place(t, 2);
 const sid = async (t) => (await q(`select id from sessions where restaurant_id='${RID}' and table_number='${t}' and status='open' order by created_at desc limit 1`))[0]?.id;
-await q(`select lfh_staff_merge_tables('${await sid(CHILD)}','${PARENT}','${RID}')`);
+{
+  const childSid = await sid(CHILD);
+  if (!childSid) throw new Error(`table ${CHILD} has no open session to merge — its fixture order did not land`);
+  const m = await q(`select lfh_staff_merge_tables('${childSid}','${PARENT}','${RID}') as res`);
+  const mr = m[0] && m[0].res;
+  if (mr && mr.ok === false) throw new Error(`the two tables would not join: ${JSON.stringify(mr)}`);
+}
 // Nothing served anywhere — that is what makes ✕ Cancel available on the parent's ticket.
 await q(`update orders set status='received' where restaurant_id='${RID}' and table_number in (${BOTH}) and not archived and status<>'cancelled'`);
 
@@ -90,6 +134,21 @@ await p.waitForTimeout(4500);
 const fr = p.frameLocator("iframe").first();
 try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6500);
+// WAIT FOR THE FLOOR TO ACTUALLY SHOW THE PARTY (sweep #6 / T28, 2026-08-22). A fixed sleep is a guess,
+// and on a busy dev box it was the wrong guess often enough that "the joined child's tile is purple"
+// failed against a database that plainly said both tables were full and joined — the panel simply had
+// not drawn them yet. That reads as a merge bug and is a stopwatch. Poll for the thing the next check
+// is about, and if it never arrives, say THAT: a party the floor never draws is a real fault and it
+// deserves its own sentence.
+{
+  let drawn = false;
+  for (let i = 0; i < 30 && !drawn; i++) {
+    drawn = await fr.locator(`.ftile[data-floor-table="${CHILD}"]`).evaluate(
+      (el) => getComputedStyle(el).getPropertyValue("--c").trim() === "#a855f7").catch(() => false);
+    if (!drawn) await p.waitForTimeout(1000);
+  }
+  if (!drawn) console.log(`  (the floor has not drawn table ${CHILD} as part of the party after 30s — the next checks say what that looks like)`);
+}
 
 // ── while the party is up: does the HEADER agree with the tiles? (T3 sweep, 2026-08-06) ──────────
 // A merged child has no session of its own, so lfh_table_view_summary reports its state as `free`.
@@ -122,73 +181,23 @@ await p.waitForTimeout(6500);
 // newest-first (owner: "every table will show every order"), so the first ✕ Cancel on screen belongs
 // to whichever table ordered last — the CHILD here. Voiding that one exercises a different (and
 // safe) path and the test would pass without ever touching the bug.
-const parentOrderIdRows = await q(`select id from orders where restaurant_id='${RID}'
-  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`);
-// NEVER `[0].id` ON A LOOKUP THAT CAN COME BACK EMPTY (T28 sweep, 2026-08-22). When the fixture
-// above fails to place its order, this line threw `TypeError: Cannot read properties of undefined`
-// and the whole run died mid-way — no summary, no failing check, just a stack trace that says
-// nothing about what went wrong. A guard must report; it must not crash.
-if (!parentOrderIdRows[0]) {
-  // WHAT IS ACTUALLY ON THE TWO TABLES? The fixture reported ok:true with a kot_no, so the ticket
-  // WAS created — and by the time we look for it, it is gone. Dump every row for both tables so the
-  // reason is in the output instead of needing another run to find out. (T28 sweep, 2026-08-22.)
-  const dump = await q(`select table_number, status, archived, session_id, created_at from orders
-    where restaurant_id='${RID}' and table_number in (${BOTH}) and created_at > now() - interval '5 minutes'
-    order by created_at`);
-  const sess = await q(`select id, table_number, status, deleted_at from sessions
-    where restaurant_id='${RID}' and table_number in (${BOTH}) and created_at > now() - interval '5 minutes'`);
-  const merges = await q(`select parent_table, child_table, session_id, ended_at from table_merges
-    where restaurant_id='${RID}' and (child_table in (${BOTH}) or parent_table in (${BOTH}))`);
-  console.log("    orders  :", JSON.stringify(dump));
-  console.log("    sessions:", JSON.stringify(sess));
-  console.log("    merges  :", JSON.stringify(merges));
-  check(`fixture: table ${PARENT} has a live ticket to void`, false,
-    "no un-archived, un-cancelled order on that table — the place_order above did not land, so "
-    + "nothing below could run. Check its reply before reading this as a voiding fault.");
-  { const bad = 1; console.log(`\n\u274c ${bad} check(s) failed — the fixture never landed`); process.exit(1); }
-}
-const parentOrderId = parentOrderIdRows[0].id;
+const parentOrderId = (await q(`select id from orders where restaurant_id='${RID}'
+  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`))[0].id;
 await fr.locator(`.ftile[data-floor-table="${PARENT}"]`).click({ force: true });
-// WAIT FOR THE BUTTON, NOT FOR FIVE SECONDS (T28 sweep, 2026-08-22). This slept a flat 5s after
-// opening the table and then counted the ✕ Cancel for a specific order id. About one run in six the
-// detail panel had not finished drawing the ticket list yet, so the count was 0, nothing was
-// clicked, and the NEXT assertion failed as
-//     FAIL the parent's ticket really was voided — {"27":"received","28":"received"}
-// which is exactly what voiding being broken on a joined party looks like. It was not: the button
-// had not appeared yet. Third instance of this same fault found today — the payment popup in
-// verify-merged-floor and the money tile in verify-admin-money were the other two.
+await p.waitForTimeout(5000);
 const cancelBtn = fr.locator(`[data-cancel-order="${parentOrderId}"]`).first();
-await cancelBtn.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
-check("the parent's own ticket offers ✕ Cancel", (await cancelBtn.count()) > 0,
-  "the table detail never drew this ticket's ✕ Cancel within 30s — nothing below could run");
+check("the parent's own ticket offers ✕ Cancel", (await cancelBtn.count()) > 0);
 if ((await cancelBtn.count()) > 0) {
   await cancelBtn.click({ force: true });
   await p.waitForTimeout(1500);
-  // The reason sheet (mig 251): pick "By mistake", then Remove.
-  //
-  // ⚠ THE SHEET GREW A SECOND QUESTION AND THIS ONLY ANSWERED THE FIRST (T28 sweep, 2026-08-22).
-  // Since 2026-08-18 it also asks "Was the food actually made?" (mig 340 — the answer decides whether
-  // the ingredients count as a loss or go back into stock), and `askRemovalReason()` is explicit:
-  // "Both questions must be answered when both are asked." `.rr-go` stays DISABLED until both are,
-  // so clicking it did nothing — silently — and the void never happened. The failures then read
-  // "the parent's ticket really was voided — {27:received, 28:received}", which looks exactly like
-  // voiding being broken on a joined party: the very bug this file exists to catch. It was not; the
-  // sheet was simply still open behind the assertion.
-  //
-  // Answer both. The ticket here is `received` — never cooked — so "No, never started" is the honest
-  // answer and it records no false loss. Then ASSERT the button is really enabled before clicking,
-  // so the next question added to this sheet fails loudly instead of silently.
-  const reason = fr.locator('.rr-opt[data-code="mistake"]').first();
-  await reason.waitFor({ timeout: 15000 });
-  await reason.click({ force: true });
-  await p.waitForTimeout(400);
-  const madeNo = fr.locator('.rr-made-opt[data-made="0"]').first();
-  if (await madeNo.count()) { await madeNo.click({ force: true }); await p.waitForTimeout(400); }
-  const go = fr.locator(".rr-go").first();
-  const goEnabled = await go.isEnabled().catch(() => false);
-  check("the removal sheet's Remove button is enabled once every question is answered", goEnabled,
-    "still disabled — the sheet is asking something this test has not answered");
-  await go.click({ force: true });
+  await answerRemovalSheet(fr, p);
+  // DID THE SHEET ACTUALLY CLOSE? Both answers given and Remove enabled is not the same as the action
+  // going through, and "the parent's ticket really was voided — {27:received}" four lines later does not
+  // say which half failed. If the sheet is still up, the tap was not answered; that is a different fault
+  // from a void that ran and did nothing, and they need different fixes.
+  const sheetGone = await fr.locator(".rr-overlay").first().waitFor({ state: "detached", timeout: 12000 }).then(() => true).catch(() => false);
+  check("the removal sheet accepted both answers and closed", sheetGone,
+    sheetGone ? "" : "Remove was enabled and clicked, but the sheet is still on screen — the tap was not answered");
   await p.waitForTimeout(11000);
 }
 
@@ -205,49 +214,53 @@ check("no page errors", errs.length === 0, errs.slice(0, 2).join(" | "));
 // exists — a solo table whose last ticket is voided must still free itself, with no confirm. If
 // this half ever fails, the fix has been over-tightened and every walk-out leaves a table occupied.
 console.log("\n  · and the plain solo walk-out:");
+// BUILD THIS FIXTURE WITH THE PANEL LOOKING AWAY (sweep #6 / T28, 2026-08-22). The manager panel is
+// still open on the floor from the half above, and it is doing its job: `wipe()` cancels the party's
+// last live ticket, the panel notices the table has nothing left on it, and frees the table — which is
+// precisely the behaviour the check below is about. So the fixture kept vanishing between being placed
+// and being read ("fixture: one solo table with one live ticket — {} open"), on a floor that was
+// behaving perfectly. Reload the panel FIRST, so it starts from the wiped board and has no stale
+// ticket to act on, and only then seat the new party. Intermittent before this, and the failure landed
+// on the wrong line.
 await wipe();
-await q(`select lfh_staff_place_order('${PARENT}','[{"id":"${dish}","qty":1}]'::jsonb,'{}',null,'${RID}',true)`);
+await p.reload({ waitUntil: "domcontentloaded", timeout: 120000 }).catch(() => {});
+await p.waitForTimeout(4000);
+await place(PARENT, 1);
 await q(`update orders set status='received' where restaurant_id='${RID}' and table_number='${PARENT}' and not archived and status<>'cancelled'`);
+// One re-read if the board is still catching up — the fixture is real, the question is only whether
+// this process can see it yet.
 let solo = await snap();
+if (!solo.live[PARENT]) { await p.waitForTimeout(2500); solo = await snap(); }
 check("fixture: one solo table with one live ticket", !!solo.live[PARENT] && !solo.live[CHILD] && solo.open.join() === PARENT, JSON.stringify(solo.live) + " open " + solo.open.join());
-const soloOrderIdRows = await q(`select id from orders where restaurant_id='${RID}'
-  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`);
-// NEVER `[0].id` ON A LOOKUP THAT CAN COME BACK EMPTY (T28 sweep, 2026-08-22). When the fixture
-// above fails to place its order, this line threw `TypeError: Cannot read properties of undefined`
-// and the whole run died mid-way — no summary, no failing check, just a stack trace that says
-// nothing about what went wrong. A guard must report; it must not crash.
-if (!soloOrderIdRows[0]) {
-  check(`fixture: table ${PARENT} has a live ticket to void`, false,
-    "no un-archived, un-cancelled order on that table — the place_order above did not land, so "
-    + "nothing below could run. Check its reply before reading this as a voiding fault.");
-  { const bad = 1; console.log(`\n\u274c ${bad} check(s) failed — the fixture never landed`); process.exit(1); }
-}
-const soloOrderId = soloOrderIdRows[0].id;
+const soloOrderId = (await q(`select id from orders where restaurant_id='${RID}'
+  and table_number='${PARENT}' and not archived and status<>'cancelled' order by created_at desc limit 1`))[0].id;
 await p.reload({ waitUntil: "networkidle", timeout: 120000 });
 await p.waitForTimeout(5000);
 try { await fr.locator('.tab[data-tab="tables"]').first().click({ timeout: 25000 }); } catch {}
 await p.waitForTimeout(6500);
+// WAIT FOR THE FLOOR TO ACTUALLY SHOW THE PARTY (sweep #6 / T28, 2026-08-22). A fixed sleep is a guess,
+// and on a busy dev box it was the wrong guess often enough that "the joined child's tile is purple"
+// failed against a database that plainly said both tables were full and joined — the panel simply had
+// not drawn them yet. That reads as a merge bug and is a stopwatch. Poll for the thing the next check
+// is about, and if it never arrives, say THAT: a party the floor never draws is a real fault and it
+// deserves its own sentence.
+{
+  let drawn = false;
+  for (let i = 0; i < 30 && !drawn; i++) {
+    drawn = await fr.locator(`.ftile[data-floor-table="${CHILD}"]`).evaluate(
+      (el) => getComputedStyle(el).getPropertyValue("--c").trim() === "#a855f7").catch(() => false);
+    if (!drawn) await p.waitForTimeout(1000);
+  }
+  if (!drawn) console.log(`  (the floor has not drawn table ${CHILD} as part of the party after 30s — the next checks say what that looks like)`);
+}
 await fr.locator(`.ftile[data-floor-table="${PARENT}"]`).click({ force: true });
-// Same as the party half above: wait for the control, do not guess at it.
+await p.waitForTimeout(5000);
 const soloCancel = fr.locator(`[data-cancel-order="${soloOrderId}"]`).first();
-await soloCancel.waitFor({ state: "visible", timeout: 30000 }).catch(() => {});
-check("the solo ticket offers ✕ Cancel", (await soloCancel.count()) > 0,
-  "the table detail never drew this ticket's ✕ Cancel within 30s — nothing below could run");
+check("the solo ticket offers ✕ Cancel", (await soloCancel.count()) > 0);
 if ((await soloCancel.count()) > 0) {
   await soloCancel.click({ force: true });
   await p.waitForTimeout(1500);
-  const r2 = fr.locator('.rr-opt[data-code="mistake"]').first();
-  await r2.waitFor({ timeout: 15000 });
-  await r2.click({ force: true });
-  await p.waitForTimeout(400);
-  // Both questions, same as the party half above — the sheet asks "was the food made?" since mig 340
-  // and Remove stays disabled until it is answered.
-  const made2 = fr.locator('.rr-made-opt[data-made="0"]').first();
-  if (await made2.count()) { await made2.click({ force: true }); await p.waitForTimeout(400); }
-  const go2 = fr.locator(".rr-go").first();
-  check("the solo walk-out's Remove button is enabled once every question is answered",
-    await go2.isEnabled().catch(() => false), "still disabled — an unanswered question on the sheet");
-  await go2.click({ force: true });
+  await answerRemovalSheet(fr, p);
   await p.waitForTimeout(11000);
 }
 solo = await snap();

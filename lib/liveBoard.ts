@@ -44,8 +44,16 @@ type Row = { id: string; created_at: string; session_id?: string | null; [k: str
 // was not one (T4 sweep, 2026-08-06). It matters for the khata path: parking a bill sets
 // archived = true, so if a future caller ever relaxes the server-side filter, the client test is
 // what stops a parked bill reappearing on the tile. One boolean per row.
+// `placed_by_id` / `placed_by` (mig 220) answer ONE question the kitchen board could not: did a
+// member of staff punch this order, or did the guest? The manager route states the contract in its
+// own words — "NULL keeps meaning the guest ordered it themselves". The kitchen needs it because a
+// guest who orders without joining the table's session has no member_id either, so it looked
+// exactly like a waiter's order and the new-order chime stayed silent (owner, 2026-08-26).
+// NEITHER COLUMN REACHES A BROWSER: the kitchen route collapses the pair into one small flag and
+// the tablet route drops it, so no panel payload grows. Selecting two more columns server-side is
+// free — the row is already being read.
 const ORDER_COLS =
-  "id, created_at, session_id, table_number, status, payment_status, total, discount, discount_note, kot_no, member_id, allergies, items, taxable_base, nontax_amount, mrp_amount, archived";
+  "id, created_at, session_id, table_number, status, payment_status, total, discount, discount_note, kot_no, member_id, allergies, items, taxable_base, nontax_amount, mrp_amount, archived, placed_by_id, placed_by";
 const ITEM_COLS =
   "id, order_id, title, qty, status, note, options, removed, added_allergens, removed_flag, unit_price, created_at, tax_mode, is_mrp";
 
@@ -158,8 +166,11 @@ export async function liveOrdersAndItems(
   // `created_at >= since` arm of the OR below. Narrowing to the overnight stragglers
   // keeps this id-list tiny — the stress test showed 300+ open sessions inlining ~11KB
   // of UUIDs into the PostgREST URL, flirting with URL-length failures.
+  // BOUNDED (T25 round 2, item 31): the note above measured 300+ open sessions on a stress run, and
+  // an unbounded read is silently capped at 1,000 by PostgREST — which here would drop overnight
+  // stragglers off the board with nobody told. 2,000 is far past any real floor.
   const openRes = await sb.from("sessions").select("id")
-    .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since);
+    .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since).limit(2000);
   if (openRes.error) throw new Error(openRes.error.message);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
@@ -226,4 +237,23 @@ export async function liveOrdersAndItems(
   ]);
 
   return { orders, items };
+}
+
+// ── WHO PUNCHED IT — collapsed to one small flag, or dropped entirely ────────────────────────────
+//
+// ORDER_COLS selects `placed_by_id` / `placed_by` so the KITCHEN can tell a guest's own order from
+// one a waiter punched (see the note beside ORDER_COLS). Neither column has any business in a
+// browser: `placed_by` is a person's name, and both together are ~77 bytes on every order of every
+// board read, forever, to answer a yes/no question.
+//
+// So a route calls this before answering. `keepGuestFlag` adds `guest: 1` — and ONLY on a guest's
+// order, so a floor full of waiter-punched tickets pays nothing at all — and every caller drops the
+// raw pair. The kitchen board grows by about eleven bytes on the rows that need it; the waiter
+// tablet's payload is byte-for-byte what it was.
+export function stripPlacedBy<T extends Record<string, unknown>>(rows: T[], keepGuestFlag = false): T[] {
+  return (rows || []).map((r) => {
+    const { placed_by_id, placed_by, ...rest } = r as Record<string, unknown>;
+    const guest = !placed_by_id && !placed_by;
+    return (keepGuestFlag && guest ? { ...rest, guest: 1 } : rest) as T;
+  });
 }

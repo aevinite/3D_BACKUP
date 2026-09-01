@@ -21,7 +21,13 @@
 //   node scripts/verify-write-paths.mjs
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-const env = Object.fromEntries(readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8").split("\n").filter(l => l.includes("=") && !l.trim().startsWith("#")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
+import { claimedTables, ownerOf } from "./sweep/fixtureTables.mjs";
+// THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
+// /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
+// sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
+// folder asserts against whatever stack THAT copy is pointed at, which may be the other backup stack
+// entirely. A check that tests something other than what you asked for is worse than no check.
+const env = Object.fromEntries(readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n").filter(l => l.includes("=") && !l.trim().startsWith("#")).map(l => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }));
 if (new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0] !== "wnsfcizclkbobwzcxqsf") { console.error("REFUSING: not the backup DB"); process.exit(1); }
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 let ok = true; const chk = (n, p, d = "") => { console.log((p ? "  ✅ " : "  ❌ ") + n + (d ? " — " + d : "")); if (!p) ok = false; };
@@ -57,6 +63,18 @@ for (const m of ((await sb.from("table_merges").select("parent_table,child_table
 // party of its own (mig 299), and `cleanup` only ever held the sessions `mk()` made. So every run
 // leaked exactly one open session, and after enough runs the restaurant had all 30 tables "occupied"
 // and this file failed with `table null` — which is how it went red again the day it went green.
+// ANOTHER GUARD'S TABLE IS BUSY, EVEN WHEN IT IS EMPTY (sweep #7 / T28, 2026-08-27).
+//
+// This picker walks UP from 5 through the whole floor and takes the first table with no open
+// session. On a floor where 5..26 are in use that is table 27 — and 27/28 are
+// verify-void-on-joined-party's reserved pair, the party whose food must survive a void. Two guards
+// on the same table is the failure sweep #6 fixed twice, and it is worse than a flake because it
+// looks exactly like a real fault in the product and only happens when the two runs overlap. I saw
+// verify:void-party go red inside a full lane and green twice on its own this run.
+//
+// scripts/sweep/fixtureTables.mjs is the one place that says which table belongs to which guard.
+// Consulting it costs nothing and is what every other dynamic picker already does.
+for (const t of claimedTables()) busy.add(String(t));
 const used = new Set();
 const freeTable = (n) => {
   for (let t = 5; t <= st.table_count; t++) {
@@ -66,11 +84,19 @@ const freeTable = (n) => {
   // NEVER return null quietly. A null table turns every assertion below into nonsense
   // ("both simultaneous orders landed at table null — 0/2") and blames the product for a floor
   // that is simply full. Say what is actually wrong, and say what to do about it.
-  throw new Error(
-    `verify-write-paths: no free table on this restaurant — all ${st.table_count} are occupied or caught in a live merge.\n` +
+// A FULL FLOOR IS "COULD NOT RUN", NOT "RAN AND FOUND A FAULT" — SO IT IS EXIT 2 (item 23,
+// 2026-08-29). This repo's most useful convention is that 1 means a fault and 2 means the check
+// never happened; verify:guards-alive enforces it for a stopped server, and four entries came
+// back 2 in this sweep with not one of them being a fault. A busy floor is exactly that case:
+// nothing about the product is wrong, there is simply nowhere to seat a test party. Exiting 1
+// made it read as a red in every summary, which is how a suite trains people to scroll past it.
+  console.error(
+    `verify-write-paths: no free table on this restaurant — all ${st.table_count} are occupied, caught in a live merge,\n` +
+    `  or claimed by another guard (${claimedTables().filter((t) => /^\d+$/.test(t) && Number(t) <= st.table_count).map((t) => `${t}→${ownerOf(t)}`).join(", ") || "none on this floor"}).\n` +
     `  This is the DEV database's state, not a product fault. Close the stale parties (an OPEN session\n` +
     `  with no live orders on it is a state no screen can show — owner, 2026-08-01) and run again.`
   );
+  process.exit(2);
 };
 const cleanup = [];
 
@@ -113,7 +139,20 @@ const cleanup = [];
   const before = (await sb.from("realtime_events").select("id").order("id", { ascending: false }).limit(1)).data[0].id;
   const m = await sb.rpc("lfh_staff_merge_tables", { p_session: psess, p_to: child, p_rid: rid });
   chk(`3664 merging ${parent} into ${child} actually happened`, !m.error && m.data && m.data.ok === true, m.error ? m.error.message.slice(0, 60) : JSON.stringify(m.data).slice(0, 70));
-  const crumbs = (await sb.from("realtime_events").select("topic,kind,table_number").gt("id", before).limit(30)).data || [];
+  // OURS, NOT EVERYBODY'S (item 23, 2026-08-29). This used to read EVERY breadcrumb written after
+  // `before` — on a shared dev database that is every other session's traffic too, and a neighbour's
+  // perfectly legitimate whole-restaurant crumb (a `menu` change, an `audit` row) has no
+  // table_number by design. So this reported "an unscopable crumb is present" about somebody else's
+  // work and blamed the merge. Caught by running the floor guards two at a time on purpose: beside
+  // verify:lifecycle, this line failed; alone, it passes.
+  //
+  // A merge's own crumbs all carry an entity_id — the two sessions, and the orders on them. Filter
+  // by those and the check keeps every tooth it had: if a merge ever DOES raise an unscopable
+  // crumb, that crumb is about our session and it is still caught.
+  const ourOrders = (await sb.from("orders").select("id").in("session_id", [psess, ...cleanup.slice(-1)]).limit(50)).data || [];
+  const ourIds = new Set([psess, ...cleanup.slice(-2), ...ourOrders.map((o) => o.id)].filter(Boolean));
+  const allCrumbs = (await sb.from("realtime_events").select("topic,kind,table_number,entity_id").gt("id", before).limit(200)).data || [];
+  const crumbs = allCrumbs.filter((c) => ourIds.has(c.entity_id));
   // MEASURED, and it is a PASS with NO fix needed. A merge raises 16 breadcrumbs and every one of
   // them is table-scoped: 5 × session[parent], 4 × session[child], 2 × order, 2 × order_item.
   // So both tiles already refetch, targeted. I briefly added a dedicated 'merge' emitter and it was
@@ -172,7 +211,27 @@ const cleanup = [];
   const st2 = (await sb.from("orders_daily_agg_state").select("rolled_through").maybeSingle()).data;
   chk("3819 the rollup is exactly where its own state marker says", newest <= st2.rolled_through,
       `newest day ${newest}, rolled_through ${st2.rolled_through}, today(IST) ${todayIst} (a 2-day lag is by design)`);
-  chk("3819 the 2-day lag is the designed one, not drift", lag <= 3, `${lag} day(s) behind today`);
+  // MEASURE THE ROLLUP, NOT THE TRADE (sweep #7 / T28, 2026-08-27). This used to compare TODAY
+  // against the newest day that HAS A ROW — so two quiet days with no sales read as "the rollup has
+  // drifted 4 days". Measured on the dev stack: newest row 2026-08-23, rolled_through 2026-08-25,
+  // and ZERO orders exist on the 24th or the 25th. The rollup was exactly where it should be; the
+  // restaurant was simply shut. A guard that calls a quiet Tuesday a data fault is one nobody
+  // believes the next time it is right.
+  const rollLag = Math.round((Date.parse(todayIst) - Date.parse(st2.rolled_through)) / 86400e3);
+  // NEVER AHEAD is the half that would be a real money fault: lfh_refresh_orders_daily_agg sets
+  // v_target = today(IST) - 2, "keep 2 live days on top", precisely so the rollup never claims a day
+  // the live tail is still adding to. A marker inside that window means a day is counted twice.
+  chk("3819 the rollup never claims a day the live tail still owns", rollLag >= 2,
+      `rolled_through ${st2.rolled_through} vs today(IST) ${todayIst} — ${rollLag} day(s) back (2 is the design)`);
+  // BEHIND is not a fault by itself, and 3 was the wrong number. Nothing in lib/ or app/ calls the
+  // refresh on a timer — it moves when the work moves — so a dev stack nobody opens Reports on
+  // drifts a day at a time while being perfectly correct. Measured 2026-08-28: rolled_through
+  // 2026-08-25, i.e. 3 back, with ZERO orders on the 24th, 25th, 26th or 27th. A week is where it
+  // stops being "quiet" and starts being "nothing is refreshing this".
+  chk("3819 the rollup is being refreshed at all", rollLag <= 7,
+      `rolled_through ${st2.rolled_through} is ${rollLag} day(s) behind today(IST) ${todayIst}` +
+      (lag > rollLag ? ` — newest day WITH SALES is ${newest} (${lag} back), which is quiet days, not drift` : "") +
+      (rollLag > 7 ? " — open the owner's Reports once, or check what is meant to advance it" : ""));
 }
 
 // ── cleanup: CLOSE every session this test opened, AND TAKE ITS TICKETS OFF THE BOARD ──────────

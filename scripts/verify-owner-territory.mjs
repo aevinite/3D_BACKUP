@@ -58,8 +58,20 @@ if (/qRid && ids\.includes\(qRid\)/.test(m)) ok("Menu: ?rid is honoured only for
 else bad("Menu: ?rid is no longer checked against the owner's own restaurants");
 if (/couldntRead|couldNotRead/.test(m) && /\.error/.test(m)) ok("Menu: a failed read has its own state, separate from \"switched off\"");
 else bad("Menu: a failed read is indistinguishable from a switched-off section again");
-if (/isn't switched on for your restaurant/.test(mT) && /please reload the page|please try again/i.test(mT)) ok("Menu: two different reasons say two different things");
-else bad("Menu: the two reasons have collapsed back into one message");
+// ── THIS RULE CHANGED ON HIS WORD (owner, 2026-09-01) ─────────────────────────────────────────
+// It used to require the sentence "isn't switched on for your restaurant" to still be on the page.
+// He has since asked for the opposite: *"it will not even show that option… it will not only show
+// 'unable to access', that there is a feature which contains inventory."* That is R36 — a section
+// he has not been given is not named to him — so the switched-off path is a REDIRECT now, on all
+// six owner screens (T14, 2026-08-31 and 2026-09-01).
+// What this rule was actually protecting is untouched and still checked: a failed READ must never
+// be dressed as a switched-off feature (T13, 2026-08-17). So the test is now "the two reasons still
+// have two different answers" — one is a sentence you can retry, the other is a redirect — rather
+// than "the two reasons still have two different sentences". A guard that keeps asserting a retired
+// rule is a guard people learn to ignore.
+if (/please reload the page|please try again/i.test(mT) && /redirect\("\/owner"\)/.test(m) && !/isn't switched on for your restaurant/.test(mT))
+  ok("Menu: a failed read still says \"try again\", while a switched-off section is a redirect, not a sentence naming it");
+else bad("Menu: the two reasons have collapsed back into one answer (or the withheld section is being named to the owner again — R36)");
 if ((m.match(/sb\.from\("restaurants"\)/g) || []).length <= 2) ok("Menu: the restaurants table is read once per caller branch");
 else bad("Menu: the restaurants table is read more than once per render again");
 if (/adm-page-h/.test(m) && !/adm-page-title/.test(m)) ok("Menu: the empty-state heading uses a class the stylesheet defines");

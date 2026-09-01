@@ -20,11 +20,53 @@ export type HelperOs = "mac" | "windows" | "linux";
 
 export type HelperScriptArgs = {
   origin: string;      // the site the helper talks to, e.g. https://www.aevinite.shop
-  code: string;        // the machine's printing-only token (shown once, at install)
+  /** NO LONGER USED and deliberately kept out of the file (mig 368, owner 2026-08-27: "there
+   *  wouldn't be one key for all restaurants… or maybe a pairing code or whatever" → "zero typing
+   *  one, yeah"). The helper holds no secret now: it pairs itself and writes its own token to its
+   *  own disk, which is what makes ONE file work for every restaurant. */
+  code?: string;
   label?: string;      // what the person called this computer, for the log only
 };
 
-const safe = (s: string) => String(s || "").replace(/["`$\\]/g, "").slice(0, 200);
+// ── THE ONE PIECE WINDOWS CANNOT DO BY ITSELF ────────────────────────────────────────────────
+// Windows has no built-in way to print a PDF silently to a NAMED printer. macOS and Linux have `lp`;
+// Windows has nothing, which is why PetPooja reaches for QZ Tray and everyone else ships an
+// installer. So the helper fetches ONE portable, open-source executable — 20 MB, no installer, no
+// registry — and it fetches it ITSELF, once, so the person downloads nothing by hand.
+//
+// PINNED AND CHECKED, both on purpose: a floating "latest" URL is a program that changes underneath
+// a restaurant without anybody deciding to, and a download with no checksum is a program you did not
+// choose. Both values were verified by fetching the file on 2026-08-27.
+const SUMATRA = {
+  version: "3.6.1",
+  url: "https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-64.zip",
+  sha256: "98b33a518d42986856d225064b0cd2d3643ecf78cbf84ab873d26cc51877a544",
+  exe: "SumatraPDF-3.6.1-64.exe",
+};
+
+// ── A VALUE PASTED INTO A GENERATED FILE MUST NOT BE ABLE TO ADD A LINE TO IT ────────────────
+// (T25 round 2, item 27, 2026-08-31.) Both values here are typed by a person: `label` is the name
+// the admin gives the computer on /aevinite/printing, and `origin` is built from the request's host.
+// They are pasted into a shell script, a .bat file and a comment line.
+//
+// The old rule stripped `"`, a backtick, `$` and `\` — everything that could END a quoted string or
+// start a substitution — and that part was right. It did NOT strip NEWLINES, and a comment line only
+// lasts until one. MEASURED by generating the real file with the computer named
+// `Front desk PC\nsay 'this line was added by the computer name'\n# `:
+//
+//     1| #!/bin/zsh
+//     2| # Aevidine print helper — Front desk PC
+//     3| say 'this line was added by the computer name'      ← a real line, from a NAME
+//
+// …identically on all three machines. So line breaks are folded to a space, and the batch/shell
+// punctuation that means "and then do this" (`% ^ & | < > ;`) goes with them: none of it belongs in
+// a hostname or in what somebody calls their front-desk PC, and `%` in particular is how a .bat file
+// expands a variable. The 200-character ceiling stays.
+const safe = (s: string) =>
+  String(s || "")
+    .replace(/[\r\n\u2028\u2029]+/g, " ")     // a name can never start a new LINE of the script
+    .replace(/["`$\\%^&|<>;]/g, "")
+    .slice(0, 200);
 
 // ── macOS ────────────────────────────────────────────────────────────────────────────────────
 // Printer discovery is `lpstat -e` (queue names) plus, for each, the DEFAULT page size out of
@@ -38,19 +80,63 @@ const mac = (a: HelperScriptArgs) => `#!/bin/zsh
 # restaurant's own address book tells it to.
 
 SITE="${safe(a.origin)}"
-CODE="${safe(a.code)}"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 WORK="$HOME/Library/Caches/aevidine-print"
+HOME_DIR="$HOME/.aevidine-print"
+TOKEN_FILE="$HOME_DIR/token"
+LOCK="$HOME_DIR/running.pid"
+PLIST="$HOME/Library/LaunchAgents/com.aevidine.print.plist"
 LOG="$WORK/helper.log"
-mkdir -p "$WORK"
+mkdir -p "$WORK" "$HOME_DIR"
+chmod 700 "$HOME_DIR"
+
+# ── ONE AT A TIME ────────────────────────────────────────────────────────────────────────────
+# From today this file is ALSO started automatically at login (the LaunchAgent below), so somebody
+# double-clicking it while the automatic one is already running would put two helpers on one token.
+# Nothing would print twice — the claim is atomic — but they would fight for every job and the log
+# would be unreadable. So a second copy says so and steps aside.
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  echo ""
+  echo "  The Aevidine print helper is ALREADY RUNNING on this computer."
+  echo "  Nothing to do — you can close this window."
+  echo ""
+  sleep 6
+  exit 0
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT INT TERM
 
 if [ ! -x "$CHROME" ]; then
   echo "Google Chrome is not installed — install it, then start this again." | tee -a "$LOG"
+  sleep 8
   exit 1
 fi
 
+# ── WHAT THIS WINDOW SHOWS ───────────────────────────────────────────────────────────────────
+# Owner, 2026-08-27: "show me the interface of helper, like how it will be once linked". This IS the
+# interface — a Terminal window is what a .command file opens, so it is made to read like a status
+# screen rather than a wall of shell output. Every line a person needs is here and nothing else.
+banner() {
+  # Plain "clear" rather than an ANSI escape sequence: an octal escape is illegal inside the
+  # TypeScript template literal this script is generated from, and clear is on every Mac anyway.
+  clear 2>/dev/null || true
+  echo ""
+  echo "  ┌──────────────────────────────────────────────┐"
+  echo "  │   Aevidine  ·  print helper                  │"
+  echo "  └──────────────────────────────────────────────┘"
+  echo ""
+  echo "    Site       $SITE"
+  echo "    Computer   $(scutil --get ComputerName 2>/dev/null || hostname)"
+  echo "    Printers   $1"
+  echo ""
+}
+
 # This machine, so the app can tell one computer from another and warn if one code is copied onto two.
 FP="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/{print $4}')"
+# THE MACHINE'S OWN NAME. Nobody is asked to type one any more (owner, 2026-08-27: "what the fuck is
+# a computer name"). scutil gives the friendly name a person recognises — "Rishi's MacBook Pro" —
+# and hostname is the fallback.
+HOST="$(scutil --get ComputerName 2>/dev/null || hostname)"
 
 # Every printer this Mac has, with the paper it is set to (in millimetres, read from the queue's own
 # driver file). This is what fills the dropdowns in the app, so nobody types a printer name.
@@ -82,7 +168,91 @@ printers_json() {
 }
 
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$LOG"; }
-say "helper started, talking to $SITE"
+line() { echo "    $1"; say "$1"; }
+
+PLIST_NAMES="$(printers_json | sed 's/[{}"]//g; s/name://g; s/,desc:[^,]*//g; s/,paper:[^}]*//g' | tr -d '[]' | sed 's/,/, /g')"
+banner "\${PLIST_NAMES:-none found}"
+
+# ── START IT AGAIN BY ITSELF, EVERY TIME (owner, 2026-08-27: "at the night they will shut it down,
+#    and at the morning it will auto start itself?") ──────────────────────────────────────────────
+# A LaunchAgent, not a Login Item, and for two reasons that both matter to a restaurant:
+#   · Login Items were an INSTRUCTION a person had to follow, so they were skipped — and a skipped
+#     step means the shop opens, nothing prints, and nobody knows why.
+#   · KeepAlive restarts it if it ever dies mid-service. A Login Item does not.
+# Written every run and it is idempotent: if the file is already right, nothing happens.
+install_autostart() {
+  local me="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  mkdir -p "$(dirname "$PLIST")"
+  cat > "$PLIST" <<PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.aevidine.print</string>
+  <key>ProgramArguments</key><array><string>/bin/zsh</string><string>$me</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>$WORK/launchd.log</string>
+</dict></plist>
+PLISTEOF
+  launchctl unload "$PLIST" >/dev/null 2>&1
+  launchctl load "$PLIST" >/dev/null 2>&1
+}
+
+# ── PAIRING: the helper links ITSELF, and nobody types anything (mig 368) ─────────────────────
+# This file holds NO secret, which is what lets ONE file work for every restaurant. On its first run
+# it describes itself, opens the browser on THIS machine, and waits for a person to press Allow. The
+# token it gets back is written here and used for ever after.
+CODE=""
+[ -f "$TOKEN_FILE" ] && CODE="$(cat "$TOKEN_FILE" 2>/dev/null)"
+
+if [ -z "$CODE" ]; then
+  line "This computer is not linked yet. Asking the site for a link…"
+  START="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/start" -H "content-type: application/json" \\
+    -d "{\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"mac\\",\\"printers\\":$(printers_json)}")"
+  PC="$(echo "$START" | sed -n 's/.*"code":"\\([^"]*\\)".*/\\1/p')"
+  PS="$(echo "$START" | sed -n 's/.*"secret":"\\([^"]*\\)".*/\\1/p')"
+  PU="$(echo "$START" | sed -n 's/.*"pairUrl":"\\([^"]*\\)".*/\\1/p')"
+  if [ -z "$PC" ] || [ -z "$PS" ]; then
+    line "Could not reach $SITE. Check this computer is online, then start this again."
+    sleep 12; exit 1
+  fi
+  echo ""
+  line "Your browser is opening. In that page, press  ►  ALLOW"
+  line "If it did not open, go to:  $PU"
+  echo ""
+  open "$PU" >/dev/null 2>&1
+  # Ten minutes, the life of a pairing. Asking every 3s is 200 requests at worst and it means the
+  # window says "linked" the moment the person's finger leaves the button.
+  n=0
+  while [ $n -lt 200 ]; do
+    POLL="$(curl -s -m 15 -X POST "$SITE/api/print-agent/pair/poll" -H "content-type: application/json" \\
+      -d "{\\"code\\":\\"$PC\\",\\"secret\\":\\"$PS\\"}")"
+    case "$POLL" in
+      *'"state":"linked"'*)
+        CODE="$(echo "$POLL" | sed -n 's/.*"token":"\\([^"]*\\)".*/\\1/p')"
+        WHERE="$(echo "$POLL" | sed -n 's/.*"restaurant":"\\([^"]*\\)".*/\\1/p')"
+        NAME="$(echo "$POLL" | sed -n 's/.*"name":"\\([^"]*\\)".*/\\1/p')"
+        printf '%s' "$CODE" > "$TOKEN_FILE"
+        chmod 600 "$TOKEN_FILE"
+        install_autostart
+        banner "\${PLIST_NAMES:-none found}"
+        line "✅  Linked to $WHERE"
+        line "    This computer is now \\"$NAME\\""
+        line "    It will start again by itself every time this Mac is switched on."
+        echo ""
+        break ;;
+      *'"state":"expired"'*)
+        line "That link expired before anybody pressed Allow. Start this file again."
+        sleep 12; exit 1 ;;
+    esac
+    n=$((n+1)); sleep 3
+  done
+  if [ -z "$CODE" ]; then line "Nobody pressed Allow. Start this file again when you are ready."; sleep 12; exit 1; fi
+else
+  install_autostart
+  line "Linked. Waiting for something to print — you can minimise this window."
+  echo ""
+fi
 
 # ── the loop: ask, print, report. Nothing clever, on purpose. ────────────────────────────────
 while :; do
@@ -91,7 +261,8 @@ while :; do
     -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
   case "$HELLO" in
     *'"ok":true'*) : ;;
-    *) say "the app did not accept this computer's code — check it was copied whole. $HELLO"; sleep 30; continue ;;
+    *) line "This computer's link was removed on the site. Delete $TOKEN_FILE and start this file again to link it afresh."
+       sleep 30; continue ;;
   esac
 
   # Keep asking while there is work; the sleep below is only for when the basket is empty.
@@ -166,18 +337,43 @@ done
 // ── Windows ──────────────────────────────────────────────────────────────────────────────────
 // Windows has no built-in silent PDF print, so the helper uses SumatraPDF portable (one 6 MB file,
 // no installer, no admin rights) and says so plainly if it is missing rather than failing quietly.
-// Printer discovery is PowerShell's Get-Printer; the paper size is left to the app's address book,
-// because Windows reports it inconsistently across drivers and a WRONG size is worse than none.
+// Printer discovery is PowerShell's Get-Printer — and since 2026-08-27 it also reports the PAPER
+// SIZE, which it had never done. Get-PrintConfiguration gives PaperSize by name and
+// Get-PrinterProperty gives the media dimensions in hundredths of a millimetre; both are read inside
+// a try/catch per printer, because a driver that refuses one must not cost the whole list. A size the
+// machine could not work out is simply absent — a WRONG size is worse than none, and that has not
+// changed.
+//
+// Owner, 2026-08-27, on why this mattered: he was typing paper sizes by hand for every Windows
+// printer, and the paper size is the setting that decides whether a slip prints sideways or at half
+// size. Asking a restaurant to know its own millimetres was always the wrong question.
 const windows = (a: HelperScriptArgs) => `@echo off
 REM Aevidine print helper${a.label ? " — " + safe(a.label) : ""}
 REM Leave this running. It has no window of its own and prints nothing by itself.
 setlocal enabledelayedexpansion
 
 set "SITE=${safe(a.origin)}"
-set "CODE=${safe(a.code)}"
 set "WORK=%LOCALAPPDATA%\\AevidinePrintHelper"
 set "LOG=%WORK%\\helper.log"
+set "TOKENFILE=%WORK%\\token.txt"
+set "LOCKFILE=%WORK%\\running.lock"
 if not exist "%WORK%" mkdir "%WORK%"
+
+REM ── ONE AT A TIME ─────────────────────────────────────────────────────────────────────────
+REM This file is started automatically at login from today, so a person double-clicking it while the
+REM automatic copy is already running would put two helpers on one token. Nothing prints twice (the
+REM claim is atomic) but they would fight for every job. A crude lock is enough: the file is held
+REM open for the life of the process, so a leftover lock from a crash is not mistaken for a live one.
+2>nul (
+  >>"%LOCKFILE%" (call )
+) || (
+  echo.
+  echo   The Aevidine print helper is ALREADY RUNNING on this computer.
+  echo   Nothing to do - you can close this window.
+  echo.
+  timeout /t 6 /nobreak >nul
+  exit /b 0
+)
 
 set "CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"
 if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"
@@ -187,26 +383,143 @@ if not exist "%CHROME%" (
   pause & exit /b 1
 )
 
-REM The one extra piece Windows needs: a silent PDF printer. Put SumatraPDF.exe next to this file.
+REM ── THE ONE PIECE WINDOWS CANNOT DO BY ITSELF, and the helper now sorts it out ─────────────
+REM Windows has no built-in way to print a PDF silently to a NAMED printer. It used to say "put
+REM SumatraPDF.exe next to this file" - which quietly made the client download a program by hand, so
+REM the whole "nothing is downloaded" promise was only ever true on a Mac (owner, 2026-08-27).
+REM
+REM Now the helper fetches it: ONE portable open-source executable, no installer, no registry. The URL
+REM and the SHA-256 are PINNED - a floating "latest" is a program that changes under a restaurant
+REM without anybody deciding to, and a download with no checksum is a program you did not choose. If
+REM the checksum does not match, it is deleted and nothing prints: a mismatch is never ignored.
 set "SUMATRA=%~dp0SumatraPDF.exe"
-if not exist "%SUMATRA%" set "SUMATRA=%WORK%\\SumatraPDF.exe"
+if not exist "%SUMATRA%" set "SUMATRA=%WORK%\\${SUMATRA.exe}"
 if not exist "%SUMATRA%" (
-  echo Put SumatraPDF.exe next to this file - Windows cannot print a PDF silently without it.>>"%LOG%"
-  echo Put SumatraPDF.exe next to this file, then start this again.
-  pause & exit /b 1
+  echo   Fetching the small PDF printer Windows needs ^(once^)...
+  echo %DATE% %TIME%  fetching SumatraPDF ${SUMATRA.version}>>"%LOG%"
+  curl -sL -m 300 -o "%WORK%\\sp.zip" "${SUMATRA.url}" 2>nul
+  set "GOT="
+  for /f "skip=1 tokens=*" %%h in ('certutil -hashfile "%WORK%\\sp.zip" SHA256 2^>nul') do if not defined GOT set "GOT=%%h"
+  set "GOT=%GOT: =%"
+  if /I not "%GOT%"=="${SUMATRA.sha256}" (
+    del /q "%WORK%\\sp.zip" 2>nul
+    echo   The PDF printer did not download correctly. Check the internet and start this again.
+    echo %DATE% %TIME%  SumatraPDF checksum mismatch - refused>>"%LOG%"
+    timeout /t 12 /nobreak >nul & exit /b 1
+  )
+  powershell -NoProfile -Command "Expand-Archive -LiteralPath '%WORK%\\sp.zip' -DestinationPath '%WORK%' -Force" >nul 2>&1
+  del /q "%WORK%\\sp.zip" 2>nul
+  set "SUMATRA=%WORK%\\${SUMATRA.exe}"
+)
+if not exist "%SUMATRA%" (
+  echo   Could not set up the PDF printer. Start this file again.
+  echo %DATE% %TIME%  SumatraPDF missing after fetch>>"%LOG%"
+  timeout /t 12 /nobreak >nul & exit /b 1
 )
 
 REM This machine, so the app can tell one computer from another.
 for /f "skip=1 tokens=*" %%i in ('wmic csproduct get uuid 2^>nul') do if not defined FP set "FP=%%i"
 set "FP=%FP: =%"
+REM ...and its own NAME. Nobody types one any more (owner, 2026-08-27: "what the fuck is a computer
+REM name") - Windows has known it since it was set up.
+set "HOST=%COMPUTERNAME%"
+
+REM ── EVERY PRINTER, WITH ITS PAPER SIZE ────────────────────────────────────────────────────
+REM Written to a file by PowerShell and posted with --data-binary, because a JSON blob on a cmd.exe
+REM command line is a quoting minefield. The paper size is read per printer inside a try/catch: a
+REM driver that refuses to answer must cost that one printer's size, never the whole list.
+set "PSPRINTERS=$out=@(); foreach($pr in Get-Printer){ $o=@{ name=$pr.Name; desc=$pr.DriverName }; try{ $c=Get-PrintConfiguration -PrinterName $pr.Name -ErrorAction Stop; $w=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeWidth' -ErrorAction Stop).Value; $h=(Get-PrinterProperty -PrinterName $pr.Name -PropertyName 'PaperSizeHeight' -ErrorAction Stop).Value; if($w -gt 0 -and $h -gt 0){ $o.paper=@{ name=[string]$c.PaperSize; wMm=[math]::Round($w/100,1); hMm=[math]::Round($h/100,1) } } }catch{}; $out+=$o }"
+
+REM ── PAIRING: this file holds NO secret, so ONE file works for every restaurant (mig 368) ────
+REM On its first run it describes itself, opens the browser on THIS machine, and waits for somebody
+REM to press Allow. The token it gets back is written here and used for ever after.
+set "CODE="
+if exist "%TOKENFILE%" set /p CODE=<"%TOKENFILE%"
+if not "%CODE%"=="" goto haveCode
+
+cls
+echo.
+echo   ================================================
+echo      Aevidine  .  print helper
+echo   ================================================
+echo.
+echo     Site       %SITE%
+echo     Computer   %HOST%
+echo.
+echo     This computer is not linked yet. Asking the site for a link...
+powershell -NoProfile -Command "%PSPRINTERS%; @{ fingerprint='%FP%'; hostname='%HOST%'; os='windows'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\start.json" 2>nul
+curl -s -m 25 -X POST "%SITE%/api/print-agent/pair/start" -H "content-type: application/json" --data-binary "@%WORK%\\start.json" > "%WORK%\\start.out" 2>nul
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\start.out' -Raw | ConvertFrom-Json).code"\`) do set "PC=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\start.out' -Raw | ConvertFrom-Json).secret"\`) do set "PS=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\start.out' -Raw | ConvertFrom-Json).pairUrl"\`) do set "PU=%%i"
+if "%PC%"=="" (
+  echo     Could not reach %SITE%. Check this computer is online, then start this again.
+  echo %DATE% %TIME%  pair/start failed>>"%LOG%"
+  timeout /t 12 /nobreak >nul & exit /b 1
+)
+echo.
+echo     Your browser is opening.  In that page, press   ALLOW
+echo     If it did not open, go to:  %PU%
+echo.
+start "" "%PU%"
+set /a PN=0
+:pairwait
+powershell -NoProfile -Command "@{ code='%PC%'; secret='%PS%' } | ConvertTo-Json -Compress" > "%WORK%\\poll.json" 2>nul
+curl -s -m 15 -X POST "%SITE%/api/print-agent/pair/poll" -H "content-type: application/json" --data-binary "@%WORK%\\poll.json" > "%WORK%\\poll.out" 2>nul
+findstr /C:"\\"state\\":\\"linked\\"" "%WORK%\\poll.out" >nul
+if not errorlevel 1 goto paired
+findstr /C:"\\"state\\":\\"expired\\"" "%WORK%\\poll.out" >nul
+if not errorlevel 1 (
+  echo     That link expired before anybody pressed Allow. Start this file again.
+  timeout /t 12 /nobreak >nul & exit /b 1
+)
+set /a PN+=1
+if %PN% GEQ 200 (
+  echo     Nobody pressed Allow. Start this file again when you are ready.
+  timeout /t 12 /nobreak >nul & exit /b 1
+)
+timeout /t 3 /nobreak >nul
+goto pairwait
+
+:paired
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\poll.out' -Raw | ConvertFrom-Json).token"\`) do set "CODE=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\poll.out' -Raw | ConvertFrom-Json).restaurant"\`) do set "WHERE=%%i"
+for /f "usebackq tokens=*" %%i in (\`powershell -NoProfile -Command "(Get-Content '%WORK%\\poll.out' -Raw | ConvertFrom-Json).name"\`) do set "MYNAME=%%i"
+>"%TOKENFILE%" echo %CODE%
+del /q "%WORK%\\poll.out" "%WORK%\\start.out" "%WORK%\\poll.json" "%WORK%\\start.json" 2>nul
+echo     [ OK ]  Linked to %WHERE%
+echo             This computer is now "%MYNAME%"
+echo.
+
+:haveCode
+REM ── START IT AGAIN BY ITSELF, EVERY TIME (owner, 2026-08-27: "at the night they will shut it
+REM    down, and at the morning it will auto start itself?") ─────────────────────────────────────
+REM A shortcut in the Startup folder, written BY the helper. It used to be an instruction a person had
+REM to follow ("Win+R, shell:startup, drag a shortcut in") - so it was skipped, and a skipped step
+REM means the shop opens, nothing prints, and nobody knows why. Rewritten every run; harmless if it
+REM is already there. WindowStyle 7 = minimised, so it never sits in front of anybody's work.
+powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Startup')+'\\Aevidine Print Helper.lnk'); $s.TargetPath='%~f0'; $s.WorkingDirectory='%~dp0'; $s.WindowStyle=7; $s.Description='Keeps this computer printing for Aevidine'; $s.Save()" >nul 2>&1
+
+cls
+echo.
+echo   ================================================
+echo      Aevidine  .  print helper
+echo   ================================================
+echo.
+echo     Site       %SITE%
+echo     Computer   %HOST%
+echo.
+echo     Linked. Waiting for something to print.
+echo     You can minimise this window - it must stay running.
+echo.
 
 :loop
 REM Every printer this PC has, as JSON, so the app's dropdowns are built from the machine's own words.
-powershell -NoProfile -Command "$p=Get-Printer | ForEach-Object { @{ name=$_.Name; desc=$_.DriverName } }; @{ fingerprint='%FP%'; printers=$p } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\hello.json" 2>nul
+powershell -NoProfile -Command "%PSPRINTERS%; @{ fingerprint='%FP%'; printers=$out } | ConvertTo-Json -Compress -Depth 4" > "%WORK%\\hello.json" 2>nul
 curl -s -m 20 -X POST "%SITE%/api/print-agent/hello" -H "x-lfh-agent: %CODE%" -H "content-type: application/json" --data-binary "@%WORK%\\hello.json" > "%WORK%\\hello.out" 2>nul
 findstr /C:"\\"ok\\":true" "%WORK%\\hello.out" >nul
 if errorlevel 1 (
-  echo %DATE% %TIME%  the app did not accept this computer's code - check it was copied whole.>>"%LOG%"
+  echo %DATE% %TIME%  this computer's link was removed on the site - delete %TOKENFILE% and start again>>"%LOG%"
   timeout /t 30 /nobreak >nul
   goto loop
 )
@@ -248,8 +561,17 @@ goto work
 const linux = (a: HelperScriptArgs) => `#!/bin/sh
 # Aevidine print helper${a.label ? " — " + safe(a.label) : ""}
 SITE="${safe(a.origin)}"
-CODE="${safe(a.code)}"
 WORK="$HOME/.cache/aevidine-print"; LOG="$WORK/helper.log"; mkdir -p "$WORK"
+HOME_DIR="$HOME/.aevidine-print"; TOKEN_FILE="$HOME_DIR/token"; LOCK="$HOME_DIR/running.pid"
+AUTOSTART="$HOME/.config/autostart/aevidine-print.desktop"
+mkdir -p "$HOME_DIR"; chmod 700 "$HOME_DIR"
+
+# One at a time — this file starts itself at login now, so a hand-started second copy steps aside.
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  echo "The Aevidine print helper is already running on this computer."; sleep 5; exit 0
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT INT TERM
 
 CHROME=""
 for c in google-chrome google-chrome-stable chromium chromium-browser; do
@@ -258,6 +580,7 @@ done
 [ -z "$CHROME" ] && { echo "Install Chromium:  sudo apt install -y chromium-browser" | tee -a "$LOG"; exit 1; }
 
 FP="$(cat /etc/machine-id 2>/dev/null || hostname)"
+HOST="$(hostname)"
 
 printers_json() {
   first=1; out="["
@@ -271,12 +594,59 @@ printers_json() {
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$LOG"; }
 say "helper started, talking to $SITE"
 
+# Starts itself at login, written by the helper rather than asked of a person (owner, 2026-08-27).
+install_autostart() {
+  me="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  mkdir -p "$(dirname "$AUTOSTART")"
+  printf '%s\\n' "[Desktop Entry]" "Type=Application" "Name=Aevidine print helper" \\
+    "Exec=/bin/sh \\"$me\\"" "X-GNOME-Autostart-enabled=true" "NoDisplay=true" > "$AUTOSTART"
+}
+
+# ── PAIRING: no secret in this file, so ONE file works everywhere (mig 368) ───────────────────
+CODE=""
+[ -f "$TOKEN_FILE" ] && CODE="$(cat "$TOKEN_FILE" 2>/dev/null)"
+if [ -z "$CODE" ]; then
+  echo "This computer is not linked yet. Asking the site for a link..."
+  START="$(curl -s -m 25 -X POST "$SITE/api/print-agent/pair/start" -H "content-type: application/json" \\
+    -d "{\\"fingerprint\\":\\"$FP\\",\\"hostname\\":\\"$HOST\\",\\"os\\":\\"linux\\",\\"printers\\":$(printers_json)}")"
+  PC="$(echo "$START" | sed -n 's/.*"code":"\\([^"]*\\)".*/\\1/p')"
+  PS="$(echo "$START" | sed -n 's/.*"secret":"\\([^"]*\\)".*/\\1/p')"
+  PU="$(echo "$START" | sed -n 's/.*"pairUrl":"\\([^"]*\\)".*/\\1/p')"
+  [ -z "$PC" ] && { echo "Could not reach $SITE. Check this computer is online."; sleep 10; exit 1; }
+  echo ""
+  echo "  Open this page on THIS computer and press ALLOW:"
+  echo "  $PU"
+  echo ""
+  # A Pi with no desktop has no browser to open — the URL above is then the whole instruction, which
+  # is why it is printed whether or not xdg-open works.
+  command -v xdg-open >/dev/null 2>&1 && xdg-open "$PU" >/dev/null 2>&1
+  n=0
+  while [ $n -lt 200 ]; do
+    POLL="$(curl -s -m 15 -X POST "$SITE/api/print-agent/pair/poll" -H "content-type: application/json" \\
+      -d "{\\"code\\":\\"$PC\\",\\"secret\\":\\"$PS\\"}")"
+    case "$POLL" in
+      *'"state":"linked"'*)
+        CODE="$(echo "$POLL" | sed -n 's/.*"token":"\\([^"]*\\)".*/\\1/p')"
+        printf '%s' "$CODE" > "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"
+        install_autostart
+        echo "Linked. It will start again by itself at every login."
+        break ;;
+      *'"state":"expired"'*) echo "That link expired. Start this file again."; sleep 10; exit 1 ;;
+    esac
+    n=$((n+1)); sleep 3
+  done
+  [ -z "$CODE" ] && { echo "Nobody pressed Allow. Start this file again."; sleep 10; exit 1; }
+else
+  install_autostart
+  echo "Linked. Waiting for something to print."
+fi
+
 while :; do
   HELLO="$(curl -s -m 20 -X POST "$SITE/api/print-agent/hello" -H "x-lfh-agent: $CODE" \\
     -H "content-type: application/json" -d "{\\"fingerprint\\":\\"$FP\\",\\"printers\\":$(printers_json)}")"
   case "$HELLO" in
     *'"ok":true'*) : ;;
-    *) say "the app did not accept this computer's code. $HELLO"; sleep 30; continue ;;
+    *) say "this computer's link was removed on the site — delete $TOKEN_FILE and start again."; sleep 30; continue ;;
   esac
   while :; do
     JOB="$(curl -s -m 20 "$SITE/api/print-agent/next" -H "x-lfh-agent: $CODE")"
@@ -338,8 +708,12 @@ export const HELPER_FILENAME: Record<HelperOs, string> = {
   windows: "print-helper.bat",
   linux: "print-helper.sh",
 };
+/** WHAT THE HELPER DOES ABOUT STARTING ITSELF — a statement now, not an instruction (owner,
+ *  2026-08-27: "at the night they will shut it down, and at the morning it will auto start itself?").
+ *  It used to be a step a person had to follow, so it was skipped — and a skipped step means the shop
+ *  opens, nothing prints, and nobody knows why. The helper writes its own auto-start on every run. */
 export const HELPER_AUTOSTART: Record<HelperOs, string> = {
-  mac: "System Settings → General → Login Items & Extensions → Open at Login → + → pick print-helper.command",
-  windows: "Win + R → shell:startup → drag a shortcut to print-helper.bat into that folder",
-  linux: "cp the .desktop entry into ~/.config/autostart (the guide has it)",
+  mac: "Nothing to do — it installs its own start-up item the first time it runs, and restarts itself if it ever stops.",
+  windows: "Nothing to do — it puts its own shortcut in the Startup folder the first time it runs.",
+  linux: "Nothing to do — it writes its own ~/.config/autostart entry the first time it runs.",
 };

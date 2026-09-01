@@ -128,20 +128,39 @@ export default function SessionOwner() {
   // The first person in the queue — that's who this prompt is about.
   const head = pending[0];
 
+  // A TAP HERE MUST NEVER VANISH IN SILENCE (sweep 7 T3).
+  //
+  // All three handlers used to throw the answer away. None of these calls throws — a timeout comes
+  // back as { ok:false, reason:"timed_out" } — so when one failed, the prompt simply stayed with
+  // the same person still first in the queue, and the head tapped "Let them in" again, and again,
+  // with nothing on screen ever explaining why their friend was not getting in.
+  //
+  // The prompt STAYING is the right behaviour (the person really is still waiting); the sentence is
+  // what was missing.
+  const say = (msg: string) =>
+    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: msg, kicker: "table", variant: "error" } }));
+  // The one refusal these three can actually give is not_owner (mig 015) — this device is no longer
+  // the head, because staff moved the table or the meal ended. That is not "try again in a moment",
+  // so it gets its own sentence; the poll straight after will take the prompt away by itself.
+  const whyFailed = (r: { ok?: boolean; reason?: string } | undefined, tryAgain: string): string =>
+    r?.reason === "not_owner" ? "You're not the host of this table any more." : tryAgain;
+
   // This runs when the host taps "Let them in": approve this person, then re-poll.
   const doApprove = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await approveMember(token, head.id, head.name);
+    const r = await approveMember(token, head.id, head.name);
     setBusy(false);
+    if (r?.ok !== true) say(whyFailed(r, "We couldn't let them in just now — please try again in a moment."));
     poll();
   };
   // This runs when the host taps "Not them": remove this person, then re-poll.
   const doDeny = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await removeMember(token, head.id);
+    const r = await removeMember(token, head.id);
     setBusy(false);
+    if (r?.ok !== true) say(whyFailed(r, "We couldn't turn that request down just now — please try again in a moment."));
     poll();
   };
   // This runs when the host taps "Let anyone join automatically": flip the
@@ -149,9 +168,17 @@ export default function SessionOwner() {
   const doAuto = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await setAutoApprove(token, true);
-    for (const m of pending) await approveMember(token, m.id, m.name); // clear the current queue too
+    const r = await setAutoApprove(token, true);
+    // Clear the queue that is already waiting, remembering whether every one of them got in — a
+    // PARTIAL result is exactly the case the head must not be left to guess about.
+    let allIn = true;
+    for (const m of pending) {
+      const a = await approveMember(token, m.id, m.name);
+      if (a?.ok !== true) allIn = false;
+    }
     setBusy(false);
+    if (r?.ok !== true) say(whyFailed(r, "We couldn't switch that on just now — please try again in a moment."));
+    else if (!allIn) say("Anyone new can join now, but we couldn't let everyone already waiting in — please try those again.");
     poll();
   };
 

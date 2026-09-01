@@ -34,6 +34,12 @@ const effective = (s: Row) => ({
   banquet: s?.banquet_allowed === true && (s?.banquet_owner_control !== true || s?.banquet_enabled !== false),
   // kitchen route: autoPrintKot = auto_print_kot && auto_print_kot_allowed.
   auto_print_kot: s?.auto_print_kot_allowed === true && s?.auto_print_kot === true,
+  // …AND THE TWO HALVES, SEPARATELY (2026-08-26). The screen has to be able to say WHICH of the two
+  // is missing: the owner sent a screenshot of the grant reading ON while the effective answer read
+  // OFF, which is what happens when only the entitlement was set — and with one combined number
+  // there was no way for the card to explain it, so it looked like a switch arguing with itself.
+  auto_print_kot_allowed: s?.auto_print_kot_allowed === true,
+  auto_print_kot_on: s?.auto_print_kot === true,
   // (No `platform` key any more — the parcel/delivery board became ONE PERMANENT feature on
   //  2026-08-03, so there is nothing to quick-switch. A quick toggle for something that cannot
   //  be off is the dead switch this screen's rebuild exists to remove. The delivery CHANNELS

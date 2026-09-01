@@ -46,7 +46,21 @@ if (!ledgers.length) { console.error("\n❌ verify:ledger-index — no ledger fi
 
 const cellsOf = (line) => line.split(/(?<!\\)\|/);
 const FIRST_COL_ID = /^\|\s*(P\d{5})\s*\|/;
-const isPhaseRow = (line) => cellsOf(line).length === 7;
+// A PHASE ROW IS DECIDED BY ITS OWN TABLE'S HEADER, NOT BY A FIXED WIDTH (sweep #7 / T28,
+// 2026-08-29).
+//
+// This required exactly five cells, because every ledger up to sweep #6 wrote
+// `| id | check | how to verify | result | note |`. T16's sweep-#7 block declares a FOUR-column
+// table in its own header — `| id | check | result | note |` — and drops the how-to-verify column.
+// That is a legitimate choice and its 500 rows read perfectly well; this guard simply could not see
+// them, so it reported all 500 as "an id in a first column that no phase row carries" and went red
+// on clean main. Worse than the noise: 500 ids were invisible to the REGISTRY, which is the one job
+// this file has — a future sweep could have handed T16's numbers to somebody else.
+//
+// So: a row is a phase row if it starts with an id and has AT LEAST four cells, and the id, result
+// and note are read by position from the header that introduced it. Assert the property (an id, a
+// verdict, a place to say why), never one particular column count.
+const isPhaseRow = (line) => /^\|\s*P\d{5}\s*\|/.test(line) && cellsOf(line).length >= 6;
 
 // ── 1 · one ID, one check, forever ─────────────────────────────────────────────────────────────
 const owner = new Map();      // id -> file, for PHASE rows only

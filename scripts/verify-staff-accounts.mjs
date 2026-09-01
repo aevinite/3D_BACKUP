@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -26,6 +27,9 @@ const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 const argBase = (() => { const i = process.argv.indexOf("--base"); return i > -1 ? process.argv[i + 1] : null; })();
 const BASE = argBase || process.env.LFH_BASE || "http://localhost:4000";
 const ADMIN = env.ADMIN_PASSWORD;
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the staff-accounts walk");
 if (!ADMIN) throw new Error("ADMIN_PASSWORD missing from .env.local");
 // The admin gate stores sha256hex(password) in the lfh_staff_auth cookie — compute
 // it directly so we never have to round-trip (or print) the password.
@@ -181,13 +185,48 @@ async function createUser(name, role, { phone, password, tables } = {}) {
   check("oplog readable by admin", oplog.status === 200 && Array.isArray(rows));
   check("staff profile_setup logged", rows.some((r) => r.action === "profile_setup" && /zztest Alpha/.test(r.actor || "")));
   check("staff profile_update logged", rows.some((r) => r.action === "profile_update"));
-  // admin EDIT of a user must NOT be logged
-  const before = rows.length;
+  // ── admin EDIT of a name/phone must NOT be logged ─────────────────────────
+  //
+  // THIS CHECK USED TO ASSERT THE WRONG THING, AND WENT PERMANENTLY RED (T13, sweep #7, 2026-08-27).
+  //
+  // It read every row `/api/admin/oplog` returned and failed if ANY of their action names contained
+  // the letters "edit":  `.filter((r) => /edit/i.test(r.action)).length === 0`.
+  //
+  // Three things were wrong with that, and together they made the guard unfailable-for-the-right-
+  // reason and unpassable-for-the-wrong-one:
+  //   1. `/api/admin/oplog` with no `restaurant_id` answers the last 30 rows for the WHOLE PLATFORM,
+  //      newest first. So the assertion was "nothing anywhere on Aevidine has recently done anything
+  //      with 'edit' in its name" — never a statement about the request this guard just made.
+  //   2. The product legitimately grew three such actions after this check was written:
+  //      `staff_profile_edit` and `staff_job_edit` (app/api/owner/staff/route.ts) and
+  //      `rate_limit_edit` (app/api/admin/rate-limits/route.ts). Every one of them is a write the
+  //      owner is SUPPOSED to see in Audit & logs.
+  //   3. With several sweep lanes sharing one dev database, one of those rows landing in the last 30
+  //      is close to certain — so this went red on clean code, which is how a suite stops being read.
+  //   The `before` and `newRows` locals it computed were never used, which is the tell: the row-count
+  //   comparison it was reaching for was written and then not finished.
+  //
+  // The claim it MEANS to make is narrow: the admin's own name/phone edit of ONE login writes no log
+  // row about that login. `app/api/admin/users` bears this out by reading — it calls `logAction` for
+  // create, set_job, set_permissions, reset_password, enable, disable, set_role, set_access, set_pin
+  // and delete, and for nothing else. So assert exactly that: take the ids on record before, make the
+  // edit, and fail only if a NEW row names THIS person. Platform noise cannot move it either way.
+  const idsBefore = new Set(rows.map((r) => r.id));
   await api("/api/admin/users", { method: "PATCH", cookie: adminCookie, body: { id: beta.id, action: "edit", phone: "5550001111" } });
   const oplog2 = await api("/api/admin/oplog", { cookie: adminCookie });
-  const newRows = (oplog2.json?.actions || []).filter((r) => r.action === "profile_update" || r.action === "profile_setup");
-  const adminEditRows = (oplog2.json?.actions || []).filter((r) => /edit/i.test(r.action));
-  check("admin name/phone edit is NOT logged", adminEditRows.length === 0);
+  const namesThisPerson = (r) =>
+    new RegExp(`${beta.id}|${beta.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i")
+      .test(`${r.detail || ""} ${r.actor || ""}`);
+  const all2 = oplog2.json?.actions || [];
+  // PROVE THE DETECTOR CAN SEE ONE FIRST. A "no row names this person" check goes green just as
+  // happily when the matcher is broken, which is the failure the old version of this check died of.
+  // Creating this person IS logged (`user_create`, detail `created kitchen "zztest Beta" · id …`), so
+  // the same matcher must find that row. If it cannot, the absence below means nothing.
+  check("…and the check can see a row that DOES name them (its own detector, proved)",
+    all2.some((r) => r.action === "user_create" && namesThisPerson(r)));
+  const aboutBeta = all2.filter((r) => !idsBefore.has(r.id) && namesThisPerson(r));
+  check("admin name/phone edit writes no log row about that person", aboutBeta.length === 0,
+    aboutBeta.map((r) => `${r.action}: ${r.detail}`).join(" · "));
 
   // ── 10. CLEANUP ───────────────────────────────────────────────────────────
   let del = 0;

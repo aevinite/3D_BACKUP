@@ -218,7 +218,18 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    never overflows the small tile at ~390px (the number stays in the tile's title attr). */
 /* Row 1: the number + the seat count (2/4 when guests are seated) — manager's ft-top. */
 .t-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
-.tnum { font-size: clamp(9px, 21cqw, 30px); font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text));
+/* ── NOTHING ON A TILE IS SMALLER THAN 9px, AND THE WORDS ARE 10px (owner, 2026-08-30) ────────
+   Measured on five devices during the fourth 500: on a 10-inch tablet held UPRIGHT at his own
+   6-per-row setting the tiles come out 116px, and thirty-four strings on them rendered at exactly
+   9px — "Free", "＋", "Take order". That is not a bug in the scaling, it is the clamp FLOOR being
+   reached; the middle term (cqw) had already shrunk as far as it was allowed to.
+   He asked for it raised. The floors move, the cqw scaling and the maxima do not, so nothing
+   changes on a tile that was already big enough — this only bites on the smallest tiles, which is
+   exactly where it was unreadable. Every rule here already carries `overflow: hidden` with an
+   ellipsis, so a long name shortens rather than spilling; verified at 360, 430, 834, 1024 and
+   1194px wide, in both skins, before this shipped.
+   The two halves of the served line now share ONE floor (10px), which they did not before. */
+.tnum { font-size: clamp(10px, 21cqw, 30px); font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text));
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A FREE table's accent is a deliberately dull brown, so mixing 78% of it left the number and
    the word "Free" barely 7% of a shade off the background — legible up close, not across a
@@ -227,8 +238,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    on white. Measured by the walkthrough's contrast check in BOTH skins. */
 .t-free .tnum, .t-free .t-linenum, .t-req .tnum, .t-req .t-linenum,
 .t-done .tnum, .t-done .t-linenum { color: color-mix(in srgb, var(--c) 30%, var(--text)); }
-.tnum-sm { font-size: clamp(8.5px, 17cqw, 25px); }   /* two digits */
-.tnum-xs { font-size: clamp(7.5px, 12cqw, 18px); }   /* a NAME rather than a number */
+.tnum-sm { font-size: clamp(9.5px, 17cqw, 25px); }   /* two digits */
+.tnum-xs { font-size: clamp(9px, 12cqw, 18px); }     /* a NAME rather than a number — 9px is the
+     floor for everything on a tile now; a long name ellipsises sooner, which beats 7.5px type */
 .tseats { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
   font-size: clamp(9.5px, 8.3cqw, 12px); font-weight: 800; font-variant-numeric: tabular-nums;
   /* 40%, not 55%: on the DIMMEST state colours this figure came back at 4.23:1 on the dark board
@@ -242,7 +254,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-linenum { font-size: clamp(10px, 8.6cqw, 13px); line-height: 1.15; font-weight: 800;
   color: color-mix(in srgb, var(--c) 72%, var(--text)); font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.t-line-plain .t-linenum { font-size: clamp(9px, 8.4cqw, 12px); color: color-mix(in srgb, var(--c) 70%, var(--text)); }
+.t-line-plain .t-linenum { font-size: clamp(10px, 8.4cqw, 12px); color: color-mix(in srgb, var(--c) 70%, var(--text)); }
 /* Row 4: the actions — ＋ Take order is the biggest control; ✓ / 💳 are square icons. */
 /* THE ROW HAS TO BE TAPPABLE, AND THE SQUARE ALREADY HAS THE ROOM (T14 tablet sweep, 2026-08-05).
    Measured on the owner's own 12-per-row floor at 1194×834: the tile is 89px square, and inside its
@@ -258,7 +270,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   min-height: clamp(26px, 44cqw, 40px); }
 .t-take { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800;
-  font-size: clamp(9px, 8.6cqw, 13.5px); padding: clamp(4px, 4.5cqw, 9px) 4px;
+  font-size: clamp(10px, 8.6cqw, 13.5px); padding: clamp(4px, 4.5cqw, 9px) 4px;
   border-radius: clamp(6px, 6cqw, 10px); white-space: nowrap; overflow: hidden; }
 .t-take:hover { filter: brightness(1.05); }
 .t-take i { font-style: normal; }
@@ -277,8 +289,23 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    the owner's A35 the tile's content box is 82px — just over the 80px line, so the word stayed —
    while the button itself was squeezed to 58px for 65px of content, and `.t-take` is
    overflow:hidden, so the label rendered as "＋ Take orde" on exactly the tiles that need action
-   (T12 phone sweep, 2026-08-05). Whenever the row is SHARED, drop the word earlier. */
-@container (max-width: 150px) {
+   (T12 phone sweep, 2026-08-05). Whenever the row is SHARED, drop the word earlier.
+   ── 96px, NOT 150px (owner, 2026-08-28, shown the measurements) ─────────────────────────────
+   150 was calibrated when a PHONE drew 3–4 tiles per row and a shared row really did leave the
+   button 58px. Since 2026-08-15 a phone draws 2, so the same tile hands the button ~112px — and
+   the threshold went on firing on every device he owns. Two tiles of the SAME size sat side by
+   side, the quiet one reading "＋ Take order" and the busy one reading a bare "＋", which is the
+   opposite of the rule R31 sets out: the words while they FIT, a bare ＋ when they do not.
+   MEASURED with the rule disabled, at every density, on a tile that also carries a ✓ — button
+   width against what the label needs:
+     4/row 221px · 5/row 161 · 6/row 128 · 7/row 108 · 8/row 92 · 9/row 79  → 0px clipped
+     10/row 68px → 3px clipped · 11/row 60 → 12px · 12/row 52 → 19px
+   So the words genuinely fit down to 9 per row (content 103.8px) and start being cut at 10
+   (content 93.8px). 96px sits between the two measurements: the label comes back on his desktop
+   at 7, his iPad at 6 and his phone at 2, and a bare ＋ still takes over on a dense floor, where
+   R31 asks for it. Do NOT raise this number back without re-measuring — and do not add a third,
+   worded face (R31 refuses one). */
+@container (max-width: 96px) {
   .t-act:has(.tacc) .t-take-t,
   .t-act:has(.tpay) .t-take-t,
   .t-act:has(.tclose) .t-take-t { display: none; }
@@ -329,7 +356,7 @@ html[data-theme="light"] .tclose { color: #b91c1c; }
    a colour that appears nowhere else in the panel, and 1.89:1 on the light pane. One token, used in
    both places, so the same fact is the same colour wherever a waiter meets it. */
 .tmerge { display: inline-block; font-size: 11px; font-weight: 800; color: var(--merge-ink); }
-.tile .tmerge { flex: 1 1 auto; min-width: 0; font-size: clamp(8px, 7.4cqw, 11px); line-height: 1.2;
+.tile .tmerge { flex: 1 1 auto; min-width: 0; font-size: clamp(9px, 7.4cqw, 11px); line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--merge-ink); }
 /* THE TABLE NUMBER WINS THE ROW (owner, 2026-08-15). On a merged tile the "⇄T11 T12" chip takes
    the seat count's place beside the number, and BOTH could shrink — so the number, which is the
@@ -383,7 +410,7 @@ html[data-theme="light"] .tile .tmerge { color: var(--merge-ink); }
 /* Badge row (calls / requests / joiners) — its own row under the number, manager style,
    so a busy table's badges never cover the seat count. */
 .tbadges { display: flex; gap: clamp(2px, 2.6cqw, 4px); flex-wrap: wrap; margin-top: clamp(3px, 3.4cqw, 5px); }
-.tbadges em { font-style: normal; font-size: clamp(8.5px, 7.6cqw, 12px); background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 999px; padding: clamp(1px, 1.4cqw, 2px) clamp(4px, 5cqw, 7px); line-height: 1.4; }
+.tbadges em { font-style: normal; font-size: clamp(9px, 7.6cqw, 12px); background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 999px; padding: clamp(1px, 1.4cqw, 2px) clamp(4px, 5cqw, 7px); line-height: 1.4; }
 .b-call { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.12); } }
 .t-free { --c: #6b6253; opacity: 0.7; }
@@ -653,11 +680,21 @@ html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb,
 .ist.ready { background: rgba(236,72,153,.20); color: #f9a8d4; border-color: rgba(236,72,153,.5); }
 .ist.served { background: rgba(34,197,94,.18); color: #4ade80; }
 /* Explicit, obvious SERVE button on a cooking/ready dish (green = go) */
+/* 40px tall like everything else on a dish row (T7 sweep #7, fifth pass, 2026-08-30). It was 29px —
+   the SMALLEST control on the row and the one that does the actual job: − and + are 40px squares,
+   🗑 is a 40px square (item 25, an hour earlier), and the button that marks a dish delivered was
+   two-thirds their height. It keeps its pill shape (it has a word in it, not a glyph); only the
+   height is pinned, so nothing else on the row moves. */
 .ist-serve { background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800;
-  font-size: 12px; padding: 7px 13px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+  font-size: 12px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 13px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap; }
 .ist-serve:hover { filter: brightness(1.07); }
 /* Per-dish delete (🗑) on a dish row — small, muted until hovered. */
-.idel { background: transparent; border: 0; color: var(--muted); font-size: 21px; padding: 8px 11px; border-radius: 9px; cursor: pointer; line-height: 1; }
+/* 40×40 like the − / + beside it (owner, 2026-08-30). It was 37px — the smallest control on the
+   panel and the only DESTRUCTIVE one, sitting between two 40px buttons that merely change a
+   number. A delete should never be the easiest thing on a row to hit by accident, but it should
+   not be the hardest to hit on purpose either. Same square as .qbtn, nothing else changed. */
+.idel { background: transparent; border: 0; color: var(--muted); font-size: 21px; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 9px; cursor: pointer; line-height: 1; }
 .idel:hover { background: rgba(239,68,68,0.15); color: #fca5a5; }
 /* Per-order staff controls (allergen chips + delete order). */
 .ordctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px dashed #2a2114; }
@@ -685,7 +722,12 @@ html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb,
 .serve-all-btn { display: block; width: 100%; margin: 0 0 10px; background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800; font-size: 14px; text-align: center; padding: 11px; border: 0; border-radius: 11px; cursor: pointer; }
 .serve-all-btn:hover { filter: brightness(1.06); }
 .oallergy { margin: 0 12px; margin-top: 10px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff8a8a; font-weight: 800; font-size: 12px; padding: 7px 10px; border-radius: 9px; letter-spacing: .03em; }
-.accept { margin: 10px 12px; display: block; width: calc(100% - 24px); background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
+/* min-height: 44px like every other button on this panel (T7 sweep #7, 2026-08-30). Line 960 says
+   `.panel .btn, .floor-nav button { min-height: 44px }` — and ✓ Accept is not a `.btn`, it is its
+   own class, so it never got the rule and rendered 38px: the one control on the table detail below
+   the size the rest of the panel holds itself to. It is also the control a waiter hits most, with
+   a tray in the other hand. Six pixels taller, nothing else changed. */
+.accept { margin: 10px 12px; display: block; width: calc(100% - 24px); min-height: 44px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
 
 /* actions row: Take order (primary) + Move table / Move an order (secondary) */
 /* The action cluster is PINNED below the scrollable detail body. It needs its own
@@ -1186,7 +1228,15 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; the panel floats */
 #panel:has(.detail-pop) { position: fixed; inset: 0; z-index: 48; display: flex; align-items: center; justify-content: center;
   margin: 0; border: 0; border-radius: 0; min-height: 0; max-height: none; overflow: hidden; padding: 16px;
-  background: rgba(4,8,18,.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  /* var(--scrim), not a value of its own (T7, 2026-08-22). The token was added on 2026-08-22 so
+     "every full-screen overlay dims the page by the same amount", and this backdrop — the one a
+     waiter sees more than any other — was one of the two places it never reached. Measured on the
+     running panel: this read rgba(4,8,18,.5) while the ten sheets built in app.js read
+     rgba(4,8,18,.66) and the confirm read the token's rgba(3,7,16,.60), so opening a table and
+     then its Discount and then its confirm dimmed the floor by THREE different amounts in one
+     action. The blur stays its own value on purpose — a heavier blur is how a stacked layer says
+     it is on top. */
+  background: var(--scrim); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 /* THE ORDERS SCROLL, THE ACTIONS DO NOT (fixed 2026-08-04). The card used to scroll as ONE
    block, so on a 360px phone a busy table's ~1900px of dish rows pushed ＋ Take order, 💳 Mark
    bill paid and ✕ Close table about 1100px below the fold — and the automated suite never
@@ -1342,3 +1392,115 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
 .tile.t-tag > *:not(.t-ribbon) { position: relative; z-index: 1; }
 
 /* (Parcel left the tablet on 2026-08-03 — its cart styles went with it.) */
+
+/* ── A MONEY FIGURE A FINGER TYPES GETS NO SPINNER ARROWS (owner picked, 2026-08-28) ──────────
+   The discount screen's three boxes — Discount %, Discount amount (₹) and the gold "They pay" —
+   are `type="number"`, so the browser draws its own ▲▼ pair inside each one. Measured on the A35
+   at dpr 3: each arrow is about 7px tall inside a 41px box, and in "They pay" they sit inside a
+   7ch field, so they eat room from the one figure a manager reads and retypes ("make it 800").
+   Nobody can hit a 7px target with a thumb, and nobody needs to: every one of these boxes is
+   typed, and each has its own live-linked partner plus the quick-percentage chips beside it.
+   `type="number"` STAYS — it is what gives a phone the numeric keypad, and `inputmode="decimal"`
+   rides on it. Only the arrows go. Written here rather than inline because a spinner is a
+   pseudo-element and an inline style cannot reach one. */
+/* The TIP's three boxes are the same kind of figure typed by the same thumb (owner, 2026-08-28),
+   so they get the same treatment — otherwise the tip screen would grow back the 7px arrows the
+   discount screen just had removed, on the same panel, two taps apart. */
+.pay-tip-pct::-webkit-outer-spin-button, .pay-tip-pct::-webkit-inner-spin-button,
+.pay-tip-amt::-webkit-outer-spin-button, .pay-tip-amt::-webkit-inner-spin-button,
+.pay-tip-paid::-webkit-outer-spin-button, .pay-tip-paid::-webkit-inner-spin-button,
+.disc-pct-input::-webkit-outer-spin-button, .disc-pct-input::-webkit-inner-spin-button,
+.disc-amt-input::-webkit-outer-spin-button, .disc-amt-input::-webkit-inner-spin-button,
+.disc-pay-input::-webkit-outer-spin-button, .disc-pay-input::-webkit-inner-spin-button {
+  -webkit-appearance: none; appearance: none; margin: 0; }
+/* Firefox draws them from the input itself, not a pseudo-element. `textfield` keeps the numeric
+   keypad on mobile and drops only the arrows. */
+.disc-pct-input, .disc-amt-input, .disc-pay-input { -moz-appearance: textfield; appearance: textfield; }
+
+/* ── THE ONE SPLIT SCREEN (owner, 2026-08-28) ─────────────────────────────────────────────────
+   Splitting a bill lived on TWO screens with two layouts and two sets of abilities; this is the
+   single one that replaced them, reached from 🧾 KOT ▾ and from the small line at the bottom of
+   the payment sheet. It renders inside the table popup's own card (renderPickerShell), so it
+   inherits the card's scrolling body and its pinned ✕ — the rules below only lay out its rows.
+   Everything is sized for a thumb: no control here is under 44px. */
+.sb-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.sb-tabs .sb-tab { flex: 1 1 auto; min-width: 0; min-height: 44px; white-space: nowrap; }
+.sb-n { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; flex-wrap: wrap; }
+.sb-n .sb-nb { min-width: 44px; min-height: 44px; font-weight: 800; }
+.sb-n b { font-size: 17px; font-variant-numeric: tabular-nums; min-width: 1.5ch; text-align: center; }
+/* A dish row is a two-column button: the dish on the left, whose share it is on the right. */
+.sb-dish { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  width: 100%; margin: 0 0 4px; min-height: 44px; text-align: left; }
+.sb-dish span:last-child { flex: 0 0 auto; color: var(--gold-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+/* One PART. Grid so a method that needs more room (Other's note, Pay later's person) can take a
+   full-width row underneath without the amount box moving. */
+.sb-row { display: grid; grid-template-columns: auto 1fr auto 32px; gap: 8px; align-items: center;
+  margin: 0 0 8px; }
+.sb-row .sb-who { color: var(--muted); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.sb-row .sb-amt, .sb-row .sb-way, .sb-row .sb-note {
+  box-sizing: border-box; min-height: 44px; padding: 10px 12px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
+.sb-row .sb-amt { width: 100%; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sb-row .sb-amt[readonly] { background: var(--panel-2); color: var(--muted); }
+.sb-row .sb-way { font-weight: 600; }
+.sb-row .sb-note { grid-column: 1 / -1; width: 100%; }
+.sb-row .sb-who-btn { grid-column: 1 / -1; min-height: 44px; text-align: left; font-weight: 600; }
+.sb-row .sb-del { width: 32px; min-height: 44px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--muted); font-size: 13px; cursor: pointer; }
+.sb-row .sb-del:hover { border-color: var(--red); color: var(--red); }
+/* No spinner arrows on a money box a finger types — the same rule as the discount screen's three
+   boxes (owner picked, 2026-08-28). type=number stays, for the numeric keypad. */
+.sb-row .sb-amt::-webkit-outer-spin-button, .sb-row .sb-amt::-webkit-inner-spin-button {
+  -webkit-appearance: none; appearance: none; margin: 0; }
+.sb-row .sb-amt { -moz-appearance: textfield; appearance: textfield; }
+/* The running total. Its colour is set inline by the script (green when the parts add up, red when
+   they do not), so only the type is set here. */
+.sb-sum { margin: 10px 0 10px; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+/* A phone: the person label goes above its own row so the amount box keeps its width. */
+@media (max-width: 430px) {
+  .sb-row { grid-template-columns: 1fr auto 32px; }
+  .sb-row .sb-who { grid-column: 1 / -1; margin-bottom: -4px; }
+  .sb-tabs .sb-tab { flex: 1 1 45%; }
+}
+
+/* The payment sheet's small written line to the split screen (owner, 2026-08-28). Deliberately a
+   quiet line and not a tile: every tile above it answers "how did the money come in?", and
+   splitting is a different question. */
+.pay-splitline { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.pay-splitline .pay-split-open { display: block; width: 100%; min-height: 44px; padding: 10px 12px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--muted); font: inherit;
+  font-size: 12.5px; text-align: center; cursor: pointer; }
+.pay-splitline .pay-split-open b { color: var(--gold-ink); font-weight: 800; }
+.pay-splitline .pay-split-open:hover { background: color-mix(in srgb, var(--gold) 10%, transparent); }
+/* "By kitchen ticket" on a bill that IS one ticket: dimmed, still tappable, and it says why when
+   tapped (T7, 2026-08-29). Never `disabled` — a disabled tab on a touch panel swallows the tap,
+   which is the fault #payBill was fixed for. */
+.sb-tabs .sb-tab-off { opacity: .55; }
+/* The count chips, the manager's geometry to the pixel (owner, 2026-08-29). Wraps rather than
+   scrolling sideways: a row that scrolls sideways is a row whose last option is invisible. */
+.sb-nrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.sb-nrow .sb-nb { min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* ── "THERE IS MORE THIS WAY" (owner, 2026-08-28) ────────────────────────────────────────────
+   The manager panel has had this since 2026-08-13 and this one never did, though it has more
+   sideways rows than the manager does: at 390px the next category was sliced off with a hard
+   straight edge, which reads as a rendering fault rather than an invitation to swipe.
+   public/panels/swipehint.js measures the row and sets data-more="start|end|both"; everything
+   visible is here, so a row is opted in with one attribute in the markup and nothing else.
+   The fade is a mask, written UNPREFIXED on a single line — this build DROPS a hand-added
+   -webkit- twin and takes the property with it (the frosted-glass lesson). */
+[data-swipe-hint][data-more="end"] { mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 44px), transparent 100%); }
+[data-swipe-hint][data-more="start"] { mask-image: linear-gradient(90deg, transparent 0, #000 44px, #000 100%); }
+[data-swipe-hint][data-more="both"] { mask-image: linear-gradient(90deg, transparent 0, #000 44px, #000 calc(100% - 44px), transparent 100%); }
+/* The count chip — a SIBLING of the row (inside it, it would scroll away with the content), so
+   its parent is the positioning context; swipehint.js sets that when the parent is static.
+   Sized for a finger like everything else on this panel, not for a mouse. */
+.lfh-swipe-more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  z-index: 2; display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 6px 12px;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+  background: var(--panel); color: var(--muted); font: inherit; font-size: 12px; font-weight: 700;
+  white-space: nowrap; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28); }
+.lfh-swipe-more b { color: var(--text); font-variant-numeric: tabular-nums; }
+.lfh-swipe-more[hidden] { display: none; }
+/* The rail needs room for the chip to sit over, exactly as the manager's does. Keyed on the bare
+   presence of data-more, which the script sets only when the row can really scroll. */
+.om-nav[data-more] { margin-right: 84px; }

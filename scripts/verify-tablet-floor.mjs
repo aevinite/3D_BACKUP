@@ -30,10 +30,15 @@
 // session — never by deleting, which the issued-bill rule rightly refuses.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
+import { seatParty, retireTables, retireOnCrash } from "./sweep/fixture.mjs";
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const BASE = arg("--base", "http://localhost:4000").replace(/\/$/, "");
 const READ_ONLY = process.argv.includes("--read-only");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the waiter-floor walk");
 const SHOTS = arg("--shots", "");
 
 let failed = 0, passed = 0;
@@ -399,9 +404,27 @@ expect(await resetToFloor(), "back on the floor before the merged-tile check");
   }
 }
 
-expect(await resetToFloor(), "back on the floor before the popup checks");
 // ── 6 · the table popup: KOT operations on TOP, money + close at the bottom ───
-const busyT = await F.evaluate(() => {
+// IT SEATS ITS OWN TWO PARTIES (sweep #6 / T28, 2026-08-22). This used to take "the first tile that is
+// not free" and then demand the full table-operations row and the ‹ › stepper. Neither is a free gift:
+// the ops row needs an OPEN SESSION (a tile can be non-free with its session already closed), and the
+// stepper only appears when there are TWO busy tables to step between. So on a tidy floor with one
+// stale tile, three checks failed on behaviour that was exactly right — and on a messy floor they
+// passed for reasons that had nothing to do with this guard. Two fixture parties make both conditions
+// true on purpose, on tables nothing else uses, retired in a finally and on a crash.
+const FIXTURE_TABLES = ["9966", "9967"];
+retireOnCrash(FIXTURE_TABLES);
+const seatedTables = await seatParty(FIXTURE_TABLES, (m) => console.log(m));
+try {
+expect(await resetToFloor(), "back on the floor before the popup checks");
+// Wait for the floor to draw them ITSELF — never reload, which would detach the frame handle every
+// later check uses (and the panel updating itself is a property this file asserts elsewhere).
+for (let i = 0; i < 24 && seatedTables.length; i++) {
+  const there = await F.evaluate((t) => !!document.querySelector(`.tile[data-t="${t}"]:not(.t-free)`), seatedTables[0]).catch(() => false);
+  if (there) break;
+  await page.waitForTimeout(1000);
+}
+const busyT = seatedTables[0] || await F.evaluate(() => {
   const t = [...document.querySelectorAll(".tile")].find((x) => !/t-free/.test(x.className));
   return t && t.dataset.t;
 });
@@ -605,8 +628,32 @@ if (READ_ONLY) {
     await F.click("#quickOrderBtn");
     await F.waitForSelector(".om.lite", { timeout: 10000 });
     if (attempt === 1) expect((await F.textContent(".om.lite .om-head h2")).includes("Quick order"), "⚡ Quick order opens the dish browser with NO table chosen yet");
-    await F.click(".dish:not(.out)");
+    // A DISH THAT QUICK-ADDS, NOT JUST THE FIRST ONE (T7 sweep #7, 2026-08-22).
+    //
+    // `.dish:not(.out)` takes whatever the menu happens to put first, and a dish with size/extras
+    // does NOT go into the cart on a tap — it correctly opens the options popup, which is the
+    // panel's own documented rule ("a sized/extra dish can't be quick-added blindly"). On little
+    // French house the first dish IS the only one with options (Espresso, 3 groups), so the cart
+    // stayed empty, SEND stayed correctly `disabled`, and F.click("#sendOrder") below threw an
+    // uncaught 30s timeout — which killed the run at exactly this point. Everything after it never
+    // executed: the whole order → serve → pay → close loop, the touch-size pass, the final
+    // "no page errors anywhere" assertion, and this section's own sweepUp() cleanup.
+    //
+    // It reads as a product failure ("element is not enabled") and it is not one. So pick the dish
+    // the way a waiter picks one they can tap once: no option groups, no open price, not sold out.
+    const plainDish = await F.evaluate(() => {
+      const d = (state.data.dishes || []).find((x) => !(x.tags || []).includes("sold-out") && !x.open_price
+        && !(Array.isArray(x.options) && x.options.length));
+      return d ? d.id : null;
+    });
+    if (!plainDish) { soft("this restaurant's menu has no dish that quick-adds (every one has options or an open price)"); continue; }
+    await F.click(`.dish[data-dish="${plainDish}"]`);
     await page.waitForTimeout(400);
+    // …and PROVE it landed, instead of finding out thirty seconds later at a disabled button.
+    const inCart = await F.evaluate(() => (typeof state !== "undefined" ? state.cart.length : 0));
+    if (!inCart) { soft(`tapping the plain dish (${plainDish}) put nothing in the cart`); continue; }
+    // (T28 found this same fault independently on 2026-08-27 and wrote a tile-by-tile version;
+    // T7's landed on main first and asks the menu directly, which is simpler. Theirs kept.)
     // TWO LAYOUTS, AND ONLY A TOUCH DEVICE SEES THE SECOND ONE. On a touchscreen held sideways the
     // ⚡ Quick order screen is TWO PANES — dishes on the left, the order on the right — so the
     // bottom "View order" pill has nothing to do and the stylesheet hides it
@@ -783,6 +830,10 @@ if (READ_ONLY) {
 }
 
 expect(errors.length === 0, errors.length ? `page errors: ${errors.join(" | ")}` : "no page errors anywhere in the walk");
+
+} finally {
+  await retireTables(FIXTURE_TABLES, (m) => console.log(m));
+}
 
 await browser.close();
 console.log(failed ? `\n${failed} of ${passed + failed} checks FAILED — the waiter's floor is not right yet.` : `\nAll ${passed} checks passed — the waiter's floor looks and works the way it was asked for.`);

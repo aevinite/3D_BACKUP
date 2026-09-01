@@ -14,12 +14,22 @@
 // that second half is the "don't break other things" test.
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { dismissTicketsForSql } from "./sweep/tickets.mjs";
 import fs from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 // --base <url> so the same simulation can be pointed at a DEPLOYED site, not just the dev server
 // (owner, 2026-08-02: "diagnose everything that you have built, it is working fine or not").
 const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
 const B = ARG("--base", "http://localhost:4937");
-const env = fs.readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8");
+// THIS CHECKOUT'S OWN KEYS, NOT THE SHARED FOLDER'S (sweep #6 / T28, 2026-08-22). This read
+// /Users/aevinite/Documents/Projects/backup_Menu/.env.local by absolute path. Every parallel lane of a
+// sweep runs from its OWN worktree — that is the rule — so a guard that reaches back into the shared
+// folder asserts against whatever stack THAT copy is pointed at, which may be the other backup stack
+// entirely. A check that tests something other than what you asked for is worse than no check.
+const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(B, "the merged-party floor simulation");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 // The database follows the site: backup-2 runs its own Supabase project, so testing that URL against
 // backup-1's database would assert on rows the site never sees. --db picks the project ref.
@@ -28,6 +38,28 @@ const REF = ARG("--db", "wnsfcizclkbobwzcxqsf");
 const q = async (sql) => { const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, {
   method: "POST", headers: { Authorization: "Bearer " + TOK, "content-type": "application/json" }, body: JSON.stringify({ query: sql }) });
   const t = await r.text(); if (!r.ok) throw new Error(t.slice(0, 160)); return JSON.parse(t); };
+// ONE AT A TIME, LIKE THE PRINTING SWEEP (T28, 2026-08-30). This guard seats a four-table party and
+// then asserts, step by step, what the whole party's state should be. Two copies running at once —
+// which is what any whole-suite sweep does, and what four sweep terminals in one folder do all day —
+// re-seat each other's tables mid-walk, and the SECOND one reports the damage as a product fault:
+// "the party lost a member", "a table went backwards from preparing to received". I nearly filed
+// that as a serious floor bug. Refusing to start is the honest answer; exit 2 says "could not run",
+// never "found something".
+const LOCK = "/tmp/merged-floor.pid";
+try {
+  const alive = Number(fs.readFileSync(LOCK, "utf8"));
+  if (alive && alive !== process.pid) {
+    try { process.kill(alive, 0); }              // signal 0 = "does this process exist?"
+    catch { throw new Error("stale"); }
+    console.log(`\nAnother merged-floor run is already going (pid ${alive}). Two of them seat a party on the\nsame four tables and each reads the other's writes as the floor misbehaving. Waiting is right.`);
+    process.exit(2);
+  }
+} catch (e) { if (e && e.message && e.message.includes("already going")) throw e; }
+try { fs.writeFileSync(LOCK, String(process.pid)); } catch {}
+const dropLock = () => { try { if (Number(fs.readFileSync(LOCK, "utf8")) === process.pid) fs.unlinkSync(LOCK); } catch {} };
+process.on("exit", dropLock);
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { dropLock(); process.exit(130); });
+
 const PARTY = ["11", "12", "13", "14"], SOLO = ["21", "22", "23"];
 const list = (a) => a.map((x) => `'${x}'`).join(",");
 let fails = 0;
@@ -40,11 +72,34 @@ const snap = async () => {
   const by = {}; o.forEach((r) => { by[r.table_number] = `${r.status}/${r.payment_status || "pending"}`; });
   return { by, merges: m.map((x) => x.child_table), open: s.map((x) => x.table_number) };
 };
+// ── IT NEVER CLEANED UP AFTER ITSELF (sweep #6 / T28, 2026-08-22) ────────────────────────────────
+// This file cleared the slate BEFORE building its fixture and then simply exited. Its last step leaves
+// table 21 preparing and 22/23 received, and the party on 11-14 served-and-paid but still seated — so
+// SEVEN live tables sat on My Little French House's Tables floor after every run, plus a red "KOT #192
+// · T11) hasn't printed in the kitchen — is the kitchen screen open?" banner for each ticket the rush
+// queued. Measured and screenshotted at 1280x800 and 360x780 dpr3: the header read "7/30 OCCUPIED · 1
+// TO PAY · 3 NEEDS YOU" on a restaurant nobody was eating in, with five complaint banners above it.
+//
+// The SAME three statements now run at the end as well, and on a crash — a fixture that only gets
+// cleared on the way IN is one that is always left behind on the way out.
+const wipe = async (why) => {
+  try {
+    await q(`delete from table_merges where restaurant_id='${RID}' and child_table in (${list([...PARTY, ...SOLO])})`);
+    await q(`update orders set status='cancelled',archived=true,archived_at=now(),cancelled_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and not archived`);
+    await q(`update sessions set status='closed',closed_at=now(),deleted_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and status='open'`);
+    await dismissTicketsForSql(q, RID, [...PARTY, ...SOLO]);
+    const left = await q(`select count(*)::int n from orders where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and not archived and status<>'cancelled'`);
+    console.log(`· ${why}: tables ${[...PARTY, ...SOLO].join("/")} cleared — ${left[0].n} live order(s) left`);
+  } catch (e) { console.log(`· ${why}: could not clear the fixture — ${String(e.message).slice(0, 160)}`); }
+};
+// Whatever happens, the floor goes back to how we found it.
+for (const sig of ["uncaughtException", "unhandledRejection"]) {
+  process.on(sig, async (e) => { console.error(`\n${sig}:`, e && e.message ? e.message : e); await wipe("crash cleanup"); process.exit(1); });
+}
+
 // ── fixture
 const dish = (await q(`select id from menu_items where restaurant_id='${RID}' limit 1`))[0].id;
-await q(`delete from table_merges where restaurant_id='${RID}' and child_table in (${list([...PARTY, ...SOLO])})`);
-await q(`update orders set status='cancelled',archived=true,archived_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and not archived`);
-await q(`update sessions set status='closed',closed_at=now() where restaurant_id='${RID}' and table_number in (${list([...PARTY, ...SOLO])}) and status='open'`);
+await wipe("fresh slate");
 for (const t of [...PARTY, ...SOLO]) await q(`select lfh_staff_place_order('${t}','[{"id":"${dish}","qty":2}]'::jsonb,'{}',null,'${RID}',true)`);
 const sid = async (t) => (await q(`select id from sessions where restaurant_id='${RID}' and table_number='${t}' and status='open' order by created_at desc limit 1`))[0]?.id;
 for (const t of ["12", "13", "14"]) await q(`select lfh_staff_merge_tables('${await sid(t)}','11','${RID}')`);
@@ -83,18 +138,34 @@ const det = await fr.locator('[data-floating-table="13"]').evaluate((el) => ({
   title: (el.querySelector(".sx-party-title")?.textContent || "").trim(), kots: (el.innerText.match(/KOT #\d+/g) || []).length,
   unmerge: el.querySelectorAll(".sx-unmerge-row [data-unmerge]").length, loading: !!el.querySelector(".sx-loading") }));
 check("joined table's detail: party title, all 4 tickets, unmerge at bottom", det.title === "T11 + T12 + T13 + T14" && det.kots === 4 && det.unmerge === 1 && !det.loading, JSON.stringify(det));
+// WAIT FOR THE STATE, DON'T SLEEP AT IT (T28, 2026-08-30). The mark-paid step below already learned
+// this on 2026-08-17 — "a guard that flaps teaches people to re-run it until it is green, which is
+// the opposite of what it is for" — but the two steps above it kept a flat 8-second sleep. Accept-all
+// and serve-all each send ONE request per order, four of them across four tables, and on a busy dev
+// box that is easily longer than 8s. So this guard reported "the party lost a member" and "a table
+// went backwards from preparing to received" on three separate runs, blaming a different table each
+// time, and every one of them was the clock. Same assertions, polled.
+const settleTo = async (want, seconds = 30) => {
+  for (let i = 0; i < seconds; i++) {
+    const s2 = await snap();
+    if (PARTY.every((t) => s2.by[t] === want)) return s2;
+    await p.waitForTimeout(1000);
+  }
+  return await snap();
+};
+
 // accept all
 const acc = fr.locator("[data-accept-all]").first();
 check("accept-all counts the whole party", (await acc.count()) > 0 && /\(4\)/.test(await acc.innerText()), await acc.innerText().catch(() => "missing"));
-await acc.click({ force: true }); await p.waitForTimeout(8000);
-st = await snap();
+await acc.click({ force: true });
+st = await settleTo("preparing/pending");
 check("accept all → all 4 preparing", PARTY.every((t) => st.by[t] === "preparing/pending"), JSON.stringify(st.by));
 check("accept all → the 3 separate tables untouched", SOLO.every((t) => st.by[t] === "received/pending"), SOLO.map((t) => t + ":" + st.by[t]).join(" "));
 // serve all
 const sa = fr.locator("[data-serve-all-orders]").first();
 check("serve-all offered", (await sa.count()) > 0);
-await sa.click({ force: true }); await p.waitForTimeout(8000);
-st = await snap();
+await sa.click({ force: true });
+st = await settleTo("served/pending");
 check("serve all → all 4 served", PARTY.every((t) => st.by[t] === "served/pending"), JSON.stringify(st.by));
 check("serve all → separate tables still received", SOLO.every((t) => st.by[t] === "received/pending"));
 // mark paid
@@ -158,6 +229,7 @@ await a2.click({ force: true }); await p.waitForTimeout(7000);
 st = await snap();
 check("separate table accepted alone", st.by["21"] === "preparing/pending" && st.by["22"] === "received/pending" && st.by["23"] === "received/pending", SOLO.map((t) => t + ":" + st.by[t]).join(" "));
 console.log("\npage errors:", errs.length ? errs : "none");
-console.log(fails === 0 && errs.length === 0 ? "\n✅ ALL CHECKS PASSED" : `\n❌ ${fails} check(s) failed, ${errs.length} console error(s)`);
 await b.close();
+await wipe("teardown");
+console.log(fails === 0 && errs.length === 0 ? "\n✅ ALL CHECKS PASSED" : `\n❌ ${fails} check(s) failed, ${errs.length} console error(s)`);
 process.exit(fails === 0 && errs.length === 0 ? 0 : 1);

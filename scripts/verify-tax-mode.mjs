@@ -174,8 +174,18 @@ console.log("\n── 6. PUT FRENCH HOUSE BACK (a test that leaves state behind 
 console.log("\n── 7. NO EXISTING BILL MOVED — every real session, old formula vs new ──");
 {
   // The single most valuable check in this file. It re-derives every session's total both
-  // ways — the pre-269 rule (all of subtotal is taxable) and the new split rule — and demands
+  // ways — the pre-270 rule (all of subtotal is taxable) and the new split rule — and demands
   // they agree. Any disagreement means a real guest's bill changed underneath them.
+  //
+  // ONLY BILLS THAT PREDATE THE SPLIT RULE (sweep #6 / T28, 2026-08-22). "No EXISTING bill moved" is a
+  // question about bills that were priced under the OLD rule and must not shift. A bill taken AFTER
+  // migration 270 was priced by the split rule from the start, so re-deriving it the old way and
+  // demanding the two agree is asking a tax-exempt or MRP line — the whole point of that migration —
+  // to behave as if it were taxable. Any test that deliberately rings up an exempt item therefore
+  // turned this red: measured on 2026-08-22, two sessions created minutes earlier by another guard's
+  // exempt fixture (subtotal 920 and 550, base 0, nontax all of it) reported as "2 existing session
+  // totals changed". That reads as a money regression and is the opposite — it is the feature working.
+  const SPLIT_RULE_LANDED = "2026-08-04 13:28:30+05:30";   // migration 270, when taxable_base arrived
   const r = await sql(`
     WITH per AS (
       SELECT o.session_id, o.restaurant_id,
@@ -185,14 +195,20 @@ console.log("\n── 7. NO EXISTING BILL MOVED — every real session, old form
              COALESCE(SUM(COALESCE(o.nontax_amount, 0)), 0) nontax
         FROM orders o
        WHERE o.session_id IS NOT NULL AND o.status <> 'cancelled'
+         AND o.created_at < timestamptz '${SPLIT_RULE_LANDED}'
        GROUP BY o.session_id, o.restaurant_id),
     w AS (SELECT p.*, lfh_effective_tax_rate(p.restaurant_id) rate FROM per p)
     SELECT count(*) sessions,
            count(*) FILTER (WHERE round(GREATEST(sub - disc, 0) * (1 + rate), 2)
                                <> round(GREATEST(base - disc, 0) * (1 + rate) + nontax, 2)) differs
       FROM w`);
-  console.log(`  (compared ${r[0].sessions} real sessions)`);
-  check("no existing session total changed", r[0].differs, 0);
+  console.log(`  (compared ${r[0].sessions} bills taken before the split rule landed on 2026-08-04)`);
+  // A window that has stopped containing anything is a check that has stopped checking. Say so.
+  if (Number(r[0].sessions) === 0) {
+    console.log("  ⚠ no bill in the database predates the split rule any more — this check now proves nothing.");
+    console.log("    Either the history has been purged, or it is time to retire this check and say why.");
+  }
+  check("no bill taken before the split rule has moved", r[0].differs, 0);
 }
 
 console.log("\n── 8. THE TRIGGERS, END TO END (inside a transaction that is rolled back) ──");

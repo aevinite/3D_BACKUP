@@ -27,12 +27,34 @@ const oneDp = (n: number) => n.toFixed(1).replace(/\.0$/, "");
  * `sign: false` (the default) still shows a minus for negative values — pass nothing.
  */
 export function compactINR(value: number): string {
-  const v = Number(value) || 0;
+  // `Number(value) || 0` catches NaN, null, "" and undefined — all falsy — and lets INFINITY
+  // through, because Infinity is truthy. So compactINR(Infinity) printed "₹InfinityCr" straight onto
+  // a chart tile (T25, sweep #7, 2026-08-28). Nothing produces an infinite total today, and that is
+  // exactly why it would be found by a person rather than by a test: it takes one division by a
+  // count that happened to be zero, somewhere upstream, on a screen full of numbers.
+  //
+  // The rule it breaks is written down for this whole sweep: no leaked code text on a screen — no
+  // `undefined`, no `NaN`, no `[object Object]`. Infinity belongs in that list.
+  const n = Number(value);
+  const v = Number.isFinite(n) ? n : 0;
   const neg = v < 0;
   const a = Math.abs(v);
+  // ── THE BUCKET IS CHOSEN ON THE NUMBER WE ARE ABOUT TO SHOW, NOT THE ONE WE WERE GIVEN ──────
+  // (owner picked item 16, 2026-08-30.)
+  //
+  // Picking the bucket first and rounding second put ₹99,999 on the screen as "₹100k" — which is
+  // arithmetically right (it IS under a lakh) and is not how anybody in India reads it. Same shape
+  // one bucket up: ₹99,99,999 read "₹100L" instead of "₹1Cr".
+  //
+  // Each bucket here is exactly 100× the one below it, so the test is simply: once the one-decimal
+  // figure has rounded to 100 or more, it belongs in the next bucket. Nothing else moves — ₹99,499
+  // is still "₹99.5k" and ₹1,00,000 is still "₹1L", because those already round below 100.
+  const dp = (n: number) => Math.round(n * 10) / 10;          // the value the label will show
   const body =
     a >= CRORE ? `${oneDp(a / CRORE)}Cr`
+    : dp(a / LAKH) >= 100 ? `${oneDp(a / CRORE)}Cr`
     : a >= LAKH ? `${oneDp(a / LAKH)}L`
+    : dp(a / THOUSAND) >= 100 ? `${oneDp(a / LAKH)}L`
     : a >= THOUSAND ? `${oneDp(a / THOUSAND)}k`
     : Math.round(a).toString();
   return `${neg ? "−" : ""}₹${body}`;

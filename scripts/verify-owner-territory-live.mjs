@@ -19,10 +19,15 @@
 //      run, every row deleted BY ID, and entitlements restored and compared byte-for-byte.
 //   4. ONE SIGN-IN — through the shared cached helper, so a full run can never trip a login limit.
 import { readFileSync } from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
 const RID = arg("--rid") || "00000000-0000-0000-0000-000000000001";
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the owner-screens walk");
 const SHOTS = arg("--shots");
 const TAG = "zzlive" + Date.now().toString().slice(-5);
 
@@ -48,11 +53,34 @@ const OWNBG = `el=>{let n=el,bg="rgba(0, 0, 0, 0)";while(n&&bg==="rgba(0, 0, 0, 
 const { chromium } = await import("playwright");
 const { loginAs } = await import("./sweep/login.mjs");
 const ORIGINAL = await readEnt();
+// It already puts the entitlements back at the end and CHECKS that it did. The gap was an
+// interruption: `finally` covers a throw, not Ctrl-C and not a lane runner killing a slow guard.
+// Leaving this one half-applied means an owner console with screens switched off that nobody
+// switched off. (sweep #7 / T28, 2026-08-27.)
+restoreOnExit("the restaurant's owner_entitlements", () => writeEnt(ORIGINAL));
 const created = []; let dishId = null;
 const br = await chromium.launch();
 const mk = async (o) => { const c = await br.newContext(o); c.setDefaultNavigationTimeout(150000); c.setDefaultTimeout(60000); await loginAs(c, "owner", BASE); return c; };
 const ctx = await mk({ viewport: { width: 1280, height: 900 } });
-const api = async (m, p, b) => { const r = await ctx.request.fetch(BASE + p, { method: m, headers: { "Content-Type": "application/json" }, ...(b ? { data: b } : {}) }); return { s: r.status(), j: await r.json().catch(() => null) }; };
+// ONE RETRY FOR THE FIRST HIT OF A ROUTE (sweep #6 / T28, 2026-08-22). `next dev` compiles a route the
+// first time anybody asks for it, and on a busy machine that can take longer than the 60s ceiling set
+// just above — so this guard reported "❌ the run stopped: Timeout 60000ms exceeded" 35 checks in, on
+// GET /api/owner/staff, with nothing wrong anywhere. That reads as a broken owner panel and is a
+// compiler. A cold compile happens ONCE per route per server, so one patient retry is enough, and it
+// says which route it waited for rather than leaving a Playwright stack to be interpreted.
+const api = async (m, p, b) => {
+  const send = (timeout) => ctx.request.fetch(BASE + p, {
+    method: m, headers: { "Content-Type": "application/json" }, timeout, ...(b ? { data: b } : {}),
+  });
+  let r;
+  try { r = await send(60000); }
+  catch (e) {
+    if (!/Timeout/i.test(String(e && e.message))) throw e;
+    console.log(`  · ${m} ${p} did not answer in 60s — almost certainly this dev server compiling the route for the first time. Waiting once more.`);
+    r = await send(150000);
+  }
+  return { s: r.status(), j: await r.json().catch(() => null) };
+};
 const until = async (f, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await f()) return true; } catch { /* settling */ } await new Promise((r) => setTimeout(r, 250)); } return false; };
 const disp = (s) => s.name || s.username;
 
@@ -76,6 +104,17 @@ try {
   // ══ BAND C · the roster as it renders and behaves ═══════════════════════════════════════════
   console.log("Band C · the roster, driven");
   const page = await ctx.newPage();
+  // PATIENT, AND NEVER FATAL (2026-08-22). The "New password for …" card appears after a write, and on a
+  // cold `next dev` the first one waited past the 60s ceiling and threw — which stopped the WHOLE run.
+  // That is how four real failures on this screen stayed hidden for weeks: they sit after this point, so
+  // nobody ever saw them. A slow render is worth reporting; it is not worth throwing away every check
+  // behind it. 150s matches api()'s patient retry, and a miss returns false so the caller can fail its
+  // own check and carry on.
+  const reveal = async (why) => {
+    const seen = await page.waitForSelector(".ost-reveal", { timeout: 150000 }).then(() => true).catch(() => false);
+    if (!seen) bad(`${why} — the password card never appeared (150s). On a cold dev server this is the route still compiling; on a warm one it is real.`);
+    return seen;
+  };
   let mode = "dismiss"; const dlg = [];
   page.on("dialog", async (d) => { dlg.push(d.message()); mode === "accept" ? await d.accept() : await d.dismiss(); });
   const reqs = []; page.on("request", (q) => { if (q.url().includes("/api/owner/staff")) reqs.push({ m: q.method(), h: q.headers() }); });
@@ -164,6 +203,25 @@ try {
   (await page.locator(".ost-row").filter({ hasText: NAME }).count()) > 0 ? ok("P06328 the roster shows the value that really landed") : bad("P06328 the roster still shows the value that did not land");
   await dismiss();
 
+  // WARM THE WRITE ROUTE BEFORE THE BROWSER USES IT (2026-08-22). `api()` above got a patient retry
+  // for a cold `next dev` compile, but the checks below POST by CLICKING Add — the browser's own
+  // request, which no retry of ours wraps — and then wait 30 seconds for the banner. The first POST to
+  // /api/owner/staff on a fresh server can take longer than that to compile, so four checks failed
+  // together on a screen that was working: the refusal never arrived inside the window, `dismiss()`
+  // then had nothing to dismiss, and the double-click check ran against a stale error and created 0.
+  //
+  // One deliberately-invalid POST compiles the route and creates nothing — the handler refuses an
+  // empty body long before it writes. It goes through api(), which waits patiently and says so.
+  // EVERY WRITE VERB, not just POST. Next compiles a route module once, but this file is
+  // POST/PATCH/DELETE through withIdempotency, and the FIRST call of each still pays for the work
+  // behind it — the reset-password reveal (a PATCH) timed out at 60s on a cold server even after the
+  // POST had been warmed. Each of these is deliberately invalid, so the handler refuses it long
+  // before it writes anything; they go through api(), which waits patiently and says so.
+  for (const [m, body] of [["POST", {}], ["PATCH", {}], ["DELETE", null]]) {
+    const warm = await api(m, "/api/owner/staff" + (m === "DELETE" ? "?id=not-a-uuid" : ""), body);
+    if (warm.s >= 500) console.log(`  · warming ${m} /api/owner/staff answered ${warm.s} — noting it; the checks below will say if it matters`);
+  }
+
   // the waiter picker
   await go();
   const form = page.locator(".ost-add").first();
@@ -182,8 +240,7 @@ try {
   { const wn = `${TAG} W`;
     await form.locator("input[name=name]").fill(wn);
     await addBtn.click();
-    await page.waitForSelector(".ost-reveal", { timeout: 60000 });
-    await page.locator(".ost-reveal").getByText("Done").click();
+    if (await reveal("P06338 the first new person's password card")) await page.locator(".ost-reveal").getByText("Done").click();
     const w = (await api("GET", "/api/owner/staff")).j.staff.find((s) => disp(s) === wn);
     if (w) created.push(w.id);
     // GROUND TRUTH: the owner API never SELECTS assigned_tables, so read the database.
@@ -200,24 +257,37 @@ try {
   { const n2 = `${TAG} T`;
     await form.locator("input[name=name]").fill(n2);
     await addBtn.click();
-    await page.waitForSelector(".ost-reveal", { timeout: 60000 });
-    (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06338 an add reveals a one-time password") : bad("P06338 no password was revealed");
+    // The five checks below need the card. If it never comes they are each reported as failed and the
+    // run CARRIES ON — the two after them (the roster and the cleared form) do not need it, and used
+    // to be thrown away along with everything else in the file.
+    const shown = await reveal("P06338/P06339 the new person's password card");
     const t2 = (await api("GET", "/api/owner/staff")).j.staff.find((s) => disp(s) === n2); if (t2) created.push(t2.id);
-    const box = await page.locator(".ost-reveal").boundingBox();
-    box && box.y >= 0 && box.y + box.height <= 900 ? ok("P06339 the reveal card scrolls itself into view") : bad("P06339 the reveal card is off screen");
-    /ost-pw/.test(await page.evaluate(() => document.activeElement?.className || "")) ? ok("P06340 the password field is focused") : bad("P06340 the password field is not focused");
-    await page.locator(".ost-reveal").getByRole("button", { name: /Copy/ }).click(); await page.waitForTimeout(250);
-    /Copied/.test(await page.locator(".ost-reveal button.ost-btn").innerText()) ? ok("P06341 Copy confirms") : bad("P06341 Copy does not confirm");
-    await page.locator(".ost-reveal").getByText("Done").click();
-    (await page.locator(".ost-reveal").count()) === 0 ? ok("P06342 Done dismisses the card") : bad("P06342 Done did not dismiss");
+    if (shown) {
+      (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06338 an add reveals a one-time password") : bad("P06338 no password was revealed");
+      const box = await page.locator(".ost-reveal").boundingBox();
+      box && box.y >= 0 && box.y + box.height <= 900 ? ok("P06339 the reveal card scrolls itself into view") : bad("P06339 the reveal card is off screen");
+      /ost-pw/.test(await page.evaluate(() => document.activeElement?.className || "")) ? ok("P06340 the password field is focused") : bad("P06340 the password field is not focused");
+      await page.locator(".ost-reveal").getByRole("button", { name: /Copy/ }).click(); await page.waitForTimeout(250);
+      /Copied/.test(await page.locator(".ost-reveal button.ost-btn").innerText()) ? ok("P06341 Copy confirms") : bad("P06341 Copy does not confirm");
+      await page.locator(".ost-reveal").getByText("Done").click();
+      (await page.locator(".ost-reveal").count()) === 0 ? ok("P06342 Done dismisses the card") : bad("P06342 Done did not dismiss");
+    } else { for (const id of ["P06338", "P06340", "P06341", "P06342"]) bad(`${id} skipped — no password card to look at`); }
     (await until(async () => (await page.locator(".ost-row").filter({ hasText: n2 }).count()) > 0)) ? ok("P06343 the new person appears with no reload") : bad("P06343 the new person did not appear");
     (await form.locator("input").evaluateAll((e) => e.map((x) => x.value))).every((v) => v === "") ? ok("P06344 the Add form is cleared") : bad("P06344 the Add form kept values"); }
   await form.locator("input[name=name]").fill(disp(mgr));
   await addBtn.click();
-  await until(async () => /taken at this restaurant/i.test(await banner()));
-  /taken at this restaurant/i.test(await banner()) ? ok("P06346 a duplicate username is refused with the friendly sentence") : bad("P06346 a duplicate was not refused clearly");
+  // 45s, not the default 30: this is a browser-driven POST, and a first compile is the one thing that
+  // legitimately takes longer than a person would wait. If it still does not come, say what we saw —
+  // "a duplicate was not refused clearly" with no banner text is a sentence nobody can act on.
+  const sawDupe = await until(async () => /taken at this restaurant/i.test(await banner()), 45000);
+  sawDupe ? ok("P06346 a duplicate username is refused with the friendly sentence")
+          : bad(`P06346 a duplicate was not refused clearly — the banner said ${JSON.stringify((await banner()).replace(/\s+/g, " ").slice(0, 90)) || "nothing at all"}`);
   /didn't go through/i.test(await bHead()) ? ok("P06211d a SERVER refusal is headed the same way, not as a fault") : bad("P06211d a server refusal is headed as a fault");
-  await dismiss(); await form.locator("input[name=name]").fill("");
+  // A dismiss that did not dismiss leaves the next check reading the PREVIOUS error, which is how one
+  // slow route turned into four failures. Confirm it, and clear the field either way.
+  await dismiss();
+  if (!(await until(async () => (await banner()) === "", 8000))) console.log("  · the refusal banner would not dismiss — the next check may read it");
+  await form.locator("input[name=name]").fill("");
   { const n3 = `${TAG} D`;
     await form.locator("input[name=name]").fill(n3);
     await Promise.all([addBtn.click(), addBtn.click().catch(() => {})]);
@@ -250,10 +320,10 @@ try {
   reqs.length === 0 ? ok("P06353 the same role fires nothing") : bad("P06353 re-picking the same role fired a request");
   mode = "accept";
   await row(NAME).getByRole("button", { name: /Reset password/ }).click();
-  await page.waitForSelector(".ost-reveal", { timeout: 60000 });
-  (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06354 Reset password reveals a new one") : bad("P06354 no new password appeared");
+  const resetShown = await reveal("P06354 the reset password card");
+  resetShown && (await page.locator(".ost-pw").inputValue()).length >= 6 ? ok("P06354 Reset password reveals a new one") : bad("P06354 no new password appeared");
   /current login stops working/i.test(dlg.at(-1) || "") ? ok("P06069 …and the question says the current login stops working") : bad("P06069 the reset question is missing its consequence");
-  await page.locator(".ost-reveal").getByText("Done").click();
+  if (resetShown) await page.locator(".ost-reveal").getByText("Done").click();
   { let held; await page.route("**/api/owner/staff", async (q) => { if (q.request().method() === "PATCH") await new Promise((x) => { held = x; setTimeout(x, 4000); }); await q.continue(); });
     await row(NAME).getByRole("button", { name: /^Disable$/ }).click();
     await page.waitForTimeout(900);
@@ -412,13 +482,31 @@ try {
     if (SHOTS) await p.screenshot({ path: `${SHOTS}/forced-refused-add.png` });
     await c.close(); }
   for (const [id, body, status, re, extra] of [
-    ["P06421", { error: "Staff management isn't enabled for your restaurant — contact Aevidine.", disabled: true }, 403, /isn't enabled/, null],
     ["P06422", { error: "Couldn't load your team just now — please try again.", transient: true }, 503, /please try again/i, /Try again/]]) {
     const c = await mk({ viewport: { width: 1280, height: 800 } }); const p = await c.newPage();
     await p.route("**/api/owner/staff*", (q) => q.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }));
     await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(3000);
     const t = await p.locator("body").innerText();
     re.test(t) && (extra ? extra.test(t) : !/Something went wrong/.test(t)) ? ok(`${id} the forced state reads correctly`) : bad(`${id} the forced state reads wrongly: ${t.replace(/\n/g, " | ").slice(0, 120)}`);
+    await c.close(); }
+  // ── P06421 · EXPECTATION MOVED 2026-09-01, same id, same rule ──────────────────────────────
+  // It used to force a 403 `disabled` answer and require the calm card to READ "isn't enabled".
+  // R36 was finished on 2026-08-31: the roster now sends the owner quietly to the dashboard instead
+  // (`if (notEnabled) router.replace("/owner")`), because naming the withheld section is the thing
+  // he ruled against. The rule being checked is the same one — a switched-off section is a
+  // legitimate state and must never read as a fault — so this now asserts BOTH halves of that:
+  // it is not treated as an error, and it says nothing at all.
+  { const c = await mk({ viewport: { width: 1280, height: 800 } }); const p = await c.newPage();
+    await p.route("**/api/owner/staff*", (q) => q.fulfill({ status: 403, contentType: "application/json",
+      body: JSON.stringify({ error: "Staff management isn't enabled for your restaurant — contact Aevidine.", disabled: true }) }));
+    await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(3500);
+    const t = await p.locator("body").innerText();
+    const landed = new URL(p.url()).pathname;
+    const calm = !/Something went wrong|Couldn't load/i.test(t);
+    const silent = !/isn't enabled|not enabled|contact Aevidine/i.test(t);
+    calm && silent && landed !== "/owner/staff"
+      ? ok(`P06421 a switched-off Team section is neither an error nor explained — it goes quiet (landed on ${landed}, R36)`)
+      : bad(`P06421 the forced state reads wrongly (landed=${landed} calm=${calm} silent=${silent}): ${t.replace(/\n/g, " | ").slice(0, 140)}`);
     await c.close(); }
 
   // ══ BAND E · a change traced across panels ═════════════════════════════════════════════════
@@ -498,7 +586,22 @@ try {
     await writeEnt({ ...base, menu: false }); await new Promise((r) => setTimeout(r, 1500));
     const c = await mk({ viewport: { width: 1280, height: 900 } }); const p = await c.newPage();
     const rr = await p.goto(BASE + "/owner/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(2500);
-    rr.status() === 200 && /isn't switched on/i.test(await p.locator("body").innerText()) && (await p.locator("iframe").count()) === 0 ? ok("P06463 Menu OFF → refused server-side, with a sentence, no editor") : bad("P06463 the Menu section switch is not enforced on the page");
+    // EXPECTATION MOVED 2026-09-01, same id, same rule. This used to require a SENTENCE
+    // ("isn't switched on for your restaurant — ask your administrator"). R36 was finished across
+    // the last three owner screens on 2026-08-31: naming a section he has not been given tells him a
+    // feature exists that was deliberately withheld, and sends him to support about it. The page now
+    // redirects to the dashboard and says nothing at all. What is being checked is UNCHANGED — the
+    // switch is enforced on the page and not only in the sidebar — so this asserts the enforcement
+    // (no editor, and he is not left on the page) plus the silence R36 requires.
+    {
+      const landed = new URL(p.url()).pathname;
+      const body = await p.locator("body").innerText();
+      const noEditor = (await p.locator("iframe").count()) === 0;
+      const silent = !/isn't switched on|ask your administrator|not enabled/i.test(body);
+      noEditor && silent && landed !== "/owner/menu"
+        ? ok(`P06463 Menu OFF → the editor never renders, and nothing names the withheld section (landed on ${landed}, R36)`)
+        : bad(`P06463 the Menu section switch is not enforced on the page (landed=${landed} editor=${!noEditor} silent=${silent})`);
+    }
     !(await p.locator(".adm.owx a").allInnerTexts()).map((x) => x.trim()).includes("Menu") ? ok("P06463b …and the sidebar drops the item") : bad("P06463b the sidebar still offers Menu");
     await p.goto(BASE + "/owner/settings", { waitUntil: "domcontentloaded" });
     await p.locator(".adm-chip").first().waitFor({ timeout: 120000 }); await p.waitForTimeout(500);

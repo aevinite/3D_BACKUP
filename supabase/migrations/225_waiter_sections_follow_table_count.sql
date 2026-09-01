@@ -59,22 +59,58 @@ CREATE TRIGGER sections_follow_table_count
 -- A trigger only covers changes from NOW ON, so close the gap that already exists: any
 -- waiter whose section stops short of the CURRENT table_count gets the missing tables.
 -- Same rule — only waiters who actually have a section.
-UPDATE staff_users su
-   SET assigned_tables = ARRAY(
-         SELECT DISTINCT t FROM (
-           SELECT unnest(su.assigned_tables) AS t
-           UNION ALL
-           SELECT generate_series(1, GREATEST(COALESCE(s.table_count, 0), 0))
-         ) q ORDER BY t
-       )
-  FROM settings s
- WHERE s.restaurant_id = su.restaurant_id
-   AND su.role = 'tablet'
-   AND COALESCE(array_length(su.assigned_tables, 1), 0) > 0
-   -- only where something is actually missing, so this is a no-op on a tidy restaurant
-   AND EXISTS (
-     SELECT 1 FROM generate_series(1, GREATEST(COALESCE(s.table_count, 0), 0)) AS g(t)
-      WHERE NOT (g.t = ANY (su.assigned_tables))
-   );
+--
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-28 (sweep #7, T23). This statement is correct EXACTLY ONCE.
+-- Its WHERE tests "is this waiter missing a table" — which is true both of the gap this migration
+-- exists to close AND of every section a manager has deliberately narrowed afterwards. A narrowed
+-- section is the whole point of the feature ("a section is only ever a SUBTRACTION from the
+-- floor"), so on a re-run this hands the WHOLE FLOOR back to every waiter and the narrowing is
+-- gone, with nothing on screen and nothing in the Activity log to say it happened.
+--
+-- That is the same shape migration 321 named for 198 / 209 / 295 / 288 and migration 352 for
+-- 235 / 301: "a WHERE that tests 'is it not the value I want' rather than absence".
+-- `scripts/seed-supabase.mjs` step 1 re-runs every file in this folder with no ledger, so this is
+-- reachable, not theoretical.
+--
+-- Measured on the backup database 2026-08-28: 0 waiters are narrowed today (mig 223's backfill gave
+-- every one of them the whole floor and nobody has cut a section yet), so guarding it costs nothing
+-- now. The day someone uses the feature is the day a re-seed would silently give it back — and that
+-- is exactly the day nobody would be looking.
+--
+-- The TRIGGER above is deliberately NOT guarded and must never be: it only ever fires when the floor
+-- GROWS, and handing out the brand-new numbers is the behaviour the file exists for.
+--
+-- `lfh_already_applied` is created by migration 307, 82 files AFTER this one, so a FRESH database
+-- runs this its single legitimate time (no ledger = "not yet applied") and then migration 369
+-- records the key. The `to_regprocedure` gate + EXECUTE is migration 043's pattern, for the same
+-- reason: this file has to parse on a database where the function does not exist yet.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('225_sections_follow_table_count') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '225_sections_follow_table_count: already applied — skipped (a re-run would hand the whole floor back to every waiter whose section a manager had narrowed)';
+ELSE
+  UPDATE staff_users su
+     SET assigned_tables = ARRAY(
+           SELECT DISTINCT t FROM (
+             SELECT unnest(su.assigned_tables) AS t
+             UNION ALL
+             SELECT generate_series(1, GREATEST(COALESCE(s.table_count, 0), 0))
+           ) q ORDER BY t
+         )
+    FROM settings s
+   WHERE s.restaurant_id = su.restaurant_id
+     AND su.role = 'tablet'
+     AND COALESCE(array_length(su.assigned_tables, 1), 0) > 0
+     -- only where something is actually missing, so this is a no-op on a tidy restaurant
+     AND EXISTS (
+       SELECT 1 FROM generate_series(1, GREATEST(COALESCE(s.table_count, 0), 0)) AS g(t)
+        WHERE NOT (g.t = ANY (su.assigned_tables))
+     );
+END IF;
+END $reseed_guard$;
 
 NOTIFY pgrst, 'reload schema';

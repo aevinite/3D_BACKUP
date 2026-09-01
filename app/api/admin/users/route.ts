@@ -29,6 +29,8 @@ import { capsForRole, isCapValue } from "@/lib/staffCaps";
 import { expectClash, clashJson } from "@/lib/clash";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +70,18 @@ async function detail(id: string) {
   const u = (rows || [])[0] as any;
   if (!u) return bad("User not found.", 404);
 
+  // ── "COULDN'T READ IT" DREW EXACTLY LIKE "THERE ISN'T ANY" (T20 sweep #7, 2026-08-27) ────────────
+  // None of these four inspected `.error`, and each one silently states something untrue when it fails:
+  //   · payrollQ  → `payrollOn` comes out false, so the whole pay block is HIDDEN and the profile reads
+  //                 as "this person isn't paid through the app" — a claim about their employment;
+  //   · paysQ     → an EMPTY payment history for someone who has been paid all year. This is the screen
+  //                 you open to settle "you never paid me", and the owner panel's twin was given exactly
+  //                 this treatment (`payUnread`, T9 finding F6) while the admin's copy was missed;
+  //   · actsQ     → "they have done nothing lately";
+  //   · restQ     → the restaurant name goes blank.
+  // None is worth refusing the whole profile for — the identity and job half is perfectly readable — so
+  // each names itself and the screen can say so, the convention the admin console's own Full report
+  // adopted (`/api/admin/restaurants/report` → `partial`).
   const [restQ, payrollQ, paysQ, actsQ] = await Promise.all([
     sb.from("restaurants").select("id, name, slug").eq("id", u.restaurant_id).maybeSingle(),
     sb.from("settings").select("payroll_allowed, payroll_owner_control, payroll_enabled")
@@ -83,16 +97,34 @@ async function detail(id: string) {
 
   // The module ladder, read the same way lib/tableTags does it: the admin allows it, and it
   // is enabled (either by the admin, or by the owner when control was handed over).
+  const unread: string[] = [];
+  for (const [q, key] of [[restQ, "restaurant"], [payrollQ, "payroll"], [paysQ, "payments"], [actsQ, "activity"]] as const) {
+    if (q.error) { console.error(`[admin/users] ${key} read failed:`, (q.error as { message?: string })?.message); unread.push(key); }
+  }
   const s: any = payrollQ.data || {};
-  const payrollOn = !!s.payroll_allowed && (s.payroll_owner_control ? !!s.payroll_enabled : s.payroll_enabled !== false);
+  // A CARD MUST NOT VANISH BECAUSE A READ BLIPPED. `payrollOn: false` HIDES the whole pay section, so
+  // a failed rung read would silently claim this person isn't paid through the app. Keep the card and
+  // let it say why — the identical call /api/owner/overview made for its module probes ("read FAILED →
+  // keep the card VISIBLE and name it in partial… showing a card that might open onto 'not enabled' is
+  // the kinder failure").
+  const payrollOn = payrollQ.error
+    ? true
+    : !!s.payroll_allowed && (s.payroll_owner_control ? !!s.payroll_enabled : s.payroll_enabled !== false);
 
   const { pin_hash, ...safe } = u;
+  // `payUnread` / `activityUnread` are the flags components/admin/StaffProfile ALREADY renders a
+  // sentence for — it prints "this is unknown, not empty" for each. The key is LEFT OUT rather than
+  // sent as an empty array, because that component's own note explains that an empty list renders as
+  // "nothing has ever been paid to them", which is the sentence a wages argument starts from.
+  const payUnread = !!paysQ.error || !!payrollQ.error;
+  const activityUnread = !!actsQ.error;
   return ok({
     person: { ...safe, hasPin: !!pin_hash },
     restaurant: restQ.data || null,
     payrollOn,
-    payments: payrollOn ? (paysQ.data || []) : [],
-    activity: actsQ.data || [],
+    ...(payUnread ? { payUnread: true } : { payments: payrollOn ? (paysQ.data || []) : [] }),
+    ...(activityUnread ? { activityUnread: true } : { activity: actsQ.data || [] }),
+    ...(unread.length ? { unread } : {}),
   });
 }
 
@@ -110,11 +142,15 @@ export async function GET(req: NextRequest) {
       .neq("role", "owner")
       .order("created_at", { ascending: true })
       .limit(2000), // safety cap so this never becomes an unbounded whole-table read; true per-restaurant server scoping/pagination is a follow-up (audit 2026-07-08)
-    sb.from("restaurants").select("id, name"),
+    // Paged for the same reason as its siblings: past the row cap a person's restaurant column went
+    // blank, on the list the admin uses to tell one tenant's staff from another's.
+    pageAll<{ id: string; name: string }>("restaurants", (from, to) =>
+      sb.from("restaurants").select("id, name").order("id").range(from, to)),
   ]);
   // Plain sentence to the screen, raw text to `detail` + the log — see lib/adminFail.
   if (usersQ.error) return adminFail("the staff list", usersQ.error, { action: "load" });
-  const nameById: Record<string, string> = Object.fromEntries((restsQ.data || []).map((r) => [r.id, r.name]));
+  if (restsQ.error) console.error("[admin/users] restaurant names unread:", (restsQ.error as { message?: string })?.message);
+  const nameById: Record<string, string> = Object.fromEntries((restsQ.rows || []).map((r) => [r.id, r.name]));
   // Strip the PIN hash to a boolean; attach the restaurant name (mapped, not a
   // PostgREST embed) so the admin sees WHICH restaurant each user belongs to.
   const users = (usersQ.data || []).map(({ pin_hash, ...u }: any) => ({ ...u, hasPin: !!pin_hash, restaurantName: nameById[u.restaurant_id] || null }));
@@ -180,10 +216,15 @@ export async function PATCH(req: NextRequest) {
   // profile edit, one spread away from reaching a response body. These are exactly the fields the
   // branches below read (`pin_hash` for the PIN state, `token_version` for the invalidation bump);
   // password_hash is deliberately absent, so it cannot leak from here even by accident.
-  const u = (await sb.from("staff_users")
+  // A blip must not read as "User not found." (404, nothing retries) on the handler behind
+  // reset-password, disable, role and every profile write — the same correction the owner panel's twin
+  // got as finding F7 (T20 sweep #7, 2026-08-27).
+  const uQ = await sb.from("staff_users")
     .select(`id, username, name, role, active, restaurant_id, permissions, pin_hash, token_version,
              can_self_reset, can_self_set_pin, ${PROFILE_COLS}`)
-    .eq("id", id).limit(1)).data?.[0] as Record<string, any> | undefined;
+    .eq("id", id).limit(1);
+  if (uQ.error) return adminFail("this person", uQ.error, { action: "load" });
+  const u = uQ.data?.[0] as Record<string, any> | undefined;
   if (!u) return bad("User not found.", 404);
   // Owners keep a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff), so the
   // account itself — role, name, active, delete — is still changed only on the Owners page.
@@ -365,7 +406,9 @@ export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing user id.");
-  const u = (await sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).limit(1)).data?.[0];
+  const dQ = await sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).limit(1);
+  if (dQ.error) return adminFail("this person", dQ.error, { action: "load" });   // see PATCH above
+  const u = dQ.data?.[0];
   // 404 on an unknown id instead of silently "succeeding" (deleting nothing but logging a
   // bogus 'deleted "?"' row and returning ok — audit 2026-07-07).
   if (!u) return bad("User not found.", 404);

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>No internet — your work is safe</title>
+<style>
+  /* DESIGN 7 — THE DUMPLING STEAMER.
+     The honest thing this one shows is the BACKING OFF. The real page waits 5s, then 10, then 20,
+     up to a minute, so it does not hammer a struggling server — and nothing on screen has ever
+     communicated that. Here the steam and the lid-rattle CALM DOWN as the gap grows: the first few
+     checks are busy and impatient, and by the time the gap is a minute the basket is barely
+     breathing. Someone watching it learns, without being told, that the app has settled into
+     waiting rather than given up. */
+  :root { color-scheme:dark; --ink:#f1ece2; --muted:#a89c8b; --bamboo:#c99a5b; --bamboo-d:#9a6f39; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:26px;
+         background:radial-gradient(120% 100% at 50% 0%, #24211c 0%, #17150f 60%, #0d0c09 100%);
+         color:var(--ink); font:500 15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:center; }
+  .card { width:min(430px,100%) }
+  #brand { font:800 11px/1 system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase;
+           color:var(--bamboo); margin-bottom:16px }
+  #brand[hidden]{ display:none }
+
+  /* ── the steamer ───────────────────────────────────────────────────────── */
+  /* --calm runs 0 (impatient, just checked) → 1 (settled into a long wait) */
+  .stage { position:relative; width:220px; height:200px; margin:0 auto 4px; --calm:0 }
+  .basket { position:absolute; left:50%; translate:-50% 0; width:170px; height:34px; border-radius:8px;
+            background:repeating-linear-gradient(90deg, var(--bamboo) 0 5px, var(--bamboo-d) 5px 9px);
+            box-shadow:0 6px 14px rgba(0,0,0,.45), inset 0 2px 0 rgba(255,255,255,.12);
+            border:1px solid rgba(80,50,20,.5) }
+  .b1 { bottom:34px } .b2 { bottom:64px; width:174px } .b3 { bottom:94px; width:178px }
+  /* the lid, which rattles */
+  .lid { position:absolute; left:50%; translate:-50% 0; bottom:124px; width:186px; height:26px;
+         border-radius:14px 14px 5px 5px;
+         background:repeating-linear-gradient(90deg,#d8a869 0 6px,#a8783f 6px 10px);
+         box-shadow:0 6px 16px rgba(0,0,0,.5);
+         transform-origin:50% 100%;
+         /* the calmer it is, the slower and shallower the rattle */
+         animation:rattle calc(.5s + var(--calm) * 2.6s) ease-in-out infinite }
+  .lid::after { content:""; position:absolute; left:50%; translate:-50% 0; top:-7px; width:34px; height:9px;
+                border-radius:6px 6px 0 0; background:#c99a5b }
+  /* the plate the whole thing sits on */
+  .base { position:absolute; left:50%; translate:-50% 0; bottom:22px; width:200px; height:14px;
+          border-radius:50%; background:#2a251d; box-shadow:0 10px 22px rgba(0,0,0,.6) }
+
+  /* the steam. Six plumes; each fades and slows as --calm rises. */
+  .steam { position:absolute; left:50%; translate:-50% 0; bottom:146px; width:150px; height:120px; pointer-events:none }
+  .steam span { position:absolute; bottom:0; width:11px; height:11px; border-radius:50%;
+                background:rgba(232,224,208,.5); opacity:0;
+                animation:plume calc(2.2s + var(--calm) * 2.4s) ease-out infinite }
+  .steam span:nth-child(1){ left:8px;   animation-delay:0s }
+  .steam span:nth-child(2){ left:34px;  animation-delay:.4s }
+  .steam span:nth-child(3){ left:60px;  animation-delay:.8s }
+  .steam span:nth-child(4){ left:86px;  animation-delay:1.2s }
+  .steam span:nth-child(5){ left:112px; animation-delay:1.6s }
+  .steam span:nth-child(6){ left:46px;  animation-delay:2s }
+  /* the whole plume block thins out as it settles, so "calm" is visible at a glance */
+  .steam { opacity:calc(1 - var(--calm) * .62); transition:opacity 1s linear }
+
+  @keyframes rattle { 0%,100%{ transform:rotate(-.9deg) translateY(0) }
+                      45%{ transform:rotate(.9deg) translateY(-1.5px) } }
+  @keyframes plume  { 0%{ opacity:0; transform:translateY(0) scale(.6) }
+                      18%{ opacity:.55 }
+                      100%{ opacity:0; transform:translateY(-96px) scale(2.3) } }
+
+  h1 { font-size:21px; margin:14px 0 6px; font-weight:800 }
+  #why { color:var(--muted); font-size:14px; margin:0 auto; max-width:32ch }
+  .safe { margin:16px auto 20px; max-width:34ch; font-size:13px; color:#a8dcb4 }
+  .safe b { color:#86efac }
+  .acts { display:flex; flex-direction:column; gap:10px }
+  button,a { font:700 14.5px/1 system-ui,sans-serif; border-radius:12px; padding:14px 18px;
+             cursor:pointer; text-decoration:none; border:0 }
+  #retry { background:var(--bamboo); color:#2a1a08 }
+  #home  { background:transparent; color:#e4dccf; border:1px solid rgba(255,255,255,.2) }
+  #hint  { margin-top:14px; font-size:12.5px; color:#94897a }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lid,.steam span { animation:none }
+    .steam span { opacity:.35 }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <div class="stage">
+      <div class="steam"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="lid"></div>
+      <div class="basket b3"></div><div class="basket b2"></div><div class="basket b1"></div>
+      <div class="base"></div>
+    </div>
+    <h1 id="title">No internet right now</h1>
+    <p id="why">This screen hasn&rsquo;t been opened on this device yet, so there&rsquo;s nothing saved to show.</p>
+    <p class="safe"><b>Anything already saved on this device is safe.</b> It sends itself the moment
+       the connection is back.</p>
+    <div class="acts">
+      <button id="retry" type="button" onclick="location.reload()">Try again</button>
+      <a id="home" href="/">Go to the menu</a>
+    </div>
+    <div id="hint">Checking again in 5s&hellip;</div>
+  </main>
+<script>
+  // --calm is 0 right after a check and climbs towards 1 as the gap between checks grows. The
+  // steam thins, the plumes slow, and the lid stops rattling — so the picture says "settling into
+  // a wait", which is exactly what the retry logic is doing and what no words on this page ever
+  // managed to convey.
+  (function () {
+    var stage = document.querySelector(".stage");
+    var hint  = document.getElementById("hint");
+    var wait = 5000, dueAt = Date.now() + wait, timer = null;
+
+    var tick = function () {
+      if (document.hidden) return;                       // nobody is looking; do nothing
+      var left = Math.max(0, dueAt - Date.now());
+      hint.textContent = left > 400 ? "Checking again in " + Math.ceil(left / 1000) + "s…" : "Checking now…";
+      // calm is a function of the GAP, not of how far through it we are: a long gap means the app
+      // has decided to be patient, and that is the thing worth showing.
+      stage.style.setProperty("--calm", ((wait - 5000) / 55000).toFixed(3));
+      if (left <= 0) {
+        wait = Math.min(wait * 2, 60000);
+        dueAt = Date.now() + Math.round(wait * (0.75 + Math.random() * 0.5));
+      }
+    };
+    var start = function () { if (!timer) { timer = setInterval(tick, 250); tick(); } };
+    var stop  = function () { if (timer) { clearInterval(timer); timer = null; } };
+    document.addEventListener("visibilitychange", function () { document.hidden ? stop() : start(); });
+    start();
+  })();
+  (function(){ try {
+    var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+    if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+  } catch (e) {} })();
+</script>
+</body>
+</html>

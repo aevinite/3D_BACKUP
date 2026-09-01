@@ -33,49 +33,47 @@ const countBy = (items) => ({
 const same = (a, b) => a.nw === b.nw && a.ck === b.ck && a.rd === b.rd && a.sv === b.sv;
 const show = (c) => `nw=${c.nw} ck=${c.ck} rd=${c.rd} sv=${c.sv}`;
 
-// ── CLEANING UP AFTER YOURSELF WHEN THE DATABASE REFUSES TO FORGET (T28 sweep, 2026-08-22) ──────
+// TEARDOWN FOLLOWS THE PRODUCT'S OWN RULE, NOT `delete` (sweep #6 / T28, 2026-08-22).
 //
-// This guard was PERMANENTLY BROKEN and nothing said so. It died with
-//   `session insert: duplicate key value violates unique constraint "idx_one_open_session_per_table"`
-// on every run, because its own leftover OPEN session was still on table 288 and
-// `idx_one_open_session_per_table` is unique on (restaurant_id, table_number) WHERE status='open'.
+// It used to hard-DELETE the orders and the session. The database refuses that: `trg_block_issued_delete`
+// raises a check_violation for any order that has a kot_no (every order gets one at insert, mig 036)
+// and for any session that has a bill_no (mig 190 — an issued bill is never erased). The refusals were
+// never read, because none of these calls looked at `.error`. So the fixture SURVIVED every run, and
+// the next run died at the very first step:
 //
-// The cleanup below looked correct and was not. `svc.from("sessions").delete()` was REFUSED by the
-// bill-immutability trigger (mig 190, re-anchored by mig 361):
-//   "lfh: an issued bill cannot be hard-deleted — soft-delete it (deleted_at) instead"
-// That trigger is deliberate and right — "even god-mode can't erase a real sale" — and migration 361
-// WIDENED it from "a bill got a number" to "an order was paid or SERVED". This fixture serves an
-// order, so from 361 onward the delete could never succeed. The result was discarded, so the guard
-// sailed on and then died on the insert. A guard that cannot clean up is a guard that runs once.
+//     ERROR: session insert: duplicate key value violates unique constraint "idx_one_open_session_per_table"
 //
-// So: try the hard delete (correct for un-issued scratch, which is most runs), and when the trigger
-// refuses, take the route the trigger itself names — CLOSE the session and stamp `deleted_at`. That
-// frees the unique index, which only covers `status = 'open'`, and erases no sale.
+// One open session on table 288 killed this guard permanently. Worse, its leftover order stayed LIVE,
+// and the floor unions off-plan table numbers onto the plan — so "288 · 4 · Preparing · ＋ Take order"
+// sat on My Little French House's Tables floor after table 30, with a red unpaid ring, and the header
+// counted it (1/31 occupied on a 30-table restaurant). Measured and screenshotted at 1280x800 and at
+// 360x780 dpr3 before this was written.
+//
+// So: retire the rows the way a real cancellation does — cancel + archive the orders, close +
+// soft-delete the session — and SAY OUT LOUD when a step will not go, instead of leaving the next
+// run to discover it.
 async function cleanup(sessId, orderIds) {
-  for (const id of orderIds) await svc.from("order_items").delete().eq("order_id", id);
-  // Orders first: soft-delete anything the lock protects, hard-delete the rest.
-  const od = await svc.from("orders").delete().eq("table_number", TN).eq("restaurant_id", RID).select("id");
-  if (od.error) {
-    await svc.from("orders").update({ deleted_at: new Date().toISOString() })
-      .eq("table_number", TN).eq("restaurant_id", RID).is("deleted_at", null);
-  }
-  if (sessId) await svc.from("session_members").delete().eq("session_id", sessId);
-  const sd = await svc.from("sessions").delete().eq("table_number", TN).eq("restaurant_id", RID).select("id");
-  if (sd.error) {
-    // The compliant route the trigger asks for. Closing it is what actually frees the index.
-    const sr = await svc.from("sessions")
-      .update({ status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() })
-      .eq("table_number", TN).eq("restaurant_id", RID).neq("status", "closed").select("id");
-    if (sr.error) throw new Error("cleanup could neither remove nor retire the fixture session: " + sr.error.message);
-  }
-  // Prove it: if an OPEN session survives here, the insert below is going to fail on the unique
-  // index and the failure will look like a product fault. Say so now, in words, instead.
-  const left = await svc.from("sessions").select("id").eq("restaurant_id", RID).eq("table_number", TN).eq("status", "open");
+  const say = (what, error) => { if (error) console.log(`   cleanup: ${what} did not go — ${error.message}`); };
+  for (const id of orderIds) say(`order_items of ${id}`, (await svc.from("order_items").delete().eq("order_id", id)).error);
+  say("retire the test orders", (await svc.from("orders")
+    .update({ status: "cancelled", archived: true, archived_at: new Date().toISOString(), cancelled_at: new Date().toISOString() })
+    .eq("table_number", TN).eq("restaurant_id", RID).is("archived", false)).error);
+  if (sessId) say("session members", (await svc.from("session_members").delete().eq("session_id", sessId)).error);
+  say("close the test session", (await svc.from("sessions")
+    .update({ status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() })
+    .eq("table_number", TN).eq("restaurant_id", RID).eq("status", "open")).error);
+  // The one thing that MUST be true when we leave: nothing live is left on this table, or the
+  // manager's floor grows a table that does not exist and the next run cannot even start.
+  const left = await svc.from("sessions").select("id").eq("restaurant_id", RID).eq("table_number", TN).eq("status", "open").limit(5);
   if ((left.data || []).length) {
-    throw new Error(`table ${TN} still has an OPEN session (${left.data[0].id}) after cleanup — `
-      + "close it before re-running; the unique index allows only one open session per table");
+    console.log(`   ⚠ table ${TN} still has ${left.data.length} OPEN session(s) — the next run will fail at the unique index`);
+    return false;
   }
+  return true;
 }
+
+// A refused write must STOP the run, not be discovered three prints later as "test setup issue".
+const ins = (what, res) => { if (res.error) throw new Error(`${what}: ${res.error.message}`); return res; };
 
 let sessId = null; const orderIds = [];
 try {
@@ -84,36 +82,30 @@ try {
   const sess = (await svc.from("sessions").insert({ restaurant_id: RID, table_number: TN, status: "open", auto_approve: true }).select("id").single());
   if (sess.error) throw new Error("session insert: " + sess.error.message);
   sessId = sess.data.id;
-  const sm = await svc.from("session_members").insert({ restaurant_id: RID, session_id: sessId, name: "Parity Selftest", role: "guest", approved: true, phone: "9990000288", token: "selftest-" + Date.now() }).select("id");
-  if (sm.error) throw new Error("session_members insert: " + sm.error.message);
+  ins("the session member", await svc.from("session_members").insert({ restaurant_id: RID, session_id: sessId, name: "Parity Selftest", role: "guest", approved: true, phone: "9990000288", token: "selftest-" + Date.now() }));
 
   // ACCEPTED order: 1 served (qty1) + 1 cooking (qty2)  → truth: sv=1, ck=2, total=3
   const o1 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 900, total: 945, status: "preparing", payment_status: "pending" }).select("id").single());
   if (o1.error) throw new Error("order1 insert: " + o1.error.message);
   orderIds.push(o1.data.id);
-  // `order_items.restaurant_id` is NOT NULL with no default (the "every table stops guessing the
-  // restaurant" change). These two inserts omitted it AND discarded the result, so from that
-  // migration onward the fixture silently had NO ITEMS — and the guard then reported
-  // "could not reproduce the old mismatch (test setup issue)" instead of "my fixture failed to
-  // insert". Same family as the session insert in scripts/verify-realtime.mjs. Supply the column,
-  // and CHECK the write: a fixture that did not land must fail loudly, not look like a product
-  // fault. (T28 sweep, 2026-08-22.)
-  const i1 = await svc.from("order_items").insert([
+  // EVERY INSERT'S ERROR IS READ (sweep #6 / T28, 2026-08-22). `order_items.restaurant_id` became
+  // NOT NULL when the app went multi-tenant, and these two rows never carried it — so both inserts
+  // were refused, in silence, and the whole comparison below ran on ZERO dishes. nw=0 ck=0 rd=0 sv=0
+  // on both sides, so "the shipped math agrees with the summary" printed a ✓ that proved nothing: a
+  // false green, on the one property this file exists to hold. The only visible symptom was the
+  // SECOND line saying it "could not reproduce the old mismatch (test setup issue)".
+  ins("the accepted order's dishes", await svc.from("order_items").insert([
     { restaurant_id: RID, order_id: o1.data.id, session_id: sessId, title: "Espresso", qty: 1, unit_price: 300, status: "served" },
     { restaurant_id: RID, order_id: o1.data.id, session_id: sessId, title: "Latte",   qty: 2, unit_price: 300, status: "preparing" },
-  ]).select("id");
-  if (i1.error) throw new Error("order1 items insert: " + i1.error.message);
-  if ((i1.data || []).length !== 2) throw new Error(`order1 items: expected 2 rows, got ${(i1.data || []).length}`);
+  ]));
 
   // CANCELLED order: 1 dish still 'ready', qty5 → the POISON that leaked into the clicked tile
   const o2 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 2500, total: 2625, status: "cancelled", payment_status: "pending" }).select("id").single());
   if (o2.error) throw new Error("order2 insert: " + o2.error.message);
   orderIds.push(o2.data.id);
-  const i2 = await svc.from("order_items").insert([
+  ins("the cancelled order's dish", await svc.from("order_items").insert([
     { restaurant_id: RID, order_id: o2.data.id, session_id: sessId, title: "Cancelled Cake", qty: 5, unit_price: 500, status: "ready" },
-  ]).select("id");
-  if (i2.error) throw new Error("order2 items insert: " + i2.error.message);
-  if ((i2.data || []).length !== 1) throw new Error(`order2 items: expected 1 row, got ${(i2.data || []).length}`);
+  ]));
 
   await sleep(500);
 

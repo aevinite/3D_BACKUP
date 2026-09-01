@@ -37,36 +37,75 @@ import { softDeleteOrders } from "@/lib/softDelete";
 // The admin stays invisible to a MANAGER too — the Audit now obeys the rule the Activity log
 // already did (lib/auditActor.ts).
 import { auditForReader, forReader } from "@/lib/auditActor";
-import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
+import { auditAfter, auditBillHtml, auditBillSides } from "@/lib/auditDetail";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 // The kitchen-ticket print queue (mig 269 + 335). Shared with the kitchen route: two panels now
 // claim from the same rows, and one implementation is what stops them drifting into two ideas of
 // "claimed" — which would be a ticket printed twice.
-import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation } from "@/lib/printQueue";
+import { pendingKotJobs, claimKotJobs, finishKotJob, stationView, takeStation, releaseStation, mayClaim, touchStation, waitingToPrint, STUCK_AFTER_MS} from "@/lib/printQueue";
 // A COMPUTER (a helper) can own the paper now — mig 341. When one does, no screen prints that kind:
 // a helper prints on the printer the address book names, a screen prints on whatever its own machine
 // defaults to, and both printing means the same ticket in two rooms.
-import { helperFor, helpersFor, queueJob } from "@/lib/printHelpers";
+import { helperFor, helpersFor, queueJob, targetsFor, targetFor, screenMayPrint } from "@/lib/printHelpers";
+// SETTING THE PRINTERS UP FROM THE MACHINE THAT HAS THEM (mig 367, owner 2026-08-27). The same board
+// the admin console draws, narrowed to this computer — same file, same four steps, same words.
+import {
+  agentForDevice, createAgent, writeRoutes, readRoutes, syncKotSwitch, isRoutableKind, ROUTABLE_KINDS,
+  panelForRole,
+} from "@/lib/printHelpers";
+import { printBoardState, helperFiles, stationFiles } from "@/lib/printBoard";
+import { helperScript, HELPER_FILENAME, HELPER_AUTOSTART, type HelperOs } from "@/lib/printHelperScript";
 // How long a BACKUP printer waits before it will take a ticket, so the kitchen's own printer always
 // gets first refusal. Deliberately short: a cook waiting on a ticket notices 30 seconds.
-const BACKUP_PRINTER_MS = 30000;
+// BACKUP_PRINTER_MS is gone with the backup screen (owner, 2026-08-30): there is no second room
+// waiting its turn, so there is no window for it to wait.
 // May a COUNTER (manager) screen print this restaurant's kitchen tickets — and only as the backup?
-// Both rungs of mig 107 must be on (the admin allowed auto-print AND the owner switched it on), and
-// mig 336's kot_print_target must name the counter. Asked on the pending read AND again at the claim.
+//
+// It asks ONE thing now: the Kitchen slips route (mig 369). It used to ask two — the route AND
+// mig 336's coarse `kot_print_target` — and the printing sweep caught them disagreeing, with the
+// OLDER one winning: a route saying "the manager screen prints the kitchen slips" was refused
+// because an admin had once set "kitchen" months before. Two settings for one question is how the
+// owner's own choice ended up doing nothing, so there is one left.
+//
+// `backup` is no longer a setting at all: the retired 'both' went to `backupPanel` on the route,
+// and then `backupPanel` itself went (owner, 2026-08-30 — there is no backup printer, a failure is
+// reported instead). Both rungs of mig 107 still gate everything (the admin allowed auto-print
+// AND the restaurant switched it on). Asked on the pending read AND again at the claim.
 async function counterPrintTarget(rid: string): Promise<{ mayPrint: boolean; backup: boolean; target: string; helper?: Awaited<ReturnType<typeof helperFor>> }> {
-  const [stQ, helper] = await Promise.all([
-    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, kot_print_target").eq("restaurant_id", rid).maybeSingle(),
+  const [stQ, helper, route] = await Promise.all([
+    sb.from("settings").select("auto_print_kot, auto_print_kot_allowed, modules").eq("restaurant_id", rid).maybeSingle(),
     helperFor(rid, "kot"),
+    targetFor(rid, "kot"),
   ]);
-  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; kot_print_target?: string } | null;
-  const on = st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
-  const target = String(st?.kot_print_target || "kitchen");
+  const st = stQ.data as { auto_print_kot?: boolean; auto_print_kot_allowed?: boolean; modules?: Record<string, { paused?: boolean }> } | null;
+  // A STOPPED QUEUE holds every screen too, not just the helper — otherwise "stop the queue" would
+  // stop the computer and let a screen carry on printing, which is not stopping anything.
+  const paused = st?.modules?.printing?.paused === true;
+  const on = !paused && st?.auto_print_kot === true && st?.auto_print_kot_allowed === true;
+  // `target` is kept in the shape only because the panels still read it to say WHERE paper goes in
+  // plain words. It is derived from the route now, never stored.
+  // "both" is gone with the backup screen: a room either prints the kitchen slips or it does not.
+  const target = route.kind === "screen"
+    ? (route.panel === "manager" ? "counter" : "kitchen")
+    : "kitchen";
   // A named helper takes the kitchen slips off every screen — including this one, and including the
   // backup path. The panel is told WHO has them so it can say so rather than going quiet.
   if (helper.owned) return { mayPrint: false, backup: false, target, helper };
-  return { mayPrint: on && (target === "counter" || target === "both"), backup: target === "both", target, helper };
+  const may = screenMayPrint(route, { panel: "manager", personId: null, deviceId: null });
+  // A person/device narrowing is checked per-request elsewhere (this helper has no request in hand),
+  // so "may a manager screen print at all" is the panel-level answer only.
+  // WITH NO ROUTE AT ALL, THE DEFAULT ROOM IS THE KITCHEN — so a manager screen does NOT auto-print.
+  // That is exactly what the retired kot_print_target defaulted to ('kitchen'), and it matters: a
+  // manager panel left open on a restaurant that has never touched the Printing board would
+  // otherwise start pulling kitchen tickets it never used to. Caught by verify:printing-sweep phase
+  // 22 before this shipped; my first version returned true here.
+  // (After mig 369 every existing restaurant HAS a kitchen-slip route, so this branch is only a
+  // brand-new one — where "the kitchen prints" is the right thing to assume.)
+  const panelOk = route.kind === "screen" ? route.panel === "manager" : false;
+  return { mayPrint: on && panelOk, backup: !!may.backup, target, helper };
 }
+
 import { settleBillInParts, reverseSplitLegs, PAY_LATER } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
@@ -78,6 +117,7 @@ import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, MENU_PART_DEFAULTS, type ManagerTabKey } from "@/lib/accessTree";
+import { managerCan } from "@/lib/managerCan";
 import { dashboardReach, clampDashRange, billsReach } from "@/lib/dashRange";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
@@ -87,6 +127,35 @@ import { panelSafeSettings } from "@/lib/panelSettings";
 import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic"; // always live, never cached
+
+// ── THE INSTALL TEXT, BUILT FOR THE MACHINE ASKING FOR IT ────────────────────────────────────────
+// The site the helper must talk to is taken from THIS request, never from a constant: a code minted
+// on backup points at backup, one minted on the live site points at the live site. A helper aimed at
+// the wrong site is a machine that never prints and never says why.
+const originOfReq = (req: NextRequest) => {
+  const h = req.headers;
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  return host ? `${proto}://${host}` : new URL(req.url).origin;
+};
+
+/** What this browser is running on, so the setup steps open on the right operating system without
+ *  anybody having to choose. A guess, and treated as one: the other two are always one tap away. */
+const osOfRequest = (req: NextRequest): HelperOs => {
+  const ua = (req.headers.get("user-agent") || "").toLowerCase();
+  if (ua.includes("windows")) return "windows";
+  if (ua.includes("mac os") || ua.includes("macintosh")) return "mac";
+  return "linux";
+};
+
+const PANEL_OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
+/** Shown ONCE, when a code is minted or replaced — it is stored only as a hash, so it can never be
+ *  read back. A lost code is REPLACED, never recovered, and the screen says so beside the button. */
+const panelScriptsFor = (origin: string, code: string, label: string) =>
+  Object.fromEntries(PANEL_OS_LIST.map((os) => [os, {
+    filename: HELPER_FILENAME[os], autostart: HELPER_AUTOSTART[os],
+    text: helperScript(os, { origin, code, label }),
+  }]));
 
 // Gate: only a logged-in MANAGER (or the admin super-user) may touch this API.
 // Returns a 401 response to short-circuit, or null to let the handler proceed.
@@ -104,75 +173,9 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which
 //  also honours the admin's "view as" restaurant. DEFAULT_RESTAURANT_ID is still used
 //  below for menu-item id namespacing.)
-// Whether the acting staff may perform an owner-gated MANAGER action. The admin
-// super-user (g.user===null) and the OWNER always may; a plain manager only if the
-// owner switched that capability flag ON for this restaurant (mig 091 + the owner's
-// "Staff & powers" page) AND the admin still entitles that power at all (mig 133 —
-// the row's own Feature half). Both columns come back in
-// ONE select, so the ladder check adds no extra round trip. Enforces give_discounts /
-// void_bills / edit_menu / view_dashboard server-side so hiding a button is never
-// the only guard.
-async function managerCan(g: { user: StaffUser | null }, rid: string, flag: string): Promise<boolean> {
-  const u = g.user;
-  if (!u) return true; // admin super-user — X-ray honesty, always passes
-  if (u.role === "owner") {
-    // The owner passes every power automatically EXCEPT menu editing, which cascades from the
-    // ADMIN rung (owner, 2026-07-25): when the admin turns menu editing OFF the owner also drops
-    // to a read-only "View menu" — matching the ladder (a rung that's off is refused by the
-    // server, not merely hidden).
-    //
-    // THE CASCADE WAS LOST AND IS BACK (T19 sweep, 2026-08-14). The old reader was
-    // `owner_entitlements.power_edit_menu`, a key no screen has been able to write since the old
-    // ladder went, so it answered "allowed" for every restaurant, always. Deleting it on
-    // 2026-08-06 was right; what went with it was the cascade itself — this branch became a bare
-    // `return true`, which returns BEFORE the Feature-half check on the line below. So the panel
-    // correctly flipped the owner to "👁 View menu" (menuEditAllowed() in public/panels/editor/
-    // app.js reads the same switch through offByAdmin) while this route went on accepting that
-    // owner's saves. The panel's own comment there promises the opposite — "the server refuses
-    // the writes regardless, so this is the honest matching UI, never the only guard" — and
-    // "hiding is never the only guard" is the access model's first rule.
-    //
-    // The switch is the Feature half of Access → Manager → Edit menu (`access_config.edit_menu.on`),
-    // which is exactly what the panel reads, so the two can't disagree again. ONE tiny indexed
-    // read, and only when the question is edit_menu — every other power still costs nothing, as
-    // the note above has always promised. It fails OPEN on a read error, deliberately and in step
-    // with the manager path six lines down: this rung decides whether an owner may edit their own
-    // menu, and a database blip must not lock them out of their own restaurant mid-service.
-    if (flag !== "edit_menu") return true;
-    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data as
-      { access_config?: Record<string, { on?: boolean }> | null } | null;
-    return cfg?.access_config?.edit_menu?.on !== false;
-  }
-  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
-    { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: Record<string, { on?: boolean }> } | null;
-  // THE FEATURE HALF (owner, 2026-08-01). A row on the Access screen now answers two questions:
-  // does this restaurant HAVE the thing, and what does a person of that role start with. This is
-  // the first — switched off, nobody has it whatever their own default or override says, which is
-  // why it is checked before them. Absent means ON, so nothing changes until it is switched off.
-  if (r?.access_config?.[flag]?.on === false) return false;
-  // THE OLD LADDER'S ADMIN CAP IS GONE (sweep T6, 2026-08-06). `power_<flag>` was the pre-rebuild
-  // "may the admin allow this power at all" rung, and it is now unwritable by ANY code path: the
-  // one and only writer of owner_entitlements is the access-tree route, which allow-lists from
-  // SECTION_ENTITLEMENTS (owner PAGE keys), and the create form's copy went on 2026-08-06. So the
-  // key is permanently absent, this line was permanently true, and it was a second cap on an idea
-  // that already has a switch — `access_config[flag].on`, checked immediately above, which IS the
-  // Feature half of the row on the Access screen. Two mechanisms for one idea is what this model
-  // exists to remove. Verified before deleting: no restaurant on the backup stack has any
-  // power_<flag> stored false, so this changes nothing for anyone today, and nothing can write
-  // one tomorrow.
-  // Per-person override (access panel → Per person, mig 115 staff_users.permissions):
-  // an individual's setting WINS over the restaurant-wide owner→manager grant, but never
-  // over the admin cap above. 'on'/'pin' = allow this person, 'off' = deny them, absent/
-  // 'default' = fall through to the grant. Rides free on u.permissions (no extra query).
-  const ov = u.permissions?.[flag];
-  if (ov === "on" || ov === "pin") return true;
-  if (ov === "off") return false;
-  // An ABSENT key used to mean NO here while the Access screen showed the row's default — usually
-  // YES. That one line is why a manager was refused things the admin could see switched on, and
-  // why every power dropped from the screen was stuck off. managerGrantValue() is the single
-  // answer both sides read now (lib/accessTree.ts).
-  return managerGrantValue(flag, r?.manager_permissions?.[flag]);
-}
+// managerCan() LIVES IN lib/managerCan.ts SINCE 2026-08-27 — unchanged, just shared. A second
+// door now asks it (/api/pair, where a print helper is adopted by a signed-in human), and a
+// permission rule with two copies is the bug class the access rebuild exists to remove.
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
 // A row on the Platform board is gated by different rungs depending on what it is: a staff
@@ -506,6 +509,14 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
     }
   }
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   return rid;
 }
@@ -761,14 +772,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // customer-search?q=98250 — "who is this number?" for the bill's customer box.
     // Fired while the waiter is still typing, so it must stay tiny and quick: prefix-anchored
-    // on the (restaurant_id, phone) index, at most 6 rows, only phone + name + visit count.
+    // on the (restaurant_id, phone) index, at most 12 rows, only phone + name + visit count.
+    // TWELVE, not the four the sheet shows: an answer the database did NOT have to truncate can be
+    // narrowed on-device for every longer number, so one slightly bigger answer replaces several
+    // small ones (owner, 2026-08-28). The cap is real as of migration 365 — before that the LIMIT
+    // sat after a json_agg and capped nothing at all, so this asked for 6 and could get the lot.
     // A complete number is normalised first, so +91 / leading-0 spellings find the same row.
     if (p === "customer-search") {
       const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
       if (q.length < 3) return ok({ matches: [] });
-      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
+      const CUSTOMER_SEARCH_ROWS = 12;
+      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: CUSTOMER_SEARCH_ROWS });
       if (error) throw new Error(error.message);
-      return ok({ matches: Array.isArray(data) ? data : [] });
+      const matches = Array.isArray(data) ? data : [];
+      // `whole` — did this answer hold EVERY customer matching that prefix, or did we cut it off?
+      // The sheet reuses a complete answer for longer numbers without asking again, so it must
+      // never have to GUESS this from a row count and a constant of its own: the two would drift
+      // the moment either side's cap moved, and the sheet would silently narrow from a truncated
+      // list and lose a real customer. The server knows; the server says. A panel too old to
+      // understand the flag simply keeps asking, which is what it did before.
+      return ok({ matches, whole: matches.length < CUSTOMER_SEARCH_ROWS });
     }
 
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
@@ -1356,7 +1379,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // otherwise still say "Print". REJECTED (owner, 2026-08-19): this must NOT put anything on
         // the paper or in the Audit — it changes one word on one button, nothing else.
         const [sessQ, memQ, chainQ, payQ] = await Promise.all([
-          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
+          sb.from("sessions").select("id,status,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone,bill_printed_at").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
           // THE SIGNED CHAIN (mig 332), for the verification line the bill prints. `bill_chain` is
           // RLS-locked with NO policy — service role only, deliberately — so this is a scoped
@@ -1408,6 +1431,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const s = map[o.session_id];
           if (s) {
             o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no;
+            // IS THE TABLE STILL ON THE FLOOR? (owner, 2026-08-26.) The Bills tab has to tell a
+            // LIVE bill being corrected before payment from a FINISHED one whose party has left —
+            // they take two different doors (void-invoice vs reopen-table, mig 365) and the button
+            // has to pick the right one. It cannot ask state.board.sessions: that holds only the
+            // SELECTED table's slice, so in the Bills tab it is empty and every bill would look
+            // open. Found by driving it — the button rendered, and rendered the wrong door.
+            o.session_status = s.status;
             // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
             // from customer_name below, which is the guest's own name on their phone.
             o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
@@ -1527,14 +1557,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip")
+        // ── payment_method IS READ FOUR TIMES BELOW, SO IT HAS TO BE ASKED FOR (T11 sweep #7, 2026-08-30)
+        // It was missing from this column list while the code underneath read `o.payment_method` four
+        // times, so every one of those reads was `undefined`:
+        //   · the till breakdown labelled EVERY bill not settled in parts "Not recorded" — measured on
+        //     2026-08-26, this report said "Not recorded ₹1,932 / 4 bills" for the same business day and
+        //     the same window (05:00 IST) where the owner's day sheet said "Cash ₹1,932 / 4 bills". The
+        //     money and the bill count were right; only the NAME was wrong — and at day close "nobody
+        //     wrote down how this was paid" is an action item that was not real.
+        //   · `onHouseCount` / `onHouseNet` could never be anything but zero, so an on-the-house bill
+        //     fell into paidCount/paidNet instead — counted as money collected when nothing was.
+        // One column, and it is a short string on a query that already pages the day's orders.
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip,payment_method")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ, cntQ, numAggQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, openSessQ, cntQ, numAggQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1545,8 +1586,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // not count the drawer against it, while a split-settled bill showed only "Split". Reversed
         // legs are read too, and reported separately — a reversal is never hidden, only excluded
         // from what was collected (mig 285). Scoped, explicit columns, limited.
-        sb.from("session_payments").select("amount,method,reversed_at").eq("restaurant_id", rid)
+        sb.from("session_payments").select("session_id,amount,method,reversed_at").eq("restaurant_id", rid)
           .gte("created_at", since).limit(20000),
+        // Which of today's tables are STILL SITTING — see the till count below. Ids only, one
+        // indexed filter, and only the open ones, so it is a few rows however busy the day was.
+        sb.from("sessions").select("id").eq("restaurant_id", rid).is("closed_at", null).limit(5000),
         // IS EVERY NUMBER ACCOUNTED FOR? (owner, 2026-08-06 — "show gaps on the Z-report".)
         //
         // Gaps in the bill/invoice series are CORRECT here: a number retires on a void and is never
@@ -1660,7 +1704,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       //     session_payments, so the legs speak for it;
       //   · every other paid bill states its own method on the order rows.
       // Reversed legs are excluded from what was collected and reported on their own line.
-      const legs = (must(legQ) || []) as { amount: number; method: string | null; reversed_at: string | null }[];
+      const legs = (must(legQ) || []) as { session_id: string | null; amount: number; method: string | null; reversed_at: string | null }[];
       const byMethod = new Map<string, { amount: number; count: number }>();
       const addMethod = (m: string, amt: number) => {
         const key = (m || "").trim() || "Not recorded";
@@ -1668,10 +1712,38 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         row.amount = r2(row.amount + amt); row.count += 1;
         byMethod.set(key, row);
       };
-      let reversedNet = 0, reversedCount = 0;
+      // ── A LEG ON A BILL THAT IS NOT SETTLED IS NOT TODAY'S TAKINGS (T11, 2026-09-01) ────────
+      // The stated side below already skips a bill that is still open. The legs loop skipped
+      // nothing but a reversal, so a table that had paid HALF and was still sitting there was
+      // counted as money collected — and the till list totalled more than the day's takings
+      // printed above it. Measured in one moment on French House: the list came to ₹14,301
+      // against a day that had taken ₹12,369, and the difference was a single open table with
+      // three payment legs on it (session 7e261230).
+      //
+      // The money is REAL — it is in the drawer — so it is not thrown away. It moves to its own
+      // line, exactly the way a reversed leg already has one, so BOTH numbers are true at once:
+      // the method list totals the day's takings, and the drawer still reconciles. Excluding it
+      // silently would have left a manager counting cash over by that amount with nothing on the
+      // report to explain it.
+      // THE TEST IS "IS THE TABLE STILL SITTING", NOT "IS THE BILL STAMPED PAID". Three shapes,
+      // and only the first is money that has not been collected yet:
+      //   · a table STILL OPEN that has paid part of its bill — the cash is in the drawer, but the
+      //     bill is not finished, so it is not today's takings;
+      //   · a bill settled in parts, all real methods — closed, collected, belongs in the list;
+      //   · a bill closed with one part on a TAB (mig 364) — the session is CLOSED and the collected
+      //     parts really were collected today, even though `payment_status` is deliberately not
+      //     'paid' because money that never arrived is never claimed. Keying off payment_status
+      //     would have thrown this cash out of the till count, which is why the test is the session.
+      const openSessions = new Set<string>(
+        ((must(openSessQ) || []) as { id: string }[]).map((r2s) => String(r2s.id)),
+      );
+      let reversedNet = 0, reversedCount = 0, asideNet = 0, asideCount = 0;
       for (const l of legs) {
         const amt = Number(l.amount) || 0;
         if (l.reversed_at) { reversedNet = r2(reversedNet + amt); reversedCount += 1; continue; }
+        if (l.session_id && openSessions.has(String(l.session_id))) {
+          asideNet = r2(asideNet + amt); asideCount += 1; continue;
+        }
         addMethod(String(l.method || ""), amt);
       }
       // The order-stated side, per BILL so a multi-order table counts once, and net of its discount
@@ -1692,6 +1764,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         .map(([method, v]) => ({ method, amount: r2(v.amount), bills: v.count }))
         .sort((a, b) => b.amount - a.amount);
       const paymentsTotal = r2(payments.reduce((a, p2) => a + p2.amount, 0));
+      // `aside` mirrors `reversed`: money that moved but is not part of today's takings.
 
       const plat = (must(platQ) || []) as any[];
       // Exclude cancelled AND still-"new" (pending, unaccepted) delivery orders — the same
@@ -1799,7 +1872,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           onHouseCount, onHouseNet: r2(onHouseNet) },
         // The till count: what came in and how. `total` is the sum of the methods, so a manager can
         // check it against paidNet — a gap means a bill was settled without a method recorded.
-        payments: { rows: payments, total: paymentsTotal, reversed: r2(reversedNet), reversedCount },
+        payments: { rows: payments, total: paymentsTotal, reversed: r2(reversedNet), reversedCount, aside: r2(asideNet), asideCount },
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
         invoicesVoided: (must(voidQ) || []).length,
@@ -2000,7 +2073,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const byId = new Map(os.map((x) => [x.id, x]));
           jobs = jobs.map((j) => ({ ...j, kot_no: byId.get(j.order_id as string)?.kot_no ?? null, table_number: byId.get(j.order_id as string)?.table_number ?? null }));
         }
-        return { events: ev.data || [], stuck: jobs };
+        // HOW MANY ARE STACKED UP (owner, 2026-08-27). The `stuck` list above is deliberately
+        // narrow — five rows, 90 seconds old, so it can name each one — and it can never answer
+        // "how far behind are we": a hundred tickets behind a dead printer show as five. This is the
+        // whole number, counted (no rows), with the age of the oldest so the strip can tell a
+        // two-second blip from an emergency. It rides the read the floor already shares.
+        const waiting = await waitingToPrint(rid, "kot");
+        return { events: ev.data || [], stuck: jobs, waiting, stuckAfterMs: STUCK_AFTER_MS };
       });
       // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249). A handful of rows, restaurant-scoped, live
       // ones only — small enough to ride along with every floor read, and the floor needs it on
@@ -2055,16 +2134,75 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // BILL whether a computer will do it, and this is the read it already makes. One pair of
       // queries for all three (helpersFor), not three pairs.
       const owners = await helpersFor(rid, ["kot", "bill", "banquet"]);
-      if (!t.mayPrint) return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners });
+      // …and how far behind the printer is, on the SAME read (owner, 2026-08-27). It is sent whether
+      // or not this screen may print, for the same reason the station is: "eleven tickets are stacked
+      // up" is exactly what a manager needs to see about a printer that is not theirs.
+      const waiting = await waitingToPrint(rid, "kot");
+      // The same one resolver: which panel/person/device the owner named for each kind of paper.
+      const targets = await targetsFor(rid, ["kot", "bill", "banquet"]);
+      const whoAmI = { panel: "manager" as const, personId: g.user?.id || null, deviceId: dv };
+      const mayKot = screenMayPrint(targets.kot, whoAmI);
+      // MAY THIS PERSON'S SCREEN PRINT AT ALL (accessTree ACTIONS → "print_here").
+      //
+      // BEING NAMED BY THE ADMIN *IS* THE PERMISSION (owner, 2026-08-29). He was being sent off to
+      // Access & permissions in the middle of setting a printer up — "in the middle of thing, you
+      // tell me to go to the access and permission… remove it completely" — and worse, naming
+      // somebody whose general permission happened to be off produced a screen that was offered the
+      // job and then refused it, with the paper going nowhere. So an explicit, deliberate choice of
+      // ONE person on the Printing screen outranks the restaurant-wide default: the admin has
+      // already answered the question that permission asks. The permission still governs everyone
+      // the admin has NOT named.
+      const namedMe = targets.kot.kind === "screen" && !!g.user?.id && targets.kot.person === g.user.id;
+      const mayBePrinter = !g.user || namedMe ? true : await managerCan(g, rid, "print_here");
+      if (!t.mayPrint || !mayKot.ok || !mayBePrinter) {
+        return ok({ jobs: [], off: true, target: t.target, station, helper: t.helper, helpers: owners,
+                    waiting, stuckAfterMs: STUCK_AFTER_MS,
+                    targets, printRefused: !mayBePrinter ? "not_allowed" : mayKot.ok ? null : mayKot.why });
+      }
       // 'both' = this screen is the BACKUP: it may only see (and win) a ticket the kitchen has left
       // for 30 seconds. The same window is re-applied at the claim, so it is the server's rule.
       // Only the ACTIVE station is handed tickets. Another manager screen (or a phone) gets the
       // station's name instead, so it can offer "print here instead" rather than quietly racing.
-      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners });
-      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), target: t.target, station, helpers: owners });
+      if (!station.mine && station.active && !station.stale) return ok({ jobs: [], target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS });
+      return ok({ jobs: await pendingKotJobs(rid, { includeAuto: true, minAgeMs: 0 }), target: t.target, station, helpers: owners, waiting, stuckAfterMs: STUCK_AFTER_MS, targets });
     }
 
 
+
+    // ── SETTINGS → PRINTING: the same board the admin sees, on the machine that has the printer ──
+    //
+    // Owner, 2026-08-27: "that device is connected to the printer, so it will be easy for THAT device
+    // to set up the printer… admin can still see it… but that device will only get the option in
+    // settings, like everyone has their settings where they log out from."
+    //
+    // TWO LEVELS OF ANSWER, and the difference is one permission:
+    //   · anybody who can open Settings gets the READ — is printing on, where does the paper go,
+    //     what has printed. It is the same page they had before, and it tells nobody anything about
+    //     another restaurant.
+    //   · a person with "May set the printers up" (accessTree → print_setup) additionally gets the
+    //     BUTTONS: register this computer, get its code, choose which printer prints what.
+    // The permission is asked here, on the server, and again on every write below — the screen
+    // hiding a button has never been a gate.
+    if (path[0] === "printing" && (path.length === 1 || path[1] === "state")) {
+      const dv = deviceIdFrom(req);
+      const maySetup = g.user ? await managerCan(g, rid, "print_setup") : true;
+      const board = await printBoardState(rid, { deviceId: dv });
+      return ok({
+        ...board,
+        // The same one generic file the admin console shows — same text, same source, so the two
+        // screens cannot hand out different helpers (mig 368).
+        files: helperFiles(originOfReq(req)),
+        // MODE B's launcher, sent beside MODE A's. Both are plain text with nothing secret in them,
+        // so the panel can show whichever the mode calls for with no second round trip.
+        stationFiles: stationFiles(originOfReq(req)),
+        maySetup,
+        deviceId: dv,
+        // Which install text to show FIRST. The browser knows what it is running on, so nobody has to
+        // pick their own operating system off a list and get it wrong — the other two stay one tap away.
+        os: osOfRequest(req),
+        person: g.user ? { id: g.user.id, name: g.user.name || g.user.username || "" } : null,
+      });
+    }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
     // One-off read on the manager's click, never polled. The order may have left the live
@@ -2539,13 +2677,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // …with the two boxes and the bill, so the manager's card is the SAME card the owner and the
         // admin read (one record, one story — the rule this whole area exists under).
         const dMeta = ((one[0] as Record<string, unknown>).meta || {}) as Record<string, unknown>;
-        const [dAfter, dBill] = await Promise.all([
-          auditAfter(rid, (one[0] as Record<string, unknown>).order_id ? String((one[0] as Record<string, unknown>).order_id) : null),
+        const dRow = one[0] as Record<string, unknown>;
+        const dOrderId = dRow.order_id ? String(dRow.order_id) : null;
+        const [dAfter, dBill, dBillSides] = await Promise.all([
+          auditAfter(rid, dOrderId),
           auditBillHtml(rid, (dMeta.was || null) as Record<string, unknown> | null),
+          // WHAT THIS DID TO THE TABLE'S BILL (owner, 2026-08-26) — the whole-bill before/after,
+          // as opposed to the KOT compared with itself. See auditBillSides() for how both numbers
+          // are got without inventing any history.
+          auditBillSides(rid, dRow.session_id ? String(dRow.session_id) : null,
+            (dMeta.was || null) as Record<string, unknown> | null, dOrderId),
         ]);
         return ok({
           ...forReader(one[0] as { actor?: string | null; actor_role?: string | null }, !g.user),
-          __after: dAfter, __billHtml: dBill,
+          __after: dAfter, __billHtml: dBill, __billSides: dBillSides,
         });
       }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
@@ -2684,28 +2829,51 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ adminView: true, printer: own.printer, agent: own.agent });
       }
       const payload: Record<string, unknown> = {};
+      // What the diary line will call this piece of paper, filled in by whichever branch below
+      // resolves it — so the log says "bill #218 for table 6", not just "bill".
+      let printedWhat = kind === "bill" ? "bill" : "banquet sheet";
+      let printedTable: string | null = null;
       if (kind === "bill") {
         const sid = String((body as Record<string, unknown>)?.sessionId || "");
         if (!sid) return err("Which bill?", 400);
         // The session must be this restaurant's — the route handler never trusts the panel's word
         // for whose row it is (every other write here does the same).
-        const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        // `table_number` and `bill_no` ride along so the diary line can NAME the bill — see the
+        // note on logAction below. Same read, two more small columns.
+        const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; table_number: unknown; bill_no: unknown } | null;
         if (!sess) return err("That table's bill is not this restaurant's.", 404);
         payload.sessionId = sid;
         if ((body as Record<string, unknown>)?.parcel) payload.parcel = true;
+        printedTable = sess.table_number != null ? String(sess.table_number) : null;
+        printedWhat = `bill${sess.bill_no != null ? ` #${sess.bill_no}` : ""}`
+          + `${sess.table_number != null ? ` for table ${sess.table_number}` : ""}`;
       } else {
         const bid = String((body as Record<string, unknown>)?.billId || "");
         if (!bid) return err("Which banquet bill?", 400);
-        const bill = (await sb.from("banquet_bills").select("id").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+        const bill = (await sb.from("banquet_bills").select("id, bill_no").eq("id", bid).eq("restaurant_id", rid).maybeSingle()).data as
+          { id: string; bill_no: unknown } | null;
         if (!bill) return err("That banquet bill is not this restaurant's.", 404);
         payload.billId = bid;
+        printedWhat = `banquet sheet${bill.bill_no != null ? ` #${bill.bill_no}` : ""}`;
       }
       const q = await queueJob(rid, kind, payload, { requestedBy: g.user?.name || g.user?.username || "manager" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
+      // ── THE DIARY LINE NAMES *WHICH* BILL (owner, 2026-08-28: "make log do that") ─────────────
+      // Asked for "say who printed a bill, on the bill itself", he answered: let the LOG answer it.
+      // It could not. The row read `bill sent to Printer_POS_80 on Shop's computer` — which says
+      // WHERE the paper came out and never WHICH bill came out of it, so on a night with forty
+      // prints no two rows could be told apart. Both facts were already in reach: `table_number`
+      // is a column logAction has always accepted and nothing here passed, and the bill number is
+      // one extra column on a read this branch already makes.
       await logAction("editor", g.user ? "print_sent" : "print_sent_by_admin", {
         restaurant_id: rid, device_id: dev,
+        // Filterable as well as readable: the Audit & logs tab groups by table, so a bill print
+        // now sits with the rest of that table's story instead of floating loose. A banquet sheet
+        // has no table, and stays null rather than being given a pretend one.
+        table_number: printedTable,
         ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
-        detail: `${kind === "bill" ? "bill" : "banquet sheet"} sent to ${own.printer} on ${own.agent}`
+        detail: `${printedWhat} sent to ${own.printer} on ${own.agent}`
           + (g.user ? "" : " — sent deliberately from the admin console"),
       });
       // What the person is told, in the words they need: where it went, and — honestly — that it is
@@ -3804,6 +3972,48 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       return ok(Array.isArray(data) ? data[0] : data);
     }
+    // sessions/:id/reopen-table — PUT THE TABLE BACK, not the bill (owner, 2026-08-26).
+    //
+    // "You should reopen table not the bill … if the table has already taken the order, it
+    //  shouldn't be able to reopen. If the table is free, then only it should be able to reopen,
+    //  and after reopen you can add the order to that particular bill, you can't delete."
+    //
+    // The sibling above (void-invoice) reopens a bill that is still LIVE, for edits before it is
+    // paid. This one is the other case: a party that paid, left, and came back. The bill is closed
+    // and settled; the table is free; they want one more coffee. Until now the app's only answer
+    // was a credit note, which is a refund document, not a way to sell them a coffee.
+    //
+    // Every rule lives in the RPC (mig 365) so all three doors obey it — the table must be free,
+    // there must be a real sale to come back to, the invoice number is retired rather than reused,
+    // and nothing is un-paid. The route's job is the permission, the tenant boundary, the reason,
+    // and turning the RPC's codes into sentences a person can act on.
+    if (a === "sessions" && c === "reopen-table") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("reopen a bill");
+      const ownsRe = must(await sb.from("sessions").select("id,status,invoice_no,invoice_voided,table_number,bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; status?: string | null; invoice_no?: string | null; invoice_voided?: boolean | null; table_number?: string | null; bill_no?: number | null } | null;
+      if (!ownsRe) return err("That table isn't for this restaurant.", 404);
+      if (ownsRe.status === "open") return err("This bill is already open — the table is live right now.", 409);
+      const reReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      if (!reReason) return err("A reason is required to reopen a table.", 400);
+      const { data: reData, error: reErr } = await sb.rpc("lfh_reopen_table", { p_session: b, p_reason: reReason, p_actor: actorName });
+      if (reErr) {
+        if (reErr.code === "LFH03" || /another party is sitting/i.test(reErr.message))
+          return err(`Someone else is sitting at ${ownsRe.table_number ? "T" + ownsRe.table_number : "that table"} right now. The table has to be free before this bill can come back to it.`, 409);
+        if (reErr.code === "LFH04" || /nothing to reopen/i.test(reErr.message))
+          return err("Every KOT on this bill was cancelled, so there is no sale to reopen.", 409);
+        throw pgError(reErr);
+      }
+      // The table + bill, never the session uuid — the same rule the sibling handlers follow, so a
+      // person reading the Audit sees what they saw on the floor.
+      await log("editor", "table_reopened", {
+        restaurant_id: rid, table_number: ownsRe.table_number ?? null,
+        detail: `Bill #${ownsRe.bill_no ?? "?"}` + (ownsRe.invoice_no ? ` · Invoice ${ownsRe.invoice_no} retired` : "") + ` · ${reReason}`,
+        device_id: dev,
+      });
+      invalidateFloor(rid);
+      return ok(reData);
+    }
+
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
     // A reason is REQUIRED (owner: every reopen must say why). Refused once settled (mig 189).
     if (a === "sessions" && c === "void-invoice") {
@@ -4650,12 +4860,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // before the admin changed the setting would otherwise keep claiming tickets the kitchen is
       // now supposed to print — the classic "the screen said yes, the server says no" fault.
       const t = await counterPrintTarget(rid);
+      // …and the PERSON's own permission, and the ROUTE's own choice of panel/person/device. Three
+      // separate questions, all re-asked here rather than trusted from the caller: is this person
+      // allowed to be a printer at all (accessTree "print_here"), and is this the screen the owner
+      // actually named on the Printing menu.
+      const tgtK = await targetsFor(rid, ["kot"]);
+      const mayK = screenMayPrint(tgtK.kot, { panel: "manager", personId: g.user?.id || null, deviceId: deviceIdFrom(req) });
+      const allowedToPrint = g.user ? await managerCan(g, rid, "print_here") : true;
+      if (!allowedToPrint) return ok({ won: [], refused: "not_allowed" });
+      if (!mayK.ok) return ok({ won: [], refused: mayK.why === "computer" ? "helper" : mayK.why, printTarget: tgtK.kot });
       const gate = await mayClaim(rid, {
         deviceId: deviceIdFrom(req), panel: "editor", label: "Counter · manager screen",
         auto: t.mayPrint, roomAllowed: t.mayPrint, by: actorName || null,
       });
       if (!gate.ok) return ok({ won: [], refused: gate.reason, station: gate.station });
-      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: t.backup ? BACKUP_PRINTER_MS : 0 }), station: gate.station });
+      return ok({ won: await claimKotJobs(rid, ids, { minAgeMs: 0 }), station: gate.station });
     }
 
     if (a === "print-jobs" && c === "done") {
@@ -4679,6 +4898,199 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : `try ${r.attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
       });
       return ok({ ok: true, attempts: r.attempts });
+    }
+
+    // ── SETTING THE PRINTERS UP, FROM THE COMPUTER THAT HAS THEM (mig 367) ──────────────────────
+    //
+    // Every verb below asks managerCan("print_setup") FIRST, before it reads or writes a single row.
+    // The screen hides the buttons too, but that is decoration: this is the gate.
+    //
+    // AND EVERY VERB IS SCOPED TO THIS BROWSER'S OWN COMPUTER. A person with the permission can set
+    // up the machine they are sitting at and route paper to it; they cannot rename, re-code or
+    // remove another restaurant's machine, or another machine in their own restaurant. Anything
+    // wider than "this computer" stays with the admin, which is what the owner asked for — the
+    // device does the setting up, Aevidine keeps the whole board.
+    if (a === "printing") {
+      if (g.user && !(await managerCan(g, rid, "print_setup"))) return permDenied("set the printers up");
+      const dv = deviceIdFrom(req);
+      if (!dv) return err("This browser has no device id yet — reload the page and try again.", 400);
+
+      // ── "This is the computer with the printer" ───────────────────────────────────────────────
+      // Registers THIS browser's machine and hands back the one-time code. A second call from the
+      // same browser does not make a second computer: it renames the one it already has, because a
+      // person pressing the button twice means "I am setting this machine up", not "I have two".
+      if (b === "this-computer") {
+        const name = String((body as Record<string, unknown>)?.name || "").trim().slice(0, 60)
+          || (g.user?.name || g.user?.username || "This computer");
+        // ── "I AM THAT COMPUTER" ─────────────────────────────────────────────────────────────
+        // The link between a browser and its helper is the panel's own device id, and a device id
+        // does not survive a cleared browser, a new profile, or a machine that was set up from the
+        // admin console in the first place. Without a way back, the person sitting at the printer
+        // would see "this computer is not set up yet" beside a helper that is plainly running, and
+        // the only way out would be a SECOND registration of the same machine — two rows, one
+        // printer, and half the tickets in the wrong room.
+        //
+        // So a computer can be adopted: pick the one you are sitting at, and this browser becomes
+        // its screen. It never steals a machine from another live browser silently — the row's old
+        // device is replaced, and the change is audited like every other printing change.
+        const adopt = String((body as Record<string, unknown>)?.adopt || "");
+        if (adopt) {
+          const row = (await sb.from("print_agents").select("id, name").eq("id", adopt)
+            .eq("restaurant_id", rid).is("revoked_at", null).maybeSingle()).data as { id: string; name: string } | null;
+          if (!row) return err("That computer is not one of this restaurant's.", 404);
+          await sb.from("print_agents").update({ owner_device: dv, owner_user: g.user?.id || null })
+            .eq("id", row.id).eq("restaurant_id", rid);
+          await logAction("editor", "print_routes_changed", {
+            restaurant_id: rid, device_id: dv,
+            ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+            detail: `this screen now manages the computer “${row.name}”`,
+          });
+          return ok({ adopted: true, id: row.id, name: row.name });
+        }
+        const mine = await agentForDevice(rid, dv);
+        if (mine) {
+          if (name !== mine.name) {
+            const up = await sb.from("print_agents").update({ name }).eq("id", mine.id).eq("restaurant_id", rid).select("id").maybeSingle();
+            if (up.error) return err(up.error.code === "23505" ? "There is already a computer with that name." : "Could not rename it.", 400);
+          }
+          return ok({ already: true, id: mine.id, name });
+        }
+        const made = await createAgent(rid, name, { deviceId: dv, userId: g.user?.id || null });
+        if ("error" in made) return err(made.error, 400);
+        await logAction("editor", "print_helper_added", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `computer “${name}” set itself up to print`,
+        });
+        return ok({ id: made.id, name, code: made.token, scripts: panelScriptsFor(originOfReq(req), made.token, name) });
+      }
+
+      // ── UNLINK THIS COMPUTER ──────────────────────────────────────────────────────────────────
+      // It replaces "newcode" (mig 368). Minting a fresh token to be carried to a machine by hand was
+      // the whole ritual the pairing handshake removed, and once the file stopped carrying a token
+      // there was nowhere left to show one — a button that mints a credential nothing displays is
+      // worse than no button.
+      //
+      // Re-linking is now ONE path, the same one as a first-time setup: unlink here, double-click the
+      // file there, press Allow. Routes pointing at it are emptied in the same breath, because a route
+      // naming a machine that can no longer print would leave paper silently unprinted, and an EMPTY
+      // line at least says "no printer chosen" on screen.
+      if (b === "unlink") {
+        const mine = await agentForDevice(rid, dv);
+        if (!mine) return err("This computer is not set up here.", 404);
+        await sb.from("print_agents").update({ revoked_at: new Date().toISOString() })
+          .eq("id", mine.id).eq("restaurant_id", rid);
+        const routes = await readRoutes(rid);
+        const patch: Record<string, unknown> = {};
+        for (const k of ROUTABLE_KINDS) {
+          if (routes[k].agent === mine.id) patch[k] = null;   // no backup line to fall back to
+        }
+        if (Object.keys(patch).length) await writeRoutes(rid, patch);
+        await logAction("editor", "print_helper_removed", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `“${mine.name}” was unlinked and can no longer print`,
+        });
+        return ok({ ok: true, cleared: Object.keys(patch) });
+      }
+
+// ── THE "mode" VERB IS GONE HERE TOO (owner, 2026-08-31) ─────────────────────────────────
+      // Same reason as the admin console: there is no mechanism left to choose. A manager who wants
+      // the slips on their own screen names themselves on the kitchen-slip line below ("a screen"),
+      // which is the same act with one fewer step and no stored copy to contradict it.
+
+            // ── who prints one kind of paper ──────────────────────────────────────────────────────────
+      // One line at a time, and only three answers: this computer, a screen, or nobody. A screen
+      // route from here always means THIS panel and THIS person — narrowing it to somebody else's
+      // screen is an admin act, and letting a manager do it from their own settings would be a way
+      // to move another person's paper without telling them.
+      if (b === "route") {
+        const kind = String((body as Record<string, unknown>)?.kind || "");
+        if (!isRoutableKind(kind)) return err("There is no such kind of paper.", 400);
+        const who = String((body as Record<string, unknown>)?.who || "");
+        const mine = await agentForDevice(rid, dv);
+        let patch: Record<string, unknown>;
+        if (who === "computer") {
+          // WHICH machine, not necessarily THIS one. The board's dropdown is grouped by computer, so
+          // a restaurant with two machines can send the bills to the counter and the slips to the
+          // kitchen from either screen. It still falls back to this computer when none is named, so
+          // the older one-machine flow is unchanged.
+          const named = String((body as Record<string, unknown>)?.agent || "");
+          const agentId = named || mine?.id || "";
+          if (!agentId) return err("Set this computer up first — it has to tell us its printers before it can be given any.", 400);
+          const printer = String((body as Record<string, unknown>)?.printer || "");
+          if (!printer) return err("Which printer?", 400);
+          // NO BACKUP FIELDS (owner, 2026-08-30 — there is no backup printer). This still ACCEPTED
+          // `backupAgent` / `backupPrinter` off the request body and wrote them onto the route, weeks
+          // after everything that READ them was deleted. Nothing acted on them, so nothing looked
+          // wrong: it quietly stamped `backupAgent: null` onto every route it saved, and a caller
+          // passing a real one would have had it stored and silently ignored. A field that can still
+          // be WRITTEN is not a deleted field — it is a deleted field waiting to be read again.
+          // (T25 round 3 found the same two lines independently, an hour later, by re-running four old
+          // ledger rows that were still defending the backup printer — P12488, P27231, P27232, P27586.
+          // Two lanes, one leftover: the guard that now watches every file is verify:print-queue's
+          // twelve-file walk, and verify:print-helper block 8h checks the whole tree including the
+          // panels, with the one named shim.)
+          patch = {
+            agent: agentId, printer,
+            paper: (body as Record<string, unknown>)?.paper ?? undefined,
+          };
+        } else if (who === "screen") {
+          // NO `device` HERE, deliberately. A per-paper "On" must produce the SAME shape as naming a
+          // person on the admin board — otherwise one line would be narrowed to this one PC and the
+          // others not, which is a difference nobody asked for and nothing shows.
+          //
+          // THE PANEL FOLLOWS THE PERSON, and it is no longer hard-coded (2026-08-31). This said
+          // `panel: "manager"` outright, which is the same fault he reported on the admin picker
+          // ("choosing a person, there is not kitchen panel available"): writeRoutes then refuses a
+          // cook for not being a manager, so a cook pressing "print them on this screen" from the
+          // kitchen panel was told their own screen was not the kitchen panel. panelForRole is the
+          // one place that answers this, and it answers it for every role that has a screen.
+          patch = { via: "screen", panel: panelForRole(g.user?.role), person: g.user?.id || null };
+        } else if (who === "off") {
+          patch = { via: "off" };
+        } else if (who === "none") {
+          // "— no printer chosen yet —". A real answer, and a different one from "nobody": the line
+          // is simply unanswered again, and every screen says so instead of going quiet.
+          patch = null as unknown as Record<string, unknown>;
+        } else {
+          return err("Say who prints it — this computer, a screen, or nobody.", 400);
+        }
+        const saved = await writeRoutes(rid, { [kind]: patch });
+        if ("error" in saved) return err(saved.error, 400);
+        // KITCHEN SLIPS AND auto_print_kot ARE ONE DECISION (see lib/printHelpers → syncKotSwitch).
+        // Without this the trigger would keep filling the basket with slips nobody could claim,
+        // behind a switch that said off — and the two boards would disagree again, which is the
+        // exact fault the owner reported.
+        if (kind === "kot") await syncKotSwitch(rid, who !== "off");
+        await logAction("editor", "print_routes_changed", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `${kind === "kot" ? "kitchen slips" : kind === "bill" ? "bills" : "banquet sheets"} → ${
+            who === "computer" ? `${String((body as Record<string, unknown>)?.printer || "")} on ${mine?.name || "this computer"}`
+              : who === "screen" ? "this screen" : "nobody"}`,
+        });
+        return ok({ routes: saved.routes });
+      }
+
+      // ── a test page on one of THIS computer's printers ────────────────────────────────────────
+      if (b === "test") {
+        const mine = await agentForDevice(rid, dv);
+        if (!mine) return err("Set this computer up first.", 400);
+        const printer = String((body as Record<string, unknown>)?.printer || "");
+        if (!mine.printers.some((x) => x.name === printer)) return err("This computer has no printer by that name.", 400);
+        const q = await queueJob(rid, "test", { by: g.user?.name || g.user?.username || "manager" },
+          { requestedBy: "test page", agentId: mine.id, printer });
+        if ("error" in q) return err("Could not send the test page.", 500);
+        await logAction("editor", "print_test", {
+          restaurant_id: rid, device_id: dv,
+          ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+          detail: `test page to ${printer}`,
+        });
+        return ok({ queued: true, note: mine.connected ? `Sent to ${printer}.` : `Saved — it prints as soon as this computer's helper is running.` });
+      }
+
+      return err("Unknown printing request.", 404);
     }
 
     // ── print-station/take · /release — "print HERE instead" from the counter screen (mig 338) ──
@@ -5320,6 +5732,33 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,khata_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
+      // ── ONCE THE INVOICE IS PRINTED, NOTHING COMES OFF THE BILL (owner, 2026-08-26) ───────────
+      // His words: *"whenever the invoice has been printed — like you have clicked the print button
+      // — after [that] you won't be able to delete the thing."*
+      //
+      // Until now the only bars on cancelling a KOT were "is it paid?" and, in the panel, "has any
+      // dish been served?". An INVOICED but not-yet-paid bill fell through both: a manager could
+      // print a tax invoice, hand it to the guest, and then void a KOT off it. The paper in the
+      // guest's hand and the record would then disagree, and the invoice number would be carrying a
+      // total that no longer exists anywhere — which is the shape of a silent downward revision,
+      // the thing docs/COMPLIANCE-GUARDRAILS.md §2 refuses outright.
+      //
+      // The legal route after an invoice exists is unchanged and already built: REOPEN the bill
+      // (which voids the invoice, retires its number and records why — mig 189), change what needs
+      // changing, and print again for a new number; or, once settled, a CREDIT NOTE. Both keep the
+      // sale on the books. So this refuses and names the door rather than just saying no.
+      //
+      // Here and not only in the panel because three doors reach this route (manager, tablet, and
+      // the admin console acting as a restaurant), and a guard in one screen is a guard one caller
+      // obeys.
+      //
+      // ONE RULE, ONE PLACE: invoiceLockedByOrder() is the same helper that already locks the
+      // per-dish delete, the quantity stepper and the discount. A live invoice number locks the
+      // bill; a VOIDED one does not, because the bill was deliberately reopened and is editable
+      // again. Reusing it is what stops "invoiced" meaning four slightly different things.
+      if (patch.status === "cancelled" && await invoiceLockedByOrder(id)) {
+        return err("This bill's invoice has already been printed, so no KOT can be taken off it. Reopen the bill first — that retires the invoice number and records why — or issue a credit note if it is already settled.", 409);
+      }
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
       // On 2026-07-31 it was put behind void_bills, reasoning that a cancel voids money. Then on
       // 2026-08-02 the owner made "Reopen a bill" default OFF for every restaurant — and because
@@ -5334,8 +5773,15 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // RECORD, not a refusal: every cancel now writes an Audit row naming the person, the reason,
       // the KOT and the bill (below), so nothing can be cancelled quietly.
       //
-      // DELETING a bill keeps its own power (delete_bill + void_bills, further down) — that is the
-      // one that takes a sale out of the reports, and it stays deliberately handed over.
+      // AND DELETING A BILL IS NOT A POWER THIS RESTAURANT HAS AT ALL — do not read the paragraph
+      // above as saying it is. R27 (owner, 2026-08-16, re-confirmed 2026-08-21) retired the
+      // grantable "Delete a bill" row outright: *"I don't want to give permission to the restaurant
+      // owner to delete the bill because he will fake the bill and delete the bill"*. Cancel is the
+      // only route out of a bill for a manager AND for the owner; `canDeleteBill()` answers true for
+      // the Aevidine admin console only, and `npm run verify:one-bill-delete` asserts exactly that.
+      // This comment said the OPPOSITE until 2026-08-28 (sweep #7, T30) — written before R27 and
+      // never re-read, which is how a permission the owner refused gets rebuilt by somebody
+      // trusting a comment. The guard now fails if that wording ever comes back.
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to

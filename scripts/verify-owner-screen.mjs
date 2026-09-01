@@ -30,6 +30,26 @@
 //   10. Tapping the sidebar's "Dashboard" while a dish was open did nothing, because Next does not
 //       remount the route you are already on.
 //
+// The T12 sweep of 2026-08-27 added six more, all of the same shape — code that ran perfectly and
+// did not say what was true:
+//
+//   11. The Activity log's search and severity chips are SERVER-side, so narrowing to nothing made
+//       the server answer with zero rows — and the branch that fired was worded for an empty
+//       record: "No staff activity yet — it appears here as your team works.", over 8,829 entries.
+//   12. "Today so far" reads the overview rather than analytics, so the switched-off state never
+//       reached it. /api/owner/overview zeroes that restaurant's day on purpose, so the row read
+//       "— · — · ₹0, 0 orders today · — · —" — one confident false zero beside four honest dashes.
+//   13. Two owner-panel writers log the owner's uuid as the actor, and both of these screens
+//       printed it verbatim in the person column: "Handled a rating · c0af7b5b-…-f475e48bab53".
+//   14. /api/owner/analytics has sent partial: ["records"] since 2026-08-12 and nothing on the
+//       dashboard ever read it, so a failed all-time-records read still left the card silently
+//       absent — the exact fault that key was added to end.
+//   15. A food-loss read that FAILED (null, never a zero, by the route's own rule) printed as a
+//       flat "− ₹0" in the On hand popup under a headline "Money on hand", and the Expenses tile
+//       face said nothing either.
+//   16. A Recent-activity read that failed also landed on null, which the card renders as
+//       "Loading…" — the same fault the 403 branch was fixed for, one branch over.
+//
 // Static + instant: no server, no database, no browser.
 // Run: node scripts/verify-owner-screen.mjs   (or npm run verify:owner-screen)
 import { readFileSync } from "node:fs";
@@ -51,7 +71,8 @@ const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, 
 const homeC = code(home), auditC = code(audit), shellC = code(shell);
 
 const fails = [];
-const check = (name, ok, hint) => { if (!ok) fails.push(`${name}\n     → ${hint}`); };
+let total = 0;
+const check = (name, ok, hint) => { total++; if (!ok) fails.push(`${name}\n     → ${hint}`); };
 
 if (!home || !audit || !shell) {
   console.error("✗ could not read the owner home / audit / shell files — has the territory moved?");
@@ -246,7 +267,7 @@ check("the cancellation note offers a door to the record",
   "app/owner/page.tsx: the popup note says cancellations live in Audit & logs but no longer links\n       there — and the link must stay gated on the same `logs` entitlement the sidebar uses.");
 // ── 14. the detail opens on the scope and period on screen ──────────────────────────────────────
 check("the dashboard sends the VIEWED scope and the chosen range",
-  /q\.set\("view", activeRid \?\? "all"\)/.test(homeC) && /q\.set\("range", globalRange\)/.test(homeC),
+  /q\.set\("view", activeRid \?\? "all"\)/.test(homeC) && /q\.set\("range", [^)]*globalRange\)/.test(homeC),
   "app/owner/page.tsx: the detail link stopped carrying `view` and `range`. Then it falls back to the\n       admin's own ?rid pin, and from the All-restaurants view every tile lands on ONE restaurant —\n       his bug of 2026-08-18.");
 {
   const rep = read("app/owner/reports/page.tsx");
@@ -371,6 +392,223 @@ check("the food loss comes from the analytics payload, not the bill value",
     "app/owner/activity/page.tsx: a refused answer is silent again. A switched-off section or an order\n       that is no longer cancelled are both real answers the screen owes him.");
 }
 
+// ══ T12 sweep, 2026-08-27 ══════════════════════════════════════════════════════════════════════
+
+// 11 — an empty ANSWER is not an empty RECORD (Audit & logs → Activity log)
+check("a search that matches nothing is not called 'no staff activity yet'",
+  /rows\.length === 0 \?[\s\S]{0,900}?q\.trim\(\)[\s\S]{0,200}?Nothing matches that/.test(auditC),
+  "app/owner/activity/page.tsx: the zero-rows branch of ActivityView stopped checking `q`. The search\n       is server-side, so an unmatched search lands HERE — and telling the owner his team has done\n       nothing, over a log of thousands of entries, is simply false.");
+check("…and a severity chip that matches nothing says so too, with a way back",
+  /rows\.length === 0 \?[\s\S]{0,900}?:\s*level\s*\?[\s\S]{0,260}?setLevel\(""\)/.test(auditC),
+  "app/owner/activity/page.tsx: filtering to Notable/Info with no such rows reads as an empty log\n       again, and offers no way back to All.");
+check("the search's empty state offers a way to clear it",
+  /setQ\(""\)[\s\S]{0,60}Clear the search/.test(auditC),
+  "app/owner/activity/page.tsx: the 'nothing matches' state is a dead end again — the removals half\n       beside it has always offered the way out.");
+
+// 12 — the switched-off state reaches EVERY tile, today included
+check("\"Today so far\" goes quiet when Reports are switched off",
+  /k="Today so far"[\s\S]{0,400}?offNote \? undefined : \(\) => setTileOpen\("today"\)[\s\S]{0,400}?offNote \? "—" : todayRev/.test(homeC),
+  "app/owner/page.tsx: the Today tile prints the overview's figure again. That route ZEROES the day for\n       a restaurant whose Reports the admin took away, so the tile prints ₹0 as fact beside four tiles\n       that honestly say '—'. It reads as 'you took nothing today'.");
+check("…and its \"live\" pill goes with it",
+  /k="Today so far"[\s\S]{0,600}?pill=\{offNote \? undefined : "● live"\}/.test(homeC),
+  "app/owner/page.tsx: a '● live' pill is back over an em dash. There is nothing live to point at when\n       the figures are not shown.");
+
+// 13 — never a database id where a person's name goes
+check("the owner's log has a guard against printing a raw database id as a person",
+  /export function actorLabel/.test(read("lib/ownerActor.ts")) && /export function actorIsRawId/.test(read("lib/ownerActor.ts")),
+  "lib/ownerActor.ts has gone. Two owner-panel writers log the owner's uuid as the actor, so both of\n       these screens would print it in the person column again.");
+check("the dashboard's mini feed renders the actor through that guard",
+  /actorLabel\(a\.actor\)/.test(homeC) && !/\{a\.actor \|\| "—"\}/.test(homeC),
+  "app/owner/page.tsx: the Recent-activity card is printing `a.actor` raw again.");
+check("both halves of Audit & logs render the actor through it too",
+  /actorLabel\(r\.actor\)/.test(auditC) && /!actorIsRawId\(a\.actor\)/.test(auditC),
+  "app/owner/activity/page.tsx: a removals row or an activity row is printing its actor raw again.");
+check("…and the reference stays traceable in the tooltip",
+  /actorTitle\(/.test(homeC) && /actorTitle\(/.test(auditC),
+  "the id is now simply thrown away. Keep it in the cell's title so support can still trace a row.");
+
+// 14 — a card that vanishes says so (the client half of the route's improvement I5)
+check("the dashboard reads the server's partial:[\"records\"] answer",
+  /a\.partial\.includes\("records"\)/.test(homeC) && /setRecsUnread/.test(homeC),
+  "app/owner/page.tsx: nothing reads the `records` partial key again, so a failed all-time-records read\n       leaves the card silently absent — the exact fault /api/owner/analytics added that key to end.");
+check("…and the Your-records card appears to say it",
+  /recordsUnread \|\| \(records && \(records\.bestDay \|\| records\.starDish\)\)/.test(homeC),
+  "app/owner/page.tsx: the Your-records card is gated on data alone again, so when the read fails there\n       is one fewer block on the page and nothing explains it.");
+check("…in wording written for ONE restaurant, not several",
+  /msg="We couldn&rsquo;t read your all-time records/.test(homeC) && /msg\?: string/.test(homeC),
+  "app/owner/page.tsx: the records strip is back on the group wording ('Some restaurants didn't\n       answer'), which is not true of a single restaurant's own records.");
+
+// 15 — an unread cost never prints as a settled zero
+check("the On hand popup admits an unread food figure",
+  /const foodUnread = !!kMain && kMain\.foodLoss == null/.test(homeC)
+    && /foodUnread \? "we couldn[^"]*read this[^"]*missing from the sum below"/.test(homeC),
+  "app/owner/page.tsx: the On hand popup prints a flat '− ₹0' for a food-loss read that FAILED, and then\n       headlines 'Money on hand' as if it were settled. null means unread, never zero — the route says so.");
+check("…and its total says it may be too high",
+  /\["Money on hand", inr\(onHand\), foodUnread \?/.test(homeC),
+  "app/owner/page.tsx: the 'Money on hand' line stopped carrying the caveat, so an answer built on a\n       missing cost reads as final.");
+check("the Expenses tile face admits it too",
+  /kMain && kMain\.foodLoss == null \? "staff pay only/.test(homeC),
+  "app/owner/page.tsx: the Expenses tile falls through to the staff-pay wording again when the food\n       figure could not be read, so a total that is too low looks complete.");
+
+// 16 — a failed read is not 'still loading'
+check("the Recent-activity card tells a failed read apart from loading",
+  /const \[actsErr, setActsErr\] = useState\(false\)/.test(homeC) && /catch \{ setActs\(null\); setActsErr\(true\); \}/.test(homeC),
+  "app/owner/page.tsx: a failed /api/owner/oplog read folds back into the null the card renders as\n       'Loading…' — the identical fault the 403 branch was fixed for, one branch over.");
+check("…and says so on screen, with one tap to try now",
+  /actsErr[\s\S]{0,200}Couldn&rsquo;t load this just now[\s\S]{0,320}Try again/.test(homeC),
+  "app/owner/page.tsx: the failed state is invisible again — the card spins with no end and no retry.");
+
+// 17 — the icon does not touch the word (a flex row eats the leading space)
+check("the Refresh buttons on Audit & logs keep their icon gap",
+  (auditC.match(/fas fa-rotate" style=\{\{ marginRight: 6 \}\}/g) || []).length === 2,
+  "app/owner/activity/page.tsx: a Refresh button lost its icon margin. .owx .adm-btn is a flex row, and a\n       flex container collapses the leading space of a text run — so the glyph sits hard against the word.");
+
+// 18 — the all-time records scan is asked for ONCE per restaurant, not once per payload in flight
+check("the unbounded all-time-records read is asked for once, at ask-time",
+  /recsAsked\.current\.has\(rid\)/.test(homeC) && /if \(recQ\) recsAsked\.current\.add\(rid!\)/.test(homeC),
+  "app/owner/page.tsx: the records=1 guard is back on `recsRef` alone, which is only filled once a\n       request has ANSWERED — so the main-range and month payloads, dispatched in the same pass, both\n       carry it and the one read the server keeps outside its cache runs twice on every open.");
+check("…and a failed records read can still be retried",
+  /recsAsked\.current\.delete\(rid\)/.test(homeC),
+  "app/owner/page.tsx: the ask-flag is never cleared, so a records read that failed can never be tried\n       again for the rest of the visit.");
+
+// 19 — the one tile that does not follow the dropdown links to its OWN period
+check("the Today popup's report link opens TODAY, not the dropdown's period",
+  /q\.set\("range", t === "daysummary" \? "today" : globalRange\)/.test(homeC),
+  "app/owner/page.tsx: the Today popup says 'it is always today' and its 'See the full detail' link\n       carries the dropdown's range again — one screen, two answers, one tap apart.");
+
+// 20 — a removal kind nobody mapped still reads as English, never as a column value
+check("an unmapped removal kind is humanised, not printed raw",
+  /function humanKind/.test(auditC) && /REMOVAL_KIND\[r\.kind\] \|\| \["•", KINDS\[r\.kind\] \|\| humanKind\(r\.kind\)\]/.test(auditC),
+  "app/owner/activity/page.tsx: the removals row falls back to the raw `r.kind` again. It is not\n       hypothetical — app/api/owner/customers writes kind: \"customer_erased\", auditsort.js has no label\n       for it, and the top row of the record read '• customer_erased · Guest ending 1601'.");
+// 21 — the skin broadcast has exactly ONE writer, and it is not inside a state updater
+check("the skin's three writes sit outside setSkin's updater",
+  /const toggleSkin = \(\) => \{\s*const next = skin === "dark"/.test(shellC) && !/setSkin\(\(cur\) => \{/.test(shellC),
+  "components/owner/OwnerShell.tsx: the localStorage write, the cookie write and the lfh:owner-skin\n       broadcast are back inside setSkin's updater. React requires an updater to be pure and calls it\n       twice in development to catch this — measured: one tap fired the broadcast twice. This is the\n       one event that drives the EMBEDDED panel's skin, and its rule is one writer.");
+
+check("the guest-erasure REASON has words, and any future code has a floor",
+  /data_erasure_request: "Data erasure request"/.test(auditC)
+    && /REMOVAL_REASON\[r\.reason_code\] \|\| humanKind\(r\.reason_code\)/.test(auditC),
+  "app/owner/activity/page.tsx: the reason column prints a raw code again. app/api/owner/customers\n       writes reason_code: \"data_erasure_request\" and the six manager reasons do not include it, so the\n       row read 'data_erasure_request — Guest asked for their personal data to be erased'.");
+check("…and the CHIP strip, the search and the money line read from that same map",
+  /function labelsWith/.test(auditC) && /kindCountsFrom\(removals \|\| \[\], counts, KINDS, KIND_ICON\)/.test(auditC)
+    && /kindLabel: KINDS/.test(auditC) && /KINDS\[activeKind\]/.test(auditC),
+  "app/owner/activity/page.tsx: a chip, the search or the '· <kind>' line is back on the bare\n       KIND_LABEL. AUDITSORT.kindCountsFrom falls back to the raw kind itself, which is how the strip\n       came to print '• customer_erased 2' beside ten properly-named chips.");
+
+// 22 — the guest-erasure row has REAL words in the one map all four surfaces read (owner, 2026-08-29)
+{
+  const as = read("public/panels/auditsort.js");
+  check("customer_erased is named in the shared map, not just floored locally",
+    /customer_erased: "Guest record erased"/.test(as) && /customer_erased: "\\uD83E\\uDDF9"/.test(as),
+    "public/panels/auditsort.js lost its customer_erased label or glyph. Then the owner panel falls back\n       to humanKind, and the manager panel, the admin console and the removal-detail card go back to\n       printing the column value.");
+}
+
+// 23 — every owner-panel write records a PERSON, never a database id (owner, 2026-08-29)
+{
+  const sc = read("lib/ownerScope.ts");
+  check("there is ONE definition of who an owner write is recorded as",
+    /export function ownerActorName\(scope: OwnerScope\): string/.test(sc) && /ownerName\?: string/.test(sc),
+    "lib/ownerScope.ts: ownerActorName has gone. Five routes used to build this by hand and all five\n       wrote scope.ownerId — a uuid — into columns the panels PRINT.");
+  check("…and the owner's login name is carried on the scope to feed it",
+    /ownerName: owner\.username \|\| undefined/.test(sc),
+    "lib/ownerScope.ts: the scope stopped carrying the owner's login name, so ownerActorName falls back\n       to the uuid again.");
+  let raw = 0;
+  for (const f of ["app/api/owner/ratings/route.ts", "app/api/owner/customers/route.ts", "app/api/owner/issues/route.ts"]) {
+    const t = read(f);
+    if (/scope\.ownerId \|\| "owner"/.test(t)) raw++;
+    check(`${f.split("/").slice(-2)[0]} records the person through ownerActorName`,
+      /ownerActorName\(scope\)/.test(t) && !/scope\.ownerId \|\| "owner"/.test(t),
+      `${f}: it is back to building the actor by hand from scope.ownerId, which is a uuid. That value\n       lands in staff_actions.actor, deletion_audit.actor, feedback.acknowledged_by or issues.raised_by —\n       all four are columns a screen prints.`);
+  }
+  check("no owner route builds that expression by hand any more",
+    raw === 0,
+    `${raw} route(s) still build the actor from scope.ownerId. One definition, or they drift again.`);
+  const iss = read("app/owner/issues/page.tsx");
+  check("the Feedback screen guards the ids already written before that fix",
+    /actorLabel\(r\.acknowledged_by\)/.test(iss) && /actorLabel\(i\.raised_by\)/.test(iss),
+    "app/owner/issues/page.tsx: 'handled by' and 'Raised by' print their column raw again. Rows written\n       before 2026-08-29 still hold a uuid there.");
+}
+
+// 24 — the type-chip strip folds on a PHONE only, and never folds a way out (owner, 2026-08-29)
+check("the removals chip strip folds on a narrow screen",
+  /const CHIP_FOLD = 5/.test(auditC) && /const folding = narrow && !allChips && chips\.length > CHIP_FOLD \+ 1/.test(auditC),
+  "app/owner/activity/page.tsx: the chip strip no longer folds. Eleven chips over eight lines pushed the\n       search box below the fold on the screen you search from — measured at ~530px on a 360px phone.");
+check("…and it is a PHONE rule, keyed to the console's own 760px step",
+  /matchMedia\("\(max-width: 760px\)"\)/.test(auditC),
+  "app/owner/activity/page.tsx: the fold is no longer width-aware, so it hides chips on a desktop where\n       all of them fit two lines.");
+check("…and it never folds 'All', nor the chip you are standing on",
+  /i < CHIP_FOLD \|\| c\.kind === kind/.test(auditC) && /activeKind === "" \? "on"/.test(auditC),
+  "app/owner/activity/page.tsx: the fold can now hide the selected chip or the way back to All — narrowing\n       to a rare type would make the chip you are standing on vanish.");
+check("…and there is one tap to see the rest",
+  /setAllChips\(true\)/.test(auditC) && /\+ \{hiddenChipCount\} more/.test(auditC),
+  "app/owner/activity/page.tsx: the folded chips have no way to be shown — that is hiding, not folding.");
+
+// 25 — the pager scrolls the element that actually scrolls (owner, 2026-08-29)
+check("paging moves the real scroller, not the window",
+  /for \(const sel of \[".adm-main", ".adm"\]\)/.test(auditC) && !/window\.scrollTo/.test(auditC),
+  "app/owner/activity/page.tsx: the Pager is back on window.scrollTo. The window NEVER scrolls on the\n       owner console — above 900px .adm-main is the scroller, below it .adm is — so that line moves\n       nothing, and 'page 2 opens at the top' is left resting on the list collapsing while it loads.");
+
+// 26 — the multi-restaurant test owner exists and is reachable (owner, 2026-08-29)
+{
+  const lg = read("scripts/sweep/login.mjs");
+  check("a sweep can sign in as an owner who owns TWO restaurants",
+    /ownerMulti: \{ username: "diagmulti"/.test(lg),
+    "scripts/sweep/login.mjs lost the ownerMulti entry. Without it, a third of this dashboard — the\n       estate table, the drawer, the callouts, the stacked bars, the picker and the switcher's\n       re-scope — can only be checked by reading, which is how two faults sat for months.");
+  check("…and the script that creates it is still in the repo",
+    /diagmulti/.test(read("scripts/sweep/make-multi-owner.mjs")),
+    "scripts/sweep/make-multi-owner.mjs has gone. It is idempotent and prints its own undo — keep it,\n       or the fixture cannot be rebuilt on a fresh database.");
+  check("…and it is NEVER pointed at Aangan",
+    /refusing: Aangan is in the list/.test(read("scripts/sweep/make-multi-owner.mjs")),
+    "scripts/sweep/make-multi-owner.mjs dropped its Aangan guard. Aangan is the read-only control at\n       factory defaults — giving it a second owner would destroy what it is for.");
+}
+
+// 27 — the estate DRAWER hides a restaurant's takings when its Reports are off (round 2, 2026-08-29)
+check("the drawer knows about reportsOff, like the table row it opens from",
+  /drawer\.r\.reportsOff \? \(/.test(homeC) && /Figures aren&rsquo;t shown for this restaurant/.test(homeC),
+  "app/owner/page.tsx: the estate drawer prints money again for a restaurant whose Reports the admin\n       switched off. /api/owner/overview zeroes that restaurant on purpose and analytics leaves it out,\n       so the drawer showed 'Today ₹0 · Revenue ₹0 · Avg ₹0 · 0 orders all-time' over a trading\n       restaurant — one inch from a table cell reading 'figures hidden'. That is the exact fault the\n       reportsOff flag was added for on 2026-08-04.");
+check("…and draws no trend chart of a series it was never given",
+  /!drawer\.r\.reportsOff && drawerTrend\.length >= 2/.test(homeC),
+  "app/owner/page.tsx: the drawer draws a trend for a reports-off restaurant — a flat line of zeros\n       presented as its business.");
+check("…while open tables and Active/Off stay, because they are not money",
+  /<div><small>Open tables<\/small>/.test(homeC) && /own-pill \$\{drawer\.r\.active/.test(homeC),
+  "app/owner/page.tsx: the drawer now hides the two things that are still true and still useful when\n       the takings are hidden — they come from the overview for every restaurant.");
+
+// 28 — the estate table STACKS on a phone instead of hiding its figures off the right edge
+//      (T12 sweep round 2, 2026-08-29)
+check("the estate table stops being a table on a narrow screen",
+  /\.hq-table :global\(thead\) \{ display: none/.test(homeC)
+    && /\.hq-table, \.hq-table :global\(tbody\), \.hq-table :global\(tr\), \.hq-table :global\(td\) \{ display: block/.test(homeC),
+  "app/owner/page.tsx: the multi-restaurant table is a table again on a phone. Measured on a 360px\n       screen with a real two-restaurant owner, the six remaining columns came to a 561px table inside a\n       330px scroller — Revenue, Orders and Open all sat off the right edge behind a sideways swipe\n       with no scrollbar and no hint. What he saw was a list of names and not one figure.");
+check("…and every figure carries the header it lost",
+  /data-l=\{`Revenue · \$\{RANGE_LABEL\[globalRange\]\}`\}/.test(homeC)
+    && /td\[data-l\]\)::before \{ content: attr\(data-l\)/.test(homeC),
+  "app/owner/page.tsx: a stacked cell prints a number with no label. On a stacked row there is no\n       column header above it, so an unlabelled figure is just a number nobody can read.");
+check("…including the reports-off row, which must still say figures hidden",
+  /data-l="Figures" title="Reports are switched off/.test(homeC),
+  "app/owner/page.tsx: the hidden-figures cell lost its stacked label.");
+check("…and the phone rule does not reach the desktop",
+  /@media \(max-width: 760px\) \{[\s\S]*?\.hq-table :global\(thead\) \{ display: none/.test(homeC),
+  "app/owner/page.tsx: the stacking rules escaped their media query — above 760px this must stay a real\n       table with its sticky header and all ten columns.");
+
+// …and a NOTE, never a failure, listing the removal kinds the app can WRITE that nobody has named.
+// It is a note because the words live in public/panels/auditsort.js, which the owner console only
+// READS — a guard that goes red over a file its own territory cannot edit is a guard that gets
+// ignored. The source of truth for "what can be written" is the RemovalKind union in
+// lib/removalAudit.ts; the source of truth for "what has words" is auditsort's KIND_LABEL block.
+{
+  const kinds = new Set([...read("lib/removalAudit.ts").matchAll(/^\s*\|\s*"([a-z_]{4,40})"/gm)].map((m) => m[1]));
+  const lab = read("public/panels/auditsort.js");
+  const block = lab.slice(lab.indexOf("var KIND_LABEL"), lab.indexOf("var KIND_ICON") + 1 || undefined);
+  const labelled = new Set([...block.matchAll(/^\s*([a-z_]{4,40})\s*:/gm)].map((m) => m[1]));
+  const unnamed = [...kinds].filter((k) => !labelled.has(k));
+  if (unnamed.length) {
+    console.log(`  note  ${unnamed.length} removal kind(s) this app can write have no words in public/panels/auditsort.js:`);
+    console.log(`        ${unnamed.join(", ")}`);
+    console.log(`        They reach the screen through humanKind() in app/owner/activity/page.tsx, which is a`);
+    console.log(`        floor, not a label. The real fix is one KIND_LABEL + KIND_ICON line each, so the owner,`);
+    console.log(`        manager and admin panels and the removal-detail card all say the same words.`);
+  }
+}
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -381,4 +619,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 61 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log(`✓ all ${total} checks passed — the owner home screen and Audit & logs hold their 2026-08-17 and 2026-08-27 fixes`);

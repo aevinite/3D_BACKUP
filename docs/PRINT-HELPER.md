@@ -1,11 +1,295 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (31 checks, in `verify:static`). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (132 checks, in `verify:static`) and `npm run verify:printing-sweep` (125 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
 > Plain-language plan for him: this file's `## In his words` section.
+
+## 2026-08-27 — the machine with the printer sets ITSELF up (mig 367)
+
+> Owner: *"I will select a particular user which I have created for the particular restaurant …
+> that device is connected to the printer, so it will be easy for that device to set up the printer
+> and all that, instead of the admin. Admin can still see it … but that device will set up, and that
+> device will only get the option in settings, like everyone has their settings where they log out
+> from. The UI/UX is also not identical … and which printer gets which paper — why are there only
+> three options, one is bill, one is KOT and one is banquet? Right now it feels too much complicated."*
+
+Six things changed, and each is guarded:
+
+1. **A helper can be born on the restaurant's own screen.** `print_agents` gained `owner_device`
+   (the panel's `lfh_panel_device`) and `owner_user`. Settings → Printing asks "is the computer I am
+   sitting at already set up?" with one indexed read, and offers **register** / **adopt** if not.
+   *Adopt* exists because a device id does not survive a cleared browser — without it the same
+   machine would be registered twice, and half the tickets would come out in the wrong room.
+2. **A new permission, `print_setup`** (`lib/accessTree.ts` ACTIONS, default **OFF**). It is separate
+   from `print_here` on purpose: being the printer is "paper comes out of my machine", setting
+   printers up is "I decide where the whole restaurant's paper comes out". It is asked on the server
+   before every verb in `/api/editor/printing/*`, and it also opens the Settings tab on its own.
+3. **One board, two places.** `lib/printBoardWords.ts` holds the four step headings, the three kinds
+   and every sentence; `lib/printBoard.ts` holds the one read both screens make. The admin console
+   and the manager panel print those words verbatim. The words file imports **nothing** — the admin
+   page is a client component, so one `import type` from `printHelpers` was enough to drag the
+   service-role module into the browser bundle and make `verify:static` refuse the page.
+4. **One question a line, three answers.** A line used to carry six controls; five kinds of paper
+   made thirty. Now: *A computer* · *A screen* · *Nobody*, and only what that answer needs appears
+   under it. Paper size, exact person and exact PC live behind **More**. (There is no backup printer
+   any more — see the note under the route table.)
+5. **`via: "off"` is a real, saved answer.** An empty line and a deliberate no used to look
+   identical. They say different things now — and for **kitchen slips** the answer also writes
+   `settings.auto_print_kot` through `syncKotSwitch()`, because mig 335's trigger reads that column.
+   Without it the address book would say "nobody prints kitchen slips" while the basket filled for
+   ever. That also removed the DUPLICATE switch from the admin board's step 1: one column, one
+   control, which is what the 2026-08-26 "ON above, OFF below" fault was.
+6. **The dead fifth line is gone.** `label` (parcel stickers) was never queued by anything and had no
+   document builder — it was an address-book row nobody could ever fill. `ROUTABLE_KINDS` is now
+   exactly `kot · bill · banquet`, which is the honest answer to "why are there only three options":
+   **this app prints three documents.** A fourth would need the app to know which items belong to
+   which kitchen section, and no such idea exists in the schema yet.
+
+Driven, not read: the whole flow (register → helper hello → "Yes — print here" → auto-print on →
+"Nobody" → auto-print off → test page → the helper claims it) was run headless on 2026-08-27 in both
+panel skins with zero console errors, and `verify:printing-sweep` grew 12 phases (83–94) that ask the
+real server as the real manager, with and without the permission.
+
+## 2026-08-27 (later) — how far behind the printer is
+
+> Owner: *"'the printer is off' and 'the printer is off and eleven orders are stacked up' stop looking
+> the same. The second one means somebody should be reading the screen instead of waiting for paper…
+> can do this too on whichever user it's on — then when anything happens they will get it."*
+
+`waitingToPrint(rid, kind)` in `lib/printQueue.ts`: **one** round trip, an exact count with no rows
+transferred, plus the single oldest row so the number can become a sentence. `STUCK_AFTER_MS` (60s)
+travels with it, so no screen keeps its own idea of how long is too long.
+
+**The count alone is never allowed to raise an alarm.** Four waiting is normal for two seconds and an
+emergency after ten minutes; a badge showing "1" every time a ticket passes through the queue is
+permanent furniture, and permanent furniture is invisible. Everything loud is keyed on the AGE.
+
+Four places, same field, same words:
+
+| Where | What a person sees |
+|---|---|
+| Kitchen → the 🖨❗ button | a red count badge, **only** once the oldest is over a minute old |
+| Kitchen → 🖨 sheet | a **Tickets waiting** row under the three existing ones, plus a red box saying *read the orders off this screen and cook from it* |
+| Manager → floor strip | one row, **first** in the strip, with *Where the paper goes →* — and **no "Resolved"**, because the tickets are still there and ticking it off would be a lie |
+| Manager Settings → Printing and admin → Printing, step 4 | the same fact as a state row |
+
+**Two faults it dragged into the light:**
+
+1. **`state.helper` was never assigned in the kitchen panel.** The 🖨 sheet has read it since the
+   helper shipped (2026-08-20) to say *"these tickets print on <printer> from <computer>"* — and
+   nothing ever set it, so that whole branch was dead code. A cook standing beside a perfectly good
+   printer at a silent screen got the generic answer instead of the true one, which is exactly the
+   mystery the branch was written to end. `printRefused` was unused in the same way, and now says
+   *why* this screen is not the printer.
+2. **One dead printer produced SEVEN rows in the manager's strip** — the pile-up row plus five named
+   "a reprint hasn't printed" rows, i.e. the same fault told six times, pushing the row that explains
+   it off the screen. When the pile-up row shows, only the OLDEST named row is kept, because it
+   carries the one button the pile-up row cannot (*Print here instead*).
+
+A third state was added to the shared state-pair pattern: **`warn`**. `no` is neutral — a fact that
+happens to be false — and it paints its value in `--muted`, so the word **STUCK** read as a
+switched-off setting. `warn` carries the danger colour, a filled dot and its own border.
+
+## 2026-08-27 (later still) — ONE file, zero typing, and it starts itself (mig 368)
+
+> Owner: *"There wouldn't be one key for all restaurants. There would be different key for different
+> restaurant or maybe a pairing code or whatever… one software only will be running in their PC just
+> for printing and it will take data from this app… tell me an easy workable idea without any money
+> cost."* Then, picking the handshake: *"zero typing one, yeah."*
+
+**His first idea — one key for every restaurant — was withdrawn by him and would have been refused
+anyway:** one plaintext key on every client's PC means one leak prints at, and reads the bills of,
+every restaurant on the platform, and no shop could be cut off on its own.
+
+### The handshake (the OAuth "device flow" — how a smart TV pairs with Netflix)
+
+```
+helper (holds NO secret)                    the person's browser, on THAT machine
+────────────────────────                    ─────────────────────────────────────
+pair/start ──► code + private secret
+   opens /pair?c=<code> ──────────────────►  sees the hostname + printers it reported
+                                             presses ALLOW ──► approvePairing()
+pair/poll(code, secret) ◄── the token, ONCE
+writes it to its own disk, for ever
+```
+
+Three things do the work, and each has a sweep phase:
+1. **The browser opens on the machine at the printer.** That is the proof of "this is that computer".
+2. **The code is not a credential.** Alone it can only be shown to a signed-in human for approval.
+3. **The token is collected with a secret only the helper holds, exactly once.** Even the person who
+   approved it cannot read it afterwards.
+
+The **restaurant is chosen by the approver, never by the helper** — that is the whole security
+boundary. A manager may only adopt into their own restaurant (the request's `rid` is ignored for
+them); the admin must say which.
+
+### What else went with it
+
+- **The machine names itself.** `scutil --get ComputerName` / `%COMPUTERNAME%`. The "what should this
+  computer be called?" box is gone — his words were *"what the fuck is a computer name"*.
+- **The helper installs its own auto-start.** A macOS **LaunchAgent with KeepAlive** (so it also
+  restarts if it dies mid-service), a Startup-folder shortcut on Windows, a `.desktop` entry on Linux.
+  It used to be an INSTRUCTION, so it was skipped — and a skipped step means the shop opens, nothing
+  prints, and nobody knows why. `HELPER_AUTOSTART` is a statement of fact now, not a to-do.
+- **A single-instance lock**, because auto-start plus a double-click would otherwise put two helpers
+  on one token. The second says "already running" and closes.
+- **Windows fetches its own PDF printer.** Pinned URL + verified SHA-256 (checked by downloading the
+  file on 2026-08-27). Windows has no built-in silent print-to-named-printer, which is why the old
+  script said *"put SumatraPDF.exe next to this file"* — quietly making the client download a program
+  by hand, so *"nothing is downloaded"* was only ever true on a Mac. A checksum mismatch deletes the
+  file and refuses to run.
+- **Windows reports paper sizes** (`Get-PrintConfiguration` + `Get-PrinterProperty`, per printer in a
+  try/catch). It never did, so somebody typed them — and paper size is the setting that decides
+  whether a slip prints sideways or at half size.
+- **"New code / shown only once" is retired.** It minted a token to be carried by hand, and once the
+  file stopped carrying one there was nowhere to show it. **Unlink** replaces it: unlink here, run the
+  file there, press Allow — the same path as a first-time setup. It empties the routes that named the
+  machine, so nothing points at a computer that cannot print.
+- **Every restaurant on one page** (`/api/admin/printing/overview` + the `.adm-over` list). Four
+  whole-table reads for the platform, grouped in memory — never N+1. Sorted worst-first: a pile-up
+  outranks a sleeping computer, which outranks "no computer", which outranks "not routed". His words:
+  *"it will be messy when there will be too much restaurants."*
+- **`managerCan()` moved to `lib/managerCan.ts`**, unchanged. A second door asks it now (`/api/pair`),
+  and a permission rule with two copies is the bug class the access rebuild exists to remove.
+
+### Two faults found by driving it
+
+1. **A spent pairing answered `waiting` for ever** (caught by sweep phase 104). The token had been
+   collected and blanked, so `!token_once` fell through to "waiting" — a helper restarted a moment
+   after collecting would sit being told to wait with a perfectly good token on its disk. `collected_at`
+   now answers `expired`.
+2. **The overview endpoint answered 400 to every request** — it sat below the route's
+   `if (!rid) return err("Which restaurant?")`, and it is the one read with no restaurant behind it.
+   The page rendered nothing and said nothing. Found by opening it.
+
+Also fixed the same day, on the owner's report (*"in the admin, Access and permission, the UI is
+clashing and overlaying"*): the Access search results panel is capped at 560px while the cards behind
+run to ~1015px, so it covered the left half of every card and left the right half lit — sentences
+chopped mid-word with the count pills still glowing beside them. It now has a **scrim that dims AND
+blurs**; a dim alone was measured at rgb(16,20,27) → rgb(10,15,23) on the dark skin, which is a real
+change and invisible to a human.
+
+## 2026-08-28 — the coarse "which screen prints" setting is retired (mig 369)
+
+> Owner: *"right now I don't understand three options — 'With no answer on the Kitchen slips line
+> below, which screen prints them?' — what do you mean by this option?"* Then: *"do what's left."*
+
+`settings.kot_print_target` (mig 336, `kitchen | counter | both`) asked **the same question** as the
+Kitchen slips line, in older and vaguer words, and the two could contradict each other — the printing
+sweep caught the older one winning on 2026-08-26. It is gone from every screen and every code path.
+
+**It was not a deleted dropdown.** On the dev stack **2 of 17** restaurants — French House and Aangan,
+the two he tests with — were on **`both`** with the Kitchen slips line unanswered. Deleting the
+setting would have silently removed their safety net. So the meaning moved first:
+
+| old value | the route it became |
+|---|---|
+| `kitchen` | `{ via:"screen", panel:"kitchen" }` |
+| `counter` | `{ via:"screen", panel:"manager" }` |
+| `both` | `{ via:"screen", panel:"kitchen" }` — see the note below |
+
+⚠️ **`both` NO LONGER EXISTS, and neither does any backup** (owner, 2026-08-30): *"What is this backup
+printer and all that? We don't even need the backup printer — if there is a backup printer, remove it.
+And if anything fails it should show me or the person: manager, owner, everyone should get a
+notification that this has failed."* `backupPanel`, `backupAgent`, `backupPrinter`, `backupAfterMs`,
+`SCREEN_BACKUP_MS` and `BACKUP_AFTER_MS_DEFAULT` were removed across nine files, and a restaurant that
+had answered `both` simply keeps the kitchen screen. A silent second attempt somewhere else is paper
+appearing in a room nobody is standing in, while the restaurant never learns its printer is broken.
+
+**What replaced it is telling somebody.** A ticket that gives up after five tries files a
+`printer_events` row of kind `auto_fail` against the printer that failed and sends an owner alert, so
+the restaurant learns the printer is broken instead of the paper quietly coming out elsewhere.
+(This paragraph was still describing the backup as current on 2026-08-31 — T25 round 3, item 39.)
+
+Migration 369 is **idempotent** and only touches restaurants that have **not** answered the Kitchen
+slips line — a newer decision is never overwritten. **The column stays** (schema changes here are
+additive, one folder feeds two databases) with a `COMMENT` saying it is retired; nothing reads or
+writes it, and `verify:print-queue` now fails if any of seven files touches it again.
+
+### Two faults found before shipping, one mine and one the sweep's own
+
+1. **With no route at all my first version let the MANAGER screen auto-print.** The retired column
+   defaulted to `kitchen`, so a manager panel left open on a restaurant that had never touched the
+   Printing board would have started pulling kitchen tickets it never used to. Sweep phase 22.
+2. **The sweep's "a DIFFERENT person" shape read an owner with no restaurant filter**, so it could
+   pick another restaurant's owner — the server correctly refused the shape and three phases blamed
+   the product. A sweep that cannot tell its own bad data from a real fault is worse than no sweep.
+   (And my new self-backup phase wrote the jsonb straight to the database, which never runs the
+   validator it was testing. It goes through `/api/admin/printing/routes` now.)
+
+`verify:printing-sweep` **112 → 118 phases**, 0 failed.
+
+## 2026-08-28 — TWO MODES behind one toggle, and only the chosen one on screen
+
+> Owner: *"I want both A and B — I want the toggle AND the simplified UI, and do one thing: you only
+> see the option you have selected, only the setting for that option will be shown."* And on mode B:
+> *"if we run that .bat or .command file it will open that Chrome which runs minimised and doesn't
+> auto-open when printing required, doesn't affect other tabs while print. Test all that by yourself."*
+
+### The two ways — and there is NOTHING TO CHOOSE (owner, 2026-08-31)
+
+> ⚠️ **Previously** (owner, 2026-08-28): *"there will be 2 mode… I want a toggle and the simplified UI
+> — like you only see the option you have selected."* **Latest** (owner, 2026-08-31): *"in admin panel
+> also we don't need toggle… with toggle gone it on and off will decide that the helper will be on and
+> off and kitchen panel will always be on and there will be guide for it."* The toggle is gone.
+
+| | **A computer** (optional) | **The kitchen screen** (always on) |
+|---|---|---|
+| what runs | the helper program | the kitchen panel, in its own minimised Chrome |
+| anything open? | nothing | that Chrome stays running |
+| more than one printer? | **yes**, one per kind of paper | no — the machine's default printer |
+| someone signs in? | no | **once**, in the window it opens |
+| has to be set up? | yes, if you want it | **no** — it is the default |
+
+**What decides, in one sentence: a computer prints if one is set up and named; if none is, the kitchen
+screen does.** `settings.modules.printing.mode` is **deleted** (mig 372 swept the dead key out of the
+three restaurants still carrying one), and `PrintMode` / `readMode` / `writeMode` are gone with it.
+The answer is READ off `routes` by `lib/printHelpers.ts → resolveTarget`, which is where the paper
+always read it from — the stored mode was a second copy, and a second copy that can disagree is why
+it went. An **unanswered kitchen-slip line resolves to the kitchen screen**, with nobody named.
+
+Two consequences worth knowing:
+- **Clearing a paper line is not switching printing off.** Only a deliberate **Nobody** (`via:"off"`)
+  does that. `syncKotSwitch` treats `null` as on for exactly this reason — before the fix, taking the
+  printer off the kitchen line silently stopped the restaurant printing while the board still said
+  the kitchen screen was doing it.
+- **It cannot double-print.** A ticket is a ROW (mig 335) and `claimKotJobs` only wins rows still
+  `queued`, so two claimers racing means the second matches nothing. The queue guarantees one copy —
+  never the mode, which is part of why removing it cost nothing.
+
+### `lib/printStationScript.ts` — the kitchen screen's launcher, and four things it took
+1. **"runs minimised / doesn't auto-open"** — running the Chrome binary steals focus, and **so does
+   `open -g -j -n` with a real URL**: measured, frontmost went `Finder → Google Chrome`. An
+   `about:blank` test had said otherwise — the kind of easy test that ships a false promise. The mac
+   launcher now **remembers who had the screen and hands it back**; measured after that,
+   `Finder → Chrome → Finder`. Windows uses `start /min`.
+2. **"doesn't affect other tabs"** — its own `--user-data-dir`, i.e. a separate Chrome instance. Their
+   ordinary Chrome, tabs, history and logins are untouched, and quitting one does not quit the other.
+3. **"doesn't auto-open when printing"** — `--kiosk-printing`. Deliberately **not** `--kiosk`, which is
+   fullscreen kiosk — the opposite — and is what the old setup guide told people to use for this.
+4. **The one nobody would guess: a hidden Chrome must still run its timers.** Chrome throttles
+   background and occluded windows hard, and a throttled panel stops polling — the tickets simply
+   queue while everything looks fine. The three `--disable-*throttling/backgrounding` flags are
+   load-bearing: a hidden instance carrying them **beaconed 13 times in 14 seconds** against a local
+   counter, i.e. full rate.
+
+No password in it, like the helper: the person signs in once and that Chrome profile remembers.
+
+### The screens, on both sides
+Card 3 was three papers × (two shape buttons + computer + printer + paper + screen + person + device
++ two backup pickers — both since REMOVED with the backup printer itself, 2026-08-30) with **five** Save buttons — about twenty controls, all on screen whether they
+applied or not. Now: **one toggle → only that mode's setup → the three papers**, each just
+*On / Nobody* plus a printer in computer mode. Measured on screen: **22 controls in computer mode, 14
+in screen mode** on the console, and **14** on the manager panel. Refinements behind **More**. The two
+launcher cards share ONE component on each side, because two copies of that markup is how the boards
+became "not identical" the first time.
+
+Guarded by 16 new `verify:print-helper` checks (**132** total) and 7 new sweep phases (**125** total,
+0 failed) — including that a `nobody` line survives a mode change and that a mode change re-asserts
+auto-print.
 
 ## Why the browser can never do this
 
@@ -130,6 +414,7 @@ written into the guide; the other stays documented as the fallback.
 1. **Basket door** — mig 341, `lib/printHelpers.ts`, the agent API. Proved with a fake helper.
 2. **The helper scripts** — macOS `.command`, Windows `.bat`, Linux `.sh`, by hand, autostart.
 3. **Admin → Printing** — a whole new menu: agents, install steps, routes, backups, test print.
+   (The *backups* part of that menu is gone: the backup printer was removed on 2026-08-30.)
 4. **Panels** — status in manager/owner Settings → Printing and the kitchen 🖨 sheet; panels stop
    printing a kind a helper owns; every screen says where the paper went.
 5. **Bills + banquet through the basket**, with today's browser window kept as the automatic
@@ -173,7 +458,9 @@ if that computer is off the notes simply wait.
 
 two computers whose printers share a NAME → one slip, to the addressed one · one code copied onto a
 second machine → flagged, and the ticket still only picked up once · a refusal → back in the basket
-with the reason on it · a backup printer → refused before its window, given the ticket after it · an
+with the reason on it · ~~a backup printer → refused before its window, given the ticket after it~~
+(that case no longer exists — the backup printer was removed on 2026-08-30, and a ticket that gives up
+now files a printer problem and alerts the owner instead) · an
 order deleted before printing → prints nothing and is closed, not retried for ever · auto-print
 switched off mid-service → the helper idles and the ticket waits, then prints when switched back on ·
 a removed computer → cannot even ask.

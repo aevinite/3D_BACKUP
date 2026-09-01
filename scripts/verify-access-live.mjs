@@ -14,11 +14,21 @@
 import { chromium } from "playwright";
 import { loginAs, adminHeaders } from "./sweep/login.mjs";
 import { readFileSync } from "node:fs";
+import { requireUp, baseFrom } from "./sweep/appUp.mjs";
 // Default to the ONE dev port the app actually runs on. It used to default to :4010 — a
 // leftover from when the panels were separate servers — so a plain run died with
-// ECONNREFUSED before its first check. VERIFY_BASE still overrides. (2026-07-31)
-const B = process.env.VERIFY_BASE || "http://localhost:4000";
+// ECONNREFUSED before its first check. (2026-07-31)
+//
+// --base WINS, AND THAT IS NOT A CONVENIENCE (sweep #7 / T28, 2026-08-27). This read VERIFY_BASE
+// only, so `npm run verify:access-live -- --base http://localhost:4228` silently drove
+// http://localhost:4000 instead — the port the OWNER verifies on. A guard aimed at a window
+// somebody is working in is worse than one that refuses. baseFrom() takes --base first, then
+// LFH_BASE / VERIFY_BASE / BASE, then 4000; every existing invocation keeps working.
+const B = baseFrom(process.argv);
 const H = adminHeaders(B);
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(B, "the live Access-screen walk");
 const env = {}; for (const l of readFileSync(new URL("../.env.local", import.meta.url),"utf8").split("\n")) { const m=l.match(/^([A-Z0-9_]+)=(.*)$/); if(m) env[m[1]]=m[2].trim(); }
 const U = env.NEXT_PUBLIC_SUPABASE_URL, K = env.SUPABASE_SERVICE_ROLE_KEY;
 const db = (q) => fetch(`${U}/rest/v1/${q}`, { headers: { apikey: K, Authorization: `Bearer ${K}` } }).then((r) => r.json());

@@ -325,24 +325,34 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     return () => document.removeEventListener("click", close);
   }, [zonesOpen]);
 
+  // ── THE WRITES LIVE OUTSIDE THE STATE UPDATER (T12 sweep, 2026-08-27) ────────────────────────
+  // All three of these used to sit INSIDE setSkin's updater function. React requires an updater to
+  // be pure, and in development it deliberately calls it twice to catch exactly this — measured on
+  // one tap of the ☀/🌙 button, `lfh:owner-skin` fired twice with the same value. Nothing visibly
+  // broke (a production build calls it once, and Manager mode forwarding the same skin twice is
+  // harmless), but this is the one broadcast that drives the EMBEDDED panel's skin, and the project
+  // rule for it is that it has exactly one writer. A side effect in an updater is a writer nobody
+  // can count. `skin` is state we already hold, so the next value needs no updater at all.
   const toggleSkin = () => {
-    setSkin((cur) => {
-      const next = cur === "dark" ? "light" : "dark";
-      try { localStorage.setItem("aevidine_skin", next); } catch {}
-      // Persist to a cookie too so the NEXT server render starts on the right skin.
-      try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
-      // Tell live listeners (Manager mode forwards this into its embedded panel so the
-      // manager floor flips skin the same instant the cockpit does — owner, 2026-08-02).
-      try { window.dispatchEvent(new CustomEvent("lfh:owner-skin", { detail: next })); } catch {}
-      return next;
-    });
+    const next = skin === "dark" ? "light" : "dark";
+    setSkin(next);
+    try { localStorage.setItem("aevidine_skin", next); } catch {}
+    // Persist to a cookie too so the NEXT server render starts on the right skin.
+    try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
+    // Tell live listeners (Manager mode forwards this into its embedded panel so the
+    // manager floor flips skin the same instant the cockpit does — owner, 2026-08-02).
+    try { window.dispatchEvent(new CustomEvent("lfh:owner-skin", { detail: next })); } catch {}
   };
 
-  // Admin "exit view": clear the act-as cookie, then back to the admin hub.
+  // Admin "exit view": clear the act-as cookie, then back to the admin console.
   // Only ever rendered for the admin (a real owner never gets adminViewing).
-  const exitAdminView = async () => {
+  //
+  // `to` lets the breadcrumb say WHERE it is going — the Dashboard crumb and the restaurant-name
+  // crumb both leave the same way but land in different places (owner, 2026-08-26). The Exit
+  // buttons pass nothing and keep their original destination, so nothing about them changes.
+  const exitAdminView = async (to = "/aevinite/restaurants") => {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
-    router.push("/aevinite/restaurants");
+    router.push(typeof to === "string" ? to : "/aevinite/restaurants");
   };
 
   const isActive = (it: NavItem) => (it.exact ? path === it.href : path.startsWith(it.href));
@@ -439,13 +449,20 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
         {/* ADMIN-ONLY breadcrumb/exit bar (never rendered for the real owner). */}
         {adminViewing && (
           <div className="adm-adminbar" role="status">
+            {/* IT STARTS AT THE DASHBOARD (owner, 2026-08-26): *"if i go from dashboard to the
+                manager panel view of some restaurant … it should be like dashboard and restaurant
+                name and manager panel … you want to go back to dashboard"*. He arrives from the
+                dashboard, so the trail leads back to it in one tap. The same change was made to
+                the manager, kitchen and tablet ribbons in the same commit, so all four panels
+                describe the same journey.
+                Both links clear the act-as cookie BEFORE leaving — like "Exit view". A plain link
+                left the admin still "acting as" this restaurant for 6h, so re-opening /owner
+                silently re-entered it (fixed here 2026-07-06; the other three panels still had
+                the old plain jump until today). */}
             <nav className="adm-crumbs" aria-label="Breadcrumb">
-              {/* Clear the act-as cookie BEFORE leaving — like "Exit view". A plain link
-                  left the admin still "acting as" this restaurant for 6h, so re-opening
-                  /owner silently re-entered it (fixed 2026-07-06). */}
-              <a href="/aevinite/restaurants" onClick={(e) => { e.preventDefault(); exitAdminView(); }}>Restaurants</a>
+              <a href="/aevinite" onClick={(e) => { e.preventDefault(); exitAdminView("/aevinite"); }}>Dashboard</a>
               <i className="fas fa-chevron-right sep" aria-hidden="true" />
-              <span className="cur">{shownName}</span>
+              <a href="/aevinite/restaurants" onClick={(e) => { e.preventDefault(); exitAdminView("/aevinite/restaurants"); }}>{shownName}</a>
               <i className="fas fa-chevron-right sep" aria-hidden="true" />
               <span className="cur">Owner panel</span>
             </nav>
@@ -488,7 +505,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               )}
             </span>
             )}
-            <button className="adm-btn" onClick={exitAdminView} title="Stop viewing this owner panel">
+            <button className="adm-btn" onClick={() => exitAdminView()} title="Stop viewing this owner panel">
               <i className="fas fa-arrow-rotate-left" style={{ marginRight: 6 }} aria-hidden="true" /> Exit view
             </button>
           </div>
@@ -596,7 +613,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>
             {adminViewing ? (
-              <button className="adm-icnbtn" onClick={exitAdminView} title="Exit admin view" aria-label="Exit admin view">
+              <button className="adm-icnbtn" onClick={() => exitAdminView()} title="Exit admin view" aria-label="Exit admin view">
                 <i className="fas fa-arrow-rotate-left" aria-hidden="true" />
               </button>
             ) : (

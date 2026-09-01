@@ -23,7 +23,7 @@ import { accentPaletteCss, accentBackground, accentCanvasCss } from "@/lib/accen
 // the background bubbles, the header, the chef-call button, and finally the
 // actual page content (`children`). It also listens for site-wide settings the
 // staff control from the editor, so the guest's screen updates live.
-export default function AppShell({ children, logoText, accentColor, restaurantId, theme, logoUrl }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string; theme?: Record<string, unknown>; logoUrl?: string }) {
+export default function AppShell({ children, logoText, accentColor, restaurantId, theme, logoUrl, brandName, brandSlug }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string; theme?: Record<string, unknown>; logoUrl?: string; /** The restaurant's real display name, and the slug the last-resort page will derive for this path ("" for the legacy #1 paths). Handed in rather than derived — see the note by the effect that stores them. */ brandName?: string; brandSlug?: string }) {
   // General-tab toggles: bubble effect on/off, and service (maintenance) mode.
   // These are pieces of remembered state — when they change, the screen redraws.
   const [bubbles, setBubbles] = useState(true);
@@ -116,6 +116,62 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       teardown();
     };
   }, [restaurantId]);
+
+  // REMEMBER WHOSE MENU THIS IS, for the one screen that cannot ask.
+  //
+  // public/offline.html is the branded page a phone lands on with no connection and nothing
+  // saved. It was completely anonymous — our wording on our dark card, no clue whose restaurant
+  // it belonged to — because it is a static file that cannot fetch anything, by definition.
+  //
+  // The name is right here, though, on every guest page. So store it, and that page reads it with
+  // no request and no data use at all. Kept deliberately dumb: ONE key, the CURRENT restaurant,
+  // written only on a guest page (this component only ever wraps those). The offline page prints
+  // it ONLY when the stored slug matches the slug its own path resolves to, so it can never show
+  // restaurant A's name on restaurant B's screen. (owner said yes, 2026-08-26.)
+  // THE NAME AND SLUG ARE HANDED IN, NOT DERIVED — and that took two goes.
+  //
+  // The first version read `logoText` and parsed the slug out of location.pathname. Both were
+  // wrong. `logoText` is deliberately `undefined` for restaurant #1 (MenuView passes
+  // `isDefault ? undefined : …`, because the flagship keeps its hardcoded branding), so on the
+  // busiest restaurant of all the name was never stored and the offline card stayed anonymous —
+  // caught on the deployed site, not by the guard, because the guard only checked that the writer
+  // and the reader agreed on the KEY. Deriving the slug from the path was the same class of
+  // mistake: MenuView already knows the resolved slug, and re-deriving it invites the two to drift.
+  //
+  // `brandSlug` must match what the last-resort page computes for the path it is on: the resolved
+  // slug on /r/<slug>/…, and "" on the legacy /menu and /item paths, which ARE restaurant #1 —
+  // the same rule as lib/tenantStorage.
+  // THE NAME IS HANDED IN. THE SLUG IS COMPUTED BY THE SAME RULE ON BOTH SIDES.
+  //
+  // Those are two different kinds of thing and they took two goes each to get right.
+  //
+  // The NAME is data, and it has to come from the caller: reading `logoText` here meant nothing
+  // was stored for restaurant #1, because MenuView deliberately passes `logoText={undefined}` for
+  // the flagship. Caught on the deployed site.
+  //
+  // The SLUG is a rule, and handing it in was also wrong. MenuView passes the resolved slug on
+  // BOTH the tenant path and the legacy /menu path — so /menu stored "french-house" while the
+  // last-resort page derives "" for /menu (those paths ARE #1, the same rule as lib/tenantStorage),
+  // and the name was then refused as belonging to a different restaurant. Measured on a production
+  // build. The two sides must apply ONE rule, so this applies exactly the rule that page applies.
+  // `brandSlug` is kept only as the fallback for a caller with no path to read.
+  useEffect(() => {
+    const name = (brandName || "").trim();
+    if (!name) return;
+    try {
+      const p = location.pathname;
+      // Identical three lines to public/offline.html's own derivation. Duplicated because that page
+      // is a static file that cannot import anything — and guarded, so they cannot drift apart.
+      let slug = (p.match(/^\/r\/([^/]+)\//) || [])[1]?.toLowerCase() || "";
+      if (!slug && !/^\/(menu|item)(\/|$)/.test(p)) slug = (sessionStorage.getItem("lfh_tab_tenant") || "").toLowerCase();
+      if (!slug && !/^\/(menu|item)(\/|$)/.test(p)) slug = (brandSlug || "").toLowerCase();
+      if (slug && !/^[a-z0-9-]+$/.test(slug)) return;
+      localStorage.setItem("lfh_brand", JSON.stringify({ slug, name }));
+    } catch {
+      /* a device that refuses storage simply gets the anonymous card — never a crash. The
+         guest menu going down over a nicety would be far worse than the nicety. */
+    }
+  }, [brandName, brandSlug]);
 
   // Per-restaurant FULL palette (Phase 2). When a restaurant has theme overrides, we
   // emit mode-scoped CSS (inline styles can't switch on the [data-theme] toggle). The

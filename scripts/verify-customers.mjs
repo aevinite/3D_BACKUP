@@ -8,12 +8,17 @@ import { chromium } from "playwright";
 import { loginAs, adminCookie } from "./sweep/login.mjs";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
+import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
 const env = Object.fromEntries(fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n")
   .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
   .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim()]));
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the customer-record walk");
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const RID1 = "00000000-0000-0000-0000-000000000001";      // french-house
 
@@ -33,48 +38,24 @@ const ok = (name, pass, note = "") => { results.push({ name, pass, note }); cons
 const section = (t) => console.log("\n" + t);
 const cleanupPhones = new Set();
 
-// ── PUT BACK WHAT WE FLIPPED, EVEN IF THIS RUN IS KILLED (T28 sweep, 2026-08-22) ────────────────
-// Section C flips the restaurant's `bill_customer_print` switch OFF in the DATABASE — the only
-// honest way to prove the panel reads it from the server rather than from JS. Two things were
-// wrong with how it put it back:
+// PUT BACK WHAT WAS THERE, NOT WHAT WE ASSUME WAS THERE (sweep #7 / T28, 2026-08-27).
 //
-//   1 · it restored to a hard-coded `true`. If the restaurant had that switch OFF, this guard
-//       turned it ON and left it on. A guard must restore the value it FOUND, not the value it
-//       assumes.
-//   2 · nothing ran on a kill. Between the flip and the restore sit an `until(...)` poll and two
-//       browser evaluates, every one of which can time out or throw — and the sweep rules open with
-//       exactly this scar: "a guard once died with a restaurant's Menu switch off and real scans got
-//       a 404 for an hour." Here the cost is Customer and Mobile silently missing from every
-//       printed bill at this restaurant until somebody noticed.
+// This switched `bill_customer_print` off mid-run and then set it — and `bill_customer_required` —
+// to a hard-coded `true` at the end. It never read what they were. So on a restaurant where the
+// owner had deliberately switched "print the customer's details on the bill" OFF, every run of this
+// guard turned it back ON and nothing said so. A test may borrow a setting; it may not decide one.
 //
-// So: remember the original, register the undo, and run the undo on the way out — normally, on
-// SIGINT/SIGTERM, and on an uncaught failure. Mirrors scripts/verify-realtime.mjs.
-const undo = [];
-let undoing = false;
-async function restoreAll(why) {
-  // Re-entrant, and USABLE MORE THAN ONCE. The first version latched `undoing` true and never
-  // cleared it, so calling this mid-run (which section C does, to put the print switch back the
-  // moment it is finished with it) would have silently disarmed the SIGINT/crash handlers for the
-  // rest of the run. It has one flip today, so nothing was lost — but a second flip added later
-  // would have restored nothing, which is the exact fault this whole block exists to prevent.
-  if (undoing) return; undoing = true;
-  const batch = undo.splice(0, undo.length).reverse();
-  if (batch.length) console.log(`\n↩︎ restoring ${batch.length} change(s)${why ? " (" + why + ")" : ""}…`);
-  for (const fn of batch) { try { await fn(); } catch (e) { console.error("  restore FAILED:", e?.message || e); } }
-  undoing = false;
-}
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, async () => { await restoreAll(sig); process.exit(130); });
-process.on("uncaughtException", async (e) => { console.error("\nunexpected failure:", e?.message || e); await restoreAll("crash"); process.exit(1); });
-process.on("unhandledRejection", async (e) => { console.error("\nunexpected failure:", e?.message || e); await restoreAll("crash"); process.exit(1); });
-
-/** Flip one settings column, remembering what it was so the undo restores the REAL value. */
-async function flipSetting(column, value) {
-  const before = (await sb.from("settings").select(column).eq("restaurant_id", RID1).maybeSingle()).data;
-  const was = before ? before[column] : null;
-  undo.push(() => sb.from("settings").update({ [column]: was }).eq("restaurant_id", RID1));
-  await sb.from("settings").update({ [column]: value }).eq("restaurant_id", RID1);
-  return was;
-}
+// And the put-back is registered for an interruption too: `finally` covers a throw, not Ctrl-C and
+// not a lane runner killing a slow guard, which is how verify:realtime once left a category
+// switched off across seven restaurants.
+const BILLFLAGS_WERE = (await sb.from("settings")
+  .select("bill_customer_print, bill_customer_required").eq("restaurant_id", RID1).maybeSingle()).data
+  || { bill_customer_print: true, bill_customer_required: true };
+const putBillFlagsBack = () => sb.from("settings").update({
+  bill_customer_print: BILLFLAGS_WERE.bill_customer_print,
+  bill_customer_required: BILLFLAGS_WERE.bill_customer_required,
+}).eq("restaurant_id", RID1);
+restoreOnExit(`French House · bill_customer_print/${BILLFLAGS_WERE.bill_customer_print} + bill_customer_required/${BILLFLAGS_WERE.bill_customer_required}`, putBillFlagsBack);
 
 const b = await chromium.launch();
 
@@ -166,30 +147,36 @@ if (fr) {
       || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     if (!row) return { html: "", note: "no orders" };
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
-    // A COMPUTER MAY OWN THE PAPER, AND THEN NO WINDOW OPENS (mig 341 — T28 sweep, 2026-08-22).
-    // This capture stubs window.open and reads what printBill writes into it. That stopped working
-    // the moment a bill printer was routed to a helper: printBill posts the job to the basket and
-    // RETURNS — "no window opens here at all, which is the whole point" — so `html` stayed "" and
-    // every assertion below failed on an empty string, reporting a paper fault that did not exist.
-    // (Same shape as the ticket-in-an-iframe trap already recorded for the KOT test.)
-    // HOW TO REACH THE FALLBACK, AND THE SEAM THAT DOES NOT WORK: `printOwners` is a top-level
-    // `let` in the panel's classic script, so it is in that script's own lexical scope and NOT on
-    // globalThis — assigning it inside page.evaluate() creates a NEW global and leaves the panel's
-    // binding untouched. (Tried that first; the capture stayed empty.) `api` IS reachable: a
-    // top-level `function` declaration in a classic script becomes a window property. So stub the
-    // one call printBill makes to the basket — `POST /print/send` — and answer without `queued`,
-    // which is exactly the "noRoute" reply the function already handles by opening the window.
-    let html = ""; const real = window.open; const realApi = window.api;
-    window.api = (m, p, b, o) => (/\/print\/send/.test(String(p)) ? Promise.resolve({}) : realApi(m, p, b, o));
+    // THE BILL NO LONGER REACHES A WINDOW SYNCHRONOUSLY (T28, 2026-08-30). Since the print queue
+    // landed (mig 341), printBill() asks the SERVER who owns the paper — `api("POST","/print/send")`
+    // — and only falls back to opening a window when nobody does, inside a .then(). This capture
+    // stubbed window.open and read `html` on the very next line, so it always read "" and every one
+    // of the eight checks below failed about an empty string. Eight red lines, one stale technique,
+    // and nothing wrong with the bill.
+    // Both doors are stubbed now — openBillWindow is the fallback the panel actually calls — and the
+    // round trip is waited for rather than assumed.
+    let html = "";
+    const realOpen = window.open, realWin = window.openBillWindow;
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
-    try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
-    finally { window.open = real; window.api = realApi; }
-    await new Promise((r) => setTimeout(r, 400)); // the basket call is fire-and-forget; let the fallback run
-    return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone }, routed: !!(realOwners && realOwners.bill && realOwners.bill.owned) };
+    window.openBillWindow = (h) => { html = h || ""; };
+    try {
+      printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os);
+      for (let i = 0; i < 60 && !html; i++) await new Promise((r) => setTimeout(r, 100));
+    } finally { window.open = realOpen; window.openBillWindow = realWin; }
+    return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone } };
   }, printTable);
   const h = printed.html || "";
   const css = h.slice(h.indexOf("<style"), h.indexOf("</style>"));
-  ok("prints as ONE continuous slip", h.includes("size:80mm"));
+  // ONE CONTINUOUS SLIP, MEASURED THE WAY IT IS BUILT TODAY (sweep #6 / T28, 2026-08-22). This asked
+  // for `size:80mm` in the printed document's CSS. That declaration was DELIBERATELY REMOVED: an
+  // @page size bigger or squarer than the roll makes the driver scale and rotate the job — measured at
+  // 80x134mm onto a 70x65mm head, 0.49x and sideways. The rule now is the opposite of what this line
+  // wanted: NO @page size on a thermal document, `@page{margin:0}` so no browser header reaches the
+  // paper, and one 66mm ink column. So it went red on the fix. (verify:print-format holds the same
+  // rule for the document itself; here it is held on the HTML this panel actually produced.)
+  ok("prints as ONE continuous slip — no @page size to rotate it, and the browser's own header kept off",
+    !/@page\s*\{[^}]*size\s*:/.test(h) && /@page\s*\{\s*margin:\s*0\s*\}/.test(h.replace(/\\n/g, "\n")));
+  ok("…on the one 66mm ink column the preview promises", /66mm/.test(css));
   ok("column header prints once (thead as row-group)", h.includes("table-row-group"));
   ok("no grey ink left in the styles", !/color:\s*#(777|555|333|444)\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
   ok("no dotted/dashed pale rules", !/dotted #e2e2e2|dashed #(999|aaa)/.test(css.replace(/\/\*[\s\S]*?\*\//g, "")));
@@ -200,10 +187,8 @@ if (fr) {
   ok("money columns sized from the bill", h.includes("colgroup"));
   ok("Customer + Mobile print when captured", h.includes(">Customer<") && h.includes(">Mobile<"));
 
-  // the print switch OFF must hide both lines — flipped in the DATABASE, not just in JS.
-  // flipSetting remembers what it was, so the restore below (and the one on a kill) puts the
-  // restaurant's OWN value back rather than an assumed `true`.
-  await flipSetting("bill_customer_print", false);
+  // the print switch OFF must hide both lines — flipped in the DATABASE, not just in JS
+  await sb.from("settings").update({ bill_customer_print: false }).eq("restaurant_id", RID1);
   await until(async () => (await fr.evaluate(async () => {
     const all = await api("GET", "/all");
     if (all && all.settings) state.data.settings = all.settings;
@@ -216,17 +201,17 @@ if (fr) {
     const row = (tbl ? orders.find((o) => String(o.table_number) === String(tbl)) : null)
       || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
-    let html = ""; const real = window.open; const realApi = window.api;
-    window.api = (m, p, b, o) => (/\/print\/send/.test(String(p)) ? Promise.resolve({}) : realApi(m, p, b, o));
+    let html = ""; const real = window.open;
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
     try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
-    finally { window.open = real; window.api = realApi; }
-    await new Promise((r) => setTimeout(r, 400));
+    finally { window.open = real; }
     return { html, printFlag: state.data.settings.bill_customer_print };
   }, printTable);
   ok("panel picked up print=OFF from the server", off.printFlag === false, String(off.printFlag));
   ok("print switch OFF hides Customer + Mobile", !off.html.includes(">Customer<") && !off.html.includes(">Mobile<"));
-  await restoreAll(); // put the switch back to what it WAS, now, rather than assuming `true`
+  // back ON for section D, which needs the lines printed — this one IS the test's own state, so it
+  // is deliberately `true` and not the captured value. The captured value is restored at the end.
+  await sb.from("settings").update({ bill_customer_print: true }).eq("restaurant_id", RID1);
 
   /* ── D. the capture sheet itself ── */
   // Builds its OWN fixture: a bill with no customer AND no invoice. Picking "whatever session
@@ -248,28 +233,40 @@ if (fr) {
     ok("sheet opens on invoice generation", sheetOpen);
     if (sheetOpen) {
       const val = (sel) => fr.evaluate((q) => { const el = document.querySelector(q); return el ? (el.value !== undefined ? el.value : el.textContent) : null; }, sel);
-      const disabled = () => fr.evaluate(() => { const g = document.querySelector(".bc-go"); return g ? g.disabled : null; });
+      // "Not ready" is aria-disabled now, never the real attribute — see the note below on why.
+      const notReady = () => fr.evaluate(() => { const g = document.querySelector(".bc-go"); return g ? g.getAttribute("aria-disabled") === "true" : null; });
       const type = (sel, v) => fr.evaluate(([q, v2]) => { const e = document.querySelector(q); e.value = v2; e.dispatchEvent(new Event("input")); }, [sel, v]);
 
       ok("opens empty for a bill with no customer yet", (await val(".bc-phone")) === "" && (await val(".bc-name")) === "");
-      ok("Generate is disabled while empty", (await disabled()) === true);
-      // A disabled button never dispatches a click, so "disabled" IS the visible refusal —
-      // the sheet can't swallow a tap here. (The in-code red "which box is missing" message
-      // only exists for the case where the button is somehow reachable.)
+      ok("Generate looks not-ready while empty", (await notReady()) === true);
+      // THE REAL `disabled` ATTRIBUTE WAS DELIBERATELY REMOVED (T8 sweep, 2026-08-17), and this
+      // section still read `goBtn.disabled`. A disabled button emits NO click at all, so the careful
+      // handler that says WHICH box is missing and puts the cursor in it could never run: exactly when
+      // a waiter needed telling — nine digits typed, or a number with no name — tapping the primary
+      // button did nothing whatsoever. That is the panel's own "a tap must never vanish in silence"
+      // rule, broken by the very attribute meant to be helpful. So the button now only LOOKS not-ready
+      // (aria-disabled + the greyed styles) and stays tappable, and the RULE to hold is the stronger
+      // one: the tap is answered. Three checks here were red on that fix.
       await fr.evaluate(() => document.querySelector(".bc-go").click());
-      await mp.waitForTimeout(350);
-      ok("a tap on the disabled button changes nothing", !!(await fr.$(".bcust-overlay")) && (await disabled()) === true);
+      await mp.waitForTimeout(500);
+      const answered = await fr.evaluate(() => {
+        const st = document.querySelector(".bc-status");
+        const focused = document.activeElement && document.activeElement.className || "";
+        return { said: (st && st.textContent || "").trim(), focused, open: !!document.querySelector(".bcust-overlay") };
+      });
+      ok("a tap on the not-ready button is ANSWERED, not swallowed — it says what is missing or puts the cursor in it",
+        answered.open && (!!answered.said || /bc-phone|bc-name/.test(answered.focused)), JSON.stringify(answered));
 
       await type(".bc-phone", "9700011122");
       const newMsg = await until(async () => { const v = await val(".bc-status"); return v && v.toLowerCase().includes("new customer") ? v : null; });
       ok('unknown number says "New customer"', !!newMsg, newMsg || (await val(".bc-status")) || "(no answer in 9s — server slow?)");
-      ok("still disabled without a name", (await disabled()) === true);
+      ok("still not-ready without a name", (await notReady()) === true);
 
       await type(".bc-phone", "9876543210");
       const backMsg = await until(async () => { const v = await val(".bc-status"); return v && v.toLowerCase().includes("returning") ? v : null; });
       ok("known number is recognised", !!backMsg, backMsg || (await val(".bc-status")) || "(no answer in 9s — server slow?)");
       ok("known number auto-fills the name", (await until(async () => (await val(".bc-name")) === "QA Guest" || null)) === true, await val(".bc-name"));
-      ok("Generate enabled once both are there", (await disabled()) === false);
+      ok("Generate becomes ready once both are there", (await notReady()) === false);
 
       await fr.evaluate(() => history.back());
       await mp.waitForTimeout(900);
@@ -438,7 +435,7 @@ for (const ph of cleanupPhones) {
   await sb.from("sessions").update({ cust_name: null, cust_phone: null }).eq("restaurant_id", RID1).eq("cust_phone", ph);
   await sb.from("customers").delete().eq("restaurant_id", RID1).eq("phone", ph);
 }
-await sb.from("settings").update({ bill_customer_print: true, bill_customer_required: true }).eq("restaurant_id", RID1);
+await putBillFlagsBack();
 
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${"=".repeat(64)}\n${results.length - failed.length}/${results.length} checks passed`);

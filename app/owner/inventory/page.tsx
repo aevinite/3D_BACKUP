@@ -5,6 +5,7 @@
 // resolution mirrors the owner Menu page: an owner picks among their entitled
 // restaurants; the admin act-as gets the one they entered.
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
@@ -47,14 +48,21 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     if (row) { restaurants = [{ id: row.id, name: row.name }]; selected = row.id; }
   }
 
-  if (!selected) {
-    return (
-      <div className="adm-page">
-        <h1 className="adm-page-h">Inventory &amp; expenses</h1>
-        <p className="adm-page-sub">This feature isn&apos;t switched on for your restaurant yet — ask your administrator.</p>
-      </div>
-    );
-  }
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31) ─────────────────────────
+  // *"if the inventory is not switch on, then it will not show — it will not even show that
+  //  option… it will not only show 'unable to access', that there is a feature which contains
+  //  inventory."*
+  // This is R36 again, arriving from the page side: *"owner can't know which option are not given
+  // to them, only admin should know that."* The sidebar already hides a withheld section from a
+  // real owner (`OwnerShell` → `if (!on && (!adminViewing || simulated)) return null`). The PAGE
+  // did not: reached by a typed URL or an old bookmark it printed "This feature isn't switched on for your
+  // restaurant yet — ask your administrator" — which
+  // names a feature he has not been given and invites him to go and ask for it.
+  // That screen is DELETED, not restyled (the standing "a new way replaces the old one" rule), and
+  // he is sent back to his dashboard instead. The ADMIN is unaffected: only a real owner can reach
+  // this line, because the admin act-as branch above is never module-gated — admin = top power, and
+  // its X-ray nav says outright "You can still open it from this view".
+  if (!selected) redirect("/owner");
 
   return <OwnerInventory restaurants={restaurants} initial={selected} skin={skin} />;
 }

@@ -29,6 +29,38 @@ export interface Restaurant {
 // Per-process cache: slug -> {value, at}. Short TTL so an admin's branding/menu
 // edit shows on the guest menu within ~15s without a process restart. (Restaurants
 // change rarely; one tiny row read every 15s per active slug is negligible egress.)
+// ── BOTH CACHES BELOW ARE KEYED ON A SLUG SOMEBODY TYPED (owner picked item 19, 2026-08-30) ──────
+//
+// Every other cache in this codebase is keyed on a restaurant id, an owner id or a person's id, so
+// it is bounded by the estate — nine entries today, a few hundred at worst. These two are keyed on
+// whatever was in the ADDRESS BAR, on a public path nobody has to log in to reach. A crawler walking
+// /r/<random>/menu adds one entry per distinct string it invents, and nothing ever removed one.
+//
+// It is small (a slug plus a tiny object, or a slug plus a string) and it only ever grows, which is
+// the shape worth closing before it matters rather than after. lib/floorSummary.ts, lib/planTable.ts
+// and lib/publicCap.ts all already do exactly this; these two were the ones that did not.
+//
+// SWEPT OPPORTUNISTICALLY, on the miss path only — never on a timer and never on a hit, so a real
+// menu load pays nothing. `keep` is the window past which an entry can no longer be USED for
+// anything: for the restaurant cache that is the stale-on-error window (not the 15s TTL, because an
+// entry older than the TTL is still the answer a failed read stands on), and for the moved-address
+// cache it is its own TTL.
+//
+// The threshold is deliberately far above any real number of restaurants on one instance, so a
+// genuine multi-tenant stack never sweeps and never notices this exists.
+const CACHE_MAX = 500;
+function sweep(m: Map<string, { at: number }>, keep: number): void {
+  if (m.size <= CACHE_MAX) return;
+  const now = Date.now();
+  for (const [k, v] of m) if (now - v.at > keep) m.delete(k);
+  // Still oversized means the entries are all fresh — a real burst rather than a crawler. Drop the
+  // OLDEST half rather than clearing: clearing would throw away answers a live diner is using.
+  if (m.size > CACHE_MAX) {
+    const oldest = [...m.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, Math.floor(m.size / 2));
+    for (const [k] of oldest) m.delete(k);
+  }
+}
+
 const bySlug = new Map<string, { value: Restaurant | null; at: number }>();
 const TTL_MS = 15000;
 // How long a LAST KNOWN answer may stand in when the database won't answer. Generous on purpose:
@@ -82,6 +114,7 @@ export async function getRestaurantBySlug(slugRaw: string): Promise<Restaurant |
   const slug = String(slugRaw || "").trim().toLowerCase();
   const hit = bySlug.get(slug);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
+  sweep(bySlug, STALE_ON_ERROR_MS);
   // ONE DOOR (mig 282): a SECURITY DEFINER function returns this restaurant's guest slice as one
   // object — `to_jsonb(row)` minus the permission/ownership block (access_config,
   // manager_permissions, owner_entitlements, owner_user_id). It used to be a column list read
@@ -157,6 +190,7 @@ export async function slugMovedTo(slugRaw: string): Promise<string | null> {
   if (!slug) return null;
   const hit = movedSlug.get(slug);
   if (hit && Date.now() - hit.at < MOVED_TTL_MS) return hit.value;
+  sweep(movedSlug, MOVED_TTL_MS);
   try {
     const { data, error } = await supabase.rpc("lfh_slug_moved", { p_slug: slug });
     if (error) return hit ? hit.value : null;   // stand on a known answer, never invent one

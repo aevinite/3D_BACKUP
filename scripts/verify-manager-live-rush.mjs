@@ -27,6 +27,9 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
+import { dismissTicketsFor } from "./sweep/tickets.mjs";
+import { claimedTables } from "./sweep/fixtureTables.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
@@ -40,6 +43,9 @@ const ROUNDS = Number(arg("--rounds", 6));    // orders per restaurant in the ru
 
 if (!/wnsfcizclkbobwzcxqsf/.test(env.NEXT_PUBLIC_SUPABASE_URL)) {
   console.error("refusing: this test places real orders and may only run against the dev/test database");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the live rush");
   process.exit(1);
 }
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -53,6 +59,28 @@ const head = (m) => console.log("\n" + m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The two restaurants to run simultaneously: each needs its own diag manager login.
+//
+// ── YES, THIS PLACES REAL ORDERS ON AANGAN, AND THAT IS ALLOWED (owner, 2026-08-28) ─────────────
+//
+// Asked directly whether this guard should be driving Aangan Garden at all — the restaurant every
+// sweep prompt calls "the READ-ONLY control at factory defaults" — he answered:
+//
+//     "you can do it on backup you can do anything you want on backup it's the test site only"
+//
+// So the rule and this guard were never actually in conflict; the rule is about Aangan's PERMISSION
+// AND FEATURE SWITCHES, which is the only part of a control restaurant that carries information.
+// Its access tree stays at factory defaults so that its differences from French House remain
+// evidence. Orders, tables and bills are not that.
+//
+// AND THE SECOND RESTAURANT IS HALF THE POINT. "Does one restaurant's rush bleed onto another" is
+// what this file exists to answer, and it cannot be answered with one restaurant. Dropping Aangan
+// would have kept a rule tidy on paper and thrown away the check.
+//
+// Still true, and unchanged: this guard touches no switch on either restaurant, picks only tables
+// nobody else has claimed (scripts/sweep/fixtureTables.mjs), and closes only the tables it opened.
+// None of this applies to AV LIVE, which is never driven by anything here.
+//
+// Do not re-raise this. It has now been asked and answered twice.
 const CREWS = [
   { name: "My Little French House", creds: { username: "diagm1", password: "diag-mgr-2026", route: "/manager" } },
   { name: "Aangan Garden", creds: { username: "diagm11", password: "diag-mgr-2026", route: "/manager" } },
@@ -83,9 +111,20 @@ async function openFloor(browser, creds) {
   if (!rid) throw new Error(`no staff_users row for ${creds.username}`);
   return { ctx, page, fr, errs, reqs, rid };
 }
+// WHAT A TILE ACTUALLY PUBLISHES (sweep #6 / T28, 2026-08-22). A tile with dishes on it prints the
+// SERVED COUNTER as its visible line — "0/1 served" — and carries the state phrase ("New order",
+// "Ready to serve", "Served") in that line's `title`, with the colour strip as the at-a-glance signal.
+// Only an EMPTY table prints its label as text ("Free"). This helper read innerText alone, so sixteen
+// checks were comparing the counter against a phrase that is no longer text: "tile 1 · 4 · 0/1 served
+// vs database New order", on a floor that was completely correct. Read both, because both are on the
+// tile — otherwise the guard is asserting where the words sit, not whether the state arrived.
 const tileText = async (crew, t) => {
-  try { return (await crew.fr.locator(`.ftile[data-floor-table="${t}"]`).innerText()).replace(/\n/g, " · "); }
-  catch { return ""; }
+  try {
+    const el = crew.fr.locator(`.ftile[data-floor-table="${t}"]`);
+    const txt = (await el.innerText()).replace(/\n/g, " · ");
+    const titles = await el.locator("[title]").evaluateAll((els) => els.map((e) => e.getAttribute("title")).filter(Boolean));
+    return [txt, ...titles].join(" · ");
+  } catch { return ""; }
 };
 // WHERE THE STATE WORD ACTUALLY LIVES (T28 sweep, 2026-08-22).
 //
@@ -130,14 +169,29 @@ async function waitForTile(crew, t, re, label) {
   return false;
 }
 
-const created = { orders: [], sessions: [] };
+const created = { orders: [], sessions: [], tables: new Set() };   // "<rid>|<table>" for every table this run touched
 async function placeOrder(rid, table, dish, qty = 1) {
+  // TWO ROUNDS OF THE SAME DISH WITHIN THREE SECONDS ARE ONE ORDER TO THIS APP (sweep #6 / T28,
+  // 2026-08-22). lfh_staff_place_order carries a double-tap guard: a non-cancelled order for the same
+  // table with the same item signature in the last 3 seconds comes back
+  // `{ ok:false, duplicateWarning:true }` and NO order_id. A guard that walks a table through several
+  // rounds trips it constantly — and because nothing here read `ok`, the undefined id travelled six
+  // lines and died as `invalid input syntax for type uuid: "undefined"`, which names neither the cause
+  // nor the file. That made this guard fail intermittently: whether it passed depended on whether the
+  // previous identical round happened to be more than three seconds ago.
+  //
+  // p_confirm_duplicate is the product's own way to say "yes, another round" — it is what the waiter's
+  // own "send anyway" sends — so it is the honest thing for a script that means exactly that. The
+  // double-tap guard itself is held by verify:order-retry and verify:guest-recovery.
   const r = await sb.rpc("lfh_staff_place_order", {
     p_table: String(table), p_items: [{ id: dish.id, qty }], p_allergies: [], p_note: null, p_restaurant_id: rid,
+    p_confirm_duplicate: true,
   });
   if (r.error) throw new Error(r.error.message);
+  if (!r.data || r.data.ok !== true) throw new Error(`place order on ${table} was refused: ${JSON.stringify(r.data)}`);
   const id = r.data?.order_id;
   if (id) created.orders.push(id);
+  created.tables.add(`${rid}|${String(table)}`);
   return r.data;
 }
 
@@ -153,6 +207,9 @@ try {
     const busy = new Set([
       ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", crew.rid).neq("status", "closed")).map((s) => String(s.table_number)),
       ...must(await sb.from("orders").select("table_number").eq("restaurant_id", crew.rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+      // …and the tables other guards own, so a whole-suite run cannot have two lanes at one table
+      // (scripts/sweep/fixtureTables.mjs). A collision there looks exactly like a product fault.
+      ...claimedTables(),
     ]);
     const count = must(await sb.from("settings").select("table_count").eq("restaurant_id", crew.rid).limit(1))[0]?.table_count || 10;
     const freeList = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n)).slice(0, ROUNDS + 1);
@@ -296,13 +353,24 @@ try {
   if (created.orders.length) {
     await sb.from("orders").update({ archived: true, archived_at: new Date().toISOString(), deleted_at: new Date().toISOString() }).in("id", created.orders);
   }
-  for (const c of CREWS) {
-    const u = must(await sb.from("staff_users").select("restaurant_id").eq("username", c.creds.username).limit(1))[0];
-    if (!u) continue;
-    const open = must(await sb.from("sessions").select("id").eq("restaurant_id", u.restaurant_id).neq("status", "closed"));
-    for (const s of open) await sb.from("sessions").update({ status: "closed" }).eq("id", s.id);
+  // ONLY THE TABLES THIS RUN TOUCHED (sweep #6 / T28, 2026-08-22). This used to read EVERY non-closed
+  // session in each crew's restaurant and close the lot — while printing "closed the tables they
+  // opened", which is not what it did. The rush picks FREE tables at the start, so any party that
+  // arrived while it ran (another sweep lane, a real phone, the owner's own tab) was ended at the end;
+  // and closing a session fires migration 232's trigger, which cancels and archives every unpaid live
+  // order on it. On a real restaurant that ends every meal in the house. It also explains flakes seen
+  // during this sweep: it was deleting other lanes' fixtures mid-run.
+  const byRid = new Map();
+  for (const key of created.tables) { const [rid, t] = key.split("|"); if (!byRid.has(rid)) byRid.set(rid, []); byRid.get(rid).push(t); }
+  let closed = 0;
+  for (const [rid, tables] of byRid) {
+    const open = must(await sb.from("sessions").select("id").eq("restaurant_id", rid).in("table_number", tables).neq("status", "closed"));
+    for (const s of open) { await sb.from("sessions").update({ status: "closed" }).eq("restaurant_id", rid).eq("id", s.id); closed++; }
+    // …and the kitchen tickets those orders queued, or the manager's floor keeps a red "hasn't printed
+    // — is the kitchen screen open?" banner for each one. By order id, never by restaurant.
+    await dismissTicketsFor(sb, rid, created.orders, info);
   }
-  console.log(`\n· cleaned up ${created.orders.length} test orders and closed the tables they opened`);
+  console.log(`\n· cleaned up ${created.orders.length} test orders and closed the ${closed} table(s) they opened`);
 }
 console.log(failed ? `\n✗ ${failed} check(s) failed — the manager's live Table view is not trustworthy yet` : "\n✓ the manager's Table view kept up with the rush, on both restaurants");
 process.exit(failed ? 1 : 0);

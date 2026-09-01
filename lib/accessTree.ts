@@ -121,7 +121,7 @@ export type Node = {
   // the restaurant-detail page. `settings:<id>` renders one section of RestaurantSettings,
   // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
   // removed setting and permission from restaurant detail — everything will be here".
-  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding";
+  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding" | "printing";
   // A format screen that can SHOW its finished page: puts a "Preview / Print" button at the
   // top right of the embedded editor, opening the real bill drawn from this restaurant's
   // settings (owner, 2026-08-02). The value picks which document — and every one of them is
@@ -245,6 +245,30 @@ const ACTIONS: ActionDef[] = [
     what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it. Managers only — a waiter can never reopen a bill." },
   { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", mgrDef: true, cap: true,
     what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
+  // MAY THIS PERSON'S SCREEN BE THE PRINTER (owner, 2026-08-26: "which particular manager I want the
+  // printing should happen… all will be decided by me"). One row here is three things at once, which
+  // is the whole reason it goes here and not in a printing-only list: the Access screen row, the row on
+  // that person's own profile (lib/staffCaps walks these folders), and a server gate the manager route
+  // asks before a screen may claim any paper.
+  //
+  // It is ELIGIBILITY, not the choice. The Printing menu picks WHO prints; this says who may be picked
+  // — so switching it off takes a person out of the picker AND stops their screen printing, even if
+  // they were already chosen. Default ON, because every manager screen could print before this existed
+  // and a rebuild must not quietly take that away.
+  { id: "print_here", name: "May be the printer (print on their own screen)", flag: "print_here", mgrDef: true,
+    what: "Their screen may print this restaurant's paper — kitchen slips, bills, banquet sheets — on whatever printer that machine is set to. Turn it OFF for a phone: a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the paper. Where printing actually happens is chosen on Printing (Aevidine holds that): a computer running the print helper, or a named screen — and only a person with this on can be that named screen." },
+  // MAY THIS PERSON SET THE PRINTERS UP (owner, 2026-08-27: "that device is connected to the printer,
+  // so it will be easy for THAT device to set up the printer and all that, instead of the admin —
+  // admin can still see it… but that device will set up, and that device will only get the option in
+  // settings, like everyone has their settings where they log out from").
+  //
+  // It is deliberately a SEPARATE row from "May be the printer". They are different amounts of trust:
+  // being the printer is "paper comes out of my machine", setting printers up is "I decide where the
+  // whole restaurant's paper comes out". Default OFF, because it is granted to ONE person — whoever
+  // sits at the machine the printer is plugged into — and a restaurant where every manager can
+  // re-route the kitchen slips is a restaurant where tickets go missing and nobody knows why.
+  { id: "print_setup", name: "May set the printers up (from their own computer)", flag: "print_setup", mgrDef: false,
+    what: "Adds a Printing page to their own Settings, on the computer the printer is plugged into: it can register that computer, get the little helper program's code, and choose which printer prints the kitchen slips, the bills and the banquet sheets. Give it to ONE person — the one sitting at that machine. Aevidine sees and can change everything they do, and nothing here lets them change any other restaurant." },
   // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
   // its own thing, and one switch covering create/reset/delete was three very different amounts of
   // trust behind a single yes. It lives in "What a manager can manage", split up.
@@ -499,9 +523,16 @@ export const SECTIONS: Section[] = [
           },
         ],
       },
-      { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
-        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", preview: "kot",
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check is inside, and Preview at the top right shows the ticket itself — the very same one the manager panel and the kitchen board print, not a mock-up of it." },
+      // THE PRINTING SETUP IS NOT HERE ANY MORE (owner, 2026-08-29): *"in the middle of thing, you
+      // tell me to go to the access and permission… remove it completely from the access and
+      // permission. Now printing has a new menu, so all the settings of the printing will be there."*
+      //
+      // A `print_where` child used to embed the whole Printing board inside this row, so the same
+      // setup existed in two places and he was sent from one to the other halfway through a job.
+      // The row above stays because it is the ENTITLEMENT — the same question every other feature
+      // answers here, "is this on for this restaurant" — and it is the very same switch as step 1 of
+      // the Printing menu. Everything else about printing lives on Printing.
+      // Do not re-embed the board here.
       // ⚡ QO/P — the floor's quick-order screen (owner, 2026-08-02). A main feature, not an
       // extra: it is how a whole order gets punched in at speed. Default ON (mig 257) because
       // it REPLACED the 🥡 New Parcel button every floor already had — shipping it off would
@@ -556,12 +587,35 @@ export const SECTIONS: Section[] = [
         bind: { t: "module", key: "take_orders" },
         confirm: "Switch order-taking OFF for this restaurant?\n\nNobody will be able to punch in a new dine-in order — not the manager panel's ＋ Take order, not the waiter tablet, not the ⚡ QO/P screen. The restaurant can still bill and close the tables it already has open.",
         what: "Punching in a dine-in order at all: the ＋ Take order button on a table, the waiter tablet's order screen, and the tables half of ⚡ QO/P. Every restaurant needs this, so it starts ON — the switch is here so you can SEE that it is on, and take it away for a restaurant that only sells parcels. WHO may take an order is a separate thing: the manager's default and the waiter's are under Manager and Waiter." },
-      { id: "table_ops", name: "Move, merge & split tables", def: false,
+      // ── A NEW RESTAURANT IS BORN WITH THESE TWO **ON** (owner, 2026-08-28) ──────────────────
+      // Both started OFF, so every restaurant created was born unable to move a party between
+      // tables, join two tables or mark a table VIP — until somebody noticed and switched them on.
+      // Seven restaurants on the backup stack are still sitting like that, and this row's own words
+      // used to admit it ("A NEW restaurant starts with it OFF, which is why most of them have it
+      // off today"), which is a product describing its own accident rather than a decision.
+      //
+      // The model already said why that was wrong, two hundred lines up, about this exact pair:
+      // "Taking an order, settling a bill, issuing the invoice, marking a table's type and
+      // moving/merging/splitting are how the floor RUNS — a restaurant that switched them off could
+      // not trade." Take-a-new-order is seeded ON for exactly that reason and says so; these two
+      // belong with it, not with banquet and payroll, which really are premium add-ons.
+      //
+      // BOTH ENDS MOVE TOGETHER OR NOT AT ALL. This `def` is what the ⓘ promises and lib/settingsClone
+      // is what a new row actually gets; if only one changed, the screen would describe a restaurant
+      // the database disagrees with — the exact class of fault this whole model exists to remove.
+      // `verify:access` check 55 now refuses that.
+      //
+      // NOTHING CHANGES FOR AN EXISTING RESTAURANT. Both columns carry a stored value on every row
+      // that already exists, and moduleLadder() reads the column, so `def` only decides what a
+      // BRAND-NEW restaurant is seeded with and what the screen shows when nothing is stored. The
+      // seven that are off stay off until somebody switches them on, which is the admin's call per
+      // restaurant, not a migration's.
+      { id: "table_ops", name: "Move, merge & split tables", def: true,
         bind: { t: "module", key: "table_ops" },
-        what: "The KOT ▾ menu on the floor: moving a party to another table, merging two tables into one bill, moving a whole kitchen ticket or a single dish, splitting a bill, and reprinting a ticket. OFF removes the whole menu from the manager panel AND the waiter tablet, and the server refuses those actions — so a restaurant with it off cannot move a party once the order has gone to the kitchen. A NEW restaurant starts with it OFF, which is why most of them have it off today; switch it on for any restaurant that runs a real floor." },
-      { id: "table_tags", name: "Table types (VIP / Family / Guest)", def: false,
+        what: "The KOT ▾ menu on the floor: moving a party to another table, merging two tables into one bill, moving a whole kitchen ticket or a single dish, splitting a bill, and reprinting a ticket. OFF removes the whole menu from the manager panel AND the waiter tablet, and the server refuses those actions — so a restaurant with it off cannot move a party once the order has gone to the kitchen. A new restaurant starts with it ON, because this is how a floor runs; switch it off only for somewhere that never moves a party." },
+      { id: "table_tags", name: "Table types (VIP / Family / Guest)", def: true,
         bind: { t: "module", key: "table_tags" },
-        what: "Marking a table so the floor shows who is sitting there — VIP, Family, Owner's guest. OFF removes the ribbon and the marking menu from the manager panel and the waiter tablet. A NEW restaurant starts with it OFF. Pay later (khata) is NOT affected: it has had its own switch under Extra features since migration 235." },
+        what: "Marking a table so the floor shows who is sitting there — VIP, Family, Owner's guest. OFF removes the ribbon and the marking menu from the manager panel and the waiter tablet. A new restaurant starts with it ON (owner, 2026-08-28) — see the note on Move, merge & split above. Pay later (khata) is NOT affected: it has had its own switch under Extra features since migration 235." },
       // ╔════════════════════════════════════════════════════════════════════════════════╗
       // ║ 🛵 ORDERS WITHOUT A TABLE — ONE FEATURE, PERMANENT, NO SWITCH (owner, 2026-08-03)║
       // ╚════════════════════════════════════════════════════════════════════════════════╝
@@ -839,8 +893,27 @@ export const SECTIONS: Section[] = [
         // group that decides a manager's money powers was telling the admin that bill DELETION is
         // a permission they can hand over, when cancel is the only route out of a bill for anyone
         // at the restaurant and no such row will ever exist again. Do not put it back.
+        //
+        // THIS SENTENCE HAS TO NAME EVERY ROW INSIDE THE FOLDER (sweep #7 T15, 2026-08-27). The
+        // children are `ACTIONS.map(mgrAction)`, so a row added to ACTIONS appears on screen with
+        // nothing here changing — which is exactly what happened on 2026-08-26 when "May be the
+        // printer" joined the list and this line still said "The money actions … reopen a bill …
+        // and discount a bill", naming two of three. Printing is not a money action, so an admin
+        // reading the folder was told the wrong thing about the row underneath it. Add the row's
+        // words here in the same commit that adds the row; `verify:access` check 51 refuses a
+        // child this sentence never mentions.
+        //
+        // IT HAPPENED AGAIN THE VERY NEXT DAY, and the guard caught it: "May set the printers up"
+        // joined ACTIONS on 2026-08-27 (mig 367) with this sentence untouched, so the folder was
+        // back to naming three of four. That is two occurrences in two days from one cause, which
+        // is the whole argument for the check rather than a one-off correction.
+        //
+        // AND IT HAS TO BE THE **FIRST** SENTENCE. rowText() in components/admin/AccessTree.tsx
+        // shows only the first sentence of any description over 45 words, with the rest behind
+        // "more" — so a tidy lead-in ("What every manager starts with.") is all the ROW itself
+        // would say, and the row would be less use than before. One sentence, all three rows.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
-        what: "The money actions, for every manager in this restaurant: reopen a bill (and for how long), and discount a bill (and up to how much). There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
+        what: "What every manager in this restaurant starts with: the money actions — reopen a bill (and for how long), and discount a bill (and up to how much) — plus the two printing ones, whether their screen may be the one that prints the paper and whether they may set the printers up from their own computer. There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
         children: [
           ...ACTIONS.map(mgrAction),
           {
@@ -942,8 +1015,17 @@ export const SECTIONS: Section[] = [
           { id: "own_settings", name: "Settings", def: true, bind: { t: "section", key: "settings" },
             what: "The owner's own Settings page — their panel's appearance, their password, and what their restaurant has switched on. It is not a permissions screen: an owner configures no permission anywhere." },
           // Renamed from "Ratings" (owner, 2026-08-02: "rating review").
+          // IT IS A TAB, NOT A PAGE, AND SAYING "page" WAS MISLEADING (sweep #7 T15, 2026-08-28).
+          // This row was listed for the owner as a switch with nothing behind it — "the owner panel
+          // has no Rating review page in its nav, yet Access has a switch for it" — and that reading
+          // was wrong. Traced end to end: the entitlement gates /api/owner/ratings, which is fetched
+          // by app/owner/issues/page.tsx, and switching it off makes that page hide its "Guest
+          // ratings" tab (`ratingsOff`) and fall back to Complaints. So the switch is real, it
+          // works, and what an owner loses is visible — it is on a tab of "Feedback & complaints",
+          // not a page of its own. Calling it "page" sent two readers hunting the owner's nav for
+          // something that was never going to be there. Say where it lives.
           { id: "own_ratings", name: "Rating review", def: true, bind: { t: "section", key: "ratings" },
-            what: "The owner's Rating review page — guest stars and written feedback." },
+            what: "Guest stars and written feedback — the “Guest ratings” tab on the owner's Feedback & complaints page. Switch it off and that tab disappears for them; the Complaints half of the same page stays. It is a tab, not a page of its own, so it is not in their left-hand menu." },
           {
             // AUDIT & LOGS (owner, 2026-08-01; renamed + given sub-options 2026-08-02: "name will
             // be changed from audit to audit and logs… and if there is a log separately, you have
@@ -1365,6 +1447,22 @@ export const MANAGER_GRANT_DEFAULTS: Record<string, boolean> = (() => {
 })();
 
 export const isConfigurableGrant = (flag: string) => flag in MANAGER_GRANT_DEFAULTS;
+
+/** What a BRAND-NEW restaurant's module columns are seeded with — `<key>_allowed` → the `def` on
+ *  that module's own row on this screen. Read by lib/settingsClone.ts, so "what the ⓘ promises"
+ *  and "what a new restaurant actually gets" are one sentence rather than two hand-typed lists.
+ *
+ *  THE FAULT THIS ENDS (2026-08-28). settingsClone copies restaurant #1's whole settings row and
+ *  then overrides a few columns by hand, so a module column nobody remembered to reset was
+ *  INHERITED from the flagship. `khata_allowed` and `payroll_allowed` were never in that list and
+ *  French House has both ON, so every restaurant created was born with Pay later and the whole
+ *  payroll module switched on while this screen said they start off. Deriving the list means a
+ *  module added here tomorrow is seeded right with no line written there, and a module that is
+ *  never reset cannot exist. Guarded by `verify:access` check 55. */
+export const MODULE_ALLOWED_DEFAULTS: Record<string, boolean> = Object.fromEntries(
+  ALL_NODES.filter((n) => n.bind.t === "module")
+    .map((n) => [`${(n.bind as Extract<Bind, { t: "module" }>).key}_allowed`, n.def === true]),
+);
 
 /** What `manager_permissions[flag]` means for this restaurant, given what is (or isn't) stored. */
 export function managerGrantValue(flag: string, stored: unknown): boolean {

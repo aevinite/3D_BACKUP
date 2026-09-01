@@ -12,6 +12,7 @@
 //        dead), and the dialog portalled out of `.adm` (a white card in a dark app).
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const args = process.argv.slice(2);
 const env = Object.fromEntries(
@@ -20,6 +21,9 @@ const env = Object.fromEntries(
 );
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
 const cookie = "lfh_staff_auth=" + createHash("sha256").update(env.ADMIN_PASSWORD).digest("hex");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the restore-and-rename walk");
 const SB = env.NEXT_PUBLIC_SUPABASE_URL, KEY = env.SUPABASE_SERVICE_ROLE_KEY;
 let fails = 0;
 const check = (n, p, x = "") => { console.log(`${p ? "PASS" : "FAIL"}  ${n}${x ? " — " + x : ""}`); if (!p) fails++; };

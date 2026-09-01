@@ -23,6 +23,12 @@ import {
 import { readActiveOrders, hasHiddenLiveOrder } from "@/lib/orderStatus";
 import { tget } from "@/lib/tenantStorage";
 import { splitBrandSegments, hasBrandMarkers } from "@/lib/brandText";
+// A RESTAURANT'S OWN NAME IS NEVER CUT (owner, 2026-08-26). The top bar packs the wordmark next to
+// four fixed-width buttons, so on the narrowest phones the name ran out of room and ended in "…" —
+// measured at 320px: 98px available, 120px needed, while 360px and up were clean. This is the same
+// helper the dish names already use ("make it dynamic so that for every screen it should fit",
+// 2026-08-05), taught to notice a name that is too WIDE as well as one that is too tall.
+import { useFitText } from "@/lib/useFitText";
 
 // The site only has two looks: a dark theme and a light theme.
 type Theme = "dark" | "light";
@@ -40,6 +46,9 @@ const readTheme = (): Theme => {
 // light/dark toggle, and the cart button (with its item-count badge).
 export default function Header({ logoText }: { logoText?: string }) {
   const restaurantId = useRestaurantId();
+  // Re-fits whenever the name itself changes — a soft restaurant switch, or the wordmark being
+  // edited — and whenever the bar's own box resizes (rotating the phone).
+  const brandRef = useFitText<HTMLHeadingElement>(logoText || "little French house");
   const features = useFeatures(restaurantId); // which restaurant features are switched on
   // Each useState below is a labelled memory box the header keeps:
   const [mounted, setMounted] = useState(false); // has the header finished loading in the browser yet?
@@ -180,7 +189,7 @@ export default function Header({ logoText }: { logoText?: string }) {
           // Custom wordmark. With *asterisks* the marked part uses the accent and the
           // rest is the mode-adaptive plain colour (white in dark / black in light).
           // With NO markers the whole name stays the accent — unchanged from before.
-          <h1 className="brand-title">
+          <h1 className="brand-title" ref={brandRef}>
             {hasBrandMarkers(logoText)
               ? splitBrandSegments(logoText).map((seg, i) => (
                   <span key={i} className={seg.hi ? "brand-highlight" : "brand-plain"}>{seg.text}</span>
@@ -188,7 +197,7 @@ export default function Header({ logoText }: { logoText?: string }) {
               : <span className="brand-highlight">{logoText}</span>}
           </h1>
         ) : (
-          <h1 className="brand-title">
+          <h1 className="brand-title" ref={brandRef}>
             <span className="brand-plain">little</span>{" "}
             <span className="brand-highlight">French</span>{" "}
             <span className="brand-plain">house</span>

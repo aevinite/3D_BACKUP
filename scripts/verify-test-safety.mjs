@@ -20,7 +20,16 @@ import path from "node:path";
 const HOOK = process.argv.includes("--hook");
 const TEST_FILE = /[/\\](scripts|tests)[/\\].*\.mjs$/;
 
-let ROOT = process.argv[2] && process.argv[2] !== "--hook" ? process.argv[2] : process.cwd();
+// The first POSITIONAL argument is the repo root to scan. A FLAG is not a root — this used to take
+// any argv[2], so `npm run verify:test-safety -- --base http://localhost:4228` (which every sweep
+// lane passes to every guard, blindly and correctly) set ROOT to the string "--base" and the run
+// ended with "no test scripts found under --base" and exit 1. A guard that fails because of an
+// argument it does not use is a guard that will be ignored. (sweep #7 / T28, 2026-08-27.)
+// A ROOT IS A FOLDER THAT EXISTS. Not "argv[2]", and not "the first thing without a dash" either:
+// the sweep lanes pass `-- --base http://localhost:4228`, so the first non-dash token is a URL.
+// Ask the disk instead — it cannot be argued with.
+const ROOT_ARG = process.argv.slice(2).find((a) => !a.startsWith("-") && fs.existsSync(path.join(a, "scripts")));
+let ROOT = ROOT_ARG || process.cwd();
 if (HOOK) {
   let raw = ""; try { raw = fs.readFileSync(0, "utf8"); } catch { process.exit(0); }
   let payload = {}; try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
@@ -30,11 +39,23 @@ if (HOOK) {
   ROOT = cut > 0 ? f.slice(0, cut) : ROOT;
 }
 
+// EVERY DEPTH, not three hand-listed folders (sweep #7 / T28, 2026-08-27). This used to read
+// ["scripts", "scripts/sweep", "tests"] only, so four sub-folders that grew afterwards were never
+// looked at — scripts/sweep/t3/ (four scripts that place real orders), scripts/live-fix-watcher/,
+// scripts/panel-stubs/ and scripts/launchagents/. The whole point of this file is "a test write
+// must name its restaurant", and the writes it could not see were exactly the ones nobody reviews.
 const files = [];
-for (const dir of ["scripts", "scripts/sweep", "tests"]) {
-  const d = path.join(ROOT, dir);
-  if (!fs.existsSync(d)) continue;
-  for (const n of fs.readdirSync(d)) if (n.endsWith(".mjs") && n !== "verify-test-safety.mjs") files.push(path.join(dir, n));
+(function walk(rel) {
+  const d = path.join(ROOT, rel);
+  if (!fs.existsSync(d)) return;
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) { if (e.name !== "node_modules") walk(p); continue; }
+    if (e.name.endsWith(".mjs") && e.name !== "verify-test-safety.mjs") files.push(p);
+  }
+})("scripts");
+for (const n of fs.existsSync(path.join(ROOT, "tests")) ? fs.readdirSync(path.join(ROOT, "tests")) : []) {
+  if (n.endsWith(".mjs")) files.push(`tests/${n}`);
 }
 if (!files.length) { if (HOOK) process.exit(0); console.error("no test scripts found under " + ROOT); process.exit(1); }
 
@@ -251,6 +272,194 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     "no script points at the live client stack",
     bad.length === 0,
     bad.join("\n    ") + "\n    Test against the backup stack. A read of the live stack has to be announced in chat, which a\n    script cannot do — and a LOGIN there counts against a limit that alerts the owner.",
+  );
+}
+
+// ── 8. A TEST WRITE NAMES ITS RESTAURANT — BOTH WAYS ────────────────────────────────────────
+// THE SINGLE BIGGEST FAULT CLASS IN THIS FOLDER (sweep #6 / T28, 2026-08-22). This app went from one
+// restaurant to a shared pool, and the guards did not come with it. Two shapes, both measured:
+//
+//   · AN INSERT THAT OMITS restaurant_id IS REFUSED (23502), and nothing read the error, so the script
+//     crashed one line later on a null and every check after it simply never ran. FIVE guards were
+//     dead this way for weeks: verify-session-ux (11 checks), verify-edge-cases (14), verify-realtime
+//     (2 of 5), verify-tablet-parity (all 5), and verify-cancelled-tile-parity — whose dish rows were
+//     refused so quietly that its main check printed a ✓ over ZERO dishes.
+//
+//   · AN UPDATE OR DELETE FILTERED ON table_number ALONE REACHES EVERY RESTAURANT ON THE STACK.
+//     Table 9, 11 and 21 exist in all of them. `PATCH sessions?table_number=eq.11 {status:closed}`
+//     from verify-edge-cases' teardown measurably closed AND soft-deleted a table-11 session belonging
+//     to a DIFFERENT restaurant during this sweep. On a live one that ends the party's meal: the close
+//     trigger (mig 232) cancels and archives every unpaid live order on the session, silently.
+//
+// The check reads the ARGUMENT of the write, not "the lines nearby". Nearby was tried first and it let
+// both shapes through, because a neighbouring `.eq("restaurant_id", RID)` on an unrelated statement
+// satisfied it — a check that can be satisfied by the wrong line is not a check.
+{
+  const TENANT = "sessions|session_members|orders|order_items|requests|blocklist|customers|staff_actions|table_merges|feedback|reviews|calls|menu_items|categories|settings";
+  // From an opening bracket, the text up to its match. Quotes and template literals are skipped so a
+  // ")" inside a string cannot end the argument early.
+  const argOf = (src, open) => {
+    let d = 0, i = open, q = null;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (q) { if (c === "\\") i++; else if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(" || c === "[" || c === "{") d++;
+      else if (c === ")" || c === "]" || c === "}") { d--; if (d === 0) return src.slice(open, i + 1); }
+    }
+    return src.slice(open, Math.min(src.length, open + 800));
+  };
+  const lineOf = (src, idx) => src.slice(0, idx).split("\n").length;
+  const bad = [];
+  for (const f of files) {
+    // Comment TEXT is blanked but the characters are kept, so every line number this reports is the
+    // real one — and a file that explains this very rule in prose cannot fail its own check.
+    const src = read(f)
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      .replace(/^[ \t]*\/\/.*$/gm, (m) => " ".repeat(m.length));
+
+    // (a) .from("<tenant>") … .insert(/.upsert( — the chain is often broken across lines for width, so
+    // allow anything but a semicolon between the two.
+    for (const m of src.matchAll(new RegExp(`\\.from\\(\\s*["'\`](${TENANT})["'\`]\\s*\\)[^;]{0,200}?\\.(insert|upsert)\\(`, "g"))) {
+      const open = m.index + m[0].length - 1;
+      let arg = argOf(src, open);
+      // A seeder hands the insert a VARIABLE built by a .map() further up. Follow the name back.
+      const bare = arg.match(/^\(\s*([A-Za-z_$][\w$]*)\s*[,)]/);
+      if (bare && !/restaurant_id/.test(arg)) {
+        const def = src.match(new RegExp(`\\b(?:const|let|var)\\s+${bare[1]}\\s*=`));
+        if (def) arg += " " + argOf(src, src.indexOf("(", def.index) >= 0 ? def.index : def.index) + src.slice(def.index, def.index + 900);
+      }
+      if (!/restaurant_id/.test(arg)) {
+        bad.push(`${f}:${lineOf(src, m.index)} — ${m[2]}s into ${m[1]} without restaurant_id (a NOT NULL column: the write is REFUSED, and the refusal is easy to miss)`);
+      }
+    }
+
+    // (b) a REST path on a tenant table filtered by table_number. The scope may be spelled out or
+    // interpolated, so look for restaurant_id anywhere inside the SAME quoted path.
+    for (const m of src.matchAll(new RegExp(`["'\`](${TENANT})\\?([^"'\`]*table_number=eq\\.[^"'\`]*)["'\`]`, "g"))) {
+      const path = m[2];
+      const isWrite = /\b(patch|delete|put|post)\b/i.test(src.slice(Math.max(0, m.index - 90), m.index));
+      if (!isWrite) continue;                                    // a scoped READ is a different rule
+      if (/restaurant_id/.test(path) || /\$\{\s*scope\s*\}/.test(path)) continue;
+      bad.push(`${f}:${lineOf(src, m.index)} — writes to ${m[1]} filtered on table_number ALONE — that table number exists in EVERY restaurant on the stack`);
+    }
+
+    // (c) the supabase-js equivalent: .update(…)/.delete() keyed on table_number, whose chain never
+    // names restaurant_id. The chain ends at the semicolon, so nothing outside it can satisfy this.
+    for (const m of src.matchAll(new RegExp(`\\.from\\(\\s*["'\`](${TENANT})["'\`]\\s*\\)[^;]{0,400}?;`, "g"))) {
+      const chain = m[0];
+      if (!/\.(update|delete)\(/.test(chain)) continue;
+      if (!/\.eq\(\s*["'`]table_number["'`]/.test(chain)) continue;
+      if (/restaurant_id/.test(chain)) continue;
+      bad.push(`${f}:${lineOf(src, m.index)} — an update/delete on ${m[1]} keyed on table_number with no restaurant_id — it reaches every restaurant`);
+    }
+  }
+  check(
+    "every test write that names a tenant table also names its restaurant (an insert that omits it is REFUSED; an update that omits it reaches EVERY restaurant)",
+    bad.length === 0,
+    bad.join("\n    ") + "\n    Add restaurant_id to the row, and .eq(\"restaurant_id\", RID) / &restaurant_id=eq.<rid> to the filter.\n    Read the .error too: an unread refusal is how a guard goes green over zero rows.",
+  );
+}
+
+// ── 9. `npm run dev` MUST HONOUR A PORT, OR A PARALLEL LANE TAKES HIS WINDOW ──────────────
+// Port 4000 is where the owner verifies — CLAUDE.md says so in as many words ("Verify where the
+// owner looks: localhost:4000"). Every parallel terminal is handed its OWN port and told never to
+// use 4000. But the script was `next dev -p 4000` with the port hard-coded, so `PORT=4128 npm run
+// dev` silently served on 4000 anyway. It happened during the sweep of 2026-08-22: a lane took his
+// window, and it was only noticed because the lane checked which port it had actually got. The next
+// time might not be noticed for an hour, and he would be looking at another branch's build while
+// being told his change was live.
+{
+  const pkg = read("package.json");
+  let scr = {};
+  try { scr = JSON.parse(pkg || "{}").scripts || {}; } catch { /* the JSON check owns that */ }
+  // BOTH WAYS OF STARTING IT, not just `dev` (sweep #7 / T28, 2026-08-28). `dev` was fixed and
+  // `start` was not, so a lane that wanted to test against a PRODUCTION build — which several
+  // guards require, verify:offline among them — still landed on 4000.
+  for (const name of ["dev", "start"]) {
+    const cmd = scr[name] || "";
+    check(
+      `\`npm run ${name}\` honours a PORT override, so a parallel lane cannot take port 4000 (the owner's window)`,
+      !cmd || /\$\{?PORT/.test(cmd),
+      `package.json "${name}" is ${JSON.stringify(cmd)} — a hard-coded port means every lane lands on the same one.\n    Use: next ${name === "dev" ? "dev" : "start"} -p \${PORT:-4000}`,
+    );
+  }
+}
+
+// ── 11. A TEST THAT FLIPS A REAL SETTING MUST PUT IT BACK EVEN IF IT IS INTERRUPTED ──────────
+//
+// `finally` covers a throw. It does not cover Ctrl-C, and it does not cover a lane runner killing a
+// guard that ran past its timeout. This project's scar is verify:realtime, which switched a
+// category off across seven restaurants and then died two steps later; on 2026-08-27 a smaller
+// version happened again, when verify-rota-clash's restore timed out and left a waiter holding two
+// tables instead of thirty.
+//
+// A setting is not a fixture row. A leftover test TABLE is obvious and verify:fixtures finds it.
+// A leftover SWITCH — "print the customer on the bill", a waiter's rota, which screens the owner
+// can see, the printing routes — looks exactly like a decision somebody made on purpose, and
+// nothing anywhere would ever flag it.
+//
+// So: a script that updates one of these must either register scripts/sweep/restore.mjs, or wire
+// its own SIGINT/SIGTERM handlers (verify-realtime does the latter, and did it first).
+{
+  // SCOPED ON PURPOSE, TWICE OVER, because the first draft of this check cried wolf on six files
+  // that were all correct — and a guard that invents a failure protects nothing.
+  //
+  //  · Only `verify-*` and scripts/sweep/. A SEEDER exists to change something and leave it
+  //    changed (copy-demo-to-prod, reset-diag-password, seed-owner-dev…); there is nothing to put
+  //    back, and demanding one would be nonsense.
+  //  · Only the CONFIGURATION tables — settings, restaurants, and a rota on staff_users. A test
+  //    that updates a row it CREATED (verify-recycle-name binning its own zzerin owner) is tidying
+  //    up, not flipping somebody's switch, and the difference is not something a pattern can see —
+  //    so the pattern is kept to the tables where a leftover is invisible AND belongs to a real
+  //    restaurant.
+  const FLIPS = /from\("(settings|restaurants)"\)[\s\S]{0,140}?\.update\(|(settings|restaurants)\?[a-z_]+=eq[^`"']*`?,\s*\{\s*method:\s*"PATCH"|update\s+staff_users\s+set\s+assigned_tables|assigned_tables:\s*\[/;
+  const bad = [];
+  for (const f of files) {
+    if (!/verify-|\/sweep\//.test(f)) continue;
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    if (!FLIPS.test(code)) continue;
+    if (/restoreOnExit\(/.test(code)) continue;                 // uses the shared helper
+    if (/process\.on\(/.test(code) && /SIG/.test(code)) continue; // wires its own, like verify-realtime
+    if (/sweep\/restore\.mjs/.test(f)) continue;                 // the helper itself
+    bad.push(f);
+  }
+  check(
+    "every test that flips a real setting puts it back on an INTERRUPTION too, not only on a throw",
+    bad.length === 0,
+    bad.join("\n    ") + "\n    Add:  import { restoreOnExit } from \"./sweep/restore.mjs\";  and register the put-back where you capture the original.",
+  );
+}
+
+// ── 12. A GUARD MUST NOT BREAK ON AN ARGUMENT IT DOES NOT USE ────────────────────────────────
+//
+// Every sweep lane hands EVERY guard its own port: `npm run verify:x -- --base http://localhost:4228`.
+// Nine guards took a bare `process.argv[2]` as the repo folder to scan, so they scanned a folder
+// called "--base", found nothing and exited 1 — and one of them shelled out to `cd --`, which bash
+// reads as a flag ("cd: --: invalid option"). Watched all nine on 2026-08-29.
+//
+// A guard that goes red because of an argument it does not even use is a guard people learn to
+// scroll past, and this suite's whole value is that a red means something. The answer is not to ban
+// the argument — pointing a static guard at another checkout is genuinely useful, and the release
+// script does it. It is to ask the DISK which argument is a repo, which cannot be argued with.
+// scripts/sweep/repoRoot.mjs does that in one line.
+{
+  const bad = [];
+  for (const f of files) {
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // Taking argv[2] as a PATH is the fault. Taking it as a count, a label or a slug is not.
+    if (!/(ROOT|root)\s*=\s*[^;\n]*process\.argv\[2\]/.test(code)) continue;
+    if (/repoRootFrom\(/.test(code)) continue;
+    bad.push(f);
+  }
+  check(
+    "no guard treats a command-line FLAG as the folder to scan (every lane passes `-- --base <url>`)",
+    bad.length === 0,
+    bad.join("\n    ") + '\n    Use:  import { repoRootFrom } from "./sweep/repoRoot.mjs";  const ROOT = repoRootFrom(import.meta.url);',
   );
 }
 

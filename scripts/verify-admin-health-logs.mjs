@@ -24,6 +24,12 @@ const USAGE = read(`${A}/usage/page.tsx`);
 const ISSUES = read(`${A}/issues/page.tsx`);
 const ATTENTION = read(`${A}/attention/page.tsx`);
 const RL_ROUTE = read("app/api/admin/rate-limits/route.ts");
+// Sweep #7 items 7, 10 and 11 reach into three more files. They are READ here, never written:
+// this guard is a static read of the source and nothing else.
+const CUSTLOG = read("app/api/admin/custlog/route.ts");
+const API_A = read("scripts/verify-admin-api-a.mjs");
+const HEALTH_ROUTE = read("app/api/admin/health/route.ts");
+const RESOLVE_ROUTE = read("app/api/admin/resolve-error/route.ts");
 
 const fails = [];
 const ok = (cond, id, msg) => { if (!cond) fails.push(`${id}  ${msg}`); };
@@ -193,10 +199,151 @@ for (const [name, src] of [["repair", REPAIR], ["logs", LOGS], ["rate-limits", L
 ok(/limit=\$\{ERROR_FEED_LIMIT\}/.test(REPAIR), "P08202", "repair: the error feed lost its limit");
 ok(/limit=\$\{FEED_LIMIT\}/.test(LOGS), "P08202", "logs: a feed lost its limit");
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// SWEEP #7 (terminal 17, 2026-08-27) — six more, each one watched happening on the running app.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── 16 · the Repair status strip must fail the way its sections do ────────────────────────────
+// With the complaints feed unreachable the pill read a confident "0 open complaints", and "need
+// attention" sat on the still-loading "…" for ever — two inches from the "problems open" pill,
+// which correctly showed "—". Neither failure reached the "couldn't read …" line either.
+ok(/failed\.push\("complaints"\)/.test(REPAIR), "P23117",
+  "repair: a failed complaints read is no longer named in the 'couldn't read' line under the counts");
+ok(/failed\.push\("account health"\)/.test(REPAIR), "P23118",
+  "repair: a failed account-health read is no longer named in the 'couldn't read' line under the counts");
+ok(/issuesErr \? "—"/.test(REPAIR), "P23119",
+  "repair: the open-complaints pill shows a number again when its feed failed — a reassuring zero");
+ok(/attErr \? "—"/.test(REPAIR), "P23120",
+  "repair: the need-attention pill no longer shows '—' when its feed failed");
+
+// ── 17 · one definition of "the same problem", client and server ──────────────────────────────
+// /api/admin/resolve-error groups by the shared errorSig(); the Logs page compared the message
+// text character for character, so "Mark resolved" cleared nine rows on the server and struck
+// through only the ones that matched letter for letter.
+ok(/from "@\/lib\/errorSignature"/.test(LOGS), "P23131",
+  "logs: the shared error signature is no longer imported — the local group test will drift from the server's again");
+ok(/errorSig\(x\.detail\) === wantSig/.test(LOGS), "P23132",
+  "logs: markResolved compares message text directly again — it will leave a group's twins red after the server clears them");
+ok(!/\(x\.detail \?\? null\) === \(a\.detail \?\? null\)/.test(LOGS), "P23132",
+  "logs: the old character-for-character detail comparison is back in markResolved");
+
+// ── 18 · a report set to "come back later" is MARKED on the one screen that shows everything ──
+// /api/admin/oplog ships `snoozed_until` for exactly this; nothing read it, so eight reports the
+// admin had told to come back tomorrow sat in the same full red as a live unhandled crash.
+ok(/snoozed_until/.test(LOGS), "P23141",
+  "logs: `snoozed_until` is unread again — a waiting report looks identical to a live unhandled one");
+ok(/Waiting · back/.test(LOGS), "P23142", "logs: the 'Waiting · back …' chip on a snoozed error row is gone");
+ok(/function backIn\(/.test(LOGS), "P23143",
+  "logs: backIn() is gone — timeAgo() only looks backwards and prints 'just now' for a future date");
+ok(/const showRed = isErr && !isResolved && !waitingUntil/.test(LOGS), "P23144",
+  "logs: a waiting report is drawn in full red again, which is what made it indistinguishable from a live one");
+
+// ── 19 · the waiting COUNT on the Repair hub says whose it is ─────────────────────────────────
+// The board asks for its problems unscoped, so the server's waiting count is always platform-wide.
+// It printed 8 under a banner reading "Showing My Little French House only." — 7 were hers.
+ok(/scopedName \? " across all restaurants" : ""/.test(REPAIR), "P23151",
+  "repair: the waiting-reports line no longer says the count is platform-wide while one restaurant is chosen");
+
+// ── 20 · the "Already fixed" list obeys the picker its own button obeys ───────────────────────
+// The list showed every restaurant's records under "Showing X only", counted all of them as X's,
+// and "Forget all" — which sends the restaurant id — then forgot fewer and said so.
+ok(/const scopedMemories = rid \?/.test(REPAIR), "P23161",
+  "repair: the already-fixed list ignores the restaurant picker again, while its Forget-all button obeys it");
+ok(/m\.restaurant_id === rid \|\| m\.restaurant_id === null/.test(REPAIR), "P23162",
+  "repair: the already-fixed filter no longer matches the DELETE route's scope (this restaurant + the platform-wide ones)");
+ok(!/All \{memories\.length\} record/.test(REPAIR), "P23163",
+  "repair: the already-fixed heading counts every restaurant's records again");
+ok(/\{scopedMemories\.map\(/.test(REPAIR), "P23164", "repair: the already-fixed list renders the unscoped array again");
+
+// ── 21 · System health's panel grid agrees with its own legend ────────────────────────────────
+// The legend calls Quiet "normal when a restaurant is closed" and the check row calls it normal
+// too — and the dot painted all 28 of them in the danger colour, the same red as the 3 that
+// genuinely need him. Same family as R42/R43: a warning that is always up is not a warning.
+ok(/offline: \{ c: "var\(--muted\)", t: "Quiet" \}/.test(HEALTH), "P23171",
+  "health: a quiet panel is drawn in the alarm colour again, for a state this page's own legend calls normal");
+ok(/never: \{ c: "var\(--adm-danger\)", t: "Never seen" \}/.test(HEALTH), "P23172",
+  "health: 'Never seen' lost the danger colour — it is the one panel state the page says is genuinely unfinished");
+
+// ── 22 · a banned guest's phone number does not ride along to a screen that never shows it ────
+// `blocklist` holds ten columns and the Customers tab renders six. Two of the four it never
+// showed were `unban_phone` / `unban_requested_at` — the number a banned guest leaves when asking
+// to be let back in. The old allowance in verify:admin-api-a said "no money column", which was
+// never the whole rule. Both halves are asserted: the read names its columns, AND the spent
+// allowance stays gone, because leaving one behind is how a select("*") creeps back in.
+ok(!/\.select\(\s*["'`]\*/.test(CUSTLOG), "P23601",
+  "custlog: the blocklist read is back to select(*) — it ships four columns the screen never renders");
+ok(/unban_phone/.test(CUSTLOG) && !/select\([^)]*unban_phone/.test(CUSTLOG), "P23602",
+  "custlog: the note explaining why unban_phone is NOT fetched is gone, or it is being fetched again");
+ok(!/"app\/api\/admin\/custlog\/route\.ts":/.test(API_A), "P23603",
+  "the spent select(*) allowance for custlog is back in verify-admin-api-a — that file must stay named");
+// ── 23 · the phone hint on a table that really does slide ─────────────────────────────────────
+// The Usage table slides sideways on a phone (T7's deliberate call for a table you read DOWN a
+// column of, and not changed here). What changed since that call is that the headings became sort
+// BUTTONS — and measured at 360px the card is 296px against a 540px row, so Staff and Tables sit
+// off-screen with nothing saying they are there.
+ok(/us-slide/.test(USAGE), "P23604",
+  "usage: the phone hint that the table slides sideways is gone — two of the five sort headings are unreachable without it");
+ok(/@media \(max-width: 560px\) \{ \.us-slide \{ display: inline; \} \}/.test(USAGE), "P23605",
+  "usage: the slide hint is no longer phone-only — it must not show where the table does not slide");
+// ── 24 · the Claude queue obeys the picker, and SAYS what it left out ─────────────────────────
+// The last list on this page the restaurant picker did not reach. A queue is different from the
+// other lists: "nothing is waiting" is a conclusion you would act on, so what is filtered out is
+// stated rather than silently dropped.
+ok(/const scopedRequests = rid \?/.test(REPAIR), "P23606",
+  "repair: the Claude queue ignores the restaurant picker again");
+ok(/const requestsElsewhere = requests\.length - scopedRequests\.length/.test(REPAIR), "P23607",
+  "repair: the queue no longer counts what the picker hid, so it cannot say so");
+ok(/queued at other restaurants/.test(REPAIR), "P23608",
+  "repair: the 'N more are queued at other restaurants' line is gone — a narrowed queue must not read as an empty one");
+ok(/queuedKeys = new Set\(requests\.map/.test(REPAIR), "P23609",
+  "repair: queuedKeys was scoped by restaurant — it must stay platform-wide, or Fix-now re-offers a ticket that already exists and files it twice");
+// ── 25 · a capped 3D count says it is capped ──────────────────────────────────────────────────
+// Every other capped list in this territory says so; this one printed a confident "200" and read
+// as the whole story. Zero on this stack, so it is the rainy-day half of a rule already kept.
+ok(/const BROKEN_3D_LIMIT = 200;/.test(HEALTH_ROUTE), "P23610",
+  "health route: BROKEN_3D_LIMIT is gone — the cap and the count can now disagree");
+ok(/\.limit\(BROKEN_3D_LIMIT\)/.test(HEALTH_ROUTE), "P23611",
+  "health route: the 3D read no longer uses the named limit, so `capped` can be computed against the wrong number");
+ok(/capped: \(broken3dQ\.data \|\| \[\]\)\.length >= BROKEN_3D_LIMIT/.test(HEALTH_ROUTE), "P23612",
+  "health route: the 3D answer no longer reports whether it was capped");
+ok(/h\.broken3d\.capped \? "\+" : ""/.test(HEALTH), "P23613",
+  "health: the 3D check row prints a bare number again for a capped answer");
+ok(/the check stops counting at 200/.test(HEALTH), "P23614",
+  "health: the 3D card no longer says the count stops at 200");
+// ── 26 · every bulk action says WHOSE, and the restaurant name is the thing you see ───────────
+// (owner, 2026-08-27.) The buttons were already scoped correctly — the picker narrows what you see
+// and every "all" request carries that restaurant, or none. Two things were missing: the confirm
+// did not say which, and the restaurant name — the one fact that tells you whose problem a ticket
+// is — was drawn in the same grey as the timestamp beside it.
+ok(/const scopePhrase = scopedName \? `at \$\{scopedName\}` : "across every restaurant"/.test(REPAIR), "P23615",
+  "repair: the one phrase every bulk confirm uses to name its scope is gone");
+{
+  const asks = [...REPAIR.matchAll(/<span>(?:Mark|Send|Bring|Clear|Resolve|Forget) all [\s\S]{0,120}?<\/span>/g)].map((m) => m[0]);
+  ok(asks.length >= 6, "P23616", `repair: expected 6 bulk confirm sentences, found ${asks.length}`);
+  const silent = asks.filter((a) => !a.includes("scopePhrase"));
+  ok(silent.length === 0, "P23617",
+    `repair: ${silent.length} bulk confirm(s) no longer name the restaurant they will act on — the last thing read before nine restaurants are cleared must say which`);
+}
+// The requests themselves must stay scoped: all restaurants -> no restaurant_id, one -> that one.
+ok(/body: JSON\.stringify\(\{ all: true, \.\.\.\(rid \? \{ restaurant_id: rid \} : \{\}\) \}\)/.test(REPAIR), "P23618",
+  "repair: 'Resolve all' no longer sends the chosen restaurant — it would clear every restaurant's board under a banner naming one");
+ok(/all: true, snooze_hours: hours, \.\.\.\(rid \? \{ restaurant_id: rid \} : \{\}\)/.test(REPAIR), "P23619",
+  "repair: 'Remind me later (all)' lost its restaurant scope");
+ok(/action: "dismiss_all", \.\.\.\(rid \? \{ restaurant_id: rid \} : \{\}\)/.test(REPAIR), "P23620",
+  "repair: 'Dismiss all' lost its restaurant scope");
+ok(/if \(scope\) upd = upd\.eq\("restaurant_id", scope\)/.test(RESOLVE_ROUTE), "P23621",
+  "the server no longer honours the restaurant a bulk resolve names (this is the half that actually decides what is cleared)");
+// …and the name is visible.
+ok(!/\.rp-rest\{font-size:11\.5px;color:var\(--muted\)\}/.test(REPAIR), "P23622",
+  "repair: the restaurant name on a ticket is back to muted grey — it is the main thing on the row");
+ok(/\.rp-rest\{[^}]*color:var\(--accent\)/.test(REPAIR), "P23623",
+  "repair: the restaurant chip lost its own colour");
+ok(!/\.rp-rest\{[^}]*(--adm-danger|--adm-warn|--adm-ok)/.test(REPAIR), "P23624",
+  "repair: the restaurant chip is using a SEVERITY colour — a restaurant is an identity, not a status, and a red name on a red tile competes with the alarm");
 if (fails.length) {
   console.error(`\n✖ verify:admin-health — ${fails.length} regression${fails.length === 1 ? "" : "s"} on the admin's health, logs & limits screens:\n`);
   for (const f of fails) console.error("   " + f);
   console.error("\n   Each line names the ledger phase (.claude/sweep/LEDGER/T17.md) that found it.\n");
   process.exit(1);
 }
-console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 15 fixes");
+console.log("✓ verify:admin-health — the admin's health, logs, issues & limits screens still hold their 26 fixes");

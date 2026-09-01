@@ -234,8 +234,14 @@ export default function AdminRepair() {
     if (e.ok) { setErrors(e.data.actions || []); setWaiting(e.data.waiting ?? null); } else { failed.push("problems"); setWaiting(null); }
     if (q.ok) setRequests(q.data.requests || []); else failed.push("the Claude queue");
     if (h.ok) setRuns(h.data.runs || []); else failed.push("Claude's history");
-    if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
-    if (at.ok) { setAtt(at.data); setAttErr(false); } else setAttErr(true);
+    // THE STRIP HAS TO FAIL THE WAY THE SECTIONS DO (T17 sweep #7, 2026-08-27). These two were the
+    // only feeds whose failure never reached the counts at the top: with the complaints list
+    // unreachable the pill read a confident "0 open complaints", and "need attention" sat on the
+    // still-loading "…" for ever — two inches from the "problems open" pill, which correctly said
+    // "—". Watched happen with both routes made to fail. Same rule as every other feed here: a
+    // failed read is not an all-clear, and it is named in the line under the strip.
+    if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else { setIssuesErr(true); failed.push("complaints"); }
+    if (at.ok) { setAtt(at.data); setAttErr(false); } else { setAttErr(true); failed.push("account health"); }
     if (rl.ok) { setRlHits(rl.data.events || []); setRlRules(rl.data.rules || []); } else failed.push("rate limits");
     if (mem.ok) setMemories(mem.data.memories || []); else failed.push("the already-fixed record");
     setProblemsErr(e.ok ? "" : (e.error || "Couldn't load the problem list."));
@@ -547,11 +553,28 @@ export default function AdminRepair() {
     return [...list].sort((a, b) =>
       a.status === b.status ? +new Date(b.created_at) - +new Date(a.created_at) : a.status === "open" ? -1 : 1);
   }, [scopedIssues, ticketFilter]);
+  // ── AND THE "ALREADY FIXED" LIST TOO (T17 sweep #7, 2026-08-27) ─────────────────────────────
+  // This list was the last thing on the page the picker did not reach. With one restaurant chosen
+  // it still showed every restaurant's records, its heading counted all of them and said they were
+  // "for <that restaurant>", and "Forget all" — which sends the restaurant id — then forgot only
+  // that restaurant's and reported a smaller number than the line above it claimed. The DELETE
+  // route's own note says the button "can never clear more than the list it sits under shows";
+  // this is what makes that true. Same set as the server's scope: this restaurant's records plus
+  // the platform-wide ones that also cover it. A client filter over rows already in hand — no
+  // extra request, so choosing a restaurant still fires nothing.
+  const scopedMemories = rid ? memories.filter((m) => m.restaurant_id === rid || m.restaurant_id === null) : memories;
   const atRisk = (att?.atRisk || []).filter((r) => !rid || r.id === rid);
   const onboarding = (att?.onboarding || []).filter((r) => !rid || r.id === rid);
   const attCount = atRisk.length + onboarding.length;
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
+  // ── EVERY BULK CONFIRM SAYS WHOSE (owner, 2026-08-27) ────────────────────────────────────────
+  // The buttons were already scoped correctly — the picker narrows what you SEE and every "all"
+  // request carries the same restaurant, or none. What they did not do was SAY so at the moment
+  // it matters: the confirm read "Mark all 6 as handled?" whether that meant one restaurant or
+  // nine. The lead sentence above the row says it, but a confirm is the last thing you read
+  // before it happens, and it should not make you look up to check.
+  const scopePhrase = scopedName ? `at ${scopedName}` : "across every restaurant";
   // ONE RESTAURANT PICKER FOR THE WHOLE PAGE (owner, 2026-08-16). It already existed, but only to
   // unlock the hands-on tools at the bottom — so choosing a restaurant appeared to do nothing to
   // the thing you were actually reading. A client rings about THEIR restaurant; there are nine on
@@ -565,6 +588,19 @@ export default function AdminRepair() {
   // (mig 183) and nothing was reading it — and the server built it with a different formula from
   // the tile's own group key, so even a reader would not have matched. Both sides now use
   // errorGroupKey(), so the queue and the board describe a problem the same way.
+  // ── AND THE QUEUE (T17 sweep #7, 2026-08-27) ────────────────────────────────────────────────
+  // The last list on this page the picker did not reach. A ticket carries the restaurant it was
+  // filed for, so choosing one narrows the queue like everything else — and, unlike the other
+  // lists, what is left out is SAID rather than silently dropped: a queue is work in flight, and
+  // "there are two more, at other restaurants" is the thing you would want to know before
+  // assuming nothing is being worked on. A ticket filed with no restaurant (a platform-wide
+  // report from the box below) belongs to the all-restaurants view only, which is the same rule
+  // the problem board follows.
+  const scopedRequests = rid ? requests.filter((q) => q.restaurant_id === rid) : requests;
+  const requestsElsewhere = requests.length - scopedRequests.length;
+  // NOTE: `queuedKeys` deliberately stays UNSCOPED. It answers "has this problem already been
+  // sent?", and the answer is yes whichever restaurant is on screen — scoping it would re-offer
+  // "Fix now" for a ticket that already exists and file it a second time.
   const queuedKeys = new Set(requests.map((q) => q.err_key).filter(Boolean) as string[]);
   const alreadyQueued = (g: ErrGroup) => sent.has(g.key) || queuedKeys.has(g.key);
 
@@ -621,14 +657,19 @@ export default function AdminRepair() {
         <a className={`rp-pill${shownRlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
           <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : rlErr ? "—" : shownRlHits.length}</span><span>limit{shownRlHits.length === 1 && !rlErr ? "" : "s"} reached</span>
         </a>
-        <a className={`rp-pill${openTickets ? " warn" : ""}`} href="#complaints" title="Jump to complaints">
-          <i className="fas fa-flag" aria-hidden="true" /><span className="n">{openTickets}</span><span>open complaint{openTickets === 1 ? "" : "s"}</span>
+        {/* "—", never a reassuring 0 and never an eternal "…", when the feed behind the number did
+            not arrive — the same rule the two pills above already follow. */}
+        <a className={`rp-pill${!issuesErr && openTickets ? " warn" : ""}`} href="#complaints"
+          title={issuesErr ? "The complaints list didn't load — this is not an all-clear" : "Jump to complaints"}>
+          <i className={`fas ${issuesErr ? "fa-circle-question" : "fa-flag"}`} aria-hidden="true" /><span className="n">{errLoading ? "…" : issuesErr ? "—" : openTickets}</span><span>open complaint{openTickets === 1 && !issuesErr ? "" : "s"}</span>
         </a>
-        <a className={`rp-pill${attCount ? " warn" : ""}`} href="#at-risk" title="Jump to at-risk restaurants">
-          <i className="fas fa-heart-pulse" aria-hidden="true" /><span className="n">{att ? attCount : "…"}</span><span>need attention</span>
+        <a className={`rp-pill${!attErr && attCount ? " warn" : ""}`} href="#at-risk"
+          title={attErr ? "Account health didn't load — this is not an all-clear" : "Jump to at-risk restaurants"}>
+          <i className={`fas ${attErr ? "fa-circle-question" : "fa-heart-pulse"}`} aria-hidden="true" /><span className="n">{attErr ? "—" : att ? attCount : "…"}</span><span>need attention</span>
         </a>
-        <div className="rp-pill">
-          <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
+        <div className="rp-pill" title={requestsElsewhere > 0 ? `${requestsElsewhere} more ${requestsElsewhere === 1 ? "is" : "are"} queued at other restaurants` : undefined}>
+          <i className="fas fa-robot" aria-hidden="true" /><span className="n">{scopedRequests.length}</span><span>waiting for Claude</span>
+          {requestsElsewhere > 0 ? <span style={{ opacity: 0.75 }}>· +{requestsElsewhere} elsewhere</span> : null}
         </div>
         <div className="rp-pill">
           <i className="fas fa-screwdriver-wrench" aria-hidden="true" /><span className="n">{TOOLS.length}</span><span>hands-on tools</span>
@@ -670,19 +711,19 @@ export default function AdminRepair() {
 
           {confirmBulk === "resolve" ? (
             <span className="rp-bulk-ask">
-              <span>Mark all {groups.length} as handled?</span>
+              <span>Mark all {groups.length} {scopePhrase} as handled?</span>
               <button className="adm-btn primary" onClick={resolveAllProblems}>Yes, clear the board</button>
               <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
           ) : confirmBulk === "claude" ? (
             <span className="rp-bulk-ask">
-              <span>Send all {groups.filter((g) => !alreadyQueued(g)).length} to the 2:30 AM robot?</span>
+              <span>Send all {groups.filter((g) => !alreadyQueued(g)).length} {scopePhrase} to the 2:30 AM robot?</span>
               <button className="adm-btn primary" onClick={sendAllToClaude}>Yes, queue them</button>
               <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
           ) : confirmBulk === "later" ? (
             <span className="rp-bulk-ask">
-              <span>Bring them all back…</span>
+              <span>Bring all {groups.length} {scopePhrase} back…</span>
               {LATER_CHOICES.map((c) => (
                 <button key={c.hours} className="adm-btn" onClick={() => snoozeAllProblems(c.hours, c.label)}>{c.label}</button>
               ))}
@@ -691,7 +732,7 @@ export default function AdminRepair() {
           ) : (
             <span className="rp-bulk-btns">
               <button className="adm-btn" disabled={!!bulk} onClick={() => setConfirmBulk("resolve")}
-                title="I've handled all of these — clear the board. Anything that happens again comes straight back.">
+                title={`Clear every problem ${scopePhrase}. I've handled all of these — anything that happens again comes straight back.`}>
                 <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />
                 {bulk === "resolve" ? "Clearing…" : "Resolve all"}
               </button>
@@ -717,8 +758,14 @@ export default function AdminRepair() {
       {!errLoading && !problemsErr && !!waiting && (
         <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px", display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
           <i className="fas fa-clock" aria-hidden="true" style={{ opacity: 0.7 }} />
+          {/* THE PICKER HAS TO MEAN THIS SENTENCE TOO (T17 sweep #7, 2026-08-27). The board asks for
+              its problems unscoped and narrows them here, so the server's waiting COUNT is always
+              platform-wide — and this line printed it verbatim under the banner reading "Showing My
+              Little French House only.". Measured: 8 shown, 7 actually French House's. Scoping the
+              request would cost an extra round-trip on every pick, which this page deliberately
+              does not do, so the number stays honest by saying whose it is. */}
           <span>
-            <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? " is" : "s are"} set to come back later — still open, not fixed, and
+            <b style={{ color: "var(--text)" }}>{waiting}</b> report{waiting === 1 ? "" : "s"}{scopedName ? " across all restaurants" : ""}{waiting === 1 ? " is" : " are"} set to come back later — still open, not fixed, and
             listed in <Link href="/aevinite/logs" style={{ color: "var(--accent)" }}>Audit &amp; logs</Link> the whole time.
           </span>
         </p>
@@ -760,7 +807,7 @@ export default function AdminRepair() {
                       </span>
                     ) : null}
                     <span className="rp-panel" style={{ ["--hue" as string]: color, borderColor: color }}>{PANEL_NAME[a.panel] || a.panel}</span>
-                    {a.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{a.restaurant_name}</span> : null}
+                    {a.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{a.restaurant_name}</span> : null}
                     <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(g.latest)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
                   </div>
                   {cameBack ? (
@@ -850,11 +897,11 @@ export default function AdminRepair() {
           NOTHING: if any of these happens again it appears in "Problems right now" above like
           any other error. Its only effect is that pressing Fix now on an OLD report of one
           answers "already fixed on <date>" instead of sending Claude to redo the work. */}
-      {memories.length ? (
+      {scopedMemories.length ? (
         <div style={{ marginBottom: 14 }}>
           <button className="rp-link" onClick={() => setShowMemories((v) => !v)} style={{ fontSize: 12.5 }}>
             <i className={`fas fa-chevron-${showMemories ? "down" : "right"}`} aria-hidden="true" style={{ marginRight: 6, fontSize: 10 }} />
-            Already fixed ({memories.length}) — for reference; nothing here is hidden from the board
+            Already fixed ({scopedMemories.length}) — for reference; nothing here is hidden from the board
           </button>
           {showMemories ? (
             <div style={{ marginTop: 8 }}>
@@ -863,11 +910,11 @@ export default function AdminRepair() {
               <div className="rp-bulk" style={{ marginBottom: 10 }}>
                 <i className="fas fa-eraser" aria-hidden="true" style={{ opacity: 0.65 }} />
                 <span className="rp-bulk-lead">
-                  All {memories.length} record{memories.length === 1 ? "" : "s"}{scopedName ? <> for <b>{scopedName}</b></> : ""} at once:
+                  All {scopedMemories.length} record{scopedMemories.length === 1 ? "" : "s"}{scopedName ? <> for <b>{scopedName}</b></> : ""} at once:
                 </span>
                 {confirmBulk === "memories" ? (
                   <span className="rp-bulk-ask">
-                    <span>Forget all {memories.length}?</span>
+                    <span>Forget all {scopedMemories.length} records {scopePhrase}?</span>
                     <button className="adm-btn primary" onClick={forgetAllMemories}>Yes, forget them</button>
                     <button className="adm-btn" onClick={() => setConfirmBulk("")}>Cancel</button>
                   </span>
@@ -889,14 +936,14 @@ export default function AdminRepair() {
                   that says an earlier fix didn&rsquo;t hold.
                 </p>
               )}
-              {memories.map((m) => (
+              {scopedMemories.map((m) => (
                 <div key={m.id} className="rp-err" style={{ opacity: 0.85 }}>
                   <span className="rp-err-bar" style={{ background: "var(--adm-ok, #4caf82)" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                       <b style={{ fontSize: 13 }}>{actLabel(m.action)}</b>
                       <span className="rp-panel">{PANEL_NAME[m.panel] || m.panel}</span>
-                      <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{m.restaurant}</span>
+                      <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{m.restaurant}</span>
                       <span className="rp-chip ok">fixed</span>
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
                         fixed {timeAgo(m.fixed_at)}{m.fixed_by ? ` by ${m.fixed_by === "claude" ? "Claude" : "you"}` : ""}
@@ -936,7 +983,7 @@ export default function AdminRepair() {
               one-tap "do it to everyone" is how a limit stops protecting anything. */}
           {shownRlHits.length > 0 && (confirmBulk === "limits" ? (
             <span className="rp-bulk-ask">
-              <span>Clear all {shownRlHits.length} alerts?</span>
+              <span>Clear all {shownRlHits.length} alerts {scopePhrase}?</span>
               <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={dismissAllLimits}>Yes, clear</button>
               <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
@@ -968,7 +1015,7 @@ export default function AdminRepair() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                   <b style={{ fontSize: 13.5 }}>{rlLabel(h.key)}</b>
                   <span className="rp-chip danger">{h.hit_count} / {h.max_count} per {rlPer(h.window_seconds)}</span>
-                  {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{h.restaurant_name}</span> : null}
+                  {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 5, fontSize: 9.5 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
                 </div>
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
@@ -1013,7 +1060,7 @@ export default function AdminRepair() {
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {openTickets > 0 && (confirmBulk === "tickets" ? (
             <span className="rp-bulk-ask">
-              <span>Resolve all {openTickets}?</span>
+              <span>Resolve all {openTickets} complaints {scopePhrase}?</span>
               <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={resolveAllTickets}>Yes, resolve</button>
               <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmBulk("")}>Cancel</button>
             </span>
@@ -1124,14 +1171,29 @@ export default function AdminRepair() {
       </div>
 
       {/* ── Waiting for Claude ─────────────────────────────────────────── */}
-      {requests.length > 0 && (
+      {(scopedRequests.length > 0 || requestsElsewhere > 0) && (
         <>
           <div className="rp-sec-h">
             <i className="fas fa-robot" aria-hidden="true" style={{ color: "var(--muted)" }} />
-            <h2>Waiting for Claude</h2><span className="rp-chip">{requests.length}</span>
+            <h2>Waiting for Claude</h2>
+            {scopedRequests.length ? <span className="rp-chip">{scopedRequests.length}</span> : null}
+            <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName || "all restaurants"}</span>
           </div>
+          {/* WHAT IS LEFT OUT IS SAID, not silently dropped. Everywhere else on this page a
+              narrowed list simply shows less; a QUEUE is different, because "nothing is waiting"
+              is a conclusion you would act on. */}
+          {requestsElsewhere > 0 && (
+            <p className="adm-muted" style={{ fontSize: 12.5, margin: "-4px 0 8px" }}>
+              <i className="fas fa-circle-info" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+              {requestsElsewhere} more {requestsElsewhere === 1 ? "is" : "are"} queued at other restaurants.{" "}
+              <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+            </p>
+          )}
+          {scopedRequests.length === 0 ? (
+            <div className="adm-empty">Nothing is queued for {scopedName}.</div>
+          ) : (
           <div className="adm-card" style={{ marginBottom: 6 }}>
-            {requests.map((q) => (
+            {scopedRequests.map((q) => (
               <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
                 <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1142,6 +1204,7 @@ export default function AdminRepair() {
               </div>
             ))}
           </div>
+          )}
         </>
       )}
 
@@ -1289,7 +1352,20 @@ export default function AdminRepair() {
         .rp-err{position:relative;display:flex;gap:12px;padding:13px 14px 13px 16px;border-radius:12px;border:var(--border);background:var(--card);margin-bottom:10px;overflow:hidden}
         .rp-err-bar{position:absolute;left:0;top:0;bottom:0;width:3px}
         .rp-panel{font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:1px 7px;border-radius:6px;border:1px solid;background:transparent;text-transform:uppercase}
-        .rp-rest{font-size:11.5px;color:var(--muted)}
+        /* THE RESTAURANT NAME IS THE MAIN THING ON A TICKET (owner, 2026-08-27: "in the ticket it
+           should show in maybe some different colour, the restaurant name because that's the main
+           thing"). It was 11.5px in --muted, the same grey as the timestamp beside it — so on a
+           board carrying nine restaurants, the one fact that tells you WHOSE problem this is was
+           the quietest thing on the row.
+           It is now a pill in the console's own accent. Deliberately NOT red, amber or green:
+           those three already mean severity here, and a restaurant is an identity, not a status —
+           a red name on a red tile would compete with the alarm instead of answering it. --accent
+           is a declared token with its own value per skin (gold on dark, tan on light), so this
+           needs no hard-coded hex and cannot go low-contrast when the console is light. */
+        .rp-rest{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;
+                 color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);
+                 border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);
+                 max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .rp-detail{font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}

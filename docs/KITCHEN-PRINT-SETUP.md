@@ -39,7 +39,7 @@ longer be lost just because a window was covered.
 | **WHO prints** (kitchen / counter / both) | **admin console → the restaurant → 🖨 KOT printing** (mig 336). NOT the manager panel: its Settings → Kitchen printing section is hidden from everyone there by the owner's 2026-07-31 decision, which is how the first attempt shipped an unreachable control. |
 | The per-device confirmation | manager panel → **Tables** → the strip above the floor asks once, and only a device that answers YES ever claims (a phone must never claim a ticket) |
 | The live socket stays open while a screen is the printer | `public/panels/realtime.js` (`keepAlive`) |
-| The kiosk launcher | `public/print-station/print-station-mac.command` · `…-windows.bat` (served, so the panels can offer them as downloads) |
+| The kiosk launcher | **Nothing is shipped and nothing is offered as a download.** The reader types the one small file by hand from `public/print-setup.html`. `public/print-station/*` and `app/api/print-station/` were DELETED on 2026-08-19 — do not re-create them, do not re-add a ⬇ button anywhere (§9). |
 | Problems / stuck tickets | manager panel → **Tables** → the strip above the floor grid (mig 269) |
 | **The restaurant-facing guide** | `public/print-setup.html` — served at `/print-setup.html`, linked from manager → Settings → Kitchen printing and from the kitchen's 🖨❗ sheet. THIS file is the engineering record; that page is what a restaurant reads. Keep them honest with each other. |
 
@@ -54,10 +54,15 @@ longer be lost just because a window was covered.
    this is on.
 3. **Manager panel → Settings → Kitchen printing → "Auto-print the KOT when a new order arrives" =
    ON.** This is the restaurant-wide switch (the owner's).
-4. **On the computer the printer is attached to, open the print station** — double-click
-   `print-station-mac.command` (Mac) or `print-station-windows.bat` (Windows). Change the `URL` line
-   in it first: `/kitchen` for a kitchen screen, `/manager` for the counter. Log in once; that
-   window keeps its own Chrome profile and stays logged in.
+4. **On the computer the printer is attached to, make the print station file BY HAND** — open
+   `/print-setup.html`, pick that computer's operating system, and type the one small file it shows
+   you (`print-station.command` on Mac · `print-station.bat` on Windows · `print-station.sh` on
+   Linux). **There is nothing to download** and **no `URL` line to edit** — the page writes the
+   reader's own site address into every command. Nothing is shipped: the old downloadable starters
+   were deleted on 2026-08-19 because macOS refuses any script that arrives from the web (§9). Log in
+   once; that window keeps its own Chrome profile and stays logged in.
+   *(For an unattended computer that prints with no window open at all, use the print helper instead
+   — `docs/PRINT-HELPER.md`, admin console → Printing.)*
 5. **Choose WHICH screen prints** — admin console → the restaurant → **🖨 KOT printing → "Which
    screen prints the ticket?"**: *the kitchen screen* (default) · *the counter (manager) screen* ·
    *both — the counter is the backup* (30s). This is an ADMIN choice, deliberately: the manager

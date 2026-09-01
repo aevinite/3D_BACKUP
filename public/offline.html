@@ -5,218 +5,419 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Can't open this screen — your work is safe</title>
   <!--
-    The last-resort page: shown ONLY when this device has never loaded the page it's
-    asking for AND the page couldn't be fetched. Everything here is inline (no fonts, no
-    images, no scripts from elsewhere) because by definition nothing can be fetched.
-    Tone matters: staff see this mid-service, so it must reassure (nothing was lost)
-    and act on its own the moment the connection returns.
+    The last-resort page: shown ONLY when this device has never loaded the page it's asking for
+    AND the page couldn't be fetched. Everything here is inline (no fonts, no images, no scripts
+    from elsewhere) because by definition nothing can be fetched.
 
-    IT MUST NOT GUESS THE REASON. The first version always said "No internet right now",
-    which was WRONG the day the app's own database stopped answering: the owner's Wi-Fi was
-    fine, the site was up, and this page still blamed his internet — then sat on
-    "Waiting for the connection..." forever, because the one thing it probed (/api/health)
-    was the very thing that was hanging. That is the same mistake as the "Connection is
-    struggling" false alarm: never state a cause the evidence doesn't support. So it now
+    IT MUST NOT GUESS THE REASON. The first version always said "No internet right now", which was
+    WRONG the day the app's own database stopped answering: the owner's Wi-Fi was fine, the site was
+    up, and this page still blamed his internet — then sat on "Waiting for the connection..." for
+    ever, because the one thing it probed (/api/health) was the very thing that was hanging. So it
     TESTS, in order:
       1. is this device on a network at all?        (navigator.onLine)
       2. can we reach our own server?               (a path that touches no database)
       3. is the app behind it actually answering?   (/api/health)
-    and says which of the three failed, in plain words. Plus a way OUT of the dead end
-    (the home screen), because a screen with one button that changes nothing is a trap.
+    and says which of the three failed, in plain words. Plus a way OUT of the dead end, because a
+    screen with one button that changes nothing is a trap.
+
+    TWO THINGS THE OWNER ASKED FOR ON 2026-08-26, having looked at ten prototypes:
+      · THE GAME (design 8, "catch the dishes"). Chrome's dinosaur works because you are STUCK
+        waiting — it turns dead time into something to do. It never gets in the way: the verdict and
+        both buttons sit above it, it needs no attention, and it stops itself the moment the
+        connection is proven back.
+      · A LIVE SIGNAL BAR — "whenever how much internet connection is coming, can be seen live" —
+        and, in his words, "make sure it doesn't increase any kind of load on our backend egress".
+        That constraint is the whole design of it. See THE METER below: it costs ZERO requests.
   -->
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px;
+      margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 20px 18px;
       background: radial-gradient(120% 120% at 50% 0%, #16233f 0%, #0b1020 55%, #070a15 100%);
       color: #e7eefc; font: 500 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-      text-align: center;
+      text-align: center; overscroll-behavior: none;
     }
     .card {
-      width: min(420px, 100%); padding: 30px 24px 26px; border-radius: 20px;
+      width: min(430px, 100%); padding: 20px 18px 18px; border-radius: 20px;
       background: rgba(15, 24, 48, .72); border: 1px solid rgba(148, 163, 184, .22);
       box-shadow: 0 24px 60px rgba(0, 0, 0, .45); backdrop-filter: blur(20px);
     }
-    .dot { width: 54px; height: 54px; margin: 0 auto 16px; border-radius: 999px; display: grid; place-items: center;
-           background: rgba(239, 68, 68, .16); border: 1px solid rgba(239, 68, 68, .4); }
-    .dot span { width: 14px; height: 14px; border-radius: 999px; background: #ef4444; animation: p 1.6s ease-in-out infinite; }
-    /* "still checking" and "it's us, not your internet" are amber, not alarm red. */
-    .dot.warn { background: rgba(245, 158, 11, .16); border-color: rgba(245, 158, 11, .45); }
-    .dot.warn span { background: #f59e0b; }
-    @keyframes p { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
-    h1 { margin: 0 0 8px; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
-    p { margin: 0 0 14px; color: #b8c5de; font-size: 14px; }
-    .why { margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; text-align: left;
-           background: rgba(56, 189, 248, .09); border: 1px solid rgba(56, 189, 248, .28);
-           color: #cfe6f8; font-size: 13px; }
-    .why b { color: #7dd3fc; display: block; margin-bottom: 3px; }
-    .safe { margin: 14px 0 20px; padding: 12px 14px; border-radius: 12px; text-align: left;
-            background: rgba(34, 197, 94, .1); border: 1px solid rgba(34, 197, 94, .3); color: #d6f5e0; font-size: 13px; }
-    .safe b { color: #86efac; }
-    button {
-      width: 100%; padding: 13px 16px; border: 0; border-radius: 12px; cursor: pointer;
-      font: 800 15px/1 system-ui, sans-serif; color: #06131f; background: #38bdf8;
-    }
-    button:active { transform: translateY(1px); }
-    button.ghost { margin-top: 10px; background: transparent; color: #cfe0f7;
+    /* The restaurant's own name, when this device has it — never a guess. See brandName() below. */
+    .brand { font: 800 11px/1 system-ui, sans-serif; letter-spacing: .16em; text-transform: uppercase;
+             color: #7dd3fc; margin: 0 0 10px; }
+    .brand[hidden] { display: none; }
+    /* THE SIGNAL IS THE HERO, replacing a pulsing dot that sat above it telling the same story.
+       "if the action is fluctuating … you don't even need to show that, you can just show that sign
+       of connection is low" (owner, 2026-08-26). One indicator, not two.
+       .dot is kept as a no-op because say() still sets its class. */
+    .dot { display: none; }
+    .bars-hero { display: flex; align-items: flex-end; justify-content: center; gap: 5px;
+                 height: 40px; margin: 2px auto 12px; }
+    .bars-hero i { width: 9px; border-radius: 3px; background: currentColor; opacity: .16;
+                   transition: opacity .35s ease; }
+    .bars-hero i:nth-child(1) { height: 14px } .bars-hero i:nth-child(2) { height: 20px }
+    .bars-hero i:nth-child(3) { height: 27px } .bars-hero i:nth-child(4) { height: 33px }
+    .bars-hero i:nth-child(5) { height: 40px }
+    .bars-hero i.on { opacity: 1; }
+    /* the tallest lit bar breathes while we wait, so the screen is visibly alive without a second
+       thing to look at. With no signal at all, the shortest bar breathes instead. */
+    .bars-hero i.on:last-of-type, .bars-hero.none i:first-child { animation: pulse 1.7s ease-in-out infinite }
+    .bars-hero.none i:first-child { opacity: .55 }
+    @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .3 } }
+    h1 { margin: 0 0 6px; font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
+    p { margin: 0 0 10px; color: #b8c5de; font-size: 13.5px; }
+    /* ONE LINE, NOT A BOX. The owner looked at the first version and said it plainly: "this too
+       many text … if you wanna add text add it like it looks merged". It had SIX blocks of words in
+       three separate coloured boxes — a verdict, a sub-line, a signal box, a cause box and a
+       reassurance box — stacked down the screen with the game after them. Everything a person needs
+       is now one strip and two short lines. */
+    .foot { margin-top: 11px; font-size: 11.5px; color: #8fa1bf; line-height: 1.5; }
+    .foot b { color: #86efac; font-weight: 700; }
+    button.act { width: 100%; padding: 12px 16px; border: 0; border-radius: 11px; cursor: pointer;
+            font: 800 14.5px/1 system-ui, sans-serif; color: #06131f; background: #38bdf8; }
+    button.act:active { transform: translateY(1px); }
+    button.ghost { margin-top: 8px; background: transparent; color: #cfe0f7;
                    border: 1px solid rgba(148, 163, 184, .38); font-weight: 700; }
-    .hint { margin-top: 14px; font-size: 12.5px; color: #8fa1bf; }
-    @media (prefers-reduced-motion: reduce) { .dot span { animation: none; } }
+    button.ghost[hidden] { display: none; }
+    .hint { margin-top: 10px; font-size: 12px; color: #8fa1bf; }
+
+    /* ── THE SIGNAL ────────────────────────────────────────────────────────────────────────── */
+    /* THE DINOSAUR PAGE IS THE TARGET. "it should look properly good, like the game of that
+       dinosaur — it does look great, very synced" (owner, 2026-08-26). That page is an icon, one
+       line and the game; nothing else competes for attention.
+       This screen had SIX blocks of words in THREE bordered boxes — a verdict, a sub-line, a signal
+       box, a cause box and a reassurance box — with the game underneath them all. What is left: the
+       signal, the title, one short line, the game, the buttons, and one closing line doing two jobs.
+       The signal WORD and the measurement sit on one small line under the title, with no box: a
+       bordered panel is what made each of these read as a separate announcement. */
+    .sig { margin: 0 0 4px; font: 800 12.5px/1.4 system-ui, sans-serif; }
+    .sig .m-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700;
+                  font-variant-numeric: tabular-nums; opacity: .9; font-size: 11.5px; }
+    .why-line { margin: 0 0 12px; font-size: 12.5px; color: #9db0cd; line-height: 1.45; }
+
+    /* ── THE GAME ──────────────────────────────────────────────────────────────────────────── */
+    /* a gap under it too: the game panel and the Try again button were touching, which read as one
+       cramped block rather than two things */
+    .game { position: relative; margin: 12px 0 14px; border-radius: 12px; overflow: hidden;
+            background: #070b14; border: 1px solid rgba(148, 163, 184, .18);
+            touch-action: none; }
+    .game canvas { display: block; width: 100%; height: 168px; }
+    .g-hud { position: absolute; top: 6px; left: 9px; right: 9px; display: flex; justify-content: space-between;
+             font: 800 10.5px/1 ui-monospace, Menlo, monospace; letter-spacing: .07em;
+             color: #8ba1c4; text-transform: uppercase; pointer-events: none; }
+    .g-hud .lv { color: #fca5a5; }
+    /* pointer-events:none is load-bearing: this sits ON TOP of the canvas, so without it the very
+       first tap lands on the invite instead of on the game and nothing ever starts. The
+       game-over / back-online messages are drawn on the CANVAS, not here, so nothing needs to be
+       clickable in this layer. */
+    .g-ov { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px;
+            background: rgba(7, 11, 20, .8); font: 700 12.5px/1.45 system-ui, sans-serif; color: #dbe6fb;
+            pointer-events: none; }
+    .g-ov[hidden] { display: none; }
+    .g-ov b { display: block; font-size: 14px; margin-bottom: 3px; }
+    .g-ov small { display: block; color: #93a4c2; font-weight: 500; margin-top: 4px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .dot span { animation: none; }
+      /* No game for anyone who has asked their phone to stop moving things. The screen said
+         everything it needed to without it. */
+      .game { display: none; }
+    }
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="dot warn" id="dot"><span></span></div>
+    <div class="brand" id="brand" hidden></div>
+    <div class="dot" id="dot"><span></span></div><!-- draws nothing; say() still sets its class -->
+
+    <!-- THE SIGNAL, AS THE ONE INDICATOR. Reading it costs nothing — see THE METER in the script. -->
+    <div class="bars-hero none" id="bars" style="color:#94a3b8"><i></i><i></i><i></i><i></i><i></i></div>
     <h1 id="title">Can't open this screen</h1>
-    <p id="sub">This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
-    <div class="why" id="why"><b>Checking what's wrong...</b><span>One moment.</span></div>
-    <!-- SAY ONLY WHAT IS ACTUALLY GUARANTEED. This used to claim that EVERYTHING done while
-         offline was stored on this device and would send itself — a promise this
-         page cannot keep and cannot check. It is untrue in two real cases: a device whose storage
-         is refused (private browsing, no room, a locked-down tablet profile), where both queues
-         deliberately switch to "keep this open, it is NOT saved"; and the guest actions that have
-         no queue at all (joining a table, being approved, the shared cart). The queues themselves
-         are careful about this exact distinction — public/panels/outbox.js `unsafeStore`,
-         lib/guestOutbox.ts `persisted` — and this page was the one surface still over-promising,
-         on the screen that appears when things have gone most wrong. -->
-    <div class="safe">
-      <b>Anything already saved on this device is safe.</b> It sends itself the moment the
-      connection is back — keep this open so it can.
+    <p class="sig"><span id="m-label">Checking&hellip;</span> <span class="m-num" id="m-num"></span></p>
+    <!-- EMPTY until a cause has actually been tested. It was seeded with "this screen hasn't been
+         opened on this device yet" — true, but a different KIND of statement from the tested cause
+         that replaces it, sitting in the slot reserved for one. The rule this page exists to keep
+         is that it never names a cause before it has established one. -->
+    <p class="why-line" id="why"></p>
+
+    <!-- THE GAME. Optional, ignorable, and it never sits between the person and the buttons. -->
+    <div class="game" id="game">
+      <canvas id="cv" width="760" height="336" aria-label="A small game: catch the falling plates"></canvas>
+      <div class="g-hud"><span>Caught <b id="score">0</b></span><span class="lv" id="lives">&hearts;&hearts;&hearts;</span></div>
+      <div class="g-ov" id="gov"><div><b>While you wait&hellip;</b>Catch the plates.<small>Drag, or use the arrow keys</small></div></div>
     </div>
-    <button type="button" id="retry">Try again</button>
-    <button type="button" class="ghost" id="home">Go to the home screen</button>
-    <div class="hint" id="hint">Checking the connection...</div>
+
+    <button type="button" class="act" id="retry">Try again</button>
+    <button type="button" class="act ghost" id="home">Go to the home screen</button>
+
+    <!-- ONE CLOSING LINE DOING TWO JOBS: the promise, and when we look again. It says only what is
+         actually guaranteed — this once claimed that EVERYTHING done offline was stored and would
+         send itself, which this page cannot keep and cannot check (a device whose storage is
+         refused; the guest actions that have no queue). "Anything already saved" keeps that
+         precision in a third of the words. -->
+    <p class="foot"><b>Anything already saved is safe.</b> <span id="hint">Checking the connection&hellip;</span></p>
   </main>
   <script>
     var $ = function (id) { return document.getElementById(id); };
 
     $("retry").addEventListener("click", function () { location.reload(); });
 
-    // THE WAY OUT HAS TO SUIT WHO IS LOOKING (guest sweep T1, 2026-08-16).
+    // ── THE WAY OUT HAS TO SUIT WHO IS LOOKING (guest sweep T1, 2026-08-16) ─────────────────
     //
-    // This button used to always go to "/", and "/" is the PLATFORM door: app/page.tsx redirects
-    // it to /login, the staff username+password screen. For a waiter that is exactly right. For a
-    // DINER it is the same dead end components/GuestNotFound.tsx was written to remove — "its only
-    // button … pointed at '/', which 307s to /login, the STAFF sign-in … a customer … dumped on a
-    // staff password screen". Offline it is worse than useless: "/" is very unlikely to be saved
-    // either, so it bounced straight back to this page.
+    // This button used to always go to "/", and "/" is the PLATFORM door: app/page.tsx redirects it
+    // to /login, the staff username+password screen. Right for a waiter; for a DINER it is the dead
+    // end components/GuestNotFound.tsx was written to remove, and offline it is worse than useless
+    // because "/" is very unlikely to be saved either.
     //
     // The service worker answers the ORIGINAL navigation with this page (event.respondWith does not
-    // change the address), so location.pathname here is still the screen the person asked for —
-    // which is all we need to tell a diner apart from a member of staff.
+    // change the address), so location.pathname here is still the screen the person asked for.
     //   /r/<slug>/menu|item…  -> that restaurant's own menu
     //   /menu, /item/…        -> the legacy restaurant-#1 menu (those paths ARE #1, same rule as
     //                            lib/tenantStorage)
-    //   /q/<code>             -> the tab's pinned restaurant when we have one (the /q/ page stores
-    //                            it before hydration); otherwise leave it as a reload, because the
-    //                            printed code is the only thing that knows their table
+    //   /q/<code>             -> the tab's pinned restaurant when we have one; otherwise leave it as
+    //                            a reload, because the printed code is the only thing that knows
+    //                            their table
+    //   /view/<folder>        -> the 3D DISH VIEWER. Missing until 2026-08-22: it is a guest surface
+    //                            with no /r/<slug> in its path, so it fell through to "/" and dropped
+    //                            a diner on the staff sign-in. Measured, not read.
     //   anything else         -> "/" exactly as before, for staff
     var homeHref = "/";
     var homeLabel = "Go to the home screen";
+    var restSlug = "";      // the restaurant this path belongs to, "" for staff / unknown
+    var isGuest = false;
     (function () {
       var p = location.pathname || "";
+      var pinnedSlug = function () {
+        var t = "";
+        try { t = sessionStorage.getItem("lfh_tab_tenant") || ""; } catch (e) {}
+        t = t.toLowerCase();
+        return /^[a-z0-9-]+$/.test(t) ? t : "";
+      };
       var m = p.match(/^\/r\/([^/]+)\//);
-      if (m) { homeHref = "/r/" + m[1].toLowerCase() + "/menu"; homeLabel = "Go to the menu"; return; }
-      if (/^\/(menu|item)(\/|$)/.test(p)) { homeHref = "/menu"; homeLabel = "Go to the menu"; return; }
+      if (m) { restSlug = m[1].toLowerCase(); isGuest = true; homeHref = "/r/" + restSlug + "/menu"; homeLabel = "Go to the menu"; return; }
+      if (/^\/(menu|item)(\/|$)/.test(p)) { isGuest = true; homeHref = "/menu"; homeLabel = "Go to the menu"; return; }
       if (/^\/q\/[^/]+/.test(p)) {
-        var pinned = "";
-        try { pinned = sessionStorage.getItem("lfh_tab_tenant") || ""; } catch (e) {}
-        if (pinned) { homeHref = "/r/" + pinned.toLowerCase() + "/menu"; homeLabel = "Go to the menu"; }
-        else { homeHref = p; homeLabel = "Go to the menu"; }
+        isGuest = true; restSlug = pinnedSlug();
+        homeHref = restSlug ? "/r/" + restSlug + "/menu" : p;
+        homeLabel = "Go to the menu"; return;
+      }
+      if (/^\/view\/[^/]+/.test(p)) {
+        isGuest = true; restSlug = pinnedSlug();
+        if (!restSlug) {
+          // ?r= is whatever a stranger put in a link, so it is validated the same way
+          // app/view/[folder]/page.tsx validates it before trusting it.
+          var q = (location.search.match(/[?&]r=([^&]*)/) || [])[1] || "";
+          try { q = decodeURIComponent(q); } catch (e) { q = ""; }
+          q = q.toLowerCase();
+          if (/^[a-z0-9-]+$/.test(q)) restSlug = q;
+        }
+        homeHref = restSlug ? "/r/" + restSlug + "/menu" : "/menu";
+        homeLabel = "Go to the menu";
       }
     })();
     $("home").textContent = homeLabel;
     $("home").addEventListener("click", function () { location.href = homeHref; });
 
-    // A check that ONLY proves "we reached our own server". It must be a path the service
-    // worker leaves alone and that touches NO database: an unmatched /api/ path answers 404
-    // from the edge, and a 404 is a perfectly good yes — something answered us.
-    // Never use a cached path here: the worker would answer from this device and we would
-    // conclude the internet is fine while it is not.
+    // ONE BUTTON WHEN THERE IS ONLY ONE ACTION. On /q/<code> with nothing pinned we cannot send
+    // anyone anywhere else, so the way out reloads — exactly what "Try again" does. Two buttons,
+    // one action, and the second implies it goes somewhere. It stays in the DOM (this page's
+    // contract and every guard key on #home existing); it is just not shown.
+    if (homeHref === location.pathname) $("home").hidden = true;
+
+    // ── THE RESTAURANT'S OWN NAME, when this device has stored it ────────────────────────────
+    // Printed ONLY when the stored record is for the SAME slug this path resolved to, so
+    // restaurant A's name can never appear on restaurant B's screen. De-slugging was the obvious
+    // shortcut and it is wrong: "french-house" would print "French House" for a restaurant
+    // actually called "My Little French House". Staff screens get nothing.
+    (function () {
+      if (!isGuest) return;
+      var stored = null;
+      try { stored = JSON.parse(localStorage.getItem("lfh_brand") || "null"); } catch (e) { stored = null; }
+      if (!stored || typeof stored.name !== "string" || !stored.name.trim()) return;
+      if (String(stored.slug || "").toLowerCase() !== restSlug) return;
+      var el = $("brand");
+      el.textContent = stored.name.slice(0, 60);   // textContent: this page can never print markup
+      el.hidden = false;
+    })();
+
+    // ── the two probes ──────────────────────────────────────────────────────────────────────
+    // A check that ONLY proves "we reached our own server". It must be a path the service worker
+    // leaves alone and that touches NO database: an unmatched /api/ path answers 404 from the edge,
+    // and a 404 is a perfectly good yes — something answered us.
     var REACH = "/api/__offline-check";
     var HEALTH = "/api/health"; // app + database. Never cached (see the NEVER list in sw.js).
 
-    // Every check is time-boxed. Today's fault was a request that never came back at all —
-    // with no timeout this page waits for it forever and explains nothing.
+    // Every check is time-boxed. Today's fault was a request that never came back at all — with no
+    // timeout this page waits for it for ever and explains nothing.
+    // It also RETURNS THE ROUND TRIP, which is what feeds the meter without costing a thing.
     function ping(url, ms) {
       return new Promise(function (resolve) {
-        var done = false, ctl = null;
+        var done = false, ctl = null, t0 = Date.now();
         try { ctl = new AbortController(); } catch (e) { ctl = null; }
         var timer = setTimeout(function () {
           if (done) return; done = true;
           try { if (ctl) ctl.abort(); } catch (e) {}
-          resolve({ ok: false, status: 0, timedOut: true });
+          resolve({ ok: false, status: 0, timedOut: true, ms: Date.now() - t0 });
         }, ms);
         fetch(url + (url.indexOf("?") < 0 ? "?" : "&") + "t=" + Date.now(), {
           method: "GET", cache: "no-store", signal: ctl ? ctl.signal : undefined
         }).then(function (r) {
           if (done) return; done = true; clearTimeout(timer);
-          resolve({ ok: !!(r && r.ok), status: (r && r.status) || 0, timedOut: false });
+          resolve({ ok: !!(r && r.ok), status: (r && r.status) || 0, timedOut: false, ms: Date.now() - t0 });
         })["catch"](function () {
           if (done) return; done = true; clearTimeout(timer);
-          resolve({ ok: false, status: 0, timedOut: false });
+          resolve({ ok: false, status: 0, timedOut: false, ms: Date.now() - t0 });
         });
       });
     }
 
-    function say(kind, title, whyTitle, whyText) {
+    // The cause is ONE short line inside the state strip now, not a bold heading plus a paragraph
+    // in a box of its own. The rule it exists for is unchanged: never state a cause that has not
+    // been tested, and never blame the wrong side.
+    function say(kind, title, why) {
       $("dot").className = "dot" + (kind === "device" ? "" : " warn");
       $("title").textContent = title;
-      while ($("why").firstChild) $("why").removeChild($("why").firstChild);
-      var b = document.createElement("b"); b.textContent = whyTitle;
-      var s = document.createElement("span"); s.textContent = whyText;
-      $("why").appendChild(b); $("why").appendChild(s);
+      $("why").textContent = why;
       document.title = title + " — your work is safe";
     }
 
-    // WHY it failed, established by testing rather than by assumption.
+    // ══ THE METER ═══════════════════════════════════════════════════════════════════════════
+    //
+    // "whenever how much internet connection is coming, can be seen live … make sure it doesn't
+    // increase any kind of load on our backend egress" (owner, 2026-08-26).
+    //
+    // THAT CONSTRAINT IS THE DESIGN. It makes ZERO requests of its own. Two free sources only:
+    //
+    //   1. navigator.connection — the browser's OWN estimate of the link (effectiveType, downlink
+    //      in Mbps, rtt). It is already measured for us from traffic the device was making anyway,
+    //      and it fires a `change` event when it moves, so "live" costs one event listener and
+    //      nothing else. Not on iOS Safari, which is handled honestly below rather than faked.
+    //
+    //   2. The round trip of the probes THIS PAGE ALREADY MAKES on its retry timer. Those requests
+    //      happen whether or not anything is drawn, so timing them is free. This is the only source
+    //      that proves the link end-to-end, so it wins over the browser's estimate when it is fresh.
+    //
+    // What it must never do: invent bars. With nothing to go on it says so.
+    var meter = (function () {
+      var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
+      var lastProbe = null;   // { ms, ok, at } — the real end-to-end measurement
+      var TIERS = [
+        { n: 0, label: "No signal",  colour: "#ef4444", note: "nothing is getting through" },
+        { n: 1, label: "Very weak",  colour: "#ef4444", note: "barely enough to load a page" },
+        { n: 2, label: "Weak",       colour: "#f59e0b", note: "slow, but it may get through" },
+        { n: 3, label: "Patchy",     colour: "#f59e0b", note: "coming and going" },
+        { n: 4, label: "Okay",       colour: "#22c55e", note: "should be enough" },
+        { n: 5, label: "Good",       colour: "#22c55e", note: "the connection looks fine" }
+      ];
+
+      function fromProbe(p) {
+        // A real round trip is the best evidence there is. Timed out or refused = nothing through.
+        if (!p) return null;
+        if (!p.status) return 0;
+        if (p.ms < 150) return 5;
+        if (p.ms < 400) return 4;
+        if (p.ms < 900) return 3;
+        if (p.ms < 2000) return 2;
+        return 1;
+      }
+      function fromBrowser() {
+        if (navigator.onLine === false) return 0;
+        if (!conn) return null;
+        var et = conn.effectiveType, dl = conn.downlink;
+        if (et === "slow-2g") return 1;
+        if (et === "2g") return 2;
+        if (et === "3g") return 3;
+        if (et === "4g") return typeof dl === "number" && dl >= 5 ? 5 : 4;
+        if (typeof dl === "number") return dl >= 5 ? 5 : dl >= 1.5 ? 4 : dl >= 0.4 ? 3 : 2;
+        return null;
+      }
+
+      function paint() {
+        var probeFresh = lastProbe && (Date.now() - lastProbe.at) < 30000;
+        var n = probeFresh ? fromProbe(lastProbe) : null;
+        var src = "measured just now";
+        if (n === null) { n = fromBrowser(); src = conn ? "as your phone reports it" : ""; }
+        var bars = $("bars"), label = $("m-label"), num = $("m-num");
+
+        if (n === null) {
+          // Nothing knowable — say that, rather than draw a number we do not have.
+          bars.style.color = "#94a3b8"; bars.className = "bars-hero none";
+          for (var j = 0; j < bars.children.length; j++) bars.children[j].className = "";
+          label.textContent = navigator.onLine === false ? "No signal" : "Signal unknown";
+          label.style.color = "#94a3b8";
+          // NEVER INVENT BARS: a browser with no Network Information API (every iPhone) is told so
+          // rather than shown a strength we do not have.
+          num.textContent = navigator.onLine === false ? "" : "this phone doesn't report signal strength";
+          num.style.color = "#8fa1bf";
+          return;
+        }
+        var t = TIERS[Math.max(0, Math.min(5, n))];
+        bars.style.color = t.colour;
+        bars.className = "bars-hero" + (t.n === 0 ? " none" : "");
+        for (var i = 0; i < bars.children.length; i++) bars.children[i].className = i < t.n ? "on" : "";
+        label.textContent = t.label;
+        label.style.color = t.colour;
+        // The millisecond figure only when it was really measured — never from an estimate.
+        num.textContent = probeFresh && lastProbe.status ? lastProbe.ms + " ms" : "";
+        num.style.color = t.colour;
+      }
+
+      // "Live" for free: the browser tells us when the link changes. No polling, no requests.
+      if (conn && conn.addEventListener) { try { conn.addEventListener("change", paint); } catch (e) {} }
+      window.addEventListener("online", paint);
+      window.addEventListener("offline", paint);
+      paint();
+
+      return {
+        // Called by diagnose() with the probe it ALREADY made. No extra request anywhere.
+        sawProbe: function (p) { lastProbe = { ms: p.ms, status: p.status, at: Date.now() }; paint(); },
+        repaint: paint
+      };
+    })();
+
+    // ── WHY it failed, established by testing rather than by assumption ─────────────────────
     function diagnose() {
       if (navigator.onLine === false) {
+        meter.repaint();
         say("device", "No internet right now",
-          "This device is offline.",
-          "It isn't connected to Wi-Fi or mobile data. Reconnect and this screen will open itself.");
+          "Not connected to Wi-Fi or mobile data. Reconnect and this screen opens itself.");
         return Promise.resolve(false);
       }
       return ping(REACH, 6000).then(function (reach) {
-        // Any answer at all means status > 0. Nothing at all means we never got off this
-        // device, or the whole site is unreachable — both are described the same honest way.
+        meter.sawProbe(reach);          // free: this request was happening anyway
+        // Any answer at all means status > 0. Nothing at all means we never got off this device, or
+        // the whole site is unreachable — both are described the same honest way.
         if (!reach.status) {
           say("device", "No internet right now",
-            "This device can't reach the internet.",
-            "Wi-Fi can say it's connected and still have no internet (a common hotel or cafe network). " +
-            "Check the connection — this screen will open itself the moment it's back.");
+            "Wi-Fi can look connected and still have none. This screen opens itself the moment it's back.");
           return false;
         }
         // We DID reach our server, so the internet is not the problem. Say so plainly.
         return ping(HEALTH, 9000).then(function (health) {
           if (health.ok) return true; // everything is back
           say("app", "The app isn't answering yet",
-            "Your internet is fine — this one is on us.",
             health.timedOut
-              ? "The app's server was reached but its database isn't responding, so screens that need data can't load yet. It usually comes back on its own, and anything already saved on this device is safe."
-              : "The app's server answered with an error (" + (health.status || "no status") +
-                "), so screens that need data can't load yet. It usually comes back on its own, and anything already saved on this device is safe.");
+              ? "Your internet is fine — this one is on us. It usually comes back on its own."
+              : "Your internet is fine — this one is on us (error " + (health.status || "?") + "). It usually comes back on its own.");
           return false;
         });
       });
     }
 
-    // Re-check by hand, automatically when the device says it's back, and on a backing-off
-    // timer. navigator.onLine is TRUE on a cafe Wi-Fi with no internet, so reloading just
-    // because it says "online" looped this page forever: PROVE there's a real connection
-    // first, and back off so a bad network isn't hammered.
+    // ── the retry loop ──────────────────────────────────────────────────────────────────────
+    // Re-check by hand, automatically when the device says it's back, and on a backing-off timer.
+    // navigator.onLine is TRUE on a cafe Wi-Fi with no internet, so reloading just because it says
+    // "online" looped this page for ever: PROVE there's a real connection first, and back off so a
+    // bad network isn't hammered.
     //
     // ONE RETRY LOOP, HOWEVER MANY TIMES THE DEVICE SAYS IT IS BACK.
     // `retryTimer` is not tidiness — it is the whole point. A phone on the edge of coverage fires
     // `online` over and over, and every one of those events that landed while no check happened to
     // be running scheduled ANOTHER timer, with no handle kept anywhere, so nothing could ever
-    // cancel it. The chains only died by colliding with each other. Measured with the real page on
-    // a local stub (scripts/verify-offline-retry.mjs): ten "back online" events left 47 retry gaps
-    // scheduled and produced 59 probes where one loop makes a handful. That is the exact opposite
-    // of what the doubling and the jitter below exist for — the page hammered a struggling server
-    // HARDER the worse the line flapped, and every device in the restaurant is on this page at the
-    // same moment. One handle, cleared before each schedule, keeps it to one loop.
+    // cancel it. Measured with the real page on a local stub: ten "back online" events left 47
+    // retry gaps scheduled and produced 59 probes where one loop makes a handful. One handle,
+    // cleared before each schedule, keeps it to one loop.
     var wait = 5000, checking = false, retryTimer = null;
     function cycle(fast) {
       if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
@@ -229,17 +430,16 @@
         checking = false;
         if (back) {
           $("hint").textContent = "Back online — reloading...";
+          if (window.LFH_GAME) window.LFH_GAME.stop("Back online");
           location.reload();
           return;
         }
         if (fast) wait = 5000;
         $("hint").textContent = "Checking again in " + Math.round(wait / 1000) + "s...";
-        // ±25% JITTER, like every other retry in the app. The doubling below already bounds the
-        // rate, but a bare doubling is still a LOCKSTEP: when the server (not the internet) is
-        // what is down, every device in the restaurant lands on this page within a second of the
-        // others and then checks in unison at 5s, 10s, 20s… — synchronised waves at exactly the
-        // moment the thing needs a quiet gap. Each device now rolls its own delay, so the same
-        // number of checks arrive spread out instead of pulsing.
+        // ±25% JITTER, like every other retry in the app. A bare doubling is a LOCKSTEP: when the
+        // SERVER is what is down, every device in the restaurant lands on this page within a second
+        // of the others and then checks in unison at 5s, 10s, 20s — synchronised waves at exactly
+        // the moment the thing needs a quiet gap. Each device now rolls its own delay.
         var jittered = Math.round(wait * (0.75 + Math.random() * 0.5));
         retryTimer = setTimeout(function () {
           retryTimer = null;
@@ -247,13 +447,115 @@
           cycle(false);
         }, jittered);
       };
-      // The catch is not decoration: if a check ever threw, `checking` would stay true and
-      // this page would never look again — a screen that recovers from nothing, which is the
-      // whole class of bug being fixed here.
+      // The catch is not decoration: if a check ever threw, `checking` would stay true and this
+      // page would never look again — a screen that recovers from nothing, which is the whole class
+      // of bug being fixed here.
       diagnose().then(next)["catch"](function () { next(false); });
     }
     window.addEventListener("online", function () { cycle(true); });
     cycle(true);
+
+    // ══ THE GAME (design 8) ═════════════════════════════════════════════════════════════════
+    //
+    // Catch the plates on a tray. The rules that make it belong on THIS screen rather than being a
+    // toy bolted on:
+    //   · the verdict, the meter and both buttons are ABOVE it — it is never the whole screen
+    //   · it stops dead the moment the connection is proven back, and says so
+    //   · it is paused entirely while the tab is hidden: a phone with no signal is often a phone
+    //     with a low battery, and there is nobody looking anyway
+    //   · nobody has to notice it. Both buttons work whether it is played or not
+    //   · it makes no requests, so it costs the restaurant nothing
+    window.LFH_GAME = (function () {
+      var cv = $("cv"); if (!cv || !cv.getContext) return { stop: function () {} };
+      var ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+      var ov = $("gov"), scoreEl = $("score"), livesEl = $("lives");
+      var tray = { x: W / 2, w: 118 };
+      var plates = [], score = 0, lives = 3, started = false, over = false, stopped = false;
+      var raf = null, last = 0, spawnAt = 0, speed = 0.14;
+
+      var toX = function (clientX) { var r = cv.getBoundingClientRect(); return ((clientX - r.left) / r.width) * W; };
+      var move = function (x) { tray.x = Math.max(tray.w / 2, Math.min(W - tray.w / 2, x)); if (!started && !stopped) begin(); };
+      cv.addEventListener("pointerdown", function (e) { try { cv.setPointerCapture(e.pointerId); } catch (err) {} move(toX(e.clientX)); });
+      cv.addEventListener("pointermove", function (e) { if (e.buttons || e.pointerType === "touch") move(toX(e.clientX)); });
+      cv.addEventListener("pointerup", function () { if (over && !stopped) { reset(); begin(); } });
+      window.addEventListener("keydown", function (e) {
+        if (stopped) return;
+        if (e.key === "ArrowLeft") { move(tray.x - 42); e.preventDefault(); }
+        if (e.key === "ArrowRight") { move(tray.x + 42); e.preventDefault(); }
+      });
+
+      function begin() { started = true; ov.hidden = true; spawnAt = performance.now() + 400; }
+      function reset() { plates = []; score = 0; lives = 3; over = false; speed = 0.14;
+                         scoreEl.textContent = "0"; livesEl.innerHTML = "&hearts;&hearts;&hearts;"; }
+
+      function spawn(now) {
+        plates.push({ x: 40 + Math.random() * (W - 80), y: -26, vy: speed + Math.random() * 0.04,
+                      r: 23, a: 0, spin: (Math.random() - 0.5) * 0.055 });
+        // It gets harder slowly and it CAPS. This is a distraction, not a challenge.
+        speed = Math.min(0.38, speed + 0.007);
+        spawnAt = now + Math.max(430, 1150 - score * 20);
+      }
+
+      function paint() {
+        ctx.clearRect(0, 0, W, H);
+        var g = ctx.createLinearGradient(0, 0, 0, H);
+        g.addColorStop(0, "rgba(56,189,248,.10)"); g.addColorStop(1, "transparent");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+        for (var i = 0; i < plates.length; i++) {
+          var p = plates[i];
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a);
+          ctx.fillStyle = "#f4f7ff"; ctx.strokeStyle = "#c9d4e8"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.33, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = "#e3eaf8";
+          ctx.beginPath(); ctx.ellipse(0, 0, p.r * 0.5, p.r * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
+        var y = H - 40;
+        ctx.fillStyle = "#8b98ae"; ctx.beginPath(); ctx.roundRect(tray.x - tray.w / 2, y, tray.w, 13, 6); ctx.fill();
+        ctx.fillStyle = "#c3cede"; ctx.beginPath(); ctx.roundRect(tray.x - tray.w / 2, y - 5, tray.w, 9, 5); ctx.fill();
+        ctx.fillStyle = "#e9b98f";
+        ctx.beginPath(); ctx.roundRect(tray.x - 24, y + 13, 11, 20, 5); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(tray.x + 13, y + 13, 11, 20, 5); ctx.fill();
+        if (over || stopped) {
+          ctx.fillStyle = "rgba(7,11,20,.82)"; ctx.fillRect(0, 0, W, H);
+          ctx.textAlign = "center";
+          ctx.fillStyle = stopped ? "#86efac" : "#eef2fb";
+          ctx.font = "800 26px system-ui,sans-serif";
+          ctx.fillText(stopped ? stoppedMsg : "Caught " + score, W / 2, H / 2 - 2);
+          ctx.font = "600 15px system-ui,sans-serif"; ctx.fillStyle = "#9fb0cd";
+          ctx.fillText(stopped ? "reloading…" : "Tap to play again", W / 2, H / 2 + 24);
+        }
+      }
+
+      var stoppedMsg = "Back online";
+      function step(now) {
+        raf = null;
+        if (document.hidden || stopped) return;   // paused: nobody is looking
+        var dt = Math.min(48, now - (last || now)); last = now;
+        if (started && !over) {
+          if (now >= spawnAt) spawn(now);
+          for (var i = plates.length - 1; i >= 0; i--) {
+            var p = plates[i]; p.y += p.vy * dt; p.a += p.spin;
+            var ty = H - 40;
+            if (p.y > ty - 10 && p.y < ty + 22 && Math.abs(p.x - tray.x) < tray.w / 2 + p.r * 0.5) {
+              plates.splice(i, 1); score++; scoreEl.textContent = String(score);
+            } else if (p.y - p.r > H) {
+              plates.splice(i, 1); lives--;
+              livesEl.innerHTML = lives > 0 ? new Array(lives + 1).join("&hearts;") : "&mdash;";
+              if (lives <= 0) over = true;
+            }
+          }
+        }
+        paint(); schedule();
+      }
+      function schedule() { if (!raf && !document.hidden && !stopped) raf = requestAnimationFrame(step); }
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) { if (raf) cancelAnimationFrame(raf); raf = null; } else { last = 0; schedule(); }
+      });
+      paint(); schedule();
+      return { stop: function (msg) { stopped = true; stoppedMsg = msg || "Back online";
+                                      if (raf) cancelAnimationFrame(raf); raf = null; paint(); } };
+    })();
   </script>
 </body>
 </html>

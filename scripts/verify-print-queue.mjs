@@ -32,6 +32,11 @@ const QUIET = process.argv.includes("--quiet");
 let failed = 0;
 const pass = (m) => { if (!QUIET) console.log("  ok   " + m); };
 const fail = (m) => { console.log("  FAIL " + m); failed++; };
+// JUDGE THE CODE, NOT THE NOTE ABOUT IT. Every "this is gone" check below would otherwise match
+// the obituary comment explaining WHY it is gone — which is exactly how this file went red the
+// minute the backup printer was removed. Same stripper verify-print-helper.mjs uses.
+const codeOnly = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "");
+
 const check = (cond, good, bad) => (cond ? pass(good) : fail(bad));
 
 console.log("\nprint queue — a ticket is a row, and any screen can be the printer");
@@ -39,8 +44,16 @@ console.log("\nprint queue — a ticket is a row, and any screen can be the prin
 const mig = read("supabase/migrations/335_a_kitchen_ticket_queues_itself.sql");
 const kroute = read("app/api/kitchen/[...path]/route.ts");
 const eroute = read("app/api/editor/[...path]/route.ts");
-const kpanel = read("public/panels/kitchen/app.js");
-const epanel = read("public/panels/editor/app.js");
+const kpanel = codeOnly(read("public/panels/kitchen/app.js"));
+// ⚠️ THE PANEL SOURCES ARE READ COMMENT-STRIPPED, AND THAT IS THE POINT (2026-08-31).
+// Two checks in this file were passing on their own obituaries. They required `data-printhere-set`,
+// `printStationStripHtml` and `data-kstation` — a per-device question, a band across the floor and
+// a take-over button, all three deliberately retired. The code went; the comments EXPLAINING that it
+// went stayed; the regexes went on matching, and the file reported three protections that no longer
+// existed. A guard that reads comments is testing the story, not the program.
+// So: judge these two files by their code. If a check ever genuinely needs to assert that a comment
+// is present (an obituary that must not be dropped), read the raw file explicitly and say why.
+const epanel = codeOnly(read("public/panels/editor/app.js"));
 const rt = read("public/panels/realtime.js");
 const lib = read("lib/printQueue.ts");
 
@@ -76,9 +89,12 @@ for (const [name, src] of [["kitchen", kroute], ["editor", eroute]]) {
 check(/\.or\(liveFilter\(\)\)[\s\S]*\.or\(liveFilter\(\)\)/s.test(lib),
   "what is OFFERED and what can be WON use the same live filter, so they cannot drift",
   "lib/printQueue no longer shares one filter between the read and the claim");
-check(/minAgeMs/.test(lib) && /claimKotJobs[\s\S]{0,600}minAgeMs/.test(lib),
-  "the backup-printer window is enforced at the CLAIM, server-side (a stale tab can't jump the kitchen's queue)",
-  "claimKotJobs no longer enforces minAgeMs — 'backup only' would be a client-side promise");
+// The backup-printer WINDOW is retired with the backup printer. `minAgeMs` survives in the queue as
+// a parameter nothing passes a value to any more; what matters is that no caller can hand a screen
+// somebody else's ticket after a wait, because there is no "somebody else's ticket" to wait for.
+check(!/t\.backup \? BACKUP_PRINTER_MS/.test(codeOnly(eroute)),
+  "no screen waits for a window and then takes another room's ticket",
+  "the backup-printer window is back: a ticket appearing in a second room is what he asked to be removed");
 
 // ── 2b. a ticket nobody can cook LEAVES the queue (both found on 2026-08-18) ────────────────────
 check(/the order was deleted before this ticket printed/.test(lib),
@@ -87,9 +103,14 @@ check(/the order was deleted before this ticket printed/.test(lib),
 check(/the order was cancelled before this ticket printed/.test(lib) && /=== "cancelled"/.test(lib),
   "a job whose order was CANCELLED is retired too — the kitchen never cooks a cancelled ticket",
   "a cancelled order's ticket can reach the printer again; an order cancelled seconds after it queued would be cooked");
-check(/kitchenMayAuto/.test(kroute) && /kot_print_target/.test(kroute),
-  "the KITCHEN route honours who-prints as well, so 'counter' does not print in both rooms",
-  "the kitchen route ignores kot_print_target — with the counter chosen, a kitchen screen left open prints the same ticket in the other room (measured)");
+// The rule is unchanged; where the answer comes from is not. Since mig 369 the kitchen room is
+// decided by the Kitchen slips ROUTE through screenMayPrint — not by mig 336's coarse column, which
+// could contradict it (the sweep caught the older one winning). So the check asserts the ROUTE is
+// consulted, and that the retired column is NOT.
+check(/kitchenMayAuto/.test(kroute) && /screenMayPrint\(/.test(kroute)
+  && !/kot_print_target/.test(kroute.replace(/^\s*\/\/[^\n]*$/gm, "")),
+  "the KITCHEN room is decided by the Kitchen slips route, so 'the counter prints' does not print in both rooms",
+  "the kitchen route ignores the route, or reads the retired kot_print_target again — with the counter chosen, a kitchen screen left open prints the same ticket in the other room (measured)");
 check(/reprint/.test(kroute) && /A MANUAL REPRINT IS DIFFERENT/.test(kroute),
   "…while a MANUAL reprint still always reaches the kitchen printer",
   "the kitchen's manual reprint is now routed by the automatic setting — the manager pressing 'Reprint in kitchen' is naming that printer on purpose");
@@ -139,42 +160,139 @@ check(/keepAlive: \(\) => !!state\.autoPrintKot/.test(kpanel),
 const mig336 = read("supabase/migrations/336_which_screen_prints_the_ticket.sql");
 const admin = read("components/admin/RestaurantSettings.tsx");
 const adminRoute = read("app/api/admin/restaurants/settings/route.ts");
+// ── kot_print_target IS RETIRED (mig 369) ─────────────────────────────────────────────────────
+// It asked the same question as the Kitchen slips line, in older and vaguer words, and the two could
+// contradict each other. Its three answers live in the route now:
+//   kitchen → a screen route on the kitchen panel
+//   counter → a screen route on the manager panel
+//   both    → a screen route on the kitchen panel WITH backupPanel = manager
+// The column stays (schema changes here are additive, one folder feeds two databases) but nothing
+// may read or write it. These three checks are what stop it creeping back.
+const mig369 = read("supabase/migrations/369_the_old_coarse_print_target_becomes_a_route.sql");
 check(/kot_print_target/.test(mig336) && /'kitchen', 'counter', 'both'/.test(mig336),
-  "mig 336 defines who may print (kitchen | counter | both) with a CHECK constraint",
-  "mig 336 no longer constrains kot_print_target — a typo could take a restaurant's printing away");
-check(/kot_print_target/.test(admin) && /Which screen prints the ticket/.test(admin),
-  "the choice lives in the ADMIN console's KOT printing card",
-  "the 'which screen prints' choice has left the admin console — and it cannot go in the manager panel: that Settings section is hidden from EVERYONE there (owner, 2026-07-31)");
-check(/"kot_print_target",/.test(admin),
-  "…and the key is in the admin form's saved-keys list (a missing key looks editable and saves nothing)",
-  "kot_print_target is missing from SETTINGS_KEYS — the control would silently save nothing");
-check(/"kot_print_target",/.test(adminRoute) && /\["kitchen", "counter", "both"\]\.includes/.test(adminRoute),
-  "the admin route accepts only the three answers the queue understands",
-  "the admin settings route no longer sanitises kot_print_target");
+  "mig 336 is untouched — the column and its CHECK constraint stay where they were",
+  "mig 336 was edited. A migration that has run everywhere is history: retire a column in a NEW file, never by rewriting the old one");
+check(/backupPanel/.test(mig369) && /lfh_already_applied/.test(mig369),
+  "mig 369 carried every restaurant's old value into the Kitchen slips line, once",
+  "mig 369 lost the carry-across or its idempotency marker. Two of the dev restaurants were on 'both' with no route — deleting the setting without moving its meaning silently changes how they print");
+{
+  const readers = [
+    ["the kitchen route", kroute],
+    ["the manager route", read("app/api/editor/[...path]/route.ts")],
+    ["the admin printing API", read("app/api/admin/printing/[...path]/route.ts")],
+    ["the admin settings form", admin],
+    ["the admin settings write route", adminRoute],
+    ["the owner settings route", read("app/api/owner/settings/route.ts")],
+    ["the Printing board", read("app/aevinite/printing/page.tsx")],
+  ];
+  const strip = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/[^\n]*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const guilty = readers.filter(([, t]) => /kot_print_target/.test(strip(t))).map(([n]) => n);
+  check(guilty.length === 0,
+    "…and no code reads or writes it any more — the route is the only answer",
+    `${guilty.join(", ")} still touches kot_print_target. Two settings for one question is what made the manager screen refuse the owner's own choice in August; derive it from the Kitchen slips route instead.`);
+}
+// ── THERE IS NO BACKUP SCREEN, AND THAT IS THE RULE NOW (owner, 2026-08-30) ─────────────────
+// This used to REQUIRE backupPanel: "the kitchen prints, the counter picks up what it leaves" was
+// where the retired kot_print_target='both' went (mig 369), and losing it was described here as two
+// restaurants losing their safety net.
+//
+// He removed the idea outright: *"what is this backup printer and all that — we don't even need the
+// backup printer. If there is a backup printer, remove it. If anything fails it should show me or
+// the person: manager, owner, everyone should get a notification that this has failed, and if you
+// want to reprint it."*
+//
+// It was never much of a safety net. Two waits for one idea (60s for a backup PRINTER, 30s for a
+// backup SCREEN, neither screen mentioning the other), and what it bought was paper appearing in a
+// room nobody is standing in while the restaurant never learns its printer is broken. The
+// replacement is not a shorter wait: it is TELLING SOMEBODY.
+const pq = read("lib/printQueue.ts");
+// ⚠️ IT ASKED ONE FILE, AND THE DELETION SPANNED SEVEN (2026-08-31). This named lib/printHelpers.ts
+// only — where the fields were DEFINED — so it went green while app/api/editor still accepted
+// `backupAgent`/`backupPrinter` off a request body and stamped them onto every route it saved, and
+// app/api/owner/settings still had a `k.backupPanel ? "both"` branch that could never be true.
+// A field that can still be WRITTEN is not a deleted field. The whole tree is asked now, so the
+// next deletion cannot hide in the file nobody named.
+const BACKUP_SRC = [
+  "lib/printHelpers.ts", "lib/printQueue.ts", "lib/printDocs.ts",
+  "app/api/editor/[...path]/route.ts", "app/api/kitchen/[...path]/route.ts",
+  "app/api/admin/printing/[...path]/route.ts", "app/api/print-agent/[...path]/route.ts",
+  "app/api/owner/settings/route.ts", "app/aevinite/printing/page.tsx",
+  "app/owner/settings/page.tsx", "public/panels/editor/app.js", "public/panels/kitchen/app.js",
+];
+const backupHits = BACKUP_SRC.filter((f) => /backupPanel|backupPrinter|backupAgent|backupAfterMs/.test(codeOnly(read(f))));
+check(backupHits.length === 0,
+  `no backup screen or printer survives anywhere in the printing path (${BACKUP_SRC.length} files asked)`,
+  "backupPanel is back in the route model: a second room quietly taking the ticket is what he asked to be rid of");
+check(/parked/.test(pq) && /printer_events/.test(pq) && /auto_fail/.test(pq) && /sendOwnerAlert/.test(pq),
+  "…and a ticket that gives up FILES a printer problem and pings the owner, so the failure is seen",
+  "a parked ticket tells nobody: without the backup printer, a silent failure is a kitchen that never gets its slip and never finds out");
+// The old check here asserted that the admin settings route SANITISED kot_print_target to one of
+// three values. There is nothing left to sanitise: the key is off the write allow-list (mig 369), so
+// the rule to assert is that it cannot be written at all. The screen-route validator does the
+// equivalent job now — writeRoutes refuses a panel that is not one of the four, and refuses a backup
+// screen that is the same screen.
+check(/isRoutePanel\(panel\)/.test(read("lib/printHelpers.ts")),
+  "…and the route validator still accepts only real panels",
+  "writeRoutes stopped checking the panel names — a route naming a panel that does not exist would print nowhere while looking set");
 check(/async function counterPrintTarget/.test(eroute) && (eroute.match(/counterPrintTarget\(rid\)/g) || []).length >= 2,
   "the editor route re-asks WHO may print at the claim as well as at the read (never trusts the panel)",
   "the counter-print gate is asked once or not at all — a screen left open from before the setting changed would keep claiming tickets");
-check(/BACKUP_PRINTER_MS = 30000/.test(eroute),
-  "'the counter is the backup' means 30 seconds, in one named place",
-  "the backup window is no longer a named constant in the editor route");
-check(/data-printhere-set/.test(epanel) && /printStationStripHtml/.test(epanel),
-  "the manager panel ASKS the device once, on the floor screen (a phone must never claim a ticket)",
-  "the per-device question is gone — the manager panel is opened on phones, and a phone that claims a ticket loses it");
+// The 30-second constant is retired with the thing it timed. It was one of the TWO numbers for one
+// idea the owner objected to (30 for a backup screen, 60 for a backup printer, neither screen
+// mentioning the other) — and the answer to "should they be the same number?" turned out to be
+// "there should be no number, because there is no backup".
+check(!/BACKUP_PRINTER_MS/.test(codeOnly(eroute)),
+  "…and no backup window is timed anywhere, because nothing is waiting its turn",
+  "a backup window is back in the editor route");
+// ⚠️ THIS CHECK WAS PASSING ON ITS OWN OBITUARY (2026-08-31). It required the literal strings
+// `data-printhere-set` and `printStationStripHtml` — the per-device "should this screen print?"
+// question and the band that carried it. Both were retired: the question was a second answer to
+// something the admin had already decided, and the band came off the floor. But it read `epanel`
+// RAW, so once the code was gone it went on matching the COMMENTS describing their removal, and
+// reported a protection that no longer existed. Comment-stripped now, and pointed at the rule.
+//
+// THE RULE, which never changed: a phone must never claim the printing job. The mechanism did —
+// the admin names a PERSON, and that person may well open their phone — so what is asserted is the
+// live gate: no auto-claim unless the pointer is fine (a real computer), and no per-device question.
+check(!/data-printhere-set/.test(epanel),
+  "…and the retired per-device question has not come back as a second way to answer it",
+  "the per-device print question is back — the admin's choice and the browser's now disagree");
 // ASSERT THE RULE, NOT THE WORDING (this file's own header). This used to require the literal
 // `if (ans === "off") return;` as the FIRST thing managerPrintPass did. That line legitimately
 // changed shape in mig 341: a device that has said "never print here" must still be able to SAY
 // where the paper comes out when a helper program owns it, so it now asks the server ONCE for the
 // display and still prints nothing. The rule that matters is unchanged and is what is checked:
 // nothing is printed unless this device answered YES.
-check(/ans !== "on"\) return;/.test(epanel) && !/claimJobs|printKot\(/.test(epanel.split(/ans !== "on"\) return;/)[0].split("async function managerPrintPass")[1] || ""),
-  "a device that has not answered YES never prints (the honest default is no)",
-  "the manager panel prints without the device having agreed to be the printer");
+// ── THE RULE SURVIVED ITS MECHANISM (2026-08-29) ─────────────────────────────────────────────
+// This used to require the literal `ans !== "on") return;` — the per-device question every screen
+// asked itself. The owner abolished that question: the admin names ONE person on the Printing board
+// and no screen re-opens the decision ("remove old logic, keep only one logic").
+//
+// But the DANGER it guarded is untouched, and it is his own words on the "May be the printer" row:
+// a phone that takes a ticket puts it in a dialog nobody looks at, and the kitchen never gets the
+// paper. So the rule is asserted against the new mechanism instead of the old spelling: a coarse
+// pointer — a touch screen with no mouse — never claims the printer.
+check(/pointer: coarse/.test(epanel) && /looksLikeAComputer/.test(epanel),
+  "a phone never claims the printer (a coarse pointer does not auto-claim)",
+  "the manager panel will auto-claim printing on a touch device — a phone that takes a ticket drops it into a dialog nobody looks at while the kitchen waits");
 check(/helper: \(r && r\.helper\) \|\| null/.test(epanel) && /helperKey/.test(epanel),
   "…and it carries the helper's answer, so a screen can say which computer prints instead",
   "the panel dropped the helper field again — every line about it goes invisible while the server is right (mig 341)");
-check(/\$\{printerStripHtml\(\)\}\$\{printStationStripHtml\(\)\}/.test(epanel),
-  "the strip is rendered on the floor, right beside the printer-problem strip",
-  "the print-station strip is not rendered on the floor — the question would never be asked, so a counter screen could never be switched on");
+// ── THE FLOOR IS FOR TABLES (owner, 2026-08-30) ──────────────────────────────────────────────
+// This used to REQUIRE both printing strips across the top of the floor, and its failure message
+// still argued from a model retired two changes earlier ("the question would never be asked") —
+// there is no question any more: the admin names one person on the Printing board.
+//
+// He then looked at what was left and said: *"I don't want it there — it should be in the
+// notification thing that we have built… why is it taking the space of the table boxes."* So the
+// rule is inverted: nothing about printing is painted across the table grid, and printing reaches
+// people through the bell, which is where a notification belongs.
+check(!/\$\{printStationStripHtml\(\)\}|\$\{printerStripHtml\(\)\}/.test(codeOnly(epanel)),
+  "no printing band is painted across the floor — the table grid keeps its space",
+  "a printing strip is back above the tables: that is the space he asked for back, twice");
+check(/kind: "printer"/.test(codeOnly(epanel)) && /printer-problem:/.test(codeOnly(epanel)),
+  "…and printing speaks through the notification bell instead, problems first",
+  "printing was taken off the floor and not put anywhere — a printer problem would now be invisible");
 
 // ── 7. the setup guide is IN the app, and reachable from a screen that is not hidden ────────────
 const guide = read("public/print-setup.html");
@@ -207,10 +325,35 @@ const ownerSettings = read("app/owner/settings/page.tsx");
 // The manager panel reaches it through a NAMED CONSTANT, so assert the constant's value and its use
 // rather than the literal — asserting the spelling of code that legitimately changed shape is how
 // this repo's guards have gone red twice (see verify-static's header).
-const managerReaches = /PRINT_SETUP_URL = "\/print-setup\.html"/.test(epanel) && /href="\$\{PRINT_SETUP_URL\}"/.test(epanel);
-check(/print-setup\.html/.test(admin) && /print-setup\.html/.test(kpanel) && managerReaches && /print-setup\.html/.test(ownerSettings),
-  "it is reachable from ALL FOUR: admin console · kitchen 🖨 sheet · manager Settings → Printing · owner Settings",
-  "the guide has lost one of its four doors (owner, 2026-08-18: it must be visible in the kitchen panel, the manager settings AND the owner panel) — the first attempt put it in the manager panel's hidden Kitchen section, which is how being reachable stopped being obvious");
+// ── THE FOUR DOORS ARE DOWN TO ONE, AND THAT IS THE POINT NOW ────────────────────────────────
+// This used to demand the guide be reachable from all four — admin console, kitchen 🖨 sheet,
+// manager Settings, owner Settings — from 2026-08-18: "it should be shown in kitchen panel… manager
+// also and owner."
+//
+// He reversed it on 2026-08-29, having watched a restaurant use it: *"inside the kitchen panel there
+// is how to print, and in the manager and the owner inside the setting how to print a whole setup
+// guide, which was from previous — so remove that completely."* Setting a printer up is the ADMIN's
+// job on the Printing screen; three more copies of "how to print" sat in panels that can no longer
+// perform that setup, saying it in different words from the board that can. That is the same
+// two-things-for-one-job fault as the retired print-here banner, and the standing rule now in
+// CLAUDE.md ("a new way replaces the old one") says the old copies go.
+//
+// So the rule is INVERTED, not deleted: the guide lives where the setup lives, and nowhere else.
+check(/print-setup\.html/.test(admin),
+  "the guide is reachable from the admin console, where the printer is actually set up",
+  "the setup guide has no door at all — the admin console is the one place that must always reach it");
+// ⚠️ INVERTED AGAIN, AND THE REASON THE OLD RULE EXISTED HAS GENUINELY EXPIRED.
+// Previously (owner, 2026-08-29): *"inside the kitchen screen also kitchen panel also there is how to
+// print… remove that completely"* — correct then. A cook's screen could not BE the printer (the admin
+// named one person on the Printing board), so a link telling a cook how to set a printer up was an
+// instruction to do something the screen would refuse.
+// LATEST (owner, 2026-08-31): *"kitchen panel will always be on and there will be guide for it."*
+// The kitchen screen is now the DEFAULT printer for kitchen slips — nobody named, nothing switched on
+// (lib/printHelpers → resolveTarget). The guide is no longer impossible advice; it is the
+// instructions for the machine the sheet is standing on.
+check(/print-setup\.html/.test(kpanel),
+  "the kitchen panel reaches the setup guide, because that screen is now the default printer",
+  "the kitchen sheet has no way to reach the print-station file, on the one screen that prints by default");
 check(/id: "printing"/.test(epanel) && /function formPrinting/.test(epanel),
   "the manager panel has its own VISIBLE Printing section (the admin-only Kitchen one stays hidden)",
   "the manager panel's Printing section is gone — the printing status and the device answer would be unreachable there again");
@@ -269,9 +412,18 @@ check(/export async function mayClaim/.test(lib) && (kroute.match(/mayClaim\(/g)
 check(/print-station" && b === "take"/.test(kroute) && /print-station" && b === "take"/.test(eroute),
   "both the kitchen and the counter screen can TAKE printing in one tap",
   "a panel lost its take-over endpoint, so a person standing at the right printer cannot move printing to it");
-check(/data-station-set/.test(epanel) && /data-kstation/.test(kpanel),
-  "…and both panels offer that tap on screen",
-  "the take-over button is missing from a panel");
+// INVERTED, NOT SATISFIED (2026-08-31). This required a take-over button on BOTH panels
+// (`data-station-set`, `data-kstation`). Both were removed on purpose: a button that says "print
+// here instead" is a second answer to a question the admin has already answered on the Printing
+// board, and when the two disagreed the paper came out wherever the last tap was. Moving printing
+// is now ONE act — naming a person — and the panels obey it. The check had been passing on the
+// comments that recorded the removal, which is why nobody noticed the rule had been reversed.
+check(!/data-station-set/.test(epanel) && !/data-kstation/.test(kpanel),
+  "neither panel offers a competing take-over tap — printing moves in ONE place",
+  "a take-over button is back on a panel: the admin's choice and a tap on the floor can now disagree");
+check(/pickPerson/.test(read("app/aevinite/printing/page.tsx")),
+  "…and that one place is the Printing board, where a person is named",
+  "the Printing board lost its person picker — there is now no way at all to move printing");
 check(/onlyWhen: "printing"/.test(epanel) && /x\.onlyWhen !== "printing" \|\| printingOn/.test(epanel),
   "the manager's Printing row is ABSENT when automatic printing is off (not greyed)",
   "the Printing row shows when printing is off — the owner's rule is that no option appears at all");

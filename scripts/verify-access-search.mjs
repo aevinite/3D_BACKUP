@@ -12,10 +12,14 @@
  */
 import { chromium } from "playwright";
 import { adminCookie } from "./sweep/login.mjs";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const ARGS = process.argv.slice(2);
 const argOf = (n, d) => { const i = ARGS.indexOf(n); return i === -1 ? d : ARGS[i + 1]; };
 const BASE = (argOf("--base", process.env.VERIFY_BASE || "https://3-d-backup.vercel.app")).replace(/\/$/, "");
+// Nothing answering = "could not run" (exit 2), said in plain words — never a raw ECONNREFUSED
+// stack, which reads as "this guard is broken". (sweep #6 / T28, 2026-08-22)
+await requireUp(BASE, "the Access-screen search walk");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const results = [];

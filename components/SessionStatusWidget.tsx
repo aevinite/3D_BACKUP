@@ -30,6 +30,7 @@ import { getStoredSession, storeSession, clearStoredSession, getSessionState, le
 // Publish the live "can this guest order?" answer so the Add-to-cart gate can read
 // it synchronously (this widget already polls the session, so we reuse that poll).
 import { setTableConnection } from "@/lib/tableConnection";
+import { enqueueGuestLeave } from "@/lib/guestOutbox";
 import { tremove } from "@/lib/tenantStorage";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 // Phone back button: while a confirm/blocked popup shows, back closes it (not the site).
@@ -285,25 +286,61 @@ export default function SessionStatusWidget() {
   useBackClose("ssw-confirm-leave", confirming, () => setConfirming(false));
 
   // ── actions ────────────────────────────────────────────────────────────────
+  //
+  // LEAVING ALWAYS WORKS ON THE PHONE; ONLY THE SENTENCE CHANGES (sweep 7 T3).
+  //
+  // Both handlers below used to throw the server's answer away and say "You left the table"
+  // regardless. leaveSession() never throws — a timeout comes back as { ok:false,
+  // reason:"timed_out" } — so a diner on a bad connection was told they had left a table the
+  // restaurant still had them sitting at. That is the same shape as the false "we've let the staff
+  // know" this territory already has a fix and a guard for: a promise is worse than a dead button,
+  // because they stop trying.
+  //
+  // The local clean-up still happens either way, deliberately — refusing to let someone go because
+  // the network is down would TRAP them, which is worse than a stale row the head can clear and the
+  // heartbeat will age out. What changes is that we stop claiming the restaurant heard it.
+  // Why ok===true is a safe test and cannot cry wolf: lfh_leave_session (mig 146) has no refusing
+  // branch at all — a token that is not a live member returns { ok:true, already_gone:true }, and
+  // the normal path returns { ok:true, ... }. So anything other than ok:true came from the
+  // transport, i.e. the restaurant genuinely did not hear it.
+  const leftForReal = async (token: string): Promise<boolean> => {
+    const r = await leaveSession(token);
+    return r?.ok === true;
+  };
   // This runs when the guest taps "Leave": tell the server, clean up locally,
-  // and show a confirmation. Their cart goes back to private + empty.
+  // and say honestly whether the restaurant heard it. Their cart goes back to private + empty.
   const doLeave = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await leaveSession(token);
+    const told = await leftForReal(token);
     clearLocal(); // also drops lfh_active_orders + nudges the tracker to hide
     wasActive.current = false;
     setSt(null);
     setBusy(false);
-    toast("You left the table", "table");
+    if (told) { toast("You left the table", "table"); return; }
+    // THE PHONE NOW CARRIES THE MESSAGE, INSTEAD OF THE DINER (owner picked this, 2026-08-30).
+    // Sweep 7 stopped this claiming they had left when the restaurant never heard — but that left
+    // the person holding the job. Save it and send it the moment there is signal, exactly like an
+    // order. If they re-join this very table first, the queue drops it (see leaveIsStale).
+    const q = await enqueueGuestLeave({ token, restaurantId, restaurantSlug });
+    toast(q.persisted
+      ? "You've left — we'll tell the restaurant as soon as there's signal"
+      : "You've left on this phone — keep this page open so we can tell the restaurant", "table");
   };
   // This runs when the guest taps "Change table": leave the current one, clean
   // up, then send them back to the menu to pick/scan a different table.
   const doChange = async () => {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
-    await leaveSession(token);
+    const told = await leftForReal(token);
     clearLocal(); // also drops lfh_active_orders so the old table's tracker won't follow you
+    // THEY CAN NOW MOVE ON EITHER WAY (owner picked this, 2026-08-30). Before the phone could carry
+    // the message, a leave the restaurant had not heard had to STOP them here and hand them the job
+    // — otherwise they would go and sit elsewhere while the old table still held them. Now the
+    // leave is saved and sends itself, so there is nothing left for the diner to do and no reason
+    // to block the thing they actually asked for. A toast would be wiped by the page load below
+    // anyway, which is exactly why this must not be where the truth is delivered.
+    if (!told) await enqueueGuestLeave({ token, restaurantId, restaurantSlug });
     // Back to THIS restaurant's menu to pick/scan a different table. The bare
     // /menu is restaurant #1's own menu, so only send there for the #1 default.
     const dest = restaurantSlug && restaurantSlug !== DEFAULT_RESTAURANT_SLUG ? `/r/${restaurantSlug}/menu` : "/menu";

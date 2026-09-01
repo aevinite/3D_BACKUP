@@ -17,6 +17,7 @@
 import { chromium } from "playwright";
 import { loginAs, adminCookie } from "./sweep/login.mjs";
 import { requireAppUp } from "./sweep/appUp.mjs";
+import { seatParty, retireTables, retireOnCrash } from "./sweep/fixture.mjs";
 const argv=process.argv.slice(2);
 const B = (argv.includes("--base")?argv[argv.indexOf("--base")+1]:null) || process.env.BASE || "http://localhost:4000";
 // Nothing answering at the base used to surface nine different ways across these guards — from a
@@ -27,6 +28,19 @@ await requireAppUp(["--base", B], "these sweep follow-up checks");
 const lum=(r,g,b)=>{const f=x=>{x/=255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4)};return .2126*f(r)+.7152*f(g)+.0722*f(b)};
 const P=s=>{const m=String(s).match(/-?[\d.]+/g);const k=/^color\(\s*srgb/i.test(String(s))?255:1;return [+m[0]*k,+m[1]*k,+m[2]*k]};
 const CR=(a,b)=>((Math.max(lum(...a),lum(...b))+.05)/(Math.min(lum(...a),lum(...b))+.05));
+// ── IT NEEDS A PARTY, SO IT SEATS ONE (sweep #6 / T28, 2026-08-22) ────────────────────────────────
+// Phase 5465 ("tablet KOT ▾ button exists") only has something to click when a table has a live
+// session — KOT ▾ lives in the table-detail popup. It used to look for whatever happened to be on the
+// floor and report ❌ "no table with a party on the floor right now — cannot exercise it" when there
+// was nothing. So it passed only when some OTHER guard had left litter behind, and went red the moment
+// the floor was clean. That is the worst of both: a check that depends on a mess, reported as a fault.
+// 5466-5468 hang off it, so all four had never run.
+//
+// scripts/sweep/fixture.mjs seats it and always clears it up — one implementation, shared with
+// verify-tablet-floor, instead of each guard hand-rolling a teardown the database quietly refuses.
+const FIXTURE_TABLE = "9965";
+retireOnCrash([FIXTURE_TABLE]);
+
 let pass=0, fail=0;
 const ok=(id,what,detail="")=>{pass++;console.log(`✅ ${id} ${what}${detail?" :: "+detail:""}`)};
 const no=(id,what,detail="")=>{fail++;console.log(`❌ ${id} ${what}${detail?" :: "+detail:""}`)};
@@ -88,6 +102,7 @@ async function ctx(role){
 
 // ── 5465-5468 · TABLET · the KOT ▾ menu and the ☰ profile drawer ─────────────
 {
+  const seated = (await seatParty([FIXTURE_TABLE]))[0] || null;
   const c = await ctx("tablet"); const p = await c.newPage();
   await p.goto(B+"/tablet",{waitUntil:"domcontentloaded",timeout:90000}); await p.waitForTimeout(11000);
   const fr = await panelFrame(p, "#kotMenuBtn, #hamburger");
@@ -102,7 +117,9 @@ async function ctx(role){
   });
   await p.waitForTimeout(2200);
   const btn = fr.locator("#kotMenuBtn, .kot-menu-btn, [id*=kotMenu]").first();
-  if (!opened) no("5465","tablet KOT \u25be button exists","no table with a party on the floor right now — cannot exercise it");
+  if (!opened) no("5465","tablet KOT \u25be button exists",
+    seated ? `seated a party on table ${seated} but no tile on the floor shows it — the waiter's floor is not drawing a live table`
+           : "could not seat a fixture party (no .env.local keys?), so there was nothing to click");
   else if (!(await btn.count())) no("5465","tablet KOT \u25be button exists",`opened "${opened}" but no #kotMenuBtn (KOT ops off?)`);
   else {
     ok("5465","tablet KOT \u25be button exists");
@@ -285,5 +302,6 @@ async function ctx(role){
   }
 }
 await br.close();
+await retireTables([FIXTURE_TABLE]);
 console.log(`\nSKIPPED-PHASE RUN: ${pass} pass · ${fail} fail`);
 process.exit(fail?1:0);

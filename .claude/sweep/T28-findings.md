@@ -1,0 +1,444 @@
+# T28 — THE REPO'S OWN TESTS · findings
+
+## ══ SWEEP #7 · 2026-08-27/28 · branch `sweep7/t28-repo-guards` · port 4228 ══════════════════════
+
+Territory: `scripts/**`, `tests/**`, and the 150 `verify:*` / `test:*` entries in `package.json`.
+All 500 sweep-#6 rows re-run (490 ✅ · 10 ⏭ · **0 ❌ — no regression**, and 13 long-standing skips
+closed). 500 new rows written and executed, `P28601`–`P29100`.
+
+**Nine guards were red or crashing on clean main when this run started. THREE were the app; SIX were
+the guard itself.** Every one is fixed here, one commit each, numbered to match the chat report.
+
+Legend: `confirmed` = I watched it happen · `code-read` = reasoned from the source.
+
+### FIXED — the app
+
+**9 · The wrong-turn redirect the owner asked for was built, then lost in a merge · confirmed · HIGH**
+`app/not-found.tsx`. Owner, 2026-08-26: *"yes for this guest should be redirected to menu … and if
+written login or aevinite then only locate to there"*. Built the same day (2805c879). PRs
+#1122/#1123/#1124 then replaced the file with the two 404 screens he picked, and the redirect was not
+carried across. A diner who drops the `/r/` from a menu link was getting the BURNT TOAST staff
+screen, whose only way out is `/` → `/login`, the staff password prompt — the exact dead end both
+screens exist to remove. `verify:guest` was red for it, 11 checks. Restored inside the new design;
+measured: all four wrong-turn addresses now land on the real menu with 59 dishes, and every staff and
+guest address is unchanged. `verify:notfound` 16/16.
+
+**3 · The admin's Printing overview read the restaurant list with no ceiling · confirmed · MEDIUM**
+`app/api/admin/printing/[...path]/route.ts`. Three of its four whole-platform reads carry a
+`.limit()`; the restaurants read carried none, so PostgREST's own cap would silently shorten it and
+the screen would stop listing later restaurants with no error anywhere. `verify:admin-api-a` had been
+red on clean main for it (181 checks, 1 failing). One line.
+
+**4 · A purge would leave the print-helper pairings behind · confirmed · MEDIUM**
+Yesterday's migration 368 added `print_pairings`, which carries a `restaurant_id`, and nobody added
+it to `admin_purge_restaurant()`. `verify:purge` was red for it. Reading it out: the rows are
+ten-minute handshakes and `lib/printPair.ts` sweeps every expired row platform-wide, so a delete line
+would be dead code — but "it cleans itself up" is exactly the claim that rots into a stale allowance.
+So the guard gained a third list, `SELF_CLEARING`, and every entry is PROVED on each run against the
+live schema and the live source.
+
+### FIXED — the guards
+
+**1 · Three new guards answered a stopped app with a stack trace · confirmed · HIGH**
+`verify-notfound-audience`, `verify-sw-version-report`, `verify-printing-sweep` all landed on
+2026-08-26 needing a running app and none did the appUp preflight, so `verify:guards-alive` check 7
+had been red on clean main ever since. All three now exit 2 with one plain sentence.
+
+**2 · Two guards ignored `--base` and quietly drove port 4000 — the owner's own window · confirmed · HIGH**
+`verify-access-live` and `verify-manager-hidden` resolved `process.env.VERIFY_BASE || "localhost:4000"`.
+Every lane hands over its own port as `-- --base …`; both ignored the flag. Measured:
+`npm run verify:access-live -- --base http://localhost:4228` refused with "nothing is answering at
+http://localhost:4000". Both use `baseFrom(process.argv)` now, and `verify:guards-alive` gained
+check 7 to keep it that way — proved by re-introducing the fault.
+
+**5 · verify:write-paths called two quiet days a data fault · confirmed · MEDIUM**
+Phase 3819 measured rollup freshness from the newest day that HAS A ROW. Two days with no sales read
+as four days of drift. It measures the rollup's own marker now, in two halves: never AHEAD of
+today−2 (the half that would be a real money fault), and not more than a week behind.
+
+**6 · verify:test-safety never looked in four sub-folders · confirmed · MEDIUM**
+It listed three folders flatly, so eleven scripts were invisible to it — including the five under
+`scripts/sweep/t3/` that place real orders. It is the guard whose whole job is "a test write must
+name its restaurant", and it runs as a hook on any `scripts/` edit. Walks every depth now; all eleven
+newly-covered files pass.
+
+**7 · The guard that catches dead guards was never wired into its own hook · confirmed · MEDIUM**
+`verify-guards-alive.mjs` has said "meant to run as a hook on any edit under scripts/ or tests/"
+since it was written, and the PostToolUse hook never listed it — which is why item 1 sat red unseen.
+It now reads the payload on stdin and exits 0 at once unless the edit is a script, a test or
+`package.json`, so it costs nothing on an unrelated edit. Wired in.
+
+**10 · verify:rota-clash left a waiter holding two tables instead of thirty · confirmed · HIGH**
+Every check passed and then the restore ITSELF timed out. `finally` saved nothing — the restore is
+what failed — so the run exited 1, reading as an app fault, and left diagt1 on `[4,5]`. Confirmed on
+the database and put back by hand. Three tries, a loud failure, and the SQL to run by hand.
+
+**11 · verify:guest reported three menus broken because SENTRY answered 429 · confirmed · MEDIUM**
+It counted every response ≥400 whoever answered it. Also: it failed the "one menu read per load"
+check against a dev server while its own note said dev double-mounts every effect; and its staff-404
+rows looked for `href="/login"`, the shape the owner replaced. All three fixed; the fourth (who
+`/signup` belongs to) is a real disagreement with `verify:notfound` and is printed as an OPEN
+QUESTION rather than guessed at.
+
+**13 · verify:tablet tapped Espresso, and Espresso has three sizes · confirmed · HIGH**
+It clicked the first dish on the Quick-order grid and assumed the order now had something in it. A
+dish with sizes opens a popup instead — correct behaviour — so the cart stayed empty, `#sendOrder`
+stayed `disabled`, and the guard died on a 30-second click, taking 24 checks with it. Nothing was
+wrong with the panel. 103/103 green now.
+
+**18 · verify:test-safety failed on an argument it does not use · confirmed · LOW**
+It read `argv[2]` as its repo root, so `-- --base <url>` — which every lane passes to every guard —
+made it scan a folder called "--base" and exit 1.
+
+### BUILT — improvements
+
+**8 · Eight guards that find their own subjects now refuse when they find none**
+Each walks a folder to decide what to check. An empty walk made every check pass because none ran,
+and the last line still said OK — the shape `verify:cache` died in for a month. Each now states its
+floor. Proved from an empty folder.
+
+**12 · Five guards borrow a real restaurant's settings and only put them back if nothing interrupts them**
+New `scripts/sweep/restore.mjs`. What each borrows: "print the customer on the bill"; the owner's
+entitlements; the printing routes, auto-print switches and manager permissions; a waiter's rota; the
+restaurant's TABLE COUNT. A leftover switch looks exactly like a decision somebody made on purpose.
+`verify-customers` was additionally setting two switches to a hard-coded `true` having never read
+what they were. Guarded by a new check 11 in `verify:test-safety`.
+
+### HIS ANSWER, 2026-08-28 — all eight built
+
+He replied: *"do all and what done check all and for 14 do what you think will be better for 15 you
+can do it on backup you can do anything you want on backup it's the test site only add this in thing
+remeber list too and yeaa do 17th too"*.
+
+**14 · A stray address belongs to the DINER · decided by me on his instruction**
+Two of this repo's guards had asserted opposite things about `/signup` for two days, each quoting him
+from 2026-08-26. The tie-breaker is who turns up: this is a restaurant's public web address, and the
+people typing a wrong path into it are diners with a bad link, not waiters. Wrong towards the guest
+costs a worker one extra tap; wrong towards staff costs a diner a PASSWORD PROMPT. So: guest, with
+NO button when we cannot tell which restaurant they meant. Both guards now agree and each says why.
+
+**15 · Writing to Aangan on backup is allowed · his call, recorded three times**
+The read-only rule is about permission and feature SWITCHES, never orders. Written into
+verify-manager-live-rush.mjs beside the crew list, into the LEDGER's Standing pre-empts, and into the
+project memory. All three say "do not re-raise".
+
+**17 · The heatmap check retired and replaced** — the old comparison exited 2 on every run since it
+was written. Replaced with six checks that can be answered on any database, including that revenue
+comes from the stored net_amount and that the tax rate is never resolved per order row.
+
+**19 + 19b · Columns, and a duplicate migration number** — verify:db-parity now compares COLUMNS
+(230 writes across 79 tables), which is how the "Saved ✓ over a 500" fault actually reached a screen.
+Two migrations both numbered 365; the newer moved to 370.
+
+**20 · A failing run prints the command that re-checks only what failed** — in the runner and in the
+500-phase printing sweep. Deliberately NOT added to the other 110 guards.
+
+**21 · `npm start` honours PORT** · **22 · the picker guard reads TypeScript guards too**
+
+**23 · The collision experiment — THREE collisions, not one.** Five floor guards run alone (all
+green), then every pair together. Three pairs went red, and all three are one class: **a guard
+asserting a property of the ENTIRE shared database, on a database it shares.**
+  · an unfenced table picker walking into another guard's reserved pair — fixed, proven green together;
+  · a whole-floor leak scan catching a neighbour mid-teardown — fixed by requiring the leak to PERSIST;
+  · a whole-stream breadcrumb scan reading everyone's traffic — fixed by filtering to its own rows.
+  · and a full floor is now exit 2 ("could not run"), not exit 1 ("the app is broken").
+
+**Checked all:** the branch was rebased onto today's main, both conflicts INTEGRATED not overwritten,
+dependencies reinstalled, and all 73 static guards re-run — every one green.
+
+### 2026-08-29 — the last red fixed, everything merged and LIVE, and a 500-phase run around it
+
+**24 · verify:split-payment was defending a screen he replaced yesterday · confirmed · HIGH**
+Red on clean main with 14 failures, every one about the waiter tablet, and NOT ONE a fault in the
+tablet. The section ran the MANAGER's literal source patterns over both panels. On 2026-08-28 he
+said *"you can only split with the kot option or small written… both have same interface as the kot
+one"*, the tablet's duplicate panel was deleted, and it now has ONE split screen. Every rule still
+holds and several hold better — it divides by dish as well as by ticket, takes each ticket's figure
+from billdoc.js, offers Pay later only when the waiter may use it, and disables "By kitchen ticket"
+with a reason on a one-ticket bill. Rewritten as one table of RULES with a pattern per panel: 18
+rules × 2 panels, plus a new one — the tablet must not grow a second split screen again.
+
+**25 · NINE guards broke on an argument they do not use · confirmed · HIGH**
+Found by the 500-phase run, four entries in. Every lane hands every guard `-- --base <url>`; nine
+took a bare `process.argv[2]` as the repo folder, scanned a folder called "--base" and exited 1.
+One shelled `cd --`. New `scripts/sweep/repoRoot.mjs` asks the disk which argument is a repo.
+Guarded by a new check 12 in verify:test-safety.
+
+### MERGED AND LIVE — PR #1148, main `ae042f61`, backup deployment READY
+Verified on the deployed site, not just locally: a mistyped menu link reaches the real menu (59
+dishes), a stray address gets the guest screen, staff addresses keep the staff screen. The deploy
+followed the lock ritual — another session held it, I waited, took it in a command that can fail,
+and released it. Both rebase conflicts were INTEGRATED: T7's tablet fix kept over mine, T8's disk
+stash kept alongside my interrupt handler.
+
+### THE 500-PHASE RUN — `P36358`–`P36857`, 483 ✅ · 17 ⏭ · 0 ❌
+Run after the fix and after the merge, as asked. The two things worth carrying forward:
+· **Mutation testing (block C): 40 of 49 guards demonstrably go red when the thing they name is
+  broken.** Before today not one had ever been proved to have teeth. Worth extending to the other
+  hundred — it is the only technique here that tells a real green from a lucky one.
+· **My own harness produced three false accusations in a row** before it was right — appending
+  instead of replacing, replacing only the first occurrence, and a needle I guessed rather than took
+  from the guard. Each one manufactured blind guards that were not blind. The tool that says "no
+  fault here" is the tool most worth doubting.
+
+---
+
+### OPEN — for the owner
+
+Nothing. All eight were answered on 2026-08-28 and built; the last red (item 24) was fixed on
+2026-08-29 and everything is merged and live on backup.
+
+The one honest limit left: two of the three colliding pairs could not be proven green TOGETHER,
+because the shared 30-table floor stayed full of other terminals' live parties for the rest of the
+run. Each half was proven separately, and neither now blames the product — both refuse in plain
+words with exit 2.
+
+---
+
+## ⚠️ HISTORY — sweep #6, 2026-08-22. Every item below was fixed then; kept because the ledger rows reference it.
+
+Territory: `scripts/**`, `tests/**`, the `verify:*` entries in `package.json`.
+Branch `sweep6/t28-the-guards` · worktree `/Users/aevinite/Documents/Projects/sweep6/T28` · port 4128.
+All 29 items below are FIXED in this branch, one commit each, numbered to match.
+
+Legend: `confirmed` = I watched it happen · `code-read` = reasoned from the source.
+
+---
+
+## FIXED — 23 problems
+
+### 1 · The cancelled-tile guard printed a tick over ZERO dishes · confirmed · HIGH
+`scripts/verify-cancelled-tile-parity.mjs`. `order_items.restaurant_id` is NOT NULL since the pool
+model; its two dish inserts never carried it and nothing read the error, so both sides of the
+comparison ran on zero dishes and "the shipped math agrees with the summary" printed a ✓ that proved
+nothing. Its teardown hard-DELETEd the order and session, which the database refuses for anything
+carrying a KOT or bill number (mig 036 / mig 190) — also unread — so the fixture survived every run
+and the next run died at the one-open-session-per-table index.
+**Who is worse off:** the manager. The leftover showed as `288 · 4 · Preparing · ＋ Take order` on My
+Little French House's Tables floor after table 30, red unpaid ring, header `1/31 OCCUPIED` on a
+30-table restaurant. Screenshotted at 1280×800 and 360×780 dpr3.
+**Regression check:** the guard now stops on any refused insert, retires rows the way a cancellation
+does, and refuses to leave an open session behind. Plus the new `verify:fixtures` (item 16).
+
+### 2 · The 1-in-1000 glitch hunt ran NONE of its 14 checks · confirmed · HIGH
+`scripts/verify-edge-cases.mjs`. Ten `page.goto("${BASE}/menu")` calls in DOUBLE quotes → Chrome was
+handed the literal address `${BASE}/menu` → "Cannot navigate to invalid URL" before the first
+assertion. Behind it: no `restaurant_id` on any write (23502 on the first insert); un-namespaced guest
+storage keys; a password POST to a four-servers-era route; and three assertions describing screens the
+product deliberately changed.
+**Who is worse off:** every guest. Nothing about the session gate, the double-tap or a network blip
+had been checked for weeks.
+**Regression check:** new `verify:guards-alive` check 1 (proved by re-introducing the bug).
+
+### 3 · The session-UX guard ran NONE of its 11 checks · confirmed · HIGH
+`scripts/verify-session-ux.mjs`. Died at its first write (no `restaurant_id`), plus three literal
+templates, plus a section that reached the panel as if it were still an Express server on a bare path.
+**Regression check:** `verify:guards-alive` + the new tenant-scope check in `verify:test-safety`.
+
+### 4 · A refusal check that ANY refusal would have satisfied · confirmed · MEDIUM
+`scripts/verify-edge-cases.mjs`, "make-head on a closed table is refused (got 400)". No `?rid=`, so
+the panel API answered 400 "No restaurant scope" — the same number. It would have gone green on a
+build where handing a closed table to a new head worked fine. Now reads the reason as well.
+
+### 5 · The realtime guard edited whichever restaurant it found first · confirmed · HIGH
+`scripts/verify-realtime.mjs`. `.limit(1)` with no restaurant filter on `menu_items` and `categories`
+— the row could belong to any tenant, Aangan included — and it flipped a category's `active` with the
+restore on the NEXT LINE, outside any finally. Its session insert had no `restaurant_id`, so it
+crashed on `s.id` of null and checks 4 and 5 had not run for weeks. It also deleted activity rows by
+`action='rt_selftest'`, removing rows another lane had just written.
+**Who is worse off:** a real restaurant whose category is left switched off by a crash — the exact
+shape that once left French House's Menu switch off and gave real scans a 404 for an hour.
+
+### 6 · The waiter-tablet breadcrumb guard crashed before its first check · confirmed · HIGH
+`scripts/verify-tablet-parity.mjs`. Same missing `restaurant_id` on five tables; no try/finally, so
+any throw left a live "preparing" order on table 9932 — a phantom table on the floor.
+
+### 7 · Three failures reported on a cancel that was working perfectly · confirmed · MEDIUM
+`scripts/verify-void-on-joined-party.mjs`. The removal sheet has asked TWO required questions since
+2026-08-18 (the owner's "order was made / not made"); the guard answered only the reason, clicked a
+disabled Remove, and blamed the app 11 seconds later.
+
+### 8 · Four checks red on two deliberate fixes · confirmed · MEDIUM
+`scripts/verify-customers.mjs`. Asked the printed bill for `size:80mm`, which was removed on purpose
+(a forced @page size rotates the job — measured 80×134mm onto a 70×65mm head, 0.49×, sideways). And
+read `goBtn.disabled` on "Generate bill", where the real attribute was deliberately dropped because a
+disabled button emits no click and swallowed the waiter's tap.
+
+### 9 · A guest-door check red on tidier code · confirmed · LOW
+`scripts/verify-guest.mjs` P00155 asked for `URLSearchParams`/`qs.append` in the menu page after the
+building moved into `queryStringOf()` in `lib/tenant.ts`. Now asserts the behaviour.
+
+### 10 · verify:admin-refusals red on a correct file · confirmed · MEDIUM
+Yesterday's H3 race fix added a third database-words site inside `ensureCodes()`, whose caller wraps
+them in `adminFail`. The allowance said two. Now three, with the reason.
+
+### 11 · One comment took two guards red on clean main · confirmed · MEDIUM
+`scripts/verify-t24-money-rules.mjs` said "REJECTED (owner, …)" without naming
+`docs/REJECTED-IDEAS.md`, so `verify:rejected` — and `verify:static`, which runs it — were red.
+
+### 12 · verify:families crashed on a port that stopped existing · confirmed · HIGH
+It called `localhost:4003`, retired on 2026-06-13, so it had run nothing for over two months. Most of
+what it asked was duplicated elsewhere or describes a path the owner has closed; the four properties
+nothing else holds are rewritten against today's app.
+
+### 13 · Six guards read the SHARED folder's keys, not their own · code-read · MEDIUM
+`verify-merged-floor`, `verify-write-paths`, `sweep/audit-capture`, and the three `sweep/t3/*` opened
+`/Users/aevinite/Documents/Projects/backup_Menu/.env.local` by absolute path. Every sweep lane runs
+from its own worktree, so a guard reaching back into the shared folder asserts against whatever stack
+THAT copy points at — and reports green about a database nobody asked it to look at.
+
+### 19 · A guard that printed "Cleaned up test order." and cleaned up nothing · confirmed · HIGH
+`scripts/verify-allergy-isolation.mjs` hard-DELETEd its order. Every order carries a KOT number from
+the moment it exists (mig 036) and the database refuses to delete one (mig 190) — unread. So table
+ALGTEST sat on the manager's floor with a new order on it, an open session blocking the
+one-open-session-per-table index, and a queued ticket whose red "hasn't printed" banner stayed on the
+floor. It also read `.env.local` relative to the current directory and left its restaurant to the
+RPC's default.
+
+### 21 · A teardown that closed EVERY open table in the restaurant · confirmed · HIGH
+`scripts/verify-manager-live-rush.mjs` read every non-closed session in each crew's restaurant and
+closed the lot — while printing "closed the tables they opened". The rush picks FREE tables at the
+start, so any party that arrived while it ran was ended at the end, and closing a session fires mig
+232's trigger, which cancels and archives every unpaid live order on it.
+**Who is worse off:** every party in the house, on a real restaurant. On the dev stack it was deleting
+other sweep lanes' fixtures mid-run, which explains flakes seen elsewhere in this sweep.
+
+### 22 · Seven live tables left on the floor after every run · confirmed · HIGH
+`scripts/verify-merged-floor.mjs` cleared the slate BEFORE building its fixture and then simply
+exited — no teardown. My Little French House's header read `7/30 OCCUPIED · 1 TO PAY · 3 NEEDS YOU` on
+a restaurant nobody was eating in, with five "hasn't printed" banners above the floor. Screenshotted
+at 1280×800 and 360×780 dpr3, before and after.
+
+### 23 · Four checks that only ran when another guard left a mess · confirmed · MEDIUM
+`scripts/verify-sweep-extras.mjs` phase 5465 needs a table with a live party (KOT ▾ only exists in the
+detail popup). It looked for whatever happened to be on the floor and reported ❌ when there was
+nothing — so it passed only while another guard's litter was still there, and went red the moment the
+floor was clean. 5466–5468 hang off it, so all four had never run. It seats its own party now: 18
+pass, 0 fail, up from 14 pass and 1 fail.
+
+### 18 · Three floor guards tripped the app's own double-tap protection · confirmed · MEDIUM
+`verify-table-lifecycle`, `verify-two-parties`, `verify-manager-live-rush`. `lfh_staff_place_order`
+refuses a second identical round for the same table within three seconds. None of the three read `ok`,
+so the undefined id died six lines later as `invalid input syntax for type uuid: "undefined"`. Passing
+depended on whether the previous identical round was more than three seconds ago — which is why they
+looked like flakes. Once the rush could run to the end it reported SIXTEEN failures on a correct floor:
+a tile with dishes prints the served counter as text and carries the state phrase in the line's title.
+
+### 24 · A guard that could NEVER work from its own npm command · confirmed · HIGH
+`verify-cancel-made.ts` defaulted to `http://localhost:4112` and its npm entry passes no `--base`, so
+`npm run verify:cancel-made` always died with "THREW: fetch failed / 1 check(s) FAILED". It only ever
+passed when somebody handed it a base. Both cancel guards also hard-DELETEd their test order — refused
+by mig 190 — so the count each printed grew by one for ever ("test orders left behind: 7" on a run that
+left nothing live). One real leak found on the way: a "T12 test flour" ingredient row from a crashed run.
+
+### 25 · Three guards red on things that were not wrong · confirmed · HIGH
+`verify:tax-mode`'s best check counted bills taken AFTER the split rule, so any test that rings up an
+exempt item read as a money regression — measured, two sessions of 920 and 550 reported as "2 existing
+session totals changed". `verify:fixtures` asked "is anything left?" mid-suite. `verify:table-ownership`
+failed half its runs on a tile under the sticky header.
+
+### 26 · Two guards fought over table 28 and the loser blamed the product · confirmed · HIGH
+`verify-table-ownership` walks DOWN from the highest table number — straight into
+`verify-void-on-joined-party`'s 27/28. Which table belongs to which guard now lives in one list.
+
+### 27 · The waiter's floor guard demanded things a tidy floor cannot give · confirmed · MEDIUM
+`verify:tablet` took "the first tile that is not free" and then demanded the ops row (needs an OPEN
+session) and the ‹ › stepper (needs TWO busy tables). 102 checks pass now, up from 95 with 3 failing.
+
+### 28 · The void guard blamed the product for a stopwatch · confirmed · HIGH
+`verify:void-party` failed about every other run and each time on a different line — reading as a void
+that took a whole party's food with it. Three causes, all the guard's: place-order RPCs whose answer was
+thrown away, a fixed 6.5s wait for the floor to draw the party, and a solo fixture built while the panel
+was still acting on the previous board.
+
+### 29 · A guard that ended someone else's party to free a table · confirmed · HIGH
+`verify:offline` borrows a table by closing its bill when the floor is full. It took table 28 out from
+under `verify:void-party`, which then reported a party-destroying void that never happened. Closing a
+session cancels and archives every unpaid live order on it (mig 232).
+
+---
+
+## BUILT — 6 improvements
+
+### 14 · A stopped dev server no longer reads as "this guard is broken"
+17 guards answered "nothing running" with a raw ECONNREFUSED stack. They now say one plain sentence
+and exit 2, keeping each one's own flag/env/default. `baseFrom()` reads whichever of
+`LFH_BASE` / `VERIFY_BASE` / `BASE` is set — all three were already in use.
+
+### 15 · NEW GUARD `verify:guards-alive` — can every guard still run at all?
+Seven static checks over all 201 scripts: no `${…}` handed to something that must resolve it; no
+retired panel port; every named repo path exists; every `verify:*` entry points at a real file; every
+guard is reachable; everything parses; every browser-driving guard does the app-up preflight.
+
+### 16 · NEW GUARD `verify:fixtures` — did our own tests leave a table on the floor?
+Nine off-plan throwaway table names, checked with the same filter the floor's own summary uses.
+`--clean` retires what it finds, by id, the product's own way.
+
+### 20 · The fixtures guard also clears the kitchen tickets our tests queue
+Every order queues a print job (mig 335); lib/printQueue dismisses a dead one, but only when something
+READS the queue, and on a stack with no kitchen screen open nothing does. Five red banners were stacked
+above the floor. One shared helper (`scripts/sweep/tickets.mjs`), always by order id, using the app's
+own wording — plus a check for any queued ticket whose order is already cancelled or archived.
+
+### 17 · NEW CHECK in `verify:test-safety` — a test write must name its restaurant
+Reads the ARGUMENT of every insert/update/delete on a tenant table. Catches both the refused insert
+(five dead guards) and the update filtered on `table_number` alone (which measurably closed another
+restaurant's table-11 session during this sweep).
+
+---
+
+## 🔗 HANDOFF — the fix is in another terminal's file
+
+### H1 · `docs/GUARD-MAP.md` — three `verify:*` entries have no row (T29 owns `docs/**`)
+`verify:pointers` is RED ON CLEAN MAIN today for `verify:split-payment` and `verify:t24-money-rules`,
+and my two new entries make five. `verify:static` runs `verify:pointers`, so both stay red until this
+one doc gets its rows. Exact rows needed, in the money / test-tooling sections:
+
+| check | what it needs | writes? |
+|---|---|---|
+| `verify:split-payment` | nothing (static) | no |
+| `verify:t24-money-rules` | nothing (static) | no |
+| `verify:guards-alive` | nothing (static) | no |
+| `verify:fixtures` | `.env.local` (dev DB) | only with `--clean`, and only test tables |
+
+### H2 · `components/Header.tsx` — the bag badge does not follow a cart change in another tab
+Its `storage` listener is bound to `loadHiddenLive()` only; the badge's own `loadCartCount()` is bound
+to the same-tab `lfh:cart-updated`. `components/CartPanel.tsx` does listen to `storage`, so the thing
+a guest opens is right — only the number on the bag lags until the tab re-reads. One line: bind
+`onCart` to `storage` as well.
+
+### H3 · `package.json` "dev" ignores `PORT` (T29 owns non-verify entries)
+`"dev": "next dev -p 4000"`. Every sweep terminal is told "your port is 41xx, never 4000", and
+`PORT=4128 npm run dev` silently takes port 4000 — the owner's own window. It happened to me on this
+run; I killed it within seconds. Suggested: `next dev -p ${PORT:-4000}`.
+
+### H4 · duplicate migration number 352 on main (T23 owns 231+)
+`352_a_reseed_cannot_undo_an_admins_choice.sql` and `352_a_split_part_can_be_pay_later.sql` both
+exist. `verify:db-parity` is red on clean main for it. T21's branch is also carrying a second `353`.
+
+---
+
+## NOT MINE, NOT A FAULT ON MAIN — shared dev-database drift from other lanes
+
+Recorded because they look exactly like product faults and are not:
+
+* `verify:grants` — `lfh_request_verification()` is missing from the dev DB. T21's unmerged
+  migration 354 drops it; migration 296 in main still creates it.
+* `verify:db-parity` — `lfh_removed_order_leaves_every_board` exists on the DB and in no migration.
+* `verify:owner-territory-live` P06476 — "a dish can be added through the real editor" fails, and the
+  panel says **"Saved ✓" over a 500**: `POST /api/editor/items` answers
+  `Could not find the 'rating' column of 'menu_items' in the schema cache`. Cause: T21's commit
+  24d318b3 (branch `sweep6/t21-db-migrations-a`) applied migration 353, which DROPS `menu_items.rating`,
+  to the shared dev database, while the matching `public/panels/editor/app.js` change is not in main.
+  Its own commit message predicts this exact 500. **Merge order matters:** if that migration lands
+  without the panel change, no dish can be saved at all.
+* `verify:avlive-release` — reads the AV-live folder and is red whenever that stack is behind. Excluded
+  from CI by intent. Not touched.
+
+## REFUSE-TO-RUN, BY DESIGN (exit 2, said in plain words) — not vacuous, not fixed
+
+* `verify:heatmap-parity` — needs `lfh_owner_heatmap_old` staged alongside the live function first.
+* `verify:summary-parity` — needs a `lfh_table_view_summary_v2` candidate. That is how mig 238 was proved.
+* `verify:offline` — refuses against a dev server, because dev serves JS `no-cache` and every offline
+  check would fail for a reason unrelated to the app. Its exit code was 1 and is now 2 (item 14's rule).
+* `verify:panel-plumbing-live` — requires `--base`.

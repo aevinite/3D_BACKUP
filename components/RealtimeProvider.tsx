@@ -143,7 +143,20 @@ export default function RealtimeProvider() {
     window.addEventListener("lfh:table-scanned", onSession);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onWake);
-    window.addEventListener("pageshow", onWake); // bfcache restore (phone wake)
+    // ONLY A REAL BACK-FORWARD RESTORE (guest sweep, 2026-08-26).
+    //
+    // `pageshow` fires on EVERY page load, not only on a bfcache restore — and on an ordinary load
+    // it arrives AFTER this effect has already done its initial fetch. So every fresh load woke the
+    // screen for no reason: a second full refetch, and a needless socket teardown-and-rebuild.
+    // Measured on a production build of the guest menu, first ever visit:
+    //     261ms  fetch /menu-data      (the real one)
+    //     460ms  pageshow persisted=false
+    //     762ms  fetch /menu-data      (this listener)
+    // `persisted` is the flag that tells the two apart, and it is true for exactly the case this
+    // listener was added for — a phone returning from another app, or an iOS gesture-back, where
+    // visibilitychange is not reliable.
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) onWake(); }; // bfcache restore (phone wake)
+    window.addEventListener("pageshow", onPageShow);
     // A network flap (wifi↔cellular) fires "online". If the tab is HIDDEN we must NOT
     // reopen a live socket — that's exactly the phantom-connection leak the idle-drop
     // prevents. Only reconnect when visible; if hidden, (re)arm the idle drop instead
@@ -164,7 +177,7 @@ export default function RealtimeProvider() {
       window.removeEventListener("lfh:table-scanned", onSession);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onWake);
-      window.removeEventListener("pageshow", onWake);
+      window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("online", onOnline);
     };
     // rid in deps: it resolves ASYNC (RestaurantProvider starts at #1 then fixes itself),

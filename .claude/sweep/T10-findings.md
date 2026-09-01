@@ -204,3 +204,114 @@ every older row untouched.
 `lib/logTrail.ts` (the three action codes with no place in the trail) **has since been fixed on
 `main`** — `origin/main` moved 99 commits while this branch was open and now carries `kot_printed`.
 Nothing needed from me; `verify:read-guards` goes green on this branch the moment it is up to date.
+
+
+---
+
+# SWEEP #7 — 2026-08-22 · three problems, all fixed in `sweep7/t10-guest-staff-apis`
+
+**Re-run first: all 500 sweep-#6 rows re-executed, 500 pass, ZERO regressions.** Nothing that was
+green has gone red. The three below are in ground the old ledger did not cover — the print-helper
+surface (migs 335/336/338/341/351), which landed *after* that ledger was written.
+
+**All three fixes leave a guard behind, and every new guard check was proven to go red when its
+fix is reverted.** `npm run typecheck` passes; the twelve `verify:*` guards touching this territory
+are green.
+
+---
+
+## Item 1 — the Aevidine admin opening a client's waiter tablet prints a bill AT THEIR SHOP
+
+* **Where** — waiter tablet → a table's bill sheet → **Print bill**, when the Aevidine console is
+  the one looking (admin console → visit this restaurant's tablet). What comes out: a real sheet of
+  paper, at the paying client's counter, because we opened their screen.
+* **Severity** — medium-high, and it is the owner's own rule being broken. It also leaves no trace:
+  the row is logged as an ordinary `print_sent` attributed to "waiter".
+* **Named person** — the Aevidine admin doing support work, and the restaurant staff who find a
+  ticket at their counter that nobody at the restaurant asked for.
+* **How it happens** — the manager panel's `print/send` was given the rule on **2026-08-20**: with
+  no staff cookie (`!g.user`), it answers `{ adminView: true }` and prints nothing unless the body
+  says `force: true`, and a forced one is audited as `print_sent_by_admin`. The waiter tablet was
+  given the SAME `print/send` verb a day earlier for mig 341 — its own header says *"the same door
+  the manager panel uses"* — and never got the rule.
+* **Why nothing caught it** — `npm run verify:print-helper` has asserted this rule since the day it
+  shipped, and asserts it against **`eroute` only**: `check(/adminView: true/.test(eroute) && …)`.
+  The guard was green throughout because it was looking at one of the two files.
+* **Confirmed** — code-read across both routes plus the guard. **Not driven**: `helperFor` returns
+  `{owned:false}` on the dev stack (no `print_agents` rows), so the fault is dormant here and live
+  for any restaurant that installs the helper. Creating a fake agent + print route to demonstrate it
+  would leave configuration rows in a shared database for the sake of proving what the diff already
+  shows, so it was not done.
+* **Fix** — the same branch the manager has, word for word, plus `print_sent_by_admin` with the
+  admin actor marks. **No panel change was needed**: `public/panels/tablet/app.js` acts on `queued`
+  and falls through to `openBillWindow(html)` for anything else, which is exactly the wanted
+  behaviour — the bill appears on OUR screen instead of the client's paper.
+* **Guard** — `verify:print-helper` now iterates **every panel that can send paper**
+  (`[["the manager panel", eroute], ["the waiter tablet", troute]]`), so a third one joins the list
+  or fails here. Proven: removing the branch turns it red.
+
+## Item 2 — a waiter with a section can send another section's bill to the printer
+
+* **Where** — waiter tablet → a table outside this waiter's own section → **Print bill**. What they
+  get: another party's bill on paper, with its money on it.
+* **Severity** — low. They cannot act on that table; they can read it.
+* **How it happens** — every table-scoped write on this route goes through ONE section gate. Its
+  resolver (`lib/tableOfAction.affectedTables`) does not recognise `("print","send")`, and its rule
+  for an unrecognised verb is `unknown: true` ⇒ refuse — deliberately, so *"a new table-scoped
+  endpoint is protected on the day it is added"*. **That is why `print/send` sits ABOVE the gate**:
+  left below it, a sectioned waiter would have been refused every bill including their own tables'.
+  Correct as far as it went — and it meant the branch had no section check at all.
+* **Fix** — the branch keeps its position and asks the question itself, against the table the bill
+  actually belongs to. `table_number` rides along on the session read that was already there, so
+  there is no extra query; `waiterTables()` returns null for the admin, for a manager/owner looking
+  in, and for every restaurant with sections off, so nobody else pays for it.
+* **Guard** — `verify:print-helper`. Proven: replacing the lookup with `null` turns it red.
+
+## Item 3 — discarding a stock count with a stale id says "the system is busy" and is RETRIED
+
+* **Where** — manager panel → **Inventory** → a stock count → **Discard**. What the manager sees:
+  "sending…", several times over, and finally the count in the "needs you" list saying *"The system
+  couldn't accept this after several tries."*
+* **Severity** — low-medium, and low reachability (it needs a client bug or a stale draft), but the
+  failure mode is the one this codebase is most careful about.
+* **How it happens** — the route states its own rule at the top: *"Every id this route accepts is a
+  uuid our own UI produced. Anything else is a BAD REQUEST — without this, Postgres raises 'invalid
+  input syntax for type uuid' and the handler answered 500 with the raw DB text."* Six branches
+  enforce it. **The three `counts` ones never did** — and this is also the only one of the four
+  catch-all panel routes with no `emptyIdSegment` guard at all, which is the guard the other three
+  carry precisely because a missing client id arrives as the literal `"undefined"`.
+* **Measured against the dev database** — `.eq("id","undefined")` errors `22P02` on both a select
+  and an update (the update matched nothing, so nothing was changed). Each branch then answered
+  something untrue: `line` → 409 *"This count is no longer open"* (the count is fine; the id was
+  not) · `submit` → 404 *"Count not found"* · **`discard` → 500 via `writeFail`**.
+* **Why the 500 is the one that matters** — `public/panels/outbox.js` reads a 5xx as *"the server is
+  up but can't take it"*: it QUEUES the action, retries it `SERVER_MAX_TRIES` times, and only then
+  files it under "needs you" with a sentence about the server. That is the exact inversion of this
+  codebase's own rule — **a 4xx is told to the person, only a 5xx is saved and retried**
+  (`verify:busy`, *"busy = offline, both ways"*).
+* **Fix** — all three answer `badId()` like their six siblings, and so does the counted line's own
+  `item_id`, which reaches a uuid column from the body rather than the path.
+* **Guard** — `verify:panel-api` (76 checks, was 71). Proven: removing the discard check turns it red.
+
+---
+
+## What was checked and came back CLEAN — so nobody re-files it
+
+* **26 "unscoped" / "unbounded" reads flagged by my own static walker were every one of them
+  correct code.** The four shapes that fool a naive detector, and the four chains that are
+  deliberately unscoped with the reason beside them, are written up in `LEDGER/T10.md` under
+  *"What Blocks A and B actually taught"*. This is the third sweep to learn it — read that section
+  before believing a scoping hit.
+* **The re-run harness's own first draft failed 32 rows that were fine**, by stripping block
+  comments before line comments (`// … under /api/kitchen/*), shapes …` opens a fake block that
+  swallowed 30 KB). Strip line comments FIRST.
+* Every money gate, discount cap, tri-state waiter cap, the Z-report numbering, the GST report, the
+  guest offline-replay routes, the two login doors, the rate limits and the bot check were re-read
+  and are correct.
+
+## 🔗 Still open from sweep #6, unchanged
+
+| file | change needed | why |
+|------|---------------|-----|
+| `public/panels/realtime.js` | in `catchUp()`'s `run()`, re-attempt `ensureClient()` while `sb` is null | F3 — an always-visible kitchen display can never recover from a failed realtime boot; nothing fires `visibilitychange`/`focus`/`pageshow`/`online` on it. **Still true on `origin/main` b64951ad.** Not my file |
+| `lib/panelGate.ts` · `app/r/[restaurant]/login/page.tsx` | the same bare `userFromCookie()` F1 fixed on `/login` | a database flap renders a raw error page on the tenant-scoped doors. Not my files |
