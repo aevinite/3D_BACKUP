@@ -14,7 +14,7 @@
 // It also protects the OTHER half — the things that MUST stay translated. Those are real bugs
 // when they regress (a Hindi guest reading an English empty state), so they are asserted, not
 // assumed.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const root = process.cwd();
@@ -80,9 +80,12 @@ const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
   // (Pizza, Sushi, Protein, Burger…). So this is a NAMED LIST: the values that were found copied
   // verbatim from the English block into a language that does not use them. Add a row when a sweep
   // finds another one; never relax one to make a run green.
-  const COPIED_FROM_ENGLISH = [
-    { lang: "de", key: "prepTime", wrong: "Prep", why: "the German dish card read an English abbreviation" },
-  ];
+  // The one entry this list ever held was `de.prepTime`, and on 2026-09-02 that key was RETIRED —
+  // no screen rendered it, so the German diner it was fixed for never existed. The list stays,
+  // empty, because the SHAPE is what is worth keeping: add a row the next time a sweep finds a
+  // value copied verbatim out of the English block. It is not the only thing standing here now —
+  // the dead-key check below is what would have caught the prepTime fix being aimed at nothing.
+  const COPIED_FROM_ENGLISH = [];
   const stillCopied = COPIED_FROM_ENGLISH.filter(({ lang, key, wrong }) => {
     const m = body.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},`));
     if (!m) return false;
@@ -92,6 +95,35 @@ const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
     fail(`a value was copied back from English into another language: ${stillCopied
       .map((c) => `${c.lang}.${c.key} = "${c.wrong}" (${c.why})`).join(" · ")}`);
   else ok(`no dictionary value is a known English leftover (${COPIED_FROM_ENGLISH.length} watched)`);
+
+  // ── A KEY NOBODY RENDERS IS SIX TRANSLATED WORDS NOBODY SEES ──────────────────
+  // Ten keys — filterAll, catAll, the five demo category names, startingPrice, prepTime and
+  // newDish — sat in the interface and in all six language blocks with no screen reading any of
+  // them. Sixty values. Two were worse than clutter: `newDish` was added for a badge the owner
+  // then refused, and `prepTime` cost the T4 sweep a translation fix (de: "Prep" → "Zub.") aimed
+  // at a label the dish card does not render. A wording sweep re-reads every one of them, every
+  // run. Retired 2026-09-02 (sweep 8, T5); this stops them coming back.
+  //
+  // Read the SCREENS, not a list: any `t.<key>` or `"<key>"` mention across app/ and components/
+  // counts, so a key reached through a lookup table is still seen. There is no dynamic `t[…]`
+  // access in this codebase — if one is ever added, widen this to accept it rather than deleting it.
+  {
+    const surfaces = [];
+    const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
+      if ([".next", "node_modules", ".git"].includes(e.name)) continue;
+      const f = join(d, e.name);
+      if (e.isDirectory()) walk(f); else if (/\.tsx?$/.test(e.name) && f !== join(root, "lib/i18n.ts")) surfaces.push(read(f.slice(root.length + 1)));
+    } };
+    walk(join(root, "app")); walk(join(root, "components"));
+    const screens = surfaces.join("\n");
+    const dead = keys.filter((k) => !new RegExp(`[.\\[]${k}\\b|["']${k}["']`).test(screens));
+    if (dead.length)
+      fail(`the dictionary declares ${dead.length} key(s) no screen renders — that is ${dead.length * 6} ` +
+           `translated values a wording sweep re-reads every run, and a fix aimed at one of them changes ` +
+           `nothing on screen: ${dead.join(", ")}. Delete the key from the interface and from all six ` +
+           `language blocks, or add the render site that was meant to use it.`);
+    else ok(`every one of the ${keys.length} dictionary keys is rendered by a real screen`);
+  }
 
   // ── the language read must survive a device that refuses storage ──────────────
   // `localStorage` is not always a readable property: a browser set to block all site data throws
