@@ -12,6 +12,9 @@
 // so an owner can only ever hit their own restaurants' cache rows.
 import { after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+// ONE definition of which columns decide the tax block — shared with every other reader of
+// them, so the fingerprint below cannot start watching a different set from the report.
+import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
 const TABLE = "owner_analytics_cache";
 
@@ -266,12 +269,46 @@ export async function cachedOwnerPayload<T extends object>(opts: {
   return { ...payload, cachedAt: now, cached: false };
 }
 
+// ── A FINGERPRINT THAT WATCHES ONLY THE ORDERS MISSES A SETTINGS CHANGE (T11 item 17, 2026-09-01)
+//
+// Both change-detectors below ask "have the ORDERS moved?". They never ask "has the restaurant's
+// TAX CONFIGURATION moved?" — and the Tax report is built from both. So when the rate is changed,
+// a tax line is edited, or a restaurant moves to the composition scheme, the stored snapshot is
+// left alone: revalidate() sees the same fingerprint, re-stamps `computed_at` and returns WITHOUT
+// recomputing. On a quiet restaurant that can hold the old rate on a GST document indefinitely.
+//
+// MEASURED 2026-09-01. price_tax_mode in the database read `excl`, and the cached report answered
+//   composition = true · rate 0 · components 0
+// while a forced read answered
+//   composition = false · rate 5 · components 2
+// Only pressing Refresh fixed it. This is the per-restaurant form of the scar already written down
+// as "the fingerprint watches data, not definitions" — the global cache version cannot fix it,
+// because the definition that moved belongs to ONE restaurant.
+//
+// So the configuration rides along in the fingerprint. It is a few short columns on an indexed
+// primary key, read only on the paths that already recompute (the cold path and the background
+// revalidate), never on a plain cached read — and one definition of WHICH columns, shared with
+// every other reader of them (lib/tax.ts → TAX_SETTINGS_COLUMNS), so this cannot drift either.
+async function taxConfigPart(ids: string[] | null): Promise<string> {
+  try {
+    let q = sb.from("settings").select(`restaurant_id, ${TAX_SETTINGS_COLUMNS}`);
+    if (ids && ids.length) q = q.in("restaurant_id", ids);
+    const { data, error } = await q.limit(500);
+    if (error || !data) return "";
+    // Sorted by id so a scope's member order can never change the fingerprint on its own.
+    return "|cfg:" + [...data]
+      .sort((a2, b2) => String(a2.restaurant_id).localeCompare(String(b2.restaurant_id)))
+      .map((r) => `${r.restaurant_id}:${r.price_tax_mode ?? ""}:${r.tax_rate ?? ""}:${JSON.stringify(r.tax_components ?? null)}`)
+      .join(";");
+  } catch { return ""; }        // a fingerprint that cannot be read must not fail the request
+}
+
 // Cheap change-detector for a scope+window (migration 196 SQL fn). Returns null on error so
 // a fingerprint failure just means "treat as changed" (safe: at worst a needless recompute).
 export async function ordersFingerprint(ids: string[] | null, from: string, to: string): Promise<string | null> {
   const { data, error } = await sb.rpc("lfh_owner_orders_fingerprint", { p_ids: ids, p_from: from, p_to: to });
   if (error) return null;
-  return typeof data === "string" ? data : null;
+  return typeof data === "string" ? data + (await taxConfigPart(ids)) : null;
 }
 
 // Cheaper change-detector for WIDE, MONTH-bucket MONEY reports (mig 202). Derives the same
@@ -282,5 +319,5 @@ export async function ordersFingerprint(ids: string[] | null, from: string, to: 
 export async function reportMonthFingerprint(ids: string[] | null, from: string, to: string): Promise<string | null> {
   const { data, error } = await sb.rpc("lfh_owner_report_month_fingerprint", { p_ids: ids, p_from: from, p_to: to });
   if (error) return null;
-  return typeof data === "string" ? data : null;
+  return typeof data === "string" ? data + (await taxConfigPart(ids)) : null;
 }
