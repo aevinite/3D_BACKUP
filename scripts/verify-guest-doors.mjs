@@ -576,6 +576,29 @@ flush();
 }
 
 flush();
+
+// ── AN ORDER ALREADY SENT IS NOT A CANCELLED ORDER (T4 s8, item 2) ────────────────────────────────
+// The ✕, the dim background and the phone's back button all call the gate's close(), which reported
+// { ok:false, reason:"cancelled" }. fireDone is once-only and components/CartPanel.tsx deregisters
+// its listener on the first result carrying action:"order" — so an order that then landed in the
+// kitchen could never say so. The basket kept every dish and the diner placed it again.
+{
+  say("\n8) An order already on its way is not reported as cancelled");
+  check("the gate knows when one of its two irreversible sends is outstanding",
+    /const inFlight = useRef\(0\);/.test(gate) && /inFlight\.current\+\+;/.test(gate) && /inFlight\.current--;/.test(gate));
+  check("…and close() stays quiet while one is",
+    /if \(inFlight\.current === 0\) fireDone\(\{ ok: false, reason: "cancelled"/.test(gate));
+  check("placing the order runs through that guard",
+    /guarded\(\(\) => placeSessionOrderSafe\(/.test(gate));
+  check("…and so does saving it to the phone, which is just as final",
+    /guarded\(\(\) => enqueueGuestOrder\(/.test(gate));
+  check("…and calling a waiter, both live and saved",
+    /guarded\(\(\) => callWaiterSession\(/.test(gate) && /guarded\(\(\) => enqueueGuestCall\(/.test(gate));
+  check("a refusal the diner must read re-opens the sheet, which may have been dismissed mid-send",
+    (gate.match(/setOpen\(true\); setStep\("blocked"\)/g) || []).length === 2);
+  check("the basket still deregisters on the first ORDER result, which is why the gate must not spend it",
+    /if \(d\?\.action !== "order"\) return;/.test(cart) && /removeEventListener\("lfh:session-done", onDone\)/.test(cart));
+}
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
