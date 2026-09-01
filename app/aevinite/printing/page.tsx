@@ -317,7 +317,13 @@ const PANEL_GROUPS: [ string, string ][] = [
    * Owner, 2026-08-29: *"the person will be only choose for KOT… other user will work as they work
    * — from the manager panel you can print the bill."* Bills and banquet sheets are never dragged
    * onto that person's screen; they stay "whoever presses Print", which is what a restaurant with no
-   * helper has always done. writeMode() enforces that server-side, so this really is one control.
+   * helper has always done. The server enforces that when the route is saved, so this really is one
+   * control.
+   *
+   * (Said `writeMode()` until 2026-08-31. There is no printing MODE any more — another lane removed the
+   * global toggle and migration 372 dropped the dead `printing.mode` key, because each paper's route
+   * already carries its own answer: a computer, a screen, or nobody. A comment naming a function that
+   * no longer exists sends the next person looking for it.)
    */
   const pickPerson = async (value: string) => {
     if (value === "off") { await saveOff("kot"); return; }
@@ -481,8 +487,11 @@ const PANEL_GROUPS: [ string, string ][] = [
               belongs to the other mode. That is the UI skill's progressive-disclosure rule, and it is
               also just what he asked for in his own words.
 
-              The toggle is not cosmetic: writeMode() rewrites the three paper lines into the new
-              mode's shape, so the board and the paper can never say different things. */}
+              ⚠️ THERE IS NO LONGER A MODE TOGGLE (2026-08-31). Another lane removed it and migration
+              372 dropped the dead `printing.mode` key: each paper line answers for itself — a
+              computer, a screen, or nobody — so a global mechanism switch was a second way to say the
+              same thing. This paragraph described what the toggle did while it existed; kept as the
+              record of why the screen looks the way it does, in the past tense. */}
           {/* ── PRINTING IS OFF: everything below is dead, and it LOOKS dead ─────────────────
               Owner, 2026-08-29: "if the printing is off, grey out the stuff which is at the bottom.
               This is the basic thing I don't have to tell you." Right — a screen that lets you set a

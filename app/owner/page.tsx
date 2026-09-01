@@ -1513,9 +1513,29 @@ export default function OwnerDashboard() {
           "— · — · ₹0, 0 orders today · — · —". A confident zero beside four honest dashes reads as
           "you took nothing today", which is the opposite of what is true. It says what the others
           say, and the "live" pill goes with it — there is nothing live to point at. */}
+      {/* ── "₹0" BESIDE "79 ORDERS TODAY" READ AS A BUG, AND IT ISN'T ONE (owner, 2026-08-31 —
+          item 26) ─────────────────────────────────────────────────────────────────────────────────
+          Seen on his own screen during the T20 sweep's visual pass: the tile said ₹0 with
+          "79 orders today" directly underneath. Both numbers are CORRECT and they always were —
+          `revenueToday` counts only bills that have been PAID (the mig-113 paid-only rule that every
+          money figure in this product follows), so a lunch where all 79 orders are still sitting open
+          on tables genuinely is ₹0 collected. But it is the tile he glances at most, and two numbers
+          that look like they are arguing cost him a second of doubt every single time.
+          So the sub-line says which of the two things is true, in his own plain words:
+            · orders, nothing paid yet  → "79 orders today · nothing paid yet"
+            · orders, some paid         → "79 orders today"  (unchanged — the figure explains itself)
+            · no orders at all          → "no orders yet today"  (rather than "0 orders today", which
+                                          is the same fact stated as a statistic)
+          NO NEW QUERY. It is derived from the two numbers the overview payload already carries, so
+          this costs nothing — which is the whole reason it is done here and not in the route. */}
       <Kpi k="Today so far" onOpen={offNote ? undefined : () => setTileOpen("today")} v={offNote ? "—" : todayRev} money compact
         loading={!offNote && !ov} pill={offNote ? undefined : "● live"}
-        sub={offNote ? offSub : `${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
+        sub={offNote ? offSub
+          : todayOrd === 0 ? "no orders yet today"
+          // "216 orders today · nothing paid yet" wrapped with "yet" alone on the second line of a
+          // ~180px tile (seen in the shot). Same fact, eight characters shorter, one clean wrap.
+          : todayRev === 0 ? `${todayOrd} order${todayOrd === 1 ? "" : "s"}, none paid yet`
+          : `${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
       <Kpi k="Expenses" onOpen={offNote ? undefined : () => setTileOpen("expenses")} v={offNote ? "—" : expensesOut} money compact loading={!offNote && !kMain}
         sub={offNote ? offSub
           : foodLost > 0 && staffOut > 0 ? "staff pay + food lost"

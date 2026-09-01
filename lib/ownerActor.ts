@@ -35,13 +35,18 @@ export function actorIsRawId(actor: string | null | undefined): boolean {
 
 /** What to PRINT in the person column: the name we were given, or "—" when all we have is an id. */
 export function actorLabel(actor: string | null | undefined): string {
-  if (!actor) return "—";
-  return actorIsRawId(actor) ? "—" : actor;
+  // TRIMMED FIRST (sweep 7 · T14 round 2, owner 2026-09-01). `!actor` is false for `"  "`, so a
+  // name recorded as nothing but spaces slipped through as an empty string and the person column
+  // rendered blank — no name, no em dash, nothing to read. Same fault T14 fixed on the Customers
+  // page in the same round (`named()`), found by driving a complaint with `raised_by: "  "`.
+  const a = (actor ?? "").trim();
+  if (!a) return "—";
+  return actorIsRawId(a) ? "—" : a;
 }
 
 /** What to put in that cell's tooltip, so an id is traceable without being on screen. */
 export function actorTitle(actor: string | null | undefined): string | undefined {
-  if (!actor) return undefined;
+  if (!(actor ?? "").trim()) return undefined;
   return actorIsRawId(actor)
     ? `Recorded without a name — the panel logged an internal reference (${actor}).`
     : undefined;

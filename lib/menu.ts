@@ -384,7 +384,39 @@ export const CARD_COLUMNS =
 // Returns null when we can't tell (read failed, or the restaurant has no category rows at
 // all). Callers MUST treat null as "don't filter": filtering on an empty set would blank
 // the entire menu, which is far worse than showing one extra dish.
+// TWO CALLERS, ONE READ — AND DELIBERATELY NO CACHE (sweep #7 T2, 2026-09-01 — the owner's item 12).
+//
+// Both readers of a dish page ask this same question: getMenuItem (the dish being opened) and
+// getMenuItems (the light list behind "You might also like" and the prev/next arrows). The dish
+// page fires them together, so the SAME query went to the SAME table twice, in the same tick, with
+// identical arguments. Measured on one dish open: `categories select=slug` appeared 4× where every
+// other read appeared 2× — and the 2× is React's development double-invoke, so that really was two
+// callers each asking twice.
+//
+// WHY `inflight` ALONE, AND NO TTL. getSettings above solves its own duplication with inflight AND
+// a short cache, and copying both here would have been the obvious move — but it would have been
+// wrong. A cache in front of a breadcrumb is the known way these updates die (mig 299), and T13
+// already lost this exact fight for settings: the guest menu's `menu` breadcrumb calls
+// refreshMenu(), which reads back through here, so an 8-second cache would have let a
+// switched-off category keep showing its dishes for up to 8 seconds after the owner switched it
+// off — a bug I would have introduced while saving one read.
+//
+// The measured problem was two callers in ONE TICK, and sharing the in-flight promise fixes exactly
+// that, with no staleness at all: the moment the request settles the map is cleared, so the next
+// read is a real read. No invalidator is needed, and none is exported, because there is nothing
+// held to invalidate.
+const catSetInflight = new Map<string, Promise<Set<string> | null>>();
+
 async function activeCategorySlugs(restaurantId: string): Promise<Set<string> | null> {
+  const pending = catSetInflight.get(restaurantId);
+  if (pending) return pending;  // another caller is asking this very second — share the answer
+  const p = fetchActiveCategorySlugs(restaurantId)
+    .finally(() => { catSetInflight.delete(restaurantId); });
+  catSetInflight.set(restaurantId, p);
+  return p;
+}
+
+async function fetchActiveCategorySlugs(restaurantId: string): Promise<Set<string> | null> {
   const { data, error } = await supabase
     .from("categories")
     .select("slug")

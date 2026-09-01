@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { canonPayMethod } from "@/components/owner/Charts";
 import { buildFiling, splitTax, taxableFor, exemptIsMaterial } from "@/lib/taxFiling";
+import { DAYPARTS, WEEKDAY_SHORT, WEEKDAY_FULL, istWeekday } from "@/components/owner/reports/kit";
+import { classifyMenu, type MI } from "@/components/owner/reports/DishReports";
 import type { ExportTable, ExportCol } from "@/components/owner/ownerReportDoc";
 
 // Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
@@ -24,6 +26,29 @@ const inr = (n: number) => {
 const nfmt = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
 /** "8 PM" — the one clock this console writes (mirrors hour12 on the dashboard). */
 const hour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
+// ── MERGE BY CANONICAL METHOD, DON'T JUST RELABEL (T11 sweep #7, 2026-08-27) ─────────────────
+// The database groups the settlement by the RAW `payment_method` string, so one method stored
+// with two casings arrives as two rows — French House really holds both "Cash" and "cash". The
+// day sheet (2026-08-17) and the Payments table and the donut all merge them; the EXPORT ran the
+// raw rows through canonPayMethod for the LABEL and stopped, which is the exact bug that was
+// fixed on screen. So the downloaded file listed
+//     Cash,274,316864
+//     Cash,2,525
+// two lines apart (they sort by amount), where the screen shows one row of ₹3,17,389 — and anyone
+// pivoting the CSV by method in a spreadsheet got two "Cash" groups. The totals always
+// reconciled, which is why nobody noticed. Merge FIRST, then filter and sort, so a method split
+// across two casings can never be dropped in halves.
+const mergePays = <T extends { method: unknown; revenue: number; orders: number }>(rows: T[]) => {
+  const by = new Map<string, { method: string; revenue: number; orders: number }>();
+  for (const p of rows) {
+    const method = canonPayMethod(String(p.method ?? ""));
+    const row = by.get(method) || { method, revenue: 0, orders: 0 };
+    row.revenue += Number(p.revenue) || 0;
+    row.orders += Number(p.orders) || 0;
+    by.set(method, row);
+  }
+  return [...by.values()].sort((a, b) => b.revenue - a.revenue);
+};
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
@@ -76,7 +101,15 @@ const INV_KINDS = new Set(["invstock", "invpurchases", "invusage", "invwaste", "
 // everywhere else in these exports.
 const q2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
-export type SectionMeta = { label: string; kind: string };
+export type SectionMeta = {
+  label: string;
+  /** the payload SHAPE (money / hourly / dishes …) */
+  kind: string;
+  /** WHICH BODY is on screen. Several bodies share one shape — by-hour and times-of-day are both
+   *  "hourly", day-of-week and average-bill are both "money" — and branching on the shape alone
+   *  wrote the wrong report under the right heading (T11 round 2, 2026-09-01). */
+  body?: string;
+};
 export type SectionCtx = {
   meta: SectionMeta; data: Payload; restName: string; periodLabel: string;
   isTax?: boolean;   // the Tax/GST report → append the CGST/SGST split table
@@ -93,11 +126,82 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
   const { meta, data } = c;
   const grain = data.bucket || "day";
   const title = `${meta.label} — ${c.restName} — ${c.periodLabel}`;
+  // ── THE FOUR THAT SHARE A SHAPE WITH ANOTHER REPORT ────────────────────────────────────────
+  // Measured on 2026-09-01, 30 days, French House. Each file was headed with the right report and
+  // filled with a different one:
+  //   Times of day    → 24 hourly rows instead of Morning / Afternoon / Evening / Late night
+  //   Day of week     → dated by-period rows instead of Monday…Sunday
+  //   Which dishes earn → the plain dish list, with the Star/Workhorse/Puzzle/Dog grouping — the
+  //                       entire point of that report — dropped
+  //   Average bill    → the by-period table WITHOUT the Avg bill column it is named after
+  // Each one below rebuilds exactly what the screen shows, from the same shared groupings.
+  if (meta.body === "daypart") {
+    const hrs = (data.rows ?? []) as { hour: number; orders: number; revenue: number }[];
+    const byHour = new Map(hrs.map((h) => [h.hour, h]));
+    const parts = DAYPARTS.map((p2) => {
+      let rev = 0, orders = 0;
+      for (const h of p2.hours) { const r = byHour.get(h); if (r) { rev += r.revenue; orders += r.orders; } }
+      return { label: p2.label, rev, orders };
+    });
+    const totalRev = parts.reduce((a2, p2) => a2 + p2.rev, 0);
+    const totalOrd = parts.reduce((a2, p2) => a2 + p2.orders, 0);
+    return [{
+      title, head: ["Day part", "Orders", "Revenue", "% share", "Per order"], cols: ["text", "num", "money", "pct", "money"],
+      rows: [
+        ...parts.map((p2) => [p2.label, p2.orders, Math.round(p2.rev),
+          totalRev ? Math.round((p2.rev / totalRev) * 1000) / 10 : 0, p2.orders ? Math.round(p2.rev / p2.orders) : 0] as (string | number)[]),
+        ["Total", totalOrd, Math.round(totalRev), 100, totalOrd ? Math.round(totalRev / totalOrd) : 0],
+      ],
+    }];
+  }
+  if (meta.body === "weekday") {
+    const m = (data.rows ?? []) as MoneyRow[];
+    const by = new Map<string, { rev: number; orders: number; days: number }>();
+    for (const r of m) {
+      const wd = istWeekday(r.bucket);
+      const cur = by.get(wd) || { rev: 0, orders: 0, days: 0 };
+      cur.rev += r.revenue; cur.orders += r.paidOrders; cur.days += (r.revenue > 0 || r.paidOrders > 0) ? 1 : 0;
+      by.set(wd, cur);
+    }
+    const rows = WEEKDAY_SHORT.map((nm) => ({ nm, ...(by.get(nm) || { rev: 0, orders: 0, days: 0 }) }));
+    const allRev = rows.reduce((a2, r) => a2 + r.rev, 0);
+    const allDays = rows.reduce((a2, r) => a2 + r.days, 0);
+    return [{
+      title, head: ["Day", "Days counted", "Paid bills", "Revenue", "% of week", "Avg / day"],
+      cols: ["text", "num", "num", "money", "pct", "money"],
+      rows: [
+        ...rows.map((r) => [WEEKDAY_FULL[r.nm], r.days, r.orders, Math.round(r.rev),
+          allRev ? Math.round((r.rev / allRev) * 1000) / 10 : 0, r.days ? Math.round(r.rev / r.days) : 0] as (string | number)[]),
+        ["Total", allDays, rows.reduce((a2, r) => a2 + r.orders, 0), Math.round(allRev), 100,
+          allDays ? Math.round(allRev / allDays) : 0],
+      ],
+    }];
+  }
+  if (meta.body === "menu") {
+    const { dishes, totalQty, totalRev } = classifyMenu((data.rows ?? []) as MI[]);
+    const LABEL: Record<string, string> = { star: "Star", workhorse: "Workhorse", puzzle: "Puzzle", dog: "Dog" };
+    return [{
+      title, head: ["Dish", "Group", "Sold", "% units", "Sales", "% sales"],
+      cols: ["text", "text", "num", "pct", "money", "pct"],
+      rows: [
+        ...[...dishes].sort((a2, b2) => b2.revenue - a2.revenue).map((d) => [
+          d.title, LABEL[d.klass] || d.klass, d.qty, Math.round(d.qtyShare * 1000) / 10,
+          Math.round(d.revenue), Math.round(d.revShare * 1000) / 10] as (string | number)[]),
+        ["Total", "", totalQty, 100, Math.round(totalRev), 100],
+      ],
+    }];
+  }
   if (meta.kind === "money" || meta.kind === "daysummary") {
     const m = (data.rows ?? []) as MoneyRow[]; const t = data.totals;
-    const head = ["Period", "Orders", "Paid", "Item sales", "GST", "Discount", "Total collected", "Cancelled", "Lost value"];
-    const rows: (string | number)[][] = m.map((r) => [c.bucketLabel(r.bucket, grain), r.orders, r.paidOrders, Math.round(r.subtotal), Math.round(r.tax), Math.round(r.discount), Math.round(r.revenue), r.cancelledOrders, Math.round(r.cancelledValue)]);
-    if (t) rows.push(["Total", t.orders, t.paidOrders, Math.round(t.subtotal), Math.round(t.tax), Math.round(t.discount), Math.round(t.revenue), t.cancelledOrders, Math.round(t.cancelledValue)]);
+    // The Average-bill report shows an extra "Avg bill" column on screen — the one figure the
+    // report is named after — and the file was leaving it out.
+    const avg = meta.body === "avgbill";
+    const head = ["Period", "Orders", "Paid", "Item sales", "GST", "Discount", "Total collected",
+      ...(avg ? ["Avg bill"] : []), "Cancelled", "Lost value"];
+    const rows: (string | number)[][] = m.map((r) => [c.bucketLabel(r.bucket, grain), r.orders, r.paidOrders, Math.round(r.subtotal), Math.round(r.tax), Math.round(r.discount), Math.round(r.revenue),
+      ...(avg ? [r.paidOrders ? Math.round(r.revenue / r.paidOrders) : 0] : []), r.cancelledOrders, Math.round(r.cancelledValue)]);
+    if (t) rows.push(["Total", t.orders, t.paidOrders, Math.round(t.subtotal), Math.round(t.tax), Math.round(t.discount), Math.round(t.revenue),
+      ...(avg ? [t.paidOrders ? Math.round(t.revenue / t.paidOrders) : 0] : []), t.cancelledOrders, Math.round(t.cancelledValue)]);
     const out: ExportTable[] = [{ title, head, rows }];
 
     // ── THE DAY SHEET PRINTS WHAT THE DAY SHEET SHOWS (T5 sweep, 2026-08-11) ──────────────
@@ -121,8 +225,7 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       out.push({ title: `${meta.label} — where the money came from`, head: ["Line", "Amount"], cols: ["text", "money"], rows: flow });
 
       if (data.payments?.length) {
-        const pays = data.payments.map((x) => ({ method: canonPayMethod(String(x.method ?? "")), revenue: x.revenue, orders: x.orders }))
-          .filter((x) => x.orders > 0).sort((a, b) => b.revenue - a.revenue);
+        const pays = mergePays(data.payments).filter((x) => x.orders > 0);
         const paid = pays.reduce((a, x) => a + x.revenue, 0);
         if (pays.length) out.push({
           title: `${meta.label} — settlement (how the money arrived)`,
@@ -177,7 +280,22 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
   }
   if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Dish sales (GST included)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
   if (meta.kind === "categories") return [{ title, head: ["Category", "Qty sold", "Category sales (GST included)"], rows: ((data.rows ?? []) as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, Math.round(r.revenue)]) }];
-  if (meta.kind === "payments") return [{ title, head: ["Method", "Bills", "Revenue"], rows: ((data.rows ?? []) as { method: string; revenue: number; orders: number }[]).map((r) => [canonPayMethod(r.method), r.orders, Math.round(r.revenue)]) }];
+  if (meta.kind === "payments") {
+    // The same merged, biggest-first list the on-screen table and the donut show — plus the
+    // Total row and the % share the screen carries, so the file and the screen are one report.
+    const pays = mergePays((data.rows ?? []) as { method: string; revenue: number; orders: number }[]);
+    const paid = pays.reduce((a, x) => a + x.revenue, 0);
+    const bills = pays.reduce((a, x) => a + x.orders, 0);
+    return [{
+      title, head: ["Method", "Bills", "Revenue", "Share", "Avg bill"], cols: ["text", "num", "money", "pct", "money"],
+      rows: [
+        ...pays.map((r) => [r.method, r.orders, Math.round(r.revenue),
+          paid > 0 ? Math.round((r.revenue / paid) * 100) : 0,
+          r.orders ? Math.round(r.revenue / r.orders) : 0] as (string | number)[]),
+        ["Total", bills, Math.round(paid), 100, bills ? Math.round(paid / bills) : 0],
+      ],
+    }];
+  }
   // "8 PM", not "20:00" — the whole console (hour12(), the Studio's hourLabel, the Busy-times
   // tiles) speaks the 12-hour clock, and only the EXPORT of it spoke 24-hour (T5 sweep, 2026-08-11).
   if (meta.kind === "hourly") return [{ title, head: ["Hour", "Orders", "Revenue"], rows: ((data.rows ?? []) as { hour: number; orders: number; revenue: number }[]).map((r) => [hour12(r.hour), r.orders, Math.round(r.revenue)]) }];

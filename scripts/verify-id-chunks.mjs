@@ -307,6 +307,26 @@ for (const [rel] of Object.entries(ESTATE_READERS).concat([["lib/liveBoard.ts"]]
   }
 }
 
+// ── A FAN-OUT WIDTH IT CANNOT READ RUNS ONE AT A TIME, NEVER NONE (T25 round 3, item 38) ─────────
+//
+// `Math.min(Math.max(1, NaN), n)` is NaN, and `Array.from({ length: NaN })` is an EMPTY array. So
+// lib/mapLimit.ts, the fan-out under every estate-wide read, spawned NO workers when its width was not
+// a number — and returned a full-length list of nothing, with no error. MEASURED before the fix:
+// `mapLimit([1,2,3], NaN, fn)` → `[null, null, null]`, and fn never called.
+//
+// Every caller passes FANOUT or FANOUT_HEAVY today, so nothing was broken on the floor. It is guarded
+// because "silently nothing, with a 200" is the exact failure this whole guard exists to prevent.
+{
+  const src = readFileSync(join(ROOT, "lib/mapLimit.ts"), "utf8");
+  const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+  if (!/Number\.isFinite\(asked\)/.test(code)) {
+    bad.push("lib/mapLimit.ts no longer checks that its width is a NUMBER before building workers — a NaN width spawns none, and the fan-out returns a full-length list of nulls with no error (measured 2026-08-31)");
+  }
+  if (!/:\s*1;/.test(code) || !/const width =/.test(code)) {
+    bad.push("lib/mapLimit.ts no longer falls back to a width of 1 — the fallback is what turns an unreadable width into slow-but-correct instead of silent-and-empty");
+  }
+}
+
 if (bad.length) {
   console.log(`\n✗ verify:id-chunks — ${bad.length} problem(s):\n`);
   for (const b of bad) console.log("  · " + b);

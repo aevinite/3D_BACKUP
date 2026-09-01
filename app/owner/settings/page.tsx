@@ -10,6 +10,10 @@ import { asSuffix } from "@/lib/ownerPin";
 
 type Module = { restaurant_id: string; name: string; key: string; label: string; enabled: boolean };
 type PrintingState = {
+  // WHICH restaurant this answer is about. The route answers for exactly one, and this page renders a
+  // LIST — see the note in the map below for what went wrong when the two were not matched up.
+  // Optional so an older deployment's answer still parses; an absent id means "don't apply it".
+  restaurantId?: string;
   allowed: boolean; on: boolean; waiting: number;
   computers: { name: string; connected: boolean; secondsAgo: number | null; printers: string[] }[];
   routes: { kind: string; printer: string | null; computer: string | null; connected: boolean }[];
@@ -183,8 +187,17 @@ export default function OwnerSettings() {
             belongs to the computer the printer is attached to. */}
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
           {data.printing.map((p) => {
-            // Only for the restaurant this page is scoped to — /api/owner/printing answers for one.
-            const kotHelper = printing && printing.routes.find((r) => r.kind === "kot" && r.printer) || null;
+            // ── ONLY FOR THE RESTAURANT THIS ANSWER IS ACTUALLY ABOUT (T20 round 2, 2026-08-31) ────
+            // /api/owner/printing answers for ONE restaurant, and this is a LIST — so looking the
+            // answer up once and using it for every row named one restaurant's printer and computer
+            // on another restaurant's line. The comment here already said "answers for one"; the code
+            // then used it for all of them.
+            // The route now echoes `restaurantId`, so the match is explicit. `!printing.restaurantId`
+            // keeps an older deployment's answer working (it falls back to the screen branch, which
+            // is what a restaurant with no helper shows anyway) rather than trusting it blindly.
+            const kotHelper = (printing && printing.restaurantId === p.restaurant_id)
+              ? (printing.routes.find((r) => r.kind === "kot" && r.printer) || null)
+              : null;
             return (
             <div key={p.restaurant_id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", border: "var(--border)", borderRadius: 9, padding: "8px 11px" }}>
               <b style={{ fontSize: 13 }}>{p.name || "This restaurant"}</b>
@@ -204,13 +217,30 @@ export default function OwnerSettings() {
                 </>
               ) : (
                 <>
+                  {/* "both" is GONE, not defaulted (owner, 2026-08-30). It meant "the kitchen prints
+                      and the counter picks up what it leaves" — the backup screen, which was removed —
+                      and the route stopped being able to answer it, so this branch was dead code that
+                      still LOOKED like a supported answer. */}
                   <span className="adm-muted" style={{ fontSize: 12 }}>
-                    tickets print on {p.target === "counter" ? "the counter screen" : p.target === "both" ? "the kitchen screen (counter as backup)" : "the kitchen screen"}
+                    tickets print on {p.target === "counter" ? "the counter screen" : "the kitchen screen"}
                   </span>
+                  {/* ── "GONE QUIET" IS A WARNING, NOT A FOOTNOTE (owner, 2026-08-31 — item 29) ─────
+                      This said "printing now: Kitchen screen · gone quiet" with the second half in
+                      muted grey, i.e. styled as background detail. It is not background detail: the
+                      screen that is supposed to be printing has not checked in for three minutes, so
+                      tickets may not be coming out of the printer at all. That is the one thing on
+                      this card worth interrupting somebody for.
+                      The helper branch above already gets this right — it says "asleep, tickets
+                      waiting", naming the CONSEQUENCE rather than the symptom. This branch now matches
+                      it in both wording and weight: amber, and it says what it means for the food. */}
                   <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
                     {p.station
-                      ? <>printing now: <b>{p.station}</b>{p.stale ? <span className="adm-muted"> · gone quiet</span> : null}</>
-                      : <span className="adm-muted">no screen has taken it yet</span>}
+                      ? p.stale
+                        ? <>printing now: <b>{p.station}</b>
+                            <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}> · gone quiet for 3+ min — tickets may not be printing</span>
+                          </>
+                        : <>printing now: <b>{p.station}</b></>
+                      : <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}>no screen has taken it yet — tickets are waiting</span>}
                   </span>
                 </>
               )}
@@ -219,11 +249,39 @@ export default function OwnerSettings() {
         </div>
         {printing ? (
           <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Where your paper comes out right now</div>
+            {/* ── AND SAY WHICH RESTAURANT THIS BOX IS ABOUT (T20 round 4, 2026-09-01) ────────────
+                Item 30 stopped a printing ROW borrowing another restaurant's printer. This box below
+                the rows had the same fault one level up and kept it: everything in it — the waiting
+                count, the printer names, the computers — comes from /api/owner/printing, which answers
+                for exactly ONE restaurant, and nothing here named it. Under a one-row list that is
+                fine. Under a TWO-row list the owner reads "4 things are waiting to print" and cannot
+                tell whose four.
+                Found by MAKING the two-row case reachable: printing was switched on for a second
+                restaurant, the page was rendered, and the box sat under both names describing one.
+                (Round 3 recorded this case as unreachable on today's data; round 4's job was to reach
+                it.) The route already echoes `restaurantId` for item 30, so the name is free. */}
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+              Where your paper comes out right now
+              {(data.printing?.length ?? 0) > 1 && printing.restaurantId ? (
+                <span className="adm-muted" style={{ fontWeight: 600 }}>
+                  {" · "}{data.printing.find((x) => x.restaurant_id === printing.restaurantId)?.name
+                    ?? data.restaurants.find((x) => x.id === printing.restaurantId)?.name
+                    ?? "one of your restaurants"}
+                </span>
+              ) : null}
+            </div>
             <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+              {/* ── THE TWO SENTENCES READ AS AN ARGUMENT (owner, 2026-08-31 — item 29) ──────────
+                  The row above says "printing now: Kitchen screen" and this said "No computer is set
+                  up to print yet". Both are true and they are about different things — which screen is
+                  taking the paper, versus whether a dedicated printer computer exists — but read one
+                  after the other they sound like the page contradicting itself. Seen in a screenshot
+                  during the T20 sweep's visual pass.
+                  Reworded so the pair is ONE statement: the second sentence now explains the first
+                  rather than appearing to deny it. */}
               {printing.computers.length
                 ? "A printer program on your own computer does this — no screen has to be open, and nothing you close can stop it."
-                : "No computer is set up to print yet, so a screen has to do it. Ask us to set one up and this becomes automatic."}
+                : "A screen is doing this because no printer computer is set up here yet — so whichever screen has taken it has to stay open. Ask us to set one up and it becomes automatic."}
             </p>
             {printing.computers.map((c) => (
               <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "5px 0" }}>

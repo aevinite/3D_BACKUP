@@ -65,6 +65,25 @@ export const CATEGORIES: ReportCat[] = [
   { key: "inventory", label: "Inventory & stock",   icon: "fa-boxes-stacked", keys: ["inventory"] },
 ];
 
+// ── The groupings a report SHOWS, in one place ──────────────────────────────
+// These used to live only inside app/owner/reports/page.tsx, so the EXPORT could not reach
+// them — which is why "Times of day" downloaded the by-hour table and "Day of week"
+// downloaded the dated by-period one (T11 round 2, 2026-09-01). One definition, two readers:
+// the screen and the file can no longer describe different groupings under the same heading.
+export const DAYPARTS: { label: string; icon: string; hours: number[] }[] = [
+  { label: "Morning",    icon: "fa-mug-hot",   hours: [5, 6, 7, 8, 9, 10, 11] },
+  { label: "Afternoon",  icon: "fa-sun",       hours: [12, 13, 14, 15, 16] },
+  { label: "Evening",    icon: "fa-cloud-sun", hours: [17, 18, 19, 20, 21] },
+  { label: "Late night", icon: "fa-moon",      hours: [22, 23, 0, 1, 2, 3, 4] },
+];
+export const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+export const WEEKDAY_FULL: Record<string, string> = {
+  Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday",
+};
+/** A bucket instant → its IST weekday. IST, or a non-IST reader groups a day into the wrong one. */
+export const istWeekday = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", { weekday: "short", timeZone: "Asia/Kolkata" });
+
 // ── Shared formatting ───────────────────────────────────────────────────────
 export const money = (n: number) => inr(n);
 export const nfmt = (n: number) => (Number(n) || 0).toLocaleString("en-IN");
@@ -230,6 +249,26 @@ export function ReportsStyles() {
       .rs-crumb { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
       .rs-crumb button { background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 0; cursor: pointer; }
       .rs-crumb button:hover { color: var(--accent); }
+      /* The no-internet note (owner, 2026-08-30 — item 5). Amber, at the TOP, above everything
+         else on the page. Deliberately quiet: one row, the same border weight as the print-blocked
+         bar next to it, and it does not steal the accent colour that means "this is your money". */
+      .rs-offnote { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 13px;
+        border: 1px solid var(--adm-warn, #d97706); border-radius: 10px; color: var(--text);
+        background: color-mix(in srgb, var(--adm-warn, #d97706) 9%, transparent); font-size: 13px; line-height: 1.45; }
+      .rs-offnote > span { flex: 1; min-width: 0; }
+      .rs-offnote > i { color: var(--adm-warn, #d97706); flex-shrink: 0; }
+      /* On paper it is meaningless — the sheet is printed from whatever was on screen. */
+      @media print { .rs-offnote { display: none !important; } }
+      @media (max-width: 640px) { .rs-offnote { flex-wrap: wrap; } .rs-offnote > span { flex: 1 1 100%; } }
+
+      /* A dash where a figure would be, when there is no connection and nothing saved. Same size
+         and weight as the number it replaces, so the card does not jump; muted, so it reads as
+         "not known" rather than as a value. */
+      .rs-ov-dash { color: var(--muted); }
+      /* No chart region at all when there is nothing to draw — a 210px void under a row of
+         dashes reads as "it failed to paint" rather than as "there is nothing here". */
+      .rs-ov-blank { min-height: 0; }
+
       .rs-back { display: inline-flex; align-items: center; gap: 7px; background: none; border: none; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; padding: 4px 0; cursor: pointer; transition: color .14s ease; }
       .rs-back:hover { color: var(--accent); }
       .rs-back i { font-size: 11px; }
@@ -491,6 +530,40 @@ export function ReportsStyles() {
         /* The hub's Report button and the Export menu are the shared .adm-btn, which the whole
            admin console uses — so raise it only INSIDE the Reports actions, never globally. */
         .rs-actions .adm-btn, .rs-actions button { min-height: 44px; }
+
+        /* ── …AND THE CONTROLS THAT FIX MISSED (T11 sweep #7, 2026-08-27) ───────────────────
+           The block above raised the control STRIP and stopped there, so on the same A35
+           screen the row of buttons at the top was 44px while everything used to MOVE
+           between views was still small. Re-measured, every screen, both skins:
+             · "← All reports"      23px — the only way back to the hub on the page
+             · the sub-tab strip    34px — Revenue / Average bill / How many orders,
+                                           Items / Categories / Which dishes earn,
+                                           By hour / Times of day / Day of week, Pay / Performance
+             · "Full report →"      22px — the day sheet's Settlement drill
+             · the overlay ✕        32px — closes the Discounts / Cancellations sheet
+           Nothing was BROKEN here either (the taps land — measured 2026-08-18), so this is
+           consistency, not a repair: one screen should not offer two sizes of the same
+           gesture. Navigation only. The in-chart Bar/Line pill and the Items By revenue /
+           By quantity pill are deliberately NOT raised — they sit inside a panel header, and
+           making them 44px would add ~26px to every chart card on a 780px-tall phone. That is
+           a look decision, so it goes to the owner rather than into this block.
+           min-height again, never padding, so nothing re-flows sideways; >640px untouched. */
+        .rs-back { min-height: 44px; padding: 4px 2px; }
+        .rs-subtab { min-height: 44px; }
+        .rs-drill { min-height: 44px; padding: 3px 12px; }
+        .rs-ovl-x { width: 44px; height: 44px; }
+
+        /* ── …AND THE TWO PILLS INSIDE THE PANEL HEADERS (owner, 2026-08-30 — item 7) ────────
+           These were deliberately left out of the block above and put to him as a choice,
+           because they sit INSIDE a card header and 44px there makes every chart card taller
+           on a 780px phone. He said do it. Measured before: the Bar / Line pill 22px on every
+           chart card, and Items → "By revenue / By quantity" 38px — the last two things on
+           Reports smaller than a thumb.
+           min-height only, and the pill's own padding is untouched, so the desktop console
+           is again pixel-for-pixel unchanged. .rs-metric is declared in DishReports.tsx and
+           InventoryReports.tsx rather than here; this sets a property NEITHER of them sets,
+           so there is nothing for the cascade to fight over. */
+        .rs-tc-toggle button, .rs-metric button, .rs-ov-toggle button { min-height: 44px; }
       }
 
       /* The masthead and closing note are invisible on screen; they only paint in @media print. */

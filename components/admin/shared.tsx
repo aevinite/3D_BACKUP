@@ -191,7 +191,7 @@ export const ACT_LABEL: Record<string, string> = {
   // ── sign-in safety ────────────────────────────────────────────────────────
   login_failed: "Wrong password", login_blocked: "Sign-in blocked", login_denied: "Sign-in refused",
   rate_limited: "Limit reached", rate_limit_edit: "Edited a limit rule", rate_limit_allow: "Allowed through a limit",
-  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_lockout_clear: "Cleared a lockout",
+  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_unblock_denied: "Said no to an unblock request", admin_lockout_clear: "Cleared a lockout",
   blocklist_add: "Added to the blocklist", blocklist_remove: "Removed from the blocklist",
   // ── the admin console ─────────────────────────────────────────────────────
   restaurant_create: "Created a restaurant", restaurant_settings: "Changed settings",
@@ -336,6 +336,28 @@ export const timeAgo = (iso: string) => {
   if (s < 3600) return Math.floor(s / 60) + "m ago";
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
   return Math.floor(s / 86400) + "d ago";
+};
+
+/** The one timezone this product reasons in. Exported so no screen declares its own copy. */
+export const IST = "Asia/Kolkata";
+
+// istDate — "4 Jul 27". ONE reading of a DATE for the admin console, beside timeAgo (how long ago)
+// and fullWhen (exactly when, to the minute).
+//
+// Two copies of this existed by the end of the T18 sweep #7 run: Customers had one for a guest's
+// first/last visit, and Platform revenue grew a second when its Next-due column stopped printing the
+// database's raw `2027-07-04`. Two copies of a date format is how two screens come to write the same
+// day differently, which is the thing the second one was written to stop — so it is shared before it
+// gets a chance to drift.
+//
+// A BARE `YYYY-MM-DD` IS PINNED TO IST FIRST. `new Date("2027-07-04")` is UTC midnight, which is
+// 05:30 IST — harmless here, but the same value read in a timezone behind UTC lands on the 3rd. A
+// full timestamp is passed through untouched, because it already carries its own offset.
+export const istDate = (iso: string | null | undefined) => {
+  if (!iso) return "—";
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + "T00:00:00+05:30" : iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
 };
 
 // fullWhen — the exact, human date + time for a log-detail popup (e.g. "Fri, 25 Jul

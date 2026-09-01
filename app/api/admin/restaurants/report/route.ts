@@ -90,7 +90,10 @@ export async function GET(req: NextRequest) {
     one(() => sb.from("waiter_calls").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso)),
     one(() => sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso)),
     one(() => sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open")),
-    one(() => sb.from("staff_users").select("role").eq("restaurant_id", rid).eq("active", true)),
+    // Bounded (T20 sweep #7, 2026-08-27): `staffTotal` is this read's own row count, so PostgREST's
+    // cap was quietly deciding the figure. 2000 matches /api/admin/users' cap and is far above any
+    // real restaurant's roll.
+    one(() => sb.from("staff_users").select("role").eq("restaurant_id", rid).eq("active", true).limit(2000)),
     one(() => sb.from("menu_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid)),
     one(() => sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: rid, p_from: fromIso, p_to: toIso })),
   ]);

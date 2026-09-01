@@ -29,6 +29,7 @@
     "verify:write-paths": "node scripts/verify-write-paths.mjs",
     "verify:live-rush": "node scripts/verify-manager-live-rush.mjs",
     "verify:owner-reports": "node scripts/verify-owner-reports.mjs",
+    "verify:rpc-contract": "node scripts/verify-rpc-contract.mjs",
     "verify:scoped-reads": "node scripts/verify-scoped-reads.mjs",
     "verify:inventory-window": "npx esbuild scripts/verify-inventory-window.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-inventory-window.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-inventory-window.mjs",
     "verify:owner-home": "npx esbuild scripts/verify-owner-home.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-owner-home.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-owner-home.mjs",

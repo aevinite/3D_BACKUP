@@ -18,6 +18,7 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, detailForList, isManagerPinRow, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
@@ -102,6 +103,7 @@ const REMOVAL_REASON: Record<string, string> = {
 export default function OwnerAuditLogs() {
   // Admin-in-one-restaurant scope pin (?rid=) — rides on every call as ?scope= so a second
   // tab's shared act-as cookie can't repoint this one. Null for a real owner.
+  const router = useRouter();
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
 
@@ -279,6 +281,22 @@ export default function OwnerAuditLogs() {
   useActiveAutoRefresh(refreshView, 60_000);
 
   const bothOff = audDisabled && actDisabled;
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31, extended 2026-09-01) ────
+  // *"it will not even show that option… it will not only show 'unable to access', that there is a
+  //  feature which contains inventory."* That is R36 from the page side: *"owner can't know which
+  // option are not given to them, only admin should know that."*
+  // The sidebar already hides a withheld section from a real owner (`OwnerShell` →
+  // `if (!on && (!adminViewing || simulated)) return null`). This page did not — reached by a typed
+  // URL or an old bookmark it printed "Audit & logs isn't enabled for your restaurant
+  // — contact Aevidine", which names a
+  // section he has not been given and tells him who to ask for it. The card is DELETED, not
+  // restyled (the standing "a new way replaces the old one" rule), and he goes back to his
+  // dashboard. `replace`, not `push`, so Back does not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner, so the X-ray
+  // view still opens every section — its nav says so outright.
+  // Done on his say-so of 2026-09-01 ("okay, give me permission") after T14 shipped the same change
+  // on Customers, Feedback & complaints, Inventory and Manager mode. Six screens, one rule.
+  useEffect(() => { if (bothOff) router.replace("/owner"); }, [bothOff, router]);
 
   return (
     <>
@@ -293,9 +311,9 @@ export default function OwnerAuditLogs() {
         </div>
       )}
 
-      {bothOff ? (
-        <div className="adm-card"><div className="adm-empty">Audit &amp; logs isn&rsquo;t enabled for your restaurant — contact Aevidine.</div></div>
-      ) : view === "audit" && !audDisabled ? (
+      {/* Nothing at all while the redirect above runs — never a sentence naming a section he has
+          not been given (R36). */}
+      {bothOff ? null : view === "audit" && !audDisabled ? (
         <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} counts={audCounts} kind={audKind} setKind={pickAudKind} onReload={loadAudit} onAnswer={answerMade} onOpenRemoval={setRemovalId}
           page={audPage} pages={audPages} total={audTotal} onPage={setAudPage} scopeName={pickName} />
       ) : (

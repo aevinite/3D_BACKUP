@@ -41,6 +41,14 @@ export function getStoredSession(table?: string): StoredSession | null {
     if (!raw) return null;
     // It's stored as text, so JSON.parse turns it back into an object.
     const s = JSON.parse(raw) as StoredSession;
+    // ── PARSED IS NOT THE SAME AS VALID (T25 round 3, item 35, 2026-08-31) ──────────────────────
+    // The try/catch below only catches a THROW, and `JSON.parse` is happy to return a number, a
+    // string, null or an array. Measured with `42` in the slot: this returned the number 42, so a
+    // caller reading `.token` got `undefined` and called an RPC with `p_token: undefined` — a refusal
+    // a guest sees as a broken table rather than as "join again". Only a note that actually carries a
+    // token is a session.
+    if (!s || typeof s !== "object" || Array.isArray(s)) return null;
+    if (typeof s.token !== "string" || !s.token) return null;
     if (table && s.table !== table) return null; // token belongs to another table
     return s;
   } catch {

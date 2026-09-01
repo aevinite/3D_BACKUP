@@ -34,7 +34,8 @@ Six things changed, and each is guarded:
    service-role module into the browser bundle and make `verify:static` refuse the page.
 4. **One question a line, three answers.** A line used to carry six controls; five kinds of paper
    made thirty. Now: *A computer* · *A screen* · *Nobody*, and only what that answer needs appears
-   under it. Backup printer, paper size, exact person and exact PC live behind **More**.
+   under it. Paper size, exact person and exact PC live behind **More**. (There is no backup printer
+   any more — see the note under the route table.)
 5. **`via: "off"` is a real, saved answer.** An empty line and a deliberate no used to look
    identical. They say different things now — and for **kitchen slips** the answer also writes
    `settings.auto_print_kot` through `syncKotSwitch()`, because mig 335's trigger reads that column.
@@ -188,13 +189,20 @@ setting would have silently removed their safety net. So the meaning moved first
 |---|---|
 | `kitchen` | `{ via:"screen", panel:"kitchen" }` |
 | `counter` | `{ via:"screen", panel:"manager" }` |
-| `both` | `{ via:"screen", panel:"kitchen", backupPanel:"manager", backupAfterMs:30000 }` |
+| `both` | `{ via:"screen", panel:"kitchen" }` — see the note below |
 
-**`backupPanel` is new** — a screen route can now name a second screen that may take a slip the first
-has left sitting, which is the mirror of `backupAgent` on a computer route. `screenMayPrint` answers
-`{ ok:true, backup:true, afterMs }` for it, and the **age** window is what holds the second screen
-back, not a refusal. A screen cannot be its own backup (an age window nothing can satisfy looks like a
-rule and is not one).
+⚠️ **`both` NO LONGER EXISTS, and neither does any backup** (owner, 2026-08-30): *"What is this backup
+printer and all that? We don't even need the backup printer — if there is a backup printer, remove it.
+And if anything fails it should show me or the person: manager, owner, everyone should get a
+notification that this has failed."* `backupPanel`, `backupAgent`, `backupPrinter`, `backupAfterMs`,
+`SCREEN_BACKUP_MS` and `BACKUP_AFTER_MS_DEFAULT` were removed across nine files, and a restaurant that
+had answered `both` simply keeps the kitchen screen. A silent second attempt somewhere else is paper
+appearing in a room nobody is standing in, while the restaurant never learns its printer is broken.
+
+**What replaced it is telling somebody.** A ticket that gives up after five tries files a
+`printer_events` row of kind `auto_fail` against the printer that failed and sends an owner alert, so
+the restaurant learns the printer is broken instead of the paper quietly coming out elsewhere.
+(This paragraph was still describing the backup as current on 2026-08-31 — T25 round 3, item 39.)
 
 Migration 369 is **idempotent** and only touches restaurants that have **not** answered the Kitchen
 slips line — a newer decision is never overwritten. **The column stays** (schema changes here are
@@ -272,7 +280,7 @@ No password in it, like the helper: the person signs in once and that Chrome pro
 
 ### The screens, on both sides
 Card 3 was three papers × (two shape buttons + computer + printer + paper + screen + person + device
-+ two backup pickers) with **five** Save buttons — about twenty controls, all on screen whether they
++ two backup pickers — both since REMOVED with the backup printer itself, 2026-08-30) with **five** Save buttons — about twenty controls, all on screen whether they
 applied or not. Now: **one toggle → only that mode's setup → the three papers**, each just
 *On / Nobody* plus a printer in computer mode. Measured on screen: **22 controls in computer mode, 14
 in screen mode** on the console, and **14** on the manager panel. Refinements behind **More**. The two
@@ -406,6 +414,7 @@ written into the guide; the other stays documented as the fallback.
 1. **Basket door** — mig 341, `lib/printHelpers.ts`, the agent API. Proved with a fake helper.
 2. **The helper scripts** — macOS `.command`, Windows `.bat`, Linux `.sh`, by hand, autostart.
 3. **Admin → Printing** — a whole new menu: agents, install steps, routes, backups, test print.
+   (The *backups* part of that menu is gone: the backup printer was removed on 2026-08-30.)
 4. **Panels** — status in manager/owner Settings → Printing and the kitchen 🖨 sheet; panels stop
    printing a kind a helper owns; every screen says where the paper went.
 5. **Bills + banquet through the basket**, with today's browser window kept as the automatic
@@ -449,7 +458,9 @@ if that computer is off the notes simply wait.
 
 two computers whose printers share a NAME → one slip, to the addressed one · one code copied onto a
 second machine → flagged, and the ticket still only picked up once · a refusal → back in the basket
-with the reason on it · a backup printer → refused before its window, given the ticket after it · an
+with the reason on it · ~~a backup printer → refused before its window, given the ticket after it~~
+(that case no longer exists — the backup printer was removed on 2026-08-30, and a ticket that gives up
+now files a printer problem and alerts the owner instead) · an
 order deleted before printing → prints nothing and is closed, not retried for ever · auto-print
 switched off mid-service → the helper idles and the ticket waits, then prints when switched back on ·
 a removed computer → cannot even ask.

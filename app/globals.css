@@ -4849,6 +4849,33 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
    the phone's screen edge (audit 2026-07-08). */
 .adx-grid2col > * { min-width: 0; }
 
+/* ── ADMIN · ANALYTICS · "GOING QUIET" ROW ─────────────────────────────────────────────────────
+   Five columns on a desktop, folded into three lines on a phone. Measured at 390px before this
+   existed: the restaurant-name column collapsed to nothing, the change badge was cut in half and
+   both buttons sat off the right edge. A "does the page overflow?" check said everything was fine,
+   because .adm-logwrap scrolls sideways and the row was clipped INSIDE its own wrapper.
+   The fold is the same one the Bills Change log uses -- named grid areas, the head row hidden, and
+   ::before labels on the numbers -- because a second way of folding a table would be one too many. */
+.qt-row { grid-template-columns: 1.5fr 90px 90px 120px 1fr; align-items: center; }
+.qt-row > .q-name   { min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-row > .q-before { text-align: right; font-variant-numeric: tabular-nums; }
+.qt-row > .q-now    { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qt-row > .q-chg    { text-align: right; }
+.qt-row > .q-act    { display: flex; gap: 6px; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .adm-logwrap:has(.qt-row) { overflow-x: visible; }
+  .qt-row { min-width: 0; grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas: "name name" "before now" "chg act"; gap: 4px 10px; padding: 11px 12px; }
+  .qt-row.head { display: none; }
+  .qt-row > .q-name   { grid-area: name; white-space: normal; }
+  .qt-row > .q-before { grid-area: before; text-align: left; }
+  .qt-row > .q-now    { grid-area: now; }
+  .qt-row > .q-chg    { grid-area: chg; text-align: left; }
+  .qt-row > .q-act    { grid-area: act; }
+  .qt-row > .q-before::before { content: "was "; opacity: .65; font-weight: 400; }
+  .qt-row > .q-now::before    { content: "now "; opacity: .65; font-weight: 400; }
+}
+
 /* Dashboard KPI stat strip — GLOBAL (not styled-jsx): its cells are <Link>s, and styled-jsx
    can't scope a component's rendered <a>, so the scoped rules never applied and the label+value
    ran together ("RESTAURANTS9 active…"). These global rules give clean, separated stat tiles
@@ -4865,6 +4892,40 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .cmd-strip .cell-link:hover .cell-go { opacity: 1; transform: translateX(0); }
 .cmd-manage { color: var(--accent); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .cmd-manage:hover { text-decoration: underline; }
+/* A DIVIDER MUST SEPARATE THE THINGS IT SITS BETWEEN (owner, 2026-08-31 — item 7).
+   This strip is a WRAPPING flexbox, and the dividers used to be `border-right` on every cell,
+   cleared only on :last-child. A border-right is only ever right for a cell that has a neighbour to
+   its RIGHT — so the moment the cells wrap, the last cell on each row draws a line down the card's
+   own edge, dividing nothing. Measured at 360x780 in BOTH skins before this: 4 cells on 4 separate
+   rows, 3 of them still drawing a right border, the line stopping short before "Orders today". It
+   reads as a half-drawn table. At 600px, two across, the same fault appears once instead of three
+   times — so it was never about one phone width.
+   A breakpoint cannot fix that, because the browser decides where to wrap: my first attempt put the
+   swap at 430px and 400px turned out to still be two-across, which just moved the wrong border
+   somewhere else. So the line is not drawn by the cells at all now. The strip shows a 1px gap and
+   the CARD's background shows through it — a separator that is automatically correct in every wrap,
+   horizontally between neighbours and vertically between rows, at any width, forever.
+   Same fault, same shape, on the twin `.rev-strip` (Platform revenue) — fixed there 2026-08-20 with
+   a breakpoint, which has this same hole at its two-across widths. Left alone deliberately: that is
+   Platform revenue's strip and its own screen's call. The ledger row for this one is P08587, which
+   had been ticked green off a mis-read screenshot and now carries the measurement. */
+/* `padding: 0` is repeated here on purpose. The strip is `class="cmd-strip adm-card"`, and
+   `.adm-card`'s own `padding: 14px 16px` is declared LATER in this file, so it was quietly winning
+   over the `padding: 0` in the .cmd-strip rule above — measured: 17px of card showing left and
+   right, 15px top and bottom. Invisible while that band was the card's own colour; the moment the
+   card's background became the divider colour it drew a grey ring round the whole strip. The twin
+   `.rev-strip` never had this fight because its rule lives in a styled-jsx block that loads after
+   this file. Each cell keeps its own 12px/18px padding, so the words move about 2px and the strip
+   now fills its card edge to edge exactly as `.rev-strip` does.
+   TWO classes, not one: the element is `class="cmd-strip adm-card"`, and a single-class rule loses
+   to `.adm-card` on source order no matter where it is put. `.cmd-strip.adm-card` wins on weight,
+   so this cannot come undone by someone moving a block around. */
+.cmd-strip.adm-card { gap: 1px; padding: 0; background: var(--border-c, #e5e7eb); overflow: hidden; }
+.cmd-strip .cell { border-right: 0; background: var(--card); }
+/* The hover tint is translucent, so it has to be LAYERED over the card colour rather than replacing
+   it — otherwise the strip's own background shows through the hovered cell and the divider grid
+   appears to swallow it. */
+.cmd-strip .cell-link:hover { background: linear-gradient(var(--muted2), var(--muted2)), var(--card); }
 @media (max-width: 640px) { .cmd-strip .cell { flex-basis: 45%; } }
 
 /* Health page's status pills (latency / db / realtime). */

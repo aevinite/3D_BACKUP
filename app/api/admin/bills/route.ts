@@ -140,8 +140,28 @@ export async function GET(req: NextRequest) {
   // screen whose job is proving no sale quietly vanished. Rows-free head count, so it is cheap.
   let delCountQ = sb.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
   if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
+  // THREE DIFFERENT EVENTS SIT UNDER ONE WORD, AND THE TILE SAID ONE NUMBER (owner, 2026-08-31 —
+  // he asked why this screen has a "Deleted" bucket at all when a bill can never be deleted).
+  // Measured on backup: 2,956 tombstoned bills, of which **16** had a person's name against them.
+  //   · 1,752 carry migration 291's own words, "every order on this bill was deleted" — the DATABASE
+  //     tombstoning a bill because its last dish came off, one at a time. Nobody deleted the bill.
+  //   · the rest have neither a person nor a reason, which is the exact fingerprint mig 291's header
+  //     describes: "scripts stamping deleted_at directly through the service role — not from the
+  //     product."
+  // The headline stays the true total, because compliance §3.0 wants every tombstone counted. What
+  // changes is that the tile stops presenting three things as one, using columns already stored —
+  // no policy is decided here and nothing is renamed. Two rows-free head counts.
+  const EMPTIED_REASON = "every order on this bill was deleted";
+  let delEmptiedQ = sb.from("sessions").select("id", { count: "exact", head: true })
+    .not("deleted_at", "is", null).eq("delete_reason", EMPTIED_REASON);
+  let delByPersonQ = sb.from("sessions").select("id", { count: "exact", head: true })
+    .not("deleted_at", "is", null).not("deleted_by", "is", null);
+  if (rid && isUuid(rid)) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
 
-  const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000), delCountQ]);
+  const [sessQ, restsQ, delQ, delEmptiedR, delPersonR] = await Promise.all([
+    sq, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000),
+    delCountQ, delEmptiedQ, delByPersonQ,
+  ]);
   if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
   // ALL THREE READS ARE CHECKED, because on this screen a silent zero is the failure mode that
   // matters most (this file's own header: "THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY
@@ -253,7 +273,12 @@ export async function GET(req: NextRequest) {
   const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
   return NextResponse.json({
     bills, counts, total: bills.length, restaurants,
-    deletedTotal: delQ.count ?? 0, nextBefore, generatedAt: new Date().toISOString(),
+    deletedTotal: delQ.count ?? 0,
+    // null, never 0, when the split could not be read — "I don't know" and "none" must not look
+    // alike on this screen. The tile falls back to its old single sentence.
+    deletedEmptied: delEmptiedR?.error ? null : (delEmptiedR?.count ?? null),
+    deletedByPerson: delPersonR?.error ? null : (delPersonR?.count ?? null),
+    nextBefore, generatedAt: new Date().toISOString(),
   });
 }
 
@@ -305,7 +330,13 @@ async function postImpl(req: NextRequest) {
       await sb.from("sessions").update({ deleted_at: new Date().toISOString(), deleted_by: "Admin", delete_reason: reason || null }).eq("id", sessionId).is("deleted_at", null);
     }
     invalidateFloor(rid);
-    await logAction("admin", "order_delete", { restaurant_id: rid, table_number: sess.table_number, detail: `admin deleted bill${sess.bill_no ? ` #${sess.bill_no}` : ""}${reason ? ` — ${reason}` : ""}` });
+    // SIGNED (owner, 2026-08-31 — item 11). `logAction` takes an actor and this route never passed
+    // one, so `staff_actions.actor` was NULL and the Change log's "By" column read "—" for every
+    // admin action — on the one screen built for spotting bills being quietly removed, the strongest
+    // removals in the product were the rows with nobody's name against them. "Admin" is not a new
+    // word: it is exactly what this same handler already writes into the permanent removals record
+    // (softDeleteOrders) and onto a credit note, so the two records now name the same actor.
+    await logAction("admin", "order_delete", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin deleted bill${sess.bill_no ? ` #${sess.bill_no}` : ""}${reason ? ` — ${reason}` : ""}` });
     return NextResponse.json({ ok: true, deleted: res.deleted });
   }
 
@@ -342,7 +373,7 @@ async function postImpl(req: NextRequest) {
       });
     }
     invalidateFloor(rid);
-    await logAction("admin", "bill_restore", { restaurant_id: rid, table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
+    await logAction("admin", "bill_restore", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
     return NextResponse.json({ ok: true, restored: res.restored });
   }
 
@@ -357,7 +388,7 @@ async function postImpl(req: NextRequest) {
     // Code first, prose as the fallback for a database without mig 278 (see that migration's header).
     if (error) return NextResponse.json({ error: (error.code === "LFH02" || /cannot exceed/i.test(error.message)) ? "The credit can't be more than the bill total." : error.message }, { status: error.code === "LFH02" ? 409 : 400 });
     const row = Array.isArray(data) ? data[0] : data;
-    await logAction("admin", "credit_note", { restaurant_id: rid, table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
+    await logAction("admin", "credit_note", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
     return NextResponse.json({ ok: true, creditNo: row?.credit_no });
   }
 

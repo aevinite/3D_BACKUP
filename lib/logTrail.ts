@@ -273,6 +273,7 @@ const PLACE: Record<string, Place> = {
   rate_limit_allow: { area: "Sign-in & security", screen: "Limits" },
   admin_block: { area: "Sign-in & security", screen: "Blocked devices" },
   admin_unblock: { area: "Sign-in & security", screen: "Blocked devices" },
+  admin_unblock_denied: { area: "Sign-in & security", screen: "Blocked devices" },
   admin_lockout_clear: { area: "Sign-in & security", screen: "Blocked devices" },
   blocklist_add: { area: "Sign-in & security", screen: "Blocked devices" },
   blocklist_remove: { area: "Sign-in & security", screen: "Blocked devices" },

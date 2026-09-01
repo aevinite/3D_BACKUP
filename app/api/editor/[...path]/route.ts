@@ -1557,14 +1557,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip")
+        // ── payment_method IS READ FOUR TIMES BELOW, SO IT HAS TO BE ASKED FOR (T11 sweep #7, 2026-08-30)
+        // It was missing from this column list while the code underneath read `o.payment_method` four
+        // times, so every one of those reads was `undefined`:
+        //   · the till breakdown labelled EVERY bill not settled in parts "Not recorded" — measured on
+        //     2026-08-26, this report said "Not recorded ₹1,932 / 4 bills" for the same business day and
+        //     the same window (05:00 IST) where the owner's day sheet said "Cash ₹1,932 / 4 bills". The
+        //     money and the bill count were right; only the NAME was wrong — and at day close "nobody
+        //     wrote down how this was paid" is an action item that was not real.
+        //   · `onHouseCount` / `onHouseNet` could never be anything but zero, so an on-the-house bill
+        //     fell into paidCount/paidNet instead — counted as money collected when nothing was.
+        // One column, and it is a short string on a query that already pages the day's orders.
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip,payment_method")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ, cntQ, numAggQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, openSessQ, cntQ, numAggQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1575,8 +1586,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // not count the drawer against it, while a split-settled bill showed only "Split". Reversed
         // legs are read too, and reported separately — a reversal is never hidden, only excluded
         // from what was collected (mig 285). Scoped, explicit columns, limited.
-        sb.from("session_payments").select("amount,method,reversed_at").eq("restaurant_id", rid)
+        sb.from("session_payments").select("session_id,amount,method,reversed_at").eq("restaurant_id", rid)
           .gte("created_at", since).limit(20000),
+        // Which of today's tables are STILL SITTING — see the till count below. Ids only, one
+        // indexed filter, and only the open ones, so it is a few rows however busy the day was.
+        sb.from("sessions").select("id").eq("restaurant_id", rid).is("closed_at", null).limit(5000),
         // IS EVERY NUMBER ACCOUNTED FOR? (owner, 2026-08-06 — "show gaps on the Z-report".)
         //
         // Gaps in the bill/invoice series are CORRECT here: a number retires on a void and is never
@@ -1690,7 +1704,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       //     session_payments, so the legs speak for it;
       //   · every other paid bill states its own method on the order rows.
       // Reversed legs are excluded from what was collected and reported on their own line.
-      const legs = (must(legQ) || []) as { amount: number; method: string | null; reversed_at: string | null }[];
+      const legs = (must(legQ) || []) as { session_id: string | null; amount: number; method: string | null; reversed_at: string | null }[];
       const byMethod = new Map<string, { amount: number; count: number }>();
       const addMethod = (m: string, amt: number) => {
         const key = (m || "").trim() || "Not recorded";
@@ -1698,10 +1712,38 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         row.amount = r2(row.amount + amt); row.count += 1;
         byMethod.set(key, row);
       };
-      let reversedNet = 0, reversedCount = 0;
+      // ── A LEG ON A BILL THAT IS NOT SETTLED IS NOT TODAY'S TAKINGS (T11, 2026-09-01) ────────
+      // The stated side below already skips a bill that is still open. The legs loop skipped
+      // nothing but a reversal, so a table that had paid HALF and was still sitting there was
+      // counted as money collected — and the till list totalled more than the day's takings
+      // printed above it. Measured in one moment on French House: the list came to ₹14,301
+      // against a day that had taken ₹12,369, and the difference was a single open table with
+      // three payment legs on it (session 7e261230).
+      //
+      // The money is REAL — it is in the drawer — so it is not thrown away. It moves to its own
+      // line, exactly the way a reversed leg already has one, so BOTH numbers are true at once:
+      // the method list totals the day's takings, and the drawer still reconciles. Excluding it
+      // silently would have left a manager counting cash over by that amount with nothing on the
+      // report to explain it.
+      // THE TEST IS "IS THE TABLE STILL SITTING", NOT "IS THE BILL STAMPED PAID". Three shapes,
+      // and only the first is money that has not been collected yet:
+      //   · a table STILL OPEN that has paid part of its bill — the cash is in the drawer, but the
+      //     bill is not finished, so it is not today's takings;
+      //   · a bill settled in parts, all real methods — closed, collected, belongs in the list;
+      //   · a bill closed with one part on a TAB (mig 364) — the session is CLOSED and the collected
+      //     parts really were collected today, even though `payment_status` is deliberately not
+      //     'paid' because money that never arrived is never claimed. Keying off payment_status
+      //     would have thrown this cash out of the till count, which is why the test is the session.
+      const openSessions = new Set<string>(
+        ((must(openSessQ) || []) as { id: string }[]).map((r2s) => String(r2s.id)),
+      );
+      let reversedNet = 0, reversedCount = 0, asideNet = 0, asideCount = 0;
       for (const l of legs) {
         const amt = Number(l.amount) || 0;
         if (l.reversed_at) { reversedNet = r2(reversedNet + amt); reversedCount += 1; continue; }
+        if (l.session_id && openSessions.has(String(l.session_id))) {
+          asideNet = r2(asideNet + amt); asideCount += 1; continue;
+        }
         addMethod(String(l.method || ""), amt);
       }
       // The order-stated side, per BILL so a multi-order table counts once, and net of its discount
@@ -1722,6 +1764,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         .map(([method, v]) => ({ method, amount: r2(v.amount), bills: v.count }))
         .sort((a, b) => b.amount - a.amount);
       const paymentsTotal = r2(payments.reduce((a, p2) => a + p2.amount, 0));
+      // `aside` mirrors `reversed`: money that moved but is not part of today's takings.
 
       const plat = (must(platQ) || []) as any[];
       // Exclude cancelled AND still-"new" (pending, unaccepted) delivery orders — the same
@@ -1829,7 +1872,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           onHouseCount, onHouseNet: r2(onHouseNet) },
         // The till count: what came in and how. `total` is the sum of the methods, so a manager can
         // check it against paidNet — a gap means a bill was settled without a method recorded.
-        payments: { rows: payments, total: paymentsTotal, reversed: r2(reversedNet), reversedCount },
+        payments: { rows: payments, total: paymentsTotal, reversed: r2(reversedNet), reversedCount, aside: r2(asideNet), asideCount },
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
         invoicesVoided: (must(voidQ) || []).length,
@@ -4983,6 +5026,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           // wrong: it quietly stamped `backupAgent: null` onto every route it saved, and a caller
           // passing a real one would have had it stored and silently ignored. A field that can still
           // be WRITTEN is not a deleted field — it is a deleted field waiting to be read again.
+          // (T25 round 3 found the same two lines independently, an hour later, by re-running four old
+          // ledger rows that were still defending the backup printer — P12488, P27231, P27232, P27586.
+          // Two lanes, one leftover: the guard that now watches every file is verify:print-queue's
+          // twelve-file walk, and verify:print-helper block 8h checks the whole tree including the
+          // panels, with the one named shim.)
           patch = {
             agent: agentId, printer,
             paper: (body as Record<string, unknown>)?.paper ?? undefined,

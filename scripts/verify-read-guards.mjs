@@ -20,6 +20,12 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readRaw = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
 
+// Declared before read(), because read()'s own sanity check reports through it.
+const fails = [];
+const oks = [];
+const ok = (m) => oks.push(m);
+const fail = (m) => fails.push(m);
+
 /**
  * Source with COMMENTS REMOVED.
  *
@@ -28,14 +34,54 @@ const readRaw = (p) => { try { return readFileSync(join(root, p), "utf8"); } cat
  * right code. A guard that greps the raw file therefore fires on the very comment that documents the
  * fix. (Both of this file's rules did exactly that on their first run.) So: strip comments, then
  * grep. The prose is for humans; the check is about what actually executes.
+ *
+ * ── LINE COMMENTS COME OFF FIRST, AND THIS FILE HAD IT BACKWARDS (T20 sweep #7, 2026-08-27) ───────
+ * These files describe themselves in prose, and that prose says things like
+ * "same cookie as every other /api/admin/* route" — a LINE comment containing `/*`. Strip BLOCK
+ * comments first and that `/*` opens one, which then runs to the next real `*\/` further down and
+ * silently swallows every line in between.
+ *
+ * Measured on this branch: `app/api/admin/restaurants/credentials/route.ts` came out of the old
+ * stripper at 1,830 characters instead of 6,888 — SEVENTY-THREE PER CENT of the file gone, including
+ * every read rule 8 below is about. So a check written against that file could only ever pass, which
+ * is worse than not having it: a dead check looks exactly like a satisfied one.
+ *
+ * verify-admin-api-a.mjs hit this on the SAME FILE and wrote the reason into its own header; this
+ * copy of the helper was never corrected. Order fixed, and the sanity check below proves nothing was
+ * eaten rather than trusting the order to stay right.
  */
-const read = (p) => readRaw(p)
-  .replace(/\/\*[\s\S]*?\*\//g, "")            // block comments
-  .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1");  // line comments, without eating a URL's "//"
-const fails = [];
-const oks = [];
-const ok = (m) => oks.push(m);
-const fail = (m) => fails.push(m);
+const read = (p) => {
+  const raw = readRaw(p);
+  const out = raw
+    .replace(/(^|[^:'"`\\])\/\/[^\n]*/gm, "$1")   // line comments FIRST (see the note above)
+    .replace(/\/\*[\s\S]*?\*\//g, "");           // …then block comments
+  return out;
+};
+
+// ── 0 · THE STRIPPER ITSELF, CHECKED AGAINST A FIXTURE (T20 sweep #7, 2026-08-27) ────────────────
+// A ratio ("did this file lose too much?") cannot do this job: these files really are three-quarters
+// prose, so a comment-heavy file and an eaten one look the same. What CAN do it is a fixture — one
+// file known to carry the hazard, and one line of real code near the bottom of it that only survives
+// when line comments come off first.
+//
+// `app/api/admin/restaurants/credentials/route.ts` is that file. Its header says "same cookie as every
+// other /api/admin/* route" — a line comment containing `/*` — and under the old block-comments-first
+// order that `/*` ran to the next real `*\/` and took 73% of the file with it (6,888 chars → 1,830),
+// including `linkQ.error`, which rule 8 below is entirely about. Every check on that file could only
+// ever pass.
+//
+// So: read it through the real helper and assert a late line of its code is still there. If the order
+// regresses, THIS goes red and names why, instead of eight checks quietly agreeing with themselves.
+{
+  const FIXTURE = "app/api/admin/restaurants/credentials/route.ts";
+  const src = read(FIXTURE);
+  if (!readRaw(FIXTURE)) ok(`${FIXTURE} is gone — the stripper fixture needs a new file with "/*" in a line comment`);
+  else if (/linkQ\.error/.test(src) && /genPassword/.test(src)) {
+    ok("the comment stripper reaches the END of a file whose header quotes a \"/api/admin/*\" path");
+  } else {
+    fail(`the comment stripper is eating ${FIXTURE} again — a "/*" inside a line comment opens a block comment when blocks are stripped FIRST, so every rule below that reads this file silently passes. Strip LINE comments first.`);
+  }
+}
 
 // ── 1. the log-visibility switch fails CLOSED ────────────────────────────────────────────────────
 const VIS = read("lib/logVisibility.ts");
@@ -211,6 +257,344 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
     if (/names\.partial/.test(src)) ok(`${p2} says so when it could not read ${what}`);
     else fail(`${p2} drops the name lookup's partial flag — every row would render its restaurant as "—" with nothing saying why (F17)`);
   }
+}
+
+// ── 7 · "COULDN'T READ IT" MUST NOT DECIDE A REFUSAL (T20 sweep #7, 2026-08-27) ─────────────────
+// Rules 1–6 above are all about a wrong NUMBER. This one is about a wrong SENTENCE, and it cost more:
+// a read whose `.error` is dropped makes its variable null, and a handler that then branches on null
+// answers a confident, non-retryable refusal about the person's setup or their scope. Six of those
+// were live in this territory:
+//
+//   · /api/owner/staff  — `payrollByRid()` came back empty on a blip, so `target()` (the front door
+//     for EVERY profile and pay write) refused with "Staff profiles & pay aren't enabled for this
+//     restaurant." 403. Saving a salary during a hiccup was simply lost. This is finding F7 again, on
+//     the read one line below the one F7 fixed.
+//   · /api/owner/staff  — the person read behind reset_password / set_active / set_role /
+//     set_permissions / edit, and the one behind DELETE, both answered "That person isn't on your
+//     staff." 404. F7 fixed the other two reads in the same file and missed these.
+//   · /api/owner/settings PATCH — "This feature isn't enabled for that restaurant." for a switch the
+//     admin genuinely handed over.
+//   · /api/owner/printing — `allowed: false`, which is what a WITHHELD feature looks like, so the
+//     whole card silently vanished (R36 says hide what is withheld; it says nothing about hiding what
+//     we failed to read).
+//   · /api/owner/issues + /api/owner/ratings — a bare `{"error":"not found"}` 404, so a resolve tap or
+//     a reply note disappeared with nothing retryable.
+//
+// Checked by SHAPE: each refusal's own sentence must have a `transient()` / `dbFail(` / 503 answer
+// somewhere between the read and it. Spelling out the sentences means a rename has to come here too,
+// which is the point — these are the words a person reads.
+{
+  const REFUSALS = [
+    ["app/api/owner/staff/route.ts", /payrollByRid/, /Promise<Record<string, boolean> \| null>/,
+      "payrollByRid must be able to say 'I could not check' — an empty map reads as 'this restaurant has no payroll' and refuses a salary save"],
+    ["app/api/owner/staff/route.ts", /isn't on your staff/, /rd\("account"/,
+      "the account-action and delete reads must tell a blip from 'not yours' (F7's third and fourth reads)"],
+    ["app/api/owner/settings/route.ts", /isn't enabled for that restaurant/, /owner\/settings\.moduleGate/,
+      "the module-ladder read must answer for itself before its 403 says the feature is off"],
+    ["app/api/owner/printing/route.ts", /allowed: false/, /transient: true/,
+      "an unreadable printing switch must be a retryable 503, not the same answer as 'withheld'"],
+    ["app/api/owner/issues/route.ts", /"not found"/, /owner\/issues\.lookup/,
+      "the complaint lookup must tell a blip from a missing complaint"],
+    ["app/api/owner/ratings/route.ts", /"not found"/, /owner\/ratings\.lookup/,
+      "the rating lookup must tell a blip from a missing rating"],
+  ];
+  for (const [p3, refusal, guardShape, why] of REFUSALS) {
+    const src = read(p3);
+    if (!src) { fail(`${p3} is missing`); continue; }
+    if (!refusal.test(src)) { ok(`${p3} no longer carries that refusal at all — nothing to guard`); continue; }
+    if (guardShape.test(src)) ok(`${p3}: ${why}`);
+    else fail(`${p3} decides a refusal from a read that no longer answers for itself — ${why}`);
+  }
+}
+
+// ── 8 · A LIST THAT IS THE PAGE, ON THE ADMIN SIDE TOO (T20 sweep #7, 2026-08-27) ────────────────
+// The same shape as rule 5, in the two admin-console answers where an unread companion list turns
+// into a confident claim rather than a shorter page:
+//   · /api/admin/restaurants — a failed `owners` read drew "—" in the Owner column of every
+//     restaurant that HAS one, on the screen where ownership is assigned, with an empty dropdown to
+//     fix it from. A failed `settings` read reported every restaurant as un-set-up.
+//   · /api/admin/restaurants/credentials — a failed `restaurant_owners` read printed a
+//     complete-looking handover sheet with every panel login on it and NO OWNER LOGIN. The admin
+//     hands that sheet to the client.
+{
+  const rests = read("app/api/admin/restaurants/route.ts");
+  if (/unread\.push\("owners"\)/.test(rests) && /unread\.push\("panels"\)/.test(rests)) {
+    ok("admin/restaurants names an unread owners / panels list instead of drawing 'no owner'");
+  } else {
+    fail("admin/restaurants swallows its owners or settings read error again — the Owner column reads '—' for restaurants that have one");
+  }
+  if (/pageAll/.test(rests)) ok("admin/restaurants pages its one-row-per-restaurant lists past PostgREST's cap");
+  else fail("admin/restaurants is back on a plain .select() for the restaurant list — the tail past the row cap disappears");
+
+  const creds = read("app/api/admin/restaurants/credentials/route.ts");
+  if (/linkQ\.error/.test(creds)) ok("the handover sheet refuses rather than printing itself without the owner's login");
+  else fail("the handover sheet ignores its owner-link read again — it would print with no owner login and look complete");
+}
+
+// ── 9 · THE ONE-PRESS PASSWORD RESET STAYS REFUSED MID-SERVICE (owner, 2026-08-31 — item 28) ─────
+// He asked for a single button that gives every login at a restaurant a new password, for a handover,
+// and he was told the cost before it was built: a new password bumps `token_version`, which ends every
+// session that person has — so all of them at once signs out the waiter's tablet and the kitchen screen
+// in the same instant. Fine on a handover morning. On a Friday night it is a floor of staff staring at
+// a login page with food on the pass.
+//
+// So the button exists AND the server refuses while any table is open. That refusal is the whole
+// safety of the feature, it lives in one `if`, and it is exactly the kind of line a later
+// "simplification" removes because the happy path works without it. Checked here, in four parts, so
+// none of them can go quietly:
+//   · the mid-service read happens at all;
+//   · it refuses on a FAILED read too (guessing "nobody is sitting down" from a query that did not
+//     answer is the one direction this must never guess in);
+//   · the refusal is a 409 the screen can show, not a silent skip;
+//   · the one-at-a-time path is untouched, because that is what still works during service.
+{
+  const CRED = "app/api/admin/restaurants/credentials/route.ts";
+  const src = read(CRED);
+  if (!src) fail(`${CRED} is missing`);
+  else if (!/reset_all/.test(src)) {
+    ok("the whole-restaurant password reset is not built here — nothing to guard");
+  } else {
+    const impl = src.slice(src.indexOf("async function resetAll"));
+    if (/from\("sessions"\)[\s\S]{0,200}?\.in\(\s*"status"/.test(impl)) ok("reset_all asks whether the restaurant is mid-service before it touches a password");
+    else fail("reset_all no longer checks for open tables — one press would sign out every screen at a restaurant DURING SERVICE (item 28's whole safety)");
+    if (/openQ\.error[\s\S]{0,140}?return adminFail/.test(impl)) ok("reset_all refuses when it could not tell whether service is on");
+    else fail("reset_all decides 'nobody is sitting down' from a read it did not check — the one direction it must never guess in");
+    if (/reason:\s*"mid_service"[\s\S]{0,120}?status:\s*409/.test(impl)) ok("the mid-service refusal is a 409 with a sentence the console shows");
+    else fail("the mid-service refusal no longer answers a 409 the screen can render — a refusal nobody sees is not a refusal");
+    if (/vaultReady\(\)/.test(impl)) ok("reset_all refuses on a deployment with no credential key, rather than burning every password for nothing");
+    else fail("reset_all no longer checks the credential vault — it would reset every password and be unable to print any of them");
+    // The per-login route must survive: it is the ONLY one that works while the restaurant is serving.
+    if (/const userId = String\(body\.user_id/.test(src)) ok("the one-login-at-a-time reset still exists — the only path that works mid-service");
+    else fail("the single-login reset is gone; during service there would be no way to reset one password at all");
+  }
+}
+
+// ── 10 · AN ANSWER ABOUT ONE RESTAURANT MUST NAME IT (T20 round 2, 2026-08-31) ───────────────────
+// /api/owner/printing answers for exactly ONE restaurant. The owner's Settings page renders a LIST —
+// one printing row per restaurant that has it on — and looked that single answer up ONCE, outside the
+// loop, so the printer and the computer named on row 2 came from whichever restaurant the route had
+// picked. Another tenant's hardware on this tenant's line: the class CLAUDE.md calls a recurring bug.
+//
+// Latent on the dev stack, and only by luck — exactly one restaurant has printing on, and for the
+// two-restaurant diag owner it happens to be `ids[0]`. Measured, not assumed. It stops being latent
+// the day a second restaurant switches printing on.
+{
+  const route = read("app/api/owner/printing/route.ts");
+  const pg = read("app/owner/settings/page.tsx");
+  if (!route || !pg) fail("owner/printing or the owner Settings page is missing");
+  else {
+    if (/restaurantId:\s*target/.test(route)) ok("owner/printing names the restaurant its answer is about");
+    else fail("owner/printing no longer echoes `restaurantId` — the Settings page cannot tell which restaurant its printing answer belongs to, so one restaurant's printer gets named on another's row");
+    if (/printing\.restaurantId\s*===\s*p\.restaurant_id/.test(pg)) ok("the Settings page applies the printing answer ONLY to the row it is about");
+    else fail("the owner Settings page uses one restaurant's printing answer for every row again — another restaurant's printer and computer would appear on this restaurant's line");
+  }
+}
+
+// ── 11 · A CACHED PAYLOAD'S VERSION MOVES WHEN ITS SHAPE DOES (T20 round 2, 2026-08-31) ──────────
+// `cachedOwnerPayload` serves a stored snapshot as-is until its FINGERPRINT moves, and the fingerprint
+// watches DATA, not the shape of the JSON. So adding a field without bumping the key's version means
+// some ranges carry it (uncached) and some do not (snapshot) — a field that exists on Tuesday and not
+// on Wednesday, which is worse for the screen than never having it.
+//
+// Both files already say this in their own comments. It was walked into anyway on 2026-08-31 while
+// adding `window`: the live check found `range=today` carrying it and `range=30d`, served from a
+// snapshot, not. So the pairing is checked here rather than left to whoever remembers the comment.
+{
+  const rep = read("app/api/owner/reports/route.ts");
+  const an = read("app/api/owner/analytics/route.ts");
+  // Each field is paired with the version that must be current for it. Add a row when you add a field.
+  const PAIRS = [
+    [rep, "app/api/owner/reports", /window:\s*\{\s*from,\s*to\s*\}/, /reports:v5:/, "`window` (the resolved from/to)"],
+    [an, "app/api/owner/analytics", /window:\s*\{\s*from,\s*to\s*\}/, /analytics:v6:/, "`window` (the resolved from/to)"],
+  ];
+  for (const [src, name, field, version, what] of PAIRS) {
+    if (!src) { fail(`${name} is missing`); continue; }
+    const hasField = field.test(src);
+    const hasVersion = version.test(src);
+    if (hasField && hasVersion) ok(`${name} carries ${what} AND the cache version that goes with it`);
+    else if (hasField && !hasVersion) fail(`${name} sends ${what} but its cache key version has moved on — a stored snapshot will serve the payload WITHOUT that field, so the screen gets it on some ranges and not others`);
+    else if (!hasField) ok(`${name} no longer sends ${what} — nothing to pair`);
+  }
+}
+
+// ── 12 · ONE IDEA OF WHAT MONTH IT IS, ON THE PLATFORM REVENUE PAGE (T20 round 2, 2026-08-31) ────
+// /api/admin/revenue corrects its YEAR boundary to IST, with the reason on the line ("a UTC year flips
+// ~5.5h late and mismatches the heading") — and left the 12-month chart's window, and the labels built
+// from it, on UTC. Measured: at UTC 2026-08-31T20:00 (IST 1 Sep 01:30) the chart's newest bucket was
+// 2026-08 while the IST month was 2026-09, so the CURRENT MONTH WAS MISSING from the chart for five
+// and a half hours; on 1 January IST it would say the new year while charting December of the old one.
+{
+  const rev = read("app/api/admin/revenue/route.ts");
+  if (!rev) fail("app/api/admin/revenue/route.ts is missing");
+  else {
+    const onNow = [...rev.matchAll(/now\.getUTC(?:Month|FullYear)\(\)/g)].length;
+    if (!onNow) ok("the revenue page builds every month boundary from ONE IST clock");
+    else fail(`the revenue page is back to reading ${onNow} month/year boundar${onNow === 1 ? "y" : "ies"} off the UTC clock while its year boundary is IST — for 5.5h after IST midnight on the 1st the chart loses the current month`);
+    // ── THIS BRANCH WENT SILENT, IN THE GUARD WRITTEN TO CATCH SILENT DRIFT (T20 round 4, 2026-09-01) ──
+    // It used to be `if (<literal 330 * 60000> && …) ok() else if (!istNow) fail()`. Another terminal
+    // then did the RIGHT thing and named the constant — `new Date(now.getTime() + IST_SHIFT_MS)` — so
+    // `istNow` was still there (no fail) and the literal was not (no ok). NEITHER BRANCH RAN. The check
+    // stopped existing and the suite went 66 → 65 with nothing red, which is exactly the "a dead check
+    // looks like a satisfied one" trap this file's own fixture rule exists for.
+    //
+    // Two corrections. First, match the INTENT — an IST clock is +5:30 however it is spelled — instead
+    // of one spelling of it. Second, and more importantly, every path now ends in ok or fail: an
+    // `if / else if` with no final `else` is the SHAPE that lets a check disappear, not a one-off typo.
+    const istShift = /const istNow\s*=\s*new Date\(now\.getTime\(\)\s*\+\s*(?:330\s*\*\s*60000|IST_SHIFT_MS|5\.5\s*\*\s*3600_?000)\)/;
+    if (istShift.test(rev)) ok("…and that clock is IST (+5:30), however the shift is spelled");
+    else if (/istNow/.test(rev)) fail("app/api/admin/revenue has an `istNow` this guard no longer recognises as a +5:30 shift — teach it the new spelling rather than leaving the check silent");
+    else fail("the revenue page no longer has a single IST clock for its month maths");
+  }
+}
+
+// ── 13 · A REMOVAL THAT REMOVED NOTHING MUST NOT BE RECORDED AS ONE (T20 round 3, 2026-09-01) ────
+// "Never log and report a change that didn't happen" has now been applied three times in this
+// territory — the Repair Kit's cancel (item 18), the rate-limit board's Deny (item 16), and the logo
+// removal (item 33). The logo one was found by RUNNING it: the exhaustive pass called DELETE on a
+// restaurant that has never had a logo, and it answered ok, told the console "Logo removed", and
+// wrote **"removed logo" into the activity log for a removal that did not happen**. `logo_url` was
+// already null, the storage folder was empty, and the only artefact of the whole call was a false
+// line in the record.
+//
+// The shape that makes it possible is specific and worth naming: `update({ logo_url: null })` over a
+// row that is ALREADY null succeeds and changes nothing, so "did the write error?" cannot answer
+// "did anything change?". The decision has to come from what was THERE.
+{
+  const logo = read("app/api/admin/restaurants/logo/route.ts");
+  if (!logo) fail("app/api/admin/restaurants/logo/route.ts is missing");
+  else {
+    const del = logo.slice(logo.indexOf("export async function DELETE"));
+    if (/select\("id, logo_url"\)/.test(del) || /logo_url/.test(del.split("logAction")[0])) {
+      ok("the logo removal reads what was THERE before deciding whether anything was removed");
+    } else {
+      fail("the logo removal no longer looks at `logo_url` before claiming one was removed — setting null over null succeeds, so the write's own error cannot tell you whether anything changed");
+    }
+    if (/if \(!exists\.data\.logo_url\)[\s\S]{0,400}?removed: false/.test(del)) {
+      ok("…and it says `removed: false` instead of claiming a removal");
+    } else {
+      fail("the logo removal no longer distinguishes 'there was nothing to remove' from 'I removed it'");
+    }
+    // The audit line must sit AFTER that branch, so a no-op cannot reach it.
+    const noop = del.indexOf("removed: false");
+    const logged = del.indexOf("logAction");
+    if (noop > -1 && logged > noop) ok("…and the audit line is unreachable from the no-op path");
+    else fail("the logo removal's audit line can be reached without anything having been removed");
+  }
+}
+
+// ── 14 · A REFUSED RE-FIRE MUST NOT READ AS A SENT TICKET (T20 round 4, 2026-09-01) ──────────────
+// `lfh_staff_place_order` answers `{ ok:false, reason }` — it does NOT throw — when it declines to
+// place an order: a duplicate inside its 3-second per-table lock (mig 202), a sold-out dish, a dish
+// off the menu, an as-per-MRP line with no price. The Repair Kit inspected only `error`, so every one
+// of those came back `{ ok:true, kot_no:null }`: the console said the order was re-fired, the diary
+// said "new KOT ?", and nothing reached the kitchen. During service that is a person at the pass
+// waiting for food that was never fired — and the Repair Kit is used precisely when service is
+// already going wrong.
+//
+// The editor route has handled it since 2026-08-05 with the reason on the line. This file's own
+// header promises it "reuses the SAME service-role primitives the panels use … so the rules can't
+// drift". The primitive was shared; the rule was not. Found by DRIVING two re-fires three seconds
+// apart, which is exactly what a person does when the first appears to have done nothing.
+{
+  const rep = read("app/api/admin/repair/route.ts");
+  if (!rep) fail("app/api/admin/repair/route.ts is missing");
+  else {
+    const refire = rep.slice(rep.indexOf('op === "refire_order"'), rep.indexOf('op === "unstick_table"'));
+    if (/\.ok === false/.test(refire)) ok("the Repair Kit's re-fire reports a REFUSED order instead of a sent one");
+    else fail("the Repair Kit's re-fire is back to inspecting only `error` — lfh_staff_place_order answers { ok:false } without throwing, so a refused re-fire would report success and no ticket would reach the kitchen");
+    if (/kot_no\b[\s\S]{0,200}?return err\(/.test(refire)) ok("…and a success with no kitchen ticket is not treated as a success");
+    else fail("the Repair Kit's re-fire no longer insists on a kitchen ticket — the ticket is the only proof anything was fired");
+    // Every reason the RPC can give needs a sentence, or the admin gets the fallback for a knowable cause.
+    for (const r of ["duplicate", "sold_out", "unknown_item", "price_required"]) {
+      if (refire.includes(`"${r}"`)) ok(`…and it says what "${r}" means in words`);
+      else fail(`the re-fire lost its sentence for the "${r}" refusal — the admin would get a generic message for a knowable cause`);
+    }
+  }
+}
+
+// ── 15 · A TABLE THAT WAS ALREADY CLOSED WAS NOT UNSTUCK BY THIS (T20 round 4, 2026-09-01) ───────
+// `closeSession` never reads the session's current status — it sets `status:'closed'` over whatever
+// is there, which SUCCEEDS on an already-closed session. So unsticking the same table twice answered
+// ok and wrote a second `repair_unstick_table` line, recording a repair that repaired nothing.
+// Fourth time this rule has been applied in this territory (items 16, 18, 33, and this).
+{
+  const rep = read("app/api/admin/repair/route.ts");
+  if (rep) {
+    const un = rep.slice(rep.indexOf('op === "unstick_table"'), rep.indexOf('op === "edit_time"'));
+    if (/select\("id, table_number, status"\)/.test(un)) ok("the Repair Kit's unstick reads whether the table is already closed");
+    else fail("the Repair Kit's unstick no longer reads `status` — closeSession succeeds on an already-closed session, so it would record a repair that repaired nothing");
+    if (/alreadyClosed/.test(un)) ok("…and says so instead of writing a repair line");
+    else fail("the Repair Kit's unstick no longer distinguishes 'already closed' from 'I unstuck it'");
+    const already = un.indexOf("alreadyClosed"), logged = un.indexOf("logRepair");
+    if (already > -1 && logged > already) ok("…and its diary line is unreachable from that path");
+    else fail("the Repair Kit's unstick can write its diary line without having closed anything");
+  }
+}
+
+// ── 16 · A SINGLE-RESTAURANT ANSWER UNDER A MULTI-RESTAURANT LIST MUST NAME ITSELF (T20 round 4) ──
+// Item 30 stopped a printing ROW borrowing another restaurant's printer. The box BELOW the rows had
+// the same fault one level up: the waiting count, the printer names and the computers all come from
+// /api/owner/printing, which answers for exactly one restaurant, and nothing named it. Under two rows
+// the owner reads "4 things are waiting to print" and cannot tell whose four.
+// Found by MAKING the two-row case reachable — round 3 had recorded it as unreachable on this data.
+{
+  const pg = read("app/owner/settings/page.tsx");
+  if (!pg) fail("app/owner/settings/page.tsx is missing");
+  else if (!/Where your paper comes out right now/.test(pg)) ok("that box is gone — nothing to name");
+  else {
+    const box = pg.slice(pg.indexOf("Where your paper comes out right now") - 900, pg.indexOf("Where your paper comes out right now") + 900);
+    if (/printing\.restaurantId/.test(box) && /data\.printing/.test(box)) ok("the printing box names the restaurant it is about when there is more than one");
+    else fail("the printing box no longer names its restaurant — under a two-restaurant list it describes one of them and says which nowhere");
+  }
+}
+
+// ── 18 · A BILL CANNOT BE VOIDED TWICE, AND THE MONEY COUNTED TWICE (T20, 2026-09-01) ────────────
+// A void KEEPS the invoice number — retired and marked cancelled, never erased, because a number is
+// never reused. So `invoice_no` is STILL SET afterwards, and a guard that only asks "does it have an
+// invoice?" passes a second time: the reopen runs again and writes a SECOND `invoice_voided` row into
+// the Removals record, each carrying the full bill amount.
+//
+// The Removals record is where the owner and the manager answer "what came off my bills, and how
+// much?". Two rows for one void means anybody totalling that column reads DOUBLE the money.
+// Reproduced on a fixture with a real issued invoice: one ₹315 void, two ₹315 rows.
+//
+// The MANAGER's own void has refused this since it was written. The Repair Kit's twin promises in its
+// own header to reuse the same primitives "so the rules can't drift", and this is the SECOND place in
+// that same file where the promise was broken (the other is the re-fire, rule 14).
+{
+  const rep = read("app/api/admin/repair/route.ts");
+  if (!rep) fail("app/api/admin/repair/route.ts is missing");
+  else {
+    const vb = rep.slice(rep.indexOf('op === "void_bill"'), rep.indexOf('op === "delete_order"'));
+    if (/select\("id, table_number, invoice_no, invoice_voided, bill_no"\)/.test(vb))
+      ok("the Repair Kit's void reads whether the invoice is ALREADY voided");
+    else fail("the Repair Kit's void no longer reads `invoice_voided` — a void KEEPS the number, so an invoice_no test alone passes a second time and the Removals record gets two rows for one void");
+    if (/owns\.invoice_voided\)\s*return err/.test(vb))
+      ok("…and refuses rather than writing a second Removals row for the same void");
+    else fail("the Repair Kit's void can run twice on one bill — the Removals record would count that money twice");
+    // and the two screens must keep saying the same thing about the same state
+    const ed = read("app/api/editor/[...path]/route.ts");
+    const phrase = "This bill is already reopened";
+    if (vb.includes(phrase) && ed.includes(phrase))
+      ok("…in the SAME words the manager's own void uses, so the two screens agree");
+    else if (!ed.includes(phrase))
+      ok("the manager's void changed its wording — the pairing is no longer assertable here");
+    else fail("the Repair Kit and the manager panel now say different things about an already-reopened bill");
+  }
+}
+
+// ── 17 · THIS SUITE ASSERTS ITS OWN SIZE (T20 round 4, 2026-09-01) ───────────────────────────────
+// Rule 12 lost a branch to a refactor and NOTHING went red: the count slid 66 → 65 and every remaining
+// check still passed. A guard that quietly shrinks is the same failure as a guard that quietly passes,
+// and this file already carries two scars from that family (the comment stripper that ate 73% of a
+// file, and the four days of red CI nobody was running).
+//
+// So the suite counts itself. The floor is deliberately a FLOOR, not an equality: adding checks is the
+// normal direction and must never need a second edit. LOSING them is the thing that has to be loud.
+// Raise this number when you add a rule — the failure message tells you to.
+const CHECK_FLOOR = 69;
+if (oks.length + fails.length < CHECK_FLOOR) {
+  fail(`this suite ran ${oks.length + fails.length} checks and the floor is ${CHECK_FLOOR} — ${CHECK_FLOOR - (oks.length + fails.length)} stopped running without going red. That is how rule 12 disappeared: an if/else-if with no final else, silently satisfied by neither. Find the branch that ends in nothing, or raise CHECK_FLOOR if you deliberately removed one.`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────

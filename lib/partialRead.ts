@@ -44,6 +44,15 @@ export type PartialKey =
   | "guestCounts"                                                              // the Customers tiles
   | "records"                                                                  // all-time bests
   | "restaurantNames"                                                          // which brand a row is
+  // ── A KEY WITH NO WORDS PRINTS ITS OWN NAME (sweep 7 · T14, owner 2026-08-31) ─────────────────
+  // `partialLabel` falls back to `?? k`, which is right — a missing entry must not silently drop a
+  // figure the owner was told about. But it means an unlisted key reaches the screen AS CODE.
+  // `/api/owner/issues` really does send `openCount` when its head-count fails, and Feedback &
+  // complaints then read: "Couldn't read which restaurant each row belongs to AND OPENCOUNT just
+  // now". Found by driving that branch with a crafted reply, never seen live because the head-count
+  // rarely fails. Same class as a database id on a card: an internal name in a sentence a
+  // restaurant owner reads.
+  | "openCount"                                                                // how many complaints are open
   | "logVisibility";                                                           // see lib/logVisibility
 // NOTE: the staff roster deliberately does NOT use this. A list is better served by a per-ROW marker
 // (`payUnread` on each person) than by one note at the top of the page, because the owner needs to
@@ -75,6 +84,7 @@ const PARTIAL_LABELS: Record<PartialKey, string> = {
   guestCounts: "the guest totals",
   records: "the all-time bests",
   restaurantNames: "which restaurant each row belongs to",
+  openCount: "how many complaints are still open",
   logVisibility: "which kinds of activity you're allowed to see",
 };
 

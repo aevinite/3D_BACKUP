@@ -453,9 +453,11 @@ const liveFilter = () =>
  * "Anything for me?" — the one question a helper asks, answered without a scan.
  *
  * A job is this helper's when the route for its KIND names this machine, or when a previous claim
- * already addressed it here. A job routed elsewhere becomes claimable as a BACKUP once it has sat
- * unprinted past the backup window, so a dead printer degrades into "it came out at the counter
- * instead" rather than into silence.
+ * already addressed it here. A job routed ELSEWHERE is never claimable here — the backup printer was
+ * deleted on 2026-08-30 (owner: "we don't even need the backup printer"), because paper appearing in
+ * a room nobody is standing in is worse than paper not appearing: the restaurant never learns its
+ * printer is broken. A ticket that gives up after five tries files a printer problem instead, which
+ * is what puts it in front of somebody.
  *
  * The claim itself is the same single filtered UPDATE the kitchen and manager screens use, which is
  * what makes "two helpers", "a copied helper file", "two tabs" and "two printers with the same
@@ -471,7 +473,7 @@ export async function claimNext(rid: string, agent: AgentRow, routes?: PrintRout
 
   // The candidate read, in TWO parts — and the second part is not optional.
   //
-  //   a) jobs of the kinds this machine is the route (or backup) for, and
+  //   a) jobs of the kinds this machine is the route for, and
   //   b) jobs ALREADY ADDRESSED to this machine, whatever their kind.
   //
   // (b) was missing, and my own security test found it: the admin's "Send a test page" queues a
