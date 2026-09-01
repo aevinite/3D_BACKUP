@@ -232,5 +232,25 @@ console.log("\n6 · the decisions in this territory that must survive");
   P("dish names are still not translated (R14, ruled three times)", /REJECTED \(owner, 2026-08-12\)/.test(menu));
 }
 
+// ── 7. THE ONE FIELD A DINER MUST FILL IN STILL FITS ON A PHONE ──────────────────────────────────
+console.log("\n7 · the table field's own words fit the box they are in");
+{
+  // Item 7. The placeholder read "Enter Table Number (required)" and was clipped to
+  // "Enter Table Number (require" on a 360px phone — measured at the rendered 20px: 287px of text
+  // in a 262px box. There is no way to measure a font from here, so this asserts the CEILING that
+  // measurement produced: at 20px in the shipped face, 24 characters is the most that fits with any
+  // headroom. A longer one goes back to being cut off, and the live row P57154's sibling in
+  // scripts/sweep/t3/s8-live.mjs re-measures it properly against a real browser.
+  const m = cart.match(/id="cart-table"[\s\S]{0,200}?placeholder="([^"]*)"/);
+  P("the table field still has a placeholder", !!m);
+  if (m) {
+    P("…and it fits the box on a 360px phone (24 characters at 20px)", m[1].length <= 24, `${m[1].length}: "${m[1]}"`);
+    P("…and still says the field is required", /required/i.test(m[1]));
+    P("…and still names what the field is", /table/i.test(m[1]));
+  }
+  P("…and the field keeps its own accessible label, which is not length-bound", /aria-label="Table number"/.test(cart));
+  P("…and it is still capped at four characters", /maxLength=\{4\}/.test(cart));
+}
+
 console.log(`\n${fails.length ? "✗" : "✓"} verify:basket — ${pass} passed, ${fails.length} failed`);
 if (fails.length) { console.log("\nFAILED:"); for (const f of fails) console.log("  · " + f); process.exit(1); }

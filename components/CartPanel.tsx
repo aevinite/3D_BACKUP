@@ -1164,7 +1164,15 @@ export default function CartPanel() {
             {/* The table-number input (required). Locked to read-only while in a session. */}
             <input
               type="text" inputMode="numeric" pattern="[0-9]*"
-              id="cart-table" className="table-input" placeholder="Enter Table Number (required)"
+              // ── IT HAS TO FIT ON A 360px PHONE (sweep #8 T3, item 7) ─────────────────────────
+              // This read "Enter Table Number (required)", and on the owner's own A35 a diner saw
+              // "Enter Table Number (require" — an unfinished word, on the one field they MUST fill
+              // in before they can order. MEASURED at the rendered 20px: the old text needs 287px
+              // inside a 262px box, so it was clipped by 25px; at 390px it fitted by 5px, which is
+              // one character of headroom and is why nobody caught it. This wording is 229px in the
+              // same box (33px spare) and still says both things — what the field is, and that it is
+              // required. Sentence case matches the note above it. Guarded by verify:basket.
+              id="cart-table" className="table-input" placeholder="Table number (required)"
               aria-label="Table number" value={lockedTable || tableNumber}
               maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
               // Keep only digits so letters/symbols can never reach the field.
