@@ -471,6 +471,72 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   }
 }
 
+// ── 14 · A REFUSED RE-FIRE MUST NOT READ AS A SENT TICKET (T20 round 4, 2026-09-01) ──────────────
+// `lfh_staff_place_order` answers `{ ok:false, reason }` — it does NOT throw — when it declines to
+// place an order: a duplicate inside its 3-second per-table lock (mig 202), a sold-out dish, a dish
+// off the menu, an as-per-MRP line with no price. The Repair Kit inspected only `error`, so every one
+// of those came back `{ ok:true, kot_no:null }`: the console said the order was re-fired, the diary
+// said "new KOT ?", and nothing reached the kitchen. During service that is a person at the pass
+// waiting for food that was never fired — and the Repair Kit is used precisely when service is
+// already going wrong.
+//
+// The editor route has handled it since 2026-08-05 with the reason on the line. This file's own
+// header promises it "reuses the SAME service-role primitives the panels use … so the rules can't
+// drift". The primitive was shared; the rule was not. Found by DRIVING two re-fires three seconds
+// apart, which is exactly what a person does when the first appears to have done nothing.
+{
+  const rep = read("app/api/admin/repair/route.ts");
+  if (!rep) fail("app/api/admin/repair/route.ts is missing");
+  else {
+    const refire = rep.slice(rep.indexOf('op === "refire_order"'), rep.indexOf('op === "unstick_table"'));
+    if (/\.ok === false/.test(refire)) ok("the Repair Kit's re-fire reports a REFUSED order instead of a sent one");
+    else fail("the Repair Kit's re-fire is back to inspecting only `error` — lfh_staff_place_order answers { ok:false } without throwing, so a refused re-fire would report success and no ticket would reach the kitchen");
+    if (/kot_no\b[\s\S]{0,200}?return err\(/.test(refire)) ok("…and a success with no kitchen ticket is not treated as a success");
+    else fail("the Repair Kit's re-fire no longer insists on a kitchen ticket — the ticket is the only proof anything was fired");
+    // Every reason the RPC can give needs a sentence, or the admin gets the fallback for a knowable cause.
+    for (const r of ["duplicate", "sold_out", "unknown_item", "price_required"]) {
+      if (refire.includes(`"${r}"`)) ok(`…and it says what "${r}" means in words`);
+      else fail(`the re-fire lost its sentence for the "${r}" refusal — the admin would get a generic message for a knowable cause`);
+    }
+  }
+}
+
+// ── 15 · A TABLE THAT WAS ALREADY CLOSED WAS NOT UNSTUCK BY THIS (T20 round 4, 2026-09-01) ───────
+// `closeSession` never reads the session's current status — it sets `status:'closed'` over whatever
+// is there, which SUCCEEDS on an already-closed session. So unsticking the same table twice answered
+// ok and wrote a second `repair_unstick_table` line, recording a repair that repaired nothing.
+// Fourth time this rule has been applied in this territory (items 16, 18, 33, and this).
+{
+  const rep = read("app/api/admin/repair/route.ts");
+  if (rep) {
+    const un = rep.slice(rep.indexOf('op === "unstick_table"'), rep.indexOf('op === "edit_time"'));
+    if (/select\("id, table_number, status"\)/.test(un)) ok("the Repair Kit's unstick reads whether the table is already closed");
+    else fail("the Repair Kit's unstick no longer reads `status` — closeSession succeeds on an already-closed session, so it would record a repair that repaired nothing");
+    if (/alreadyClosed/.test(un)) ok("…and says so instead of writing a repair line");
+    else fail("the Repair Kit's unstick no longer distinguishes 'already closed' from 'I unstuck it'");
+    const already = un.indexOf("alreadyClosed"), logged = un.indexOf("logRepair");
+    if (already > -1 && logged > already) ok("…and its diary line is unreachable from that path");
+    else fail("the Repair Kit's unstick can write its diary line without having closed anything");
+  }
+}
+
+// ── 16 · A SINGLE-RESTAURANT ANSWER UNDER A MULTI-RESTAURANT LIST MUST NAME ITSELF (T20 round 4) ──
+// Item 30 stopped a printing ROW borrowing another restaurant's printer. The box BELOW the rows had
+// the same fault one level up: the waiting count, the printer names and the computers all come from
+// /api/owner/printing, which answers for exactly one restaurant, and nothing named it. Under two rows
+// the owner reads "4 things are waiting to print" and cannot tell whose four.
+// Found by MAKING the two-row case reachable — round 3 had recorded it as unreachable on this data.
+{
+  const pg = read("app/owner/settings/page.tsx");
+  if (!pg) fail("app/owner/settings/page.tsx is missing");
+  else if (!/Where your paper comes out right now/.test(pg)) ok("that box is gone — nothing to name");
+  else {
+    const box = pg.slice(pg.indexOf("Where your paper comes out right now") - 900, pg.indexOf("Where your paper comes out right now") + 900);
+    if (/printing\.restaurantId/.test(box) && /data\.printing/.test(box)) ok("the printing box names the restaurant it is about when there is more than one");
+    else fail("the printing box no longer names its restaurant — under a two-restaurant list it describes one of them and says which nowhere");
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {
