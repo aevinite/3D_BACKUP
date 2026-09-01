@@ -249,7 +249,27 @@ export default function OwnerSettings() {
         </div>
         {printing ? (
           <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Where your paper comes out right now</div>
+            {/* ── AND SAY WHICH RESTAURANT THIS BOX IS ABOUT (T20 round 4, 2026-09-01) ────────────
+                Item 30 stopped a printing ROW borrowing another restaurant's printer. This box below
+                the rows had the same fault one level up and kept it: everything in it — the waiting
+                count, the printer names, the computers — comes from /api/owner/printing, which answers
+                for exactly ONE restaurant, and nothing here named it. Under a one-row list that is
+                fine. Under a TWO-row list the owner reads "4 things are waiting to print" and cannot
+                tell whose four.
+                Found by MAKING the two-row case reachable: printing was switched on for a second
+                restaurant, the page was rendered, and the box sat under both names describing one.
+                (Round 3 recorded this case as unreachable on today's data; round 4's job was to reach
+                it.) The route already echoes `restaurantId` for item 30, so the name is free. */}
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+              Where your paper comes out right now
+              {(data.printing?.length ?? 0) > 1 && printing.restaurantId ? (
+                <span className="adm-muted" style={{ fontWeight: 600 }}>
+                  {" · "}{data.printing.find((x) => x.restaurant_id === printing.restaurantId)?.name
+                    ?? data.restaurants.find((x) => x.id === printing.restaurantId)?.name
+                    ?? "one of your restaurants"}
+                </span>
+              ) : null}
+            </div>
             <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
               {/* ── THE TWO SENTENCES READ AS AN ARGUMENT (owner, 2026-08-31 — item 29) ──────────
                   The row above says "printing now: Kitchen screen" and this said "No computer is set
