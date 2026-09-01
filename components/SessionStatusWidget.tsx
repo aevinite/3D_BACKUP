@@ -447,7 +447,13 @@ export default function SessionStatusWidget() {
             know the staff have been told. */}
         {st.calls.length > 0 && (
           <div className="ssw-called">
-            <span className="ssw-called-label">You called for</span>
+            {/* ── WHOSE REQUEST IS IT? THE TABLE'S (T4 sweep #8, item 5) ────────────────────────
+                This list is `calls` out of lfh_session_state, and migration 318 builds it from
+                `waiter_calls WHERE session_id = <this session> AND NOT resolved` — every open
+                request at the table, from ANY member, not this device's own. The label said "You
+                called for", so a diner whose friend asked for water was shown it as something they
+                had done, and could sit there wondering why. The list is right; only the label was. */}
+            <span className="ssw-called-label">This table asked for</span>
             <span className="ssw-called-list">
               {st.calls.map((c, i) => (
                 <span key={i} className="ssw-called-chip">{callIcon(c.note)} {c.note}</span>
