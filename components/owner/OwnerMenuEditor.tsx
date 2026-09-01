@@ -33,6 +33,15 @@ export default function OwnerMenuEditor({
   const bornSkin = useRef(liveSkin).current;
   const src = `/panels/editor/index.html?rid=${encodeURIComponent(rid)}&menuonly=1&skin=${bornSkin}`;
   const mount = useEmbedFrame(src, liveSkin, [rid]);
+  // ONE RESTAURANT = NO BAR AT ALL (owner, 2026-09-01, STANDING).
+  // *"If the owner has only one restaurant, then there shouldn't be any kind of bar only like to
+  // switch the restaurant. If they have two then only it should have."* — so this is a hard rule,
+  // not a nicety: a switcher offering exactly one choice is a control that does nothing, taking a
+  // row of height off the editor on every screen, and the great majority of owners hold one
+  // restaurant. It has always behaved this way; it is written down now so nobody "improves" it into
+  // an always-visible header showing the current restaurant's name. The admin act-as branch of
+  // app/owner/menu/page.tsx resolves exactly one restaurant too, so the bar is correctly absent
+  // there as well. Guarded: verify:owner-panel §15 (static) and P21545 (driven).
   const many = restaurants.length > 1;
 
   return (

@@ -552,6 +552,9 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     else bad("the /api/owner/printing answer is applied to every restaurant row — it answers for ONE "
       + "restaurant and does not say which, so a second restaurant would be told the wrong printer");
 
+    // ── the icon must not touch its label ──
+    // `.owx .adm-btn` is `display: inline-flex` with no gap, and a flex container trims the leading
+    // space of a text run: `<i/> Open the…` measured 0px between the glyph and the O.
     // The gap moved from this one button to the shared rule on 2026-09-01, because four more buttons
     // in this console had the same fault. Watch the RULE — a per-button override would let the shared
     // one rot unnoticed, which is the whole reason the other four were broken in the first place.

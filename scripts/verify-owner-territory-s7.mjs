@@ -118,7 +118,12 @@ P("P21148", "…and says who changes it", /done for you by Aevidine/.test(cardT)
 P("P21149", "…twice: once for the routing, once for the two switches", (cardT.match(/done for you by Aevidine/g) || []).length >= 2);
 P("P21150", "the guide is a link, opening in its own tab", /href="\/print-setup\.html" target="_blank"/.test(card));
 P("P21151", "…with rel=noopener, like every other new-tab link in this territory", /href="\/print-setup\.html" target="_blank" rel="noopener"/.test(card));
-P("P21152", "…and its icon is spaced off its label (a flex button trims the markup space)", /print-setup\.html"[^]{0,220}gap:\s*\d/.test(card));
+// EXPECTATION MOVED 2026-09-01, same id, same claim. The gap was an inline style on this one
+// button for one commit; it is now `gap` on `.owx .adm-btn` in app/globals.css, because four more
+// buttons in this console had the identical fault. Assert the RULE — a per-button override would
+// let the shared one rot unnoticed, which is exactly how the other four came to be broken.
+P("P21152", "…and its icon is spaced off its label (a flex button trims the markup space)",
+  (() => { const i = css.indexOf("\n.owx .adm-btn {"); return i > -1 && /gap:\s*\d/.test(css.slice(i, css.indexOf("}", i))); })());
 P("P21153", "there is a direct link per operating system, so nobody has to hunt", ["#windows", "#mac", "#linux"].every((h) => card.includes(`/print-setup.html${h}`)));
 P("P21154", "…each of those opens in its own tab too", (card.match(/print-setup\.html#[a-z]+" target="_blank"/g) || []).length === 3);
 P("P21155", "…each with rel=noopener", (card.match(/print-setup\.html#[a-z]+" target="_blank" rel="noopener"/g) || []).length === 3);
