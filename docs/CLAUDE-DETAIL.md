@@ -418,7 +418,7 @@ reinvent (dataviz skill agrees: "a single value is a stat tile, not a one-bar ch
 
 ## Stack & app map
 
-- Next 16.3.1, App Router, async `params`. React 19.2.8. TS strict.
+- Next 16.3.3, App Router, async `params`. React 19.2.8. TS strict.
 - Tailwind 4 (postcss). GSAP (npm-only, imported in `HeroTitle.tsx` + `IntroSplash.tsx` — the old "npm + CDN duplication" bug is gone; there is no GSAP CDN tag).
 - `<model-viewer>` web component loaded via `<Script>` from CDN inside `components/PublicModelViewer.tsx` (NOT in `app/layout.tsx`).
 - GLB models on Supabase Storage; two tiers per dish (small ~2 MB, optimized ~9 MB).
