@@ -620,6 +620,9 @@ flush();
     /variant === "error" \? 2200 : 1100/.test(read("components/ToastHost.tsx")));
   check("…and `duration` is still a thing ToastHost honours",
     /typeof d\.duration === "number" && d\.duration > 0/.test(read("components/ToastHost.tsx")));
+  // 12 · a comment that lies about a poll is how a fast poll gets "restored".
+  check("the card's comments no longer claim a 3-second poll it has not done for a long time",
+    !/every 3s/.test(widget) && /RT_BACKUP_MS \(60s\) as the backstop/.test(widget));
 }
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);

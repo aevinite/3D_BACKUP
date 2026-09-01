@@ -11,6 +11,7 @@ import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 // device reverts to its own private cart; the table keeps its order). If the head
 // leaves, ownership passes on / the table closes (handled server-side).
 //
+// It follows the table on realtime nudges, with a 60-second backstop poll — not a fixed fast poll.
 // It only shows when dining sessions are ON and this device holds a session. When
 // the session ends (anyone closes it, or the head leaves with no one left), the
 // widget detects it on the next poll, clears the local token + cart, and hides.
@@ -131,9 +132,12 @@ export default function SessionStatusWidget() {
     try { setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1"); } catch {}
   }, []);
 
-  // This runs once on first appear: check if sessions are on, and if so keep
-  // polling the server every 3s so the card always reflects the live table state.
-  // settings gate + live poll of the session state
+  // This runs once on first appear: check if sessions are on, and if so follow the live table state
+  // — driven by realtime nudges (`lfh:rt-tick`), with RT_BACKUP_MS (60s) as the backstop for when
+  // the socket is asleep. It claimed a three-second poll for a long time after that stopped being
+  // true, which is exactly the sort of comment that gets a later session to "restore" that poll and
+  // put 20x the reads back on the owner's bill. (T4 sweep #8, item 12.)
+  // settings gate + live follow of the session state
   useEffect(() => {
     let alive = true; // guards against updating state after the component is gone
     let iv: ReturnType<typeof setInterval> | null = null; // the poll timer
