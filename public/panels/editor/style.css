@@ -16,6 +16,15 @@
   --gold-ink: var(--gold);
   --gold-strong: #e8b884;
   --gold-grad: linear-gradient(180deg, #e8b884, #d4a574);   /* the gold FILL, per skin — dark ink sits on it */
+  /* THE GRADIENT THAT PAINTS THE WORD "Manager" IN THE TOP BAR — ink, not fill (T26 sweep #7,
+     2026-08-27). .brand uses background-clip:text, so this gradient IS the lettering, and it was
+     reading the FILL golds: on the light skin's near-white bar the panel's own name measured
+     2.64:1 against the 3:1 a 20px/800 word needs. Same trap --gold-ink was created for one sweep
+     earlier, and the same trap the note below .brand already describes for the restaurant's name
+     beside it — that fix moved the NAME and left the panel's own word behind. The kitchen board
+     and the waiter tablet paint their titles in --text and read 14.6:1, so this was also the one
+     panel out of three that looked different. Dark is byte-identical to what it was (7.73:1). */
+  --brand-grad: linear-gradient(90deg, var(--gold-strong), var(--gold));
 /* ── ONE DIM FOR EVERY FULL-SCREEN OVERLAY (owner, 2026-08-22) ────────────────────────────────
    Every sheet, drawer and confirm box on this panel dims the page behind it, and each one had
    picked its own value: rgba(0,0,0,.55), .6, .62 and rgba(8,5,2,.6). Two overlays on the same
@@ -134,7 +143,12 @@ body.nav-tight .tab-badge { margin-left: 5px; }
 body.nav-compact .nav-burger {
   display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
   gap: 4px; flex: none;
-  width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
+  /* 44, not 40 (owner said do it, 2026-09-01 — item 24). The waiter tablet and the kitchen board
+     both put this control at 44x44 and recorded why on 2026-08-22 ("38x38 … all three sat 6px under
+     the finger target … they get bigger without getting nearer each other"). The manager panel was
+     the last one still short. Its neighbour is 8px away and unmoved, so a bigger target here cannot
+     become a nearer wrong one — the whole of R40's reasoning. */
+  width: 44px; height: 44px; min-height: 44px;
   background: transparent; border: 1px solid var(--line); border-radius: 10px;
   cursor: pointer; padding: 0;
   position: relative;                               /* anchors the .has-news dot below */
@@ -331,6 +345,11 @@ body.nav-rail .layout { margin-left: var(--rail-w); transition: margin-left .16s
 body.nav-rail .topbar { gap: 12px; height: calc(50px + var(--sat)); }
 body.nav-rail .layout { height: calc(100vh - 50px - var(--ribbon-h, 0px) - var(--offbar-h, 0px)); }
 body.nav-rail .top-actions { margin-left: auto; }
+/* The drawer's utility rows exist only in the phone layout — above 760px every one of these
+   buttons is on the bar, and offering the same action twice on one screen is its own fault. */
+.nav-util { display: none; }
+/* Same for the colour key the phone layout moves in here (item 23). */
+.nav-legend { display: none; }
 @media (prefers-reduced-motion: reduce) {
   body.nav-rail .tabs, body.nav-rail .layout { transition: none; }
 }
@@ -459,10 +478,24 @@ body.nav-rail .top-actions { margin-left: auto; }
 }
 .cat-chip:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 .cat-chip i { font-size: 12px; opacity: .85; }
+/* --gold-ink on the LABEL, --gold everywhere else (T26 sweep #7, 2026-08-31 — item 18). The chip
+   lays an 18% gold wash under itself and then wrote on it in --gold-strong, which is a FILL: on the
+   light skin the chosen category measured 2.71:1. Exactly the trap --gold-ink exists for, and the
+   same one items 5 and 16 closed on the Take-order and Bills screens. The fill and the border keep
+   the bright gold and look as they did; in the DARK skin --gold-ink IS --gold, so only the skin
+   that was wrong moves (dark was already 7.57). */
 .cat-chip.active {
   background: color-mix(in srgb, var(--gold) 18%, transparent);
-  color: var(--gold-strong); border-color: var(--gold);
+  color: var(--gold-ink); border-color: var(--gold);
 }
+/* ONE STEP PAST --gold-ink, AND ONLY ON THE LIGHT SKIN (item 18). This chip lays an 18% gold wash
+   under its own label, so the shared ink token lands at 4.31 here where it clears everywhere else.
+   60% measures 4.86.
+   It has to be light-only: my first attempt wrote the deeper mix on the BASE rule, which darkens
+   both skins — and on the dark chip that took a perfectly good 7.57 down to 2.46. That is the whole
+   reason --gold-ink is a per-skin token rather than a fixed mix, and I walked straight into it.
+   Written as a mix of --gold so a themed restaurant still gets its own hue. */
+html[data-theme="light"] .cat-chip.active { color: color-mix(in srgb, var(--gold) 60%, #000); }
 
 .list { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; }
 .list-item {
@@ -503,7 +536,9 @@ body.nav-rail .top-actions { margin-left: auto; }
 .bulk-bar .bulk-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 /* Editor-only dish code (#7) shown next to a dish on the list + on order/bill
    lines. Subtle, monospace digits so it reads as a reference, not a price. */
-.dish-no { font-size: 11px; font-weight: 700; color: var(--gold); opacity: 0.75; font-variant-numeric: tabular-nums; }
+/* --gold-ink, and no 0.75 veil on top of it (item 18): gold as ink at 75% opacity measured 2.37:1
+   on the light panel. The number identifies a dish in the list — it is read, not decoration. */
+.dish-no { font-size: 11px; font-weight: 700; color: var(--gold-ink); font-variant-numeric: tabular-nums; }
 
 /* ---------- editor panel ---------- */
 /* Right/left padding carries the landscape side insets too — see the note on .topbar. */
@@ -761,7 +796,10 @@ body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
 .ord-pill.preparing { background: rgba(232,161,60,0.18); color: #e8a13c; }
 .ord-pill.ready { background: rgba(236,72,153,0.18); color: #f472b6; }
 .ord-pill.served { background: rgba(74,222,128,0.16); color: #4ade80; }
-.ord-pill.cancelled { background: rgba(239,68,68,0.16); color: #ef4444; }
+/* #f87171, not #ef4444 (T26 sweep #7, 2026-08-31 — item 16). On its own 16% red tint over the dark
+   card the deeper red measured 4.08:1, the only dark-skin pill still under the line. The lighter red
+   is the right direction on a dark ground, and it stays unmistakably red. */
+.ord-pill.cancelled { background: rgba(239,68,68,0.16); color: #f87171; }
 /* pre-order: in the shared cart, not sent yet. Blackish-grey ON PURPOSE (owner,
    2026-06-12): it used to be blue, which clashed with the blue "Preparing" on the
    floor board. Grey reads as "not real yet"; red stays reserved for alerts. */
@@ -824,8 +862,13 @@ body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
 .dash-fresh { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
 .dash-fresh i { margin-right: 5px; }
 .dash-card .kchip { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 99px; vertical-align: 3px; margin-left: 7px; }
-.dash-card .kchip.up { background: rgba(22,142,93,.13); color: #168e5d; }
-.dash-card .kchip.dn { background: rgba(206,74,74,.13); color: #c05252; }
+/* The LIGHT values are deepened one step (T26 sweep #7, 2026-08-31 — item 19). These two already
+   had explicit DARK overrides below, which is the tell: someone tuned the dark skin and left the
+   light one at the value that had been picked for a dark card. On their own 13% tints they measured
+   3.53 (up) and 3.86 (down) at 10px — under the 4.5 that size needs. Same hue, one step deeper:
+   4.67 and 4.78. The DARK overrides below are untouched. */
+.dash-card .kchip.up { background: rgba(22,142,93,.13); color: #12784e; }
+.dash-card .kchip.dn { background: rgba(206,74,74,.13); color: #ad4444; }
 .dash-card .kchip.flat { background: rgba(150,140,125,.14); color: var(--muted); }
 html[data-theme="dark"] .dash-card .kchip.up { color: #4fd6a5; }
 html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
@@ -915,7 +958,7 @@ body {
   box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 10px 26px rgba(0,0,0,0.28);
 }
 .brand {
-  background: linear-gradient(90deg, var(--gold-strong), var(--gold));
+  background: var(--brand-grad);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .brand span { -webkit-text-fill-color: initial; color: initial; }
@@ -1057,7 +1100,11 @@ body {
 .ord-card.is-freed { filter: saturate(0.6) brightness(0.9); }
 .ord-card.is-freed:hover { filter: saturate(0.85) brightness(0.97); }
 .ord-card.is-freed .ord-del { opacity: 1; }
-.ord-pill.freed-pill { background: rgba(150,150,150,0.18); color: var(--muted); }
+/* Its own grey rather than --muted (T26 sweep #7, 2026-08-31 — item 16). --muted is tuned against
+   the panel; on this pill's own 18% grey wash it landed at 4.47:1 on the dark skin — 0.03 short.
+   One pill, one line, so it is worth clearing properly rather than excusing. The LIGHT skin gets
+   its own deeper value in the light block below. */
+.ord-pill.freed-pill { background: rgba(150,150,150,0.18); color: #cfc9bd; }
 .ord-grid-freed { opacity: 0.95; }
 .ord-section-divider { margin: 30px 0 14px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-top: 1px dashed var(--line); padding-top: 20px; }
 .ord-section-divider h3 { margin: 0; font-size: 16px; font-weight: 800; }
@@ -1609,6 +1656,11 @@ html[data-theme="light"] .lgcap,
 html[data-theme="light"] .floor-head .fstat-l,
 html[data-theme="light"] .fstat-l,
 html[data-theme="light"] .ft-seats { color: #6b5d46; }
+/* A JOINED tile is tinted 58% toward its state colour, so the same seat ink that reads 5.13:1 on a
+   plain tile measured 4.44:1 there — 0.06 under (item 12, 2026-08-31). One step deeper on the
+   joined tiles only; every other tile keeps the value above, unchanged. */
+html[data-theme="light"] .ftile.ft-merged .ft-seats,
+html[data-theme="light"] .ftile.ft-ready .ft-seats { color: #574a37; }
 html[data-theme="light"] .lgcap { opacity: 1; }   /* .75 of a pale ink was half the problem */
 /* The tile's live line ("0/6 served", "Free"): keep the state hue, but let the dark text carry it. */
 html[data-theme="light"] .ft-linenum,
@@ -1620,6 +1672,11 @@ html[data-theme="light"] .ft-line-plain .ft-linenum { color: color-mix(in srgb, 
    carries more of the state hue than the served line under it: 6.02:1 amber, 6.44:1 green, and
    the states that were already fine only get clearer. The dark skin is untouched. */
 html[data-theme="light"] .ft-num { color: color-mix(in srgb, var(--c) 45%, var(--text)); }
+/* The DARK skin's FREE tile needed the same treatment the light skin got above (item 20). A free
+   table's accent is a deliberately dull grey, so 78% of it on the dark board left the table number
+   at 4.23:1 — and a free tile is most of the floor most of the time. 60% measures 5.80. The light
+   skin keeps its own 45% above, unchanged at 8.28. */
+html[data-theme="dark"] .ftile.ft-free .ft-num { color: color-mix(in srgb, var(--c) 60%, var(--text)); }
 /* ＋ Take order: gold ink on a gold button is the one combination that cannot work on cream. */
 html[data-theme="light"] .ft-take { color: color-mix(in srgb, var(--gold) 26%, var(--text)); }
 html[data-theme="light"] .ft-take:hover { color: var(--text); }
@@ -2214,6 +2271,38 @@ body {
        · a 6px gap instead of 10px across the (up to) 5 gaps  → ~20px back
        · an icon-only Profile button (the drawer it opens names itself) → ~59px back
      That lands at ~314px, so a 4-digit latency AND a future 6th button still fit. */
+  /* ITEM 9 (owner asked 2026-08-31). SIX controls do not fit beside the brand on a 360px bar, so
+     the bar ran to two rows and tipped into a THIRD whenever the connection pill grew — measured
+     108px normally and 152px on a slow link, against the waiter tablet's 57px. The floor lost a
+     whole row of tables exactly when the network was worst.
+     The four set-once ones move into the ☰ drawer (app.js → buildNavUtilRows, the same proxy
+     pattern the tablet has used since August). They stay in the DOM and keep every handler, badge
+     and aria-label — only their place on the BAR is given up, and only under 760px.
+     WHAT STAYS ON THE BAR: the connection pill (R40 — its size is settled) and 🔔, because an
+     alert you have to open a menu to notice is not an alert.
+     NOT DONE HERE, deliberately: the floor header below is untouched. R11 settled its KOT ▾ / QO/P
+     layout ("P four is perfectly fine") and R25 settled the legend, three times. */
+  #themeToggle, #reportIssueBtn, #myProfileBtn, #staffSettingsBtn { display: none; }
+  .nav-util { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .nav-util-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+  .nav-util-row:hover { background: var(--panel-2); }
+  /* THE COLOUR KEY, moved in from the floor header on a phone (item 23). It costs 45px of a 780px
+     screen up there and is read once, in your first week — a manager needs the TABLES, not the key.
+     app.js MOVES the live node in (never a clone: the floor rebuilds it whenever tables merge), so
+     it is the same strip, saying the same things, one tap away. */
+  /* `display: block` matters: the base rule above hides this, and the first cut of the phone rule
+     set only the spacing — so the key was moved into the drawer correctly and then never shown.
+     Caught by opening the drawer and MEASURING the strip's box rather than trusting that it moved. */
+  .nav-legend { display: block; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .nav-legend-h { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .nav-legend .floor-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0; }
+  /* …and it stops taking a row in the header, which is the whole point. */
+  .floor-head .floor-legend { display: none; }
+  /* The 🔔 is injected by the shared guestbell.js at 38x38 and is the one control left on this bar
+     under the finger target (item 24). The waiter tablet already serves it at 44 through its own
+     .theme-toggle rule; this does the same from the panel that owns the bar. Height AND width,
+     because it is a square icon button and its neighbours are 5px away and unmoved. */
+  #lfhBellBtn { width: 44px; height: 44px; min-height: 44px; }
   .top-actions { gap: 6px; }
   /* Icon-only, but ONLY for the everyday "👤 Profile" label. The one-time "👋 Finish setup"
      state keeps its words — that one is an invitation, not a utility button (maint.js sets
@@ -2221,7 +2310,9 @@ body {
   #staffSettingsBtn[data-mode="profile"] { padding: 9px 11px; }
   #staffSettingsBtn[data-mode="profile"] .ssb-t { display: none; }
 
-  /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
+    /* Above the phone breakpoint the bar has room for everything, so the drawer's copies must not
+     appear — otherwise the same action is offered twice on one screen. */
+/* belt-and-braces: never let a stray wide element scroll the whole page sideways */
   html, body { overflow-x: hidden; }
 
 
@@ -2711,7 +2802,7 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .sx-item-qty { font-weight: 800; color: var(--gold-strong); font-size: 15px; text-align: center; }
 .sx-item-info { min-width: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 2px; }
 .sx-item-name { font-weight: 600; }
-.dish-no { color: var(--gold); font-size: 11.5px; font-weight: 700; }
+.dish-no { color: var(--gold-ink); font-size: 11.5px; font-weight: 700; }   /* item 18 — was 2.37:1 on the light skin */
 .ord-line-opts { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 .ol-no { color: #ff9a9a; font-weight: 800; background: rgba(239,68,68,.13); border-radius: 5px; padding: 1px 6px; }
 .sx-item-price { margin-left: 0; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
@@ -3011,7 +3102,14 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    Deliberately NOT in quick mode (⚡ QO/P) — that has its own drill bar. */
 .to-rail { flex: 0 0 240px; min-width: 0; display: flex; flex-direction: column;
   background: var(--panel); border-right: 1px solid var(--line); }
-.to-rail-h { padding: 14px 16px 10px; font-weight: 800; font-size: 14px; color: var(--gold); }
+/* --gold-ink, not --gold, on all four of these (T26 sweep #7, 2026-08-27). This is the same trap
+   the --gold-ink note in the light block already describes — "the same gold is also used as INK in
+   a few places, and on a light page that measured 2.48-2.81:1" — except that pass fixed the four
+   sites it had probes for and the whole TAKE ORDER screen was not one of them. Measured on the
+   running panel, light skin: "Categories" over the left box 2.81, the chosen category in that box
+   3.14, the category heading in the dish list 3.71, and the "+ Other" allergy chip 2.48. In the
+   DARK skin --gold-ink IS --gold, so this only moves the skin that was wrong. */
+.to-rail-h { padding: 14px 16px 10px; font-weight: 800; font-size: 14px; color: var(--gold-ink); }
 .to-rail-h i { font-style: normal; font-size: 11.5px; font-weight: 700; color: var(--muted);
   font-variant-numeric: tabular-nums; margin-left: 6px; }
 /* overflow:hidden is the GUARD, not a detail: if a fit is ever impossible the box clips
@@ -3039,8 +3137,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 /* The count chip — the same wording and shape as the floor's own "→ 15 more tables", because it
    is the same promise. A SIBLING of the row (inside it, it would scroll away), so its parent is
    the positioning context; swipehint.js sets that if the parent is static. */
+/* min-height 44 (owner said do it, 2026-08-31 — item 10): the "→ N more" hint measured 29px tall.
+   It is centred with translateY(-50%), so the extra height grows equally up and down about the
+   same centre — it does not move, and nothing sits above or below it in the rail. */
 .lfh-swipe-more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  z-index: 2; display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px;
+  z-index: 2; display: inline-flex; align-items: center; min-height: 44px; gap: 4px; padding: 5px 10px;
   border-radius: 999px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
   background: var(--panel); color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700;
   white-space: nowrap; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28); }
@@ -3048,12 +3149,15 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .lfh-swipe-more:hover { border-color: var(--gold); color: var(--text); }
 .lfh-swipe-more[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .lfh-swipe-more { transition: none; } }
-.to-cat { flex: 0 0 auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
+/* min-height 44 (owner said do it, 2026-08-31 — item 10): these chips measured 34px tall, and they
+   are how a manager moves between courses mid-order. Height only — the rail scrolls sideways, so a
+   taller chip brings no neighbour nearer. */
+.to-cat { flex: 0 0 auto; min-height: 44px; display: inline-flex; align-items: center; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
-.to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-strong); border-color: var(--gold); }
+.to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-ink); border-color: var(--gold); }
 .to-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 14px; }
 .to-sec { padding-top: 4px; }
-.to-sec-h { position: sticky; top: 0; z-index: 2; margin: 0 0 8px; padding: 8px 2px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--gold-strong);
+.to-sec-h { position: sticky; top: 0; z-index: 2; margin: 0 0 8px; padding: 8px 2px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--gold-ink);
   background: linear-gradient(180deg, var(--panel) 70%, transparent); }
 .to-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 9px; margin-bottom: 6px; }
 .to-dish { position: relative; display: flex; align-items: center; gap: 11px; text-align: left; padding: 9px 11px; border-radius: 13px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); min-height: 78px; cursor: pointer; transition: border-color .12s, background .12s, transform .08s; }
@@ -3061,7 +3165,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-dish:active { transform: scale(.99); }
 /* Right side of a tile: the running ×N count on top, a big ✎ (the only button) below. */
 .to-dish-side { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
-.to-dish-edit { width: 40px; height: 40px; border-radius: 11px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line)); background: color-mix(in srgb, var(--gold) 10%, var(--panel-2)); color: var(--gold-strong); font-size: 17px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+/* 44px TALL, width unchanged at 40 (owner said do it, 2026-08-31 — item 10). Same nested case as
+   the tablet's ✎: measured on a real 294x78 dish row, the row keeps 21,172 of 21,332 px2 — it gives
+   up 0.75% of its own area, at the far right, away from the dish name a manager aims at. */
+.to-dish-edit { width: 40px; height: 44px; border-radius: 11px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line)); background: color-mix(in srgb, var(--gold) 10%, var(--panel-2)); color: var(--gold-strong); font-size: 17px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .to-dish-edit:hover { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
 /* Per-dish allergy/note popup from a tile's ✎ (mirrors the tablet). Sits over the modal. */
 .to-tileedit-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); border-radius: 18px; }
@@ -3104,7 +3211,7 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    Dashed outline so it reads as "add something", never as an allergy that is currently set;
    it deliberately has no .on state (tapping it opens a dialog). Same treatment wherever an
    allergy list appears in this panel (take order, the dish popup, a placed KOT, ✎ Edit dish). */
-.alg-other { border-style: dashed !important; color: var(--gold); font-weight: 600; }
+.alg-other { border-style: dashed !important; color: var(--gold-ink); font-weight: 600; }
 .alg-other:hover { background: rgba(212, 165, 116, 0.12); }
 .to-note { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-size: 13.5px; resize: vertical; }
 .to-note:focus { outline: none; border-color: var(--gold); }
@@ -3133,6 +3240,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
      right way; this is the same treatment, at the widths that actually needed it too. Sending
      food to the kitchen is the last thing tapped on every order — it may not look half-drawn. */
   .to-foot { flex-wrap: wrap; row-gap: 8px; }
+  /* 44px, and only TALLER (owner said do it, 2026-08-31 — item 10). "Send to kitchen" is the last
+     thing tapped on every order and measured 36px tall on a phone; "− Discount" beside it the same.
+     Height only, and these two already own their own line here (the rule above gives .to-send
+     `flex: 1 1 100%`), so nothing wraps and no neighbour moves closer. */
+  .to-foot .btn { min-height: 44px; }
   .to-foot .to-send, .to-foot .to-pay { flex: 1 1 100%; margin-left: 0; justify-content: center; }
   .to-foot .to-pay { display: flex; gap: 8px; }
   .to-foot .to-pay .to-send { flex: 1 1 0; }
@@ -3201,7 +3313,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   .to-crail { display: flex; align-items: center; gap: 7px; padding: 8px 10px;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .to-crail::-webkit-scrollbar { display: none; }
-  .to-crail .to-cat { width: auto; flex: 0 0 auto; min-height: 34px; white-space: nowrap; font-size: 13px; padding: 6px 13px; }
+  /* 44, not 34 (owner said do it, 2026-08-31 — item 10). On a phone the left category box lies
+     down into this sideways strip, and 34px is the smallest thing a manager taps mid-order. The
+     strip already scrolls sideways, so a taller chip brings no neighbour nearer and nothing wraps. */
+  .to-crail .to-cat { width: auto; flex: 0 0 auto; min-height: 44px; white-space: nowrap; font-size: 13px; padding: 6px 13px; }
   /* …and real room on the right for the "→ N more" chip. It has to be a MARGIN on the scroller,
      not padding inside it: padding only adds space at the END of the scrolled content, so at the
      start of the row the floating chip sat on top of the third category (seen in the check).
@@ -3224,6 +3339,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
      its own: bigger to hit, and impossible to clip however many controls join the row later.
      Desktop is untouched — the whole rule is inside this phone query. */
   .to-foot { flex-wrap: wrap; row-gap: 8px; }
+  /* 44px, and only TALLER (owner said do it, 2026-08-31 — item 10). "Send to kitchen" is the last
+     thing tapped on every order and measured 36px tall on a phone; "− Discount" beside it the same.
+     Height only, and these two already own their own line here (the rule above gives .to-send
+     `flex: 1 1 100%`), so nothing wraps and no neighbour moves closer. */
+  .to-foot .btn { min-height: 44px; }
   .to-foot .to-send, .to-foot .to-pay { flex: 1 1 100%; margin-left: 0; justify-content: center; }
   .to-foot .qo-cartbtn { margin-left: auto; }
 
@@ -3510,7 +3630,9 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .plat-age { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
 .plat-cust { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
 .plat-items { font-size: 14px; line-height: 1.55; margin-bottom: 9px; }
-.plat-line .q { color: var(--gold); font-weight: 700; }
+/* --gold-ink, not --gold (T26 sweep #7, 2026-09-01 — item 25): the ×N quantity on a Platform order
+   measured 2.81:1 on white. Gold as ink again, the same trap items 5, 16 and 18 closed elsewhere. */
+.plat-line .q { color: var(--gold-ink); font-weight: 700; }
 .plat-line .no { color: var(--red); font-weight: 600; font-size: 12.5px; }
 .plat-cf { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--line); padding-top: 9px; }
 .plat-tot { font-weight: 800; font-size: 15px; }
@@ -3695,6 +3817,9 @@ html[data-theme="light"]{
      which is the gold mixed 65% with black → 5.89:1 on white, 4.97:1 on --bg. Fills,
      borders and glows keep the bright gold and look exactly as they did. */
   --gold-ink: color-mix(in srgb, var(--gold) 65%, #000);
+  /* The same 65%-toward-black recipe applied to BOTH stops, because on this skin the gradient is
+     lettering rather than a fill: 6.92:1 and 5.58:1 on the bar, against 3.50 and 2.64 before. */
+  --brand-grad: linear-gradient(90deg, color-mix(in srgb, var(--gold-strong) 65%, #000), var(--gold-ink));
   --green:#15803d;
   --red:#dc2626;
   --shadow-sm:0 1px 2px rgba(60,45,20,.07);
@@ -3741,7 +3866,44 @@ html[data-theme="light"] .pay-pill.paid,
 html[data-theme="light"] .avail-toggle.on,
 html[data-theme="light"] .logstat-in-session,
 html[data-theme="light"] .tbl-paid .tbl-num, html[data-theme="light"] .tbl-paid .tbl-state{ color:#15803d; }
-html[data-theme="light"] .ord-pill.new{ color:#b45309; }
+html[data-theme="light"] .ord-pill.new{ color:#92400e; }
+/* THE REST OF THE SAME FAMILY (T26 sweep #7, 2026-08-31 — item 16). The 2026-07-23 pass above
+   deepened the pills it had in front of it and left the others, and it also deepened the class
+   `.ord-pill.new` while the one the Bills list actually renders is `.ord-pill.received`. Measured on
+   the running Bills screen, light skin, by mounting every state on a real .ord-card:
+       received "New order"  1.43   ready 1.59   cancelled 2.28
+       preparing 3.28        served 3.30        freed 3.43        new 3.64
+   Every value below is the shallowest deepening of that pill's OWN hue that clears 4.5 on its own
+   tint — measured, not chosen by eye. `.ord-pill.building` is deliberately absent: it is the one
+   pill with a DARK background, its pale ink reads 4.46, and every darker candidate measured 1.1-1.6
+   — darkening it would be the exact mistake this block exists to undo. */
+html[data-theme="light"] .ord-pill.received{ color:#92400e; }   /* 1.43 -> 4.74 */
+html[data-theme="light"] .ord-pill.ready{ color:#9d174d; }      /* 1.59 -> 4.74 */
+html[data-theme="light"] .ord-pill.cancelled{ color:#991b1b; }  /* 2.28 -> 5.03 */
+html[data-theme="light"] .ord-pill.freed-pill{ color:#4d4d4d; } /* 3.43 -> 5.42 */
+html[data-theme="light"] .ord-pill.served{ color:#166534; }     /* 3.30 -> 4.69, deeper than the 2026-07-23 value */
+/* .preparing IS in the 2026-07-23 list above, but that value only lifted it to 3.28 — the pass
+   moved it off "unreadable" and stopped short of the line. One step deeper: 4.64. */
+html[data-theme="light"] .ord-pill.preparing{ color:#92400e; }
+/* .pay-pill.pending is in the SAME July selector list as .ord-pill.preparing above and needed the
+   same second step (item 21): "⏳ Unpaid" measured 3.36:1 on a bill card. 4.75 now. Splitting one
+   selector out of a shared list and leaving its neighbours behind is how item 16 happened; this is
+   that lesson applied to the one that was left. */
+html[data-theme="light"] .pay-pill.pending{ color:#92400e; }
+/* THE BILL'S OWN LINES, on the light skin (item 21). A bill card sits on a greyer ground than the
+   panel, and --muted is tuned against the panel: the time, the "×1" quantity, "Subtotal", "Tax 5%"
+   and their amounts all measured 3.87:1 on it. Same shape as the guest category card, the owner
+   chart toggle and the joined floor tile — ink tuned for one surface, read on a slightly different
+   one. One step deeper, scoped to the card so nothing else on the panel moves: 4.81. */
+html[data-theme="light"] .ord-card .ord-when,
+html[data-theme="light"] .ord-card .ol-qty,
+html[data-theme="light"] .ord-card .ord-sub,
+html[data-theme="light"] .ord-card .ord-sub * { color:#665b48; }
+/* THE BILL'S OWN TOTAL was the worst of the lot: --gold is a FILL, and as ink on the total row it
+   measured 2.03:1 against the 3:1 a 24px/800 number needs — the single most important figure on the
+   screen where money is read. --gold-ink is what this file already uses wherever gold carries
+   words (see the note in the light block); it reads 4.28 here. Dark is untouched at 8.18. */
+html[data-theme="light"] .ord-card:not(.is-paid):not(.ord-cancelled) .ord-total span:last-child { color: var(--gold-ink); }
 html[data-theme="light"] .tp-pill-prep, html[data-theme="light"] .sx-tag-open,
 html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state{ color:#1d4ed8; }
 html[data-theme="light"] .khata-due{ color:#0369a1; }
@@ -3932,7 +4094,10 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 .khata-ghead small { color: var(--muted); }
 .khata-gright { display: flex; align-items: center; gap: 10px; flex: none; }
 .khata-due { font-weight: 800; color: #7dd3fc; font-variant-numeric: tabular-nums; }
-.btn.ghost { background: transparent; border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); color: var(--gold); }
+/* The LABEL reads --gold-ink; the border keeps the bright gold (item 25). "🖨 Print bill" and its
+   siblings measured 2.81:1 on white — a fill colour carrying words. In the DARK skin --gold-ink IS
+   --gold, so only the skin that was wrong moves. */
+.btn.ghost { background: transparent; border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); color: var(--gold-ink); }
 .btn.ghost:hover { background: color-mix(in srgb, var(--gold) 12%, transparent); }
 .khata-bill { display: flex; align-items: center; gap: 10px; padding: 9px 0; font-size: 13px; color: var(--muted); border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
 .khata-bill:last-child { border-bottom: 0; }
@@ -3974,7 +4139,12 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 .plat-paid, .plat-unpaid { font-size: 10px; font-weight: 800; letter-spacing: .04em;
   padding: 1px 7px; border-radius: 999px; }
 .plat-paid { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
-.plat-unpaid { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+/* UNPAID was under the line in BOTH skins (item 25): 3.76 light and 3.93 dark, at 10px, on its own
+   16% red wash. --red is a state colour, not an ink, and this tag is the one word on a Platform row
+   that says money is still owed. Each skin moves in its own direction — deeper on light, lighter on
+   dark — which is the only way a red on a red tint clears at both ends. 5.02 and 5.34. */
+.plat-unpaid { background: color-mix(in srgb, var(--red) 16%, transparent); color: #f87171; }
+html[data-theme="light"] .plat-unpaid { color: #b91c1c; }
 .plat-collect { font-size: 12.5px; }
 /* Phone: keep the New Parcel button BESIDE the "Table view · live" title (owner 2026-07-25). */
 @media (max-width: 640px) {

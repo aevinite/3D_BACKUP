@@ -10620,8 +10620,46 @@ function layoutFloatingRow() {
 // "→ N more" chip honest. Both are gone with the sideways scroll itself (owner, 2026-08-15). R8 in
 // docs/REJECTED-IDEAS.md — his refusal to make that chip smarter — moved to Reversed for the only
 // reason a rejection ever should: the thing it was about no longer exists.)
+// THE COLOUR KEY MOVES INTO THE ☰ MENU ON A PHONE (item 23, owner gave permission 2026-09-01:
+// "can do the two things I give you the permission").
+//
+// WHY: on a 360px screen the floor header is 169px, and 45px of that is the two-line colour key.
+// The first table sat 300px down a 780px screen and a manager saw FOUR tables of 31, against the
+// waiter tablet's six. The key is a learning aid — you read it in your first week and never again —
+// so it is the one block in that header that does not need to be on screen while you work.
+//
+// WHAT THIS IS NOT: it does not touch `const LEG`. Every entry R25 protects is still there, in the
+// same order, saying the same thing — the strip stays exactly as short as he asked for, it just
+// lives one tap away on the smallest screen. And it does not re-flow the 🧾 KOT ▾ / ⚡ QO/P pair,
+// which is what R11 settled; that line is untouched at every width.
+//
+// ABOVE 760px NOTHING MOVES: the key stays in the header where it has always been.
+function syncLegendToDrawer() {
+  const tabs = document.getElementById("mainTabs");
+  if (!tabs) return;
+  const phone = window.matchMedia("(max-width: 760px)").matches;
+  let slot = tabs.querySelector(".nav-legend");
+  if (!phone) { if (slot) slot.remove(); return; }   // back on a big screen: give it up again
+  const live = document.querySelector(".floor-head .floor-legend");
+  if (!live) return;
+  if (!slot) {
+    slot = document.createElement("div");
+    slot.className = "nav-legend";
+    const h = document.createElement("div");
+    h.className = "nav-legend-h";
+    h.textContent = "What the colours mean";   // textContent: never build a label from HTML
+    slot.appendChild(h);
+    tabs.appendChild(slot);
+  }
+  // MOVE the live node, never a clone: the floor re-renders this element on every board update
+  // (merged tables add a "Merged" entry and remove it again), and a clone would quietly go stale.
+  const held = slot.querySelector(".floor-legend");
+  if (held !== live) { if (held) held.remove(); slot.appendChild(live); }
+}
+
 function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
+  syncLegendToDrawer();  // phone: the colour key lives in the ☰ menu (item 23)
   const ed = $("#editor");
   // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
   //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
@@ -16751,6 +16789,59 @@ function navDrawerSet(open) {
     const off = navBackOff; navBackOff = null; off(); // safe even when BACK itself closed it
   }
 }
+// THE PHONE BAR'S SET-ONCE BUTTONS LIVE IN THE DRAWER TOO (item 9, owner asked 2026-08-31).
+//
+// On a 360px phone this panel's top bar carried SIX controls — the connection pill, 🔔, 🌙, 🚩,
+// 💳 and the injected 👤 — and they do not fit beside the brand, so the bar ran to two rows and
+// tipped into a THIRD whenever the connection pill grew ("Reconnecting…", "No internet — saved").
+// Measured on an A35: 108px normally, 152px on a slow link, against the waiter tablet's 57px. The
+// floor lost a whole row of tables at exactly the moment the network was worst.
+//
+// The waiter tablet solved this long ago by keeping only the live controls on the bar and giving
+// the drawer a row for each set-once one (see its #dwTheme / #dwIssue / #dwMe). This is the same
+// pattern, in this panel's own drawer: the rows PROXY a .click() to the real button, which stays
+// in the DOM (hidden by CSS under 760px) so every handler, badge and aria-label keeps working and
+// nothing has two implementations. Above 760px the bar is unchanged and these rows are hidden.
+function buildNavUtilRows() {
+  const tabs = document.getElementById("mainTabs");
+  if (!tabs) return;
+  // Re-entrant on purpose: 💳 and 👤 are injected AFTER first paint, so bailing out because the
+  // box already exists would freeze the list at whatever had arrived by the first call — which is
+  // exactly what happened on the first cut of this (3 rows instead of 4). Add only what is missing.
+  let box = tabs.querySelector(".nav-util");
+  const rows = [
+    ["🌙", "Theme", "themeToggle"],
+    ["🚩", "Report an issue", "reportIssueBtn"],
+    ["💳", "My profile & pay", "myProfileBtn"],
+    ["👤", "Profile & settings", "staffSettingsBtn"],
+  ];
+  if (!box) { box = document.createElement("div"); box.className = "nav-util"; }
+  for (const [icon, label, targetId] of rows) {
+    if (box.querySelector(`[data-proxy="${targetId}"]`)) continue;   // already has its row
+    // Only offer a row for a button this restaurant actually has: 💳 and 👤 are injected at
+    // runtime and are absent for some people, and a row that proxies to nothing is a dead tap.
+    const target = document.getElementById(targetId);
+    if (!target) continue;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nav-util-row";
+    b.dataset.proxy = targetId;
+    b.innerHTML = `<i class="tab-ico" aria-hidden="true">${icon}</i><span class="tab-lbl"></span>`;
+    b.querySelector(".tab-lbl").textContent = label;   // textContent: never build a label from HTML
+    b.onclick = () => {
+      navDrawerSet(false);          // close first, so a hardware Back press has one layer, not two
+      document.getElementById(targetId)?.click();
+    };
+    box.appendChild(b);
+  }
+  if (box.children.length && box.parentElement !== tabs) tabs.appendChild(box);
+}
+// Re-run on every nav re-decide: 💳/👤 are injected after first paint, so a single call at boot
+// would miss them on a slow connection.
+buildNavUtilRows();
+setTimeout(buildNavUtilRows, 1500);
+setTimeout(buildNavUtilRows, 4000);
+
 {
   const burger = document.getElementById("navBurger");
   if (burger) burger.onclick = () => navDrawerSet(!document.body.classList.contains("nav-open"));
@@ -16760,7 +16851,7 @@ function navDrawerSet(open) {
   if (close) close.onclick = () => navDrawerSet(false);
   // crossing the phone breakpoint → re-decide the nav mode (syncNavFit closes an open
   // drawer itself whenever the tabs go back into the bar)
-  window.matchMedia("(max-width: 760px)").addEventListener("change", () => syncNavFit());
+  window.matchMedia("(max-width: 760px)").addEventListener("change", () => { syncNavFit(); syncLegendToDrawer(); });
 }
 // Top tabs + Editor sub-nav switch views — but first guard any unsaved edits.
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) { setTab(t.dataset.tab); navDrawerSet(false); } }));

@@ -136,7 +136,14 @@ function Style() {
   .acc2-rsel { height:40px; border-radius:10px; border:var(--border); background:var(--card); color:var(--text); font-weight:700; font-size:13.5px; padding:0 10px; }
   .acc2-tabs { display:flex; gap:3px; background:var(--card); border:var(--border); border-radius:12px; padding:4px; }
   .acc2-tabs button { display:flex; align-items:center; gap:7px; min-height:40px; padding:0 16px; border-radius:9px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13.5px; cursor:pointer; }
-  .acc2-tabs button.on { background:var(--accent); color:#fff; }
+  /* THE FILL IS DEEPENED FOR THE WHITE ON IT (T26 sweep #7, 2026-09-01 — item 26). --accent is the
+     console's blue-500 and it is tuned as an ACCENT, not as a ground for white text: the chosen tab
+     measured 3.68:1 on the dark skin. That is the same number, on the same blue, that the sign-in
+     pages were fixed for — verify:look-ink's own note reads "blue-500 with white on it read 3.68:1
+     … Blue-600 reads 5.17:1" — and the LIGHT console block already carries #2563eb for exactly this
+     reason. 85% of the accent measures 4.87 with white on it and stays unmistakably the same blue.
+     Written as a mix of --accent, not a hex, so a console whose accent ever changes follows it. */
+  .acc2-tabs button.on { background:color-mix(in srgb, var(--accent) 85%, #000); color:#fff; }
   .acc2-warn { display:flex; gap:10px; align-items:flex-start; padding:12px 16px; margin:0 0 16px; border-radius:12px; background:color-mix(in srgb, var(--adm-danger) 12%, transparent); border:1px solid color-mix(in srgb, var(--adm-danger) 40%, transparent); color:var(--text); font-size:13.5px; }
   .acc2-main { display:flex; flex-direction:column; gap:14px; min-width:0; }
   .acc2-sect { padding:0; overflow:hidden; }

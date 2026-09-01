@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **161** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **167** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 161 names in their head, so in practice a person runs none of them, or reaches for
+can hold 167 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -222,6 +222,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | session / table ownership | `verify:table-ownership`, `verify:two-parties`, `verify:lifecycle`, `verify:closed-session` | `.env.local` | **YES** |
 | realtime breadcrumbs (`lfh_rt_emit`) | `verify:realtime` | `.env.local` | **YES** |
 | anything at all, before a release | `verify:db-parity` ← the two databases must agree | `.env.local` | no |
+| **added a migration, or wondered whether an old one still holds** | `verify:migration-truth` ← a migration file is a promise ("after this ran, these objects exist") and nothing checked it object by object: 384 files, 1,104 declared functions, views, indexes and columns, each looked up in the live database. `verify:grants` asks WHO may run a function, `verify:db-parity` compares the two databases to each other — this one asks the plainest question, is the thing still there. Reads only. | `.env.local` | no |
 | **applied ONE migration by hand** (`scripts/run-migration.mjs`) | `verify:run-alone` ← that script's header promises "CREATE OR REPLACE / IF NOT EXISTS are safe to re-run", and for a file whose objects a LATER migration removed it is not. Running 005/015/036 alone once re-created 7 pre-tenancy overloads (5 anon-callable) and reverted 5 function bodies. Also checks no table went back to guessing the restaurant, and that the issued-bill lock has not drifted | `.env.local` | no |
 | **retired an object** (dropped a function, policy or trigger a migration still creates) | `verify:run-alone` ← the file that creates it must end by removing it again, or a single-file run puts it back. Migrations 099, 281 and 297 each patched only their own case | `.env.local` | no |
 | **a new RPC that takes `p_restaurant_id`**, or a new call to one | `verify:rpc-scoped` ← 25 of them still DEFAULT the restaurant to #1, so a caller that forgets does not fail, it answers for French House. That is how the admin floor showed the wrong restaurant's tables | nothing | no |

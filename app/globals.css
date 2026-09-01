@@ -16,7 +16,12 @@
   --card: #2c1b11;          /* raised chocolate card — clearly lighter than bg for depth */
   --border: 1px solid rgba(227, 192, 111, 0.22); /* warm-gold edge */
   --text: #f3e9db;          /* cream text (matches logo) */
-  --muted: rgba(195, 168, 146, 0.72);  /* warm taupe for secondary text */
+  /* 0.76, not 0.72 (owner said do it, 2026-08-31 — item 11). This one token paints 77 secondary
+     rules on the guest menu, and at 0.72 it measured 4.47:1 on a card — 0.03 under the 4.5 that
+     small text needs. Sweep #6 measured the same 0.03 and parked it because touching this repaints
+     the whole menu; asked directly, the answer was to lift it. 0.76 measures 4.82:1, so it clears
+     the line with room rather than sitting on it. Same hue, same warmth — only the veil is thinner. */
+  --muted: rgba(195, 168, 146, 0.76);  /* warm taupe for secondary text */
   --gold: #b8923f;          /* deep warm gold (used in glows/highlights) */
   --gold-glow: rgba(227, 192, 111, 0.42);
   --gold-grad: linear-gradient(135deg, #b8923f 0%, #e3c06f 100%);
@@ -41,7 +46,16 @@
      (0 text elements under 3:1 across the whole guest menu), so accent-text is
      the accent itself. The light skin darkens it — see [data-theme="light"]. */
   --accent-ink: var(--accent);
-  --accent-ink-dim: var(--accent-dim);
+  /* ITS OWN VALUE ON DARK, not an alias of --accent-dim (T26 sweep #7, 2026-08-31 — item 15).
+     --accent-dim is a 60%-alpha accent used for borders and glows, where 60% is right. As INK it
+     lands differently on every surface: measured on the dish page, "Read more ↓" sits on the
+     description card (#2c1b11) at 4.29:1 — under the 4.5 that 11px needs — while "ABOUT THIS DISH"
+     sits on the page itself (#1a0f09) and scrapes 4.54. Same token, one over and one under, which
+     is the same shape as the category names on their darker card and the Bar/Line option on its
+     tint. 70% clears both: 5.33 on the card, 5.77 on the page. --accent-dim itself is untouched, so
+     the seven borders and glows that read it look exactly as they did. The LIGHT skin already gives
+     this token its own value for the same reason; this just makes dark do the same. */
+  --accent-ink-dim: color-mix(in srgb, var(--accent) 70%, transparent);
   /* THE HAIRLINE COLOUR ON ITS OWN. --border is the whole `1px solid rgba(...)` shorthand, so a rule
      that needs only the colour (a border-top, a border-bottom) cannot reuse it — and five rules on
      the BILL panel read `var(--border-color, rgba(212,165,116,0.18))` for a token nothing declared,
@@ -538,8 +552,12 @@ body.menu-scrolling .chef-call {
 }
 
 /* --- ANIMATIONS --- */
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.fade-in { animation: fadeIn 0.5s var(--ease) forwards; }
+/* fadeIn and .fade-in were BOTH declared here and again ~35 lines further down, with different
+   values (10px/0.5s here, 20px/0.6s there). CSS gives the later declaration of a duplicated
+   @keyframes name and the later of two equal-specificity rules, so this pair could never run — it
+   was unreachable code that read like the live definition. Removed 2026-08-31 (item 13); the
+   surviving pair further down is the one that has always been in effect. Nothing on screen moves. */
+
 @keyframes reveal { from { opacity:0; transform: translateY(20px); } to { opacity:1; transform: translateY(0); } }
 .reveal { opacity: 0; animation: reveal 0.8s var(--ease) forwards; }
 
@@ -873,6 +891,16 @@ body.menu-scrolling .chef-call {
 .cat-name {
   font-size: 10px; color: var(--muted); font-weight: 600; transition: all 0.3s;
 }
+/* THE CARD'S OWN TINT IS DARKER THAN THE PAGE, and 10px secondary ink cannot afford it (T26 sweep
+   #7, 2026-08-27). --muted reads a comfortable 5.09:1 on the light page, but a category card sits
+   on its own #ede7dc tint and the SAME token measured 4.13:1 there — under the 4.5 that 10px needs,
+   on the one row a guest uses to find food. Only the unselected labels are affected; the chosen one
+   fills with the accent and reads 7.72.
+   A relative mix, never a literal: a themed restaurant overrides --muted, and a hex here would pin
+   every tenant to French House's gold. 85% of whatever the tenant's muted is → 5.30:1 on the card.
+   DARK is untouched and measured 4.59:1 on the same cards — over the line, but only just, so if
+   the guest --muted is ever re-tuned this is the row that goes under first. */
+[data-theme="light"] .cat-name { color: color-mix(in srgb, var(--muted) 85%, #000); }
 .cat-card:hover .cat-name { color: var(--text); }
 
 /* --- SEARCH & FILTERS --- */
@@ -2089,7 +2117,13 @@ body.menu-frost .nav {
 .rating-row .stars { display: flex; gap: 2px; }
 .rating-row .star { color: var(--accent); font-size: 12px; }
 .rating-value { font-weight: 700; color: var(--text); }
-.rating-count { color: var(--muted2); }
+/* --muted, not --muted2 (T26 sweep #7, 2026-08-27). --muted2 is a 25%-alpha SURFACE tint — it is
+   what ~15 console rules paint a hover row with — and it is declared in the guest LIGHT block only.
+   So this line did two different wrong things: on the DARK skin (the guest default) the var was
+   undeclared, the declaration was dropped and the count silently inherited; on the LIGHT skin it
+   resolved to #3c2a1e at 25% alpha and "(12 reviews)" measured 1.63:1 on the white review card.
+   --muted is the guest's secondary INK and reads 5.09 light / 4.47 dark. */
+.rating-count { color: var(--muted); }
 
 .review-form {
   background: var(--card); border: var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px;
@@ -2394,10 +2428,11 @@ body.menu-frost .nav {
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
 }
-.price-label { 
-  font-size: 11px; color: var(--muted2); letter-spacing: 1px; text-transform: uppercase;
-}
-.section-label { 
+/* .price-label was here and is gone (T26 sweep #7, 2026-08-27). `grep -r price-label` over the
+   whole repo returned exactly one line: the rule itself. Nothing has ever rendered it, and it was
+   the last rule painting INK with --muted2 — a 25%-alpha surface tint the guest dark skin does not
+   declare — so it would have been wrong in both skins the day something did. */
+.section-label {
   font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-ink-dim); margin-bottom: 10px;
   animation: titleSlide 0.6s var(--ease) 0.32s both;
 }
@@ -2426,7 +2461,13 @@ body.menu-frost .nav {
 }
 .review-stars { display: flex; gap: 2px; margin-bottom: 8px; }
 .review-star { width: 12px; height: 12px; fill: var(--accent); stroke: var(--accent); }
-.review-star.empty { fill: none; stroke: var(--muted2); }
+/* THE UNEARNED STARS HAD NO OUTLINE AT ALL on the guest's default skin (T26 sweep #7, 2026-08-27).
+   --muted2 is declared in the LIGHT block only, so on DARK this computed to `stroke: none` and a
+   3-of-5 review showed three gold stars beside nothing — a guest could not tell it was out of five.
+   On LIGHT it resolved to a 25%-alpha tint and measured 1.63:1, which is the same story with a
+   fainter ending. --muted is the guest's secondary ink: visible in both skins, and still plainly
+   not the filled star, because `fill: none` is what separates them. */
+.review-star.empty { fill: none; stroke: var(--muted); }
 .review-name { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
 .review-comment { font-size: 13px; color: var(--muted); line-height: 1.6; }
 .stats-row {
