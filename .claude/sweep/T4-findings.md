@@ -151,3 +151,79 @@ line at all. The per-terminal `filed?` table still needs T40's real rebuild.
 - Every fix proven by **reverting it and watching the guard go red**, then restoring.
 - `git diff --name-only origin/main` is a subset of my territory. No migration, no other panel, no
   owner or admin screen, no `CLAUDE.md`, no settings file. Nothing named or read the live client stack.
+
+---
+
+# ⚠️ SWEEP #8 — a DIFFERENT territory under the same terminal number
+
+Sweep #8 re-cut the territories from the real file structure, so T4 is no longer the offline layer.
+Everything above this line is sweep #7's T4 and is untouched.
+
+**Sweep #8 T4 territory:** the table session, and who this device is —
+`components/SessionGate.tsx` · `components/SessionStatusWidget.tsx` · `lib/session.ts` ·
+`app/pair/page.tsx` · `app/api/pair/route.ts` · `app/api/rt-config/route.ts` ·
+`app/api/r/[restaurant]/menu-data/route.ts`.
+
+**Branch** `sweep8/t4-table-session-and-who-you-are` · **port 4304** (proved free before it was
+started) · **base** `origin/main` fb3477b9 · **ids** `P57701`–`P58204` inside the pre-allocated block
+`P57701`–`P58700`. **Aangan untouched. AV live never read or named. No database row written.**
+
+## The re-run
+
+109 rows across ten ledger files name a file this territory owns. All 109 re-run, results updated in
+place: **108 ✅, 1 ⏭, ZERO regressions.**
+
+## The ten problems, and how each was proved
+
+1. **The gate's own "Scan QR" could not read a single QR sticker this product prints.** The reader
+   understood `?table=N`, `?t=N` or a bare number. Every QR the app generates has been `/q/<code>`
+   since migration 210 — `components/admin/RestaurantSettings.tsx` builds `${origin}/q/${code}` and
+   `components/MenuView.tsx`'s own comment says nothing builds `?table=N` any more. MEASURED by
+   running the reader's own two lines in the browser: `?table=12` → `"12"`, a bare `"14"` → `"14"`,
+   `/q/K7M2P9` → `""`. So the camera view sat there for ever, saying nothing. It now recognises
+   today's sticker and walks through the `/q/` door — same origin only — and a QR it cannot use says
+   which kind it was. Guard: `verify:guest-doors` §7, sabotage-tested.
+2. **Closing the sheet while the order was being sent told the basket it was cancelled.** `close()`
+   fired `{ok:false,reason:"cancelled"}`, `fireDone` is once-only, and `CartPanel` deregisters on the
+   first `action:"order"` result — so the order landed in the kitchen and could never say so. The
+   basket kept every dish and the diner placed it again under a fresh at-most-once id. The sheet
+   still closes; it just stays quiet while one of the four irreversible sends is outstanding.
+   Guard: `verify:guest-doors` §8.
+3. **The Allow page told a signed-in person to sign in when the site was unreachable.** The sentence
+   written for that case renders only on the Allow card, which a failed read never reaches; the
+   first pass through `load()` leaves `{signedIn:false}`. MEASURED headless with the door
+   unreachable: "Sign in on this computer first". Now its own card. Guard: `verify:print-helper` §8f.
+4. **`/api/pair` had no answer for "the database didn't answer".** `userFromCookie` throws
+   `AuthDbError`; seven other routes catch it and this one did not, so a flap escaped as an
+   unclassified 500. Now 503 + `pair_busy` + `retryable`, on both the read and the press.
+5. **The table card showed the whole table's requests as if they were this diner's.** `calls` from
+   `lfh_session_state` is every unresolved `waiter_calls` row for the session (mig 318). The label
+   said "You called for". Now "This table asked for".
+6. **The messages that mattered most flashed for 1.3 seconds wearing a green tick.** Every message
+   from the card went out with no variant, so `ToastHost` fell back to `success` and its shortest
+   life. MEASURED on the rendered page: **1,283 ms** for "This table's session ended — scan the QR
+   again to start a new one", and the same tick and length for "You've been removed from this
+   table". After: **3,799 ms**, neutral mark. Guard: `verify:guest-doors` §9.
+7. **A request to staff went out nameless when the device already knew the name.** Fixed where a
+   name exists; the one case with no name anywhere is a decision in the report, not a fallback.
+8. **One name box in the gate ignored the phone's Go key and had no length limit.** Three of four
+   capped at 40 and submitted on Enter; `guest_name` did neither. Guard: `verify:guest-doors` §10,
+   which finds every name box rather than naming them.
+9. **The Allow page asked its door again on every keystroke** — and three times on one open —
+   because the two defaults it fills in were dependencies of the function that fills them.
+10. **`verify:guest-doors` printed no name for a failing check**: its results flush sat mid-file, so
+    the eight sections after it counted toward the total and printed nothing.
+11. **A red guard in the repo-wide PostToolUse hook was refusing every session's edits.**
+    `scripts/verify-t24b-live.mjs` drives a browser against `--base` with no app-up preflight, so
+    `verify:guards-alive` was red on clean `main` and every Write/Edit in this checkout came back
+    blocked with a complaint about somebody else's file. One import and one line.
+12. The card's comments claimed a three-second poll it has not done for a long time.
+
+## What I did NOT touch, and why
+
+* `.claude/sweep/LEDGER/INDEX.md`'s *Next free ID* line. `verify:ledger-index` is red because it
+  says `P54701` while 40 pre-allocated blocks sit above it. Sweep #8's rules say the mark is not
+  mine to move, and six recorded collisions came from terminals moving it. The merge terminal
+  reconciles it once. It is not in the PostToolUse hook, so it blocks nobody.
+* `lib/tableConnection.ts` still says the card "polls the live session every 3s". Same stale claim
+  as item 12, in a file this territory does not own.
