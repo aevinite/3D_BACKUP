@@ -426,7 +426,10 @@ const PROBES = [
              <div class="ord-sub"><span>Subtotal</span><span>₹120</span></div>
              <div class="ord-total"><span>Total</span><span>₹126</span></div></div>
              <button class="cat-chip active">All</button><span class="dish-no">#1</span>
-             <div class="dash-card"><span class="kchip up">100%</span><span class="kchip dn">28%</span></div>`,
+             <div class="dash-card"><span class="kchip up">100%</span><span class="kchip dn">28%</span></div>
+             <div class="plat-line"><span class="q">1×</span></div>
+             <button class="btn ghost">🖨 Print bill</button>
+             <span class="plat-unpaid">UNPAID</span>`,
     checks: [[".ord-pill.received", 4.5, "Bills → the 'New order' tag (was 1.43 on the light skin — an amber word on a tan pill)"],
              [".ord-pill.preparing", 4.5, "Bills → the Cooking tag (was 3.28 — the July pass stopped short of the line)"],
              [".ord-pill.ready", 4.5, "Bills → the Ready tag (was 1.59)"],
@@ -442,7 +445,10 @@ const PROBES = [
              [".pay-pill.pending", 4.5, "Bills → the '⏳ Unpaid' tag (was 3.36; it shares the July selector list with .ord-pill.preparing and was left behind when that one was deepened)"],
              [".ord-card .ord-when", 4.5, "Bills → the time on a bill card (was 3.87 — a bill card sits on a greyer ground than the panel --muted is tuned against)"],
              [".ord-card .ol-qty", 4.5, "Bills → a line's ×N quantity (was 3.87)"],
-             [".ord-card .ord-sub", 4.5, "Bills → the Subtotal / Tax rows (was 3.87)"]] },
+             [".ord-card .ord-sub", 4.5, "Bills → the Subtotal / Tax rows (was 3.87)"],
+             [".plat-line .q", 4.5, "Platform → an order line's ×N quantity (was 2.81 on white — gold as ink)"],
+             [".btn.ghost", 4.5, "Platform → '🖨 Print bill' and its siblings (was 2.81 — the label read the FILL gold; the border still does)"],
+             [".plat-unpaid", 4.5, "Platform → the UNPAID tag, the one word on a row that says money is owed (was 3.76 light AND 3.93 dark)"]] },
   { name: "kitchen board", role: "kitchen", url: "/kitchen", frame: "/panels/kitchen/",
     html: `<div class="col" id="col-cooking"><h2>Cooking</h2></div>
            <div class="col" id="col-ready"><h2>✅ Ready</h2></div>
