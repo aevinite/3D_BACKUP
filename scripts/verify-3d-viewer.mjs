@@ -286,6 +286,16 @@ check(
     "and losing the listener there would freeze the bar at whatever the first paint decided."
 );
 
+// ── a labelled section never appears with nothing under it (sweep #8 T2, item 4) ─────────────
+// The nutrition row, the About card and the allergens block all already hide themselves when empty
+// (the MENU1 rule). The INGREDIENTS heading inside the expanded description was the one exception.
+check(
+  "the dish page's INGREDIENTS heading only appears when there are ingredients",
+  (read(ITEM_CLIENT).match(/descExpanded && \(item\.ingredients\?\.length \?\? 0\) > 0/g) || []).length >= 2,
+  "app/item/[slug]/ItemClient.tsx: both the heading and its row must test the list, or a dish with " +
+    "a description and no ingredients prints a label over a blank strip."
+);
+
 // ── the heart tells the truth even when the dish page's second read never lands (item 3) ─────
 // This read used to be a passenger on the main fetch's .then(...). Since item 9 the server hands
 // the dish down, so the page renders in full even when the browser's re-read stalls — and on that

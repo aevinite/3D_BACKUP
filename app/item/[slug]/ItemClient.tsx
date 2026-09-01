@@ -1098,9 +1098,19 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           <span id="desc-toggle" className="desc-toggle" onClick={() => setDescExpanded(!descExpanded)}>
             {descExpanded ? t.readLess : t.readMore}
           </span>
-          {/* When expanded, also reveal the ingredients list and allergens. */}
-          {descExpanded && <div className="ing-inside-label">{t.ingredients}</div>}
-          {descExpanded && <div className="ingredients-row" id="tags-row">
+          {/* When expanded, also reveal the ingredients list and allergens.
+              THE HEADING GOES WITH ITS LIST (sweep #8 T2, 2026-09-02 — item 4). The allergens block
+              a few lines down already asks `item.allergens.length > 0`, and this page already hides
+              the nutrition row and the whole "About this dish" card when they have nothing in them
+              (the MENU1 rule) — this one heading was the exception. A dish with a written
+              description and no ingredients filled in printed the word INGREDIENTS with a blank
+              strip under it, which reads as a page that failed to load rather than as a dish
+              nobody listed the ingredients for.
+              No dish is in that state on this stack today (0 of 464 have a description and no
+              ingredients), so this changes nothing on screen now; 261 dishes have neither, so it is
+              one restaurant's first description away from being visible. */}
+          {descExpanded && (item.ingredients?.length ?? 0) > 0 && <div className="ing-inside-label">{t.ingredients}</div>}
+          {descExpanded && (item.ingredients?.length ?? 0) > 0 && <div className="ingredients-row" id="tags-row">
             {/* Draw a colored chip for each ingredient. */}
             {(item.ingredients ?? []).map((ingItem, i) => {
               // Pick a color for this ingredient's emoji (alternating between
