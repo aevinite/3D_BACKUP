@@ -1096,5 +1096,39 @@ console.log("\nT11-E · saying so when a read failed");
   );
 }
 
+// ── THE TAX FINGERPRINT MUST BE BOUNDED ON THE PATH THAT HAS NO FILTER (T13, 2026-09-01) ──────
+// `taxConfigPart` narrows by restaurant id — but only `if (ids && ids.length)`, and
+// app/api/admin/analytics calls `ordersFingerprint(null, …)` for the platform-wide view. On that
+// path there is no filter at all. It used to end in a flat `.limit(500)`, so past 500 restaurants it
+// read a TRUNCATED set with no error and no sign: the fingerprint would never notice a tax change on
+// restaurant 501 onwards, and the admin's analytics would keep serving the old rate until somebody
+// pressed Refresh. A stale number, not a crash — the worst shape.
+//
+// What must hold: the read is bounded on EVERY path (a `.range()` applied unconditionally, not a
+// `.limit()` that a conditional filter is trusted to make safe), and it pages rather than stopping.
+{
+  const cache = read("lib/ownerCache.ts");
+  const i = cache.indexOf("async function taxConfigPart");
+  const body = i > -1 ? cache.slice(i, i + 2200) : "";
+  check(
+    "the tax fingerprint pages, so the unfiltered platform-wide read cannot silently truncate",
+    /\.range\(/.test(body) && /for \(let page = 0; page < TAX_FP_MAX_PAGES/.test(body),
+    "lib/ownerCache.ts — `ids` is genuinely null on the admin's platform-wide analytics, so a flat " +
+      "limit there is a truncated read of every restaurant's tax configuration.",
+  );
+  check(
+    "…and it never returns a stable fingerprint it knows is incomplete",
+    /cfg:incomplete:\$\{Date\.now\(\)\}/.test(body),
+    "lib/ownerCache.ts — past the page ceiling the answer is known to be partial. A partial " +
+      "fingerprint that looks stable freezes the cache on a stale tax rate, which is the exact " +
+      "failure this function exists to prevent; it must force a recompute instead.",
+  );
+  check(
+    "…and the scoped path still narrows by restaurant id",
+    /q\.in\("restaurant_id", ids\)/.test(body),
+    "lib/ownerCache.ts — an owner must still only fingerprint their own estate.",
+  );
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }
