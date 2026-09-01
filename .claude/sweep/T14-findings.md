@@ -113,3 +113,46 @@ for the dead `adm-page-title` class survives, which is the part that actually en
 
 **Two of his eight needed no work at all** — and both were found by re-reading the code as it is
 today rather than trusting my own report from four days earlier.
+
+
+---
+
+# ROUND 3 (2026-09-01) — the territory grew, and it came back clean
+
+He gave permission for the two things round 2 had to leave in other lanes' files:
+
+- **Item 20** — `app/owner/{activity,staff,menu}` still named a withheld section. All three are
+  redirects now, so **all six** owner screens follow R36 and Pay Later is the one written exception
+  (R34). Driven: a **503 on Team stays put and offers a retry**, so a blip can never look like a
+  withheld feature; and the **ADMIN still opens all eight sections**, including the one whose module
+  is genuinely off — that is the single thing this change could have broken and it is the row worth
+  keeping (`P48313`).
+- **Item 21** — `lib/ownerActor.ts` let a blank-but-present name through as an empty string.
+
+## What round 3 found
+
+**No new product fault.** Three rounds and 2,000 numbered checks in, this ground has converged.
+What it did find was in the guards, not the product:
+
+**`verify:owner-territory` was asserting a rule the owner had just retired** — it required the Menu
+page to still say *"isn't switched on for your restaurant"*, the exact sentence item 20 deletes. It
+was **rewritten to assert what it was actually protecting** (a failed read and a withheld section
+still give two different *answers*) rather than left red or quietly removed. A guard that keeps
+asserting a retired rule is one people learn to ignore.
+
+## The one thing deliberately left
+
+The **Dashboard's per-restaurant note** — "Reports are switched off" when you drill into a
+restaurant whose Reports the admin has taken away. That is a different case from the six page-level
+messages: he *has* the Dashboard, and a number vanishing with no reason is worse than a reason.
+Reported to him rather than changed.
+
+## Totals across three rounds
+
+| | |
+|---|---|
+| numbered checks on record for this territory | **2,000** (`P06501`–`P07000`, `P21601`–`P22100`, `P47301`–`P47800`, `P48301`–`P48800`) |
+| items built | **21**, one commit each |
+| guard rules watching them | **47** in `verify:owner-money`, plus the territory's other 19 guards |
+| PRs | #1128, #1213, #1215 — all merged, all deployed READY, every item driven on the live site |
+| regressions found across all re-runs | **0** |
