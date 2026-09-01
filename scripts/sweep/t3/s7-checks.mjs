@@ -537,8 +537,18 @@ P("P16307", "a late reply for restaurant A cannot land on restaurant B",
   /let alive = true;/.test(F.ctx) && /return \(\) => \{ alive = false; \};/.test(F.ctx));
 P("P16308", "…and a stale NAME cannot flash during the resolve window",
   /setName\(null\);/.test(F.ctx));
-P("P16309", "a failed lookup can never leave a widget waiting for ever",
-  /\.catch\(\(\) => \{ if \(alive\) setReady\(true\); \}\)/.test(F.ctx));
+// RE-AIMED, sweep #8 T3, 2026-09-01. This asserted `.catch(() => { if (alive) setReady(true); })`,
+// and that line is GONE ON PURPOSE: T25's item 21 (the owner: "21 is very imp do it solve and make
+// sure this never happens") made a failed tenant lookup answer "we do not know" instead of
+// "restaurant #1", so the catch now sets the id to "" and deliberately leaves `ready` FALSE — the
+// point being that nothing keyed on the restaurant acts on a guess about somebody's money. A
+// detector that keeps demanding the retired line is a red guard for a decision that was taken, and
+// a red guard hides real regressions. So it now asserts the rule ACTUALLY in force: the catch is
+// alive-guarded, and it answers with no restaurant rather than defaulting to #1.
+// The residual question — that a diner on that path waits with no message — is reported as a
+// decision item against lib/restaurant-context.tsx, not smuggled in as a check on someone's file.
+P("P16309", "a failed lookup answers 'we do not know' rather than guessing restaurant #1",
+  /\.catch\(\(\) => \{[\s\S]{0,200}if \(!alive\) return;[\s\S]{0,200}setId\(""\)[\s\S]{0,200}setReady\(false\)/.test(F.ctx));
 P("P16310", "the slug the provider hands out is folded to lower case, so one restaurant is one bucket",
   /decodeURIComponent\(m\[1\]\)\.trim\(\)\.toLowerCase\(\)/.test(F.ctx));
 P("P16311", "…and storage folds it the same way, so the two cannot disagree on spelling",
