@@ -26,6 +26,25 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HOOK = process.argv.includes("--hook");
+
+// HOOK MODE READS THE EDIT AND USUALLY DOES NOTHING (sweep #7 / T28, 2026-08-27).
+//
+// This file has said "it is meant to run as a hook on any edit under scripts/ or tests/" since the
+// day it was written, and it was never wired into one — which is why it sat RED on clean main for
+// three guards that landed on 2026-08-26 and nobody saw. The reason it could not simply be added is
+// cost: a full scan parses 218 scripts and takes ~9 seconds, and the PostToolUse hook fires on
+// EVERY Edit and Write in the repo, sharing a 45-second budget with nine other guards.
+//
+// So it does what verify-test-safety.mjs does: read the PostToolUse payload on stdin, and exit 0
+// immediately unless the file just written is one this guard is about. An edit to a component pays
+// nothing; an edit to a guard pays the nine seconds, which is the only time the answer can change.
+if (HOOK) {
+  let raw = ""; try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }
+  let payload = {}; try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
+  const f = String(payload?.tool_input?.file_path || payload?.tool_response?.filePath || "").replace(/\\/g, "/");
+  // package.json matters too: check 4 asks whether every verify:* entry points at a file that exists.
+  if (!/\/(scripts|tests)\/.*\.(mjs|ts)$/.test(f) && !/\/package\.json$/.test(f)) process.exit(0);
+}
 const fails = [];
 const checks = [];
 const check = (name, ok, detail = "") => { checks.push({ name, ok }); if (!ok) fails.push(`${name}\n      ${detail}`); };
@@ -44,6 +63,10 @@ if (existsSync(join(ROOT, "tests"))) for (const n of readdirSync(join(ROOT, "tes
 
 // Lines that are pure comment — a rule quoted in prose must never fail its own guard.
 const codeLines = (src) => src.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => !/^\s*(\/\/|\*|\/\*)/.test(l));
+// The same source with whole-line comments dropped, as ONE string. Several checks below ask "does
+// this file call X?" — and this repo's guards explain themselves at length, so the sentence
+// describing the fix will happily match the pattern that looks for the fix. Ask the code.
+const bare = (src) => codeLines(src).map(([, l]) => l).join("\n");
 
 // ── 1 · A TEMPLATE PLACEHOLDER IN A NON-TEMPLATE STRING ──────────────────────────────────────────
 // `"${BASE}/menu"` is not a mistake a reader notices and not one any type-check catches: it is a
@@ -208,7 +231,14 @@ function quotedStrings(src) {
     const drivesBrowser = /\.goto\(|frameLocator\(|newContext\(/.test(src);
     const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}/.test(src);
     if (!drivesBrowser && !fetchesBase) continue;
-    if (/requireAppUp|requireUp/.test(src)) continue;                          // has the preflight
+    if (/requireAppUp|requireUp/.test(bare(src))) continue;                    // has the preflight — in CODE, not in a comment about it
+    // A GUARD THAT SERVES ITS OWN PAGES NEEDS NO APP AND NO BASE (sweep #7 / T28, 2026-08-28).
+    // scripts/verify-bill-screens.mjs opens a browser and navigates — to page.setContent() and to
+    // addresses it fulfils itself with page.route(). There is no server to preflight and no base to
+    // honour; demanding either would be this check inventing a failure on a guard that is right,
+    // which is the one thing a guard must never do. It went red on this file the day both checks
+    // were written, which is how I found out.
+    if (/page\.route\(|\.setContent\(/.test(bare(src)) && !/localhost:\d|\$\{BASE\}|BASE \+/.test(bare(src))) continue;
     if (/SKIPPED \(pass --base|skipped the live checks|static only/i.test(src)) continue; // optional live half
     // verify-everything.mjs is the RUNNER, not a guard: it prints the base it resolved and WHERE it
     // came from on every single run, refuses to start while another run holds its lock, and checks it
@@ -225,6 +255,73 @@ function quotedStrings(src) {
   check("every guard that drives the app — a browser OR a fetch of its base — does the app-up preflight (exit 2 + a plain sentence, never a stack trace)",
     bad.length === 0,
     bad.join("\n      ") + "\n      Add:  import { requireUp } from \"./sweep/appUp.mjs\";  then  await requireUp(BASE, \"what it drives\");");
+}
+
+// ── 7 · A GUARD THAT IS TOLD --base MUST GO THERE, NOT TO PORT 4000 ─────────────────────────────
+// Port 4000 is the OWNER'S OWN WINDOW. Every parallel lane is given its own port and hands it over
+// as `-- --base http://localhost:41xx`. Two guards read only VERIFY_BASE and ignored the flag
+// entirely, so being told 4228 they quietly walked 4000 instead — driving, clicking and in one case
+// writing against the window he verifies on, while their output said nothing about it.
+// (sweep #7 / T28, 2026-08-27: verify-access-live and verify-manager-hidden.)
+//
+// The rule is not "use baseFrom()" — a guard may resolve its own base however it likes. The rule is
+// that a guard which drives an app it did not start must LOOK at --base. A guard that starts its own
+// stub server on a port it owns is exempt: nobody hands it a base.
+{
+  const bad = [];
+  for (const f of scriptFiles) {
+    if (!/^scripts\/verify-/.test(f)) continue;
+    const src = read(f);
+    const drivesBrowser = /\.goto\(|frameLocator\(|newContext\(/.test(src);
+    const fetchesBase = /fetch\(\s*`\$\{BASE\}|fetch\(\s*BASE\s*\+|fetch\(\s*`\$\{B\}|fetch\(\s*B\s*\+/.test(src);
+    if (!drivesBrowser && !fetchesBase) continue;
+    if (/createServer\(/.test(src)) continue;                        // brings up its own server
+    // A GUARD THAT SERVES ITS OWN PAGES NEEDS NO APP AND NO BASE (sweep #7 / T28, 2026-08-28).
+    // scripts/verify-bill-screens.mjs opens a browser and navigates — to page.setContent() and to
+    // addresses it fulfils itself with page.route(). There is no server to preflight and no base to
+    // honour; demanding either would be this check inventing a failure on a guard that is right,
+    // which is the one thing a guard must never do. It went red on this file the day both checks
+    // were written, which is how I found out.
+    if (/page\.route\(|\.setContent\(/.test(bare(src)) && !/localhost:\d|\$\{BASE\}|BASE \+/.test(bare(src))) continue;
+    if (f === "scripts/verify-everything.mjs") continue;              // the runner; prints the base it chose
+    // Any of these means the flag is read: the shared helper, or the script's own argv lookup.
+    // CODE ONLY. Reading the raw source here made this check useless the moment it was written: the
+    // very comment explaining the fix says "baseFrom() takes --base first", and that sentence made
+    // the file look like it read the flag. A guard must never be satisfied by prose about itself.
+    if (/baseFrom\(|requireAppUp\(\s*process\.argv|indexOf\(\s*["']--base["']\s*\)|arg\(\s*["']--base["']|ARG\(\s*["']--base["']|argOf\(\s*["']--base["']/.test(bare(src))) continue;
+    bad.push(f);
+  }
+  check("every guard that drives an app it did not start reads --base (so a lane's own port is honoured, and port 4000 is never taken by surprise)",
+    bad.length === 0,
+    bad.join("\n      ") + "\n      Use baseFrom(process.argv) from ./sweep/appUp.mjs — it takes --base first, then LFH_BASE / VERIFY_BASE / BASE, then :4000.");
+}
+
+// ── THE LINT GATE CANNOT BE DROWNED BY A BUILD DIRECTORY (sweep #7 / T25 round 3, 2026-08-31) ────
+//
+// `npm run lint` is half of CLAUDE.md's definition of done, and it is bare eslint — it walks the
+// whole folder. Twice now a generated directory has turned it into a wall of noise: `.claude/**`
+// (another session's full checkout, 1,475 errors, T10 2026-08-06) and `.next-8093/` (a dev server's
+// build output, **502 errors**, found today). Nothing anybody wrote was at fault either time; the
+// gate simply stopped being readable, which teaches everyone to ignore it — a guard made useless is
+// the subject of this whole file.
+//
+// `.gitignore` already knows every one of these directories. So the check is that the two lists
+// AGREE: any directory `.gitignore` names as generated build output must also be in
+// eslint.config.mjs's globalIgnores. It is a static string comparison — no eslint run, no cost.
+{
+  const gi = read(".gitignore");
+  const el = read("eslint.config.mjs");
+  // Only build output, and only directory entries — never a file pattern, never a negation.
+  const generated = gi.split("\n").map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#") && !l.startsWith("!") && l.endsWith("/"))
+    .filter((l) => /^\/?\.next([-/]|$)|^\/?out\/|^\/?build\//.test(l))
+    .map((l) => l.replace(/^\//, "").replace(/\/$/, ""));
+  const missing = generated.filter((d) => !el.includes(`"${d}/**"`) && !el.includes(`'${d}/**'`));
+  check(`every generated build directory .gitignore names is also ignored by eslint (${generated.length} checked: ${generated.join(", ") || "NONE"})`,
+    generated.length > 0 && missing.length === 0,
+    generated.length === 0
+      ? ".gitignore no longer names a single build directory — this check has nothing to compare and is asserting nothing."
+      : `not in eslint.config.mjs globalIgnores: ${missing.map((d) => `"${d}/**"`).join(", ")}\n      Bare eslint will walk into it and report its generated chunks as errors, which is how the gate stops being read.`);
 }
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────

@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 // The shared bill money itself, so the stamped-rate rule can be ASKED rather than grepped for.
 import BILLDOC from "../public/panels/billdoc.js";
+// The ONE map of removal words, read the same way the owner and admin screens read it.
+import AUDITSORT from "../public/panels/auditsort.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
@@ -287,6 +289,25 @@ else {
   }
   if (missing.length) fail(`kinds with no label — they render as a raw key like "qty_reduced": ${missing.join(", ")}`);
   else ok(`all ${kinds.length} kinds have a label in the manager, admin and owner views`);
+
+  // …AND THE SHARED MAP ITSELF HAS WORDS FOR EVERY KIND (T9 sweep #7, 2026-08-22).
+  //
+  // The check above proves all three screens read the ONE map. It never asked whether the map has
+  // an entry for each kind the recorder can write — so `customer_erased` (owner → Customers → Erase)
+  // sat in KIND_RISK and KIND_TAGS with no words and no glyph, and every screen dutifully printed
+  // the raw code "customer_erased". Worse, the owner's Activity and the admin's Logs both build
+  // their type chips from `Object.keys(KIND_LABEL)`, so the row could not be filtered by type at
+  // all. Deriving from a shared map only helps if the map is complete.
+  const A = AUDITSORT;
+  if (!A || !A.KIND_LABEL) fail("public/panels/auditsort.js did not load — the shared removal words could not be checked");
+  else {
+    const noWords = kinds.filter((k) => !A.KIND_LABEL[k]);
+    const noGlyph = kinds.filter((k) => !A.KIND_ICON[k]);
+    if (noWords.length) fail(`public/panels/auditsort.js has no WORDS for ${noWords.join(", ")} — the Activity and Logs screens print the raw code, and offer no chip for it`);
+    else ok(`the shared removal map has English words for all ${kinds.length} kinds the recorder can write`);
+    if (noGlyph.length) fail(`public/panels/auditsort.js has no glyph for ${noGlyph.join(", ")}`);
+    else ok("…and a glyph for each of them");
+  }
 }
 
 // ── 4 · recording a removal is never gated by a menu switch ──────────────────

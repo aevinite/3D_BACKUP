@@ -17,11 +17,25 @@ export type PaperSize = { name?: string; wMm: number; hMm: number };
 
 /** The four questions, in the order a person asks them. Both screens print these verbatim as their
  *  card headings — that is the whole point of them living in one file. */
+/**
+ * The steps, in the order a person walks them.
+ *
+ * The LAST one is numbered by the caller, not here: choosing "a computer" adds a step (the machine,
+ * then its printers) that choosing "a screen" does not, so the log is step 5 one way and step 4 the
+ * other. Hard-coding "4 ·" put two cards called 4 on the same screen (2026-08-29).
+ */
+// FOUR STEPS, AND NONE OF THEM IS A CHOICE OF MECHANISM (owner, 2026-08-31 — *"we don't need
+// toggle"*). Step 2 used to be "How does the paper come out?", the two big buttons. There is nothing
+// to ask: a computer prints if one is set up, and the kitchen screen prints the slips when none is.
+// So the steps are now the things a person actually DOES, in the order they do them.
 export const STEPS = {
   one:   "1 · Is printing switched on",
-  two:   "2 · The computers that can print",
+  two:   "2 · The computer that prints (optional)",
   three: "3 · Which printer gets which paper",
-  four:  "4 · What has printed",
+  four:  "What has printed",
+  // The kitchen screen needs no switching on, so its card is a statement and a file, not a step
+  // with a decision in it.
+  screen: "4 · The kitchen screen",
 } as const;
 
 /** The restaurant's words, never ours. "kot" means nothing to anybody outside this codebase. */
@@ -41,10 +55,19 @@ export const KIND_WHAT: Record<string, string> = {
  *  A bill is printed by a person pressing a button, so switching the route off does not stop the
  *  bill: it stops a PRINTER doing it silently, and the ordinary print window opens instead. Saying
  *  "nobody" on the bill line would be a lie, and a screen that lies once is never trusted again. */
+/**
+ * What "the helper does NOT take this one" means, per paper — in the words the owner used on
+ * 2026-08-29: *"if only KOT selected, other other two will print normally by tabbing on it."*
+ *
+ * They are not the same sentence, and that is the point. A bill or a banquet sheet has somebody
+ * standing there who pressed Print, so "normal" means the window opens for them. A kitchen slip has
+ * nobody — it prints because an order arrived — so the only other answer is that it does not print
+ * by itself at all.
+ */
 export const KIND_OFF_LABEL: Record<string, string> = {
-  kot: "Nobody — do not print kitchen slips",
-  bill: "Whoever presses Print (a window opens)",
-  banquet: "Whoever presses Print (a window opens)",
+  kot: "Nobody — kitchen slips do not print by themselves",
+  bill: "Normal — a window opens when somebody taps Print",
+  banquet: "Normal — a window opens when somebody taps Print",
 };
 
 /** Common sheets, so nobody has to know that A6 is 105 × 148. "As the printer says" is first because
@@ -57,6 +80,31 @@ export const PAPER_PRESETS: { id: string; label: string; paper: PaperSize | null
   { id: "a5", label: "A5 · 148 × 210 (half of A4)", paper: { wMm: 148, hMm: 210 } },
   { id: "a6", label: "A6 · 105 × 148 (quarter of A4)", paper: { wMm: 105, hMm: 148 } },
 ];
+
+/**
+ * The paper sizes a given kind can ACTUALLY be told to use — and for the banquet sheet there are
+ * none, which is the honest answer rather than a missing one.
+ *
+ * A kitchen slip and a bill are laid out TO the width they are given: `withPaper` sets the page size
+ * and narrows and centres the column on the print head, so every size in the list does something.
+ *
+ * A banquet sheet is not. `banquetDocHtml` draws it at exactly two sizes, A4 or A5, and it chooses
+ * between them from the RESTAURANT'S OWN setting — `settings.banquet_paper_size`, set on the Banquet
+ * screen next to the margins and the signature line. Because it declares that page size itself,
+ * `withPaper` returns it untouched. So the paper dropdown on the Banquet line of the Printing screen
+ * reached no code at all: whatever was chosen, the sheet came out at whatever the Banquet screen
+ * said. Found by the printing sweep, 2026-08-29 — the sweep asked for A6 and measured an A5 sheet.
+ *
+ * Two places to set one thing, one of them a no-op, is worse than one place. So the Printing screen
+ * stops asking, and says where the answer lives instead. Do not "restore" this dropdown without
+ * first making the document able to obey it.
+ */
+export const papersFor = (kind: string) => (kind === "banquet" ? [] : PAPER_PRESETS);
+
+/** Shown where the paper dropdown used to be, for the kind that has no paper to choose here. */
+export const PAPER_ELSEWHERE: Record<string, string> = {
+  banquet: "The banquet sheet's size (A4 or A5) is set on the Banquet screen, with its margins — not here.",
+};
 
 export const paperLabel = (p?: PaperSize | null) => (p ? `${p.wMm} × ${p.hMm} mm` : "as the printer says");
 

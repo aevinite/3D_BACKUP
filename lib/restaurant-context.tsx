@@ -43,13 +43,18 @@ export interface RestaurantMeta {
   slug: string;
   /** The restaurant's display name, once resolved (null while resolving / on bare routes). */
   name: string | null;
-  /** False only while a /r/<slug> id is still being looked up. `id` starts at restaurant
-   *  #1 so every widget has something usable immediately, which means a widget that ASKS
-   *  THE SERVER something about "this restaurant" would otherwise ask twice: once about
-   *  #1, once about the real one (BanGate did exactly that — two requests per page load,
-   *  the first about the wrong restaurant). Anything that makes a network call keyed on
-   *  the restaurant should wait for this. Bare routes (/menu, /item) resolve instantly:
-   *  they ARE restaurant #1 by definition. Guest sweep 2026-08-04. */
+  /** False while a /r/<slug> id is still being looked up — AND false for good if the lookup
+   *  FAILED. `id` starts at restaurant #1 so every widget has something usable immediately, which
+   *  means a widget that ASKS THE SERVER something about "this restaurant" would otherwise ask
+   *  twice: once about #1, once about the real one (BanGate did exactly that — two requests per
+   *  page load, the first about the wrong restaurant). Anything that makes a network call keyed on
+   *  the restaurant should wait for this. Bare routes (/menu, /item) resolve instantly: they ARE
+   *  restaurant #1 by definition. Guest sweep 2026-08-04.
+   *
+   *  ⚠️ ON A FAILED LOOKUP `id` IS "" AND `ready` STAYS FALSE (item 21, 2026-08-30). It used to
+   *  stay on restaurant #1, which is a guess about a different restaurant's orders and money — see
+   *  the long note at the resolve below, and the Aangan sticker it was watched on. A widget that
+   *  keys on the restaurant must treat "" the way the server already does: refuse, and say so. */
   ready: boolean;
 }
 
@@ -107,10 +112,48 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
     if (s === DEFAULT_RESTAURANT_SLUG) { setId(DEFAULT_RESTAURANT_ID); setReady(true); return; }
     setReady(false);
     getRestaurantBySlug(s)
-      // `ready` flips true even when the lookup FAILS: the answer is then "it's #1", and a
-      // widget waiting forever would be worse than one asking about the fallback.
-      .then((r) => { if (alive) { setId(r?.id || DEFAULT_RESTAURANT_ID); setName(r?.name || null); setReady(true); } })
-      .catch(() => { if (alive) setReady(true); });
+      // ── A FAILED LOOKUP IS "WE DON'T KNOW", NOT "IT'S RESTAURANT #1" ─────────────────────────
+      // (T25, sweep #7, item 21, 2026-08-30. The owner: *"21 is very imp do it solve and make sure
+      // this never happens."*)
+      //
+      // This used to read `setId(r?.id || DEFAULT_RESTAURANT_ID)` with a `.catch` that flipped
+      // `ready` and left the id alone — so on a failed resolve every GLOBAL widget answered
+      // "restaurant #1" for a diner standing in a different restaurant. That is not a theoretical
+      // fault: it is the one written at the top of this file, watched happening on AANGAN'S OWN
+      // TABLE-1 STICKER. Aangan has dining sessions OFF; the widgets read #1's settings, where they
+      // are ON; so tapping "+" on a dish opened the join-a-table gate instead of adding it, and the
+      // basket stayed empty. A diner scanning the sticker on their table could not order at all.
+      //
+      // It went unnoticed because restaurant #1's own stickers resolve to #1 by accident, which is
+      // the right answer for exactly one restaurant.
+      //
+      // WHEN IT CAN HAPPEN NOW. lib/tenant.ts stopped folding a failed READ into `null` on
+      // 2026-08-03 — it stands on a 10-minute-old answer if it has one and otherwise THROWS. So the
+      // `.catch` below is genuinely reachable: a cold process plus one refused read, on the
+      // `/q/<code>` door where the page renders server-side and the client re-resolves.
+      //
+      // WHY THE EMPTY STRING IS THE RIGHT ANSWER, and not a hang. The server half of this is
+      // ALREADY BUILT and already worded. `/api/guest/place-order` and `/api/guest/call-waiter` both
+      // do `isUuid(b.restaurantId) ? … : ""` and refuse with `unknown_restaurant`, and
+      // lib/guestOutbox.ts already words it for a diner: *"We couldn't tell which restaurant this
+      // order was for."* So an unknown restaurant now takes the path this codebase built for exactly
+      // that case — a visible refusal — instead of quietly becoming somebody else's order and
+      // somebody else's money. `ready` stays FALSE, which is what BanGate and CustomerGreeter
+      // already wait on.
+      //
+      // A lookup that succeeds and returns null (a slug nobody owns) is a DIFFERENT answer and keeps
+      // its old behaviour: there is no restaurant to be wrong about.
+      .then((r) => {
+        if (!alive) return;
+        if (r?.id) { setId(r.id); setName(r.name || null); setReady(true); return; }
+        setId(DEFAULT_RESTAURANT_ID); setName(null); setReady(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setId("");          // we do not know — and "#1" would be a guess about somebody's money
+        setName(null);
+        setReady(false);    // …so nothing keyed on the restaurant acts on a guess
+      });
     return () => { alive = false; };
   }, [pathname]);
 

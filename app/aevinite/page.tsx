@@ -246,8 +246,16 @@ export default function AdminCommand() {
       {/* 3 · Working now + latest activity. */}
       <div className="cmd-grid2">
         <div className="adm-card">
+          {/* THE HEADING COUNTS EVERYONE, LIKE THE CARD ABOVE IT (T18 sweep #7, item 5). The
+              endpoint sends a LIST capped at 200 plus the exact `onlineCount`, and it says why in
+              its own comment: "exact total (list capped at 200) so the KPI can't under-report at
+              scale". The stat card at the top of this page reads that exact count; this heading
+              read `online.length`, the length of the capped list. Past the cap the same screen
+              would state two different numbers for the same thing, 300px apart, with a "View all"
+              link between them — the fault this console has already had to fix twice by name. The
+              rows listed are still whatever came back; the heading is the truth. */}
           <div className="cmd-sec">
-            Working now <span>· {online.length} active</span>
+            Working now <span>· {onlineCount ?? online.length} active</span>
             <Link href="/aevinite/staff-online" style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>View all →</Link>
           </div>
           {online.length === 0 ? (
@@ -277,7 +285,9 @@ export default function AdminCommand() {
       {/* Open issues — quiet row under the grid; loud only when something IS open. */}
       <div className="adm-card" style={{ marginTop: 12 }}>
         <div className="cmd-sec">
-          Open issues <span>· {openIssues.length} open</span>
+          {/* Same rule, and this one is far closer to biting: the issues LIST is capped at 50 while
+              `openIssuesCount` is exact, and this section shows five rows of it. */}
+          Open issues <span>· {openIssuesCount ?? openIssues.length} open</span>
           <Link href="/aevinite/repair#complaints" style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>Manage →</Link>
         </div>
         {openIssues.length === 0 ? (

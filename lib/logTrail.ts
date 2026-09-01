@@ -244,12 +244,20 @@ const PLACE: Record<string, Place> = {
   print_routes_changed: { area: "Aevidine console", screen: "Printing" },
   print_switch: { area: "Aevidine console", screen: "Printing" },
   print_test: { area: "Aevidine console", screen: "Printing" },
-  // These two are written by app/api/editor/[...path] when a bill or ticket actually goes to
-  // paper, so they happened where the printing did — the manager panel, not the console. The
-  // `_by_admin` twin is the same act done through act-as; its LABEL already says so, and its place
-  // is still the screen the paper came out of.
-  print_sent: { area: "Orders & bills", screen: "Kitchen tickets" },
-  print_sent_by_admin: { area: "Orders & bills", screen: "Kitchen tickets" },
+  // These two are written when a bill or a banquet sheet actually goes to paper, so they happened
+  // where the printing did — the manager panel (and, since mig 341, the waiter tablet), not the
+  // console. The `_by_admin` twin is the same act done through act-as; its LABEL already says so,
+  // and its place is still the screen the paper came out of.
+  //
+  // FILED UNDER "Print the bill", NOT "Kitchen tickets" (owner, 2026-08-28: "make log do that").
+  // These two codes are written in exactly two places, and BOTH are the bill/banquet `print/send`
+  // door — a kitchen ticket is `kot_reprint_sent` / `kot_printed`, which are different codes. So
+  // filing them under Kitchen tickets put every bill print in the wrong drawer twice over: looking
+  // under Bills for "where did that bill come out?" found nothing, and filtering Kitchen tickets
+  // returned bills that were never kitchen tickets. "Print the bill" already exists as a screen
+  // here (invoice_generate uses it), so this is a move, not a new name.
+  print_sent: { area: "Orders & bills", screen: "Print the bill" },
+  print_sent_by_admin: { area: "Orders & bills", screen: "Print the bill" },
 
   // ── Sign-in & security ──────────────────────────────────────────────────────────────────────
   // The admin stepping into a restaurant's own panel (act-as). Already red on main before the print
@@ -265,6 +273,7 @@ const PLACE: Record<string, Place> = {
   rate_limit_allow: { area: "Sign-in & security", screen: "Limits" },
   admin_block: { area: "Sign-in & security", screen: "Blocked devices" },
   admin_unblock: { area: "Sign-in & security", screen: "Blocked devices" },
+  admin_unblock_denied: { area: "Sign-in & security", screen: "Blocked devices" },
   admin_lockout_clear: { area: "Sign-in & security", screen: "Blocked devices" },
   blocklist_add: { area: "Sign-in & security", screen: "Blocked devices" },
   blocklist_remove: { area: "Sign-in & security", screen: "Blocked devices" },

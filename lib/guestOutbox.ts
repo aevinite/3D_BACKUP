@@ -20,7 +20,10 @@ export type GuestOrder = {
   // waiter — the thing a diner does when something is WRONG, and the request most likely to come
   // from the corner with no bars — simply failed. Absent on rows written before this existed, so
   // it is read as "order" everywhere, which is what they are.
-  kind?: "order" | "call";
+  // "leave" joined the two on 2026-08-30: a diner telling the restaurant they have left a table,
+  // saved and sent by the phone exactly like an order, so a dead connection cannot leave a table
+  // holding a head who walked out.
+  kind?: "order" | "call" | "leave";
   reason?: string;                  // the waiter-call note ("kind" === "call")
   // The basket as a PERSON sees it — id AND name for each line (improvement #5). `items` carries
   // ids and `track.items` carries names, and pairing them by position would work only for as long
@@ -434,6 +437,7 @@ function sendDeadline(): AbortSignal | undefined {
 }
 
 const isCall = (it: GuestOrder) => it.kind === "call";
+const isLeave = (it: GuestOrder) => it.kind === "leave";
 
 /**
  * THE LIST THAT ACTUALLY HAS NAMES ON IT.
@@ -468,6 +472,14 @@ function blockedLineId(it: GuestOrder, reason?: string, token?: string): string 
 }
 
 function doPost(item: GuestOrder) {
+  if (isLeave(item)) {
+    return fetch("/api/guest/leave", {
+      method: "POST",
+      signal: sendDeadline(),
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": item.id },
+      body: JSON.stringify({ token: item.token, restaurantId: item.restaurantId }),
+    });
+  }
   if (isCall(item)) {
     return fetch("/api/guest/call-waiter", {
       method: "POST",
@@ -547,6 +559,8 @@ export async function flushGuestOutbox() {
     while (idx < queued.length && !isOffline()) {
       const item = queued[idx];
       // Too old to be worth ringing the floor for — say so instead of sending it.
+      // They re-joined the very table this leave was for — drop it rather than throw them out.
+      if (leaveIsStale(item)) { await removeItem(item.id); notify(); continue; }
       if (isCall(item) && Date.now() - (item.at || 0) > STALE_CALL_MS) {
         // `queued: true` like every other refusal that reaches this file: it is a SAVED thing being
         // turned down later, and the guard in verify:order-retry holds the whole queue to that.
@@ -590,7 +604,7 @@ export async function flushGuestOutbox() {
         await moveToFailed(item, j.clash.plain); notify(); continue;
       }
       // A CALL succeeds with no order_id — there is nothing to track, the floor just knows.
-      if (res.ok && j?.ok && isCall(item)) { progressed = true; await removeItem(item.id); notify(); continue; }
+      if (res.ok && j?.ok && (isCall(item) || isLeave(item))) { progressed = true; await removeItem(item.id); notify(); continue; }
       if (res.ok && j?.ok && j.order_id) { progressed = true; recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
       // Already placed on a prior sync whose reply we lost. The server echoes the original
       // order_id back with the duplicate, so we can still show it to the guest.
@@ -644,6 +658,81 @@ export async function flushGuestOutbox() {
 }
 
 export async function dismissGuestFailed(id: string) { await removeItem(id); notify(); }
+
+/**
+ * TAKE BACK A REQUEST FOR STAFF THAT HAS NOT GONE YET (owner picked this, 2026-08-30).
+ *
+ * WHERE THE LINE SITS, AND WHY IT IS HERE AND NOT ROUND AN ORDER. A saved ORDER deliberately has no
+ * cancel: by the time a diner looks at it, the kitchen may already hold it — the reply is what was
+ * lost, not the order — and throwing it away would destroy real work. Nobody has cooked a glass of
+ * water. A queued CALL has not rung anything yet; it is a bell that has not been pressed.
+ *
+ * So this refuses anything that is not a call, by kind, rather than trusting the caller — the UI
+ * only offers the button on a call, but a guard that depends on a render is not a guard.
+ *
+ * It also refuses a call that is no longer QUEUED. One already moved to `failed` is handled by
+ * "Remove"; one already sent is gone from the list entirely. Returning a reason rather than a bare
+ * false lets the screen say something true instead of going quiet — the tap-in-silence rule.
+ */
+/**
+ * SAVE "I'VE LEFT THIS TABLE" AND SEND IT WHEN THE SIGNAL RETURNS (owner picked this, 2026-08-30).
+ *
+ * Only ONE leave per token can be waiting: leaving twice is the same fact, and a second row would
+ * just be a second request for the restaurant to answer.
+ */
+export async function enqueueGuestLeave(p: {
+  token: string; restaurantId?: string; restaurantSlug?: string; actionId?: string;
+}): Promise<{ ok: true; queued: true; action_id: string; persisted: boolean }> {
+  ensureStarted();
+  const existing = queued.find((x) => isLeave(x) && String(x.token || "") === String(p.token || ""));
+  if (existing) {
+    const kept = await persist(existing);
+    notify(); ensureRetry();
+    return { ok: true, queued: true, action_id: existing.id, persisted: kept };
+  }
+  const item: GuestOrder = {
+    id: p.actionId || uuid(), kind: "leave", status: "queued", at: Date.now(),
+    token: p.token, mode: "session", restaurantId: p.restaurantId,
+    restaurantSlug: p.restaurantSlug || tenantSlug(), items: [], allergies: [],
+  };
+  queued.push(item);
+  while (queued.length > MAX_QUEUED) {
+    const oldest = queued[0];
+    await moveToFailed(oldest, "This one waited too long to send — please tell a member of staff if it still matters.");
+  }
+  const persisted = await persist(item);
+  notify(); ensureRetry();
+  return { ok: true, queued: true, action_id: item.id, persisted };
+}
+
+/**
+ * THE ONE DECISION THIS FEATURE NEEDED, AND THE ANSWER (owner asked what should happen, 2026-08-30).
+ *
+ * What if the diner RE-JOINS the same table before the saved "I've left" has gone? Sending it then
+ * would throw them out of the table they are now sitting at — the app would undo something the
+ * person has just done, on their behalf, with no way to see it coming. So a saved leave is DROPPED
+ * the moment this device holds a live session on the same token again.
+ *
+ * Checked at send time rather than on rejoin, because the rejoin can happen while the tab is shut.
+ */
+function leaveIsStale(it: GuestOrder): boolean {
+  if (!isLeave(it)) return false;
+  try {
+    const raw = tgetFor("lfh_session", it.restaurantSlug || tenantSlug());
+    if (!raw) return false;
+    const s = JSON.parse(raw) as { token?: string };
+    return !!s?.token && s.token === it.token;   // they are back on the very session they left
+  } catch { return false; }
+}
+
+export async function cancelQueuedCall(id: string): Promise<{ ok: boolean; reason?: "not_found" | "not_a_call" }> {
+  const it = queued.find((x) => x.id === id);
+  if (!it) return { ok: false, reason: "not_found" };
+  if (!isCall(it)) return { ok: false, reason: "not_a_call" };
+  await removeItem(id);
+  notify();
+  return { ok: true };
+}
 
 /**
  * SEND THE REST OF THE BASKET, WITHOUT THE DISH THAT WAS REFUSED (improvement #5).

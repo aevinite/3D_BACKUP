@@ -140,16 +140,25 @@ export default function SessionGate() {
   // auto-continue. On the "call a waiter" (access) path — used when the guest is too far
   // or as an escape hatch — nothing watches, so we must NOT promise auto-send (audit fix S1).
   const [reqAutoSend, setReqAutoSend] = useState(true);
+  // WHEN the request to staff actually landed, and a clock that ticks only while that screen is up
+  // (owner picked this, 2026-08-30). Deliberately UNDERSTATED: elapsed time, never a countdown and
+  // never a warning — a diner watching a number climb is being made anxious, not informed. It stays
+  // silent for the first minute, because "asked 0 minutes ago" tells nobody anything.
+  const [reqAt, setReqAt] = useState(0);
+  const [, reqTick] = useState(0);
 
   // Working values that shouldn't trigger a re-draw when they change:
-  // The cached settings, KEYED BY RESTAURANT (sweep 6 T3). This was a bare
-  // `useRef<Settings | null>` filled once with `settingsRef.current || await getSettings(...)`,
-  // which is only correct while a mounted gate never sees a second restaurant — and it does see
-  // one: this component lives in the root layout, so it survives a move between restaurants, and
-  // `ridRef.current` is still restaurant #1's placeholder for the few hundred milliseconds it
-  // takes the slug to resolve. Whatever restaurant was cached in that window then decided the
-  // geofence, the table-count range check and whether a location check was needed, for the whole
-  // life of the page. Keyed, it simply cannot answer for the wrong restaurant.
+  // The LAST-KNOWN settings, keyed by restaurant. Two rules live here, from two sweeps:
+  //   * KEYED (sweep 6 T3) — this was a bare useRef<Settings | null>, and this component lives in
+  //     the root layout, so it survives a move between restaurants while ridRef.current is still
+  //     restaurant #1's placeholder for the few hundred ms the slug takes to resolve. Whatever
+  //     restaurant landed in that window then decided the geofence, the table-count range check
+  //     and whether a location check was needed, for the whole life of the page.
+  //   * A FALLBACK, NOT A CACHE (sweep 7 T3) — reading it in preference to ASKING meant a
+  //     restaurant could never change its own rules under a guest who already had the page open.
+  //     The load in the handler below always asks getSettings(); this map is only what we fall
+  //     back to when that read fails, so a blip does not dead-end a diner who was fine a moment
+  //     before.
   const settingsByRid = useRef<Map<string, Settings>>(new Map());
   const settingsRef = useRef<Settings | null>(null); // the settings for the restaurant we are acting on NOW
   const pending = useRef<Pending | null>(null); // the action we're trying to complete
@@ -244,6 +253,13 @@ export default function SessionGate() {
   // Phone back button closes the sheet (and reports the action cancelled, exactly
   // like the backdrop/X) instead of leaving the site.
   useBackClose("session-gate", open, close);
+  // One tick every 30s, and ONLY while the "we've told them" screen is actually up — a timer that
+  // runs behind a closed sheet is a battery cost with nothing to show for it.
+  useEffect(() => {
+    if (!open || step !== "request_sent" || !reqAt) return;
+    const iv = setInterval(() => reqTick((n) => n + 1), 30_000);
+    return () => clearInterval(iv);
+  }, [open, step, reqAt]);
 
   // ── perform the queued action once the session is ready ────────────────────
   // Now that we're in the session, actually do the job: place the order or call
@@ -604,24 +620,39 @@ export default function SessionGate() {
       pending.current = detail;
       settled.current = false;
       coords.current = { lat: null, lng: null };
-      // Load settings once and reuse them after. OFFLINE GUARD: this fetch THROWS
-      // with no internet, which used to kill the whole flow before any screen
-      // opened — tapping Add-to-cart while offline just did nothing, silently.
-      // Now the guest gets the connection-trouble screen with a working Retry.
+      // OFFLINE GUARD: this fetch THROWS with no internet, which used to kill the whole flow before
+      // any screen opened — tapping Add-to-cart while offline just did nothing, silently. Now the
+      // guest gets the connection-trouble screen with a working Retry.
+      //
+      // ALWAYS ASK; KEEP THE LAST ANSWER ONLY AS A FALLBACK (sweep 7 T3).
+      //
+      // This used to serve the map whenever it had an entry, so the FIRST time a guest opened the
+      // gate decided the geofence, whether a location check was needed and the table-number range
+      // for the whole life of the page. A restaurant that added tables, moved its geofence or
+      // switched the location check on while a guest had the menu open kept being held to the OLD
+      // rules: at 40 tables, a diner at table 35 was still refused with "This place has tables
+      // 1-30".
+      //
+      // getSettings() is the right owner of that decision and already does all of it: it dedups
+      // simultaneous callers into ONE request, holds a short TTL, and — the part a private Map can
+      // never have — it is DROPPED by invalidateSettings() when a realtime breadcrumb says the row
+      // changed. A cache in front of a breadcrumb is the known way these updates die.
       try {
         // THIS restaurant's settings, not "the first restaurant this tab ever asked about".
         const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
-        const cached = settingsByRid.current.get(rid);
-        if (cached) settingsRef.current = cached;
-        else {
-          const s = await getSettings(rid);
-          settingsByRid.current.set(rid, s);
-          settingsRef.current = s;
-        }
+        const s = await getSettings(rid);
+        settingsByRid.current.set(rid, s);
+        settingsRef.current = s;
       } catch {
-        setNote("We can't reach the restaurant's system right now — check your internet and retry.");
-        setOpen(true); setStep("net_error");
-        return;
+        // …and if that read fails but we knew this restaurant a moment ago, carry on with what we
+        // knew rather than dead-ending a diner who was fine a moment before.
+        const known = settingsByRid.current.get(ridRef.current || DEFAULT_RESTAURANT_ID);
+        if (known) settingsRef.current = known;
+        else {
+          setNote("We can't reach the restaurant's system right now — check your internet and retry.");
+          setOpen(true); setStep("net_error");
+          return;
+        }
       }
       if (detail.action === "connect") {
         // SILENT FAST-PATH: already in an open session AND approved → finish without
@@ -790,6 +821,7 @@ export default function SessionGate() {
     // KEEPS the cart so the guest can order once a waiter seats them. The sheet stays on
     // request_sent; Cancel just closes it (fireDone is once-only, so this is safe). (S1)
     if (type === "access") fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
+    setReqAt(Date.now());          // stamped only after requestLanded() said it really landed
     setStep("request_sent");
     } finally { reqBusy.current = false; }
   };
@@ -813,6 +845,7 @@ export default function SessionGate() {
     // the Request button still works — so the next tap is one that can actually get them served.
     if (!requestLanded(r, true)) return;
     setNote("");
+    setReqAt(Date.now());
     setStep("request_sent");
     } finally { reqBusy.current = false; }
   };
@@ -1100,6 +1133,17 @@ export default function SessionGate() {
           ) : (
             <p className="sg-sub">A waiter is on the way to help you. Your order hasn&apos;t been sent yet — it&apos;s saved in your cart, so you can place it once you&apos;re seated.</p>
           )}
+          {/* How long they have been waiting — plain, quiet, and only once there is something to
+              say. `sg-sub` keeps it in the card's own muted colour in both skins. */}
+          {(() => {
+            const mins = reqAt ? Math.floor((Date.now() - reqAt) / 60000) : 0;
+            if (mins < 1) return null;
+            return (
+              <p className="sg-sub" style={{ opacity: 0.75 }}>
+                Asked {mins === 1 ? "a minute" : `${mins} minutes`} ago.
+              </p>
+            );
+          })()}
           <div className="sg-actions"><button className="sg-btn ghost" onClick={close}>{reqAutoSend ? "Cancel" : "Close"}</button></div>
         </>)}
 

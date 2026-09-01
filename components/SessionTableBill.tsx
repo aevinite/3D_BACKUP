@@ -76,8 +76,16 @@ export default function SessionTableBill() {
   // Composition scheme (mig 270): this restaurant may not pass GST to the diner at all, so a
   // GST row must not appear on their copy of the bill.
   const [composition, setComposition] = useState(false);
+  // A SKELETON THAT NEVER RESOLVES IS A BLANK SCREEN WITH NO HONEST MESSAGE (sweep 7 T3).
+  // `loaded` only ever flips true on a SUCCESSFUL read, and a transient failure deliberately
+  // returns without touching it — that is what keeps a live bill on screen through a blip. Put
+  // those two together on the FIRST read and the Live-status tab shimmered for as long as the tab
+  // stayed open, saying nothing: the diner is offline, or the restaurant's system is not
+  // answering, and the screen just pulses. Say so, once, and offer a way to ask again.
+  const [stalled, setStalled] = useState(false);
   // Holds the session token. A ref (not state) because changing it shouldn't redraw.
   const tokenRef = useRef<string | null>(null);
+  const pollRef = useRef<(() => void) | null>(null); // so a Retry on the stalled screen can ask again
 
   // This runs once when the component first appears. It checks whether we should
   // show anything at all, then starts polling the server for live updates.
@@ -114,8 +122,13 @@ export default function SessionTableBill() {
         if (!st.ok) {
           const reason = (st as { reason?: string }).reason;
           if (reason === "session_closed" || reason === "removed" || reason === "invalid_token") setActive(false);
+          // Nothing has ever loaded, so there is no live bill to protect — say what is happening
+          // instead of shimmering. Once anything HAS loaded we stay quiet and retry, exactly as
+          // before: a blip must never blank a bill that is already on screen.
+          else setStalled(true);
           return;
         }
+        setStalled(false);
         const sess = st.session as { table_number?: string; status?: string } | undefined;
         if (sess?.status !== "open") { setActive(false); return; }
         // PENDING members must NOT see the live table. The server already withholds
@@ -158,6 +171,7 @@ export default function SessionTableBill() {
       };
       // Check right away; realtime nudges drive instant refetches, with a slow 60s
       // backup poll for when the WebSocket is asleep/dropped.
+      pollRef.current = () => { void poll(); };
       poll();
       iv = setInterval(poll, RT_BACKUP_MS);
       onTick = () => poll();
@@ -187,7 +201,11 @@ export default function SessionTableBill() {
     <div className="stb">
       {/* The header: a little live dot, the table number, and a guest count. */}
       <div className="stb-head">
-        <span className="stb-dot" aria-hidden="true" />
+        {/* The green pulsing dot MEANS "this is live". While we are telling the diner we cannot
+            reach the restaurant's system, it would be claiming the opposite, so it goes grey and
+            stops pulsing until a read lands. (sweep 7 T3) */}
+        <span className="stb-dot" aria-hidden="true"
+          style={!loaded && stalled ? { background: "var(--muted)", boxShadow: "none", animation: "none" } : undefined} />
         Your table{table ? ` · Table ${table}` : ""}
         {/* Only show the guest count when more than one person shares the table. */}
         {members > 1 && <span className="stb-members">{members} guests</span>}
@@ -206,7 +224,19 @@ export default function SessionTableBill() {
       {/* Until the FIRST server fetch is back, show a shimmer skeleton — never the
           "no dishes" empty message (that split-second flash before data loaded was
           the glitch). (owner, 2026-06-19) */}
-      {!loaded ? (
+      {!loaded && stalled ? (
+        <div className="stb-empty" aria-live="polite">
+          We can&apos;t reach the restaurant&apos;s system right now, so we can&apos;t show what your
+          table has ordered. Nothing is lost — it appears here as soon as the connection is back.
+          {/* `sg-link` is the app's existing muted, underlined text button (it themes itself from
+              var(--muted)/var(--text), so it is readable in both guest skins) — reused here rather
+              than inventing a class, because THE LOOK is another territory's file. */}
+          <button type="button" className="sg-link" style={{ marginLeft: 6 }}
+            onClick={() => { setStalled(false); pollRef.current?.(); }}>
+            Try again
+          </button>
+        </div>
+      ) : !loaded ? (
         <div className="stb-loading" aria-live="polite" aria-label="Loading your table…">
           <span className="stb-skel" /><span className="stb-skel" /><span className="stb-skel short" />
         </div>

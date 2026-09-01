@@ -662,11 +662,14 @@ input:disabled { opacity: .55; cursor: not-allowed; }
    780px screen on four screens. body[data-tab] is set by setTab, survives any re-render and
    cannot be lost with the node. The JS stays as the first line of defence. */
 body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
-/* A TOAST MUST NOT LAND ON THE UNDO BAR (same sweep). Both are centred at the bottom ~8px apart
-   (undobar.js sits at 16px + --sab, this at 24px), so on a 360px screen a "1 new order" toast
-   covered the "Undo serve" card — and the undo is the one with a deadline. undobar.js adds
-   .lfh-undobar-up to <body> while it is showing and publishes its measured height. */
-body.lfh-undobar-up .toast { bottom: calc(24px + var(--sab) + var(--lfh-undobar-h, 56px) + 8px); }
+/* A TOAST MUST NOT LAND ON THE UNDO BAR (T12 phone sweep). Both are centred at the bottom ~8px
+   apart, so on a 360px screen a "1 new order" toast covered the "Undo serve" card — and the undo
+   is the one with a deadline.
+   THE RULE ITSELF NOW SHIPS FROM undobar.js (T9 sweep #7, 2026-08-17), so all four panels get it
+   from one place instead of a copy per stylesheet. This panel's copy was left behind and was dead
+   — undobar.js injects its sheet at runtime, after this <link>, at equal specificity, so its rule
+   won every time. Dead code that looks live is worse than no code: the next person to change one
+   of the two would have had no way to know about the other. Removed 2026-08-28. */
 .toast.ok { border-color: var(--green); }
 .toast.err { border-color: var(--red); }
 .toast .toast-x {
@@ -2885,6 +2888,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 }
 /* No spinner arrows: they steal the width this field needs and nobody nudges a bill by ₹1 arrows. */
 .disc-pay-input::-webkit-outer-spin-button, .disc-pay-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* …and the tip's three, for the same reason: same kind of figure, same thumb, same screen. */
+#payTipPct::-webkit-outer-spin-button, #payTipPct::-webkit-inner-spin-button,
+#payTipInput::-webkit-outer-spin-button, #payTipInput::-webkit-inner-spin-button,
+#payPaidInput::-webkit-outer-spin-button, #payPaidInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .disc-pay-input { -moz-appearance: textfield; appearance: textfield; }
 .disc-hint { margin-top: 8px; text-align: center; font-size: 12px; color: var(--muted); }
 .disc-foot-spacer { flex: 1; }
@@ -2932,10 +2939,27 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   min-width: 44px; min-height: 44px; padding: 0 12px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
 .pay-split-n.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
-/* "By order" sits in the same row as the counts and highlights the same way, so it reads as one
-   choice: fill the amounts evenly, or fill them from the tickets. */
-.pay-split-byorder { min-height: 44px; padding: 0 12px; font-weight: 700; }
-.pay-split-byorder.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+/* ── THE FOUR WAYS TO DIVIDE (owner, 2026-08-29: "all the options for both the interface should
+   be similar"). Deliberately the tablet's own .sb-tabs geometry, so the two panels read as one
+   screen: a wrapping row of equal-width buttons, each a full 44px tap target, two per line once
+   the sheet is narrower than a phone's width. The 🧾 "By order" button that used to sit in the
+   COUNT row is now the fourth tab — it was a way of dividing sitting among a row of quantities,
+   which is why it read as a fifth "how many". */
+.pay-split-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.pay-split-tabs .pay-split-tab { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 10px; white-space: nowrap; font-weight: 700; }
+.pay-split-tabs .pay-split-tab.sel { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
+/* Greyed, not hidden: a one-ticket bill cannot be divided by ticket, and an option that VANISHES
+   reads as a missing feature, while an option that dims reads as "not for this bill". It still
+   answers when tapped — see setSplitMode's sentence. */
+.pay-split-tabs .pay-split-tab-off { opacity: .55; }
+@media (max-width: 420px) { .pay-split-tabs .pay-split-tab { flex: 1 1 45%; } }
+/* By dish: one tappable line per dish, the name on the left and whose it is on the right — the
+   tablet's .sb-dish, to the pixel. */
+.pay-split-dishes { margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.pay-split-dish { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  width: 100%; min-height: 44px; padding: 0 12px; text-align: left; }
+.pay-split-dish span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pay-split-dish span:last-child { flex: 0 0 auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* Which ticket a part is for. Full width above the amount: a KOT number cannot share the row with
    an amount box and a dropdown at 360px. */
 .pay-split-row .psr-label { grid-column: 1 / -1; margin: 0 0 -2px; font-weight: 700; }
@@ -4623,6 +4647,26 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
 .pw-state-row.no  .pw-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
 .pw-val { font-weight: 700; font-size: 12.5px; letter-spacing: .02em; }
 .pw-state-row.yes .pw-val { color: var(--green, #30a46c); }
+/* THE CONFIRMATION, IN THE PAGE — the panel's copy of the admin board's strip, same shape and same
+   words, so the two screens do not teach a person two different things (owner, 2026-08-29). */
+.pw-confirm { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
+  margin-top: 11px; padding: 12px 14px; border-radius: 12px;
+  /* --panel-2, NOT --card (T28, 2026-08-30). `--card` is declared in app/globals.css, and this
+     stylesheet belongs to the panel INSIDE the iframe, which cannot see it. An undefined variable
+     inside color-mix() makes the whole function invalid, so the browser threw the background away
+     and this strip rendered as a gold outline over the page with no fill at all — in BOTH skins,
+     which is why nobody caught it by looking at one. --panel-2 is the raised surface every other
+     card in this panel already sits on, and it is declared for dark and light here. */
+  border: 1px solid var(--gold, #d4a574); background: color-mix(in srgb, var(--gold, #d4a574) 8%, var(--panel-2, #251f17)); }
+.pw-confirm .txt { flex: 1 1 300px; display: flex; flex-direction: column; gap: 4px; }
+.pw-confirm .txt b { font-size: 13.5px; color: var(--ink, var(--text)); }
+.pw-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.pw-confirm .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (max-width: 640px) { .pw-confirm .acts { width: 100%; } .pw-confirm .acts .btn { flex: 1 1 auto; } }
+/* THE "YES" measured 4.43:1 on the light panel's cream card — a hair under the 4.5:1 a 12.5px label
+   needs (printing sweep §15, 2026-08-29). One step deeper, and only in the light skin: the dark
+   skin's green already reads clean on its own card, and --green is shared with other panels. */
+html[data-theme="light"] .pw-state-row.yes .pw-val { color: #13663a; }
 .pw-state-row.no  .pw-val { color: var(--muted); }
 /* The same third state as the console's .adm-state-row.warn: not "no", but WRONG. */
 .pw-state-row.warn { border-color: var(--red); background: color-mix(in srgb, var(--red) 9%, var(--panel-2)); }
@@ -4645,6 +4689,24 @@ html[data-theme="light"] .br-part-tab .brp-m { color: #6d28d9; }
 .pw-opt.on { background: color-mix(in srgb, var(--gold) 18%, var(--panel-2)); color: var(--text);
   font-weight: 700; box-shadow: inset 0 0 0 2px var(--gold-ink); }
 .pw-opt.on::before { content: "✓ "; font-weight: 800; color: var(--gold-ink); }
+
+/* ── THE ONE TOGGLE, mirroring the console's .adm-mode class for class ────────────────────────
+   Owner, 2026-08-28: "I want a simple toggle… you only see the option you have selected." Two big
+   targets, each carrying its own one-line explanation, because the choice is a MECHANISM and the
+   names alone do not tell you what you get. The chosen one is marked by a tick, a ring, a filled
+   panel AND bold weight — never colour alone (WCAG 1.4.1). */
+.pw-mode { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
+  flex: 1 1 250px; min-height: 64px; padding: 12px 15px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--muted); font: inherit; cursor: pointer;
+  transition: background .15s, box-shadow .15s; }
+.pw-mode b { font-size: 14px; font-weight: 650; color: var(--text); }
+.pw-mode small { font-size: 12px; line-height: 1.45; }
+.pw-mode:hover:not(.on):not(:disabled) { color: var(--text); }
+.pw-mode:focus-visible { outline: 2px solid var(--gold-ink); outline-offset: 2px; }
+.pw-mode:disabled { cursor: default; opacity: .8; }
+.pw-mode.on { background: color-mix(in srgb, var(--gold) 16%, var(--panel-2));
+  box-shadow: inset 0 0 0 2px var(--gold-ink); }
+.pw-mode.on b::before { content: "✓ "; color: var(--gold-ink); font-weight: 800; }
 
 /* The refinements nobody needs on the way in. */
 .pw-more { margin: 8px 0 0; }

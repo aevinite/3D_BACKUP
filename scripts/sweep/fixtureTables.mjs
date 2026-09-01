@@ -33,6 +33,8 @@ export const OFF_PLAN = [
   ["OWNCHK", "verify-table-ownership.mjs"],
   ["T12-TEST", "verify-cancel-loss.ts"],
   ["T12-P2", "verify-cancel-made.ts"],
+  ["T11-PAID", "verify-owner-reports.mjs — the Z-report till count: a bill settled in parts"],
+  ["T11-OPEN", "verify-owner-reports.mjs — the Z-report till count: a table STILL SITTING that has part-paid"],
 ];
 
 /**
@@ -40,13 +42,15 @@ export const OFF_PLAN = [
  * Keep the reason next to each — the point is that the next person can see the clash before it happens.
  */
 export const RESERVED = [
-  ["11", "verify-edge-cases.mjs — the session-gate races"],
+  ["11", "verify-merged-floor.mjs — the four-table party's PARENT (it holds the joint bill)"],
   ["12", "verify-merged-floor.mjs — the four-table party"],
   ["13", "verify-merged-floor.mjs — the four-table party"],
   ["14", "verify-merged-floor.mjs — the four-table party"],
+  ["15", "verify-edge-cases.mjs — the session-gate races (moved off 11 on 2026-08-30: 11 is the merged party's parent, and the two guards were scrambling each other)"],
   ["21", "verify-merged-floor.mjs / verify-families.mjs — the independent tables"],
   ["22", "verify-merged-floor.mjs / verify-families.mjs — the independent tables"],
   ["23", "verify-merged-floor.mjs — the independent tables"],
+  ["25", "scripts/sweep/t3/order-end-to-end.mjs — it opens a session on 25 and walks an order through it (registered 2026-08-30: it had been sitting there unlisted, so any dynamic picker was free to take it mid-run)"],
   ["27", "verify-void-on-joined-party.mjs — the party that holds the bill"],
   ["28", "verify-void-on-joined-party.mjs — the joined table whose food must survive"],
   ["9", "verify-session-ux.mjs — the partner-approval walk"],

@@ -32,7 +32,11 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const force = sp.get("refresh") === "1";
-  const month = /^\d{4}-\d{2}$/.test(sp.get("month") || "") ? sp.get("month")! : istToday().slice(0, 7);
+  // A REAL MONTH, not just the SHAPE of one (T25 round 2, 2026-08-31). This used to test
+  // `^\d{4}-\d{2}$`, which accepts `2026-13` and `2026-00` — and so did the window helper, so
+  // `?month=2026-13` answered with **January 2027's** purchases labelled "2026-13". Guarded by
+  // `npm run verify:inventory-window`.
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(sp.get("month") || "") ? sp.get("month")! : istToday().slice(0, 7);
   // ── ONE MONTH, ONE DEFINITION (T9 finding F27, fixed 2026-08-12) ────────────────────────────────
   // This page and the Inventory REPORT both show "purchases / waste / expenses" for a month, and they
   // used to build that month two different ways — a plain calendar month here, and a business-day

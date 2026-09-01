@@ -1,104 +1,83 @@
-# T21 findings — the database, migrations 001 to 118
+# T21 findings — sweep #7 · the database, migrations 001 to 118
 
-Territory: the first 120 files of `supabase/migrations/`.
-Ledger: `.claude/sweep/LEDGER/T21.md` (P10001–P10500). All findings below are FIXED in `sweep6/t21-db-migrations-a`.
+**Re-run 2026-08-28 against `origin/main` c005b3d3. Branch `sweep7/t21-migrations-a`.**
 
-## The one real fault, in ten places
+## The headline: 0 regressions in the product, 1 real hole in the scaffolding
 
-**ONE CLASS: running a single old migration by hand undoes a decision a later migration made.**
+All 500 existing rows (`P10001`–`P10500`) were re-run. **Nothing that was green is red.** Two
+long-standing `⏭` handoffs are now CLOSED by work that landed after sweep #6 (migrations 359 and the
+`verify:rpc-scoped` guard). 500 new rows (`P25101`–`P25600`) were planned, written and executed, all
+green.
 
-`CLAUDE.md` and `scripts/run-migration.mjs` both recommend applying ONE migration instead of a full
-re-seed, and that script's header states the assumption plainly: *"Idempotent migrations (CREATE OR
-REPLACE / IF NOT EXISTS) are safe to re-run."* For a file that only ADDS things, that is true. For a
-file whose objects a LATER migration deliberately REMOVED, it is not — the old file happily re-creates
-them, and the removal lives 100+ files away where nobody looks.
+### Item 1 — 120 permanent checks pointed at a script that was never committed
 
-The project has hit this three times and patched only its own instance each time:
-migration 099 (its body was replaced by its own removal, "running this file alone brought a
-table-closing job back to life"), migration 281 (*"if 236 is ever re-run alone they will come back"*),
-and migration 297, named "undo a resurrection". Nothing generalised it. This sweep did.
+Rows `P10001`–`P10120`, **24% of this whole territory**, all read
+`node scripts/verify-migration-truth.mjs --only <file>`. That file exists in **no commit in this
+repository's history** — `git log --all --diff-filter=A -- '*migration-truth*'` is empty, and the only
+mention of the name anywhere on disk is the ledger row itself. It was written in sweep #6's throw-away
+worktree, used once, and thrown away with it.
 
-**MEASURED, not reasoned.** Running 005, 015 and 036 by hand against the dev database:
-- re-created **7 pre-tenancy function overloads, 5 of them callable with the public menu key** —
-  including an `lfh_place_order` that trusts a client-supplied `subtotal`/`tax`/`total`, the exact
-  thing migration 029 exists to prevent (029 leaves a shim there that IGNORES that money);
-- reverted **5 function BODIES** to their old era — `lfh_session_state`, the guest's whole table view,
-  went from 5,315 characters back to 1,601, losing migrations 076/126/271/318.
+So the single largest group of checks on the database could not be re-run, which is the exact failure
+the ledger exists to prevent.
 
-`verify:grants` stayed GREEN through all of it and could not have caught it: its allow-list is keyed by
-function NAME, so a stale overload of an allowed name looks allowed, and it never compares bodies.
+**Fixed:** rebuilt as a permanent guard, `npm run verify:migration-truth`. It asserts, per migration
+file, that every object the file declares (table, added column, function, view, trigger, index, read
+policy) is either present in the database or retired **later in the sequence** — positionally later,
+meaning a later file OR later in the same file's own text, which is what migration 040 does with
+`lfh_check_verification`.
 
-The dev database was restored to a byte-exact snapshot taken before anything ran (all 187 functions,
-every body length matching), and `verify:grants` re-verified green afterwards.
+Nothing else in the repo asked this: `verify:db-parity` compares the two databases to each other so
+both can be wrong together, and `verify:db-grants` is keyed by function NAME so an absence looks like
+an allowed name.
 
-| # | file | what a single run put back | why that matters | severity |
-|---|------|---------------------------|------------------|----------|
-| 1 | `005_allergens_and_orders.sql` | policy `orders.public_insert_orders` (anon INSERT, `WITH CHECK (true)`) | a guest's phone writes an `orders` row with a price it chose, past `lfh_place_order`'s session/approval/pricing checks — the thing mig 029 exists to stop | **high — money** |
-| 1 | `008_search_alias_and_calls.sql` | policy `waiter_calls.public_insert_calls` | unlimited unattributed waiter calls on any table number; mig 050 replaced this with a rate-limited RPC that refuses a closed table | medium |
-| 2 | `015_sessions_v2_rpcs.sql` | function `lfh_open_session(text,text)` **+ its anon GRANT** | a guest opens their own table — mig 021 forbids it, mig 304 removed the function for doing it | **high** |
-| 2 | `083_guest_rpc_scoping_param.sql` | function `lfh_open_session(text,text,uuid)` **+ its anon GRANT** | same door, tenant-scoped signature | **high** |
-| 3 | `036_kot_bill_staff_orders.sql` | trigger `trg_assign_bill` on `sessions` + `lfh_assign_bill()` | every table a waiter opens instantly spends a bill number even if nobody orders — mig 040 fixed exactly this, and `docs/NUMBERING.md` records why | **high — numbering** |
-| 3 | `080_tenant_counters.sql` | function `lfh_assign_bill()` | dead function only (mig 040 already took its trigger) | low |
-| 4 | `037_billing_feedback_backend_stubs.sql` | function `lfh_request_otp` + anon GRANT | a second code-issuing door beside the live one, invisible while `verification` is backend-only | low |
-| 4 | `040_bill_no_lazy_and_otp_rename.sql` | function `lfh_check_verification` + anon GRANT | third route to the resurrection migs 267 and 297 each undid | low |
-| 5 | `003_settings.sql` | policy `settings.public_read_settings` (`USING (true)`) | every restaurant's whole settings row — gstin, access_config — to the public menu key. **Inert today** because anon's table SELECT grant is also revoked; this removes the reliance on that one remaining lock | low (defence in depth) |
-| 5 | `078_tenancy_core.sql` | policy `restaurants.public_read_restaurants` | same shape, closed by mig 313; also inert today for the same reason | low (defence in depth) |
+**Green:** 1,104 declared objects across all 375 files, 27 deliberately retired later, none missing.
+340 objects in this territory's own 120 files.
 
-**Fix (all ten):** each file now ENDS in the state the later migration decided — an idempotent
-`DROP … IF EXISTS`, in the pattern migrations 036, 040 and 099 already use, with a comment naming the
-later migration and the rule. A full re-seed is unchanged (the later DROP was always going to win);
-a single-file run now lands in the same place.
+Registered in `docs/GUARD-MAP.md` §9.
 
-**Confirmed, not reasoned:** ran 005, 008, 015 and 036 through `scripts/run-migration.mjs` after the
-fix and re-queried — no policy, function or trigger came back.
+## Ten rows I first read as RED and then cleared — every one was my own detector
 
-## Guard
+Recorded so the next sweep does not re-file them. Each is written into its own ledger row.
 
-`scripts/verify-migration-run-alone.mjs` + `npm run verify:run-alone`. Two assertions:
-1. **static** — no migration re-creates an object the sequence later retires without removing it again
-   itself (18 retired objects across 356 files);
-2. **live** — no function in the database carries a signature the sequence drops. This is the
-   stale-overload check, and it is what catches a hand-run after the fact.
+| what I read as broken | what was actually wrong |
+|---|---|
+| 20 function bodies "drifted" from their migrations | my extractor only understood `$$ … $$`; half this repo's functions use `$function$ … $function$` |
+| `lfh_owner_payment_breakdown`'s body still differed | ONE LEADING SPACE. Diffed character by character: divergence at position 0, then 3,036 identical characters |
+| 38 indexes "absent" | off-by-one in my capture groups — I was looking up table names as index names |
+| `rt_emit_settings` "lost its UPDATE event" | migration 328 deliberately split it: INSERT/DELETE stays, UPDATE moved to a sibling with a WHEN clause that ignores the bill-counter tick. Compare against the LAST declaration, not the first |
+| 267 duplicate KOT numbers | I grouped on the CALENDAR day. The counter keys on the BUSINESS day (5am IST, migration 044). Zero duplicates on the right key |
+| 203 duplicate bill numbers | grouped on `opened_at`, which is null on the control restaurant's sessions, collapsing 203 rows into one null bucket. Zero on `created_at`'s business day |
+| 702 orders "in an unknown state" | the product says `received`; my list said `new` |
+| 5 tables with "a read policy and no grant" | `information_schema.role_table_grants` under-reports. `has_table_privilege` is the authoritative instrument, and all five carry the grant |
+| a "sixth" wide-open read policy | two `USING (true)` policies are granted to `service_role` only — which is exactly why the repo's own guard filters on roles |
+| migration 036 "not re-runnable" | its bare `CREATE FUNCTION` is preceded by `DROP FUNCTION IF EXISTS` on the line above, on purpose, because the return shape changes and `OR REPLACE` cannot change that |
 
-Proved it bites: removing the fix from 036 makes it exit 1; restoring it exits 0.
+## Four red rows that were test residue, not the product
 
-Four files OUTSIDE migrations 001–118 still carry the same shape. They are listed in a written-down
-`KNOWN_BACKLOG` so the guard is green today and RED on anything new — see the handoff below.
+Named because they will come back every sweep.
 
-## 🔗 HANDOFF
+- **445 sessions carry a bill number with no order.** Every writer of `sessions.bill_no` is a trigger
+  on an ORDER arriving, so migration 040's lazy rule holds. 165 of the 445 are dated the sweep-#6 day
+  alone, three sessions one second apart on consecutive tables, and not one carries a printed bill —
+  their order rows were hard-deleted by the cleanup the sweep's own rules require.
+- **13 soft-deleted sessions have orders and no bill number.** Their `delete_reason` says it in words:
+  *"sweep6 T3 self-test row — retired by the run that created it"*. Nothing blanked a number; these
+  never had one, because the orders were inserted straight into the table past the trigger.
+- **1 order marked paid with no time of payment**, on a table named `T9-erase`, dated 2026-08-05.
+- **A "32 vs 30" disagreement between the manager floor and the tablet floor.** Two readings a minute
+  apart. Read in ONE run they agreed every time — another terminal was removing its fixture tables.
 
-1. **`scripts/run-migration.mjs`** — the root cause. It should refuse, or at minimum print a loud list,
-   when the file it is asked to run is not the last definer of the functions it defines. Its header
-   currently promises the opposite ("safe to re-run"). Evidence: running 015 reverted `lfh_session_state`
-   from 5,315 to 1,601 characters.
-2. **`scripts/verify-db-grants.mjs`** — its `ANON_ALLOWED` allow-list is keyed by function NAME, so a
-   stale overload of an allowed name passes. Key it by signature, or call `verify:run-alone`'s live half.
-3. **Four files needing the same one-line ending** (each outside 001–118, each needs the removal its own
-   later migration already wrote): `218_error_signatures.sql` → `lfh_bump_error_signature` (retired by 219) ·
-   `236_write_down_the_unwritten_function.sql` → `lfh_check_ban_scoped` (retired by 281) ·
-   `249_merge_is_recorded_and_reversible.sql` → `lfh_merge_group` (retired by 267) ·
-   `296_database_layer_a_sweep_fixes.sql` → `lfh_check_verification` (retired by 297).
-4. **`public/panels/editor/app.js`** — the Items tab shows a "Rating" text box (line ~1431) and editable
-   review rows (~1281) bound to `menu_items.rating` / `menu_items.reviews`. Both columns are dead: every
-   rating a guest sees comes from the `item_ratings` view. Someone types 4.8 and nothing changes anywhere.
-5. **`app/api/admin/floor/route.ts:74`** — `supabaseAdmin.rpc("lfh_floor_state")` with no restaurant, so it
-   answers with restaurant #1's floor by parameter default. Unreachable today (the only caller uses
-   `?all=1`), so not a fault yet; it is a trap for the next caller.
-6. **Pre-existing red, not mine:** `npm run verify:db-parity` fails on clean `origin/main` —
-   `346_a_purge_clears_the_printing_setup.sql` and `346_usage_and_cost_answers_for_any_window.sql` share
-   number 346. Both are in `origin/main`'s tree; my diff touches no 346 file. The newer one needs renumbering.
+## What is genuinely clean, and how it was proved
 
-## Checked and found CLEAN (no change made)
-
-- Every object migrations 001–118 declare is present in the dev DB or removed by a later migration (120/120).
-- All 69 surviving functions from the range match their migration's body byte-for-byte — zero hand-edit drift.
-- Every tenant table the range created leads on `restaurant_id`, has RLS on, and its policy has the matching
-  GRANT. The documented "read POLICY with no GRANT" fault does not exist anywhere in this range.
-- No `ADD COLUMN … NOT NULL` without a default; no `SET NOT NULL`; every `CREATE INDEX` and `ADD CONSTRAINT`
-  survives a re-run.
-- The 11 one-time data-rewriting blocks migration 307 enumerated are all still guarded or predicate-keyed.
-  Migration 043's ×84 money conversion is guarded twice over — confirmed on screen: prices are whole rupees.
-- The three duplicate-number pairs in the range (057, 068, 116) declare disjoint objects.
-- `staff_actions.restaurant_id` being nullable is CORRECT (900 platform-level rows: owner-account admin
-  actions, failed logins, client errors) and the admin Activity log reads them un-scoped.
-- The 5 wide-open read policies are the ones the repo chose; column-narrowing is a rejected idea (migs 274/281).
+- **Object shape, not just presence** — 73 function bodies, 90 columns, 38 indexes, 24 triggers,
+  9 policies, 32 grants, 8 constraints, all still what the migrations declare.
+- **The numbers** — zero duplicate KOT, bill or invoice numbers, per restaurant, per business day,
+  across all 53 restaurants.
+- **The data** — 40 referential checks (orphans, restaurant mismatches, impossible states) all zero.
+- **Re-runnability** — all 120 files land in the same state applied twice.
+- **Per-tenant branding** — four tenants' own menu doors, rendered: each shows its own wordmark, hero
+  and categories, and none of the three non-#1 tenants carries any French House wording. Each menu's
+  section counts add up to that restaurant's own dish count exactly (59, 10, 10, 72).
+- **No database key reaches the browser** — 2.5–3.9 MB of every HTML/JS/JSON response on all three
+  guest doors, scanned for the service-role key, the access token and the session secret. None
+  present, and not even the public key: the rows arrive already rendered by the server.

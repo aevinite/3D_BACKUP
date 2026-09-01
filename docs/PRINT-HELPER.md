@@ -1,7 +1,7 @@
 # The print helper — one basket, many printers
 
 > **Status:** BUILT 2026-08-20 — six stages, each driven rather than read (23 + a real print + 16 + 14 + 14 + 12 checks).
-> Guarded by `npm run verify:print-helper` (100 checks, in `verify:static`) and `npm run verify:printing-sweep` (100 phases). Owner asked for it after the Aangan problem:
+> Guarded by `npm run verify:print-helper` (132 checks, in `verify:static`) and `npm run verify:printing-sweep` (125 phases). Owner asked for it after the Aangan problem:
 > one man is the owner AND the manager, sits in the owner panel in Manager mode, and the
 > kitchen's auto-print window kept pulling his screen away — while three printers hang off the
 > shop's computer (kitchen slips, bills, a small-paper A4 machine for banquet sheets).
@@ -34,7 +34,8 @@ Six things changed, and each is guarded:
    service-role module into the browser bundle and make `verify:static` refuse the page.
 4. **One question a line, three answers.** A line used to carry six controls; five kinds of paper
    made thirty. Now: *A computer* · *A screen* · *Nobody*, and only what that answer needs appears
-   under it. Backup printer, paper size, exact person and exact PC live behind **More**.
+   under it. Paper size, exact person and exact PC live behind **More**. (There is no backup printer
+   any more — see the note under the route table.)
 5. **`via: "off"` is a real, saved answer.** An empty line and a deliberate no used to look
    identical. They say different things now — and for **kitchen slips** the answer also writes
    `settings.auto_print_kot` through `syncKotSwitch()`, because mig 335's trigger reads that column.
@@ -171,6 +172,125 @@ chopped mid-word with the count pills still glowing beside them. It now has a **
 blurs**; a dim alone was measured at rgb(16,20,27) → rgb(10,15,23) on the dark skin, which is a real
 change and invisible to a human.
 
+## 2026-08-28 — the coarse "which screen prints" setting is retired (mig 369)
+
+> Owner: *"right now I don't understand three options — 'With no answer on the Kitchen slips line
+> below, which screen prints them?' — what do you mean by this option?"* Then: *"do what's left."*
+
+`settings.kot_print_target` (mig 336, `kitchen | counter | both`) asked **the same question** as the
+Kitchen slips line, in older and vaguer words, and the two could contradict each other — the printing
+sweep caught the older one winning on 2026-08-26. It is gone from every screen and every code path.
+
+**It was not a deleted dropdown.** On the dev stack **2 of 17** restaurants — French House and Aangan,
+the two he tests with — were on **`both`** with the Kitchen slips line unanswered. Deleting the
+setting would have silently removed their safety net. So the meaning moved first:
+
+| old value | the route it became |
+|---|---|
+| `kitchen` | `{ via:"screen", panel:"kitchen" }` |
+| `counter` | `{ via:"screen", panel:"manager" }` |
+| `both` | `{ via:"screen", panel:"kitchen" }` — see the note below |
+
+⚠️ **`both` NO LONGER EXISTS, and neither does any backup** (owner, 2026-08-30): *"What is this backup
+printer and all that? We don't even need the backup printer — if there is a backup printer, remove it.
+And if anything fails it should show me or the person: manager, owner, everyone should get a
+notification that this has failed."* `backupPanel`, `backupAgent`, `backupPrinter`, `backupAfterMs`,
+`SCREEN_BACKUP_MS` and `BACKUP_AFTER_MS_DEFAULT` were removed across nine files, and a restaurant that
+had answered `both` simply keeps the kitchen screen. A silent second attempt somewhere else is paper
+appearing in a room nobody is standing in, while the restaurant never learns its printer is broken.
+
+**What replaced it is telling somebody.** A ticket that gives up after five tries files a
+`printer_events` row of kind `auto_fail` against the printer that failed and sends an owner alert, so
+the restaurant learns the printer is broken instead of the paper quietly coming out elsewhere.
+(This paragraph was still describing the backup as current on 2026-08-31 — T25 round 3, item 39.)
+
+Migration 369 is **idempotent** and only touches restaurants that have **not** answered the Kitchen
+slips line — a newer decision is never overwritten. **The column stays** (schema changes here are
+additive, one folder feeds two databases) with a `COMMENT` saying it is retired; nothing reads or
+writes it, and `verify:print-queue` now fails if any of seven files touches it again.
+
+### Two faults found before shipping, one mine and one the sweep's own
+
+1. **With no route at all my first version let the MANAGER screen auto-print.** The retired column
+   defaulted to `kitchen`, so a manager panel left open on a restaurant that had never touched the
+   Printing board would have started pulling kitchen tickets it never used to. Sweep phase 22.
+2. **The sweep's "a DIFFERENT person" shape read an owner with no restaurant filter**, so it could
+   pick another restaurant's owner — the server correctly refused the shape and three phases blamed
+   the product. A sweep that cannot tell its own bad data from a real fault is worse than no sweep.
+   (And my new self-backup phase wrote the jsonb straight to the database, which never runs the
+   validator it was testing. It goes through `/api/admin/printing/routes` now.)
+
+`verify:printing-sweep` **112 → 118 phases**, 0 failed.
+
+## 2026-08-28 — TWO MODES behind one toggle, and only the chosen one on screen
+
+> Owner: *"I want both A and B — I want the toggle AND the simplified UI, and do one thing: you only
+> see the option you have selected, only the setting for that option will be shown."* And on mode B:
+> *"if we run that .bat or .command file it will open that Chrome which runs minimised and doesn't
+> auto-open when printing required, doesn't affect other tabs while print. Test all that by yourself."*
+
+### The two ways — and there is NOTHING TO CHOOSE (owner, 2026-08-31)
+
+> ⚠️ **Previously** (owner, 2026-08-28): *"there will be 2 mode… I want a toggle and the simplified UI
+> — like you only see the option you have selected."* **Latest** (owner, 2026-08-31): *"in admin panel
+> also we don't need toggle… with toggle gone it on and off will decide that the helper will be on and
+> off and kitchen panel will always be on and there will be guide for it."* The toggle is gone.
+
+| | **A computer** (optional) | **The kitchen screen** (always on) |
+|---|---|---|
+| what runs | the helper program | the kitchen panel, in its own minimised Chrome |
+| anything open? | nothing | that Chrome stays running |
+| more than one printer? | **yes**, one per kind of paper | no — the machine's default printer |
+| someone signs in? | no | **once**, in the window it opens |
+| has to be set up? | yes, if you want it | **no** — it is the default |
+
+**What decides, in one sentence: a computer prints if one is set up and named; if none is, the kitchen
+screen does.** `settings.modules.printing.mode` is **deleted** (mig 372 swept the dead key out of the
+three restaurants still carrying one), and `PrintMode` / `readMode` / `writeMode` are gone with it.
+The answer is READ off `routes` by `lib/printHelpers.ts → resolveTarget`, which is where the paper
+always read it from — the stored mode was a second copy, and a second copy that can disagree is why
+it went. An **unanswered kitchen-slip line resolves to the kitchen screen**, with nobody named.
+
+Two consequences worth knowing:
+- **Clearing a paper line is not switching printing off.** Only a deliberate **Nobody** (`via:"off"`)
+  does that. `syncKotSwitch` treats `null` as on for exactly this reason — before the fix, taking the
+  printer off the kitchen line silently stopped the restaurant printing while the board still said
+  the kitchen screen was doing it.
+- **It cannot double-print.** A ticket is a ROW (mig 335) and `claimKotJobs` only wins rows still
+  `queued`, so two claimers racing means the second matches nothing. The queue guarantees one copy —
+  never the mode, which is part of why removing it cost nothing.
+
+### `lib/printStationScript.ts` — the kitchen screen's launcher, and four things it took
+1. **"runs minimised / doesn't auto-open"** — running the Chrome binary steals focus, and **so does
+   `open -g -j -n` with a real URL**: measured, frontmost went `Finder → Google Chrome`. An
+   `about:blank` test had said otherwise — the kind of easy test that ships a false promise. The mac
+   launcher now **remembers who had the screen and hands it back**; measured after that,
+   `Finder → Chrome → Finder`. Windows uses `start /min`.
+2. **"doesn't affect other tabs"** — its own `--user-data-dir`, i.e. a separate Chrome instance. Their
+   ordinary Chrome, tabs, history and logins are untouched, and quitting one does not quit the other.
+3. **"doesn't auto-open when printing"** — `--kiosk-printing`. Deliberately **not** `--kiosk`, which is
+   fullscreen kiosk — the opposite — and is what the old setup guide told people to use for this.
+4. **The one nobody would guess: a hidden Chrome must still run its timers.** Chrome throttles
+   background and occluded windows hard, and a throttled panel stops polling — the tickets simply
+   queue while everything looks fine. The three `--disable-*throttling/backgrounding` flags are
+   load-bearing: a hidden instance carrying them **beaconed 13 times in 14 seconds** against a local
+   counter, i.e. full rate.
+
+No password in it, like the helper: the person signs in once and that Chrome profile remembers.
+
+### The screens, on both sides
+Card 3 was three papers × (two shape buttons + computer + printer + paper + screen + person + device
++ two backup pickers — both since REMOVED with the backup printer itself, 2026-08-30) with **five** Save buttons — about twenty controls, all on screen whether they
+applied or not. Now: **one toggle → only that mode's setup → the three papers**, each just
+*On / Nobody* plus a printer in computer mode. Measured on screen: **22 controls in computer mode, 14
+in screen mode** on the console, and **14** on the manager panel. Refinements behind **More**. The two
+launcher cards share ONE component on each side, because two copies of that markup is how the boards
+became "not identical" the first time.
+
+Guarded by 16 new `verify:print-helper` checks (**132** total) and 7 new sweep phases (**125** total,
+0 failed) — including that a `nobody` line survives a mode change and that a mode change re-asserts
+auto-print.
+
 ## Why the browser can never do this
 
 A web page cannot choose a printer. `window.print()` under Chrome's `--kiosk-printing` always
@@ -294,6 +414,7 @@ written into the guide; the other stays documented as the fallback.
 1. **Basket door** — mig 341, `lib/printHelpers.ts`, the agent API. Proved with a fake helper.
 2. **The helper scripts** — macOS `.command`, Windows `.bat`, Linux `.sh`, by hand, autostart.
 3. **Admin → Printing** — a whole new menu: agents, install steps, routes, backups, test print.
+   (The *backups* part of that menu is gone: the backup printer was removed on 2026-08-30.)
 4. **Panels** — status in manager/owner Settings → Printing and the kitchen 🖨 sheet; panels stop
    printing a kind a helper owns; every screen says where the paper went.
 5. **Bills + banquet through the basket**, with today's browser window kept as the automatic
@@ -337,7 +458,9 @@ if that computer is off the notes simply wait.
 
 two computers whose printers share a NAME → one slip, to the addressed one · one code copied onto a
 second machine → flagged, and the ticket still only picked up once · a refusal → back in the basket
-with the reason on it · a backup printer → refused before its window, given the ticket after it · an
+with the reason on it · ~~a backup printer → refused before its window, given the ticket after it~~
+(that case no longer exists — the backup printer was removed on 2026-08-30, and a ticket that gives up
+now files a printer problem and alerts the owner instead) · an
 order deleted before printing → prints nothing and is closed, not retried for ever · auto-print
 switched off mid-service → the helper idles and the ticket waits, then prints when switched back on ·
 a removed computer → cannot even ask.

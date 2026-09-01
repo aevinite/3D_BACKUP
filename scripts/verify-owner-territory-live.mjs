@@ -20,6 +20,7 @@
 //   4. ONE SIGN-IN — through the shared cached helper, so a full run can never trip a login limit.
 import { readFileSync } from "node:fs";
 import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
 const BASE = arg("--base") || process.env.LFH_BASE || "http://localhost:4000";
@@ -52,6 +53,11 @@ const OWNBG = `el=>{let n=el,bg="rgba(0, 0, 0, 0)";while(n&&bg==="rgba(0, 0, 0, 
 const { chromium } = await import("playwright");
 const { loginAs } = await import("./sweep/login.mjs");
 const ORIGINAL = await readEnt();
+// It already puts the entitlements back at the end and CHECKS that it did. The gap was an
+// interruption: `finally` covers a throw, not Ctrl-C and not a lane runner killing a slow guard.
+// Leaving this one half-applied means an owner console with screens switched off that nobody
+// switched off. (sweep #7 / T28, 2026-08-27.)
+restoreOnExit("the restaurant's owner_entitlements", () => writeEnt(ORIGINAL));
 const created = []; let dishId = null;
 const br = await chromium.launch();
 const mk = async (o) => { const c = await br.newContext(o); c.setDefaultNavigationTimeout(150000); c.setDefaultTimeout(60000); await loginAs(c, "owner", BASE); return c; };
@@ -476,13 +482,31 @@ try {
     if (SHOTS) await p.screenshot({ path: `${SHOTS}/forced-refused-add.png` });
     await c.close(); }
   for (const [id, body, status, re, extra] of [
-    ["P06421", { error: "Staff management isn't enabled for your restaurant — contact Aevidine.", disabled: true }, 403, /isn't enabled/, null],
     ["P06422", { error: "Couldn't load your team just now — please try again.", transient: true }, 503, /please try again/i, /Try again/]]) {
     const c = await mk({ viewport: { width: 1280, height: 800 } }); const p = await c.newPage();
     await p.route("**/api/owner/staff*", (q) => q.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) }));
     await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(3000);
     const t = await p.locator("body").innerText();
     re.test(t) && (extra ? extra.test(t) : !/Something went wrong/.test(t)) ? ok(`${id} the forced state reads correctly`) : bad(`${id} the forced state reads wrongly: ${t.replace(/\n/g, " | ").slice(0, 120)}`);
+    await c.close(); }
+  // ── P06421 · EXPECTATION MOVED 2026-09-01, same id, same rule ──────────────────────────────
+  // It used to force a 403 `disabled` answer and require the calm card to READ "isn't enabled".
+  // R36 was finished on 2026-08-31: the roster now sends the owner quietly to the dashboard instead
+  // (`if (notEnabled) router.replace("/owner")`), because naming the withheld section is the thing
+  // he ruled against. The rule being checked is the same one — a switched-off section is a
+  // legitimate state and must never read as a fault — so this now asserts BOTH halves of that:
+  // it is not treated as an error, and it says nothing at all.
+  { const c = await mk({ viewport: { width: 1280, height: 800 } }); const p = await c.newPage();
+    await p.route("**/api/owner/staff*", (q) => q.fulfill({ status: 403, contentType: "application/json",
+      body: JSON.stringify({ error: "Staff management isn't enabled for your restaurant — contact Aevidine.", disabled: true }) }));
+    await p.goto(BASE + "/owner/staff", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(3500);
+    const t = await p.locator("body").innerText();
+    const landed = new URL(p.url()).pathname;
+    const calm = !/Something went wrong|Couldn't load/i.test(t);
+    const silent = !/isn't enabled|not enabled|contact Aevidine/i.test(t);
+    calm && silent && landed !== "/owner/staff"
+      ? ok(`P06421 a switched-off Team section is neither an error nor explained — it goes quiet (landed on ${landed}, R36)`)
+      : bad(`P06421 the forced state reads wrongly (landed=${landed} calm=${calm} silent=${silent}): ${t.replace(/\n/g, " | ").slice(0, 140)}`);
     await c.close(); }
 
   // ══ BAND E · a change traced across panels ═════════════════════════════════════════════════
@@ -562,7 +586,22 @@ try {
     await writeEnt({ ...base, menu: false }); await new Promise((r) => setTimeout(r, 1500));
     const c = await mk({ viewport: { width: 1280, height: 900 } }); const p = await c.newPage();
     const rr = await p.goto(BASE + "/owner/menu", { waitUntil: "domcontentloaded" }); await p.waitForTimeout(2500);
-    rr.status() === 200 && /isn't switched on/i.test(await p.locator("body").innerText()) && (await p.locator("iframe").count()) === 0 ? ok("P06463 Menu OFF → refused server-side, with a sentence, no editor") : bad("P06463 the Menu section switch is not enforced on the page");
+    // EXPECTATION MOVED 2026-09-01, same id, same rule. This used to require a SENTENCE
+    // ("isn't switched on for your restaurant — ask your administrator"). R36 was finished across
+    // the last three owner screens on 2026-08-31: naming a section he has not been given tells him a
+    // feature exists that was deliberately withheld, and sends him to support about it. The page now
+    // redirects to the dashboard and says nothing at all. What is being checked is UNCHANGED — the
+    // switch is enforced on the page and not only in the sidebar — so this asserts the enforcement
+    // (no editor, and he is not left on the page) plus the silence R36 requires.
+    {
+      const landed = new URL(p.url()).pathname;
+      const body = await p.locator("body").innerText();
+      const noEditor = (await p.locator("iframe").count()) === 0;
+      const silent = !/isn't switched on|ask your administrator|not enabled/i.test(body);
+      noEditor && silent && landed !== "/owner/menu"
+        ? ok(`P06463 Menu OFF → the editor never renders, and nothing names the withheld section (landed on ${landed}, R36)`)
+        : bad(`P06463 the Menu section switch is not enforced on the page (landed=${landed} editor=${!noEditor} silent=${silent})`);
+    }
     !(await p.locator(".adm.owx a").allInnerTexts()).map((x) => x.trim()).includes("Menu") ? ok("P06463b …and the sidebar drops the item") : bad("P06463b the sidebar still offers Menu");
     await p.goto(BASE + "/owner/settings", { waitUntil: "domcontentloaded" });
     await p.locator(".adm-chip").first().waitFor({ timeout: 120000 }); await p.waitForTimeout(500);

@@ -15,6 +15,16 @@ import { TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
 const IDENTITY_COLUMNS = "restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label, table_names";
 
+// THE BANQUET SHEET'S OWN PAPER (mig 237). `bqPaper(settings)` reads these eight, and a column that
+// is not SELECTED comes back undefined — so it fell back to every default and the helper printed a
+// sheet the restaurant had not set up: A5 when they had chosen A4, 33/14/6mm margins whatever they
+// had typed, the signature line and the filler rows back on. The manager's own screen was always
+// right because it hands the whole settings row to the same function; only the helper's copy was
+// short. Found by the printing sweep on 2026-08-29, asking for A4 and measuring A5.
+const BANQUET_PAPER_COLUMNS =
+  "banquet_paper, banquet_paper_size, banquet_paper_top, banquet_paper_bot, banquet_paper_side, " +
+  "banquet_paper_foot, banquet_paper_sign, banquet_paper_fill";
+
 /**
  * The table as the FLOOR knows it — the table's NAME when the owner set one, else "T7", and "T?"
  * when a row has no table at all (a banquet bill with the table left blank).
@@ -90,7 +100,10 @@ export async function billHtmlForSession(rid: string, sessionId: string, opts?: 
   ]);
   const session = sessQ.data as Record<string, unknown> | null;
   if (!session) return null;
-  const orders = ((await sb.from("orders").select("*").eq("session_id", sessionId).eq("restaurant_id", rid)).data || []) as Record<string, unknown>[];
+  // BOUNDED (T25 round 2, item 31): every order on ONE table. 500 is far past a real bill, and an
+  // unbounded read is capped at 1,000 by PostgREST without telling anyone — on a printed bill, a
+  // silent truncation is a missing line of food.
+  const orders = ((await sb.from("orders").select("*").eq("session_id", sessionId).eq("restaurant_id", rid).limit(500)).data || []) as Record<string, unknown>[];
   if (!orders.length) return null;
   const settings = (setQ.data || {}) as Record<string, unknown>;
   const tnum = session.table_number == null ? "" : String(session.table_number);
@@ -219,7 +232,7 @@ export function withPaper(html: string, paper: { wMm: number; hMm: number } | nu
 export async function banquetHtmlForBill(rid: string, billId: string): Promise<string | null> {
   const [billQ, setQ, restQ] = await Promise.all([
     sb.from("banquet_bills").select("*").eq("id", billId).eq("restaurant_id", rid).maybeSingle(),
-    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, ${IDENTITY_COLUMNS}, ${BANQUET_PAPER_COLUMNS}`).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("*").eq("id", rid).maybeSingle(),
   ]);
   const bill = billQ.data as Record<string, unknown> | null;

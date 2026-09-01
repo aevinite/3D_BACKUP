@@ -92,7 +92,8 @@ function migrateLegacyOnce() {
       if (old !== null) localStorage.removeItem(base);
     }
     localStorage.setItem(MIGRATED_FLAG, "1");
-  } catch {}
+  } catch { /* best-effort, once per device: a phone that refuses storage simply keeps reading the
+               legacy keys, which still work */ }
 }
 
 // ── get / set / remove, scoped to the current restaurant ────────────────────
@@ -106,11 +107,13 @@ export function tget(base: string): string | null {
 export function tset(base: string, value: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
+  // best-effort: a phone with storage full or switched off loses the preference, never the page
   try { localStorage.setItem(tkey(base), value); } catch {}
 }
 export function tremove(base: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
+  // best-effort, same as tset: nothing downstream depends on the removal having happened
   try { localStorage.removeItem(tkey(base)); } catch {}
 }
 
@@ -129,6 +132,7 @@ export function tgetFor(base: string, slug: string): string | null {
 export function tsetFor(base: string, slug: string, value: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
+  // best-effort, same as tset — a refused write costs a preference, not the screen
   try { localStorage.setItem(`${base}:${fold(slug)}`, value); } catch {}
 }
 

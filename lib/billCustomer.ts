@@ -20,11 +20,24 @@ type SettingsRow = { bill_customer_required?: boolean | null; bill_customer_prin
 
 /** Does this restaurant refuse to issue a bill without the customer's mobile + name? */
 export async function billCustomerRequired(sb: SupabaseClient, rid: string): Promise<boolean> {
-  const { data } = await sb
+  const { data, error } = await sb
     .from("settings")
     .select("bill_customer_required")
     .eq("restaurant_id", rid)
     .maybeSingle();
+  // "I COULDN'T ASK" IS NOT "THERE IS NO ROW" (T25, sweep #7, 2026-08-28). This read `.data` alone,
+  // so a database blip looked identical to an unconfigured restaurant and the requirement quietly
+  // stopped applying — a bill could be issued to nobody at a restaurant whose owner had switched
+  // "no bill without a name and number" ON. It is the same conflation lib/tenant.ts's whole header
+  // is about, and lib/logVisibility.ts exists as a file to make impossible.
+  //
+  // Both branches still fail OPEN, and deliberately: a lookup hiccup must never stop a restaurant
+  // billing a table mid-service. What changes is that the blip is now RECORDED, so "why did we
+  // issue three bills with no customer on Tuesday" has an answer.
+  if (error) {
+    console.error(`[billCustomer] could not read whether a customer is required for ${rid}:`, error.message);
+    return false;
+  }
   // No settings row at all = an unconfigured restaurant. Fail OPEN: a missing config row
   // must never be the reason a restaurant cannot bill a table.
   if (!data) return false;
@@ -64,7 +77,16 @@ export async function saveBillCustomer(
   if (error) {
     // Required → the bill must wait rather than be issued to nobody. Not required → the
     // save is a nicety, so a database hiccup shouldn't hold up a table's bill.
-    if (required) return { ok: false, message: "Couldn't save the customer: " + error.message };
+    //
+    // THE DATABASE'S OWN WORDS DO NOT GO ON A MANAGER'S SCREEN (T25, sweep #7, 2026-08-28). This
+    // said `"Couldn't save the customer: " + error.message`, and the function's own header promises
+    // "a plain message the panel can show as-is" — so a PostgREST sentence went straight to a person
+    // mid-service. /api/maintenance was fixed for exactly this on 2026-08-05 ("a malformed ?rid= put
+    // 'invalid input syntax for type uuid' on a manager's screen — meaningless to them, and internal
+    // to us"), and lib/ownerScope.ts's dbFail() was written to keep the raw text server-side. Same
+    // rule here: the detail is logged, the person is told what to do.
+    console.error(`[billCustomer] save failed for ${rid} / session ${sessionId}:`, error.message);
+    if (required) return { ok: false, message: "Couldn't save the customer just now — please try again." };
     return { ok: true, saved: false };
   }
   const res = (data || {}) as { ok?: boolean; reason?: string; visits?: number };

@@ -118,8 +118,11 @@ export async function POST(req: NextRequest) {
     const key = String(b.key || "");
     if (!/^admin:/.test(key)) return err("invalid key");
     await throttleUnblock(key);
-    // Any open unblock requests for this device are now moot → resolve them as approved.
-    await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", key).eq("status", "open");
+    // Any open unblock requests for this device are now moot → resolve them as approved. The block
+    // itself is already lifted by the line above, so a failure here leaves a stale row in the ASK
+    // list rather than a person still locked out — reported, not fatal (T20 sweep #7, 2026-08-27).
+    const tidy = await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", key).eq("status", "open");
+    if (tidy.error) console.error("[admin/rate-limits] unblock tidied the block but not the request row:", tidy.error.message);
     await logAction("admin", "admin_unblock", { level: "info", detail: `admin-panel block lifted · ${key}` });
     return NextResponse.json({ ok: true });
   }
@@ -131,7 +134,8 @@ export async function POST(req: NextRequest) {
     const r = (await sb.from("unblock_requests").select("key").eq("id", id).maybeSingle()).data as { key: string } | null;
     if (!r) return err("that request no longer exists", 404);
     await throttleUnblock(r.key);
-    await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", r.key).eq("status", "open");
+    const tidy2 = await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", r.key).eq("status", "open");
+    if (tidy2.error) console.error("[admin/rate-limits] approve lifted the block but not the request row:", tidy2.error.message);
     await logAction("admin", "admin_unblock", { level: "info", detail: `unblock request approved · ${r.key}` });
     return NextResponse.json({ ok: true });
   }
@@ -139,8 +143,25 @@ export async function POST(req: NextRequest) {
   if (action === "deny_request") {
     const id = String(b.request_id || "");
     if (!UUID.test(id)) return err("invalid request_id");
-    const r = await sb.from("unblock_requests").update({ status: "denied", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", id).select("id").maybeSingle();
+    const r = await sb.from("unblock_requests").update({ status: "denied", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", id).select("id, key, ip").maybeSingle();
     if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
+    // ── DENY WAS THE ONE DECISION ON THIS PAGE THAT LEFT NO TRACE (T20 sweep #7, 2026-08-27) ────────
+    // Two things were missing, and they are the two rules its own siblings on this page state out loud:
+    //
+    //  · IT MUST NOT SUCCEED AT NOTHING. `r.data` is null when the id matched no row (another tab
+    //    already handled it), and this still answered ok:true — the page removes the row
+    //    optimistically, so the admin watched it disappear believing they had decided it. `dismiss`
+    //    forty lines down 404s in exactly this case, with a comment saying why; this one was missed.
+    //
+    //  · IT MUST BE ON RECORD. Every other action here writes a `logAction` line — unblock, approve,
+    //    block, clear, allow, dismiss_all. Denying is a decision about a PERSON who is locked out of
+    //    the panel and whose only remaining move was to ask, and it was the single action on this
+    //    board that happened invisibly. "Who said no, and when" had no answer anywhere in the product.
+    if (!r.data) return err("that request no longer exists — refresh the page", 404);
+    await logAction("admin", "admin_unblock_denied", {
+      level: "info",
+      detail: `unblock request DENIED · ${(r.data as { key?: string }).key || (r.data as { ip?: string }).ip || id} — the block stays in place`,
+    });
     return NextResponse.json({ ok: true });
   }
 
@@ -157,9 +178,20 @@ export async function POST(req: NextRequest) {
       .update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" })
       .eq("status", "open");
     if (scope) upd = upd.eq("restaurant_id", scope);
-    const r = await upd.select("id");
+    // COUNTED BEFORE, NOT COUNTED FROM WHAT CAME BACK (T19 sweep #7, 2026-09-01 — the same lesson
+    // "Forget all" in app/api/admin/error-memory already carries). Asking the update to RETURN its
+    // rows puts the ANSWER under PostgREST's own row cap: with more open alerts than that, every one
+    // would be cleared and the audit line would record a smaller number. Rule 3 of
+    // verify:admin-api-a deliberately does NOT flag a write's returning clause — correctly, it is not
+    // a list read — so nothing was watching this. Rule 5 in that guard now is. A head count with the
+    // SAME filter moves no rows and cannot be shortened.
+    let cnt = sb.from("rate_limit_events").select("id", { count: "exact", head: true }).eq("status", "open");
+    if (scope) cnt = cnt.eq("restaurant_id", scope);
+    const before = await cnt;
+    if (before.error) return adminFail("the rate limits", before.error, { action: "load" });
+    const r = await upd;
     if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
-    const n = r.data?.length ?? 0;
+    const n = before.count ?? 0;
     await logAction("admin", "rate_limit_dismiss_all", {
       restaurant_id: scope ?? undefined, level: "info",
       detail: `Cleared ${n} limit-reached alert(s)${scope ? " (one restaurant)" : " (all restaurants)"}. No limit changed and nobody was let through or blocked.`,
@@ -172,13 +204,20 @@ export async function POST(req: NextRequest) {
 
   // Block the device/IP behind an admin-login alert from reaching the admin panel.
   if (action === "block") {
-    const e = (await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle()).data as { key: string; subject: string; subject_label: string | null } | null;
+    // A BLIP MUST NOT READ AS "that alert is gone" (item 21, T19 sweep #7, 2026-09-01) — on the
+    // screen where a refusal means a person stays locked out.
+    const eQ = await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle();
+    if (eQ.error) return adminFail("that limit alert", eQ.error, { action: "load" });
+    const e = eQ.data as { key: string; subject: string; subject_label: string | null } | null;
     if (!e) return err("that alert no longer exists", 404);
     if (e.key !== "admin_login") return err("blocking only applies to admin-login alerts");
     // Safeguard: never let the admin block their OWN current IP (would lock themselves out).
     if (e.subject && e.subject === clientIp(req)) return err("That's your own device — you can't block yourself.");
     await throttleBlock(`admin:${e.subject}`, e.subject_label || `admin panel · ${e.subject}`);
-    await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
+    // The BLOCK is what mattered and it has landed; a failure to mark the alert handled only leaves the
+    // row on the board, so it is reported rather than fatal.
+    const mark = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
+    if (mark.error) console.error("[admin/rate-limits] blocked the device but couldn't clear its alert:", mark.error.message);
     await logAction("admin", "admin_block", { level: "info", detail: `admin-panel access blocked for ${e.subject_label || e.subject}` });
     return NextResponse.json({ ok: true });
   }
@@ -188,7 +227,11 @@ export async function POST(req: NextRequest) {
   // few minutes via login_throttle — this lifts that so a genuine person (e.g. the owner forgot the
   // password) can retry now. Marks the alert handled.
   if (action === "clear") {
-    const e = (await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle()).data as { key: string; subject: string; subject_label: string | null } | null;
+    // Checked like the block path above (item 21): "that alert no longer exists" is a sentence the
+    // admin acts on, and a person waiting to be let back in pays for it being wrong.
+    const eQ = await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle();
+    if (eQ.error) return adminFail("that limit alert", eQ.error, { action: "load" });
+    const e = eQ.data as { key: string; subject: string; subject_label: string | null } | null;
     if (!e) return err("that alert no longer exists", 404);
     if (e.key !== "admin_login") return err("clearing a lockout only applies to admin-login alerts");
     if (e.subject) await throttleUnblock(`admin:${e.subject}`);
@@ -203,7 +246,9 @@ export async function POST(req: NextRequest) {
   // stuck. "clear" above already 404s in exactly this case; these two now match it. Same rule the
   // user DELETE learned in the 2026-07-07 audit: never log and report a change that didn't happen.
   if (action === "allow") {
-    const e = (await sb.from("rate_limit_events").select("id").eq("id", eventId).maybeSingle()).data;
+    const eQ = await sb.from("rate_limit_events").select("id").eq("id", eventId).maybeSingle();
+    if (eQ.error) return adminFail("that limit alert", eQ.error, { action: "load" });
+    const e = eQ.data;
     if (!e) return err("that limit-reached record no longer exists — refresh the page", 404);
     // Reset that subject's counter now (unblock them) + mark the event handled.
     const r = await sb.rpc("lfh_rate_allow", { p_event_id: eventId, p_actor: "admin" });

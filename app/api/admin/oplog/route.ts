@@ -6,6 +6,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { redactMoney } from "@/lib/oplog";
 import { safeSearch } from "@/lib/searchText";
 
@@ -88,9 +92,9 @@ export async function GET(req: NextRequest) {
       })()
     : null;
 
-  const r = await q;
-  if (r.error) return adminFail("the activity log", r.error, { action: "load" });
-  const rows = r.data ?? [];
+  const reads = new ReadSet("admin/oplog", [await rd("rows", () => q)]);
+  if (reads.failed("rows")) return adminFail("the activity log", reads.error("rows"), { action: "load" });
+  const rows = reads.rows<{ id: string; panel: string; action: string; actor: string | null; detail: string | null; restaurant_id: string | null }>("rows");
 
   // Stamp each row with WHICH restaurant it belongs to, so the admin (who sees every
   // restaurant) can tell them apart. Fetch the restaurant names ONCE into a map keyed
@@ -99,8 +103,10 @@ export async function GET(req: NextRequest) {
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean)));
   const nameById = new Map<string, { name: string; slug: string }>();
   if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name, slug").in("id", ids).limit(2000);
-    for (const x of rest.data ?? []) nameById.set(x.id, { name: x.name, slug: x.slug });
+    // Tolerated: a miss leaves the restaurant chip blank rather than emptying the feed, and rowsOr
+    // says so where it happens.
+    const rest = new ReadSet("admin/oplog:names", [await rd("names", () => sb.from("restaurants").select("id, name, slug").in("id", ids).limit(2000))]);
+    for (const x of rest.rowsOr<{ id: string; name: string; slug: string }>("names", [])) nameById.set(x.id, { name: x.name, slug: x.slug });
   }
   const actions = rows.map((a) => {
     const meta = a.restaurant_id ? nameById.get(a.restaurant_id) : undefined;

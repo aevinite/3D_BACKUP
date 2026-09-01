@@ -73,7 +73,14 @@ const freeTable = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) 
 if (freeTable === undefined) {
   console.error(`need one completely free table; the floor is busy right now ` +
     `(${count} tables, all of them in use — ${busy.size} carry a live session or order)`);
-  process.exit(1);
+  console.error("Nothing is wrong with the app — close the stale parties, or run this when the other lanes are idle.");
+// A FULL FLOOR IS "COULD NOT RUN", NOT "RAN AND FOUND A FAULT" — SO IT IS EXIT 2 (item 23,
+// 2026-08-29). This repo's most useful convention is that 1 means a fault and 2 means the check
+// never happened; verify:guards-alive enforces it for a stopped server, and four entries came
+// back 2 in this sweep with not one of them being a fault. A busy floor is exactly that case:
+// nothing about the product is wrong, there is simply nowhere to seat a test party. Exiting 1
+// made it read as a red in every summary, which is how a suite trains people to scroll past it.
+  process.exit(2);
 }
 const T = String(freeTable);
 const dish = must(await sb.from("menu_items").select("id,title,price").eq("restaurant_id", RID).limit(2));

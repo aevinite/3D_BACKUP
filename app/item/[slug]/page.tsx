@@ -3,6 +3,7 @@
 import { notFound } from "next/navigation";
 import ItemClient from "./ItemClient";
 import Maintenance from "@/components/Maintenance";
+import OfflineNoticeStatic from "@/components/OfflineNoticeStatic";
 import { getMenuItem, getSettings } from "@/lib/menu";
 
 // The bare /item/<slug> route is restaurant #1's own dish page. Give it #1's
@@ -13,7 +14,16 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // A closed menu must not preview a shared dish link as though it were open — same rule, and the
   // same cached read, as the tenant twin. Without it the page 404s but the link forwarded to a
   // friend still showed the dish, its photo and its price. (sweep #6 T2, 2026-08-17)
-  if (!(await getSettings()).menuEnabled) {
+  //
+  // SERVICE (MAINTENANCE) MODE COUNTS AS CLOSED HERE TOO (sweep #7 T2, 2026-08-22 — item 4).
+  // The gate below the fold already returns the maintenance screen for it; this one checked only
+  // the master switch. So a restaurant that had switched itself off for the evening served the
+  // branded "we'll be right back" screen to anyone who OPENED a dish link, while the same link
+  // pasted into WhatsApp still previewed the dish, its photo and its price. Two switches, one
+  // meaning — the 3D screen beside these two doors has treated them as one since 2026-08-04
+  // (`if (!s.menuEnabled || s.serviceMode)`), and now so do both dish doors, on both halves.
+  const settings = await getSettings();
+  if (!settings.menuEnabled || settings.serviceMode) {
     return { title: "Menu", description: "This menu isn’t available right now." };
   }
   const dish = await getMenuItem(slug).catch(() => null);
@@ -60,7 +70,22 @@ export default async function ItemPage({
   // friendly "Item not found" card inside a 200, which tells search engines the page is
   // real and tells our own monitoring the request succeeded — the exact reason the /r/
   // twin already 404s here. getMenuItem is cached, so asking costs one small read.
-  if (!(await getMenuItem(slug).catch(() => null))) notFound();
+  //
+  // …AND THE ANSWER IS KEPT, NOT THROWN AWAY (owner's item 9, 2026-09-01). This read was made
+  // purely to decide the 404 and then discarded, so ItemClient asked for the very same row again
+  // from the phone. Handing it down puts the dish in the first paint, drops one read from the
+  // hottest guest page, and means a page restored from the device with no signal shows the dish
+  // instead of a spinner.
+  const dish = await getMenuItem(slug).catch(() => null);
+  if (!dish) notFound();
   // Hand both to the browser-side component, which does the real work.
-  return <ItemClient slug={slug} fromCat={cat} />;
+  return (
+    <>
+      {/* The offline warning that survives a reload with no signal, when React never boots and
+          components/OfflineNotice.tsx therefore cannot render. See that file for the measurement.
+          It removes itself the moment React's own bar takes over. (Owner's item 11, 2026-09-01.) */}
+      <OfflineNoticeStatic />
+      <ItemClient slug={slug} fromCat={cat} initialItem={dish} initialFeatures={settings.features} />
+    </>
+  );
 }

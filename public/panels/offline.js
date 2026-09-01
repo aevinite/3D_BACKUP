@@ -450,9 +450,21 @@
       var row = el("div", "lfh-off-item is-wait");
       row.appendChild(el("b", null, it.label || "Change"));
       var slow = !isOffline() && (Date.now() - it.at) > STUCK_MS && (Date.now() - nudgedAt) > 8000;
+      // "SENDING NOW…" ABOUT A CHANGE THAT IS DELIBERATELY BEING HELD (2026-08-28).
+      //
+      // A change queued behind an earlier one on the same table is not being sent — it is waiting
+      // ON PURPOSE, so a discount and the settle after it can never swap. This sheet said
+      // "Sending now…" for it anyway, while the connection panel two inches away said "waiting for
+      // an earlier change on this table". Two surfaces describing one moment differently is the
+      // exact fault both of them have already been repaired for once, and it got sharper the day
+      // the hold became real.
+      //
+      // The queue has recorded `why` per change since 2026-08-02. Read it.
+      var held = !isOffline() && it.why === "behind";
       row.appendChild(el("p", "lfh-off-why", isOffline()
         ? "Saved here — waiting for internet."
-        : (slow ? "Saved here — it hasn't gone through yet." : "Sending now…")));
+        : held ? "Waiting for an earlier change on this table."
+          : (slow ? "Saved here — it hasn't gone through yet." : "Sending now…")));
       row.appendChild(el("div", "lfh-off-when", "You did this " + fmtTime(it.at)));
       // One button for the whole queue (it sends in order), on the first row only.
       if (slow && i === 0) {

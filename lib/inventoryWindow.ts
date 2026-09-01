@@ -65,7 +65,18 @@ function bizStartInstant(y: number, m0: number, d: number): number {
  * one that quietly stayed on this one.
  */
 export function inventoryMonthWindow(month: string): InventoryWindow {
-  const ok = /^\d{4}-\d{2}$/.test(month);
+  // ── A MONTH THAT DOES NOT EXIST IS NOT A MONTH (T25 round 2, item 24, 2026-08-31) ──────────────
+  // The shape test used to be `^\d{4}-\d{2}$`, which accepts `2026-13` and `2026-00` — and both
+  // callers validate with that same loose pattern, so nothing upstream caught them either. What came
+  // out was the thing the note above this function forbids in as many words: `?month=2026-13` gave a
+  // window over **January 2027** and labelled it "2026-13", and `?month=2026-00` gave **December
+  // 2025** labelled "2026-00". A month picker cannot produce either, but a hand-edited address can,
+  // and the answer was a different month's purchases under a made-up heading.
+  //
+  // Same rule as lib/dashRange.ts already applies to the dashboard: a word nobody offers must
+  // resolve to something real, never reach somewhere else. So the month half is range-checked too,
+  // and an impossible month falls back to the current one — which is what the note promised.
+  const ok = /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
   const now = new Date(Date.now() + IST_MS);
   const y = ok ? +month.slice(0, 4) : now.getUTCFullYear();
   const m0 = ok ? +month.slice(5, 7) - 1 : now.getUTCMonth();

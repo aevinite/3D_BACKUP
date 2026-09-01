@@ -55,7 +55,12 @@ UPDATE settings SET menu_currencies = ARRAY['INR']::TEXT[] WHERE menu_currencies
 --
 -- The helper may not exist yet and that is not an error: `lfh_already_applied` is created by
 -- migration 307, 72 files AFTER this one, so a FRESH database runs this its single legitimate
--- time (no ledger = "not yet applied") and then migration 360 records the key. The
+-- time (no ledger = "not yet applied") and then migration 352 records the key. The
+-- (This line said "migration 360" until 2026-08-28. The file that records the key was written
+-- as 360, renumbered to 352 on merge, and this pointer never followed — so it aimed at
+-- 360_the_last_half_of_a_retired_stub.sql, an unrelated file. The KEY ITSELF must never be
+-- renamed: it is already recorded in lfh_applied_once on every live database, and a rename
+-- would stop the guard matching, i.e. run the backfill again.)
 -- `to_regprocedure` gate + EXECUTE is migration 043's pattern, for the same reason.
 DO $reseed_guard$
 DECLARE v_applied boolean := false;

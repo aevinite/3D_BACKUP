@@ -24,6 +24,7 @@ const OrdersTrend = dynamic(() => import("@/components/admin/OrdersTrend"), {
 
 type Range = "today" | "7d" | "30d";
 type Busiest = { id: string; slug: string; name: string; orders: number; activeTablesNow: number };
+type Quiet = { id: string; slug: string; name: string; now: number; before: number; dropPct: number; silent: boolean };
 type Data = {
   totals: { totalOrders: number; activeTablesNow: number; activeRestaurants: number; totalRestaurants: number; totalStaff: number; totalTables: number };
   bucket?: "day" | "hour";
@@ -33,6 +34,11 @@ type Data = {
   cached?: boolean;
   trend: TrendPoint[];
   busiest: Busiest[];
+  // null = this window is too short to compare against the one before it (today / a drilled day).
+  quiet: Quiet[] | null;
+  quietWindowDays: number | null;
+  quietMinPerDay: number;
+  quietDropPct: number;
   bySource: { source: string; orders: number }[];
 };
 
@@ -145,6 +151,10 @@ export default function AdminAnalytics() {
   const busiestWithOrders = (data?.busiest || []).filter((r) => r.orders > 0);
   const busiestActive = busiestWithOrders.slice(0, 8);
   const busiestMax = Math.max(1, ...busiestActive.map((r) => r.orders));
+  // `null` and `[]` mean different things here and must stay apart: null = this window is too short
+  // to compare, [] = compared and nobody has gone quiet. `?? null` (not `|| null`) so an empty
+  // array survives as an empty array.
+  const quiet = data?.quiet ?? null;
   const sources = (data?.bySource || []).filter((s) => s.orders > 0 || s.source === "dine_in");
   const sourceTotal = sources.reduce((s, x) => s + x.orders, 0);
   const maxSource = Math.max(1, ...sources.map((s) => s.orders));
@@ -191,7 +201,16 @@ export default function AdminAnalytics() {
             updated {timeAgo(data.cachedAt)}
           </span>
         ) : null}
-        <button className="adm-btn" disabled={loading} onClick={() => load(range, true)}>
+        {/* REFRESH RE-ASKS FOR WHAT IS ON SCREEN, WHICH MAY BE ONE DAY (T18 sweep #7, item 1).
+            This was `load(range, true)` — no third argument, so `day` defaulted to null and the
+            reply was the WHOLE WINDOW, while `drillDay` stayed set and every label on the page
+            went on naming the drilled day. Measured: drill into 24 Aug (0 orders that day), press
+            ↻, and the tile reads "Orders · 24 Aug  1,047" — the week's total under the day's name,
+            with both card hints saying "for 24 Aug" and the chart still offering "← Back to the
+            whole range". That is exactly the fault the drill-labels fix closed in the T18 sweep of
+            2026-08-20, coming back through the one control that fix never touched. The 60s backstop
+            three lines below has always passed `drillDay`; this is the same call. */}
+        <button className="adm-btn" disabled={loading} onClick={() => load(range, true, drillDay)}>
           <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
         </button>
       </div>
@@ -213,7 +232,14 @@ export default function AdminAnalytics() {
             href: "/aevinite/floor", title: "Open the live floor",
             sub: t ? (
               <>
-                <span>of {nf.format(t.totalTables)} tables ({Math.round(occupancy * 100)}%)</span>
+                {/* A PERCENTAGE MUST NOT ROUND ITSELF DOWN TO "NONE" (T18 sweep #7, item 3). The
+                    BAR beside this already refuses to disappear — it keeps a 2% sliver whenever a
+                    table is occupied — but the words said `Math.round(occupancy * 100)`%, so on
+                    this platform the tile read "8" above "of 1,850 tables (0%)": eight tables
+                    occupied, nought per cent, with a visible bar under it. Three readings that do
+                    not agree. Under half a per cent now says so in words instead of claiming zero,
+                    which is the same honesty the sliver was given. */}
+                <span>of {nf.format(t.totalTables)} tables ({occupancy > 0 && occupancy * 100 < 0.5 ? "under 1" : Math.round(occupancy * 100)}%)</span>
                 <span style={{ display: "block", height: 6, borderRadius: 999, background: "color-mix(in srgb, var(--accent) 16%, transparent)", overflow: "hidden", marginTop: 6 }}>
                   <span style={{ display: "block", height: "100%", width: `${Math.max(occupancy * 100, t.activeTablesNow > 0 ? 2 : 0)}%`, background: "var(--accent)", borderRadius: 999 }} />
                 </span>
@@ -311,6 +337,62 @@ export default function AdminAnalytics() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* ── GOING QUIET ─────────────────────────────────────────────────────────────────────
+            The card above ranks restaurants against EACH OTHER. This one is the only place on any
+            of these screens that compares a restaurant against ITS OWN past — which is the shape of
+            a restaurant about to stop paying, and it used to be invisible here. Deliberately below
+            the busiest list: it is the thing you act on, but only after you have seen the normal
+            picture. Full width, because each row carries a sentence, not just a number. */}
+        <div className="adm-card" style={{ marginBottom: 14 }}>
+          <h2>Going quiet</h2>
+          <p className="hint">
+            Restaurants whose own orders have fallen against their previous {data?.quietWindowDays ?? ""} days
+            {data ? ` — at least ${data.quietMinPerDay} orders a day before, and down ${data.quietDropPct}% or more` : ""}.
+            This is the only list here that compares a restaurant with itself rather than with the others.
+          </p>
+          {data === null ? (
+            <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
+          ) : quiet === null ? (
+            // NOT an empty state — a refusal to answer, and it says why. One day against the day
+            // before is noise, and a warning that cries wolf is one nobody reads.
+            <div className="adm-empty">
+              Choose <b>Last 7 days</b> or <b>Last 30 days</b> to see this — one day against the day
+              before moves too much to mean anything.
+            </div>
+          ) : quiet.length === 0 ? (
+            <div className="adm-empty">Nobody has gone quiet in {windowText}. Every restaurant is holding its own orders.</div>
+          ) : (
+            <div className="adm-logwrap">
+              <div className="adm-logrow head qt-row">
+                <span className="q-name">Restaurant</span>
+                <span className="q-before">Before</span>
+                <span className="q-now">Now</span>
+                <span className="q-chg">Change</span>
+                <span className="q-act" />
+              </div>
+              {quiet.map((r) => (
+                <div key={r.id} className="adm-logrow qt-row">
+                  <div className="q-name">{r.name}</div>
+                  <div className="q-before adm-muted">{nf.format(r.before)}</div>
+                  <div className="q-now">{nf.format(r.now)}</div>
+                  <div className="q-chg">
+                    <span className="hue-ink" style={{ ["--hue" as string]: r.silent ? "#ef4444" : "#f59e0b", fontSize: 11.5, padding: "3px 8px", borderRadius: 6, fontWeight: 700,
+                      background: `color-mix(in srgb, ${r.silent ? "#ef4444" : "#f59e0b"} 16%, transparent)`, whiteSpace: "nowrap" }}>
+                      {r.silent ? "no orders at all" : `down ${r.dropPct}%`}
+                    </span>
+                  </div>
+                  <div className="q-act">
+                    <button className="adm-btn" onClick={() => openRestaurantPanel(r.id, "/editor")} title={`Open ${r.name}'s manager panel`}>
+                      <i className="fas fa-arrow-up-right-from-square" style={{ marginRight: 5 }} aria-hidden="true" />Manager
+                    </button>
+                    <a className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`}>Manage →</a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>

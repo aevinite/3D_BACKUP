@@ -141,11 +141,14 @@ export default function AdminFloor() {
   // refusal — and the admin can reach every restaurant, always. So a blocked new tab now opens a
   // small card that takes him there instead: the manager panel IN THIS TAB (no pop-up needed at
   // all), or the restaurant's own details page, which is where its owner, settings and access live.
-  const [blocked, setBlocked] = useState<{ rid: string; name: string; slug: string } | null>(null);
-  const openPanel = useCallback(async (r: { id: string; name: string; slug: string }) => {
+  // `active` travels with it (T16 sweep #7, 2026-08-27): the card offers this restaurant's guest
+  // menu, and a SUSPENDED restaurant's menu is offline — sending the admin to a "this menu isn't
+  // available right now" page is the same dead end the Restaurants page already disables.
+  const [blocked, setBlocked] = useState<{ rid: string; name: string; slug: string; active: boolean } | null>(null);
+  const openPanel = useCallback(async (r: { id: string; name: string; slug: string; active: boolean }) => {
     try {
       const w = await openRestaurantPanel(r.id, "/manager");
-      if (!w) setBlocked({ rid: r.id, name: r.name, slug: r.slug });
+      if (!w) setBlocked({ rid: r.id, name: r.name, slug: r.slug, active: r.active });
     } catch (e) {
       toast(`Couldn't open ${r.name} — ${e instanceof Error ? e.message : String(e)}`, "err");
     }
@@ -586,7 +589,7 @@ export default function AdminFloor() {
 // but two ways in (owner, 2026-08-20). "Open it here" needs no pop-up at all — it is an ordinary
 // navigation — so it always works, and the line at the bottom points at the one page that holds
 // everything about the restaurant.
-function BlockedDoor({ r, onClose }: { r: { rid: string; name: string; slug: string }; onClose: () => void }) {
+function BlockedDoor({ r, onClose }: { r: { rid: string; name: string; slug: string; active: boolean }; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useAdminModal(ref, "adm-floor-blocked", onClose);
   return (
@@ -605,9 +608,16 @@ function BlockedDoor({ r, onClose }: { r: { rid: string; name: string; slug: str
               style={{ textAlign: "center" }}>
               <i className="fas fa-table-columns" style={{ marginRight: 7 }} aria-hidden="true" />Open its manager panel here
             </a>
-            <a className="adm-btn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" style={{ textAlign: "center" }}>
-              <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />See its guest menu
-            </a>
+            {r.active ? (
+              <a className="adm-btn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" style={{ textAlign: "center" }}>
+                <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />See its guest menu
+              </a>
+            ) : (
+              <button className="adm-btn" disabled style={{ textAlign: "center" }}
+                title="This restaurant is suspended, so its guest menu is offline. Reactivate it in the danger zone on its details page.">
+                <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu offline &mdash; it&rsquo;s suspended
+              </button>
+            )}
           </div>
           <p className="hint" style={{ margin: "14px 0 0", paddingTop: 12, borderTop: "var(--border)" }}>
             Everything about {r.name} — its owner, its bill, its tables, its access and who may sign

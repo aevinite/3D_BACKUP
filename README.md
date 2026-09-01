@@ -46,7 +46,7 @@ admin's at `app/api/admin/*`.
 
 ## There is no `middleware.ts`, and that is deliberate
 
-The login check moved to each route: the admin console's layout and all 50 `/api/admin/*` handlers
+The login check moved to each route: the admin console's layout and all 49 `/api/admin/*` handlers
 check `tokenIsValid`, the panel APIs use `requireRole()`, the owner's use `ownerScope()`. Looking
 for a middleware file finds nothing and makes it look like the gate is missing — it isn't.
 The complete list of the few deliberately login-free routes is in `docs/CLAUDE-DETAIL.md`
@@ -83,7 +83,7 @@ more**, so a green run here is necessary but not sufficient:
 
 Run those two as well before you push and the local answer really is the CI answer.
 
-There are 146 `verify:*` scripts in all, one per bug that once reached somebody's screen.
+There are 157 `verify:*` scripts in all, one per bug that once reached somebody's screen.
 **`docs/GUARD-MAP.md` tells you which ones your change needs** — look up the file you touched.
 
 Do **not** run `npm run verify:everything` casually: it is the 500-phase suite, it writes to the

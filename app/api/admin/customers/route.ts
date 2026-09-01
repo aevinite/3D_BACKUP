@@ -14,6 +14,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
 import { safeSearch } from "@/lib/searchText";
 
@@ -63,10 +67,9 @@ export async function GET(req: NextRequest) {
     //     the obvious fix and the wrong one: a guest row belonging to a binned restaurant would
     //     have lost its chip and read "—", which is the exact failure the comment above warns
     //     about. A deleted restaurant's guests are still real people with a real history.
-    const restsQ = await sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").limit(2000);
-    if (restsQ.error) return adminFail("the restaurant list", restsQ.error, { action: "load" });
-    const rests = (restsQ.data || []) as
-      Array<{ id: string; name: unknown; slug: string; accent_color: string | null; deleted_at: string | null }>;
+    const reads = new ReadSet("admin/customers", [await rd("restaurants", () => sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").limit(2000))]);
+    if (reads.failed("restaurants")) return adminFail("the restaurant list", reads.error("restaurants"), { action: "load" });
+    const rests = reads.rows<{ id: string; name: unknown; slug: string; accent_color: string | null; deleted_at: string | null }>("restaurants");
     const liveRests = rests.filter((r) => r.deleted_at == null);
     // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
     // string on others — read both, fall back to the slug so a chip is never blank.
@@ -87,7 +90,8 @@ export async function GET(req: NextRequest) {
     // ── one customer's detail: the same number across every restaurant it appears in.
     // This is the admin-only view — "Meera has eaten at 3 of our restaurants".
     if (detail) {
-      const { data, error } = await sb.from("customers").select(COLS).eq("phone", detail).limit(50);
+      const one = new ReadSet("admin/customers:one", [await rd("guest", () => sb.from("customers").select(COLS).eq("phone", detail).limit(50))]);
+      const { data, error } = { data: one.rowsOr<Row>("guest", []), error: one.failed("guest") ? one.error("guest") : null };
       // PLAIN WORDS, not the database's (sweep #6, T19). `throw new Error(error.message)` walked the
       // raw sentence out through the catch at the bottom and into the console's red toast — the same
       // fault lib/adminFail was written for, just wearing a throw. Answered here instead so the raw
@@ -114,7 +118,30 @@ export async function GET(req: NextRequest) {
     if (seg === "regulars") q = q.gte("visits", REPEAT_MIN);
     if (seg === "new") q = q.lt("visits", REPEAT_MIN);
     if (seg === "blocked") q = q.eq("blocked", true);
-    const { data, error, count } = await q;
+    // THE PAGED LIST READ STAYS AS IT IS, deliberately (item 15, 2026-09-01). lib/readGuard answers
+    // one question — did it work — and this read has a THIRD answer: "that page is past the end"
+    // (PGRST103), which the branch below turns into an empty page rather than a failure. Wrapping it
+    // would mean unwrapping it again two lines later to reach the same three-way decision, so the
+    // helper is used for the other two reads on this route and this one keeps its own shape.
+    let { data, error, count } = await q;
+    // A PAGE PAST THE END IS EMPTY, NOT BROKEN (T18 second 500, 2026-08-31). PostgREST answers an
+    // offset beyond the last row with 416 / PGRST103 "Requested range not satisfiable", which came
+    // back to the screen as a red "Couldn't load the guest list" — the same words a real database
+    // failure gets, for a page that simply does not exist. Measured: 87 guests, and ?page=2 was a
+    // 500. The Next button is disabled at the end so a person cannot reach it by tapping, but a
+    // stale "Showing X of Y" or a typed address could, and "this page is empty" and "the guest list
+    // is down" must not read the same. The count is re-taken here because the failed read carried
+    // none, and only on this path, so the ordinary page costs nothing extra.
+    if (error && (error as { code?: string }).code === "PGRST103") {
+      let head = sb.from("customers").select("phone", { count: "exact", head: true });
+      if (rid) head = head.eq("restaurant_id", rid);
+      if (search) head = head.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+      if (seg === "regulars") head = head.gte("visits", REPEAT_MIN);
+      if (seg === "new") head = head.lt("visits", REPEAT_MIN);
+      if (seg === "blocked") head = head.eq("blocked", true);
+      const h = await head;
+      data = []; error = null; count = h.count ?? 0;
+    }
     if (error) return adminFail("the guest list", error, { action: "load" });
     const customers = ((data || []) as Row[]).map((c) => ({
       ...c,
@@ -133,6 +160,11 @@ export async function GET(req: NextRequest) {
       key: `admincust:v1:${rid || "all"}`,
       force,
       fingerprint: async () => {
+        // A fingerprint that cannot be read comes back NULL, and lib/ownerCache treats null as "I
+        // cannot tell whether anything changed" — which makes it recompute rather than serve a
+        // possibly-stale snapshot. That is the right way round, so this read stays tolerant on
+        // purpose; the note is here because the line looks like the same omission as the tiles below,
+        // and it is not (item 18, 2026-09-01).
         const { data } = await sb.rpc("lfh_customers_fingerprint", { p_restaurant_id: rid || null });
         return typeof data === "string" ? data : null;
       },
@@ -143,18 +175,32 @@ export async function GET(req: NextRequest) {
           return q0;
         }
         const since30 = new Date(Date.now() - 30 * 86400e3).toISOString();
-        const [c1, c2, c3, c4] = await Promise.all([
-          baseCount(),
-          baseCount().gte("visits", REPEAT_MIN),
-          baseCount().eq("blocked", true),
-          baseCount().gte("first_seen_at", since30),
-        ]);
-        // Guests per restaurant — ONE grouped read in the database (mig 228), never
-        // "fetch every customer row and count them here".
-        const { data: spreadRaw } = await sb.rpc("lfh_admin_customer_spread");
+        const tiles = new ReadSet("admin/customers:tiles", await Promise.all([
+          rd("total", () => baseCount()),
+          rd("regulars", () => baseCount().gte("visits", REPEAT_MIN)),
+          rd("blocked", () => baseCount().eq("blocked", true)),
+          rd("newThisMonth", () => baseCount().gte("first_seen_at", since30)),
+          // Guests per restaurant — ONE grouped read in the database (mig 228), never
+          // "fetch every customer row and count them here".
+          rd("spread", () => sb.rpc("lfh_admin_customer_spread")),
+        ]));
+        // A FAILED COUNT MUST NOT BE STORED AS A ZERO (item 18, T19 sweep #7, 2026-09-01).
+        //
+        // These five read `c1.count || 0` and `spreadRaw || []`, with no `.error` test — so a blip
+        // turned "we could not count" into "0 saved guests · 0 regulars · 0 blocked" and an empty
+        // per-restaurant card. And this compute sits INSIDE cachedOwnerPayload, which stores what it
+        // is given: the invented zeros would then be served from the snapshot for as long as the
+        // fingerprint stayed still, which on a quiet evening is hours. lib/readGuard's own header
+        // names this exact shape as the worst of the ten it was written for.
+        //
+        // THROWN, not zeroed: cachedOwnerPayload lets a synchronous failure reach the caller, so the
+        // page gets a real error it can retry instead of a stored lie, and nothing is written under
+        // the key. `count()` and `rows()` do the throwing, and ReadFailed names which read went.
+        if (tiles.anyFailed) throw new Error(`[admin/customers] tile read(s) failed: ${tiles.failedNames.join(", ")}`);
         return {
-          total: c1.count || 0, regulars: c2.count || 0, blocked: c3.count || 0, newThisMonth: c4.count || 0,
-          spreadRaw: (spreadRaw || []) as Array<{ restaurant_id: string; guests: number; regulars: number; blocked: number }>,
+          total: tiles.count("total"), regulars: tiles.count("regulars"),
+          blocked: tiles.count("blocked"), newThisMonth: tiles.count("newThisMonth"),
+          spreadRaw: tiles.rows<{ restaurant_id: string; guests: number; regulars: number; blocked: number }>("spread"),
         };
       },
     });
@@ -162,20 +208,35 @@ export async function GET(req: NextRequest) {
     // The per-restaurant bars follow the dropdown: a bar you cannot then filter to, for a
     // restaurant that has been deleted, is the same fault one row down.
     const liveIds = new Set(liveRests.map((r) => r.id));
-    const spread = agg.spreadRaw
+    const spreadAll = agg.spreadRaw
       .filter((s2) => liveIds.has(s2.restaurant_id))
       .map((s2) => ({ id: s2.restaurant_id, name: nameOf(s2.restaurant_id), count: s2.guests, regulars: s2.regulars }))
-      .filter((s2) => s2.count > 0)
-      .slice(0, 8);
+      .filter((s2) => s2.count > 0);
+    const spread = spreadAll.slice(0, 8);
+    // HOW MANY THERE REALLY ARE, so the card can say when it is hiding one (owner, 2026-08-31 —
+    // item 9). The bars are capped at 8 and the page could not know that, so on a platform with a
+    // ninth restaurant that has guests, that restaurant simply was not there — on the card whose
+    // stated job is "how many saved guests each restaurant has". The sibling card on Platform
+    // analytics ("Showing the busiest 8 of 9 restaurants that took an order") was given this on
+    // 2026-08-20; this one was not. Sent as a count, not more rows: the cap is what keeps the read
+    // small, and one number is enough to tell the truth about it.
+    const spreadTotal = spreadAll.length;
 
     return NextResponse.json({
       summary: { total, regulars, blocked, newThisMonth: fresh, matched: count || 0, page, pageSize: PAGE },
       cachedAt: agg.cachedAt,
       restaurants: liveRests.map((r) => ({ id: r.id, name: label(r) })),
       spread,
+      spreadTotal,
       customers,
     });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // The last door the database's own sentence could walk out of on this route (T19 sweep #7,
+    // 2026-09-01): every read above answers through adminFail, and then the catch handed the raw text
+    // to the console anyway. Logged in full, answered in words, with the raw text kept in `detail`
+    // exactly as adminFail does it.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[admin] unexpected failure in app/api/admin/customers/route.ts", msg);
+    return NextResponse.json({ error: "Couldn't load the guest list just now. Please try again.", detail: msg }, { status: 500 });
   }
 }

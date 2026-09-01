@@ -9,6 +9,7 @@ import { getMenuItem, getSettings } from "@/lib/menu";
 import { accentPaletteCss, accentCanvasCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
 import Maintenance from "@/components/Maintenance";
+import OfflineNoticeStatic from "@/components/OfflineNoticeStatic";
 
 // White-label: a dish link's tab title + share preview must read as THIS
 // restaurant, never the platform brand ("Aevidine — Restaurant OS") the global
@@ -22,8 +23,14 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   // 404s in both cases; without this the link's own preview card still showed the dish, its photo
   // and its price to whoever it was forwarded to. Both reads are the cached ones the page already
   // makes, so this costs nothing.
+  //
+  // SERVICE (MAINTENANCE) MODE COUNTS AS CLOSED HERE TOO (sweep #7 T2, 2026-08-22 — item 4).
+  // The page below already returns this restaurant's own maintenance screen for it; this half
+  // checked only the master switch, so a restaurant closed for the evening previewed its dish,
+  // its photo and its price to whoever the link was forwarded to. Two switches, one meaning — the
+  // 3D screen has treated them as one since 2026-08-04 (`if (!s.menuEnabled || s.serviceMode)`).
   const settings = await getSettings(r.id);
-  if (!r.active || !settings.menuEnabled) {
+  if (!r.active || !settings.menuEnabled || settings.serviceMode) {
     return { title: "Menu", description: "This menu isn’t available right now." };
   }
   const dish = await getMenuItem(slug, r.id).catch(() => null);
@@ -85,7 +92,12 @@ export default async function RestaurantItemPage({
   // way, but a 200 tells search engines the page is real and tells our own monitoring the
   // request succeeded. generateMetadata above already fetched this dish, so asking again
   // here costs one small cached read on a page nobody polls.
-  if (!(await getMenuItem(slug, r.id).catch(() => null))) notFound();
+  //
+  // …AND THE ANSWER IS KEPT, NOT THROWN AWAY (owner's item 9, 2026-09-01) — the same change as on
+  // restaurant #1's door beside it, for the same reason: this row was read only to decide the 404
+  // and then discarded, so the phone fetched it all over again while a diner watched a spinner.
+  const dish = await getMenuItem(slug, r.id).catch(() => null);
+  if (!dish) notFound();
   // WHITE-LABEL (audit fix 2026-07-08): this page renders ItemClient WITHOUT the
   // AppShell that themes the menu, so its price + "Add to Cart" button fell back to
   // restaurant #1's GOLD accent for every OTHER restaurant. Emit this restaurant's
@@ -100,11 +112,32 @@ export default async function RestaurantItemPage({
       : "";
   return (
     <>
+      {/* THE FOURTH THING THIS PAGE HAS TO REPEAT. It renders OUTSIDE AppShell, so everything the
+          shell does for the menu has to be done again here: maintenance mode (above), the menu
+          switch (above), the accent (below) — and the restaurant's DEFAULT light/dark, which was
+          the one still missing. app/layout.tsx stamps <html> 'light' globally and cannot know WHICH
+          restaurant is opening; the menu page emits this same line behind the same condition. Tap
+          through from the menu and the choice is already in localStorage, so nothing showed — but a
+          FULL page load of a dish (a shared link, a refresh, a QR straight to a dish) opened LIGHT
+          on a restaurant whose admin had chosen dark. Byte-identical to the menu page's on purpose:
+          it runs as the parser reaches it, before the dish paints, and it only acts when the guest
+          has saved nothing of their own. (T29 sweep #7, 2026-08-28, on the owner's word — the fault
+          was handed off by sweep #6 as P14317/P14460/P14462 and had stayed open.) */}
+      {settings.menuDefaultMode === "dark" && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "(function(){try{if(!localStorage.getItem('lfh_theme'))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();",
+          }}
+        />
+      )}
+      {/* The offline warning that survives a reload with no signal — see components/
+          OfflineNoticeStatic.tsx. (Owner's item 11, 2026-09-01.) */}
+      <OfflineNoticeStatic />
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
       {/* r.slug, not the address-bar text — the same reason as the menu page: this prop namespaces
           the cart/favourites and builds the back-to-menu link, so a capitalised URL must land in
           the SAME scope as the lower-case one (owner, 2026-08-12). */}
-      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={r.slug} />
+      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={r.slug} initialItem={dish} initialFeatures={settings.features} />
     </>
   );
 }

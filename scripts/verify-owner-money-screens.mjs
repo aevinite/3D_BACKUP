@@ -16,6 +16,20 @@ import fs from "node:fs";
 import path from "node:path";
 
 const read = (f) => { try { return fs.readFileSync(path.resolve(f), "utf8"); } catch { return null; } };
+// A `mustNot` is tested against the CODE ONLY — comments stripped first.
+//
+// WHY (sweep 7 · T14, 2026-08-27). Item 19's rule forbids `summary.total > summary.shown`, the
+// expression that made a filtered list claim guests it was not hiding. The fix removed it from the
+// code and explained it in a comment above — and the guard went red, pointing at its own obituary.
+// This project has been bitten by that before: "a red guard can be asserting a retired rule", and a
+// guard that fires on the sentence describing a fix teaches people to delete the sentence.
+// Block comments (and JSX `{/* … */}`) go first, then `//` to end of line — with the `[^:]` guard so
+// a `https://` inside a string is left alone. `must` rules still read the WHOLE file, because
+// several of them deliberately assert that an explanation is still there (item 4's R34 note).
+const codeOnly = (src) => src
+  .replace(/\/\*[\s\S]*?\*\//g, " ")
+  .split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+
 let fail = 0, pass = 0;
 const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
 const bad = (m) => { fail++; console.log(`  ❌ ${m}`); };
@@ -25,6 +39,13 @@ const KHATA = "app/owner/khata/page.tsx";
 const ISSUES = "app/owner/issues/page.tsx";
 const INVENTORY = "app/owner/inventory/page.tsx";
 const MANAGER = "app/owner/manager/page.tsx";
+// The three screens outside this terminal's own territory that carry the SAME rule (item 34).
+// He gave permission for them on 2026-09-01; the rule lives here because this is the file that
+// already states it for the other three, and one rule in one place is what stops six screens drifting.
+const ACTIVITY = "app/owner/activity/page.tsx";
+const STAFF = "app/owner/staff/page.tsx";
+const MENU = "app/owner/menu/page.tsx";
+const ACTOR = "lib/ownerActor.ts";
 const PANEL_MGR = "public/panels/editor/app.js";
 const PANEL_TAB = "public/panels/tablet/app.js";
 const INV_ROUTE = "app/api/owner/inventory/route.ts";
@@ -244,11 +265,264 @@ const RULES = [
       /key: `investate:v2:\$\{scopeKeyOf\(null, !!scope\.all, ids\)\}/,   // keyed on the whole scope
     ],
   },
+  // ══ SWEEP 7 · TERMINAL 14 (2026-08-27) ════════════════════════════════════════════════════════
+  // Same shape as everything above it: the server sent an exact answer and the screen said
+  // something else. Each rule is separate so one can be reverted alone.
   {
+    item: 19, file: CUSTOMERS,
+    say: "the line under the list is about the GROUP on screen, and only when the list hit its cap",
+    must: [
+      /const LIST_PAGE = 300;/,                                   // the cap the route really applies
+      /seg === "regulars" \? summary\.returning/,                  // each group asks its own head-count
+      /seg === "blocked" \? summary\.blocked/,
+      /seg === "new" \? Math\.max\(0, summary\.total - summary\.returning\)/,
+      /if \(rows\.length < LIST_PAGE \|\| segTotal === null \|\| segTotal <= rows\.length\) return null;/,
+    ],
+    mustNot: [
+      // the whole-scope total must never again be the "of N" for a filtered list
+      /summary\.total > summary\.shown/,
+    ],
+  },
+  {
+    item: 20, file: CUSTOMERS,
+    say: "a search says what was actually searched for, and a box of wildcards is not a search",
+    must: [
+      /import \{ safeSearch \} from "@\/lib\/searchText"/,
+      /const searched = safeSearch\(search\);/,
+      /if \(searched\) return \(/,
+      /match\{rows\.length === 1 \? "" : "es"\} for “\{searched\}”/,
+    ],
+    mustNot: [
+      /for “\{search\.trim\(\)\}”/,   // the raw box is not what the server looked for
+    ],
+  },
+  {
+    item: 21, file: CUSTOMERS,
+    say: "a guest record that spans two restaurants says which one each bill is from",
+    must: [/detail\.rows\.length > 1 && \([\s\S]{0,320}detail\.rows\.find\(\(r\) => r\.restaurant_id === b\.restaurant_id\)\?\.restaurantName/],
+  },
+  {
+    item: 22, file: ISSUES,
+    say: "a tab the admin switched off can never be the tab you are left sitting on",
+    must: [
+      /if \(tab === "ratings" && ratingsOff && !issuesOff\) setTab\("issues"\);/,
+      /else if \(tab === "issues" && issuesOff && !ratingsOff\) setTab\("ratings"\);/,
+    ],
+    mustNot: [
+      // the latch that made the fallback unreachable: it was set on the first render, before
+      // either request had answered, so it never got to move the tab.
+      /decided\.current = true/,
+    ],
+  },
+  {
+    // T12's sweep (2026-08-29) landed the real repair while this branch was open: the owner routes
+    // record the login NAME now, and `lib/ownerActor.ts` renders a legacy uuid row as an em dash
+    // with the reference in the hover text. T14's own local `handledBy()` was DELETED rather than
+    // left beside it. This rule follows the surviving way.
+    item: 23, file: ISSUES,
+    say: "a rating card never prints a database id where a person's name belongs",
+    must: [
+      /import \{ actorLabel, actorTitle \} from "@\/lib\/ownerActor"/,
+      /handled by \{actorLabel\(r\.acknowledged_by\)\}/,
+      /title=\{actorTitle\(r\.acknowledged_by\)\}/,
+    ],
+    mustNot: [
+      /handled by \$\{r\.acknowledged_by\}/,   // the raw column value
+      /const handledBy = /,                       // …and T14's superseded local copy
+    ],
+  },
+  {
+    // ── ITEM 7 IS NOW ONLY THE WHOLE-APP WALK ABOVE (owner, 2026-08-31) ───────────────────────────
+    // The Manager-mode fallback heading this rule used to assert has been DELETED along with the
+    // screen it sat on — a section he has not been given is a redirect now, not a page that names
+    // the feature (item 8 / R36). The `mustNot` survives because the dead class must never come
+    // back anywhere, and the walk over all of `app/` above is what actually enforces that.
     item: 7, file: MANAGER,
-    say: "the Manager-mode fallback heading uses a class the stylesheet defines",
-    must: [/className="adm-page-h">Manager mode/],
-    mustNot: [/className="adm-page-title"/],   // declared in no stylesheet — see app/globals.css
+    say: "Manager mode carries no heading in a dead stylesheet class",
+    mustNot: [/className="adm-page-title"/],
+  },
+  {
+    // ── ITEM 24 · A SECTION HE HAS NOT BEEN GIVEN IS NOT NAMED TO HIM (owner, 2026-08-31) ─────────
+    // *"it will not even show that option… it will not only show 'unable to access', that there is
+    //  a feature which contains inventory."* R36, from the page side. Four screens used to print a
+    //  sentence naming the feature and telling him who to ask; all four are redirects now.
+    item: 24, file: INVENTORY,
+    say: "Inventory sends a real owner home instead of naming a feature he has not been given",
+    must: [/import \{ redirect \} from "next\/navigation"/, /if \(!selected\) redirect\("\/owner"\);/],
+    mustNot: [/isn&apos;t switched on for your restaurant/, /ask your administrator/],
+  },
+  {
+    item: 24, file: MANAGER,
+    say: "Manager mode does the same",
+    must: [/import \{ redirect \} from "next\/navigation"/, /if \(!restaurants\.length\) redirect\("\/owner"\);/],
+    mustNot: [/No restaurant is available here right now/],
+  },
+  {
+    item: 24, file: CUSTOMERS,
+    say: "Customers does the same, from the client side, and never for the admin",
+    must: [
+      /import \{ useRouter \} from "next\/navigation"/,
+      /useEffect\(\(\) => \{ if \(disabled\) router\.replace\("\/owner"\); \}, \[disabled, router\]\);/,
+      /\{disabled \? null : \(/,
+    ],
+    mustNot: [/Customers isn&apos;t enabled for your restaurant/],
+  },
+  {
+    item: 24, file: ISSUES,
+    say: "Feedback & complaints does the same when BOTH tabs are off",
+    must: [
+      /import \{ useRouter \} from "next\/navigation"/,
+      /useEffect\(\(\) => \{ if \(bothOff\) router\.replace\("\/owner"\); \}, \[bothOff, router\]\);/,
+      /\{bothOff \? null : \(/,
+    ],
+    mustNot: [/This section isn&apos;t enabled for your restaurant/],
+  },
+  {
+    item: 25, file: CUSTOMERS,
+    say: "one restaurant means no \"Restaurant\" column, the same rule the phone list already uses",
+    must: [
+      /const multiRest = rests\.length > 1;/,
+      /\{multiRest && <th style=\{\{ padding: "8px 10px" \}\}>Restaurant<\/th>\}/,
+      /\{multiRest && <td style=\{\{ padding: "9px 10px" \}\}><span className="adm-chip"/,
+    ],
+  },
+  {
+    item: 26, file: CUSTOMERS,
+    say: "a figure you can tap carries a mark, and one line says what the mark means",
+    must: [
+      /className=\{`fas fa-filter cust-tilemark\$\{active \? " on" : ""\}`\}/,
+      /Tap a figure with this mark to see the people behind it\./,
+    ],
+  },
+  {
+    item: 27, file: CUSTOMERS,
+    say: "the guest record's three figures share a baseline even when a label wraps",
+    must: [
+      /gridTemplateColumns: "repeat\(auto-fit, minmax\(108px, 1fr\)\)", alignItems: "stretch"/,
+      /padding: "12px 14px", display: "flex", flexDirection: "column"[\s\S]{0,120}marginTop: "auto"/,
+    ],
+  },
+  {
+    // ── ITEM 28 · A FIGURE THE SCREEN CAN NAME MUST HAVE WORDS (owner, 2026-08-31) ────────────────
+    // `partialLabel` falls back to the raw key, so an unlisted one reaches the screen as CODE.
+    // `/api/owner/issues` sends `openCount`, and the note read "…and openCount just now". Every key
+    // any of these five screens can be sent must have an entry — this rule is the list of them.
+    item: 28, file: "lib/partialRead.ts",
+    say: "every unread-figure key these screens can receive has plain words",
+    must: [
+      /collectedToday: "money collected today"/,
+      /collectedMonth: "money collected this month"/,
+      /restaurantNames: "which restaurant each row belongs to"/,
+      /openCount: "how many complaints are still open"/,
+    ],
+  },
+  {
+    item: 29, file: CUSTOMERS,
+    say: "the four figures say WHEN they were counted, because they ride a 5-minute snapshot",
+    must: [
+      /cachedAt\?: string \};/,
+      /const fmtTime = \(iso: string\) =>/,
+      /Counted at \{fmtTime\(summary\.cachedAt\)\} · Refresh to count again\./,
+    ],
+  },
+  {
+    // ── ITEM 30 · ONE ODD ROW MUST NOT TAKE THE WHOLE SCREEN DOWN ─────────────────────────────────
+    // `"★".repeat(5 - n)` throws RangeError above 5 and `"★".repeat(n)` throws below 0, and a throw
+    // inside render loses the average, the distribution, every other rating and the complaints tab.
+    // The same six lines exist twice — here and in the manager panel — so both are checked, because
+    // fixing one and leaving the other is how the pair drifted in the first place.
+    item: 30, file: ISSUES,
+    say: "the owner's star row clamps its count, so a rating outside 1-5 cannot blank the screen",
+    must: [/const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\);/,
+           /\{"★"\.repeat\(filled\)\}<span[\s\S]{0,80}\{"★"\.repeat\(5 - filled\)\}/],
+    mustNot: [/\{"★"\.repeat\(n\)\}/],
+  },
+  {
+    item: 30, file: PANEL_MGR,
+    say: "the manager panel's copy of the same six lines clamps too",
+    must: [/const filled = Math\.max\(0, Math\.min\(5, Math\.round\(Number\(n\) \|\| 0\)\)\);/,
+           /\$\{"★"\.repeat\(filled\)\}<span style="color:var\(--line\)">\$\{"★"\.repeat\(5 - filled\)\}/],
+    mustNot: [/\$\{"★"\.repeat\(n\)\}/],
+  },
+  {
+    item: 31, file: CUSTOMERS,
+    say: "a name that is only spaces reads \"Guest\", not an empty cell",
+    must: [/const named = \(n: string \| null \| undefined\): string \| null =>/,
+           /\{named\(c\.name\) \|\| <span className="adm-muted">Guest<\/span>\}/,
+           /const label = named\(c\.name\) \|\| c\.phone \|\| "this customer";/],
+    mustNot: [/\{c\.name \|\| <span className="adm-muted">Guest/],
+  },
+  {
+    item: 32, file: CUSTOMERS,
+    say: "a date it cannot read shows a dash, never the words \"Invalid Date\"",
+    must: [/const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\);/,
+           /const fmt = \(iso: string\) => \(ok\(iso\) \?/, /const fmtTime = \(iso: string\) => \(ok\(iso\) \?/],
+  },
+  {
+    item: 32, file: KHATA,
+    say: "…and the credit book never prints \"oldest NaN days\"",
+    must: [/const ok = \(iso: string\) => Number\.isFinite\(new Date\(iso\)\.getTime\(\)\);/,
+           /if \(!ok\(iso\)\) return "—";/,
+           /const d = ok\(iso\) \? Math\.floor/],
+  },
+  {
+    // ── ITEM 33 · A READ THAT FAILED IS NOT AN EMPTY BOOK ─────────────────────────────────────────
+    // The loading branch was guarded, the EMPTY branch below it was not, so a failed first load fell
+    // through to "No one owes anything right now" — a claim about money made from no data — under a
+    // red card saying the opposite. Both screens now say what Feedback & complaints has always said.
+    item: 33, file: KHATA,
+    say: "a failed credit-book read says so instead of \"nobody owes anything\"",
+    must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;nobody owes anything\.&rdquo;/],
+  },
+  {
+    item: 33, file: CUSTOMERS,
+    say: "a failed guest-list read says so instead of \"no customers yet\"",
+    must: [/\) : customers === null \? \(/, /this is a loading error, not &ldquo;no customers\.&rdquo;/],
+  },
+  {
+    item: 32, file: ISSUES,
+    say: "…and Feedback & complaints never prints \"resolved Invalid Date\"",
+    must: [/const okDate = \(iso: string \| null \| undefined\) =>/, /const dt = \(iso: string\) => \(okDate\(iso\)/,
+           /\{okDate\(i\.resolved_at\) \? ` · resolved \$\{dOnly\(i\.resolved_at as string\)\}` : ""\}/],
+    mustNot: [/\{new Date\(r\.created_at\)\.toLocaleString/, /\{new Date\(i\.created_at\)\.toLocaleString/],
+  },
+  {
+    // ── ITEM 34 · THE SAME RULE ON THE LAST THREE SCREENS (owner, 2026-09-01) ─────────────────────
+    // *"okay, give me permission."* Six owner screens can be reached by a typed URL when the admin
+    // has withheld that section. Three were fixed on 2026-08-31 (items 8/24); these are the other
+    // three. A rule that is true on five screens and false on three is worse than one that is false
+    // everywhere, because he stops trusting it. All six are checked here, in one place.
+    item: 34, file: ACTIVITY,
+    say: "Audit & logs sends a real owner home instead of naming a section he has not been given",
+    must: [/import \{ useRouter \} from "next\/navigation"/,
+           /useEffect\(\(\) => \{ if \(bothOff\) router\.replace\("\/owner"\); \}, \[bothOff, router\]\);/,
+           /\{bothOff \? null :/],
+    mustNot: [/isn&rsquo;t enabled for your restaurant/, /isn&apos;t enabled for your restaurant/],
+  },
+  {
+    item: 34, file: STAFF,
+    say: "Team does the same",
+    must: [/import \{ useRouter \} from "next\/navigation"/,
+           /useEffect\(\(\) => \{ if \(notEnabled\) router\.replace\("\/owner"\); \}, \[notEnabled, router\]\);/],
+    mustNot: [/\{!loading && notEnabled && <div className="adm-card">/],
+  },
+  {
+    item: 34, file: MENU,
+    say: "Menu does the same, and its \"a failed read is not a switched-off feature\" guard is untouched",
+    must: [/import \{ redirect \} from "next\/navigation"/,
+           /if \(!selected\) redirect\("\/owner"\);/,
+           /I COULDN'T ASK" IS NOT "IT IS SWITCHED OFF/],
+    mustNot: [/The menu editor isn&apos;t switched on for your restaurant/],
+  },
+  {
+    // ── ITEM 35 · A NAME OF ONLY SPACES IS NOT A NAME, IN THE SHARED HELPER TOO ───────────────────
+    // `!actor` is false for "  ", so a blank-but-present name rendered as nothing at all. The same
+    // fault item 16 fixed on the Customers page, in the file every owner log screen shares.
+    item: 35, file: ACTOR,
+    say: "the shared \"who did it\" helper trims before deciding there is no name",
+    must: [/const a = \(actor \?\? ""\)\.trim\(\);/, /if \(!a\) return "—";/,
+           /if \(!\(actor \?\? ""\)\.trim\(\)\) return undefined;/],
+    mustNot: [/if \(!actor\) return "—";/],
   },
 ];
 
@@ -279,7 +553,7 @@ for (const r of RULES) {
   const src = read(r.file);
   if (src === null) { bad(`item ${r.item}: ${r.file} not found (if it moved, update this guard)`); continue; }
   const missing = (r.must || []).filter((re) => !re.test(src));
-  const present = (r.mustNot || []).filter((re) => re.test(src));
+  const present = (r.mustNot || []).filter((re) => re.test(codeOnly(src)));
   if (!missing.length && !present.length) ok(`item ${r.item} · ${r.say}`);
   else {
     bad(`item ${r.item} · ${r.say}`);

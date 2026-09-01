@@ -83,6 +83,36 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
     } else toast(r.error || "Couldn't set a password.", "err");
   };
 
+  // ── NEW PASSWORDS FOR THE WHOLE RESTAURANT, IN ONE PRESS (owner, 2026-08-31 — item 28) ──────────
+  // A handover used to be one "Show" per login, each with its own confirmation. This is one press for
+  // all of them — and it is deliberately NOT the primary button on the card: the ordinary reason to
+  // open this card is to READ the sheet, not to change every password on it.
+  //
+  // The confirmation spells out the cost in the words that actually matter — everyone signed out — and
+  // the SERVER refuses outright while any table is open, so the dangerous case cannot be reached by
+  // pressing through a dialog. If it refuses, the reason it gives is shown as-is: it already names how
+  // many tables are open and what to do instead.
+  const [resetAllStep, setResetAllStep] = useState<0 | 1>(0);
+  const resetAll = async () => {
+    setResetAllStep(0);
+    setBusy("__all__");
+    const r = await adminFetch<{ reset: number; logins: Login[]; failed?: string[] }>("/api/admin/restaurants/credentials", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+      body: JSON.stringify({ restaurant_id: restaurantId, action: "reset_all" }),
+    });
+    setBusy(null);
+    if (!r.ok) { toast(r.error || "Couldn't set the passwords.", "err"); return; }
+    // Re-read rather than patching row by row: the answer carries every new password and the sheet
+    // has to show exactly what the server stored, not what this component hoped it stored.
+    await load();
+    if (r.data.failed?.length) {
+      toast(`${r.data.reset} password${r.data.reset === 1 ? "" : "s"} set — but ${r.data.failed.length} failed (${r.data.failed.join(", ")}). Press Show on those.`, "err");
+    } else {
+      toast(`New passwords set for all ${r.data.reset} logins. Everyone has been signed out.`);
+    }
+  };
+
   const openSheet = () => {
     if (owners.length > 1) { setPicking(true); return; }
     setSheetFor(owners[0]?.id ?? "");
@@ -104,6 +134,21 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
           <button className="adm-btn" onClick={load} title="Reload">
             <i className="fas fa-rotate-right" style={{ marginRight: 7 }} aria-hidden="true" />Refresh
           </button>
+          {resetAllStep === 0 ? (
+            <button className="adm-btn" onClick={() => setResetAllStep(1)} disabled={!d || d.logins.length === 0 || busy === "__all__"}
+              title="Give every login here a new password, for a handover">
+              <i className="fas fa-key" style={{ marginRight: 7 }} aria-hidden="true" />
+              {busy === "__all__" ? "Setting…" : "New passwords for all"}
+            </button>
+          ) : (
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <button className="adm-btn danger" onClick={resetAll}>
+                <i className="fas fa-key" style={{ marginRight: 7 }} aria-hidden="true" />
+                Yes — reset all {d?.logins.length} and sign everyone out
+              </button>
+              <button className="adm-btn" onClick={() => setResetAllStep(0)}>Cancel</button>
+            </span>
+          )}
           <button className="adm-btn primary" onClick={openSheet} disabled={!d || d.logins.length === 0}
             title="Open a printable handover sheet">
             <i className="fas fa-print" style={{ marginRight: 7 }} aria-hidden="true" />Print handover sheet
@@ -173,6 +218,8 @@ export default function CredentialsCard({ restaurantId }: { restaurantId: string
           <p className="hint" style={{ margin: "10px 0 0" }}>
             A password set before this feature existed can&rsquo;t be read back — nothing kept a readable
             copy of it. <b>Show</b> gives that login a new password and keeps it visible from then on.
+            <b> New passwords for all</b> does the same thing to every login here in one press, for a
+            handover — it signs everyone out, so it is refused while any table is open.
             Passwords changed by staff in their own panel appear here automatically.
           </p>
         </div>

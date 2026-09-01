@@ -454,7 +454,17 @@ function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: st
 }
 
 /** Past this many restaurants the ranking turns HORIZONTAL — a vertical column can no
- *  longer hold a readable restaurant name or amount (owner's decision, 2026-07-31). */
+ *  longer hold a readable restaurant name or amount (owner's decision, 2026-07-31).
+ *
+ *  REJECTED (owner, 2026-07-31): a Columns / Bars / Line picker on this card. He had me DELETE the
+ *  segmented toggle that used to sit here (PR #632) — *"why option to toggle from bar column and
+ *  stuff remove option — we have make already till 9 restaurant column then bars, we decide that"*.
+ *  The right shape is a property of the DATA, not a preference: the boundary below IS the decision,
+ *  so the buttons were three ways for somebody to make the chart worse, sitting where the numbers
+ *  should be. "Line" was also the same picture as the card beside it. Do not add a chart-type
+ *  picker to this or any new chart — choose the shape from the count and render only that.
+ *  Recorded as R52 in docs/REJECTED-IDEAS.md. (The older `ToggleChart` Bar/Line control on the
+ *  reports pages is a DIFFERENT component he has not been asked about — leave it alone.) */
 const COLUMNS_MAX = 9;
 export function WhoEarnsMore({ data, onSelect }: {
   data: RevDatum[];

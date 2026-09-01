@@ -12,7 +12,7 @@
 //      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
 //      rows (staff_actions) — never bills or customer records.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, detailForList, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
@@ -482,7 +482,7 @@ function OpsTable({ rows, err, onRetry, scopedName, capped, onSendToClaude, onRe
         // tap-batch / error worth reading in full.
         // Errors keep their raw text (stack/where matters); everything else (esp. tap batches)
         // is shown in plain English via the shared formatter.
-        const det = isErr ? (a.detail || "") : formatActionDetail(a.action, a.detail);
+        const det = isErr ? (a.detail || "") : detailForList(a.action, a.detail);
         // On a TABLET row, `actor` is the manager whose PIN unlocked the action (no per-person
         // tablet login exists) — except a person's own login/profile actions. A name with
         // " / " = a PIN shared by >1 manager → ambiguous.

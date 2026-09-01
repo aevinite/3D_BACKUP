@@ -45,6 +45,30 @@ if (lib) {
   check("ownerScopeOr503 answers 503 with `transient: true`",
     /status:\s*503/.test(helper) && /transient:\s*true/.test(helper));
   check("ownerScopeOr503 still answers 401 for a real \"not you\"", /status:\s*401/.test(helper));
+
+  // 1b · …AND EVERY READ THAT DECIDES THE SCOPE CONSULTS ITS OWN `.error`
+  //      (T25, sweep #7, 2026-08-28.)
+  //
+  // The throw above only helps for a read that is CHECKED. F22 was written up for one read and one
+  // read was fixed; the two beside it, one step earlier in the same act-as branch, kept
+  // `(data || [])`. A failure there left the members list empty, so `ownerId` fell through to null
+  // and the branch returned `{ ids: [acting] }` — an admin opening a five-restaurant owner's
+  // cockpit saw ONE, with nothing saying the other four had been dropped rather than never existed.
+  // That is F22's exact symptom by a different road, which is why the rule is asserted as a
+  // PROPERTY of the whole function instead of a line: every `sb.from(...)` in ownerScope() that
+  // shapes the id list must have its error read.
+  const body = lib.slice(lib.indexOf("export async function ownerScope("), lib.indexOf("export function inScope"));
+  const reads = [...body.matchAll(/const \[?([A-Za-z, ]+?)\]?\s*=\s*await (?:Promise\.all\(\[)?[\s\S]{0,400}?sb\.from\(/g)];
+  const named = [...new Set(body.match(/\b(\w+Q|owned|links)\b(?=\.(?:error|data))/g) || [])];
+  const unchecked = named.filter((v) => !new RegExp(`\\b${v}\\.error\\b`).test(body));
+  check("every read that shapes the act-as scope consults its own .error",
+    unchecked.length === 0 && reads.length > 0,
+    unchecked.length
+      ? `${unchecked.join(", ")} read${unchecked.length === 1 ? "s" : ""} .data without ever reading .error — a blip there SHRINKS the view in silence, which is finding F22`
+      : "");
+  check("…and the act-as branch throws rather than falling through to one restaurant on a failed read",
+    /if \(membersQ\.error \|\| primaryQ\.error\)[\s\S]{0,300}throw new OwnerScopeUnavailable\(\)/.test(body),
+    "a failed owner lookup must be OwnerScopeUnavailable, not a silent narrowing to `{ ids: [acting] }`");
 }
 
 // 2 · EVERY owner route is covered. Discovered by walking, never a hardcoded list.
