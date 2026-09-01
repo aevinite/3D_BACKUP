@@ -255,7 +255,13 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't record payment.");
       payActionIdRef.current = null; // committed → the next payment gets a fresh id
       setPayAmount(""); setPayMethod(""); setPayLabel(""); setPayNote("");
-      setPayMsg("Payment recorded.");
+      // THE SERVER'S HALF-DONE ANSWER IS SHOWN, NOT SWALLOWED (T19 sweep #7, 2026-09-01).
+      // "Also move the next due date" is a SECOND write, and /api/admin/billing has answered
+      // { warning } since sweep #6 for the case where the payment saved and the date did not:
+      // the restaurant then reads as due — or overdue — the moment after being paid, and the only
+      // way to find out was to notice. This screen threw that sentence away and said "Payment
+      // recorded." either way. Now it says which of the two happened.
+      setPayMsg(typeof d?.warning === "string" && d.warning ? d.warning : "Payment recorded.");
       // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
       await loadHistory(); onChanged();
     } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); } finally { setPayBusy(false); payingRef.current = false; }
@@ -339,7 +345,17 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
               </label>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                 <button className="adm-btn primary" disabled={payBusy} onClick={addPayment}>{payBusy ? "Recording…" : "Add payment"}</button>
-                {payMsg && <span className="adm-muted" style={{ fontSize: 12 }}>{payMsg}</span>}
+                {payMsg && (
+                  // A warning is not an aside: the half-done case ("the payment was saved, but the
+                  // next-due date could not be moved") has to read as something to act on, while
+                  // "Payment recorded." stays the quiet confirmation it was.
+                  <span
+                    className={/could not|couldn't|not be/i.test(payMsg) ? undefined : "adm-muted"}
+                    style={/could not|couldn't|not be/i.test(payMsg)
+                      ? { fontSize: 12, color: "var(--adm-danger)", fontWeight: 600 }
+                      : { fontSize: 12 }}
+                  >{payMsg}</span>
+                )}
               </div>
             </div>
 
