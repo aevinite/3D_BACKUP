@@ -228,6 +228,23 @@ for (const file of ["public/panels/kitchen/style.css", "public/panels/tablet/sty
   }
 }
 
+// WHITE INK NEEDS A DARK ENOUGH FILL — the second sighting (T26, sweep #7 item 26). The check
+// above catches the two sign-in pages by their literal. The admin ACCESS screen hit the same number
+// on the same blue by a different route: its chosen tab filled with the console's bare --accent
+// (blue-500) and put white on it, 3.68:1 on the dark skin. The LIGHT console block already carried
+// blue-600 for this reason; only dark was left. Assert the rule, not the literal.
+{
+  const f = "app/aevinite/access/page.tsx";
+  let src; try { src = readFileSync(f, "utf8"); } catch { src = null; }
+  if (!src) fail(`${f} — not found; this guard needs updating`);
+  else {
+    const rule = src.split("\n").find((l) => /\.acc2-tabs button\.on\s*\{/.test(l)) || "";
+    if (/background\s*:\s*var\(\s*--accent\s*\)/.test(rule))
+      fail(`${f} — the chosen Access tab fills with the bare --accent under white ink; that is 3.68:1 on the dark console. Deepen the fill (85% measures 4.87) or use the light block's blue-600.`);
+    else ok(`${f} — the chosen Access tab's fill is dark enough for the white on it`);
+  }
+}
+
 // THE styled-jsx BLOCKS ARE DOCUMENTS TOO, and until sweep #7 no guard read them (T26). The trap
 // is the same one this file was built for — `var(--undeclared, <literal>)`, where the literal then
 // wins in BOTH skins — but it hides better here, because these blocks are scattered across 150 tsx
