@@ -547,10 +547,17 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     // /api/owner/printing answers for ONE restaurant and does not say which, so an owner with
     // printing on at two restaurants would have read the first one's computer and printer on the
     // second one's row.
-    if (/data\.printing!?\.length === 1 && printing/.test(bare))
-      ok("printing: the single-restaurant answer is only used where it provably belongs");
+    // T13 (sweep #7) and T20 found this same fault in the same week. T13's fix could only use the
+    // answer when the list held one row; T20's made the ROUTE say which restaurant it answered for,
+    // which is right for two restaurants as well as one, so that is the version on main and the one
+    // asserted here. The claim is unchanged: one restaurant's printer never appears on another's row.
+    if (/printing\.restaurantId === p\.restaurant_id/.test(bare))
+      ok("printing: the answer is matched to the restaurant it is actually about");
     else bad("the /api/owner/printing answer is applied to every restaurant row — it answers for ONE "
-      + "restaurant and does not say which, so a second restaurant would be told the wrong printer");
+      + "restaurant, so a second restaurant would be told the wrong printer");
+    if (/restaurantId\?:/.test(read(SETTINGS) || "") )
+      ok("…and the route's answer carries that restaurant id for the page to match on");
+    else bad("the printing answer no longer carries the restaurant it is about — the match above cannot work");
 
     // ── the icon must not touch its label ──
     // `.owx .adm-btn` is `display: inline-flex` with no gap, and a flex container trims the leading

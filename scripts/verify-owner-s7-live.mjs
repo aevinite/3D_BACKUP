@@ -156,7 +156,10 @@ console.log("H1 · the Kitchen printing card, in both skins and at both widths (
       P("P21461", "…and the per-restaurant row is still there, so the page is not half-empty", /tickets print on/.test(t));
     });
     await force({ computers: [], routes: [] }, (t) => {
-      P("P21462", "with no computer set up, it says a screen has to do it", /so a screen has to do it/.test(t));
+      // EXPECTATION MOVED 2026-09-01, same id, same claim — see the static twin P21121. T20 rewrote
+      // this sentence so it no longer contradicts the row above it; the thing being asserted (with
+      // no printer computer, the card says a screen is carrying the job) is unchanged.
+      P("P21462", "with no computer set up, it says a screen is doing it, and why", /no printer computer is set up here yet/.test(t));
       P("P21463", "…and tells the owner the one thing that changes that", /Ask us to set one up/.test(t));
       P("P21464", "…and lists no printer rows at all, rather than an empty table", !/Kitchen slips/.test(t));
     });

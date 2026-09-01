@@ -75,8 +75,12 @@ P("P21105", "the gate uses optional chaining, so a failed settings load cannot t
 P("P21106", "one row per restaurant, keyed by the restaurant's id (never the array index)", /key=\{p\.restaurant_id\}/.test(card));
 P("P21107", "a restaurant with no name still prints something readable", /p\.name \|\| "This restaurant"/.test(card));
 P("P21108", "the row says where the paper comes out, in words, not a code", /tickets print on/.test(cardT));
-P("P21109", "…and it translates the stored target rather than printing it raw", /p\.target === "counter"/.test(card) && /p\.target === "both"/.test(card));
-P("P21110", "…covering all three stored values, with the kitchen as the fallback", /: "the kitchen screen"/.test(cardT));
+P("P21109", "…and it translates the stored target rather than printing it raw", /p\.target === "counter"/.test(card));
+// EXPECTATION MOVED 2026-09-01, same id, same claim. There are TWO stored targets now, not three:
+// the printing rework retired "both" (counter as backup) rather than leave a value on screen that
+// no longer describes anything the product does. The rule — every stored value is translated into
+// English and the kitchen is the fallback — is unchanged.
+P("P21110", "…covering every stored value, with the kitchen as the fallback", /: "the kitchen screen"/.test(cardT));
 P("P21111", "the row names which screen has actually taken the job", /printing now:/.test(cardT));
 P("P21112", "…and says so plainly when no screen has", /no screen has taken it yet/.test(cardT));
 P("P21113", "…and marks a screen that has stopped checking in", /gone quiet/.test(cardT));
@@ -87,7 +91,12 @@ P("P21117", "…and the computer, not a fingerprint", /kotHelper\.computer/.test
 P("P21118", "…and says when that computer is asleep, with what happens to the tickets", /asleep, tickets waiting/.test(cardT));
 P("P21119", "the sub-card is headed as a question an owner actually asks", /Where your paper comes out right now/.test(cardT));
 P("P21120", "…and it only renders when the live read answered", /\{printing \?/.test(card));
-P("P21121", "with no computer set up, it says a screen has to do it", /so a screen has to do it/.test(cardT));
+// EXPECTATION MOVED 2026-09-01, same id, same claim. T20 rewrote this sentence (their items 29/37):
+// it used to read "No computer is set up to print yet, so a screen has to do it", which sat directly
+// under a row already naming the screen and read as a second, contradicting answer. It now says the
+// same thing from the other end — a screen IS doing it, and why. The claim being checked is the one
+// that matters: with no printer computer, the card says a screen is carrying the job.
+P("P21121", "with no computer set up, it says a screen is doing it, and why", /no printer computer is set up here yet/.test(cardT));
 P("P21122", "…and tells the owner the one thing that would change that", /Ask us to set one up/.test(cardT));
 P("P21123", "with a computer set up, it says nothing you close can stop it", /nothing you close can stop it/.test(cardT));
 P("P21124", "each computer is listed by its own name", /\{c\.name\}/.test(card));
@@ -174,7 +183,11 @@ P("P21193", "…and the per-computer line", /gap: 8, flexWrap: "wrap"/.test(card
 P("P21194", "…and each route line", /padding: "3px 0", flexWrap: "wrap"/.test(card));
 P("P21195", "the route label has a fixed column so the printers line up", /minWidth: 130/.test(card));
 P("P21196", "every colour on the card is a declared token or has a fallback", (card.match(/var\(--[a-z-]+\)/g) || []).every((v) => /--(border|accent|adm-ok|adm-danger|adm-warn|muted|text|card|bg)\)/.test(v)));
-P("P21197", "…and the two raw hexes are the status dot only, where the words carry the meaning", (card.match(/#[0-9a-f]{6}/gi) || []).length <= 2);
+// EXPECTATION MOVED 2026-09-01, same id, same claim. Two more raw hexes arrived with T20's item 29,
+// which made "gone quiet" a warning instead of a footnote — an amber that is deliberately the same
+// in both skins, beside the two status-dot colours. Still a small, closed set, and still nowhere
+// that a word is not also carrying the meaning.
+P("P21197", "…and the handful of raw hexes are status colours only, where the words carry the meaning", (card.match(/#[0-9a-f]{6}/gi) || []).length <= 5);
 P("P21198", "the card adds no popup or drawer, so nothing needs a phone-Back layer", !/useBackClose|LFH_BACK|dialog/.test(card));
 P("P21199", "the card writes nothing — it is read-only, as the printing rule requires", !/method: "POST"|method: "PATCH"|method: "DELETE"/.test(card));
 P("P21200", "…so it needs no clash expectation and no idempotency key", !/X-LFH-Expect|X-LFH-Action-Id/.test(card));
@@ -237,8 +250,20 @@ P("P21247", "…and it is answered before the switched-off card can render", m.i
 P("P21248", "the couldn't-read card tells the owner nothing has changed", /Nothing has changed/.test(mT));
 P("P21249", "…and that their menu is safe", /your menu is safe/.test(mT));
 P("P21250", "…and what to do (reload), before who to contact", mT.indexOf("please reload") < mT.indexOf("contact Aevidine"));
-P("P21251", "the switched-off card names who to ask", /ask your administrator/.test(mT));
-P("P21252", "the two cards cannot both render", m.indexOf("return (") < m.indexOf("if (!selected)"));
+// EXPECTATION INVERTED 2026-09-01, same id — and this is the important kind. This row used to assert
+// that the Menu page's switched-off card NAMES who to ask. R36 (the owner is never shown what is
+// withheld) was finished across the last three screens on 2026-08-31, and that sentence went with it:
+// telling an owner "the menu editor isn't switched on — ask your administrator" names a section he
+// has not been given and sends him to support about a decision that was deliberate. The page now
+// redirects to the dashboard instead, exactly as his sidebar already stays silent. So the check must
+// assert the SILENCE, not the sentence. A guard left asserting the old rule would have defended a
+// decision he reversed.
+P("P21251", "the Menu page says NOTHING about a section that is switched off (R36) — it redirects", 
+  !/ask your administrator/.test(mT) && /redirect\("\/owner"\)/.test(m));
+// The couldn't-read card and the switched-off path are still mutually exclusive — but the second is
+// a redirect now, not a card (see P21251), so the claim is that the read failure is answered FIRST.
+P("P21252", "a failed read is answered before the switched-off path, so a blip never reads as a decision",
+  m.indexOf("if (couldntRead)") < m.indexOf("if (!selected)"));
 P("P21253", "a restaurant whose Menu switch is off is filtered out of the picker", /\.filter\(\(r\) => mergeOwnerEntitlements/.test(m));
 P("P21254", "…so a two-restaurant owner with one switched off sees only the other", /const ids = restaurants\.map/.test(m));
 P("P21255", "?rid is checked against the FILTERED list, not the owned list", m.indexOf("const ids = restaurants.map") < m.indexOf("ids.includes(qRid)"));
@@ -253,7 +278,7 @@ P("P21263", "…and it logs nothing", !/console\./.test(m));
 P("P21264", "…and echoes no cookie value into the page", !/store\.get\([^)]*\)\?\.value\}/.test(m));
 P("P21265", "the picker and the initial selection are always set together", /restaurants = \[\{ id: row\.id, name: row\.name \}\]; selected = row\.id;/.test(m));
 P("P21266", "…so the picker can never open on a restaurant not in its own list", /selected = qRid && ids\.includes\(qRid\) \? qRid : \(ids\[0\] \|\| ""\)/.test(m));
-P("P21267", "an owner with no entitled restaurant gets the card, not an empty editor", /if \(!selected\)/.test(m));
+P("P21267", "an owner with no entitled restaurant never reaches an empty editor", /if \(!selected\)/.test(m));
 P("P21268", "the editor is handed the same skin the page read", /skin=\{skin\}/.test(m));
 P("P21269", "Next 16's async searchParams is awaited", /await searchParams/.test(m));
 P("P21270", "…and cookies()", /await cookies\(\)/.test(m));
