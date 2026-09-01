@@ -239,9 +239,47 @@ else for (const n of strayTabs) {
         else if (c === ")" || c === "]" || c === "}") { depth--; if (depth < 0) break; }
         else if (c === ";" && depth === 0) break;
       }
-      const chain = code.slice(i, j);
+      let chain = code.slice(i, j);
+      let conditionalOnly = "";
       i += needle.length;
-      if (/\.(update|insert|upsert|delete)\(/.test(chain)) continue;         // a write, narrowed elsewhere
+      // ── A BUILDER IS STILL ONE READ, EVEN WHEN IT IS WRITTEN OVER SEVERAL STATEMENTS ──────────
+      // (T13, 2026-09-01. This check was RED on clean main and the code it accused was correct.)
+      //
+      // The walk above stops at the first `;` at depth 0, which is right for a fluent chain. But
+      // supabase-js is a BUILDER, and the idiomatic way to apply a conditional filter is to split it:
+      //
+      //     let q = sb.from("settings").select(`restaurant_id, ${COLS}`);
+      //     if (ids && ids.length) q = q.in("restaurant_id", ids);
+      //     const { data } = await q.limit(500);
+      //
+      // Everything that makes that read safe — the `.in()` AND the `.limit()` — lives in the two
+      // statements AFTER the one the walker reads. So it saw `from("settings").select(…)` with no
+      // filter and no limit and reported an unlimited whole-table read that does not exist.
+      // lib/ownerCache.ts was accused this way for weeks; the guard, not the product, was wrong.
+      //
+      // So: when the chain is bound to a variable, keep reading. Everything applied to that variable
+      // up to the end of the enclosing function counts as part of the same read. The window stops at
+      // the next top-level function so a same-named variable in a LATER function can never launder
+      // an unlimited read here — which is the way this could have been made too permissive.
+      const bound = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=[^=]*$/.exec(code.slice(0, i - needle.length));
+      if (bound) {
+        const v = bound[1];
+        const rest = code.slice(j);
+        const endOfFn = rest.search(/\n(?:export\s+)?(?:async\s+)?function\s|\n(?:export\s+)?const\s+[A-Za-z_$][\w$]*\s*=\s*(?:async\s*)?\(/);
+        const scope = rest.slice(0, endOfFn > -1 ? endOfFn : rest.length);
+        // Only the uses of THAT variable, so an unrelated `.limit()` nearby cannot excuse this read.
+        const uses = scope.match(new RegExp(`[^\\n]*\\b${v}\\s*(?:=\\s*${v})?\\s*\\.[\\s\\S]{0,200}?(?=;|\\n)`, "g")) || [];
+        // A FILTER INSIDE AN `if` DOES NOT MAKE THE OTHER PATH SAFE (T13, 2026-09-01).
+        // The idiom that started this is `if (ids && ids.length) q = q.in("restaurant_id", ids);` —
+        // so when `ids` is null there is NO filter, and the read is the whole table. Counting that
+        // conditional `.in()` as a filter is how a genuinely unlimited path would pass unnoticed:
+        // proved by deleting the `.limit(500)` from lib/ownerCache.ts and watching this stay green.
+        // Only UNCONDITIONAL narrowing counts. A conditional one is kept for the write test below.
+        const unconditional = uses.filter((u) => !/^\s*(if|else|\}\s*else)\b/.test(u)).join(" ");
+        chain += " " + unconditional;
+        conditionalOnly = uses.join(" ");
+      }
+      if (/\.(update|insert|upsert|delete)\(/.test(chain + conditionalOnly)) continue;   // a write, narrowed elsewhere
       if (/\.eq\(|\.in\(|\.limit\(|\.range\(|maybeSingle|head: true/.test(chain)) continue;
       bad.push(`${rel}: ${chain.replace(/\s+/g, " ").slice(0, 90)}…`);
     }

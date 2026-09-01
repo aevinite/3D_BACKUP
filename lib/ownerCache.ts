@@ -289,17 +289,51 @@ export async function cachedOwnerPayload<T extends object>(opts: {
 // primary key, read only on the paths that already recompute (the cold path and the background
 // revalidate), never on a plain cached read — and one definition of WHICH columns, shared with
 // every other reader of them (lib/tax.ts → TAX_SETTINGS_COLUMNS), so this cannot drift either.
+// ── IT IS PAGED, BECAUSE `ids` IS GENUINELY NULL ON ONE PATH (T13, 2026-09-01) ────────────────
+// This read was a flat `.limit(500)` with a CONDITIONAL filter:
+//     if (ids && ids.length) q = q.in("restaurant_id", ids);
+//     const { data } = await q.limit(500);
+// For an owner that is fine — `ids` is their own small estate. But `app/api/admin/analytics` calls
+// `ordersFingerprint(null, …)` for the platform-wide view, and on that path there is no filter at
+// all: it reads EVERY restaurant's tax configuration and stops at 500 with no error and no sign.
+//
+// Past 500 restaurants that is a silent wrong answer of the worst kind — not a crash, a stale
+// number. The fingerprint would simply never notice a tax change on restaurant 501 onwards, so the
+// admin's analytics would keep serving the old rate until somebody pressed Refresh. That is the
+// same scar this function was WRITTEN for, one level up: "the fingerprint watches data, not
+// definitions", and a truncated read is a definition you never looked at.
+//
+// So it pages. With the handful of restaurants on this platform today that is exactly one request,
+// the same cost as before; it simply stays correct when that stops being true. `.range()` is
+// unconditional, so the read is bounded on every path, including the unfiltered one.
+const TAX_FP_PAGE = 500;
+const TAX_FP_MAX_PAGES = 40;      // 20,000 restaurants; a ceiling, not an expectation
 async function taxConfigPart(ids: string[] | null): Promise<string> {
   try {
-    let q = sb.from("settings").select(`restaurant_id, ${TAX_SETTINGS_COLUMNS}`);
-    if (ids && ids.length) q = q.in("restaurant_id", ids);
-    const { data, error } = await q.limit(500);
-    if (error || !data) return "";
-    // Sorted by id so a scope's member order can never change the fingerprint on its own.
-    return "|cfg:" + [...data]
-      .sort((a2, b2) => String(a2.restaurant_id).localeCompare(String(b2.restaurant_id)))
-      .map((r) => `${r.restaurant_id}:${r.price_tax_mode ?? ""}:${r.tax_rate ?? ""}:${JSON.stringify(r.tax_components ?? null)}`)
-      .join(";");
+    const rows: Record<string, unknown>[] = [];
+    for (let page = 0; page < TAX_FP_MAX_PAGES; page++) {
+      let q = sb.from("settings").select(`restaurant_id, ${TAX_SETTINGS_COLUMNS}`)
+        .order("restaurant_id")
+        .range(page * TAX_FP_PAGE, page * TAX_FP_PAGE + TAX_FP_PAGE - 1);
+      if (ids && ids.length) q = q.in("restaurant_id", ids);
+      const { data, error } = await q;
+      if (error) return "";
+      rows.push(...((data || []) as Record<string, unknown>[]));
+      if (!data || data.length < TAX_FP_PAGE) {
+        // Sorted by id so a scope's member order can never change the fingerprint on its own.
+        // (The database ordering above only makes the PAGING stable; this is what the string is
+        // built from, and it stays JS-side so the two cannot disagree about collation.)
+        return "|cfg:" + rows
+          .sort((a2, b2) => String(a2.restaurant_id).localeCompare(String(b2.restaurant_id)))
+          .map((r) => `${r.restaurant_id}:${r.price_tax_mode ?? ""}:${r.tax_rate ?? ""}:${JSON.stringify(r.tax_components ?? null)}`)
+          .join(";");
+      }
+    }
+    // Past the ceiling we know the answer is incomplete. Return something that is DIFFERENT every
+    // time rather than something that looks stable: an incomplete fingerprint that never changes
+    // would freeze the cache on a stale tax rate, which is the exact failure being fixed here.
+    // Recomputing every time is wasteful and obvious; serving a wrong tax figure is neither.
+    return `|cfg:incomplete:${Date.now()}`;
   } catch { return ""; }        // a fingerprint that cannot be read must not fail the request
 }
 
