@@ -1,3 +1,22 @@
+-- ⚠ RENUMBERED 369 → 375 (2026-09-01, while merging every open PR).
+--   FOUR files were sitting at 369, each written by a different lane on 2026-08-28 and each in its
+--   own unmerged branch, so nothing noticed until they landed on main together. `npm run
+--   verify:grants` refuses a NEW duplicate number, and it is right to: with several files at one
+--   number a re-seed applies them in FILENAME order, which is not an order anybody chose.
+--   The one that KEEPS 369 is the earliest by commit time (00:01 — a_purge_clears_the_pending_
+--   printer_handshakes); this one was committed at 05:12, so it moved.
+--
+--   CHECKED BEFORE MOVING, not assumed:
+--     · every statement here is CREATE OR REPLACE / IF NOT EXISTS or wrapped in lfh_applied_once,
+--       so running it at a later position is safe and re-running it is a no-op;
+--     · the applied-once KEY inside this file is unchanged, so a database where it has already run
+--       does not run it again — renaming the file must never change that key;
+--     · nothing created by 370-373 is used here, and nothing here is undone by them (370 and 371
+--       only replace two unrelated functions; 372 removes a dead `modules.printing.mode` key while
+--       the print-route file below writes `modules.printing.routes.kot`, a different key; 373 adds a
+--       settings column).
+--   Moving a migration LATER can only be safer than moving one earlier — the same reasoning the
+--   352 → 364 renumber recorded.
 -- 371 · A re-seed cannot hand a narrowed waiter section back to the whole floor
 -- ═══════════════════════════════════════════════════════════════════════════════════════════════
 -- ⚠ MIGRATION NUMBER: 369 — the next free number after main's 368, and the SECOND number this file

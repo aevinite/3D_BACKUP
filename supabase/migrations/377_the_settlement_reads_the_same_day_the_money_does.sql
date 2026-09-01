@@ -1,3 +1,14 @@
+-- ⚠ RENUMBERED 367 → 377 (2026-09-01, while merging every open PR).
+--   Two files sat at 367: `a_device_sets_up_its_own_printer` (2026-08-27 09:51) and this one
+--   (2026-09-01 02:23). `npm run verify:db-parity` refuses a NEW duplicate number, because with two
+--   files at one number a re-seed applies them in FILENAME order — not an order anybody chose. This
+--   is the newer of the two by five days, so it is the one that moves.
+--
+--   CHECKED BEFORE MOVING: this file only does CREATE OR REPLACE FUNCTION
+--   public.lfh_owner_payment_breakdown — one function, no data rewrite, no schema change, and
+--   nothing numbered 368-376 replaces or drops that function. So running it later changes nothing,
+--   and re-running it is a no-op. Nothing outside the migrations folder referenced the old filename.
+--   Same reasoning, and the same direction, as the 352 → 364 and 369 → 374/375/376 renumbers.
 -- 367_the_settlement_reads_the_same_day_the_money_does.sql — T11 sweep #7, 2026-08-27
 --
 -- WHERE THE OWNER SEES IT
