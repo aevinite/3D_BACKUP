@@ -9,6 +9,7 @@ import { loginAs, adminCookie } from "./sweep/login.mjs";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 import { requireUp } from "./sweep/appUp.mjs";
+import { restoreOnExit } from "./sweep/restore.mjs";
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
@@ -36,6 +37,25 @@ const has = (haystack, needle) => haystack.toLowerCase().includes(needle.toLower
 const ok = (name, pass, note = "") => { results.push({ name, pass, note }); console.log(`${pass ? "  ✓" : "  ✗"} ${name}${note ? "  — " + note : ""}`); };
 const section = (t) => console.log("\n" + t);
 const cleanupPhones = new Set();
+
+// PUT BACK WHAT WAS THERE, NOT WHAT WE ASSUME WAS THERE (sweep #7 / T28, 2026-08-27).
+//
+// This switched `bill_customer_print` off mid-run and then set it — and `bill_customer_required` —
+// to a hard-coded `true` at the end. It never read what they were. So on a restaurant where the
+// owner had deliberately switched "print the customer's details on the bill" OFF, every run of this
+// guard turned it back ON and nothing said so. A test may borrow a setting; it may not decide one.
+//
+// And the put-back is registered for an interruption too: `finally` covers a throw, not Ctrl-C and
+// not a lane runner killing a slow guard, which is how verify:realtime once left a category
+// switched off across seven restaurants.
+const BILLFLAGS_WERE = (await sb.from("settings")
+  .select("bill_customer_print, bill_customer_required").eq("restaurant_id", RID1).maybeSingle()).data
+  || { bill_customer_print: true, bill_customer_required: true };
+const putBillFlagsBack = () => sb.from("settings").update({
+  bill_customer_print: BILLFLAGS_WERE.bill_customer_print,
+  bill_customer_required: BILLFLAGS_WERE.bill_customer_required,
+}).eq("restaurant_id", RID1);
+restoreOnExit(`French House · bill_customer_print/${BILLFLAGS_WERE.bill_customer_print} + bill_customer_required/${BILLFLAGS_WERE.bill_customer_required}`, putBillFlagsBack);
 
 const b = await chromium.launch();
 
@@ -127,10 +147,22 @@ if (fr) {
       || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     if (!row) return { html: "", note: "no orders" };
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
-    let html = ""; const real = window.open;
+    // THE BILL NO LONGER REACHES A WINDOW SYNCHRONOUSLY (T28, 2026-08-30). Since the print queue
+    // landed (mig 341), printBill() asks the SERVER who owns the paper — `api("POST","/print/send")`
+    // — and only falls back to opening a window when nobody does, inside a .then(). This capture
+    // stubbed window.open and read `html` on the very next line, so it always read "" and every one
+    // of the eight checks below failed about an empty string. Eight red lines, one stale technique,
+    // and nothing wrong with the bill.
+    // Both doors are stubbed now — openBillWindow is the fallback the panel actually calls — and the
+    // round trip is waited for rather than assumed.
+    let html = "";
+    const realOpen = window.open, realWin = window.openBillWindow;
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
-    try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
-    finally { window.open = real; }
+    window.openBillWindow = (h) => { html = h || ""; };
+    try {
+      printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os);
+      for (let i = 0; i < 60 && !html; i++) await new Promise((r) => setTimeout(r, 100));
+    } finally { window.open = realOpen; window.openBillWindow = realWin; }
     return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone } };
   }, printTable);
   const h = printed.html || "";
@@ -177,6 +209,8 @@ if (fr) {
   }, printTable);
   ok("panel picked up print=OFF from the server", off.printFlag === false, String(off.printFlag));
   ok("print switch OFF hides Customer + Mobile", !off.html.includes(">Customer<") && !off.html.includes(">Mobile<"));
+  // back ON for section D, which needs the lines printed — this one IS the test's own state, so it
+  // is deliberately `true` and not the captured value. The captured value is restored at the end.
   await sb.from("settings").update({ bill_customer_print: true }).eq("restaurant_id", RID1);
 
   /* ── D. the capture sheet itself ── */
@@ -401,7 +435,7 @@ for (const ph of cleanupPhones) {
   await sb.from("sessions").update({ cust_name: null, cust_phone: null }).eq("restaurant_id", RID1).eq("cust_phone", ph);
   await sb.from("customers").delete().eq("restaurant_id", RID1).eq("phone", ph);
 }
-await sb.from("settings").update({ bill_customer_print: true, bill_customer_required: true }).eq("restaurant_id", RID1);
+await putBillFlagsBack();
 
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${"=".repeat(64)}\n${results.length - failed.length}/${results.length} checks passed`);

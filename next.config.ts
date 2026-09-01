@@ -114,7 +114,14 @@ const nextConfig: NextConfig = {
     // outside WordPress site any more. (Dish cards render a plain <img>, not next/image, so this
     // list never optimized them anyway; it only ever granted permission.)
     remotePatterns: [
+      // The two hosts public/content/starter-menu.json really loads from — the ready-made menu a
+      // BRAND-NEW restaurant starts with, read by lib/starterMenu.ts. 62 of its 72 dish photos come
+      // from themealdb and 10 from unsplash; only unsplash was listed here, and the mismatch was
+      // invisible because dish cards render a plain <img>, which never consults this list. It would
+      // have surfaced the day one of them moved to next/image — and then ONLY for a brand-new
+      // restaurant, which is the hardest case to notice. Granted on the owner's word, 2026-08-28.
       { protocol: "https", hostname: "images.unsplash.com" },
+      { protocol: "https", hostname: "www.themealdb.com" },
     ],
   },
   async headers() {

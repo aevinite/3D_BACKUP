@@ -210,7 +210,16 @@ export default function AdminRestaurants() {
             const on = healthFilter === key;
             const count = key === "all" ? (list?.length ?? 0) : (healthCounts[key] || 0);
             return (
-              <button key={key} onClick={() => setHealthFilter(key)} className="adm-chip"
+              // TAPPING THE LIT CHIP AGAIN CLEARS IT (T16 sweep #7, 2026-08-28). It used to just
+              // set the same filter again, so the only way back to the whole list was to find the
+              // "All" chip — while the KPI tiles on Owners, the other filter row in this console,
+              // have toggled back since they were built (`setF`). Nothing was unreachable; the two
+              // rows simply behaved differently. "All" is excluded: tapping the lit All must stay
+              // All, not flip to something else.
+              <button key={key} onClick={() => setHealthFilter((cur) => (cur === key && key !== "all" ? "all" : key))}
+                className="adm-chip"
+                aria-pressed={on}
+                title={on && key !== "all" ? `Showing ${lbl.toLowerCase()} only — tap again to show all` : undefined}
                 style={{ cursor: "pointer", padding: "7px 12px", border: on ? `1px solid ${col}` : "var(--border)",
                   background: on ? `color-mix(in srgb, ${col} 18%, transparent)` : "transparent",
                   color: on ? col : "var(--muted)", fontWeight: on ? 700 : 500 }}>
@@ -528,8 +537,12 @@ function NewRestaurant({ onCreated, takenSlugs }: { onCreated: () => void; taken
               <b>This web address has been used before.</b>{" "}
               <span className="adm-muted">
                 <b style={{ color: "var(--text)" }}>{done.reusedAddress.name}</b> held{" "}
-                <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span> until it went to the
-                recycle bin on {new Date(done.reusedAddress.binnedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span> until it was
+                {/* "removed", not "went to the recycle bin" (T16 sweep #7, 2026-08-27): the previous
+                    occupant may have been REMOVED FOR GOOD since, and this line then told the admin
+                    it was sitting in the bin — somewhere he could go and look at it. The date the
+                    server sends is when it left, which is true either way. */}
+                {" "}removed on {new Date(done.reusedAddress.binnedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}.
                 Any QR codes or printed menus still carrying that address now open <b style={{ color: "var(--text)" }}>this</b> restaurant&rsquo;s menu.
                 If that isn&rsquo;t what you want, rename this one now — before its codes are printed.
               </span>
@@ -670,6 +683,9 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   const [showResolved, setShowResolved] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState(false);
+  // A refusal on ONE ticket — separate from `err`, which means the whole list failed to load and
+  // takes the card over. See setStatus below.
+  const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setErr(false);
@@ -680,15 +696,28 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   }, [restaurantId]);
   useEffect(() => { load(); }, [load]);
 
+  // ── A REFUSED CHANGE HAS TO SAY SO (T16 sweep #7, 2026-08-27) ────────────────────────────────
+  // This flipped the chip optimistically and, on a refusal, called load() — which quietly put the
+  // chip back. From the admin's side that is a tap that appeared to work and then undid itself
+  // with no reason given, which is the shape the tap rule exists to stop ("no silent return on a
+  // user action — hold it, or refuse visibly"). The row still reverts, because the server is the
+  // truth; what is added is the sentence saying why, in the card the admin is already looking at.
   const setStatus = async (id: string, status: "resolved" | "open") => {
-    setBusy(id);
+    setBusy(id); setNote(null);
     setTickets((prev) => (prev || []).map((t) => (t.id === id ? { ...t, status } : t))); // optimistic
+    const refused = (why: string) => {
+      setNote(`Couldn't mark that ticket ${status === "resolved" ? "resolved" : "open again"} — ${why} It has been put back.`);
+      load();
+    };
     try {
       const r = await fetch("/api/owner/issues?scope=all", {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }),
       });
-      if (!r.ok) load();
-    } catch { load(); }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        refused(d.error || `the server answered ${r.status}.`);
+      }
+    } catch { refused("there was no answer from the server."); }
     finally { setBusy(null); }
   };
 
@@ -699,14 +728,28 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   // COMPACT when there's nothing to act on: no big empty "no tickets 🎉" box — just a slim
   // all-clear line (owner 2026-07-24: "why is the empty box there"). The full card only
   // appears when there ARE open tickets, or when the admin expands the resolved history.
+  // A refusal, said in the card the admin is already looking at. role="alert" so it is announced
+  // even though the chip has quietly gone back to where it was.
+  const refusalNote = note ? (
+    <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 10, padding: "8px 11px", borderRadius: 9, fontSize: 12.5, lineHeight: 1.5,
+      color: "var(--adm-danger)", border: "1px solid color-mix(in srgb, var(--adm-danger) 45%, transparent)", background: "color-mix(in srgb, var(--adm-danger) 10%, transparent)" }}>
+      <i className="fas fa-circle-exclamation" style={{ marginTop: 2 }} aria-hidden="true" />
+      <span style={{ flex: 1 }}>{note}</span>
+      <button className="adm-btn" style={{ padding: "2px 9px", fontSize: 11.5 }} onClick={() => setNote(null)}>Got it</button>
+    </div>
+  ) : null;
+
   if (tickets !== null && !err && open.length === 0 && !showResolved) {
     return (
-      <div className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, padding: "12px 16px" }}>
-        <i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #16a34a)" }} aria-hidden="true" />
-        <span style={{ fontSize: 13.5, fontWeight: 600 }}>No open issues</span>
-        {resolved.length > 0
-          ? <button className="adm-btn" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setShowResolved(true)}>Show resolved ({resolved.length})</button>
-          : <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>staff reported nothing</span>}
+      <div className="adm-card" style={{ marginBottom: 14, padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #16a34a)" }} aria-hidden="true" />
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>No open issues</span>
+          {resolved.length > 0
+            ? <button className="adm-btn" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setShowResolved(true)}>Show resolved ({resolved.length})</button>
+            : <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>staff reported nothing</span>}
+        </div>
+        {refusalNote}
       </div>
     );
   }
@@ -725,6 +768,7 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
         )}
       </div>
       <p className="hint">Problems this restaurant&apos;s staff reported from the manager, kitchen or waiter tablet.</p>
+      {refusalNote}
       {tickets === null ? (
         <div className="adm-empty">Loading tickets…</div>
       ) : err ? (
@@ -751,7 +795,6 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 // section (owner 2026-07-26). Having it in both places showed two toggles that shared one
 // saved value but not one on-screen state, so they looked out of sync — one control now.
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
-  const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
   // (The per-switch in-flight tracker went with the toggle grids — this page has no
   // switches left to disable while a save is in flight.)
@@ -882,23 +925,24 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     });
   }, []);
 
-  // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
-  // load leaves the switches disabled, so without a message you couldn't tell why (audit 2026-07-07).
-  const loadPanels = useCallback(async () => {
-    try {
-      const j = await (await fetch(`/api/admin/restaurants/panels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setPanels(j.panels || {}); else flash("Couldn't load panels.");
-    } catch { flash("Couldn't load panels."); }
-  }, [restaurant.id, flash]);
-  useEffect(() => { loadPanels(); }, [loadPanels]);
+  // ── THE PANELS READ IS GONE, AND SO IS THE ROUTE (owner, 2026-08-31 — item 27) ────────────────
+  // This fetched /api/admin/restaurants/panels on every open of a restaurant, to decide which Enter
+  // buttons to draw. That route has answered a CONSTANT since 2026-07-31 ("remove it completely, all
+  // panels always on"): it returns all four regardless of what is stored, and its own comment explains
+  // why it must — "merging a stale `false` would hide a door into a panel that actually opens". Its
+  // POST already answered 410 Gone, and its header ended with "the whole route can go once the Enter
+  // card stops calling its GET". This is that.
+  //
+  // So a round trip, a piece of state, a loader and a failure toast all existed to compute a value
+  // that could not vary. The doors are drawn unconditionally now — which is exactly what the server
+  // was answering — and the route directory is deleted in the same commit.
 
   // (The staff-feature entitlement read that used to live here went with the "Main features"
   // card — those switches are Access & permissions → Main features now, and fetching them
   // here would have been a request whose answer nothing on this page renders.)
 
-  // (The panel on/off switches moved to Access & permissions → Staff apps with the rest
-  // of the permissions. `panels` is still read above because the Enter card needs to know
-  // which apps exist before offering a door into them.)
+  // (The panel on/off switches moved to Access & permissions → Staff apps with the rest of the
+  // permissions, and then away entirely on 2026-07-31. Nothing here reads them any more.)
 
   if (showReport) {
     return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
@@ -944,7 +988,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
           <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
 
-          <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
+          <div id="det-enter"><EnterCard restaurant={restaurant} /></div>
 
           {/* WHO CAN SIGN IN, AND WITH WHAT — plus the printable handover sheet (owner,
               2026-08-16). It sits directly under "Open & manage this restaurant" because that is
@@ -970,10 +1014,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   );
 }
 
-// DangerCard — move a restaurant to the 90-day RECYCLE BIN. Distinct from Suspend:
+// DangerCard — move a restaurant to the RECYCLE BIN. Distinct from Suspend:
 // suspend just hides the guest menu (reversible instantly, staff/admin keep working);
-// DELETE puts the whole restaurant in the bin (guest 404 + staff logins blocked) and
-// starts a 90-day clock, after which it can be permanently purged from the bin. To
+// DELETE puts the whole restaurant in the bin (guest 404 + staff logins blocked), from
+// where it can be restored at any time OR permanently removed at any time. To
 // make an accidental delete near-impossible, the admin must TYPE the exact name to
 // confirm (the GitHub pattern). Restaurant #1 (default) can never be deleted.
 function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaurant; onDeleted: () => void; onChanged: () => void }) {
@@ -1025,9 +1069,20 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingBottom: 14, marginBottom: 14, borderBottom: "var(--border)" }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontWeight: 700, fontSize: 14 }}>{restaurant.active ? "Suspend this restaurant" : "Restaurant is suspended"}</div>
+          {/* ── WHAT SUSPEND ACTUALLY STOPS (T16 sweep #7, 2026-08-27) ─────────────────────────
+              The suspended line said "the guest menu is offline AND STAFF CAN'T LOG IN". That is
+              the RECYCLE BIN's behaviour, borrowed by mistake: soft_delete writes deleted_at and
+              /api/panel-login refuses on it (isRestaurantDeleted). Suspend writes only
+              `restaurants.active`, which the tenant resolver reads to stop serving the guest menu
+              — nothing on the staff sign-in path reads it, so the restaurant's own manager,
+              kitchen and waiter can still sign in. The route's own comment says as much, and the
+              other three sentences on this screen (the confirm, the status card, and the line
+              above) all describe it correctly. This was the one that disagreed — and it disagreed
+              in the direction that matters, because an admin reading it would believe a suspended
+              restaurant's staff had been shut out when they had not. */}
           <p className="hint" style={{ margin: "3px 0 0" }}>{restaurant.active
             ? "Takes the guest menu offline immediately. Staff panels stay reachable to you. Instantly reversible — nothing is erased."
-            : "The guest menu is offline and staff can't log in. Reactivate any time, or delete it below."}</p>
+            : "The guest menu is offline. Its own staff can still sign in to their panels — deleting it below is what stops that. Reactivate any time."}</p>
         </div>
         {restaurant.active
           ? <button className="adm-btn danger" disabled={susBusy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />{susBusy ? "Suspending…" : "Suspend…"}</button>
@@ -1035,10 +1090,20 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
       </div>
 
       {/* 2) Delete — only after suspending (owner rule 2026-07-24). */}
+      {/* WHAT THE BIN ACTUALLY DOES NOW (T16 sweep #7, 2026-08-27). This said "recycle bin for
+          90 days … you can restore it any time in those 90 days; only after that can it be
+          permanently removed" — which stopped being true on 2026-08-20, when the owner removed
+          the wait ("i wanna chnage the rule that you camn't permamnetly delete from recycle bin")
+          and migration 342 dropped the database's half of the lock. So this card was promising a
+          three-month protection window that nothing enforces: an admin could read it, delete a
+          client's restaurant believing it was safe until November, and somebody could clear it out
+          of the bin the same minute. The recycle bin's own page has said "there is no waiting
+          period" since that day; this is the screen that still disagreed with it. */}
       <p className="hint">
-        Delete <b>{restaurant.name}</b> — it moves to the <b>recycle bin for 90 days</b>. Its guest menu goes offline and
-        staff can&apos;t log in, but nothing is erased. You can <b>restore</b> it any time in those 90 days; only after that can it be
-        permanently removed.
+        Delete <b>{restaurant.name}</b> — it moves to the <b>recycle bin</b>. Its guest menu goes offline and
+        staff can&apos;t log in, but nothing is erased, and you can <b>restore</b> it from the bin at any time —
+        there is no deadline. From the bin it can also be <b>removed for good</b> whenever you choose, and that
+        part cannot be undone (its bills are still kept).
       </p>
       {restaurant.active ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1156,33 +1221,46 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
 // exactly what its own staff see. This flow is the ONLY way an admin reaches a
 // panel: a bare /tablet etc. with no restaurant scope bounces back to /aevinite.
 // "Stop" clears the cookie; already-open tabs stay pinned by their ?rid=.
-function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Record<string, boolean> | null }) {
+function EnterCard({ restaurant }: { restaurant: Restaurant }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // A blocked new tab, remembered as WHICH door was being opened — see openPanel below.
+  const [blocked, setBlocked] = useState<{ path: string; label: string } | null>(null);
+  // The same door WITHOUT a pop-up: an ordinary navigation through the act-as redirect, which is
+  // what the platform floor's blocked-tab card already offers. No blocker can stop this one.
+  const hereHref = (path: string) =>
+    `/api/admin/act-as/go?rid=${encodeURIComponent(restaurant.id)}&to=${encodeURIComponent(path)}`;
 
-  // Only show the Enter buttons for panels this restaurant HAS. Until the panels load
-  // (null) show all, so the buttons never flicker missing. (mig 106)
-  const panelOn = (k: string) => !panels || panels[k] !== false;
-  const PANELS: [string, string, string, string][] = [
-    ["/editor", "Manager panel", "fa-table-columns", "manager"],
-    ["/kitchen", "Kitchen display", "fa-fire-burner", "kitchen"],
-    ["/tablet", "Waiter tablet", "fa-mobile-screen-button", "tablet"],
+  // EVERY restaurant has every staff app (owner, 2026-07-31). There is no per-restaurant switch left
+  // to consult — see the note on the deleted panels read above — so all four doors are always offered.
+  const PANELS: [string, string, string][] = [
+    ["/editor", "Manager panel", "fa-table-columns"],
+    ["/kitchen", "Kitchen display", "fa-fire-burner"],
+    ["/tablet", "Waiter tablet", "fa-mobile-screen-button"],
   ];
 
-  const openPanel = async (path: string) => {
-    setBusy(true); setMsg(null);
+  // ── A BLOCKED TAB IS NOT A LOCKED DOOR (T16 sweep #7, 2026-08-27) ───────────────────────────
+  // This used to answer "Couldn't open the panel tab — allow pop-ups for this site, then try
+  // again." The owner ruled on that exact sentence for the platform floor on 2026-08-20 — "admin
+  // has access to everything, so it shouldn't be 'you can't access the restaurant' — it should
+  // take you to the restaurant" — and the floor was rewritten to offer a way IN. This card, which
+  // is the main door into a restaurant, was still turning him away with a browser-settings
+  // instruction. Same answer as the floor's: the panel opens in THIS tab through the act-as
+  // redirect, which is an ordinary navigation and needs no pop-up at all.
+  const openPanel = async (path: string, label: string) => {
+    setBusy(true); setMsg(null); setBlocked(null);
     try {
       // Shared act-as helper (components/admin/shared.tsx) — also used by the
       // Command page's quick-open buttons. Sets the act-as cookie, then opens the
       // panel in a new tab pinned to this restaurant via ?rid=.
       const w = await openRestaurantPanel(restaurant.id, path);
       if (w) setViewing(true);
-      else setMsg("Couldn't open the panel tab — allow pop-ups for this site, then try again.");
+      else setBlocked({ path, label });
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setBlocked(null);
     try {
       await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) });
       setViewing(false); setMsg("Stopped — reopen a panel from here when you need it again.");
@@ -1207,13 +1285,13 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
             <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu offline
           </button>
         )}
-        {panelOn("owner") && (
-          <button className="adm-btn" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
+        {(
+          <button className="adm-btn" disabled={busy} onClick={() => openPanel("/owner", "Owner dashboard")} title={`Open ${restaurant.name}'s owner dashboard`}>
             <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
           </button>
         )}
-        {PANELS.filter(([, , , k]) => panelOn(k)).map(([path, label, icon]) => (
-          <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path)} title={`Open ${label} as ${restaurant.name}`}>
+        {PANELS.map(([path, label, icon]) => (
+          <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path, label)} title={`Open ${label} as ${restaurant.name}`}>
             <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}
           </button>
         ))}
@@ -1237,6 +1315,20 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
           <button className="adm-btn" disabled={busy} onClick={stop} title="Return to your normal admin view (already-open panel tabs stay pinned)">
             <i className="fas fa-arrow-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Stop viewing as this restaurant
           </button>
+        </div>
+      )}
+      {/* The blocked-tab answer: a way IN, not a browser-settings instruction. */}
+      {blocked && (
+        <div role="status" style={{ marginTop: 12, padding: "11px 13px", borderRadius: 10, fontSize: 12.5, lineHeight: 1.55,
+          border: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)", background: "color-mix(in srgb, var(--accent) 9%, transparent)" }}>
+          <b>Your browser blocked the new tab.</b> Nothing else is in the way — you can open
+          {" "}<b>{blocked.label}</b> right here instead.
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
+            <a className="adm-btn primary" href={hereHref(blocked.path)}>
+              <i className="fas fa-arrow-right-to-bracket" style={{ marginRight: 7 }} aria-hidden="true" />Open {blocked.label} here
+            </a>
+            <button className="adm-btn" onClick={() => setBlocked(null)}>Not now</button>
+          </div>
         </div>
       )}
       {msg && <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>{msg}</div>}

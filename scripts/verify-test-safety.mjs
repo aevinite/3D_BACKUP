@@ -20,7 +20,16 @@ import path from "node:path";
 const HOOK = process.argv.includes("--hook");
 const TEST_FILE = /[/\\](scripts|tests)[/\\].*\.mjs$/;
 
-let ROOT = process.argv[2] && process.argv[2] !== "--hook" ? process.argv[2] : process.cwd();
+// The first POSITIONAL argument is the repo root to scan. A FLAG is not a root — this used to take
+// any argv[2], so `npm run verify:test-safety -- --base http://localhost:4228` (which every sweep
+// lane passes to every guard, blindly and correctly) set ROOT to the string "--base" and the run
+// ended with "no test scripts found under --base" and exit 1. A guard that fails because of an
+// argument it does not use is a guard that will be ignored. (sweep #7 / T28, 2026-08-27.)
+// A ROOT IS A FOLDER THAT EXISTS. Not "argv[2]", and not "the first thing without a dash" either:
+// the sweep lanes pass `-- --base http://localhost:4228`, so the first non-dash token is a URL.
+// Ask the disk instead — it cannot be argued with.
+const ROOT_ARG = process.argv.slice(2).find((a) => !a.startsWith("-") && fs.existsSync(path.join(a, "scripts")));
+let ROOT = ROOT_ARG || process.cwd();
 if (HOOK) {
   let raw = ""; try { raw = fs.readFileSync(0, "utf8"); } catch { process.exit(0); }
   let payload = {}; try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
@@ -30,11 +39,23 @@ if (HOOK) {
   ROOT = cut > 0 ? f.slice(0, cut) : ROOT;
 }
 
+// EVERY DEPTH, not three hand-listed folders (sweep #7 / T28, 2026-08-27). This used to read
+// ["scripts", "scripts/sweep", "tests"] only, so four sub-folders that grew afterwards were never
+// looked at — scripts/sweep/t3/ (four scripts that place real orders), scripts/live-fix-watcher/,
+// scripts/panel-stubs/ and scripts/launchagents/. The whole point of this file is "a test write
+// must name its restaurant", and the writes it could not see were exactly the ones nobody reviews.
 const files = [];
-for (const dir of ["scripts", "scripts/sweep", "tests"]) {
-  const d = path.join(ROOT, dir);
-  if (!fs.existsSync(d)) continue;
-  for (const n of fs.readdirSync(d)) if (n.endsWith(".mjs") && n !== "verify-test-safety.mjs") files.push(path.join(dir, n));
+(function walk(rel) {
+  const d = path.join(ROOT, rel);
+  if (!fs.existsSync(d)) return;
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) { if (e.name !== "node_modules") walk(p); continue; }
+    if (e.name.endsWith(".mjs") && e.name !== "verify-test-safety.mjs") files.push(p);
+  }
+})("scripts");
+for (const n of fs.existsSync(path.join(ROOT, "tests")) ? fs.readdirSync(path.join(ROOT, "tests")) : []) {
+  if (n.endsWith(".mjs")) files.push(`tests/${n}`);
 }
 if (!files.length) { if (HOOK) process.exit(0); console.error("no test scripts found under " + ROOT); process.exit(1); }
 
@@ -350,12 +371,95 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
 // being told his change was live.
 {
   const pkg = read("package.json");
-  let dev = "";
-  try { dev = (JSON.parse(pkg || "{}").scripts || {}).dev || ""; } catch { /* the JSON check owns that */ }
+  let scr = {};
+  try { scr = JSON.parse(pkg || "{}").scripts || {}; } catch { /* the JSON check owns that */ }
+  // BOTH WAYS OF STARTING IT, not just `dev` (sweep #7 / T28, 2026-08-28). `dev` was fixed and
+  // `start` was not, so a lane that wanted to test against a PRODUCTION build — which several
+  // guards require, verify:offline among them — still landed on 4000.
+  for (const name of ["dev", "start"]) {
+    const cmd = scr[name] || "";
+    check(
+      `\`npm run ${name}\` honours a PORT override, so a parallel lane cannot take port 4000 (the owner's window)`,
+      !cmd || /\$\{?PORT/.test(cmd),
+      `package.json "${name}" is ${JSON.stringify(cmd)} — a hard-coded port means every lane lands on the same one.\n    Use: next ${name === "dev" ? "dev" : "start"} -p \${PORT:-4000}`,
+    );
+  }
+}
+
+// ── 11. A TEST THAT FLIPS A REAL SETTING MUST PUT IT BACK EVEN IF IT IS INTERRUPTED ──────────
+//
+// `finally` covers a throw. It does not cover Ctrl-C, and it does not cover a lane runner killing a
+// guard that ran past its timeout. This project's scar is verify:realtime, which switched a
+// category off across seven restaurants and then died two steps later; on 2026-08-27 a smaller
+// version happened again, when verify-rota-clash's restore timed out and left a waiter holding two
+// tables instead of thirty.
+//
+// A setting is not a fixture row. A leftover test TABLE is obvious and verify:fixtures finds it.
+// A leftover SWITCH — "print the customer on the bill", a waiter's rota, which screens the owner
+// can see, the printing routes — looks exactly like a decision somebody made on purpose, and
+// nothing anywhere would ever flag it.
+//
+// So: a script that updates one of these must either register scripts/sweep/restore.mjs, or wire
+// its own SIGINT/SIGTERM handlers (verify-realtime does the latter, and did it first).
+{
+  // SCOPED ON PURPOSE, TWICE OVER, because the first draft of this check cried wolf on six files
+  // that were all correct — and a guard that invents a failure protects nothing.
+  //
+  //  · Only `verify-*` and scripts/sweep/. A SEEDER exists to change something and leave it
+  //    changed (copy-demo-to-prod, reset-diag-password, seed-owner-dev…); there is nothing to put
+  //    back, and demanding one would be nonsense.
+  //  · Only the CONFIGURATION tables — settings, restaurants, and a rota on staff_users. A test
+  //    that updates a row it CREATED (verify-recycle-name binning its own zzerin owner) is tidying
+  //    up, not flipping somebody's switch, and the difference is not something a pattern can see —
+  //    so the pattern is kept to the tables where a leftover is invisible AND belongs to a real
+  //    restaurant.
+  const FLIPS = /from\("(settings|restaurants)"\)[\s\S]{0,140}?\.update\(|(settings|restaurants)\?[a-z_]+=eq[^`"']*`?,\s*\{\s*method:\s*"PATCH"|update\s+staff_users\s+set\s+assigned_tables|assigned_tables:\s*\[/;
+  const bad = [];
+  for (const f of files) {
+    if (!/verify-|\/sweep\//.test(f)) continue;
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    if (!FLIPS.test(code)) continue;
+    if (/restoreOnExit\(/.test(code)) continue;                 // uses the shared helper
+    if (/process\.on\(/.test(code) && /SIG/.test(code)) continue; // wires its own, like verify-realtime
+    if (/sweep\/restore\.mjs/.test(f)) continue;                 // the helper itself
+    bad.push(f);
+  }
   check(
-    "`npm run dev` honours a PORT override, so a parallel lane cannot take port 4000 (the owner's window)",
-    !dev || /\$\{?PORT/.test(dev),
-    `package.json "dev" is ${JSON.stringify(dev)} — a hard-coded port means every lane lands on the same one.\n    Use: next dev -p \${PORT:-4000}`,
+    "every test that flips a real setting puts it back on an INTERRUPTION too, not only on a throw",
+    bad.length === 0,
+    bad.join("\n    ") + "\n    Add:  import { restoreOnExit } from \"./sweep/restore.mjs\";  and register the put-back where you capture the original.",
+  );
+}
+
+// ── 12. A GUARD MUST NOT BREAK ON AN ARGUMENT IT DOES NOT USE ────────────────────────────────
+//
+// Every sweep lane hands EVERY guard its own port: `npm run verify:x -- --base http://localhost:4228`.
+// Nine guards took a bare `process.argv[2]` as the repo folder to scan, so they scanned a folder
+// called "--base", found nothing and exited 1 — and one of them shelled out to `cd --`, which bash
+// reads as a flag ("cd: --: invalid option"). Watched all nine on 2026-08-29.
+//
+// A guard that goes red because of an argument it does not even use is a guard people learn to
+// scroll past, and this suite's whole value is that a red means something. The answer is not to ban
+// the argument — pointing a static guard at another checkout is genuinely useful, and the release
+// script does it. It is to ask the DISK which argument is a repo, which cannot be argued with.
+// scripts/sweep/repoRoot.mjs does that in one line.
+{
+  const bad = [];
+  for (const f of files) {
+    const src = read(f);
+    if (!src) continue;
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    // Taking argv[2] as a PATH is the fault. Taking it as a count, a label or a slug is not.
+    if (!/(ROOT|root)\s*=\s*[^;\n]*process\.argv\[2\]/.test(code)) continue;
+    if (/repoRootFrom\(/.test(code)) continue;
+    bad.push(f);
+  }
+  check(
+    "no guard treats a command-line FLAG as the folder to scan (every lane passes `-- --base <url>`)",
+    bad.length === 0,
+    bad.join("\n    ") + '\n    Use:  import { repoRootFrom } from "./sweep/repoRoot.mjs";  const ROOT = repoRootFrom(import.meta.url);',
   );
 }
 

@@ -1,57 +1,115 @@
-# T16 findings — the admin's restaurants, owners, settings, billing, bin & platform floor
+# T16 findings — sweep #7, 2026-08-27
 
-Sweep #6, terminal 16. Phases **P07501–P08000**. All eight were FIXED in this branch; the four
-biggest were observed BEFORE and AFTER the fix by running the same check against the committed
-file and then the fixed one, with the dev server hot-reloading between them.
+Terminal 16 of 40. Territory: the admin console's **Restaurants · Owners · Settings · Billing &
+plans · Recycle bin · Live floor**, plus the settings card those screens embed
+(`components/admin/RestaurantSettings.tsx`).
 
-| # | severity | what a person loses | where it lives | how it was confirmed | ledger rows |
-|---|---|---|---|---|---|
-| 1 | HIGH | The admin picks a setting on Access (tables per row, what a menu price means, which screen prints the kitchen ticket), closes the row, and the pick is gone — no write, no Save bar, no message | Admin → Access & permissions → any embedded settings card (`components/admin/RestaurantSettings.tsx`) | confirmed — drove the real Access row: before, a pick of 9 left the stored value at 4; after, 9 and then 7 both stored | P07602–P07604 |
-| 2 | HIGH | A restaurant WITH an owner reads as having none, in the list and in the Owner card, so the admin assigns somebody and quietly replaces an owner nobody told them about | Admin → Restaurants (Owner column) and a restaurant's Owner card (`app/aevinite/restaurants/page.tsx`) | confirmed — suspended a fixture owner: before, the column read "—" and the card read "— no owner —"; after, "assigned · not active" and a named explanation | P07523, P07524, P07814, P07815 |
-| 3 | MEDIUM | Every restaurant door on the platform floor does nothing and says nothing when the browser blocks the pop-up | Admin → Live floor (restaurant names, open-table chips, Today-tab names) | confirmed — window.open stubbed to null, which IS the blocked-pop-up condition; before, silence; after, "allow pop-ups for this site, then tap again" | P07667, P07735, P07859–P07861 |
-| 4 | MEDIUM | The admin sets 7 days of log retention believing it applies everywhere, while a restaurant whose manager chose "3 months" keeps 90 days of activity and customer log | Admin → Settings → Log retention (`app/aevinite/settings/page.tsx`) | code-read + confirmed on screen — mig 157 makes the value a DEFAULT, and the manager panel's own picker offers 90 days | P07697, P07698, P07872, P07975 |
-| 5 | LOW | Attach five restaurants to an owner, have the third fail, and the pane shows none of them — so the admin re-picks all five | Admin → Owners → an owner → Assign restaurant | confirmed — one attach 200 + one 404 leaves a real half-done batch; the pane now lists what landed | P07580, P07845 |
-| 8 | HIGH | The settings cards on a JUST-CREATED restaurant lock themselves behind "Couldn't load this restaurant's settings" | Admin → Access & permissions, seconds after creating a restaurant | confirmed — two concurrent first loads: one 200, one 500 ("couldn't mint unique codes"); seen on screen, and gone after the fix | P07594 |
-| 9 | MEDIUM | Two of a restaurant's four tile rows on the platform floor are one unreadable run of digits | Admin → Live floor → a restaurant's tile grid | confirmed BY READING A SCREENSHOT, then measured: 8 seven-digit labels, 22px squares, no clipping | P07915 |
-| 12 | MEDIUM | The Table setting card states the opposite of what the printer does with a renamed table | Admin → Access → Table → Table name & seats (`components/admin/RestaurantSettings.tsx`) | confirmed — named table 5, rendered the real bill: it printed "Table zzt16 Banquet", against the card's "bills & QR codes keep the number" | P07931 |
+Branch `sweep7/t16-admin-restaurants`, worktree `../wt-s7-t16`, dev port **4216**.
+Ledger: `.claude/sweep/LEDGER/T16.md` — **1,500 rows on record, all green.** 500 existing rows
+re-run in place, 500 new rows `P22601`–`P23100`, and then a SECOND 500 (`P35737`–`P36236`, planned
+from scratch on 2026-08-29 against ground the first 1,000 do not cover).
 
-Two more were phone polish the code had already asked for and not got (items 10 and 11): the floor
-gate's only button measured 40px against its own `min-height: 44px`, and the billing editor's card
-sat ~2px off a 360px screen. Both fixed.
+Every temporary row this run created was a `zzt16s7…` row and was removed **by its own id** in a
+`finally` and on SIGINT/SIGTERM. Every write pass counts what is left as its last line; it was 0
+every time. French House and Aangan were never written to. No login request was made at all — the
+admin cookie was used throughout — so no rate limit could be touched.
 
-## 🔗 HANDOFF — the real fix is outside this territory
+---
 
-| id | file | the change needed | why |
-|---|---|---|---|
-| H1 | `scripts/verify-purge-classified.mjs` (or a migration extending `admin_purge_restaurant()`) | classify `bill_chain` and `print_stations` — `bill_chain` belongs on KEEP ("the signature chain that proves the KEPT bills were not altered", mig 332); `print_stations` (mig 338) is operational and should be purged | `npm run verify:purge` is RED on `origin/main` and stays red. Its FK to `restaurants` is `ON DELETE CASCADE`, but the purge deliberately keeps the restaurants row, so the rows genuinely linger |
+## Fixed on this branch (one commit each, the number in the message)
 
-> **CLOSED 2026-08-20 (mig 346 + the guard's inverted retention check) — verify:purge is GREEN**
+| # | where | what was wrong |
+|---|---|---|
+| 1 | Owners → any owner | Deleting an owner left the page's `busy` flag set, so **every action button on the next owner opened was dead** until a reload. Released in a `finally`. Reproduced live on a temp owner. |
+| 2 | Restaurants → Danger zone, Owners → Danger zone + delete dialog | All three still promised a **90-day protection window** the recycle bin stopped giving on 2026-08-20 (mig 342). A REGRESSION by drift: the ledger row `P07771` was ✅ in sweep #6 and the code around it moved. |
+| 3 | Billing & plans → "Collected this year" | A currency stored as `inr` was **neither counted in the tile nor named under "not counted above"** — the money simply disappeared while the row still printed ₹. One grouping pass on a canonical code now produces both figures from the rows on screen; the editor sends a normalised code. |
+| 4 | Access → Table setting | Clearing a table's seats box stored **1 seat**, while the card promises "nothing set = 4". Clearing now removes the entry. |
+| 5 | Owners → New owner | Closing the password card with Escape / phone Back / the scrim **did not refresh the roster**, so an owner who had been created was missing from the list. |
+| 6 | Restaurants → a restaurant → Tickets | A refused Resolve/Reopen **reverted with no reason given**. It now says why, in the card. |
+| 7 | Restaurants → Open & manage (×4) and Recycle bin → panel buttons (×3) | A blocked tab answered "allow pop-ups for this site" — the wording the owner ruled on for the platform floor on 2026-08-20. All five now offer the panel **in this tab**. In the bin it also stopped landing in the slot whose Retry re-reads the counts. |
+| 8 | Live floor → blocked-tab card | It offered the guest menu of a **suspended** restaurant, which is offline. |
+| 9 | Access → Guest QR link per table | "Print sheet" **silently skipped** a table with no code. It now names them. (Also closed a stale "HANDOFF H3" note — that route change shipped.) |
+| 10 | Billing → Payment history | A refused delete reported itself **one section up**, next to "Add payment". |
+| 11 | Recycle bin | A dead `canPurge` permission flag that could only ever say yes, read by nothing, sitting on the type that describes a permanent delete. |
+| 12 | Restaurants → a SUSPENDED restaurant → Danger zone | The line said suspending stops staff logging in. **It does not** — that is the recycle bin. Three other sentences on the same screen already said so. |
+| 13 | Restaurants → New restaurant → the reused-address note | It said the previous occupant "went to the recycle bin", which is wrong when that restaurant was **removed for good**. |
+| 14 | **Guest menu** — any restaurant made on a reused web address | Its own menu could answer "not available", intermittently, while the console listed it as Active. **Migration 370**; see below. |
+| 15 | Restaurants → the health chip row | Tapping the lit chip again did nothing; the "All" chip was the only way back. |
+| 16 | Billing & plans → Manage → Amount (and Add a payment) | A typo was **stored as a real plan amount**: "abc" and "₹" became ₹0, "x1y2" became ₹12, and the screen said "Saved." Found by the second 500. |
+| 17 | Backend only, nothing on screen | Four platform-wide reads behind Restaurants and the Recycle bin had **no `.limit()`** — including a whole-table `settings` read with no `.eq()`. Found by the second 500. |
+| — | Backend only, nothing on screen | `verify:ui-integrity` was red on `main` and, running as a PostToolUse hook, was **blocking the Write and Edit tools for every session in the repo**. Shipped separately as PR #1159 because nothing could be edited until it was. |
 
-| H2 | `public/panels/editor/app.js` → `RETENTION_OPTS` · `app/api/editor/[...path]/route.ts` → the 1..90 clamp | drop the "3 months" option and clamp to 30, so the owner's "1 month MAX" (2026-07-09) is enforced and not just stated | the admin's platform default cannot cap a restaurant that chose its own window. I fixed the honesty half on the admin screen; only these two files can fix the enforcement half |
-| H3 | `app/api/admin/restaurants/settings/route.ts` → `ensureCodes()` | `insert(missing)` → `upsert(missing, { onConflict: "restaurant_id,table_number", ignoreDuplicates: true })`, then re-read the map | two first loads on a new restaurant race to mint the same table codes; the retry loop re-mints the CODE while the conflict is on the (restaurant, table) pair, so all three attempts fail and the route 500s. Reproduced: 200 + 500 |
+All 13 are covered by `scripts/verify-admin-restaurants.mjs`, sections 11–23 (30 new checks). Run
+against `origin/main`'s own files, 26 of the 30 go red and the four that pass are the ones asserting
+something that was already true — and every one of the guard's PREVIOUS checks still passes there.
 
-> **CLOSED 2026-08-20 (upsert + ignoreDuplicates + scoped re-read) — two loads raced, both 200**
+---
 
-| H5 | `app/aevinite/users/page.tsx` lines 199-201 (**T15's territory — its PR #1021 is still open**) | the locked Restaurant field truncates the name and its `title` talks about the lock, so tapping it never shows the full name — and the native tooltip lands over the **Role** dropdown beside it. Put the NAME first in the title (`${scopedName} — scoped by the filter above…`) and let the field wrap onto two lines instead of truncating, so the tooltip is rarely needed | he asked for this directly (2026-08-20, with a screenshot). I did not edit it: T15's worktree is live and its PR touching that file is unmerged, and "another live session's uncommitted work" is one of his four ask-first carve-outs |
+## Items 14 and 15 — reported first, then BUILT on the owner's word (2026-08-28)
 
-> **CLOSED 2026-08-20 once T15's PR #1021 merged — the name wraps, the title leads with it**
+Both were listed as decisions rather than changed, because 14 is a database migration outside this
+territory and 15 is a preference. He answered *"do all the other things"*, so both landed.
 
-| H6 | `app/globals.css` → `.nr-preset` | one dead CSS class, now that the create form has no preset dropdown | harmless; whoever owns globals.css can drop the line |
+### 14 · A restaurant created on a REUSED web address can serve a 404 on its own guest menu
 
-> **CLOSED 2026-08-20 — eight dead nr-* classes removed, not the one H6 named**
+`lfh_guest_restaurant(p_slug)` (migration 282) is:
 
-| H4 | `lfh_floor_state` (mig 126) / `app/api/admin/floor/route.ts` | decide whether an order keyed by something that is not a table number should arrive as a "table" — the list is `generate_series(1, table_count)` UNION every session/order `table_number`, and French House carries eight 7-digit ones | I stopped them smearing across the tile grid; whether they belong on a floor at all is not a display question |
+```sql
+SELECT to_jsonb(r) - ARRAY[…] FROM restaurants r WHERE r.slug = p_slug LIMIT 1;
+```
 
-> **CLOSED 2026-08-21 — NOT A BUG, no change made. Checked the data before changing anything: all eight seven-digit rows carried a real bill number and one order (genuine sales), and they left the floor on their own when their sessions closed — `lfh_admin_floor_all()`'s `universe` CTE already unions ONLY open sessions and un-archived orders. At the same moment table **288** was live on a 30-table floor with food PREPARING, so dropping off-plan numbers would have HIDDEN a real open order. The display fix (item 9, clipped label) was the whole job. Pinned both ways by `npm run verify:floor-offplan`.**
+No `deleted_at IS NULL` filter, no `ORDER BY`. Since migration 309 a permanently-removed
+restaurant's `restaurants` row **survives** (marked `purged_at`) so the kept bills have something to
+hang off, and migration 319 made the slug's unique index partial (`WHERE deleted_at IS NULL`) so a
+new restaurant may take the freed name. Two rows therefore legitimately hold one slug, and `LIMIT 1`
+with no order can return the dead one — `lib/tenant.ts` sees `deleted_at`, returns null, and the new
+restaurant's guest menu answers **404**.
 
+Reproduced four separate times, with the resolver asked directly through the app's own public
+function: it returned the row with `deleted_at` and `purged_at` set instead of the live restaurant.
+It is **intermittent** — `LIMIT 1` with no order is not deterministic — which is worse, not better:
+the same address can serve one minute and 404 the next. The admin console meanwhile lists the
+restaurant as **Active**, and nothing on any admin screen says otherwise.
 
+**FIXED — `supabase/migrations/370_a_reused_web_address_serves_the_live_restaurant.sql`.** The
+resolver now orders `(r.deleted_at IS NULL) DESC, r.created_at DESC NULLS LAST`. An ORDER rather
+than a filter, on purpose: mig 319's partial unique index still guarantees at most one LIVE row per
+slug, so that first key decides the answer whenever a live restaurant exists — and when every row
+on the address is gone the function still RETURNS one, so `lib/tenant.ts` nulls it itself exactly as
+before and the retired-address redirect (mig 350) still fires. The only behaviour that moves is the
+broken one.
 
-## Still open after round 3 (2026-08-20)
+Proved by running the whole loop **ten times**, because the fault was intermittent — one green pass
+would have proved nothing. 10/10 served the new restaurant's own menu; it failed consistently
+before. Guarded by a new `npm run verify:guest-address` (static by default, `-- --base <url>` drives
+the real loop), sabotage-tested against `origin/main` and against its own migration with the ORDER
+BY removed.
 
-**Nothing remains.** H2 was built as a visible LOCK (PR #1076) and H4 was investigated and closed as
-correct behaviour (below). Kept for the record:
+Evidence rows: `P07967`, `P23033`–`P23040`.
 
-* **H2** — enforcing the 1-month log cap would take the manager panel's 3-month option away from every restaurant that chose it. That is the owner's call about his own product, not a correctness fix; the admin screen already stopped claiming it enforces one.
-* **H4** — hiding the eight 7-digit non-table keys from the Live floor could hide a genuinely open order. Their smearing across the tile grid is fixed; whether they belong on a floor is a product question.
+### 15 · The health filter chips on Restaurants do not clear when tapped again
 
-Two gates are RED on `origin/main` and neither is T16's: `verify:grants` (migration 344 is missing from the sequence — it exists only as an uncommitted file in the shared main folder) and `verify:ui` (three panel `?v=` hashes are stale; `npm run verify:panel-cache -- --fix` clears it, but it touches panel files another session is editing right now).
+Tapping the active chip a second time left the filter on; the "All" chip was the only way out,
+while the Owners page's KPI tiles next door have toggled since they were built.
+
+**FIXED on the owner's word (2026-08-28).** Tapping the lit chip goes back to All; "All" itself is
+excluded so tapping lit-All stays All; each chip reports its pressed state. Driven on the real
+screen: 9 rows → Dormant → 5 → Dormant again → 9. Guarded by section 24, which also asserts the
+Owners tiles it follows still toggle back, so the two rows cannot drift apart again.
+
+Evidence row: `P22601`.
+
+---
+
+## Checked and found clean — do not re-report
+
+* The four `select("*")` style reads flagged in sweep #6's `P07729`/`P07785` are single-row
+  `.eq(…).maybeSingle()` template reads that clone restaurant #1's whole settings row. Bounded,
+  scoped, deliberate, and present at sweep #6 too.
+* The two recycle-bin choosers use `width: min(94vw, 520px)` where the other dialogs were changed to
+  `min(100%, …)`. **Measured** at 360×780: it fits, both sides inside the viewport (`P23071`,
+  `P22857`). A consistency nit, not a fault — not changed.
+* The connection pill ("Live", 25px) is the shell's shared `connbadge`, and `docs/REJECTED-IDEAS.md`
+  R40 refuses enlarging it for the third time. Excluded from the tap-target row (`P23079`) by name.
+* `verify:purge` was `⏭` in sweep #6 (red before that branch). It is **green now**, and it asserts
+  the retention lock stays removed — the same fact item 2 fixed on screen.

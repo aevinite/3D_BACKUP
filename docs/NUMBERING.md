@@ -6,7 +6,7 @@ some point, and they behave differently. This is the one page that says which is
 | | **KOT number** | **Bill number** | **Invoice number** |
 |---|---|---|---|
 | Lives on | `orders.kot_no` | `sessions.bill_no` | `sessions.invoice_no` |
-| Who sees it | the kitchen, on the ticket | the table's bill | the printed tax invoice |
+| Who sees it | the kitchen, on the ticket | staff always; **the customer's sheet only when there is no invoice number** | the printed tax invoice |
 | Resets | every business day (05:00 IST) | every business day (05:00 IST) | **never** |
 | Given out when | the order is created | the table's **first order** lands | someone generates a tax invoice |
 | Per restaurant | yes | yes | yes |
@@ -53,6 +53,37 @@ the Activity log is `staff_actions`, and `lfh_prune_logs()` (migration 158) dele
 maximum of **30 days** — selectable down to **1 day** from `/aevinite/settings`. It is a working
 log of what staff did, not the record of where a number went (corrected 2026-08-11, T7 finding F5).
 
+## Which number the CUSTOMER'S sheet shows (owner, 2026-08-21)
+
+This app hands out three numbers where a POS normally has two, and only `bill_no` can have visible
+holes — a table that ordered and then cancelled leaves its number spent. Printing it beside the
+invoice number meant a customer, and an owner flicking through the day's sheets, saw #12, #14, #15
+and read it as sloppiness.
+
+So the printed sheet shows **`bill_no` only when there is no invoice number to show instead**:
+
+* a restaurant that issues GST invoices → the sheet shows the **invoice number** and nothing else
+  (that is the number meant to be quoted);
+* a restaurant without invoicing → the sheet shows **`bill_no`**, which is the case it exists for;
+* a **cancelled** sheet names the invoice number it retired, marked "— voided" (mig 073), so it
+  still shows no `bill_no`.
+
+Nothing about how numbers are ASSIGNED changed — every rule on this page still holds, and staff
+screens (the manager's Bills record, the admin bill ledger, the Audit) show `bill_no` as they always
+did. It is a decision about the customer's piece of paper only.
+`public/panels/billdoc.js` → the `billNo` row.
+
+## A reprint is not a number, and not an event
+
+`sessions.bill_printed_at` (migration 333, re-commented by migration 339) records that a bill has
+been printed before. It exists so a panel's button can read **"Reprint"** — nothing more. The
+printed bill says nothing at all about being a second copy (owner, 2026-08-19; R37 in
+`docs/REJECTED-IDEAS.md`, guarded by `npm run verify:bill-reprint`), and no number is drawn or
+changed by a reprint. **Reopening** a bill is a different act and that one IS in the Audit.
+
+The kitchen ticket keeps its big DUPLICATE banner (owner, 2026-08-04, re-confirmed 2026-08-19) —
+a cook who mistakes a duplicate for a fresh order cooks the food twice.
+
 ## Why invoice numbers never reset — and also have gaps
 
 A tax invoice number must be sequential forever, so it comes from a different counter
@@ -98,3 +129,5 @@ today.
 | no duplicate KOT on a backdated write | `296_database_layer_a_sweep_fixes.sql` |
 | a cancelled sale takes no invoice number | `331_a_cancelled_sale_takes_no_invoice_number.sql` |
 | every issued bill is signed and chained | `332_every_bill_is_signed_and_chained.sql` |
+| a bill remembers it has been printed (so the button can say "Reprint") | `333_a_reprinted_bill_knows_it_is_a_reprint.sql` |
+| …and the printed bill says nothing about it | `339_a_reprinted_bill_says_nothing.sql` |

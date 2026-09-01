@@ -38,7 +38,7 @@ import Link from "next/link";
 type Aud = "guest" | "staff";
 
 /** The audience, the restaurant this path belongs to, and where the way out should go. */
-function readAudience(): { aud: Aud; slug: string; href: string; label: string } {
+function readAudience(): { aud: Aud; slug: string; href: string; label: string; maybe?: string } {
   const p = typeof location === "undefined" ? "" : location.pathname || "";
   const pinned = (): string => {
     let t = "";
@@ -70,7 +70,75 @@ function readAudience(): { aud: Aud; slug: string; href: string; label: string }
     const slug = pinned() || fromQuery();
     return { aud: "guest", slug, href: slug ? `/r/${slug}/menu` : "/menu", label: "Go to the menu" };
   }
-  return { aud: "staff", slug: "", href: "/", label: "Go to the home screen" };
+  // THE ADDRESS SAYS STAFF — that half is his instruction word for word: the staff door is offered
+  // "if written login or aevinite then only".
+  if (STAFF_WORDS.test(p)) return { aud: "staff", slug: "", href: "/", label: "Go to the home screen" };
+
+  // EVERYTHING ELSE IS A STRANGER, AND A STRANGER ON THIS SITE IS A DINER (owner, 2026-08-28, asked
+  // to settle it: he left the call to me, and this is the call).
+  //
+  // Two of this repo's own guards disagreed here for two days, and both quoted him from 2026-08-26.
+  // verify:notfound said an address like /signup gets the BURNT TOAST worker screen, because that
+  // is the default for anyone who is not obviously a guest. verify:guest said it gets the guest
+  // advice, because he also said the staff door is offered only when the address itself says staff.
+  //
+  // The tie-breaker is who actually turns up. This is a restaurant's public web address: the people
+  // typing a wrong path into it are overwhelmingly diners with a bad link, not waiters. Getting it
+  // wrong towards the guest costs a worker one extra tap — "/" is one word away and they know the
+  // way in. Getting it wrong towards staff costs a diner a PASSWORD PROMPT, which is the exact dead
+  // end both of these screens were designed to remove (and it is what item 9 in this same branch
+  // had to put right for a mistyped menu link).
+  //
+  // The address may ALSO be a restaurant's own with the "/r/" dropped, and that has to be ASKED
+  // rather than guessed — see resolveSlug(). If it resolves, nothing below is ever painted.
+  const seg = p.split("/").filter(Boolean)[0] || "";
+  let maybe = "";
+  try { maybe = decodeURIComponent(seg).toLowerCase(); } catch { maybe = ""; }
+  if (!/^[a-z0-9][a-z0-9-]{1,60}$/.test(maybe)) maybe = "";
+
+  // The way out, when there is one. If this device has been in a restaurant, send them back to that
+  // restaurant — never to "/menu", which is restaurant #1 by definition and would be the WRONG
+  // restaurant for a stranger on a multi-restaurant install. With nothing pinned there is NO BUTTON
+  // at all: the advice ("scan the QR code on your table again") is the honest answer, and a button
+  // that leads nowhere useful would only bounce them back to this same screen. That is the same
+  // reasoning components/GuestNotFound.tsx already uses for its own menu-is-off case.
+  const known = pinned();
+  return known
+    ? { aud: "guest", slug: known, href: `/r/${known}/menu`, label: "Go to the menu", maybe }
+    : { aud: "guest", slug: "", href: "", label: "", maybe };
+}
+
+// The words that mean "this person was heading somewhere staff-only". `/login` and `/aevinite` are
+// the two the owner named; the panels are the same kind of address and would be just as wrong to
+// answer with a restaurant's menu.
+const STAFF_WORDS = /(^|\/)(login|staff-login|aevinite|admin|manager|editor|kitchen|tablet|owner)(\/|$)/i;
+
+/**
+ * A DINER WHO DROPPED THE "/r/" IS SENT TO THE MENU, NOT TO A PASSWORD SCREEN.
+ *
+ * Owner, 2026-08-26: *"yes for this guest should be redirected to menu if you make it like that if
+ * possible and if written login or aevinite then only locate to there"*.
+ *
+ * A menu's real address is /r/<slug>/menu. Drop the "/r/" — by editing a shared link, or retyping
+ * one — and the visitor lands here, on the STAFF screen, whose way out is "/" and therefore the
+ * staff sign-in. A guest mid-meal shown a password prompt is the exact dead end these two screens
+ * exist to remove.
+ *
+ * This was built on 2026-08-26 and then lost three days later, when the two picked 404 designs
+ * replaced this whole file and the redirect was not carried across. verify:guest has been red on
+ * clean main for it ever since (11 checks). Restored here, inside the new design rather than beside
+ * it. (sweep #7 / T28, 2026-08-27.)
+ *
+ * ONE HEAD REQUEST to the menu-data endpoint — the same gate the menu page itself uses, so a
+ * switched-off restaurant, or one whose Menu feature is off, correctly does NOT resolve and the
+ * visitor keeps the screen they would have had. HEAD, not GET: a menu is ~24KB and none of it is
+ * wanted, only the yes/no.
+ */
+async function resolveSlug(slug: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/r/${encodeURIComponent(slug)}/menu-data`, { method: "HEAD", cache: "no-store" });
+    return r.ok;
+  } catch { return false; }   // offline → never promise a menu we cannot reach
 }
 
 const CSS = `
@@ -209,12 +277,27 @@ export default function NotFound() {
   // So: null until decided, and a <noscript> block below carries a plain working screen for a
   // browser with JavaScript switched off. A 404 has nothing to gain from being server-rendered —
   // no search engine needs it — and a blank instant is far better than the wrong screen.
-  const [a, setA] = useState<{ aud: Aud; slug: string; href: string; label: string } | null>(null);
+  const [a, setA] = useState<{ aud: Aud; slug: string; href: string; label: string; maybe?: string } | null>(null);
   const [name, setName] = useState("");
   const [popped, setPopped] = useState(0);
 
   useLayoutEffect(() => {
     const next = readAudience();
+    // An address that might be a restaurant with the "/r/" dropped is ASKED about before anything
+    // is shown. `a` stays null meanwhile, which this screen already treats as "not decided yet" —
+    // a blank instant, never the wrong screen. If it resolves we leave for the menu and no 404 is
+    // ever painted; if it does not, the screen this address would have had appears as normal.
+    if (next.maybe) {
+      let alive = true;
+      resolveSlug(next.maybe).then((real) => {
+        if (!alive) return;
+        // replace, not assign: the address they typed was never a real page, so it must not sit in
+        // their history waiting for Back to return them to this same dead end.
+        if (real) location.replace(`/r/${next.maybe}/menu`);
+        else setA(next);
+      });
+      return () => { alive = false; };
+    }
     setA(next);
     // The restaurant's own name, when this device stored it — and ONLY for the same restaurant this
     // path resolves to, so one restaurant's name can never appear on another's screen. Never a
@@ -275,7 +358,9 @@ export default function NotFound() {
             <h1>That table doesn&rsquo;t exist</h1>
             <p className="sub">The page you asked for isn&rsquo;t here. If you&rsquo;re sitting down, scan
               the QR code on your table again &mdash; or ask a member of staff.</p>
-            <a className="nf-btn nf-home" id="nf-home" href={a.href}>{a.label}</a>
+            {/* No button when we do not know which restaurant they meant — see readAudience(). An
+                offer that leads nowhere useful is worse than the advice above it. */}
+            {a.href ? <a className="nf-btn nf-home" id="nf-home" href={a.href}>{a.label}</a> : null}
             <button className="nf-btn nf-again" type="button" onClick={reload}>Try again</button>
           </div>
         </div>

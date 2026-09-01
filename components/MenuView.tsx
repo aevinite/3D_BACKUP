@@ -157,6 +157,49 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       if (digits) {
         setScannedTable(digits);                                // remember it
         window.dispatchEvent(new Event("lfh:table-scanned"));   // tell the app
+        // ── AND THE NUMBER LEAVES THE ADDRESS BAR (owner, 2026-08-30) ─────────────────────────
+        // His words: *"instead of numbers for table, do you use some kind of code right? Because
+        // people can't able to change the table number from top just by changing the URL."*
+        //
+        // The answer is the `/q/<code>` door (mig 210), and it is what every QR this app generates
+        // has encoded since — `components/admin/RestaurantSettings.tsx` builds `/q/<code>` and
+        // nothing builds `?table=N` any more. On that door the number never appears in the address
+        // bar at all, which is exactly what he is describing.
+        //
+        // These two OLDER doors — `/menu?table=N` and `/r/<slug>/menu?table=N` — are kept alive only
+        // so a laminated sticker printed before mig 210 keeps working. So the number is read ONCE
+        // and then wiped out of the address, which leaves nothing on screen to edit and no
+        // ?table= to share by accident. The stored value is what the app uses from here on.
+        //
+        // WHY NOT REDIRECT TO `/q/<code>` INSTEAD, which was the obvious idea: the code is a
+        // PRIVATE random string (mig 210's own words). A route that turned "table 7" into "table 7's
+        // code" would let anyone learn every table's private code by walking 1…30 — trading a
+        // guessable number for a harvestable secret. Strictly worse.
+        //
+        // AND IT IS NOT A GATE, WHICH MATTERS MORE THAN THE TIDINESS. A diner can still name a table
+        // by TYPING it (SessionGate's `ask_table` step) — the address bar was never the only way. What
+        // actually protects a table that already has a party is the session: `lfh_join_session` makes
+        // a second arrival a `guest` whose `approved` comes from `sessions.auto_approve`, which
+        // migration 018 set to DEFAULT FALSE — so the head has to let them in — and
+        // `lib/tableConnection.ts` refuses to add to the basket until they are approved. On top of
+        // that `lfh_geo_ok` refuses anyone outside the restaurant's radius once its coordinates are
+        // set. Removing the number from the URL removes a duplicate way in; those two are the guard.
+        //
+        // `replaceState`, never `pushState`: the back button must not walk the diner through a
+        // history entry that puts the number back.
+        try {
+          if (!qrTable && window.location.search) {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("table") || url.searchParams.has("t")) {
+              url.searchParams.delete("table");
+              url.searchParams.delete("t");
+              const clean = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : "") + url.hash;
+              // Spread the existing state so Next's own router bookkeeping survives — the same rule
+              // lib/backStack.ts records for its synthetic entries.
+              history.replaceState({ ...(history.state as object) }, "", clean);
+            }
+          }
+        } catch {}
       }
     } catch {}  // if anything goes wrong, just carry on without a table number
   }, [qrTable]);

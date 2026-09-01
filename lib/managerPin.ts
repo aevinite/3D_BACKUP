@@ -51,7 +51,11 @@ export async function verifyManagerPin(pin: string, restaurantId: string, thrott
   if (throttleKey && (await throttleStatus(throttleKey)).locked) return { ok: false, locked: true };
   const { data } = await sb.from("staff_users").select("id,name,username,pin_hash")
     .eq("restaurant_id", restaurantId)
-    .eq("role", "manager").eq("active", true).not("pin_hash", "is", null);
+    .eq("role", "manager").eq("active", true).not("pin_hash", "is", null)
+    // BOUNDED (T25 round 2, item 31): a read with no limit is silently capped at 1,000 rows by
+    // PostgREST, which is a truncation nobody is told about. 200 is far past any restaurant's
+    // manager count, so it can only ever be a ceiling, never a cut.
+    .limit(200);
   // Check EVERY manager (no early return) so a shared PIN credits ALL of them, not just
   // whichever row the DB returned first — that would name the wrong manager in the log.
   const matches: { id: string; name: string }[] = [];

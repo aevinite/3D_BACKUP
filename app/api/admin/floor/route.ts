@@ -10,6 +10,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
 
 // Always fetch fresh — the floor is live, never cached.
 export const dynamic = "force-dynamic";
@@ -36,18 +40,21 @@ export async function GET(req: NextRequest) {
     // already trims each tile to {n,s,p,c} and drops money, and excludes recycle-bin
     // restaurants. Counts still come pre-summed from lfh_admin_floor_stats (one tiny row per
     // restaurant, counts only, NO revenue).
-    const [restsQ, statsQ, tilesQ] = await Promise.all([
-      supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
-      supabaseAdmin.rpc("lfh_admin_floor_stats"),
-      supabaseAdmin.rpc("lfh_admin_floor_all"),
-    ]);
-    if (restsQ.error) return adminFail("the live floor", restsQ.error, { action: "load" });
-    const rests = restsQ.data ?? [];
+    const reads = new ReadSet("admin/floor", await Promise.all([
+      rd("restaurants", () => supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
+      // These two are DELIBERATELY soft: a missing migration must not blank the whole platform view,
+      // it must say which half is unreadable (the two fields at the bottom). `rowsOr` is how that
+      // decision is stated rather than assumed.
+      rd("stats", () => supabaseAdmin.rpc("lfh_admin_floor_stats")),
+      rd("tiles", () => supabaseAdmin.rpc("lfh_admin_floor_all")),
+    ]));
+    if (reads.failed("restaurants")) return adminFail("the live floor", reads.error("restaurants"), { action: "load" });
+    const rests = reads.rows<{ id: string; name: string; slug: string; active: boolean | null }>("restaurants");
     type StatRow = { restaurant_id: string; orders_today: number; active_orders: number; unpaid_orders: number; paid_today: number; cancelled_today: number };
-    const statsBy = new Map(((statsQ.data as StatRow[] | null) ?? []).map((s) => [s.restaurant_id, s]));
+    const statsBy = new Map(reads.rowsOr<StatRow>("stats", []).map((s) => [s.restaurant_id, s]));
     type Tile = { n: string; s: string; p: string; c: boolean };
     type FloorRow = { restaurant_id: string; tables: Tile[] };
-    const tilesBy = new Map(((tilesQ.data as FloorRow[] | null) ?? []).map((f) => [f.restaurant_id, f.tables || []]));
+    const tilesBy = new Map(reads.rowsOr<FloorRow>("tiles", []).map((f) => [f.restaurant_id, f.tables || []]));
     const floors = rests.map((r) => {
       const st = statsBy.get(r.id);
       return {
@@ -63,11 +70,19 @@ export async function GET(req: NextRequest) {
     });
     // Never fake zeros: if a stats/tiles RPC failed (e.g. a DB missing a migration), say so
     // instead of silently rendering 0 orders / empty floors everywhere.
+    // The raw sentence is already in the server log, once, from the ReadSet — and NAMED, so the log
+    // says which of the three reads went instead of "something failed".
     return NextResponse.json({
       restaurants: floors,
       generatedAt: new Date().toISOString(),
-      statsError: statsQ.error?.message || null,
-      tilesError: tilesQ.error?.message || null,
+      // SAY IT IN WORDS, NOT IN POSTGRES (T19 sweep #7, 2026-09-01). These two fields carried the
+      // database's own sentence and app/aevinite/floor/page.tsx prints them inside its banner, so the
+      // Live floor could read "Order counts unavailable (function lfh_admin_floor_stats(unknown) does
+      // not exist)". That is the same fault lib/adminFail was written for, on the eight screens fixed
+      // in sweep #6 — this was the ninth, wearing a different field name. The raw text still goes to
+      // the server log, where it is searchable and useful.
+      statsError: reads.failed("stats") ? "couldn't be read just now" : null,
+      tilesError: reads.failed("tiles") ? "couldn't be read just now" : null,
     });
   }
 

@@ -31,6 +31,10 @@ import { logAction, redactMoney } from "@/lib/oplog";
 import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName, nameTakenMessage } from "@/lib/ownerHome";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 
 export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -151,16 +155,21 @@ export async function GET(req: NextRequest) {
   // ── ?deleted=1 → the RECYCLE BIN: only binned owners, with how long each has sat there.
   // Kept separate from the main list so a binned owner never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {
-    const [binQ, linksQ] = await Promise.all([
-      sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
-        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000),
-      sb.from("restaurant_owners").select("user_id").limit(20000),
-    ]);
-    if (binQ.error) return adminFail("the owners recycle bin", binQ.error, { action: "load" });
+    const binReads = new ReadSet("admin/owners:bin", await Promise.all([
+      rd("binned", () => sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
+        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000)),
+      rd("links", () => sb.from("restaurant_owners").select("user_id").limit(20000)),
+    ]));
+    if (binReads.failed("binned")) return adminFail("the owners recycle bin", binReads.error("binned"), { action: "load" });
+    // "How many restaurants are still linked" is the number that decides whether a permanent removal
+    // is safe — purging hands each of them to a co-owner or to nobody. With this read unchecked a
+    // failure read as a confident "0 restaurants", i.e. "nothing is attached, remove away" (T19
+    // sweep #7, 2026-09-01).
+    if (binReads.failed("links")) return adminFail("the owners recycle bin", binReads.error("links"), { action: "load" });
     const owned = new Map<string, number>();
-    for (const l of linksQ.data || []) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
+    for (const l of binReads.rows<{ user_id: string }>("links")) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
     const now = Date.now();
-    const trashed = (binQ.data || []).map((o) => {
+    const trashed = binReads.rows<{ id: string; username: string; name: string | null; deleted_at: string; deleted_by: string | null; delete_reason: string | null }>("binned").map((o) => {
       const deletedAt = o.deleted_at as string;
       // How long they have SAT in the bin — a fact the admin can use, not a countdown to a
       // permission. `daysLeft` is gone rather than pinned at 0 for a screen to render.
@@ -175,35 +184,38 @@ export async function GET(req: NextRequest) {
     return ok({ trashed, retentionDays: RETENTION_DAYS });
   }
 
-  const [ownersQ, linksQ, restQ] = await Promise.all([
+  const reads = new ReadSet("admin/owners", await Promise.all([
     // deleted_at IS NULL → the live/suspended list; binned owners are hidden here
     // (they live in the recycle bin above).
-    sb.from("staff_users")
+    rd("owners", () => sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
       // PAGED, like lib/ownerScope's scopedRestaurantIds (2026-08-05). A bare select with no
       // .limit() stops at PostgREST's cap and silently drops everyone past it — the same bug that
       // "silently dropped every restaurant past the 100th" in the owner reports. 2000 is far above
       // any real estate and still an explicit ceiling rather than a hidden one.
-      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000),
-    sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000),
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000),
-  ]);
+      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000)),
+    rd("links", () => sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000)),
+    rd("restaurants", () => sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000)),
+  ]));
   // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). Every failure on this page answered with the
   // database's own sentence — `insert or update on table "restaurant_owners" violates foreign key
   // constraint …` in a red toast. adminFail keeps that text in the response `detail` and the server
   // log and gives the screen a sentence naming the thing and saying whether anything changed; on the
   // page that hands out ownership of a restaurant, "nothing was changed" is the important half.
-  if (ownersQ.error) return adminFail("the owners list", ownersQ.error, { action: "load" });
-  if (linksQ.error) return adminFail("who owns what", linksQ.error, { action: "load" });
-  if (restQ.error) return adminFail("the restaurant list", restQ.error, { action: "load" });
+  if (reads.failed("owners")) return adminFail("the owners list", reads.error("owners"), { action: "load" });
+  if (reads.failed("links")) return adminFail("who owns what", reads.error("links"), { action: "load" });
+  if (reads.failed("restaurants")) return adminFail("the restaurant list", reads.error("restaurants"), { action: "load" });
 
-  const restById = new Map((restQ.data || []).map((r) => [r.id, r]));
+  type RestRow = { id: string; slug: string; name: string; active: boolean | null; owner_user_id: string | null };
+  const restRows = reads.rows<RestRow>("restaurants");
+  const linkRows = reads.rows<{ restaurant_id: string; user_id: string }>("links");
+  const restById = new Map(restRows.map((r) => [r.id, r]));
 
   // Who holds each restaurant's PRIMARY slot right now — including accounts the list
   // above hides (a binned owner keeps its links so Restore works). Without this the
   // screen could only say "Co-owner" with no way to see WHO the primary is, which is
   // exactly the confusion Aangan caused (its binned starter "owner" still held it).
-  const primaryIds = Array.from(new Set((restQ.data || []).map((r) => r.owner_user_id).filter(Boolean) as string[]));
+  const primaryIds = Array.from(new Set(restRows.map((r) => r.owner_user_id).filter(Boolean) as string[]));
   const primaryUser = new Map<string, { name: string; binned: boolean }>();
   if (primaryIds.length) {
     const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds).limit(2000);
@@ -212,7 +224,7 @@ export async function GET(req: NextRequest) {
 
   type OwnedRow = { id: string; slug: string; name: string; active: boolean; primary: boolean; primaryHolder: string | null; primaryBinned: boolean };
   const byOwner = new Map<string, OwnedRow[]>();
-  for (const l of linksQ.data || []) {
+  for (const l of linkRows) {
     const r = restById.get(l.restaurant_id);
     if (!r) continue; // deleted/binned restaurants don't show as owned
     const holder = r.owner_user_id ? primaryUser.get(r.owner_user_id as string) : undefined;
@@ -225,13 +237,13 @@ export async function GET(req: NextRequest) {
     });
     byOwner.set(l.user_id, list);
   }
-  const owners = (ownersQ.data || []).map((o) => ({
+  const owners = reads.rows<{ id: string; username: string; name: string | null; active: boolean | null; last_seen_at: string | null; created_at: string }>("owners").map((o) => ({
     id: o.id, username: o.username, name: o.name || o.username, active: o.active === true,
     lastSeenAt: o.last_seen_at || null, createdAt: o.created_at,
     restaurants: (byOwner.get(o.id) || []).sort((a, b) => a.name.localeCompare(b.name)),
   }));
-  const ownedIds = new Set((linksQ.data || []).map((l) => l.restaurant_id));
-  const restaurants = (restQ.data || []).map((r) => ({
+  const ownedIds = new Set(linkRows.map((l) => l.restaurant_id));
+  const restaurants = restRows.map((r) => ({
     id: r.id, slug: r.slug, name: r.name, active: r.active === true,
     hasOwner: ownedIds.has(r.id),
   }));
@@ -298,7 +310,14 @@ export async function POST(req: NextRequest) {
   if (action === "restore_owner") {
     const ownerId = String(body?.owner_id || "");
     if (!ownerId) return bad("Missing owner_id.");
-    const o = (await sb.from("staff_users").select("id, username, name, role, deleted_at, restaurant_id").eq("id", ownerId).limit(1)).data?.[0];
+    // A BLIP MUST NOT READ AS A REFUSAL (item 21, T19 sweep #7, 2026-09-01). Eight lookups on this
+    // route's write paths took `.data` and ignored `.error`, so a failed read answered "That user
+    // isn't an owner." or "Restaurant not found." — a definite sentence about the thing on screen,
+    // which is exactly the answer a person acts on. purge_owner below was given this check in sweep
+    // #6 and the rest were not; they all have it now.
+    const oQ0 = await sb.from("staff_users").select("id, username, name, role, deleted_at, restaurant_id").eq("id", ownerId).limit(1);
+    if (oQ0.error) return adminFail("this owner", oQ0.error, { action: "load" });
+    const o = oQ0.data?.[0];
     if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
     if (!o.deleted_at) return bad("That owner isn't in the recycle bin.", 409);
 
@@ -385,7 +404,7 @@ export async function POST(req: NextRequest) {
     // hardDeleteOwner hands back the database's sentence for the SERVER's benefit; the console gets
     // plain words and the raw text goes to the log, same as every other failure on this page.
     if (res.error) { console.error("[admin/owners] purge failed:", res.error); return bad("Couldn't remove that owner permanently — nothing was changed. Please try again.", 500); }
-    await logAction("admin", "owner_purge", { actor: "admin", restaurant_id: null, detail: `PERMANENTLY purged owner "${who}" (${ownerId}) · ${res.released} restaurant(s) released` });
+    await logAction("admin", "owner_purge", { actor: "admin", restaurant_id: null, detail: `PERMANENTLY removed owner "${who}" (${ownerId}) · ${res.released} restaurant(s) released` });
     return ok({ ok: true, purged: true });
   }
 
@@ -435,14 +454,18 @@ export async function PATCH(req: NextRequest) {
   const ownerId = String(body?.owner_id || "");
   const action = String(body?.action || "");
   if (!ownerId) return bad("Missing owner_id.");
-  const owner = (await sb.from("staff_users").select("id, name, username, role").eq("id", ownerId).limit(1)).data?.[0];
+  const ownerQ = await sb.from("staff_users").select("id, name, username, role").eq("id", ownerId).limit(1);
+  if (ownerQ.error) return adminFail("this owner", ownerQ.error, { action: "load" });
+  const owner = ownerQ.data?.[0];
   if (!owner || owner.role !== "owner") return bad("That user isn't an owner.", 404);
   const who = owner.name || owner.username;
 
   if (action === "attach") {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
-    const r = (await sb.from("restaurants").select("id, name").eq("id", rid).is("deleted_at", null).limit(1)).data?.[0];
+    const rQ = await sb.from("restaurants").select("id, name").eq("id", rid).is("deleted_at", null).limit(1);
+    if (rQ.error) return adminFail("this restaurant", rQ.error, { action: "load" });
+    const r = rQ.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     const e = await attach(ownerId, rid);
     if (e) return bad(e, 500);
@@ -459,10 +482,16 @@ export async function PATCH(req: NextRequest) {
   if (action === "set_primary") {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
-    const r = (await sb.from("restaurants").select("id, name, owner_user_id").eq("id", rid).is("deleted_at", null).limit(1)).data?.[0];
+    const rQ = await sb.from("restaurants").select("id, name, owner_user_id").eq("id", rid).is("deleted_at", null).limit(1);
+    if (rQ.error) return adminFail("this restaurant", rQ.error, { action: "load" });
+    const r = rQ.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     if (r.owner_user_id === ownerId) return ok({ ok: true, already: true });
-    const member = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", ownerId).limit(1)).data?.[0];
+    // The membership test decides whether the write happens at all, so a failed read must not read
+    // as "they are not linked" — that refusal sends the admin off to attach something already there.
+    const memberQ = await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", ownerId).limit(1);
+    if (memberQ.error) return adminFail("who owns this restaurant", memberQ.error, { action: "load" });
+    const member = memberQ.data?.[0];
     if (!member) return bad("Assign this restaurant to the owner first — only a linked owner can be made primary.", 409);
     const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
     if (error) return adminFail("this restaurant's primary owner", error, { action: "save" });
@@ -496,7 +525,16 @@ export async function PATCH(req: NextRequest) {
     const password = String(body?.password || "").trim() || genPassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // token_version bump = "log out everywhere" (same rule as /api/admin/users).
-    const cur = (await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1)).data?.[0];
+    // READ IT PROPERLY, OR CHANGE NOTHING (T19 sweep #7, 2026-09-01). This took `.data` and ignored
+    // `.error`, so a failed read fell back to 0 and wrote `token_version: 1`. Two ways that is wrong,
+    // and both are silent: if the real value already IS 1 the column does not move at all, so the
+    // password changes and every session signed in with the old one keeps working; and if the real
+    // value is higher, writing 1 puts the counter BACK, so a cookie signed at version 1 verifies
+    // again. lib/userAuth folds this number into the signature — it is the whole mechanism of
+    // "signed out everywhere", so a guess is not good enough.
+    const curQ = await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1);
+    if (curQ.error) return adminFail("this owner's password", curQ.error, { action: "save" });
+    const cur = curQ.data?.[0];
     const { error } = await sb.from("staff_users")
       .update({ ...(await passwordFields(password)), token_version: ((cur?.token_version as number) || 0) + 1, failed_count: 0, locked_until: null })
       .eq("id", ownerId);
@@ -507,7 +545,12 @@ export async function PATCH(req: NextRequest) {
 
   if (action === "set_active") {
     const active = body?.active === true;
-    const cur = (await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1)).data?.[0];
+    // Same rule as reset_password above, and it matters more here: suspending is what kills a live
+    // owner-panel session, and a token_version that failed to move leaves that session running while
+    // the screen says "suspended".
+    const curQ = await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1);
+    if (curQ.error) return adminFail("this owner's status", curQ.error, { action: "save" });
+    const cur = curQ.data?.[0];
     // Suspending also bumps token_version so any live session dies immediately.
     const patch: Record<string, unknown> = { active };
     if (!active) patch.token_version = ((cur?.token_version as number) || 0) + 1;
@@ -520,7 +563,8 @@ export async function PATCH(req: NextRequest) {
   if (action === "delete_forever") {
     // Kept for API symmetry — reject here so no one wires a PATCH to a destructive
     // action by accident. DELETE now moves to the recycle bin; POST purge_owner is
-    // the permanent step (after 90 days).
+    // the permanent step (available as soon as they are in it — RETENTION_DAYS is 0,
+    // owner 2026-08-20).
     return bad("Use DELETE /api/admin/owners?id=… to bin, or POST purge_owner to remove permanently.", 405);
   }
 
@@ -538,13 +582,20 @@ export async function PATCH(req: NextRequest) {
   return bad("Unknown action.");
 }
 
-// The old permanent-delete guts, now used ONLY by purge_owner (after the 90-day
-// bin lock). Hands each restaurant's PRIMARY pointer to a remaining co-owner (or
+// The old permanent-delete guts, now used ONLY by purge_owner. Hands each
+// restaurant's PRIMARY pointer to a remaining co-owner (or
 // clears it — owner_user_id must never point at someone with no membership), drops
 // the join rows, then deletes the staff_users row. Returns how many restaurants
 // were released. staff_actions rows are kept on purpose (audit outlives account).
 async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; released: number }> {
-  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000)).data || [];
+  // CHECKED (item 21, 2026-09-01). A failed read made `links` empty, so no restaurant was handed to
+  // a co-owner before the join rows went — the database's own ON DELETE SET NULL (mig 092) then saves
+  // it from a dangling pointer, but the audit line would still record "0 restaurant(s) released" for
+  // a purge that released several, and nobody would know which co-owner inherited what. Refuse
+  // instead: a permanent removal is the last place to guess.
+  const linksQ = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000);
+  if (linksQ.error) return { error: dbNote("read this owner's restaurants", linksQ.error), released: 0 };
+  const links = linksQ.data || [];
   for (const l of links) {
     const rid = l.restaurant_id as string;
     const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
@@ -566,14 +617,19 @@ async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; relea
 // step). Binning sets deleted_at so the owner drops out of the Owners list; their
 // login is already dead (suspended). NOTHING is erased — restaurant links + primary
 // pointers stay intact, so a Restore from the bin brings ownership straight back.
-// After 90 days they can be permanently purged (POST purge_owner). Mirrors the
+// They can be purged permanently (POST purge_owner) whenever the admin chooses —
+// THERE IS NO WAIT. The 90-day hold was deleted by the owner on 2026-08-20 and these
+// three comments still promised it; a comment describing a retired rule is how somebody
+// puts the rule back. See RETENTION_DAYS at the top of this file. Mirrors the
 // restaurant recycle bin (soft_delete_restaurant, mig 128/208).
 export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const url = new URL(req.url);
   const ownerId = url.searchParams.get("id") || "";
   if (!ownerId) return bad("Missing id.");
-  const o = (await sb.from("staff_users").select("id, username, name, role, active, deleted_at").eq("id", ownerId).limit(1)).data?.[0];
+  const oQ = await sb.from("staff_users").select("id, username, name, role, active, deleted_at").eq("id", ownerId).limit(1);
+  if (oQ.error) return adminFail("this owner", oQ.error, { action: "load" });
+  const o = oQ.data?.[0];
   if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
   if (o.active) return bad("Suspend this owner first — deleting only moves a suspended account to the recycle bin.", 409);
   if (o.deleted_at) return bad("That owner is already in the recycle bin.", 409);

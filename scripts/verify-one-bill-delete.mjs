@@ -110,6 +110,31 @@ if (!gate) fail("canDeleteBill() is gone — R27 says a restaurant cancels and n
 else if (/return\s*!g\.user\s*;/.test(gate[0])) pass("R27 holds: canDeleteBill() is true for the admin console only — a manager and an owner cancel");
 else fail(`canDeleteBill() no longer returns !g.user. R27 (owner, 2026-08-16, re-confirmed 2026-08-21) says nobody at the restaurant deletes a bill:\n         ${gate[0].replace(/\s+/g, " ").slice(0, 160)}`);
 
+// ── 6. AND NO COMMENT MAY SAY THE OPPOSITE (sweep #7, T30, 2026-08-28) ────────────────────────
+// The enforcement was right and a comment 5,000 lines further down still said the manager's
+// delete-a-bill power "stays deliberately handed over" — written before R27 and never re-read.
+// A stale comment on this rule is not cosmetic: it is what makes somebody rebuild the permission
+// the owner refused, and neither this guard nor verify:rejected could see it (verify:rejected only
+// checks that a comment SAYING "REJECTED" points back at the doc).
+// NOTE THE SOURCE IT READS: `route` above has every LINE COMMENT BLANKED by code(), so a check
+// looking for a comment in it can only ever pass. That is how this very check first shipped green
+// against the stale comment it was written to catch — caught by deliberately putting the old
+// wording back and watching the guard still say "ok". It reads the RAW file instead.
+{
+  const raw = read("app/api/editor/[...path]/route.ts");
+  const claims = [
+    /delete_bill[^\n]{0,120}(stays|remains)[^\n]{0,40}handed over/i,
+    /DELETING a bill keeps its own power/i,
+    // Deliberately NARROW. A looser "(manager|owner) … can … delete … bill" pattern was tried and
+    // dropped: it fired on the correct sentence "(owner, 2026-08-16) — see canDeleteBill", i.e. on
+    // the very citation that records the rule. A guard that invents a failure protects nothing.
+    /\bdelete[ _-]?a?[ _]?bill\b[^\n]{0,60}\b(permission|switch|row|toggle)\b[^\n]{0,60}\b(granted|grantable|handed|available)\b/i,
+  ];
+  const hit = claims.map((re) => raw.match(re)).find(Boolean);
+  if (hit) fail(`a comment in the manager route still claims a restaurant keeps a delete-a-bill power, which R27 retired:\n         "${hit[0].replace(/\s+/g, " ").slice(0, 150)}"`);
+  else pass("…and no comment in the manager route claims a restaurant still keeps that power");
+}
+
 console.log(failed
   ? `\n✗ verify:one-bill-delete — ${failed} check${failed === 1 ? "" : "s"} failed. Bulk bill-deleting was removed on the owner's instruction; do not bring it back.`
   : "\n✓ verify:one-bill-delete — one bill at a time, admin console only, no sweep anywhere");

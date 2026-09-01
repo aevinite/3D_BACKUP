@@ -1,112 +1,171 @@
-# T7 findings — the waiter tablet (sweep #6)
+# T7 findings — the waiter tablet (sweep #7, 2026-08-22/23)
 
-Territory: `app/tablet/**` · `public/panels/tablet/app.js` · `public/panels/tablet/index.html` ·
-`public/panels/tablet/style.css`. 500 phases (P03001–P03500). Everything below was FIXED in this
-PR and is held by `npm run verify:tablet-taps` (26 checks, new in this PR — every one of them
-proven to FAIL against the re-introduced bug before it was accepted).
+**Territory:** `app/tablet/**` · `public/panels/tablet/{app.js,index.html,style.css}`
+**Branch:** `sweep7/t7-waiter-tablet` · **Base:** `origin/main` b64951ad · **Port:** 4207
+**Ledger:** `.claude/sweep/LEDGER/T7.md` — all 500 existing rows re-run, 302 new rows added
+(`P18101`–`P18404`).
 
----
-
-## F1 · The floor's ✓ Accept, ✓ Accept all, 🍽️ Serve all and Attend-all could vanish in silence
-**confirmed** (watched it happen) · severity **HIGH** — the busiest controls on a waiter's floor
-
-**Where:** waiter tablet → the floor → a tile's little green **✓**, and the table popup's
-**✓ Accept all** / **🍽️ Serve all** / **Attend all**. What he would SEE: he taps the green tick, the
-tile does not change, and nothing at all appears on screen.
-
-**What happens.** Each of these four handlers builds a list of order (or call) ids from the table's
-cached slice a moment before firing, and then began `if (!list.length) return;`. The list comes back
-EMPTY in two situations a person cannot see:
-
-* the forced slice re-read failed — `ensureTableSlice` swallows a fetch blip **on purpose** ("the
-  action then no-ops rather than throwing"), which is exactly how the tap became invisible;
-* someone else — the kitchen screen, the manager panel, another waiter's tablet — accepted, served
-  or attended it in the seconds between the tile being painted and the finger landing.
-
-The control is still on screen in both cases, so the waiter taps something visibly there and nothing
-happens and nothing is said. This is the same fault sweep #5 reported as *"the little green ✓ that
-accepts a new order doing nothing and saying nothing"*, and `verify:taps` could not see it: its rule
-looks for a `state.…find()` lookup, and these four are `.filter().map()` results one hop away.
-
-**Proved live** (`scripts/sweep/t7-live.mjs`, P03360) by failing that one slice read the way a
-restaurant's wifi does — in a context with the service worker blocked, because a request the panel's
-service worker answers never reaches the fault injection at all. Before: nothing. After:
-*"Nothing left to accept here — refreshing this table."*
-
-**Fixed:** all four now toast what happened and refresh, exactly like `bumpItemQty` and the allergy
-chip already did.
+**Improvement ideas are NOT in this file.** They were printed in the terminal, which is what the
+owner asked for on 2026-08-22. This file is problems only.
 
 ---
 
-## F2 · A waiter with a section got a "🪢 Merge tables" row that opened an empty picker
-**code-read**, then confirmed live · severity **LOW**
+## The headline: no regression, and the panel is in good shape
 
-**Where:** waiter tablet → tap a table → **🧾 KOT ▾** → the row **Merge tables**. What he would SEE:
-the row looks available, he taps it, and the screen says *"No other open tables to merge with."*
+All 500 sweep-#6 rows were re-run. **Not one went from ✅ to ❌.** The 16 `❌→✅` fixes from sweep #6
+all still hold, and the four `⏭` are still skipped for the same written reasons. That matters more
+than anything below: the tile-clipping fix (P03314), the merge/unmerge work, the "never drop a tap"
+fixes and the party-slice rewrite (P03047) are all still doing their jobs, verified on a real party.
 
-**What happens.** The row's own comment says it counts what the picker will actually offer *"so the
-row is never enabled onto an empty picker"* — but the count asked only `canHostAParty(i)`, while
-`renderMergePicker` offers `inMySection(i) && canHostAParty(i)`. A waiter whose section does not
-include the restaurant's other open tables therefore got an enabled row that leads nowhere. Waiter
-sections are live on both stacks, so this is a normal restaurant, not an edge case.
-
-**Fixed:** the count now asks the picker's exact two questions — the same rule the "Split the bill"
-row was fixed to on 2026-08-04.
+Three things were found. **One is a real product fault a waiter would hit. One is an unfinished fix
+from the day before. One is a guard that had quietly stopped running.**
 
 ---
 
-## F3 · The dish-move picker offered a table that already shares the same bill
-**confirmed** (built a merged party and looked at the picker) · severity **LOW**
+## 1 · A 40-paise shortfall told the waiter "₹0 of the bill is still uncovered"  — FIXED
 
-**Where:** waiter tablet → a merged table → **🧾 KOT ▾ → 🍛 Move a single dish** → the destination
-grid. What he would SEE: while T26 and T27 are served as one party, T27's picker listed **T26** as
-somewhere to send the dish — labelled with the party's own state, so it reads like a different bill.
+**Where it lives:** waiter tablet → tap a table → **💳 Mark bill paid** → **Split payment**. What he
+would see: the running line says "₹0.40 still to cover", and the refusal directly under it says
+"**₹0** of the bill is still uncovered." Take payment refuses, names nothing, and refuses again on
+the next tap. There is nothing on screen that tells the waiter what is wrong.
 
-**What happens.** The server resolves a merged destination to the party head and then refuses with
-reason `same_table` (*"That dish is already on that table."*), so the only possible outcome of that
-button was a confusing refusal. Its sibling `renderMoveOrderTarget` has excluded party mates since
-2026-08-11 for exactly this reason and says so in its own comment; the dish picker never got it.
+**Measured** on a ₹483 bill at 1194×834 and 360×780:
 
-**Fixed:** the dish picker now skips every table in `partyTablesOf(t)`, like its sibling. Measured
-after the fix: 28 destinations offered on a 30-table floor, with T26 and T27 both absent.
+| | says |
+|---|---|
+| the running line (`inrExact`) | `₹0.40 still to cover` |
+| the refusal (`inr`) | `₹0 of the bill is still uncovered.` |
+
+Two halves of one sentence disagreeing about one number. This panel declares both helpers on
+purpose, and the note above `inrExact` states the rule in a line: `inr()` rounds to whole rupees,
+and "the ONE place that is wrong is a figure the person has to MATCH — the server recomputes the due
+to the paise." The three refusals below quote exactly that kind of figure and used the rounding one.
+
+**Reachable** the moment a waiter edits a box — which is the whole point of the panel ("the amounts
+fill in evenly and you can change any of them") — and by **＋ Add another part**, which seeds the new
+box with the exact remainder. The KOT-menu split had the worse version of it: "The shares must add up
+to exactly ₹483" on a bill whose due is ₹483.33 is a target that cannot be typed.
+
+**Fixed** in the three places that quote a figure a person must match; headings keep `inr()`, because
+a title is not something anyone has to match. Verified live: `₹0.40 of the bill is still uncovered`,
+`₹0.40 more than the bill`, and a ₹50 gap still reads `₹50` — not `₹50.00`.
+
+**Guard:** `verify:tablet-taps` §9, four checks. Each proved red with the fault restored, green
+without it. Commit `a3c412a4`. Ledger `P18293`, `P18303`, `P18304`.
 
 ---
 
-## Not a finding, recorded so the next sweep does not chase it again
+## 2 · "Every overlay dims by the same amount" had reached 4 of 15 overlays  — FIXED
 
-* **`verify:tablet`'s merged-tile check failed once, then passed.** *"…and from there the party's
-  bill controls are reachable"* failed on T11 during the first run of the walk. Re-run: 103/103. The
-  merge rows on T11–T14 were created at 03:45:5x — during that run — by another sweep terminal
-  working the same demo restaurant. Reproduced deliberately on a party of my own (T26+T27, built and
-  closed by id in the same run): the child's popup carries the party label, the whole party's
-  tickets, KOT ▾, ＋ Take order, − Discount whole bill, 🖨 Print bill, 💳 Mark bill paid, ✕ Close
-  table and the bill bar — measured at 1.6s and again at 5s. **The product is right; the failure was
-  another terminal's live fixture.** (SWEEP-RULES §4.)
-* **`verify:merged-floor` and `verify:skin-ink` are not this territory** — the first drives the
-  MANAGER's floating tables (`[data-floating-table]`), the second the owner console's pill.
+**Where it lives:** waiter tablet → tap a table, then its **− Discount whole bill**, then answer its
+confirm. What he would see: the floor behind dims by **three different amounts in one action**, each
+step a slightly different grey.
+
+`--scrim` was added to this panel on 2026-08-22 under the message *"all three staff panels: every
+full-screen overlay dims the page by the same amount"*, and its own comment names the problem: *"each
+one had picked its own value … Two overlays on the same screen therefore dimmed by different amounts,
+which is the sort of thing that makes one product feel like several."*
+
+**Measured** by reading each overlay's computed `backgroundColor` on the running panel:
+
+| dim | overlays |
+|---|---|
+| `rgba(3, 7, 16, 0.60)` — the token | confirm · drawer · dish-options popup · quick-order picker |
+| `rgba(4, 8, 18, 0.66)` | discount · table type · payment · pay-later person · settings · dish edit · manager PIN · reason · price · ＋Other allergy — **ten**, all built in `app.js` |
+| `rgba(4, 8, 18, 0.5)` | the table-detail backdrop — the one a waiter sees more than any other |
+
+`rgba(4,8,18,.66)` is one of the four values that commit's own comment lists as the fault.
+
+**Fixed:** the ten hand-built overlays read `var(--scrim)`, and so does the detail backdrop.
+Re-measured: all fifteen report `rgba(3, 7, 16, 0.6)`. The **blur** is deliberately left at each
+overlay's own value — a heavier blur is how a stacked layer says it is on top, and that commit says
+so.
+
+**Not touched, because he has already ruled on it:** the ~30×27px ✕ on these sheets is **R22**
+(owner, 2026-08-13, after looking at a screenshot: *"x is fine"* — do not pad it, do not resize it,
+do not re-report it). Only the dim changed; every close button is byte-identical.
+
+**Guard:** `verify:tablet-taps` §10, four checks, each negative-tested. It reads whole declaration
+BLOCKS rather than a fixed character window, so a comment someone adds later cannot make it cry
+wolf. Commit `dbe43c17`. Ledger `P18302`.
 
 ---
 
-## 🔗 HANDOFF — the fix lives in another terminal's file
+## 3 · `verify:tablet` died at check 81 of 103, and looked like a product fault  — FIXED
 
-### H1 · There is no way to UNMERGE from the waiter tablet
-**File:** `app/api/tablet/[...path]/route.ts` (whoever owns the tablet's server routes).
+`npm run verify:tablet` reported 80 green checks and then crashed:
 
-A waiter can MERGE two tables from the tablet (🧾 KOT ▾ → 🪢 Merge tables), and the KOT menu then
-tells them *"Change table — unmerge first"* — an instruction they cannot follow on that device.
-`tables/:t/unmerge` exists only on `/api/editor/*` (the manager panel), so undoing a mis-tapped merge
-means finding a manager. **Exact change needed:** add a `tables/:t/unmerge` branch to the tablet route,
-gated exactly like `sessions/:id/merge` (the `tableOpsTabletAllowed` module check plus
-`tabletPerm("tablet_table_ops", …)`), calling the same `lfh_staff_unmerge_table` RPC and emitting the
-same breadcrumb. The panel side (an "Unmerge from T…" row on a merged CHILD's KOT ▾ sheet, matching
-the manager's "you can only unmerge by clicking on the child table" rule) is ~15 lines inside my own
-territory and I will add it the moment that route exists.
+```
+frame.click: Timeout 30000ms exceeded.
+  locator resolved to <button disabled id="sendOrder" ...>CHOOSE TABLE & SEND →</button>
+  - element is not enabled
+```
 
-### H2 · The manager panel has the same hover-only refusal this PR removed from the tablet
-**File:** `public/panels/editor/app.js` (T5 — manager panel).
+That reads as a broken panel. It is not. SEND is **correctly** disabled because the cart is empty,
+because the guard's own dish tap added nothing:
 
-`openBillPreview`'s **💳 Mark paid** is rendered `disabled` with its reason in a `title` attribute
-(*"Accept the order first — a bill can only be paid once the order is accepted."*). A title needs a
-hover; the manager panel is used on touch screens too. **Exact change needed:** the same shape this
-PR gave the tablet — keep the button enabled, dim it, mark it `data-needs-accept="1"`, and toast the
-reason from the click handler. About 5 lines. Not urgent, and nothing is broken today for a mouse.
+```js
+await F.click(".dish:not(.out)");
+```
+
+That takes whatever the menu renders first — and on little French house the first dish is the **one
+dish with size options** (Espresso, 3 groups). A dish with options deliberately does not quick-add;
+it opens the options popup, which is this panel's own written rule.
+
+**What it cost,** measured before and after: the crash threw outside the section's soft-retry, so
+everything after it never executed — the whole end-to-end loop (order → the picker sends it → serve →
+settle → the finished tile's ⏻ → the close confirm → the table is free again), the touch-size pass at
+1194px and 1024px including "no tile clips at touch size", the final "no page errors anywhere", and
+its own `sweepUp()` cleanup, so a crashed run could leave a test party on a table. **23 checks nobody
+was told had stopped running.**
+
+**Fixed** by picking a dish that quick-adds — no option groups, no open price, not sold out — and
+then PROVING the tap landed instead of finding out 30 seconds later at a disabled button. A menu with
+no quick-addable dish now says so and retries, through the section's existing soft-failure path.
+
+`before: 80 ok, then an uncaught exception` → `after: All 103 checks passed`. No product file is
+touched. Commit `498ce623`. Ledger `P18405` is reserved for its re-check.
+
+---
+
+## WITHDRAWN — five red rows that were MY OWN CHECK, not the product
+
+Written down so the next sweep does not re-file them. Every one of these looked like a real fault
+until it was checked against the file it accused.
+
+| what my check claimed | what was actually true |
+|---|---|
+| **"Tapping a dish adds nothing to the cart"** — reproduced on all three devices, `state.cart` stayed `[]` | My selector took the FIRST dish, which is the only one on this menu **with size options**. Tapping it correctly opens the options popup instead of quick-adding. 58 of 59 dishes are plain. Pick a dish with no options, no open price, not sold out. (Same root cause as finding 3.) |
+| **"A typed per-dish allergy vanishes"** — the set stayed empty and the chip never appeared | `document.querySelector("[data-alg-other]")` also matches the **CART's whole-order avoid row**, which sits earlier in the document and is `display:none` while browsing but still present. My allergy went onto the whole-order list. **Scope every options-popup selector to `#optOverlay`.** |
+| **"Backing out of an order for a free table does not return to the floor"** | The tile READ free but held an open session — a party with nothing ordered is deliberately drawn as Free (owner, 2026-07-31), and keeping its detail is right. Select on the RAW summary state, not the tile's class. |
+| **"The dark skin fails contrast at 1.11:1"** on nine floor labels | A tile's background is a `linear-gradient`, i.e. `background-image`, so `backgroundColor` is transparent; my walk up the ancestors fell through to a **white fallback**. The screenshot shows a perfectly readable dark floor. Compute contrast against a resolved backdrop — or just look at it. |
+| **"The admin ribbon is missing"** | `?rid=` is deliberately ignored without the console's **act-as** cookie. `requirePanel` says so in its own comment, and `/manager?rid=` redirects identically, so it is not a tablet fault. |
+
+Two more cost false reds through timing alone, and both are worth knowing:
+
+* **`page.goBack()` is the wrong tool on this panel.** The back-stack uses `pushState` inside the
+  panel iframe, so there is no `load` navigation to wait for and it times out after 30s. Use
+  `page.evaluate(() => history.back())`.
+* **Toasts self-remove after 2.6s.** A read taken after a 6-second settle finds none. Capture them
+  with a `MutationObserver` on `#toasts` as they appear.
+
+---
+
+## Left open, honestly
+
+| what | why | who should take it |
+|---|---|---|
+| The admin view's geometry (`P18374`–`P18404`, and `P03399`/`P03406`) | needs the console's act-as cookie — a browser-wide write this terminal would not make on a shared stack | a session that enters through /aevinite → Restaurants → the panel link |
+| `verify:offline` (`P03268`) | needs a production build on its own port; this port was carrying the live walk | any later session |
+| `verify:merged-floor` (`P03461`) | drives the MANAGER's floating tables, not this panel | T5's territory |
+| The KOT-menu split, banquet billing, an MRP/open-price menu, a sectioned waiter, the offline WRITE path | each needs a SETTING this restaurant does not have on, or a fixture this pass did not build | listed with reserved ids at the bottom of `T7.md` |
+
+## Guards run for this territory, all green
+
+`verify:tablet` (103) · `verify:tablet-taps` (60, incl. the 8 new) · `verify:tablet-parity` ·
+`verify:tablet-wants-in` · `verify:taps` (33) · `verify:floor` · `verify:floor-per-row` ·
+`verify:floor-offplan` · `verify:table-ownership` · `verify:board-sig` · `verify:twins` ·
+`verify:static` (32) · `verify:rejected` · `verify:clash-coverage` · `verify:panel-cache` (57) ·
+`verify:busy` (33) · `verify:access` (50) · `verify:ui` · `verify:ledger-index` (14,820 rows).
+`npm run typecheck` passes; `npm run lint` has 0 errors and the same 630 warnings as `origin/main`
+(none in my files).

@@ -14,7 +14,7 @@ import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
-import { liveOrdersAndItems } from "@/lib/liveBoard";
+import { liveOrdersAndItems, stripPlacedBy } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 // A waiter's bill must take the SAME road as a manager's (mig 341). Before this, printing a bill from
 // the tablet opened a window and used whatever printer THAT device defaults to — which on a waiter's
@@ -43,7 +43,7 @@ import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
-import { waiterTables, allows, blockedReason, type SectionLimit } from "@/lib/tableAssign";
+import { waiterTables, allows, blockedReason, notYoursMessage, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -386,6 +386,14 @@ const BLOCKED_READ = () => NextResponse.json(
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   // Blocked device → the whole screen goes dark (see the note by blockedForRead above).
   if (await blockedForRead(deviceIdFrom(req), rid)) return BLOCKED_READ();
@@ -472,7 +480,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "menu-sig") {
       const [mi, cat] = await Promise.all([
         sb.from("menu_items").select("id,title,price,tags").eq("restaurant_id", rid).order("id").limit(2000),
-        sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug"),
+        // .limit(500) to match the manager panel's twin (editor route, GET /all). It is the only
+        // read in this territory that was scoped and column-named but UNBOUNDED — about ten rows on
+        // a real restaurant, so this changes nothing today and closes the one exception to
+        // CLAUDE.md's "column list AND .limit()". (owner picked it, 2026-08-28)
+        sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug").limit(500),
       ]);
       const rows = (must(mi) || []) as { id: string; title: string | null; price: unknown; tags: unknown[] | null }[];
       const cats = (must(cat) || []) as { slug: string; name: unknown; sort_order: unknown; active: unknown }[];
@@ -551,7 +563,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category");
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
-        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order").limit(500),   // bounded like its twin — see the note on the menu-sig read above
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color, access_config").eq("id", rid).maybeSingle(),
       ]);
       // KOT ▾ module rung resolved server-side from the settings row itself (canonical
@@ -667,7 +679,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ]);
         return ok({
           sessions, members: must(members) || [], calls: must(calls),
-          orders: live.orders, items: live.items, requests: must(requests),
+          // the who-punched-it columns are selected for the kitchen's chime and never sent to a
+          // browser — this panel's payload is byte-for-byte what it was (stripPlacedBy)
+          orders: stripPlacedBy(live.orders), items: live.items, requests: must(requests),
         });
       }
       // ── NO TABLE = NO ANSWER, AND THAT IS THE POINT (T4 improvement 4, 2026-08-11) ─────────
@@ -764,6 +778,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // ── print/send — the same door the manager panel uses ────────────────────────────────────────
     // Kept identical on purpose, including `noRoute` meaning "open your window as you always did":
     // one bill, one road, whichever panel pressed the button.
+    //
+    // IT SITS ABOVE THE SECTION GATE DELIBERATELY, AND THAT IS WHY IT CARRIES ITS OWN (T10 sweep #7).
+    // lib/tableOfAction.affectedTables does not recognise ("print","send"), and its own rule for an
+    // unrecognised verb is `unknown: true` ⇒ refuse — "a new table-scoped endpoint is protected on
+    // the day it is added". Correct as a default, and wrong here: a waiter with a section would have
+    // been refused every bill including their OWN tables'. So the branch stays where it is and asks
+    // the question itself, against the table the bill actually belongs to.
     if (a === "print" && b === "send") {
       const kind = String((body as Record<string, unknown>)?.kind || "");
       if (kind !== "bill") return err("Only a bill can be sent this way from the tablet.", 400);
@@ -771,12 +792,57 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!own.owned) return ok({ noRoute: true });
       const sid = String((body as Record<string, unknown>)?.sessionId || "");
       if (!sid) return err("Which bill?", 400);
-      const sess = (await sb.from("sessions").select("id").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as { id: string } | null;
+      // `table_number` rides along for the section check below, and `bill_no` so the diary line
+      // can NAME the bill — one read, not three.
+      const sess = (await sb.from("sessions").select("id, table_number, bill_no").eq("id", sid).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; table_number: unknown; bill_no: unknown } | null;
       if (!sess) return err("That table's bill is not this restaurant's.", 404);
+      // WAITER SECTIONS (mig 222) — the same answer every other table-scoped write on this route
+      // gives, asked here because the shared gate below cannot resolve this verb (see above).
+      // `waiterTables` returns null for the admin, for a manager/owner looking in, and for every
+      // restaurant with sections off, so this costs one lookup only for a real sectioned waiter.
+      {
+        const psLimit = await waiterTables(actor, rid);
+        if (psLimit !== null && !allows(psLimit, sess.table_number)) {
+          return err(notYoursMessage(String(sess.table_number ?? "")), 403);
+        }
+      }
+      // ── THE ADMIN LOOKING IS NOT THE RESTAURANT PRINTING (owner, 2026-08-20) ──────────────────
+      // `g.user` is null when this is the Aevidine console viewing a restaurant's waiter tablet.
+      // Their printers are theirs: nothing comes out of a paying client's roll because we opened
+      // their screen. The manager panel's identical `print/send` was given this rule on 2026-08-20
+      // and this one — added a day earlier for mig 341, with the header above promising "the same
+      // door the manager panel uses" — was left without it. `npm run verify:print-helper` asserted
+      // the rule against the EDITOR route's source only, so nothing noticed the twin.
+      //
+      // The panel needs no change: public/panels/tablet/app.js acts on `queued` and falls through to
+      // openBillWindow() for anything else, which is exactly the wanted behaviour — the bill appears
+      // on OUR screen instead of the client's paper. `force` is the deliberate way to help them
+      // ("their printer was stuck, send it again"), and it is audited under its own action code so a
+      // mystery ticket at their counter can always be traced back to us.
+      if (!g.user && (body as Record<string, unknown>)?.force !== true) {
+        return ok({ adminView: true, printer: own.printer, agent: own.agent });
+      }
       const q = await queueJob(rid, "bill", { sessionId: sid, ...((body as Record<string, unknown>)?.parcel ? { parcel: true } : {}) },
-        { requestedBy: g.user?.name || g.user?.username || "waiter" });
+        { requestedBy: g.user?.name || g.user?.username || "Aevidine admin" });
       if ("error" in q) return q.error === "no-route" ? ok({ noRoute: true }) : err("Could not send that to the printer.", 500);
-      await logAction("tablet", "print_sent", { restaurant_id: rid, device_id: dev, detail: `bill sent to ${own.printer} on ${own.agent}` });
+      // ── THE DIARY LINE NAMES *WHICH* BILL (owner, 2026-08-28: "make log do that") ─────────────
+      // Asked for "say who printed a bill, on the bill itself", he answered: let the LOG answer it.
+      // It could not. The row said `bill sent to Printer_POS_80 on Shop's computer` — which
+      // answers WHERE the paper came out and never WHICH bill came out of it, so on a night with
+      // forty prints the log could not tell them apart. `table_number` was available and unused,
+      // and the bill number was one column away on a read this branch already makes.
+      const billLabel = `bill${sess.bill_no != null ? ` #${sess.bill_no}` : ""}`
+        + `${sess.table_number != null ? ` for table ${sess.table_number}` : ""}`;
+      await logAction("tablet", g.user ? "print_sent" : "print_sent_by_admin", {
+        restaurant_id: rid, device_id: dev,
+        // Filterable as well as readable: the Audit & logs tab groups by table, so a print now
+        // sits with the rest of that table's story instead of floating loose.
+        table_number: sess.table_number != null ? String(sess.table_number) : null,
+        ...(g.user ? {} : { actor: "Aevidine admin", actor_id: ADMIN_VIEW_ACTOR_ID }),
+        detail: `${billLabel} sent to ${own.printer} on ${own.agent}`
+          + (g.user ? "" : " — sent deliberately from the admin console"),
+      });
       return ok({ queued: true, id: q.id, printer: own.printer, agent: own.agent, connected: !!own.connected,
         note: own.connected ? `Sent to ${own.printer}` : `Saved — it prints at ${own.printer} as soon as ${own.agent} is back` });
     }
@@ -796,7 +862,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // waiter at a restaurant that actually uses sections.
     const sectionLimit = await waiterTables(actor, rid);
     if (sectionLimit !== null) {
-      const blocked = await blockedReason(sectionLimit, a, b, c, body);
+      const blocked = await blockedReason(sectionLimit, rid, a, b, c, body);
       if (blocked) return err(blocked, 403);
     }
 
@@ -1531,6 +1597,31 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       await log("order_accept", { order_id: b, device_id: dev });
+      return ok({ ok: true });
+    }
+
+    // orders/:id/tip — record the optional TIP taken at payment (owner, 2026-08-28).
+    //
+    // This route did not exist on the tablet at all, which is why the waiter panel had no tip
+    // control: the panel your waiters actually take money on could not record one, so every tip
+    // they collected was invisible to the tips report while the manager's screen could log one.
+    //
+    // A byte-for-byte twin of the editor's own orders/:id/tip, on purpose — same ceiling, same
+    // permission, same audit line. Two routes writing the same column with different rules is how
+    // the two panels start disagreeing about money.
+    //   · GATED ON tablet_mark_paid, because taking a tip happens at a settle and nowhere else.
+    //     recordPin() means the manager-PIN mode covers it exactly as it covers the settle itself.
+    //   · The ceiling is the same 100000 the editor uses. It is there to catch a mis-typed 500000
+    //     landing in the day-close figure, not to judge a tip.
+    //   · It NEVER touches subtotal/tax/discount/total (migration 154). A tip is money on top of a
+    //     finished bill; the moment it enters the bill math it becomes an untaxed sale.
+    if (a === "orders" && c === "tip") {
+      const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp;
+      const cur = must(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      const amt = Math.min(Math.max(0, Number((body as { amount?: unknown })?.amount) || 0), 100000);
+      must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
+      await log("order_tip", { order_id: b, detail: `tip ₹${amt}`, device_id: dev });
       return ok({ ok: true });
     }
 

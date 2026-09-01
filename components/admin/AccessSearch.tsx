@@ -38,7 +38,6 @@ import { SECTIONS, type Node, type Section } from "@/lib/accessTree";
 const SYNONYMS: Record<string, string> = {
   allergy_notes: "allergy allergen nuts note request",
   allergy_other: "allergy own custom",
-  auto_print_kot: "printer print kot kitchen ticket thermal",
   banquet: "banquet event party hall per plate",
   banquet_setup: "banquet fields number series tax paper layout",
   bill: "bill invoice receipt gst tax legal",

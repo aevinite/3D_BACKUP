@@ -133,8 +133,9 @@ head("B. Live data — no order left behind by a closed session");
     live.push(...part);
   }
   const sids = [...new Set(live.map((o) => o.session_id).filter(Boolean))];
-  const sess = sids.length ? must(await sb.from("sessions").select("id,status").in("id", sids)) : [];
+  const sess = sids.length ? must(await sb.from("sessions").select("id,status,closed_at").in("id", sids)) : [];
   const status = new Map(sess.map((s) => [s.id, s.status]));
+  const closedAt = new Map(sess.map((s) => [s.id, s.closed_at ? Date.parse(s.closed_at) : null]));
   // A real leak is an order that STAYS on the floor after its party left — it persists for
   // minutes or hours. This scan reads the WHOLE shared dev database, so it also used to catch
   // another session's fixture MID-FLIGHT (a test that opens a table, orders, and closes it inside
@@ -143,6 +144,21 @@ head("B. Live data — no order left behind by a closed session");
   // had time to settle, and skip only rows written in the last few seconds. Nothing real is hidden
   // — a genuine leak is still failing on the very next run. (2026-07-31)
   const SETTLING_MS = 15000;
+  // …AND THE SAME MERCY FOR A PARTY THAT IS BEING CLOSED RIGHT NOW (item 23, 2026-08-29).
+  //
+  // The window above forgives an order written seconds ago. It does not forgive an order written
+  // two minutes ago whose SESSION was closed one second ago — and that is another guard's teardown
+  // in progress, which is the commonest way this check cries wolf on a shared database.
+  //
+  // Found by running the floor guards two at a time on purpose: beside verify:two-parties, this
+  // file reported `1 order(s) still on the floor after their party left: ["T17 preparing/pending"]`
+  // and pointed at migration 232 as if the product had failed. It had not. The neighbour was
+  // between closing its session and its rows being archived, which is a window of milliseconds
+  // that a concurrent reader can land in.
+  //
+  // Nothing real is hidden: a genuine leak is an order that sits there for minutes or hours, so it
+  // fails on this run and on every run after it. Only the instant of somebody's teardown is spared.
+  const TEARDOWN_MS = 60000;
   const fresh = [];
   for (const r of rests) {
     fresh.push(...await mustRetry(() => sb.from("orders").select("id")
@@ -150,7 +166,41 @@ head("B. Live data — no order left behind by a closed session");
       .gte("created_at", new Date(Date.now() - SETTLING_MS).toISOString()).limit(500)));
   }
   const freshIds = new Set(fresh.map((o) => o.id));
-  const ghosts = live.filter((o) => o.session_id && status.get(o.session_id) !== "open" && !freshIds.has(o.id));
+  const now = Date.now();
+  const beingClosed = (sid) => { const t = closedAt.get(sid); return t != null && now - t < TEARDOWN_MS; };
+  const suspect = live.filter((o) => o.session_id && status.get(o.session_id) !== "open"
+    && !freshIds.has(o.id) && !beingClosed(o.session_id));
+
+  // AND THE ONE TEST THAT SETTLES IT: DOES IT PERSIST? (item 23, 2026-08-29.)
+  //
+  // The two windows above are guesses at somebody else's timing, and guessing is how this check
+  // kept crying wolf. Beside verify:two-parties it reported "T17 preparing/pending", then on the
+  // re-run "T6 preparing/pending" — different table, same story, and by the time I read the
+  // database both were gone. Neither was a leak. Widening the window further would only move the
+  // guess.
+  //
+  // A LEAK IS DEFINED BY PERSISTING. That is the whole complaint: "the next guests at those tables
+  // would inherit them". An order that is gone eight seconds later was never going to be inherited
+  // by anybody — it was a neighbour's fixture between two states. So instead of guessing how long
+  // somebody else's teardown takes, ask the only question that matters: is it STILL there?
+  //
+  // Costs eight seconds, and only when there is something to re-ask about. Hides nothing: a real
+  // leak sits on the floor for minutes or hours and fails both reads.
+  let ghosts = suspect;
+  if (suspect.length) {
+    await new Promise((r) => setTimeout(r, 8000));
+    const stillIds = new Set(must(await sb.from("orders").select("id")
+      .in("id", suspect.map((o) => o.id)).eq("archived", false).is("deleted_at", null)
+      .neq("status", "cancelled").limit(500)).map((o) => o.id));
+    const stillSess = must(await sb.from("sessions").select("id,status")
+      .in("id", [...new Set(suspect.map((o) => o.session_id))]).limit(500));
+    const stillOpen = new Set(stillSess.filter((x) => x.status === "open").map((x) => x.id));
+    ghosts = suspect.filter((o) => stillIds.has(o.id) && !stillOpen.has(o.session_id));
+    if (ghosts.length < suspect.length) {
+      console.log(`  · ${suspect.length - ghosts.length} order(s) looked like a leak and were gone eight seconds later `
+        + "— another run's fixture between two states, not a leak. Not counted.");
+    }
+  }
   ghosts.length === 0
     ? pass(`${live.length} live orders checked — every settled one belongs to an OPEN session`)
     : fail(`${ghosts.length} order(s) still on the floor after their party left: ` +

@@ -11,13 +11,22 @@
 
 // Turn a brand hex ("#c0392b") into "r, g, b" so we can build rgba() glows at any
 // opacity. Accepts #rgb or #rrggbb; returns null for anything we can't parse.
-export function hexToRgbTriplet(hex: string): string | null {
-  let h = hex.trim().replace(/^#/, "");
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  const n = parseInt(h, 16);
-  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
-}
+//
+// ── ONE DEFINITION, NOT TWO (T25, sweep #7, 2026-08-28) ──────────────────────────────────────────
+// This file used to carry its OWN copy of this function, exported under the SAME NAME as the one in
+// lib/brandTheme.ts — and the two disagreed on a real input. brandTheme's calls isHexColor() first,
+// which requires the leading `#`; this one stripped the `#` before testing, so a value stored
+// WITHOUT one ("c0392b") came back as "192, 57, 43" here and null there. components/AppShell.tsx
+// imports from both files, so both answers were in one module graph.
+//
+// One name with two answers is the drift this codebase keeps consolidating away, and the resolution
+// is the one lib/liveBoard.ts's `pageAll` → `pageBoard` note records: fix the thing that is actually
+// wrong. Here that is the DUPLICATE, not the behaviour — a brand colour is stored with its `#` by
+// every writer (admin branding goes through isHexColor in the same commit that saves it), and
+// measured on the dev database every stored accent_color carries one. So the strict version is the
+// only one, and it is imported rather than re-typed.
+export { hexToRgbTriplet } from "./brandTheme";
+import { hexToRgbTriplet, isHexColor } from "./brandTheme";
 
 // WHICH INK READS ON THE ACCENT ITSELF — black or white, whichever genuinely has more contrast.
 //
@@ -48,6 +57,16 @@ export function inkOnAccent(accentColor: string): string {
 // The colour VARIABLES only (no page background) — safe to set on :root so the
 // whole document, including body-level widgets, follows the restaurant colour.
 export function accentPaletteCss(accentColor: string): string {
+  // ── A VALUE THAT IS NOT A COLOUR DOES NOT REACH A STYLESHEET (T25 round 3, item 36, 2026-08-31) ──
+  // These lines become CSS custom properties, and the value arrives from an admin field. Measured
+  // before this guard: `accentPaletteCss('#fff;} body{display:none;')` produced
+  // `--accent:#fff;} body{display:none;;--gold:…` — a rule of its own inside the stylesheet.
+  //
+  // Not reachable today: the only writer (app/api/admin/restaurants/branding) tests isHexColor before
+  // storing. So this is the same class as items 26, 30 and 35 — a trap one careless caller away —
+  // and it is closed the way accentCanvasCss below already closes it, by refusing outright rather
+  // than trusting every future writer to validate.
+  if (!isHexColor(accentColor)) return "";
   const rgb = hexToRgbTriplet(accentColor);
   const grad = `linear-gradient(135deg, ${accentColor} 0%, color-mix(in srgb, ${accentColor} 82%, #000) 100%)`;
   const lines = [

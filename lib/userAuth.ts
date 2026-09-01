@@ -197,8 +197,9 @@ export async function loginUser(
     const ownerIds = candidates.filter((u) => u.role === "owner" && u.restaurant_id !== restaurantId).map((u) => u.id);
     let ownsHere = new Set<string>();
     if (ownerIds.length) {
-      const links = await sb.from("restaurant_owners").select("user_id")
-        .eq("restaurant_id", restaurantId).in("user_id", ownerIds);
+      // BOUNDED below (T25 round 2, item 31): an unbounded read is silently capped at 1,000 rows.
+  const links = await sb.from("restaurant_owners").select("user_id")
+        .eq("restaurant_id", restaurantId).in("user_id", ownerIds).limit(1000);
       if (links.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true, reason: "transient" };
       ownsHere = new Set((links.data || []).map((l) => l.user_id as string));
     }

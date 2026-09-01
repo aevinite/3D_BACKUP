@@ -13,17 +13,6 @@
 // A new tenant table is a FAILURE until somebody decides which it is. That decision is cheap; the
 // silent drift was not.
 //
-// AND THE OTHER HALF, ADDED BY SWEEP #7 (T23, 2026-08-28). The check above only ever asked "is this
-// table accounted for SOMEWHERE" — so a table could sit on the KEEP list, with a written reason
-// saying it survives forever, while admin_purge_restaurant() deleted it, and nothing said a word.
-// Four tables were in exactly that state: `expenses`, `inv_purchases`, `inv_purchase_lines` (all
-// three carrying money-out reasons) and `aggregator_orders`, a parcel sale that holds its own
-// total, payment method and invoice number and has no mirror row in `orders`. A list that promises
-// something the function does not do is worse than no list. So KEEP now has to mean KEPT: a KEEP
-// table the purge deletes FAILS. The four are parked in DISPUTED, printed loudly on every run,
-// until the owner rules on them — and the tables the purge deletes with no reason written down
-// anywhere are counted too, because that silence is how `aggregator_orders` got there.
-//
 // DELIBERATELY NOT AUTO-DELETING. Deriving the delete list at runtime was the first idea and it is
 // wrong: the money tables must be kept (owner, 2026-08-11 — "keep bills forever, purge only the
 // rest"), and the surviving rows reference kept rows, so a generated delete order would break a
@@ -75,9 +64,16 @@ const KEEP = new Map([
   ["orders_daily_agg", "the pre-summed money behind the kept bills"],
   ["orders_report_monthly_agg", "the pre-summed money behind the kept bills"],
   ["staff_payments", "payroll paid — money out"],
-  // `expenses`, `inv_purchases` and `inv_purchase_lines` used to be here, with money-out reasons —
-  // and the purge deletes all three. Moved to DISPUTED below (sweep #7, T23, 2026-08-28) so this
-  // list only ever names tables that really do survive. Nothing about the purge itself changed.
+  // REMOVED FROM THIS LIST (T22 sweep #7, 2026-08-28): `expenses`, `inv_purchases` and
+  // `inv_purchase_lines` sat here reading "money out — a financial record, same reasoning as a
+  // sale" while migrations 321 and 345 have been DELETING all three since 2026-08-16. The list
+  // and the function said opposite things and nothing noticed, because this guard only ever
+  // looked for tables missing from BOTH lists. The migrations are the decision: mig 345's own
+  // header names "expenses, banquet configuration, table QR codes and table tags" among the
+  // things a permanent removal must clear, and the compliance rule it is protecting is about a
+  // SALE (docs/COMPLIANCE-GUARDRAILS.md §3.0) — an expense and a stock purchase are not sales.
+  // So they are purged, they need no classification, and the assertion added at the bottom of
+  // this file now makes a contradiction like that one FAIL instead of sitting in a comment.
   ["khata_customers", "a kept pay-later bill points at the person who owes it"],
   ["owner_records_agg",
     "DERIVED from the kept bills (best day, biggest bill, busiest hour — mig 327) and rebuilt nightly, "
@@ -87,65 +83,49 @@ const KEEP = new Map([
     "the tamper-evidence for the bills a purge KEEPS (mig 332). Not a preference: mig 332's "
     + "trg_bill_chain_append_only trigger REFUSES a delete, so purging it would raise and abort the "
     + "whole purge — and it is what proves the kept sales were never altered. Classified mig 346."],
+  ["settings", "deleted LAST by the purge, after every child (checked separately below)"],
+  ["staff_users", "deleted LAST by the purge, after every child (checked separately below)"],
 ]);
 
-// ── DELETED, AND THAT IS THE INTENTION ─────────────────────────────────────────────────────────
-// `settings` and `staff_users` used to sit in KEEP with the note "deleted LAST by the purge, after
-// every child". That note was true and the list was the wrong place for it: KEEP means "survives a
-// purge", and these two do not. They are here so KEEP means exactly one thing (sweep #7, T23).
-const DELETED_LAST = new Map([
-  ["settings", "deleted LAST by the purge, after every child — the recycle-bin screen says so in words"],
-  ["staff_users", "deleted LAST by the purge, after every child — the recycle-bin screen says so in words"],
-]);
-
-// ── ON KEEP IN SPIRIT, DELETED IN FACT — awaiting the owner's decision ─────────────────────────
-// Found by sweep #7 (T23, 2026-08-28) by comparing KEEP against the delete list for the first time.
-// Each of these is a FINANCIAL record that admin_purge_restaurant() deletes today. Nothing is
-// changed here: what a purge removes is the owner's call, not a guard's. They are listed so the
-// contradiction is printed on every run instead of being invisible, and so the KEEP/deleted check
-// below can be strict about everything else.
-const DISPUTED = new Map([
-  ["aggregator_orders",
-    "a PARCEL / platform sale. It carries total, paid, paid_at, payment_method, bill_no, invoice_no "
-    + "and invoice_at, and migration 261 draws those numbers from the SAME series a dine-in bill "
-    + "uses. Measured 2026-08-28: 43 rows, 32 of them invoiced, and NOT ONE has a mirror row in "
-    + "`orders` (order_id is null on all 43) — so a purge is the only thing that touches them and "
-    + "the sale is gone while its invoice number stays consumed in seq_counters. KEEP already says "
-    + "'a banquet bill IS a sale'; a parcel bill is the same thing. Needs the owner's yes."],
-  ["expenses",
-    "money out. KEEP's own reason for this table was 'a financial record, same reasoning as a "
-    + "sale' — and the purge deletes it. One of the two is wrong; the owner decides which."],
-  ["inv_purchases",
-    "stock bought — money out. Same contradiction as `expenses`."],
-  ["inv_purchase_lines",
-    "the lines of those purchases. Same contradiction as `expenses`."],
-]);
+// The two entries above are on KEEP for a different reason from all the others: they ARE deleted,
+// just last of all, after every child row that points at them. They are named here so the
+// money-is-kept assertion at the bottom does not read them as a contradiction.
+const DELETED_LAST = new Set(["settings", "staff_users"]);
 
 // Tables the purge leaves behind today and we have NOT decided about yet. Listing them here is the
 // whole point: they are visible, dated, and a person has to choose. Emptying this list is the work.
 const UNDECIDED = new Map([
-  ["banquet_items", "the banquet MENU (not a bill) — almost certainly should be purged"],
-  ["table_tags", "vip/family marks on tables — operational"],
-  ["table_qr_codes", "the printed QR codes — operational"],
+  // Re-derived against the live function on 2026-08-28 (T22, sweep #7). Nineteen of the
+  // twenty-two names that used to sit here — banquet_items, table_tags, table_qr_codes,
+  // print_jobs, printer_events, all three rate_limit_* tables, error_signatures,
+  // customer_devices, customer_visits, orders_change_watermark and the whole inv_* book — are
+  // cleared by admin_purge_restaurant() today and have been since migrations 321/345. Leaving
+  // them here made this guard print "22 tables are LEFT BEHIND and not yet decided" every run,
+  // when the real number was three. A remaining-work list that is 86% wrong is worse than no
+  // list: it is the reason nobody read this section. Re-derive it, do not extend it by hand —
+  // `node scripts/verify-purge-classified.mjs` now fails if a name here is actually purged.
   ["action_idempotency", "at-most-once claims, pruned by age anyway (mig 268)"],
-  ["print_jobs", "print queue — operational"],
-  ["printer_events", "printer history — operational"],
-  ["rate_limit_counters", "throttle counters — operational"],
-  ["rate_limit_events", "throttle hits — operational"],
-  ["rate_limit_rules", "throttle settings — operational"],
-  ["error_signatures", "crash grouping — operational"],
   ["fix_requests", "the Fix-NOW queue — operational"],
-  ["customer_devices", "which device a returning guest used — personal data, probably purge"],
-  ["customer_visits", "visit history — personal data, but a kept bill may reference it"],
   ["table_merges", "which tables were joined — describes how a service ran"],
-  ["orders_change_watermark", "one row per restaurant, a refetch marker — operational"],
-  ["inv_items", "stock list — but kept inv_purchase_lines reference it, so deleting needs care"],
-  ["inv_movements", "stock in/out — operational, references inv_items"],
-  ["inv_counts", "stock takes — operational"],
-  ["inv_count_lines", "lines of a stock take — operational"],
-  ["inv_recipe_lines", "dish→ingredient map — operational, references inv_items"],
-  ["inv_vendors", "suppliers — referenced by kept purchases"],
-  ["inv_waste_entries", "waste log — operational"],
+]);
+
+// ── SELF-CLEARING — a third answer, and the only one this file does not take on trust ────────────
+//
+// mig 078's rule is that tenant foreign keys have NO cascade, which is why the purge has to name
+// every table by hand. A handful of tables are a genuine exception: they hold a HANDSHAKE, not a
+// record, every row carries its own expiry, and something deletes expired rows for the whole
+// platform rather than per restaurant. Naming such a table in the purge would be dead code.
+//
+// "It cleans itself up" is exactly the kind of claim that rots, so an entry here is NOT an
+// allowance — it is a claim this guard PROVES on every run, against the live schema and the live
+// source. If the expiry column goes, or the sweeper starts filtering by restaurant, the entry fails
+// like any other missing table.
+const SELF_CLEARING = new Map([
+  ["print_pairings", {
+    expiry: "expires_at",
+    sweeper: "lib/printPair.ts",
+    why: "a print-helper handshake (mig 368), dead in 10 minutes; lib/printPair.ts deletes every expired row platform-wide at the start of each new pairing, so a purged restaurant's rows are gone within the hour whatever anyone does",
+  }],
 ]);
 
 console.log("\nAdmin console → Restaurants → Recycle bin → purge: is every tenant table accounted for?");
@@ -168,8 +148,7 @@ for (const t of tenant) {
   if (new RegExp(`delete\\s+from\\s+(public\\.)?${t}\\b`, "i").test(def)) purged.add(t);
 }
 
-const known = (t) => KEEP.has(t) || UNDECIDED.has(t) || DELETED_LAST.has(t) || DISPUTED.has(t);
-const unclassified = tenant.filter((t) => !purged.has(t) && !known(t));
+const unclassified = tenant.filter((t) => !purged.has(t) && !KEEP.has(t) && !UNDECIDED.has(t) && !SELF_CLEARING.has(t));
 
 pass(`${tenant.length} tables carry a restaurant_id`);
 pass(`${purged.size} are cleared by the purge`);
@@ -183,41 +162,82 @@ else for (const t of unclassified) {
   fail(`${t} carries a restaurant_id but the purge neither clears it nor keeps it on purpose — add it to admin_purge_restaurant(), or to KEEP/UNDECIDED in this file with the reason`);
 }
 
-// ── KEEP HAS TO MEAN KEPT ──────────────────────────────────────────────────────────────────────
-// The check above only ever asked "is this table accounted for SOMEWHERE". A table could therefore
-// sit on KEEP — "money out, a financial record, same reasoning as a sale" — while
-// admin_purge_restaurant() deleted it, and nothing said a word. Sweep #7 (T23) found four tables in
-// exactly that state. So: a table on KEEP that the purge DELETES is now a failure. The four known
-// ones live in DISPUTED until the owner rules on them, which is a decision he can see rather than a
-// promise the guard was quietly breaking.
-const keptButDeleted = [...KEEP.keys()].filter((t) => purged.has(t));
-if (keptButDeleted.length === 0) pass("every table on the KEEP list really does survive a purge");
-else for (const t of keptButDeleted) {
-  fail(`${t} is on the KEEP list ("${KEEP.get(t)}") but admin_purge_restaurant() DELETES it — `
-    + `one of the two is wrong. Move it to DISPUTED with the reason, or stop deleting it.`);
+// ── PROVE every SELF_CLEARING claim, rather than believing it ──────────────────────────────────
+for (const [t, c] of SELF_CLEARING) {
+  if (!tenant.includes(t)) { fail(`${t} is listed as self-clearing but no longer carries a restaurant_id — remove the stale entry`); continue; }
+  // (a) the expiry column is really there, and really has a default, so a row cannot be immortal.
+  const col = await q(`
+    SELECT a.attname AS n, pg_get_expr(d.adbin, d.adrelid) AS dflt
+    FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace AND ns.nspname = 'public'
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = '${c.expiry}' AND NOT a.attisdropped
+    LEFT JOIN pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum
+    WHERE c.relname = '${t}'`);
+  if (!col.length) { fail(`${t} is listed as self-clearing on ${c.expiry}, but that column is gone — it now needs a line in admin_purge_restaurant()`); continue; }
+  if (!col[0].dflt) { fail(`${t}.${c.expiry} has no default, so a row can be written with no expiry and live for ever — it needs a purge line`); continue; }
+  // (b) something really deletes the expired rows, and does it for the WHOLE platform. A sweeper
+  //     that filtered by restaurant_id would never reach a purged restaurant's leftovers.
+  let src = "";
+  try { src = readFileSync(join(root, c.sweeper), "utf8"); } catch { }
+  const sweep = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?\\.lt\\(\\s*"${c.expiry}"`).test(src);
+  const scoped = new RegExp(`from\\("${t}"\\)[\\s\\S]{0,200}?\\.delete\\(\\)[\\s\\S]{0,200}?restaurant_id`).test(src);
+  if (!sweep) fail(`${c.sweeper} no longer sweeps expired ${t} rows — ${t} is not self-clearing any more and needs a line in admin_purge_restaurant()`);
+  else if (scoped) fail(`${c.sweeper} now sweeps ${t} per restaurant, so a purged restaurant's rows would never be reached — ${t} needs a purge line`);
+  else pass(`${t} is left out of the purge on purpose, and it really does clear itself: ${c.why}`);
 }
-for (const t of DELETED_LAST.keys()) {
-  if (!purged.has(t)) fail(`${t} is listed as "deleted last by the purge" but the purge does not delete it any more — move it to KEEP`);
-}
-if ([...DELETED_LAST.keys()].every((t) => purged.has(t))) pass(`${DELETED_LAST.size} tables are deleted LAST, on purpose, after every child`);
-if (DISPUTED.size) {
-  console.log(`  … ⚠ ${DISPUTED.size} FINANCIAL tables are deleted by a purge and somebody has written down that they should not be.`);
-  console.log(`      This is the owner's decision, not a guard's — it is printed every run so it cannot go quiet again:`);
-  if (!QUIET) for (const [t, why] of DISPUTED) console.log(`      · ${t} — ${why}`);
-}
-// And the other half of the same blind spot: a table can be DELETED with no reason written down
-// anywhere. That is how aggregator_orders came to be purged. Reported, not failed — writing the
-// remaining reasons is a job someone has to do deliberately.
-const deletedWithNoReason = [...purged].filter((t) => !known(t)).sort();
-if (deletedWithNoReason.length === 0) pass("every table the purge deletes has a written reason");
-else console.log(`  … ${deletedWithNoReason.length} tables are deleted with no reason written down anywhere: ${deletedWithNoReason.join(", ")}`);
 
-// A stale name in any list is just as misleading as a missing table.
-const allListed = [...KEEP.keys(), ...UNDECIDED.keys(), ...DELETED_LAST.keys(), ...DISPUTED.keys()];
-for (const t of allListed) {
+// A stale name in either list is just as misleading as a missing table.
+for (const t of [...KEEP.keys(), ...UNDECIDED.keys(), ...SELF_CLEARING.keys()]) {
   if (!tenant.includes(t)) fail(`${t} is listed here but no longer has a restaurant_id column — remove the stale entry`);
 }
-if (!allListed.some((t) => !tenant.includes(t))) pass("no stale entries in any list");
+if (![...KEEP.keys(), ...UNDECIDED.keys(), ...SELF_CLEARING.keys()].some((t) => !tenant.includes(t))) pass("no stale entries in any list");
+
+// ── THE DIRECTION THIS GUARD NEVER CHECKED (T22, sweep #7, 2026-08-28) ────────────────────────
+// Everything above asks "is any tenant table missing from both lists?". Nothing asked the
+// opposite and far more expensive question: IS THE PURGE DELETING SOMETHING THE KEEP LIST SAYS
+// MUST SURVIVE? That is the compliance direction — "a sale can never disappear"
+// (docs/COMPLIANCE-GUARDRAILS.md §3.0) — and it was unguarded, so this file could sit green
+// while admin_purge_restaurant() erased `orders`.
+//
+// This is not hypothetical. Migration 345 exists because migration 342 rewrote this very
+// function from an older body and silently dropped twenty-two deletes; the same rewrite in the
+// other direction would silently ADD one, and only `verify:fix-survives` would have had a
+// chance of noticing. Three entries (expenses, inv_purchases, inv_purchase_lines) had already
+// drifted into exactly this contradiction — written down as kept, deleted in practice — and
+// stayed that way through five sweeps because no check compared the two.
+const mustSurvive = [...KEEP.keys()].filter((t) => !DELETED_LAST.has(t));
+const wronglyPurged = mustSurvive.filter((t) => purged.has(t));
+if (wronglyPurged.length === 0) {
+  pass(`the ${mustSurvive.length} tables kept on purpose are all absent from the purge's delete list`);
+} else for (const t of wronglyPurged) {
+  fail(`admin_purge_restaurant() DELETES ${t}, but this file keeps it on purpose: "${KEEP.get(t)}" — `
+    + "one of the two is wrong. If the purge is right, take the table off KEEP with the reason; if "
+    + "KEEP is right, this is a sale or a financial record being erased and the migration must go.");
+}
+
+// ── AND THE THIRD DIRECTION, WHICH ONLY T23 HAD (integrating #1147, 2026-09-01) ────────────────
+// T22 and T23 fixed this same guard independently, in the same window, and T22's version reached
+// main first. It turned out to be the stronger of the two — `mustSurvive`/`wronglyPurged` above is
+// T23's "KEEP has to mean kept" assertion, and T22 added the UNDECIDED mirror and the SELF_CLEARING
+// proofs on top. One assertion existed ONLY in T23's version, so it is carried over here rather
+// than lost in the merge: a table listed as "deleted LAST, after every child" must still actually be
+// deleted. If a rewrite of admin_purge_restaurant() stops clearing `settings` or `staff_users`, the
+// ordering note above becomes a promise about something that no longer happens.
+const lastButKept = [...DELETED_LAST].filter((t) => !purged.has(t));
+if (lastButKept.length === 0) pass(`${DELETED_LAST.size} tables are deleted LAST, on purpose, after every child`);
+else for (const t of lastButKept) {
+  fail(`${t} is listed as "deleted last by the purge" but admin_purge_restaurant() does not delete it `
+    + "any more — move it to KEEP with the reason, or the ordering note is describing something that "
+    + "no longer happens");
+}
+
+// And the mirror of it, so the remaining-work list cannot rot again: a name on UNDECIDED that the
+// purge actually clears is a false to-do, and it is what made this section unreadable.
+const falseTodo = [...UNDECIDED.keys()].filter((t) => purged.has(t));
+if (falseTodo.length === 0) pass("every name on the not-yet-decided list is genuinely still left behind");
+else for (const t of falseTodo) {
+  fail(`${t} is on the not-yet-decided list but admin_purge_restaurant() already clears it — `
+    + "remove the entry, or this list keeps reporting work that is done");
+}
 
 // The two guards the owner's own rules put on this function must still be there.
 if (/never be purged/i.test(def)) pass("restaurant #1 still can never be purged");
@@ -237,6 +257,7 @@ if (/Retention lock/i.test(defCode) || /90 days/.test(defCode)) {
 } else pass("the retention lock stays removed, as the owner asked (mig 342)");
 
 console.log(failed
-  ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — a purge would silently leave a table behind`
-  : "\n✓ every tenant table is either purged or kept on purpose");
+  ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — a purge would leave a table behind, erase one it `
+    + "promised to keep, or report work that is already done"
+  : "\n✓ every tenant table is either purged or kept on purpose, and the money is provably kept");
 process.exit(failed ? 1 : 0);

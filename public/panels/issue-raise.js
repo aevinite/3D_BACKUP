@@ -62,6 +62,14 @@
       ".lfhir-b:disabled{opacity:.55;cursor:not-allowed}",
       ".lfhir-dot{width:9px;height:9px;border-radius:50%;background:#e5484d;display:inline-block;animation:lfhirpulse 1s infinite}",
       "@keyframes lfhirpulse{0%,100%{opacity:1}50%{opacity:.25}}",
+      // …AND A WAY OUT OF ALL OF IT (T9 sweep #7, 2026-08-22). The card slides and scales in and the
+      // recording dot pulses, and none of it asked. The dot STAYS — it is what says a recording is
+      // running, and losing that would be worse than the movement — it simply stops flashing.
+      "@media (prefers-reduced-motion:reduce){",
+      "  .lfhir-ov,.lfhir-box{transition:none}",
+      "  .lfhir-ov .lfhir-box{transform:none}",
+      "  .lfhir-dot{animation:none}",
+      "}",
     ].join("");
     document.head.appendChild(s);
   }
@@ -302,8 +310,30 @@
     };
 
     // ── Close / teardown ──────────────────────────────────────────────────────
-    var offBack = (window.LFH_BACK && window.LFH_BACK.layer) ? window.LFH_BACK.layer("issue-raise", doClose) : null;
-    function doClose() { close(true); }
+    // THE PHONE'S OWN BACK BUTTON IS THE THIRD ACCIDENTAL EXIT (T9 sweep #7, 2026-08-22).
+    //
+    // The backdrop and Escape were taught to refuse mid-recording on 2026-08-17 (see guardedClose
+    // below). Hardware Back was not — and on a phone, which is the device somebody actually records
+    // a voice note on, it is the likeliest of the three to be pressed by accident. It went straight
+    // to close(true) and the recording was gone with nothing said.
+    //
+    // Refusing needs one extra step here: backstack has ALREADY popped this layer by the time we are
+    // called, so a refusal has to put it back or the NEXT Back press would leave the panel. That is
+    // the same armBack() dance maint.js does for its unskippable first-login card.
+    var offBack = null;
+    function armBack() {
+      if (window.LFH_BACK && window.LFH_BACK.layer && !offBack) offBack = window.LFH_BACK.layer("issue-raise", doClose);
+    }
+    function doClose() {
+      offBack = null;                      // backstack has already dropped it
+      if (rec && rec.state === "recording") {
+        setStatus("Still recording — tap Stop first, or Cancel to throw it away.", "err");
+        armBack();                         // put the layer back, or the next Back leaves the panel
+        return;
+      }
+      close(true);
+    }
+    armBack();
     function close(fromBack) {
       stopRecording();
       if (recStream) { recStream.getTracks().forEach(function (t) { t.stop(); }); recStream = null; }

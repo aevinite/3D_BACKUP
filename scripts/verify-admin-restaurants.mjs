@@ -23,10 +23,15 @@
 //   node scripts/verify-admin-restaurants.mjs
 //   node scripts/verify-admin-restaurants.mjs <root>    # another checkout / worktree
 import { readFileSync, readdirSync } from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), "..");
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be plain `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in eight more guards.)
+const ROOT = repoRootFrom(import.meta.url);
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 // Comments and on-screen PROSE both contain the words these checks hunt for ("earnings", "sales",
 // "payments"), so a naive grep flags this file's own explanations. Strip line comments, block
@@ -129,9 +134,12 @@ console.log("\n3. Live floor: opening a restaurant either opens it or says why n
   const raw = FLOOR.match(/onClick=\{\(\) => openRestaurantPanel\(/g) || [];
   want(raw.length === 0,
     "no door on this page throws away the window handle (the helper returns null on a blocked pop-up)");
-  want(/const openPanel = useCallback\(async \(r: \{ id: string; name: string; slug: string \}\)/.test(FLOOR),
+  // Shape-tolerant on purpose: sweep #7 item 8 ADDED `active` to what travels with a blocked
+  // restaurant, and an exact-shape regex turned that widening into a red guard. What matters is
+  // that there is ONE awaited opener and that a null handle opens the card.
+  want(/const openPanel = useCallback\(async \(r: \{ id: string; name: string; slug: string[^}]*\}\)/.test(FLOOR),
     "every door goes through ONE opener that awaits the handle");
-  want(/if \(!w\) setBlocked\(\{ rid: r\.id, name: r\.name, slug: r\.slug \}\);/.test(FLOOR),
+  want(/if \(!w\) setBlocked\(\{ rid: r\.id, name: r\.name, slug: r\.slug/.test(FLOOR),
     "…and a null handle opens the card that gets him in anyway (see 3a)");
   want(/catch \(e\) \{\s*toast\(/.test(FLOOR),
     "…and a thrown error is reported too, never swallowed");
@@ -383,6 +391,253 @@ want(/Admin only:/.test(CARD) && /table QR links at all/.test(CARD),
   want(/\.in\("table_number", stillMissing\)/.test(SET),
     "…and the loser of that race re-reads only the rows it lacks, never the whole table");
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// SWEEP #7, T16 (2026-08-27) — eleven more places where a screen said one thing and did another.
+// Each `want` below is one numbered item from that run's report; reverting the fix turns it red.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// Comments quote the OLD wording on purpose, so these read against the comment-stripped source:
+// an obituary must never be able to fail the check that killed the thing it describes.
+const noComments = (src) => src
+  .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+const RESTn = noComments(REST), OWNn = noComments(OWN), BINn = noComments(BIN), FLOORn = noComments(FLOOR);
+
+console.log("\n11. Owners: one delete must not disable every button on the next person");
+{
+  // `busy` is the PAGE's state, shared by the roster and the detail pane. doDelete() released it
+  // only in its catch, so a delete that WORKED left it true for good: the admin picked the next
+  // owner and Rename, Reset password, Suspend, Assign restaurant, Make primary and Remove were all
+  // greyed out, with nothing saying why. Only a reload cleared it. (item 1.)
+  const del = (OWN.match(/async function doDelete\(\)[\s\S]*?\n  \}/) || [""])[0];
+  const inFinally = /finally \{ setBusy\(false\); \}/.test(del);
+  const outsideCatch = /setBusy\(false\)/.test(del.replace(/catch\s*\([^)]*\)\s*\{[^}]*\}/g, ""));
+  want(inFinally || outsideCatch,
+    "a SUCCESSFUL owner delete hands `busy` back, so the next owner's buttons still work");
+  want(/busy=\{busy\} setBusy=\{setBusy\}/.test(OWN),
+    "…and `busy` really is the page-wide flag those buttons read (which is why it matters)");
+}
+
+console.log("\n12. Deleting says what the recycle bin actually does (migration 342 removed the wait)");
+{
+  // All three read "recycle bin for 90 days … only after that can it be permanently removed".
+  // The owner removed that wait on 2026-08-20 and mig 342 dropped the database's half of it, so
+  // the sentence promised three months of safety that nothing enforces — read at the moment
+  // somebody deletes a paying client's restaurant. (item 2.)
+  want(!/90 days/.test(RESTn),
+    "the restaurant Danger zone no longer promises a 90-day protection window");
+  want(!/(restorable|restored) for 90 days/i.test(OWNn) && !/only after 90 days/i.test(OWNn),
+    "…and neither does the Owners danger zone or its delete dialog");
+  want(/there is no waiting period/i.test(BINn),
+    "…and the recycle bin still states the truth they now agree with");
+}
+
+console.log("\n13. Billing: money the platform collected is either counted or named");
+{
+  // A currency stored as "inr" fell through BOTH halves: the server's total matched "INR"
+  // exactly, and the page upper-cased before asking "is it something else?" — so it was neither
+  // added up nor listed under "not counted above", while the row itself still printed ₹. (item 3.)
+  want(/const canon = \(c: string \| null \| undefined\) => \(c \|\| "INR"\)\.trim\(\)\.toUpperCase\(\) \|\| "INR";/.test(BILL),
+    "the currency is folded to one canonical form before anything is compared");
+  want(/const byCurrency = \(rows \|\| \[\]\)\.reduce/.test(BILL) && /canon\(r\.currency\)/.test(BILL),
+    "…and ONE grouping pass produces both the rupee total and the excluded list");
+  want(/money\(rupeesCollected, "INR"\)/.test(BILL),
+    "…so the tile is summed from the same rows the table shows, and cannot disagree with them");
+  want(/currency: currency\.trim\(\)\.toUpperCase\(\) \|\| "INR"/.test(BILL),
+    "…and the editor sends a normalised code, so no new row can be stored in the broken shape");
+}
+
+console.log("\n14. A control that promises a default falls back to it");
+{
+  // "nothing set = 4", but clearing the box left "" in table_seats and the route's
+  // Math.round(Number("")) → 0 → clamp(1..30) stored ONE seat. (item 4.)
+  want(/const settleSeat = \(t: number, v: string\) => \{[\s\S]{0,300}delete next\[String\(t\)\];/.test(CARD),
+    "clearing a table's seat box REMOVES its entry, so the readers fall back to 4");
+  want(/onBlur=\{\(e\) => settleSeat\(t, e\.target\.value\)\}/.test(CARD),
+    "…on blur, so the box can be emptied and retyped without refilling under the cursor");
+}
+
+console.log("\n15. An owner you just created is never missing from the list");
+{
+  // Only "Done" called onCreated(), which is what reloads the roster. Escape, phone Back and the
+  // scrim just hid the card — so a created owner was absent until a reload. (item 5.)
+  want(/const close = \(\) => \{ if \(reveal\) onCreated\(reveal\.id\); else onClose\(\); \};/.test(OWN),
+    "every exit from the New-owner dialog reports a created owner");
+  want(/useAdminModal\(dialogRef, "admin-new-owner", close\)/.test(OWN),
+    "…including Escape and the phone Back button");
+  want(/<div onClick=\{close\} style=\{\{ position: "fixed", inset: 0, background: "rgba\(2,6,16,0\.66\)", backdropFilter: "blur\(2px\)"/.test(OWN),
+    "…and a tap on the scrim");
+}
+
+console.log("\n16. A refused ticket change says why instead of quietly undoing itself");
+{
+  // The chip flipped optimistically and a refusal called load(), which put it back with no
+  // reason given — a tap that appeared to work and then reversed. (item 6.)
+  const st = (REST.match(/const setStatus = async[\s\S]*?\n  \};/) || [""])[0];
+  want(/const refused = \(why: string\) => \{[\s\S]{0,400}setNote\(/.test(st),
+    "a refusal is captured with the server's own reason");
+  want((REST.match(/\{refusalNote\}/g) || []).length === 2,
+    "…and rendered in BOTH shapes of the Tickets card, compact and full");
+}
+
+console.log("\n17. A blocked tab takes the admin in — it never tells him to change his browser");
+{
+  // The owner ruled on this wording for the platform floor on 2026-08-20: "admin has access to
+  // everything, so it shouldn't be 'you can't access the restaurant' — it should take you to the
+  // restaurant". Five places still said "allow pop-ups for this site". (item 7.)
+  want(!/allow pop-ups for this site/i.test(RESTn) && !/allow pop-ups for this site/i.test(BINn)
+    && !/allow pop-ups for this site/i.test(FLOORn),
+    "no screen in this territory answers a blocked tab with a browser-settings instruction");
+  want(/const hereHref = \(path: string\) =>\s*`\/api\/admin\/act-as\/go\?rid=/.test(REST),
+    "the restaurant's Enter card offers the SAME panel in this tab (an ordinary navigation)");
+  want(/function BlockedHere\(/.test(BIN) && /hereHref\(r\.id, p\.to, \{ bin: true \}\)/.test(BIN),
+    "…and the recycle bin does too, carrying its bin=1 opt-in");
+  want(!/setInsideErr\("Your browser blocked/.test(BIN),
+    "…and the bin's blocked-tab message no longer lands in the slot whose Retry re-reads the counts");
+  want(/function BlockedDoor/.test(FLOOR),
+    "…and the platform floor's own card, which set the pattern, is still there");
+}
+
+console.log("\n18. …and that card never offers a guest menu that is switched off");
+{
+  // A suspended restaurant's guest menu is offline; the card offered it anyway. (item 8.)
+  want(/const \[blocked, setBlocked\] = useState<\{ rid: string; name: string; slug: string; active: boolean \} \| null>/.test(FLOOR),
+    "the platform floor's blocked-tab card knows whether the restaurant is live");
+  want(/Guest menu offline/.test(FLOOR),
+    "…and says so instead of linking to a menu that will refuse");
+}
+
+console.log("\n19. The QR sheet names any table it could not print");
+{
+  // A table with no code was skipped and the sheet came out one QR short, silently. (item 9.)
+  want(/const missing: number\[\] = \[\];/.test(CARD) && /missing\.push\(t\); continue;/.test(CARD),
+    "the print sheet records the tables it had no code for");
+  want(/if \(missing\.length\) \{[\s\S]{0,300}setErr\(/.test(CARD),
+    "…and names them afterwards instead of printing a short sheet in silence");
+  want(!/is HANDOFF H3/.test(CARD),
+    "…and the note beside it no longer asks for the route upsert that already shipped");
+}
+
+console.log("\n20. Billing: a refused payment delete is said beside the payment rows");
+{
+  // It used to land next to "Add payment", a section up and often off-screen. (item 10.)
+  const del = (BILL.match(/const deletePayment = async[\s\S]*?\n  \};/) || [""])[0];
+  want(/setHistMsg\(/.test(del), "the delete result has its own line");
+  want(BILL.indexOf("Payment history") < BILL.indexOf("{histMsg && ("),
+    "…rendered under the Payment history heading, where the bin the admin pressed is");
+}
+
+console.log("\n21. The recycle bin carries no permission flag that can only say yes");
+{
+  // `canPurge` was always true after mig 342 and read by nothing — a dead permission beside a
+  // permanent delete is the kind of thing a later reader wires back up. (item 11.)
+  want(!/canPurge: boolean/.test(BIN), "`canPurge` is gone from both bin row types");
+  want(/daysHeld: number/.test(BIN), "…while `daysHeld`, which is a fact rather than a permission, stays");
+}
+
+
+console.log("\n22. Suspend is described by what it actually stops");
+{
+  // The suspended line said "the guest menu is offline AND STAFF CAN'T LOG IN". That is the
+  // recycle BIN's behaviour: soft_delete writes deleted_at and /api/panel-login refuses on it.
+  // Suspend writes only `restaurants.active`, which the tenant resolver reads for the GUEST menu
+  // — nothing on the staff sign-in path reads it. (item 12.)
+  want(!/The guest menu is offline and staff can't log in/.test(RESTn),
+    "the suspended-state line no longer claims suspending stops the restaurant's own staff signing in");
+  want(/Its own staff can still sign in to their panels/.test(REST),
+    "…and says what suspend really does, and which step does stop them");
+  const LOGIN = read("app/api/panel-login/route.ts");
+  want(/isRestaurantDeleted\(/.test(LOGIN) && !/\.active\b[^)]*restaurant/.test(LOGIN),
+    "…which is still true of the sign-in path: it refuses a BINNED restaurant, and reads no `active` flag");
+  want(/staff can&apos;t log in/.test(REST) || /staff can't log in/.test(REST),
+    "…and the DELETE paragraph, where that sentence IS true, still carries it");
+}
+
+
+console.log("\n23. The reused-address notice says what really happened to the previous occupant");
+{
+  // It said "until it went to the recycle bin on <date>". A previous occupant may have been
+  // REMOVED FOR GOOD since, and that sentence then sent the admin looking for it in a bin it is
+  // not in. The date the server sends is when it left, which is true either way. (item 13.)
+  want(!/until it went to the\s*\n?\s*recycle bin on/.test(REST),
+    "the notice no longer says the previous occupant is sitting in the recycle bin");
+  want(/removed on \{new Date\(done\.reusedAddress\.binnedOn\)/.test(REST),
+    "…it says it was removed on that date, which holds whether it was binned or removed for good");
+}
+
+
+console.log("\n24. The health chips clear when the lit one is tapped again");
+{
+  // It used to set the same filter again, so the only way back to the whole list was to find the
+  // "All" chip — while the KPI tiles on Owners, the other filter row in this console, have
+  // toggled back since they were built. Nothing was unreachable; the two rows behaved
+  // differently. (item 15.)
+  want(/setHealthFilter\(\(cur\) => \(cur === key && key !== "all" \? "all" : key\)\)/.test(REST),
+    "tapping the lit health chip goes back to All");
+  want(/key !== "all"/.test(REST),
+    "…and the All chip itself is excluded, so tapping lit-All stays All rather than flipping");
+  want(/aria-pressed=\{on\}/.test(REST),
+    "…and each chip reports its pressed state, the way the Owners tiles already do");
+  // the row it is being made consistent WITH must still behave that way
+  want(/const setF = \(f: Filter\) => setFilter\(\(cur\) => \(cur === f \? "all" : f\)\)/.test(OWN),
+    "…and the Owners KPI tiles, the pattern this follows, still toggle back too");
+}
+
+
+console.log("\n25. Billing: a typed amount is a NUMBER or it is refused — never invented");
+{
+  // The old parser stripped every character that was not a digit, a dot or a minus and took what
+  // was left: "abc" and "₹" became 0, and "x1y2" became 12. None reached the route's own refusal,
+  // because that only fires when the parse returns null — so a typo was stored as a ₹0 (comped)
+  // or ₹12 plan and the screen said "Saved." (item 16.)
+  const BAPI = read("app/api/admin/billing/route.ts");
+  want(/const cleaned = String\(v\)\.trim\(\)\.replace\(\/\[\\s,\]\/g, ""\)\.replace\(\/\^\[₹\$€£\]\/, ""\);/.test(BAPI),
+    "the route strips only what is typed AROUND a number — spaces, thousands separators, a currency symbol");
+  want(/if \(!\/\^-\?\\d\+\(\\\.\\d\+\)\?\$\/\.test\(cleaned\)\) return null;/.test(BAPI),
+    "…and then requires what is left to BE a number, instead of taking whatever survived");
+  want(!/Number\(String\(v\)\.replace\(\/\[\^0-9\.-\]\/g, ""\)\)/.test(BAPI),
+    "…and the strip-everything-else parse is gone");
+  want(/Amount isn't a valid number/.test(BAPI),
+    "…so the refusal it was always meant to reach can actually fire");
+  want(/A plan can be 0 \(free\/comped\)/.test(BAPI),
+    "…while a DELIBERATE 0 is still allowed, which is why a typo landing on 0 was invisible");
+  // the same rule on the payment box, which had the same shape
+  const BPAGE = read("app/aevinite/billing/page.tsx");
+  want(/const cleaned = String\(payAmount\)\.trim\(\)\.replace\(\/\[\\s,\]\/g, ""\)/.test(BPAGE),
+    "…and the Add-a-payment box parses by the same rule, so it cannot record a ₹12 typo either");
+  want(!/Number\(String\(payAmount\)\.replace\(\/\[\^0-9\.-\]\/g, ""\)\)/.test(BPAGE),
+    "…and its strip-everything-else parse is gone too");
+}
+
+console.log("\n26. Every platform-wide read behind these screens has a ceiling");
+{
+  // The sibling billing route was bounded on 2026-08-04 with the reasoning "one row per restaurant
+  // makes it small today, but it grows with exactly the number this product is built to increase".
+  // Four reads in the restaurants route were left without one. Egress is this product's cost.
+  // (item 17.)
+  const unbounded = [];
+  for (const f of [
+    "app/api/admin/restaurants/route.ts", "app/api/admin/restaurants/settings/route.ts",
+    "app/api/admin/restaurants/export/route.ts", "app/api/admin/owners/route.ts",
+    "app/api/admin/cancelled-today/route.ts", "app/api/admin/maintenance/route.ts",
+    "app/api/admin/billing/route.ts", "app/api/admin/floor/route.ts",
+  ]) {
+    const src = read(f);
+    for (const m of src.matchAll(/\.from\("([a-z_]+)"\)([\s\S]{0,400}?)(?=;|\n\s*(?:const|let|if|return|await|\}))/g)) {
+      const q = m[2];
+      if (!/\.select\(/.test(q)) continue;
+      if (/\.limit\(|maybeSingle\(\)|\.single\(\)|count:|head: true/.test(q)) continue;
+      if (/\.update\(|\.insert\(|\.upsert\(|\.delete\(/.test(q)) continue;
+      unbounded.push(f.split("/").slice(-2).join("/") + " · " + m[1]);
+    }
+  }
+  want(unbounded.length === 0,
+    unbounded.length === 0
+      ? "every list read behind the admin's restaurants, owners, billing, bin and floor is bounded"
+      : "unbounded list read(s): " + unbounded.join(", "));
+}
+
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — an admin screen is claiming something it does not do\n`
   : "\n✓ every admin screen still keeps the promise it prints on itself\n");

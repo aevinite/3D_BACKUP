@@ -2,6 +2,7 @@
 // ViewerClient and runs in the browser. This file is the small server wrapper.
 import ViewerClient from "./ViewerClient";
 import { getRestaurantBySlug } from "@/lib/tenant";
+import OfflineNoticeStatic from "@/components/OfflineNoticeStatic";
 
 // White-label (audit fix 2026-07-08): give the 3D page its OWN tab title. Without a
 // generateMetadata it inherited the platform default ("Aevidine — Restaurant OS"),
@@ -73,6 +74,10 @@ export default async function ViewerPage({
     // adding any extra box to the page.
     <>
       {pinTenant && <script dangerouslySetInnerHTML={{ __html: pinTenant }} />}
+      {/* The offline warning that survives a reload with no signal — see components/
+          OfflineNoticeStatic.tsx. Matters as much here as on the dish page: with no signal this
+          screen freezes on "LOADING 3D MODEL" and said nothing. (Owner's item 11, 2026-09-01.) */}
+      <OfflineNoticeStatic />
       {/* Hand the folder name to the browser-side viewer, which does the work.
           key={folder} forces a fresh instance when navigating 3D-view → 3D-view (e.g.
           tapping another dish's "ready" toast while a viewer is open) — without it the

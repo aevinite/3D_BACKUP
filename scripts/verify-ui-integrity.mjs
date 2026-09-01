@@ -237,15 +237,59 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
   };
   walk("public/panels");
   const offenders = [];
+  // ── ONLY A COMMENT THAT IS ACTUALLY INSIDE A TEMPLATE LITERAL (T16 sweep #7, 2026-08-29) ──────
+  // This used to flag EVERY backtick in EVERY /* … */ comment anywhere under public/panels. The
+  // fault it is built for is real and specific: a backtick inside a comment that sits INSIDE the
+  // injected `<style>` template literal ends that string and the panel stops parsing. A backtick
+  // in an ordinary code comment — quoting a column name, say — cannot do that, and check 7b below
+  // already says so in its own words: "scoped to the style block so ordinary JSDoc elsewhere is
+  // untouched". The panels half was left blunt.
+  //
+  // It went red on main when a bill-document comment quoted `lines` and `linesHtml`, and because
+  // this guard runs as a PostToolUse hook, a false positive here blocks EVERY session's Write and
+  // Edit tool across the whole repo. Two ordinary comments stopped all editing.
+  //
+  // So the file is walked once, tracking which of the four states each character is in — code,
+  // line comment, block comment, quoted string, template literal — and a block comment is reported
+  // only when it opened while a template literal was open.
+  const commentsInsideTemplate = (src) => {
+    const hits = [];
+    let inLine = false, inBlock = false, inStr = null, inTpl = false;
+    let blockStart = -1, blockOpenedInTpl = false;
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i], nx = src[i + 1];
+      if (inLine) { if (ch === "\n") inLine = false; continue; }
+      if (inBlock) {
+        if (ch === "*" && nx === "/") {
+          const body = src.slice(blockStart, i + 2);
+          if (blockOpenedInTpl && body.includes("`")) hits.push({ index: blockStart, body });
+          inBlock = false; i++;
+        }
+        continue;
+      }
+      if (inStr) { if (ch === "\\") { i++; continue; } if (ch === inStr) inStr = null; continue; }
+      if (inTpl) {
+        if (ch === "\\") { i++; continue; }
+        if (ch === "`") { inTpl = false; continue; }
+        // a comment can open inside ${ … } too, and that is still inside the literal
+        if (ch === "/" && nx === "*") { inBlock = true; blockStart = i; blockOpenedInTpl = true; i++; }
+        continue;
+      }
+      if (ch === "/" && nx === "*") { inBlock = true; blockStart = i; blockOpenedInTpl = false; i++; continue; }
+      if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
+      if (ch === '"' || ch === "'") { inStr = ch; continue; }
+      if (ch === "`") { inTpl = true; continue; }
+    }
+    return hits;
+  };
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
-    for (const m of src.matchAll(/\/\*[\s\S]*?\*\//g)) {
-      if (!m[0].includes("`")) continue;
+    for (const m of commentsInsideTemplate(src)) {
       const line = src.slice(0, m.index).split("\n").length;
-      offenders.push(`${f}:${line}  ${m[0].replace(/\s+/g, " ").slice(0, 70)}…`);
+      offenders.push(`${f}:${line}  ${m.body.replace(/\s+/g, " ").slice(0, 70)}…`);
     }
   }
-  if (offenders.length === 0) ok(`${files.length} panel script(s): no backtick inside a /* … */ comment`);
+  if (offenders.length === 0) ok(`${files.length} panel script(s): no backtick inside a /* … */ comment that sits INSIDE a template literal`);
   else bad(
     `${offenders.length} block comment(s) in a panel script contain a backtick — inside the injected stylesheet that ENDS the template literal and takes the panel down`,
     offenders.join("\n         ") + "\n         Quote code with 'single quotes' or nothing at all.",
@@ -605,6 +649,40 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
     if (!/\.tabs:hover\s*\{[^}]*width:\s*var\(--rail-w-open\)/.test(css)) bad("hovering the collapsed rail no longer opens it to full width", `${f}\n         Owner, 2026-08-18: hovering the side must show the section names.`);
     else if (!/@media \(hover: hover\) and \(pointer: fine\)/.test(css)) bad("the rail's hover peek is not fenced to real mice", `${f}\n         On a touch screen :hover latches after a tap and the tablet keeps a half-open rail.`);
     else ok("hovering the collapsed rail opens it, and only on a device with a real mouse");
+  }
+}
+
+// ── AN ADMIN CONTROL MUST EXIST IN BOTH SKINS, AND MUST NOT SIT ON ITS NEIGHBOUR ──────────────
+// Owner, 2026-08-28, with a photo of his screen: "whenever the blue colour thing is coming it is
+// crossing the kitchen written thing… and that blue colour is not coming in the light mode."
+// Both were real, and both were one control: the Access tree's Preview / Print button.
+{
+  let tree = ""; try { tree = fs.readFileSync("components/admin/AccessTree.tsx", "utf8"); } catch {}
+  if (tree) {
+    // 1 · NO NEGATIVE MARGIN ON .at-panel-top. It was -4px, pulling the card below up under the
+    //     button so they looked joined — and it became four measured pixels of a button drawn over
+    //     a heading the moment that heading stopped being hidden.
+    const top = (tree.match(/\.at-panel-top\s*\{[^}]*\}/) || [""])[0];
+    if (/margin\s*:[^;]*-\d/.test(top))
+      bad("the Access panel's Preview button is pulled up by a negative margin",
+          "components/admin/AccessTree.tsx → .at-panel-top\n         That is what put it on top of the 'Kitchen ticket printing' heading. Space them, don't overlap them.");
+    else ok("the Access panel's Preview button is spaced from the card, not pulled onto it");
+
+    // 2 · THE DUPLICATE HEADING IS HIDDEN VIA THE BODY WRAPPER, not :first-child of the panel.
+    //     Keyed on :first-child of the PANEL it stopped matching the day a button was put above it.
+    if (/\.at-panel-body > \.adm-card:first-child > h2\s*\{\s*display:\s*none/.test(tree))
+      ok("…and the first card's duplicate heading is hidden by the body wrapper, whatever sits above it");
+    else
+      bad("the Access panel's duplicate heading rule is keyed on the panel's first child again",
+          "components/admin/AccessTree.tsx\n         Anything added above the card makes :first-child stop matching, the repeated heading\n         reappears, and the Preview button lands on it. Key it on .at-panel-body.");
+
+    // 3 · NO HARD-CODED SKIN COLOURS ON IT. It was rgba(99,102,241,.16) / #c7d2fe — dark-mode
+    //     values, so on the light skin it was a pale ghost of a button.
+    const btn = (tree.match(/\.at-preview-btn[^{]*\{[^}]*\}/) || [""])[0];
+    if (/#[0-9a-f]{3,6}|rgba?\(/i.test(btn))
+      bad("the Access panel's Preview button carries hard-coded colours",
+          "components/admin/AccessTree.tsx → .at-preview-btn\n         Those were dark-skin values, and on the light skin the button was almost invisible.\n         Build it from --accent / --card / --text so each skin gets its own.");
+    else ok("…and it is built from the console's own tokens, so it exists in the light skin too");
   }
 }
 

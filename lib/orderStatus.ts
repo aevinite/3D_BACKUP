@@ -33,7 +33,27 @@ export const POLL_MS = 1500; // how often a guest re-checks their order's status
 // `lfh:rt-tick` window event), so the timer below is only a slow safety-net poll
 // for when the WebSocket is asleep/dropped. (Was POLL_MS=1.5s of constant polling.)
 export const RT_BACKUP_MS = 60 * 1000;
-export const SERVED_LINGER_MS = 5 * 1000; // a served/cancelled order lingers 5s in the live view, then drops into Previous orders (becomes a past bill)
+// HOW LONG A FINISHED ORDER STAYS ON THE FLOATING STRIP — AND WHY THAT IS "UNTIL THE MEAL ENDS".
+//
+// This constant's old comment said a served/cancelled order "lingers 5s in the live view, then
+// drops into Previous orders (becomes a past bill)". BOTH HALVES ARE OUT OF DATE and the sentence
+// sent sweep 7 hunting a bug that is not there:
+//   * Nothing filters a finished order out of liveActiveOrders() — only `dismissed` and MAX_AGE_MS
+//     do — so it does NOT drop out after 5s. Measured on a phone: a strip reading
+//     "Served — enjoy! · Table 3" was still on screen a full minute after the order finished.
+//   * "Previous orders" NO LONGER EXISTS. The per-device past-bills history was REMOVED by the
+//     owner on 2026-06-17 (see the note at the top of components/CartPanel.tsx); the bill's second
+//     tab is a LIVE-STATUS tab only.
+//
+// So there is nowhere for a finished order to drop INTO, and dropping it after five seconds would
+// take the diner's only record of it off the screen. Staying put is the correct behaviour now: the
+// diner reads "Served — enjoy!", and drags the strip onto the cross when they are done with it, or
+// it goes when the table closes (SessionStatusWidget.clearLocal) or ages out at MAX_AGE_MS.
+//
+// The value is still used — OrderTracker schedules a redraw at finalizedAt + this — so it is left
+// alone rather than deleted. DO NOT "fix" the filter to honour it; that is the regression this
+// comment exists to prevent. (sweep 7 T3, second pass, 2026-08-30.)
+export const SERVED_LINGER_MS = 5 * 1000;
 export const MAX_AGE_MS = 3 * 60 * 60 * 1000; // stop following an order after 3h (3 hrs * 60 min * 60 sec * 1000 ms)
 
 // One order this device placed and is still following the status of.
