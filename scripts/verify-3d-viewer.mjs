@@ -317,6 +317,43 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── the offline warning survives a reload with no signal (owner's item 11) ────────────────────
+// After an offline reload the client JavaScript never boots, so components/OfflineNotice.tsx cannot
+// render and a diner got a page frozen mid-load with no explanation. The static bar is a plain
+// inline script, which is the one thing still standing.
+{
+  const stat = read("components/OfflineNoticeStatic.tsx");
+  check(
+    "there is a no-framework offline bar for the case where React never boots",
+    /export default function OfflineNoticeStatic/.test(stat) && /navigator\.onLine===false/.test(stat),
+    "components/OfflineNoticeStatic.tsx \u2192 it must be a plain inline <script>, not a component " +
+      "that needs hydration. Measured: after an offline reload, --lfh-offbar-h is never set, a " +
+      "synthetic 'offline' event does nothing and a click does nothing."
+  );
+  check(
+    "…it refuses to draw whenever React's own bar is alive, checked on EVERY signal change",
+    /function reactOwnsIt\(\)/.test(stat) && /navigator\.onLine===false && !reactOwnsIt\(\)/.test(stat),
+    "components/OfflineNoticeStatic.tsx \u2192 the check belongs inside sync(), not only in a " +
+      "start-up watch. An earlier version watched for five seconds, and a diner whose signal " +
+      "dropped later than that got BOTH bars, one under the other, saying different things."
+  );
+  check(
+    "…and nothing dynamic is interpolated into it",
+    !/\$\{(?!JSON\.stringify\(BAR_ID\))/.test(stat.split("const SCRIPT")[1] || ""),
+    "components/OfflineNoticeStatic.tsx \u2192 the inlined script must stay a fixed literal. The " +
+      "only interpolation allowed is the hardcoded BAR_ID; a value from the address bar or the " +
+      "database would need resolving and character-checking first, as app/view/[folder]/page.tsx does."
+  );
+  for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R], ["the /view", VIEW_PAGE]]) {
+    check(
+      label + " route renders the no-framework offline bar",
+      /<OfflineNoticeStatic \/>/.test(read(file)),
+      file + " \u2192 a guest can reload this screen with no signal, so it needs the bar that works " +
+        "without React."
+    );
+  }
+}
+
 // ── two callers, one read of the category list (sweep #7 T2, owner's item 12) ─────────────────
 // Both readers of a dish page ask activeCategorySlugs the same question in the same tick, so the
 // same query hit the same table twice. Shared via the in-flight promise — and deliberately with NO

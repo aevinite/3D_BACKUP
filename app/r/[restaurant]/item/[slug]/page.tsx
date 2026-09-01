@@ -9,6 +9,7 @@ import { getMenuItem, getSettings } from "@/lib/menu";
 import { accentPaletteCss, accentCanvasCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
 import Maintenance from "@/components/Maintenance";
+import OfflineNoticeStatic from "@/components/OfflineNoticeStatic";
 
 // White-label: a dish link's tab title + share preview must read as THIS
 // restaurant, never the platform brand ("Aevidine — Restaurant OS") the global
@@ -124,6 +125,9 @@ export default async function RestaurantItemPage({
           }}
         />
       )}
+      {/* The offline warning that survives a reload with no signal — see components/
+          OfflineNoticeStatic.tsx. (Owner's item 11, 2026-09-01.) */}
+      <OfflineNoticeStatic />
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
       {/* r.slug, not the address-bar text — the same reason as the menu page: this prop namespaces
           the cart/favourites and builds the back-to-menu link, so a capitalised URL must land in

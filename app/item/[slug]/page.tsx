@@ -3,6 +3,7 @@
 import { notFound } from "next/navigation";
 import ItemClient from "./ItemClient";
 import Maintenance from "@/components/Maintenance";
+import OfflineNoticeStatic from "@/components/OfflineNoticeStatic";
 import { getMenuItem, getSettings } from "@/lib/menu";
 
 // The bare /item/<slug> route is restaurant #1's own dish page. Give it #1's
@@ -71,5 +72,13 @@ export default async function ItemPage({
   // twin already 404s here. getMenuItem is cached, so asking costs one small read.
   if (!(await getMenuItem(slug).catch(() => null))) notFound();
   // Hand both to the browser-side component, which does the real work.
-  return <ItemClient slug={slug} fromCat={cat} />;
+  return (
+    <>
+      {/* The offline warning that survives a reload with no signal, when React never boots and
+          components/OfflineNotice.tsx therefore cannot render. See that file for the measurement.
+          It removes itself the moment React's own bar takes over. (Owner's item 11, 2026-09-01.) */}
+      <OfflineNoticeStatic />
+      <ItemClient slug={slug} fromCat={cat} />
+    </>
+  );
 }
