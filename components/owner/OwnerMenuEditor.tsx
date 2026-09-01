@@ -55,10 +55,16 @@ export default function OwnerMenuEditor({
         .ome-full{ height:100%; display:flex; flex-direction:column; min-height:0; }
         .ome-mount{ flex:1 1 auto; min-height:0; display:flex; }
         .ome-mount .emb-frame{ flex:1 1 auto; width:100%; border:0; display:block; background:var(--bg, #0a0c10); }
+        /* --border-c, NOT --line (T13, sweep #7, 2026-08-27). The --line token is declared by the PANEL
+           stylesheets (editor / kitchen / tablet) and by nothing in the owner or admin console, so
+           inside this cockpit it always fell through to the hard-coded #1d2430 — a dark navy, which
+           is right on the dark skin and a heavy wrong-coloured hairline on the light one. --border-c
+           is the console's own border colour and is declared in BOTH skins, so this bar now matches
+           whichever one you are in. Same for the select below. */
         .ome-switch{ display:flex; align-items:center; gap:9px; padding:9px 16px;
-          border-bottom:1px solid var(--line, #1d2430); font-size:13px; font-weight:600; color:var(--muted, #9aa4b6); }
+          border-bottom:1px solid var(--border-c, #1d2430); font-size:13px; font-weight:600; color:var(--muted, #9aa4b6); }
         .ome-switch select{ font:inherit; font-weight:700; color:var(--text, #e6ebf3);
-          background:var(--card, #10141b); border:1px solid var(--line, #1d2430); border-radius:9px; padding:6px 11px; cursor:pointer; }
+          background:var(--card, #10141b); border:1px solid var(--border-c, #1d2430); border-radius:9px; padding:6px 11px; cursor:pointer; }
       `}</style>
     </div>
   );
