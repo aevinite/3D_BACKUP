@@ -191,7 +191,12 @@ export type BillRecord = {
   invoiceGens: number;         // how many times a tax invoice was generated (>1 = re-issued)
   openedAt: string | null;
   closedAt: string | null;
-  at: string | null;           // sort key (closed_at ?? created_at)
+  at: string | null;           // when it SETTLED (closed_at ?? created_at) — shown in the row's detail
+  // The instant the ledger is actually ORDERED and paged by. `at` is NOT the sort key, whatever
+  // an earlier comment here claimed: /api/admin/bills orders sessions by `created_at` and hands
+  // its "Load more" cursor back as a `created_at`. Showing `at` in the collapsed row while
+  // sorting by this one is what put "2 days ago" ABOVE "1 day ago" on the admin's ledger.
+  createdAt: string | null;
   deletedAt: string | null;
   deletedBy: string | null;
   deleteReason: string | null;
@@ -239,6 +244,7 @@ export function rollUpBill(session: BillSession, orders: BillOrder[], restaurant
     openedAt: session.opened_at,
     closedAt: session.closed_at,
     at: session.closed_at || session.created_at,
+    createdAt: session.created_at,
     deletedAt: session.deleted_at || (orders.find((o) => o.deleted_at)?.deleted_at ?? null),
     deletedBy: session.deleted_by || (orders.find((o) => o.deleted_by)?.deleted_by ?? null),
     deleteReason: session.delete_reason || (orders.find((o) => o.delete_reason)?.delete_reason ?? null),

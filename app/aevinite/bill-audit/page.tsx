@@ -14,7 +14,7 @@ type Bill = {
   sessionId: string; billNo: number | null; invoiceNo: number | null; invoiceVoided: boolean;
   restaurantId: string | null; restaurantName: string; table: string | null; state: BillState;
   amount: number; paid: number; orderCount: number; invoiceGens: number;
-  openedAt: string | null; closedAt: string | null; at: string | null;
+  openedAt: string | null; closedAt: string | null; at: string | null; createdAt: string | null;
   deletedAt: string | null; deletedBy: string | null; deleteReason: string | null;
   // Closed-unpaid bills only: was the food made? (owner 2026-08-20 — see the tile's own note.)
   loss?: "yes" | "no" | "unknown" | null;
@@ -430,7 +430,14 @@ export default function AdminBills() {
                   </span>
                   <span className="c-tbl" style={{ color: "var(--muted)", fontSize: 12.5 }}>{b.table ? `T${b.table}` : "—"}</span>
                   <span className="c-amt" style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", textDecoration: del ? "line-through" : undefined, opacity: del ? 0.7 : 1 }}>{inr(b.amount)}</span>
-                  <span className="c-when" style={{ color: "var(--muted)", fontSize: 12, fontVariantNumeric: "tabular-nums" }} title={b.at || undefined}>{b.at ? timeAgo(b.at) : "—"}</span>
+                  {/* THE TIME SHOWN IS THE TIME THIS LIST IS SORTED BY — they must be the same instant, or the
+                      column reads as broken. The endpoint orders sessions by `created_at` and pages with a
+                      `created_at` cursor, but this column used to print `at` (= closed_at ?? created_at). A bill
+                      opened yesterday and settled today then sat by its opening time while showing its settling
+                      time, so scanning down the ledger you met "2 days ago" ABOVE "1 day ago" — 4 such pairs on a
+                      192-row page when this was measured. Both moments are still on the row: "Opened" and
+                      "Closed" are spelled out in full, in IST, in the panel below. */}
+                  <span className="c-when" style={{ color: "var(--muted)", fontSize: 12, fontVariantNumeric: "tabular-nums" }} title={b.createdAt ? `Opened ${new Date(b.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}${b.closedAt ? ` · closed ${new Date(b.closedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}` : undefined}>{b.createdAt ? timeAgo(b.createdAt) : b.at ? timeAgo(b.at) : "—"}</span>
                   <span className="blz-chev c-chev" style={{ color: "var(--muted)", display: "inline-flex" }}><Ico n="chev" s={14} /></span>
                 </button>
 

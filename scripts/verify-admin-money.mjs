@@ -909,6 +909,40 @@ try {
     // HIGH, so this is the direction that matters.
     ok(bills.every((b) => Number.isFinite(b.amount) && b.amount >= 0 && b.amount >= b.paid - 0.01),
       "12 · every bill's total is a real number and at least what was collected on it");
+
+    // ── 17 · THE LEDGER SHOWS THE INSTANT IT SORTS BY ─────────────────────────────────────────
+    // The endpoint orders sessions by `created_at` and pages with a `created_at` cursor, but the
+    // collapsed row used to print `at` (= closed_at ?? created_at). A bill opened yesterday and
+    // settled today therefore sat in the list by its OPENING time while displaying its SETTLING
+    // time — so reading down the ledger you met "2 days ago" above "1 day ago". Measured on a
+    // 192-row page when this was found: 29 rows out of order, 4 of them visibly so.
+    //
+    // Two things are asserted, because either one alone can pass while the screen is wrong:
+    //   a) the row carries `createdAt` at all — the field the fix added, and the one it must show;
+    //   b) the sequence of those instants really is newest-first, end to end.
+    ok(bills.length > 0 && bills.every((b) => b.createdAt !== undefined),
+      "17 · every bill row carries the instant the ledger is ordered by");
+    let outOfOrder = 0;
+    for (let i = 1; i < bills.length; i++) {
+      const prev = Date.parse(bills[i - 1].createdAt ?? bills[i - 1].at);
+      const cur = Date.parse(bills[i].createdAt ?? bills[i].at);
+      if (Number.isFinite(prev) && Number.isFinite(cur) && prev < cur - 1000) outOfOrder++;
+    }
+    ok(outOfOrder === 0, `17 · the ledger's own times run newest-first, with no older bill above a newer one (${outOfOrder} out of order of ${Math.max(0, bills.length - 1)})`);
+
+    // And the SCREEN must print that instant, not the other one. Read from the rendered row rather
+    // than from the payload, because the whole fault was a screen showing a different field.
+    {
+      const c17 = await ctx(1280, 900, 1, "dark");
+      const pg = await c17.newPage();
+      await pg.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+      await settle(pg);
+      const whens = await pg.$$eval(".c-when", (els) => els.map((e) => e.getAttribute("title") || ""));
+      await c17.close();
+      const titled = whens.filter((t) => t.trim());
+      ok(titled.length > 0 && titled.every((t) => /^Opened /.test(t)),
+        `17 · and each row's time says which moment it is, in IST, on hover (${titled.length} rows)`);
+    }
   }
 
 } finally {
