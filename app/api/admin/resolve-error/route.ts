@@ -63,9 +63,22 @@ export async function POST(req: NextRequest) {
     if (scope) upd = upd.eq("restaurant_id", scope);
     // Snoozing again should only ever reach the tiles you can SEE, i.e. ones not already waiting.
     if (snoozeUntil) upd = upd.or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
-    const bulk = await upd.select("id");
+    // COUNTED BEFORE, NOT COUNTED FROM WHAT CAME BACK (T19 sweep #7, 2026-09-01 — rule 5 of
+    // verify:admin-api-a, added with this fix). `upd.select("id")` is the update's RETURNING clause,
+    // and those rows stop at PostgREST's own cap — so on a board with more open problems than that,
+    // "Resolve all" would clear every one of them and write a SMALLER number into the audit line
+    // ("Cleared 1000 problem report(s)" for 1,500). The same shape was in Rate limits' "Clear all
+    // alerts" and in the bell's "mark all seen", both fixed in the same pass. A head count on the
+    // SAME filter moves no rows and cannot be shortened.
+    let cntQ = sb.from("staff_actions").select("id", { count: "exact", head: true })
+      .eq("level", "error").is("resolved_at", null);
+    if (scope) cntQ = cntQ.eq("restaurant_id", scope);
+    if (snoozeUntil) cntQ = cntQ.or(`snoozed_until.is.null,snoozed_until.lte.${new Date().toISOString()}`);
+    const before = await cntQ;
+    if (before.error) return adminFail(snoozeUntil ? "those problems' reminder" : "those problems' status", before.error, { action: "load" });
+    const bulk = await upd;
     if (bulk.error) return adminFail(snoozeUntil ? "those problems' reminder" : "those problems' status", bulk.error, { action: "save" });
-    const n = bulk.data?.length ?? 0;
+    const n = before.count ?? 0;
     await logAction("admin", snoozeUntil ? "errors_snoozed_all" : "errors_resolved_all", {
       restaurant_id: scope ?? undefined,
       level: "info",

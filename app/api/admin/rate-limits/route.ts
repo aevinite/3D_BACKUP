@@ -178,9 +178,20 @@ export async function POST(req: NextRequest) {
       .update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" })
       .eq("status", "open");
     if (scope) upd = upd.eq("restaurant_id", scope);
-    const r = await upd.select("id");
+    // COUNTED BEFORE, NOT COUNTED FROM WHAT CAME BACK (T19 sweep #7, 2026-09-01 — the same lesson
+    // "Forget all" in app/api/admin/error-memory already carries). Asking the update to RETURN its
+    // rows puts the ANSWER under PostgREST's own row cap: with more open alerts than that, every one
+    // would be cleared and the audit line would record a smaller number. Rule 3 of
+    // verify:admin-api-a deliberately does NOT flag a write's returning clause — correctly, it is not
+    // a list read — so nothing was watching this. Rule 5 in that guard now is. A head count with the
+    // SAME filter moves no rows and cannot be shortened.
+    let cnt = sb.from("rate_limit_events").select("id", { count: "exact", head: true }).eq("status", "open");
+    if (scope) cnt = cnt.eq("restaurant_id", scope);
+    const before = await cnt;
+    if (before.error) return adminFail("the rate limits", before.error, { action: "load" });
+    const r = await upd;
     if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
-    const n = r.data?.length ?? 0;
+    const n = before.count ?? 0;
     await logAction("admin", "rate_limit_dismiss_all", {
       restaurant_id: scope ?? undefined, level: "info",
       detail: `Cleared ${n} limit-reached alert(s)${scope ? " (one restaurant)" : " (all restaurants)"}. No limit changed and nobody was let through or blocked.`,
