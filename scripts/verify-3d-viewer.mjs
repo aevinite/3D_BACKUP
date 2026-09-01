@@ -317,6 +317,32 @@ check(
     "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
 );
 
+// ── two callers, one read of the category list (sweep #7 T2, owner's item 12) ─────────────────
+// Both readers of a dish page ask activeCategorySlugs the same question in the same tick, so the
+// same query hit the same table twice. Shared via the in-flight promise — and deliberately with NO
+// cache, because the guest menu's `menu` breadcrumb reads back through here and a TTL would let a
+// switched-off category keep showing its dishes.
+{
+  const menu = read("lib/menu.ts");
+  const code = menu.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the active-category read is shared between the dish page's two callers",
+    /const catSetInflight = new Map<string, Promise<Set<string> \| null>>\(\)/.test(code) &&
+      /const pending = catSetInflight\.get\(restaurantId\)/.test(code) &&
+      /catSetInflight\.delete\(restaurantId\)/.test(code),
+    "lib/menu.ts \u2192 activeCategorySlugs must share its in-flight promise. Without it the dish " +
+      "page reads the categories table twice per open, measured 4\u00d7 against every other read's 2\u00d7."
+  );
+  check(
+    "…and it holds NO cache, so a switched-off category still reaches a browsing guest at once",
+    !/catSetCache/.test(code) && !/CATEGORY_SET_TTL_MS/.test(code),
+    "lib/menu.ts \u2192 do not put a TTL in front of activeCategorySlugs. The guest menu's `menu` " +
+      "breadcrumb reads back through it (MenuView \u2192 refreshMenu \u2192 getMenuItems), and T13 " +
+      "already lost this exact fight for settings: a cache in front of a breadcrumb is how these " +
+      "updates die (mig 299). In-flight sharing fixes the duplication with no staleness at all."
+  );
+}
+
 // ── the dish page's two error cards are centred by INLINE STYLE, not by a utility class ──────
 // (sweep #7 T2, item 7.) Measured on the running page: with `flex flex-col items-center
 // justify-center min-h-genscreen p-4` on the container, `#detail-page` still computed to
