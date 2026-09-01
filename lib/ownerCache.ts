@@ -117,15 +117,58 @@ function numbersIn(v: unknown, depth = 0, out: number[] = []): number[] {
   else if (v && typeof v === "object") for (const x of Object.values(v)) numbersIn(x, depth + 1, out);
   return out;
 }
+// ── AND IT WAS COUNTING THE TAX RATES AS IF THEY WERE MONEY (T11 item 16, 2026-09-01) ───────────
+// numbersIn() walks the WHOLE payload, and a money payload carries a `tax` block — the configured
+// rate and the CGST/SGST components. Those are CONFIGURATION, not takings. So on a day that took
+// nothing, switching a restaurant to the composition scheme (which legitimately makes the rate 0
+// and empties the components) turned the last non-zero numbers in the payload into zeros, and the
+// guard read a deliberate settings change as a failed read and refused to store the answer.
+// Observed while testing exactly that: a forced read answered `composition: true` and every other
+// reader kept being handed the payload that said `false`.
+// The guard's own comment says it is "deliberately narrow: only a whole-payload collapse". It is
+// narrow now: the tax configuration is left out, so only the MONEY and the COUNTS decide.
+const withoutConfig = (p: unknown): unknown => {
+  if (!p || typeof p !== "object" || Array.isArray(p)) return p;
+  const { tax: _tax, ...rest } = p as Record<string, unknown>;
+  return rest;
+};
 function collapsedToZero(next: unknown, prev: unknown): boolean {
   if (!prev) return false;                              // nothing to compare against — store it
-  const before = numbersIn(prev);
-  const after = numbersIn(next);
+  const before = numbersIn(withoutConfig(prev));
+  const after = numbersIn(withoutConfig(next));
   if (!before.length || !after.length) return false;
   const hadValue = before.some((n) => n !== 0);
   const allZeroNow = after.every((n) => n === 0);
   return hadValue && allZeroNow;
 }
+
+// ── …BUT A QUIET DAY IS NOT A BLIP, AND THE GUARD COULD NOT TELL (T11 item 16, 2026-09-01) ───────
+//
+// The rule above had no way out. Once a stored snapshot held money and the honest answer became
+// ZERO — a restaurant closed on its weekly day off, a window whose only bills were all cancelled,
+// a period before opening — every recompute was refused, the row was never even re-stamped, and
+// the OLD money was served to everyone for ever. Not for five minutes: for ever, until real money
+// happened to arrive again. And "updated X ago" sat beside it, so it read as current.
+//
+// Caught by the app's own warning while testing something else. Four of these in one run:
+//   [ownerCache] refused to store an all-zero payload over a non-zero one (forced):
+//     reports:v5:r:…:sales:today:2026-08-31
+// and while they were happening a forced read answered `composition: true` while every other
+// reader was still being handed the older payload that said `false`.
+//
+// The guard was written for a BLIP — a read that fails seconds after a good one. So the test is
+// now the age of the thing we are protecting: **refuse only while the snapshot we hold is still
+// FRESH.** A blip lands on a fresh row and is still refused, exactly as before. A genuinely quiet
+// day lands on a row that has already gone stale, is believed, and the console self-heals within
+// one freshness window instead of never.
+//
+// It reuses isFresh(), so there is no second definition of "recent" to drift, and no new state to
+// lose on a cold start. What it costs: a read failure that happens to strike a key nobody has
+// looked at for five minutes can still store a zero — which is the case the ORIGINAL guard was
+// least aimed at (nobody is watching that key), and the next successful compute corrects it.
+const zeroIsSuspicious = (next: unknown, prev: { payload?: unknown; computed_at?: unknown } | null | undefined,
+  maxAgeMs: number): boolean =>
+  !!prev && isFresh(prev.computed_at, maxAgeMs) && collapsedToZero(next, prev.payload);
 
 export async function cachedOwnerPayload<T extends object>(opts: {
   key: string;
@@ -157,8 +200,8 @@ export async function cachedOwnerPayload<T extends object>(opts: {
       }
       const payload = await compute();
       if (isPartial(payload)) return;                // see isPartial — do not freeze a half answer
-      if (collapsedToZero(payload, cur?.payload)) {  // see collapsedToZero — improvement I2
-        console.warn(`[ownerCache] refused to store an all-zero payload over a non-zero one: ${key}`);
+      if (zeroIsSuspicious(payload, cur, maxAgeMs)) {   // see zeroIsSuspicious — a blip, not a quiet day
+        console.warn(`[ownerCache] refused to store an all-zero payload over a snapshot computed seconds ago: ${key}`);
         return;
       }
       const fp2 = fingerprint ? await fingerprint().catch(() => null) : null;
@@ -212,8 +255,8 @@ export async function cachedOwnerPayload<T extends object>(opts: {
   // neither a partial one nor an all-zero one over a snapshot that had real money in it.
   if (isPartial(payload)) {
     // nothing stored — see isPartial
-  } else if (collapsedToZero(payload, prevRow?.payload)) {
-    console.warn(`[ownerCache] refused to store an all-zero payload over a non-zero one (forced): ${key}`);
+  } else if (zeroIsSuspicious(payload, prevRow, maxAgeMs)) {
+    console.warn(`[ownerCache] refused to store an all-zero payload over a snapshot computed seconds ago (forced): ${key}`);
   } else {
     await sb.from(TABLE).upsert(
       { cache_key: key, payload, fingerprint: fp, computed_at: now, last_viewed_at: now },
