@@ -171,9 +171,27 @@ check("serve all → separate tables still received", SOLO.every((t) => st.by[t]
 // mark paid
 const pay = fr.locator("#sxPayAll").first();
 check("mark-paid offered", (await pay.count()) > 0);
-await pay.click({ force: true }); await p.waitForTimeout(2500);
-const cash = fr.locator('button:has-text("Cash")').first();
-if (await cash.count()) { await cash.click({ force: true }); }
+await pay.click({ force: true });
+// WAIT FOR THE PAYMENT POPUP, DON'T GUESS AT IT EITHER (T28 sweep, 2026-08-22).
+//
+// This was `waitForTimeout(2500)` and then `if (await cash.count()) { click }` — so when the popup
+// took longer than 2.5s the method was never picked, NOTHING was clicked, and the only thing that
+// failed was the assertion 30 seconds later:
+//     FAIL mark paid → the whole party is paid — {"11":"served/pending", …}
+// which reads exactly like the product refusing to settle a merged party's bill. It was not: the
+// money was never asked for. `markTablePaid()` now awaits `ensurePartySlices(t)` before the popup
+// opens — a real round-trip for a four-table party — and the popup itself grew a tip row, so 2.5s
+// stopped being enough. A conditional click on a control that may not be there yet is a silent
+// no-op, and a silent no-op in a guard becomes a phantom product fault.
+//
+// This is the same lesson the poll below already carries in its own comment ("WAIT FOR THE MONEY,
+// DON'T GUESS AT IT") — applied to the popup as well as to the settle.
+const cash = fr.locator('button.pay-method-btn[data-method="Cash"]').first();
+try { await cash.waitFor({ state: "visible", timeout: 20000 }); }
+catch { /* reported by the check below rather than skipped in silence */ }
+check("the payment popup offered a method to pick", (await cash.count()) > 0,
+  "no .pay-method-btn[data-method=Cash] after 20s — the popup never opened, so nothing below could settle");
+if (await cash.count()) await cash.click({ force: true });
 // WAIT FOR THE MONEY, DON'T GUESS AT IT (T5 sweep, 2026-08-17). This was a flat 10-second sleep,
 // and a party's bill is settled one order at a time — four requests, plus the invoice afterwards.
 // On a dev database answering in ~450ms, or one that hands back a 503 and makes the panel's queue
