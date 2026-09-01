@@ -943,6 +943,40 @@ try {
       ok(titled.length > 0 && titled.every((t) => /^Opened /.test(t)),
         `17 · and each row's time says which moment it is, in IST, on hover (${titled.length} rows)`);
     }
+
+    // ── 18 · A NUMBER NOBODY KNOWS IS NEVER PRINTED AS A CONFIDENT ZERO ───────────────────────
+    // Revenue's `money()` was `Number(n) || 0`, so an absent figure rendered "₹0" — "you collected
+    // nothing" — while the count tile beside it honestly rendered "…" for the same absence. Bills'
+    // Deleted tile did the same with `counts.deleted || 0`, and that one is a PLATFORM-WIDE,
+    // all-time claim on the screen whose whole job is proving no sale went missing.
+    //
+    // /api/admin/revenue already refuses to send a partial payload for precisely this reason, so
+    // nobody has seen it in production — this is the screen being made to agree with the decision
+    // its own route had already taken. Driven by handing each screen a reply with the fields
+    // missing, which is the only way to reach it.
+    for (const [name, path, apiGlob, sel18] of [
+      // Revenue: the five headline money/count tiles, plus the four status figures.
+      ["Revenue", "/aevinite/revenue", "**/api/admin/revenue*", ".rev-strip .cell .v"],
+      // Bills: ONLY the Deleted tile — the one that speaks for all time rather than for this page.
+      ["Bills", "/aevinite/bill-audit", "**/api/admin/bills*", ".blz-stat:has-text('DELETED') .fit-num"],
+    ]) {
+      const c18 = await ctx(1280, 900, 1, "dark");
+      const p18 = await c18.newPage();
+      await p18.route(apiGlob, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+      await p18.goto(BASE + path, { waitUntil: "domcontentloaded" });
+      await settle(p18);
+      // Read only the figures that make a claim BEYOND the page in front of you. Bills' first three
+      // tiles say "on this page" in their own subtitle, so 0 on an empty page is the truth and must
+      // NOT be flagged; the Deleted tile says "every one, all time", which is the platform-wide
+      // claim that must never be guessed.
+      const tiles = await p18.$$eval(sel18, (els) => els.map((e) => e.textContent.trim()).filter((t) => t.length && t.length < 24));
+      await c18.close();
+      const zeros = tiles.filter((t) => t === "₹0" || t === "0");
+      ok(tiles.length > 0 && zeros.length === 0,
+        `18 · ${name} · with the figures missing, no all-time number claims a confident zero (${tiles.length} read, ${zeros.length} zero${zeros.length === 1 ? "" : "s"})`);
+      ok(tiles.length > 0 && tiles.every((t) => t === "\u2026" || t === "—"),
+        `18 · ${name} · every one of them says the number is not known instead (${tiles.join(" ")})`);
+    }
   }
 
 } finally {

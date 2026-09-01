@@ -15,7 +15,17 @@ type Data = {
   collectedThisYear: number; collectedAllTime: number; monthly: Month[]; paying: Paying[]; generatedAt: string;
 };
 
-const money = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+// A MISSING NUMBER IS NOT ZERO, AND ON THIS SCREEN THE DIFFERENCE IS THE WHOLE POINT.
+// This used to be `Number(n) || 0`, so an absent figure printed as a confident "₹0" — "you have
+// collected nothing" — while the count tile beside it honestly printed "…" for the very same
+// absence. /api/admin/revenue already refuses to send a partial payload for exactly this reason
+// (its own comment: "else a failed payments/restaurants read would show confident zeros"), so the
+// screen was contradicting a decision the route had already made. A REAL zero still prints ₹0:
+// only null, undefined and NaN become "…".
+const money = (n: number | null | undefined) =>
+  Number.isFinite(Number(n)) && n !== null && n !== undefined
+    ? "₹" + Math.round(Number(n)).toLocaleString("en-IN")
+    : "…";
 const STATUS_COLOR: Record<string, string> = { active: "var(--adm-ok)", trial: "var(--accent)", paused: "#d4a574", cancelled: "var(--adm-danger)" };
 const STATUS_LABEL: Record<string, string> = { active: "Active (paying)", trial: "Trial", paused: "Paused", cancelled: "Cancelled" };
 
@@ -193,14 +203,19 @@ export default function AdminRevenue() {
           {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : (
             <div style={{ display: "grid", gap: 10 }}>
               {(["active", "trial", "paused", "cancelled"] as const).map((st) => {
-                const n = byStatus[st] || 0;
+                // Same rule as the money tiles above: a count nobody sent is unknown, not zero. The
+                // bar is drawn at nothing and the figure reads "…", so four confident zeros never
+                // stand in for "we could not read the subscriptions".
+                const raw = byStatus[st];
+                const known = typeof raw === "number" && Number.isFinite(raw);
+                const n = known ? raw : 0;
                 return (
                   <div key={st} style={{ display: "grid", gridTemplateColumns: "120px 1fr 34px", gap: 10, alignItems: "center", fontSize: 13 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ width: 8, height: 8, borderRadius: 999, background: STATUS_COLOR[st] }} />{STATUS_LABEL[st]}</span>
                     <span style={{ height: 8, borderRadius: 999, background: "var(--muted2, rgba(255,255,255,.06))", overflow: "hidden" }}>
                       <span style={{ display: "block", height: "100%", width: `${Math.max((n / statusMax) * 100, n > 0 ? 4 : 0)}%`, background: STATUS_COLOR[st], borderRadius: 999 }} />
                     </span>
-                    <span style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{n}</span>
+                    <span style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{known ? n : "\u2026"}</span>
                   </div>
                 );
               })}

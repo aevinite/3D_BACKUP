@@ -319,7 +319,12 @@ export default function AdminBills() {
             and the capability itself is his own (R27: "The Aevidine admin console keeps a soft delete
             for support work"). What stops is the tile presenting three things as one number. Nothing
             is renamed and no policy is decided here — the split comes from columns already stored. */}
-        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} calculating={!d}
+        {/* "every one, all time" is a PLATFORM-WIDE claim, so an unknown count must not be shown as 0.
+            `counts.deleted` is the true database count (the route overwrites the page-derived value
+            with it), but on a reply that arrives without it, `|| 0` asserted "no bill has ever been
+            deleted" on the one screen whose job is proving that no sale went missing. A real 0 still
+            shows 0; only a missing number now shows "…". */}
+        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={typeof counts.deleted === "number" ? counts.deleted : "…"} calculating={!d}
           sub={d?.deletedByPerson == null || d?.deletedEmptied == null
             ? "restorable · every one, all time"
             : <>
@@ -560,7 +565,7 @@ export default function AdminBills() {
 // `sub` is a ReactNode, not a string: the Closed-unpaid tile says two things (what the food-made
 // half is worth and what the never-made half is worth) and needs its own line break to stay legible
 // at 150px, the narrowest this grid ever draws a tile.
-function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number; sub: React.ReactNode; calculating?: boolean }) {
+function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number | string; sub: React.ReactNode; calculating?: boolean }) {
   return (
     <div className="adm-card blz-stat" style={{ padding: "14px 16px" }}>
       <div style={{ fontSize: 11.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
