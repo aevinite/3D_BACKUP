@@ -1130,7 +1130,13 @@ export default function SessionGate() {
         {step === "guest_name" && (<>
           <div className="sg-badge"><i className="fas fa-handshake"></i></div><h3 className="sg-title">This table&apos;s already open</h3>
           <p className="sg-sub">Someone at table {pending.current?.table} started this tab. Add your name so they can confirm it&apos;s you, then ask to join.</p>
-          <input className="sg-input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          {/* THE SAME BOX AS EVERY OTHER NAME BOX IN THIS SHEET (T4 sweep #8, item 8). It was the one
+              without a length cap and the one that ignored the phone keyboard's blue Go key: the
+              other three (open_name, not_open, nickname) both cap at 40 and submit on Enter, so on
+              this screen alone a diner pressed Go and nothing happened, and a pasted paragraph went
+              through to the head's approve list and the manager's floor. */}
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doJoinAsGuest(); }} autoFocus />
           {/* e.g. "couldn't reach the restaurant's system" after a failed join attempt */}
           {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">

@@ -624,6 +624,21 @@ flush();
   check("the card's comments no longer claim a 3-second poll it has not done for a long time",
     !/every 3s/.test(widget) && /RT_BACKUP_MS \(60s\) as the backstop/.test(widget));
 }
+
+// ── EVERY NAME BOX IN THE GATE BEHAVES THE SAME (T4 s8, item 8) ───────────────────────────────────
+// Four screens ask for a name. Three capped it at 40 and submitted on Enter; `guest_name` — the one
+// a diner reaches when somebody else already holds the table — did neither, so the phone keyboard's
+// blue Go key did nothing there and a pasted paragraph reached the head's approve list.
+{
+  say("\n10) Every name box in the gate behaves the same");
+  const boxes = gate.match(/<input className="sg-input"[\s\S]*?\/>/g) || [];
+  const named = boxes.filter((b) => /value=\{name\}/.test(b));
+  check("all four name boxes were found", named.length === 4);
+  check("…every one of them caps the name at 40",
+    named.length === 4 && named.every((b) => /maxLength=\{40\}/.test(b)));
+  check("…and every one of them submits on Enter, so the phone's Go key is never dead",
+    named.length === 4 && named.every((b) => /e\.key === "Enter"/.test(b)));
+}
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
