@@ -457,7 +457,13 @@ check("…says what will happen to it",
 check("…and the chip counts it as a MESSAGE, not an order",
   /message to the restaurant/.test(chip));
 
-console.log(out.join("\n"));
+// Everything above prints here; everything BELOW this line is printed by the flush at the end.
+// (Sections were appended after this call over several sweeps and pushed into `out` with
+// nothing printing them again, so a failure down there exited 1 saying only "1 check failed"
+// and never named it. Found sweep 8 T5, 2026-09-02.)
+let printed = 0;
+const flush = () => { console.log(out.slice(printed).join("\n")); printed = out.length; };
+flush();
 
 // ── THE TABLE NUMBER LEAVES THE ADDRESS BAR (T25 round 2, 2026-08-31) ─────────────────────────────
 // Round 1's item 21b strips `?table=` / `?t=` from the two older doors after the page has read them,
@@ -514,6 +520,39 @@ console.log(out.join("\n"));
     /import \{ hexToRgbTriplet, isHexColor \} from ".\/brandTheme";/.test(accent));
 }
 
+// ── GUEST CHROME MOUNTS ON GUEST DOORS ONLY ───────────────────────────────────────────────────
+// components/GuestChrome.tsx renders sixteen always-on guest widgets, and its whole reason for
+// existing is that they must NOT run on a staff screen: the table-session machinery auto-opened
+// tables over the admin floor, and the ban check plus the returning-guest greeting are a database
+// round trip each, against restaurant #1, on a page that has no diner on it.
+//
+// The list has now been short THREE times — the flat routes, then the /r/<slug>/ shapes, then
+// /pair (sweep 8 T5, 2026-09-02). A hand-maintained list of "everything that is not a guest door"
+// silently rots every time a route is added, so this checks it against the routes on disk.
+{
+  const gc = read("components/GuestChrome.tsx");
+  const m = gc.match(/const STAFF_SEGMENTS = (\[[^\]]+\])/);
+  check("GuestChrome still declares a staff-segment list", !!m);
+  if (m) {
+    const segs = JSON.parse(m[1].replace(/'/g, '"'));
+    // The diner's own doors, and only these: /menu, /item, /view, /q/<code>, /r/<slug>/…
+    const GUEST_DOORS = new Set(["menu", "item", "view", "q", "r"]);
+    const routes = readdirSync(join(ROOT, "app"), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name !== "api" && !e.name.startsWith("_") && !e.name.startsWith("("))
+      .map((e) => e.name);
+    const uncovered = routes.filter((r) => !GUEST_DOORS.has(r) && !segs.includes(r));
+    check(`every non-guest top-level route is in GuestChrome's staff list${uncovered.length ? " — missing: " + uncovered.join(", ") : ""}`,
+      uncovered.length === 0);
+    // …and the regex really matches both shapes, not just the flat one.
+    const re = new RegExp(`^(?:/r/[^/]+)?/(?:${segs.join("|")})(?:/|$)`);
+    check("…and the staff test still matches /r/<slug>/<segment> as well as /<segment>",
+      re.test("/manager") && re.test("/r/aangan/kitchen") && re.test("/pair"));
+    check("…and it still lets every guest door through",
+      !re.test("/menu") && !re.test("/q/ABC123") && !re.test("/r/aangan/menu") && !re.test("/view/soup"));
+  }
+}
+
+flush();
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
