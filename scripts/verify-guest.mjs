@@ -634,6 +634,22 @@ async function live(base) {
       await pg2.goto(`${base}/r/${slug}/menu`, { waitUntil: "domcontentloaded", timeout: 60000 });
       await pg2.waitForSelector("#search-input", { timeout: 30000 }).catch(() => {});
       await pg2.waitForTimeout(2000);
+      // ── A CLOSED RESTAURANT MUST NOT KILL THE WHOLE GUARD (guest sweep T1, sweep #8, 2026-09-02).
+      // This loop names `demo-bistro`, and `demo-bistro` is a real restaurant somebody can switch to
+      // maintenance from the editor. When they do there is no search box, this `fill` threw, and the
+      // live half of verify:guest died with a stack trace BEFORE the report — so every one of its
+      // other live rows silently stopped being run. Measured on origin/main: exit with a
+      // TimeoutError, no PASS/FAIL line at all. The repo's own hook says it in one sentence — "a
+      // guard that cannot run looks exactly like a guard nobody ran, and neither looks like a red" —
+      // so say WHICH it is, and carry on with the rest.
+      const boxThere = (await pg2.locator("#search-input").count()) > 0;
+      if (!boxThere) {
+        const closed = await pg2.evaluate(() => /UNDER MAINTENANCE|right back/i.test(document.body.innerText));
+        check("P15607", `LIVE: ${slug} "${qq}" @${wdt}px — every suggestion name is whole`, () =>
+          ({ ok: closed, note: closed ? `⏭ ${slug} is showing its own maintenance sign, so it has no search box to type in — not a fault, and not a pass either` : "no search box, and the restaurant is NOT closed" }));
+        await cc.close();
+        continue;
+      }
       await pg2.fill("#search-input", qq);
       await pg2.waitForSelector(".search-result", { timeout: 20000 }).catch(() => {});
       await pg2.waitForTimeout(1200);
