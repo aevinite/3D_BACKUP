@@ -190,7 +190,8 @@
     "verify:floor-offplan": "node scripts/verify-floor-offplan.mjs",
     "verify:tip": "node scripts/verify-tip.mjs",
     "verify:owner-s7": "node scripts/verify-owner-territory-s7.mjs",
-    "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs"
+    "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
+    "verify:owner-live500": "node scripts/verify-owner-live-500.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",
