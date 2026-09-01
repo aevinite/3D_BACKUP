@@ -552,6 +552,29 @@ flush();
   }
 }
 
+// ── THE GATE'S OWN QR READER MUST UNDERSTAND THE STICKER THIS PRODUCT PRINTS (T4 s8, item 1) ──────
+// Measured before the fix, running the reader's own two lines in the browser against each sticker
+// shape: `?table=12` → "12" ✓ · a bare "14" → "14" ✓ · `/q/K7M2P9` → "" ✗. Every QR this app
+// generates has been `/q/<code>` since mig 210 (components/admin/RestaurantSettings.tsx builds
+// `${origin}/q/${code}`, and components/MenuView.tsx's own comment says nothing builds `?table=N`
+// any more) — so "Scan QR" could not read one single sticker in the building, and said nothing while
+// failing. These four checks are the ones that go red if any of that is undone.
+{
+  say("\n7) The gate's QR reader understands the sticker this product actually prints");
+  check("the reader knows today's `/q/<code>` sticker",
+    /\/\^\\\/q\\\/\(\[A-Za-z0-9\]\{6,16\}\)\\\/\?\$\//.test(gate));
+  check("…and walks through that door rather than inventing a table number",
+    /window\.location\.href = `\/q\/\$\{ourCode\}`/.test(gate));
+  check("…and still reads the older `?table=` sticker and a bare-number QR",
+    /searchParams\.get\("table"\) \|\| u\.searchParams\.get\("t"\)/.test(gate) && /catch \{ t = raw; \}/.test(gate));
+  check("a scanned link is never followed off this site",
+    /u\.origin === window\.location\.origin/.test(gate));
+  check("a QR that is not a table sticker SAYS so instead of leaving the camera running",
+    /That QR belongs to another site/.test(gate) && /That QR doesn’t say which table it is/.test(gate));
+  check("…and the admin's QR builder still makes the shape the reader was taught",
+    /\$\{window\.location\.origin\}\/q\/\$\{code\}/.test(read("components/admin/RestaurantSettings.tsx")));
+}
+
 flush();
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);

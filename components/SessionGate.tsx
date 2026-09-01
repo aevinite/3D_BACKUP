@@ -881,8 +881,8 @@ export default function SessionGate() {
 
   // Open the camera and read the table's QR sticker. Uses the browser's built-in
   // BarcodeDetector (Chrome / Android phones — no scanning library to download);
-  // phones without it just type the number instead. The sticker holds a menu
-  // link (…?table=N), but a QR with a bare number works too.
+  // phones without it just type the number instead. Today's sticker is `/q/<code>`
+  // (mig 210); the older `…?table=N` links and a QR holding a bare number work too.
   const startScan = async () => {
     type Detector = { detect: (v: HTMLVideoElement) => Promise<{ rawValue?: string }[]> };
     const Ctor = (window as unknown as { BarcodeDetector?: new (o?: { formats?: string[] }) => Detector }).BarcodeDetector;
@@ -910,12 +910,44 @@ export default function SessionGate() {
           const codes = await detector.detect(videoRef.current);
           const raw = codes[0]?.rawValue || "";
           if (!raw) return;
-          // Pull the table number out of the link (?table=N or ?t=N); if the QR
-          // isn't a link, treat the whole text as the number.
+          // ── THIS READER COULD NOT READ A SINGLE STICKER THIS PRODUCT PRINTS (T4, sweep #8) ──────
+          // It only understood `?table=N`, `?t=N`, or a bare number. But every QR this app has
+          // generated since migration 210 is `/q/<code>` — `components/admin/RestaurantSettings.tsx`
+          // builds `${origin}/q/${code}` and nothing builds `?table=N` any more (the same fact
+          // components/MenuView.tsx states in its own comment). So a diner holding their phone at the
+          // sticker on their table got a camera view that sat there, forever, saying nothing.
+          //
+          // The `/q/` door already knows how to turn that code into a table: it pins the tenant and
+          // hands MenuView `qrTable`. So we GO THERE, exactly as the phone's own camera app would.
+          // That is also why we do not add a code→table lookup instead: MenuView's comment records
+          // the reason — a route that answers "which table is this code?" would turn a private code
+          // into something harvestable. Walking through the door the sticker points at exposes
+          // nothing that scanning it with the camera did not already expose.
+          //
+          // SAME ORIGIN ONLY. A QR is a thing a stranger can stick on a table, so a scanned link is
+          // never followed off this site.
           let t = "";
-          try { const u = new URL(raw); t = u.searchParams.get("table") || u.searchParams.get("t") || ""; } catch { t = raw; }
+          let ourCode = "";
+          let foreign = false;
+          try {
+            const u = new URL(raw); // absolute link…
+            if (u.origin === window.location.origin) {
+              t = u.searchParams.get("table") || u.searchParams.get("t") || ""; // the pre-mig-210 stickers
+              const m = /^\/q\/([A-Za-z0-9]{6,16})\/?$/.exec(u.pathname);       // today's stickers
+              if (!t && m) ourCode = m[1].toUpperCase();
+            } else foreign = true;
+          } catch { t = raw; } // …not a link at all, so treat the whole text as the number
           t = (t || "").replace(/\D/g, "");
-          if (t) { stopScan(); setTableInput(t); setStep("ask_table"); }
+          if (t) { stopScan(); setTableInput(t); setStep("ask_table"); return; }
+          if (ourCode) { stopScan(); window.location.href = `/q/${ourCode}`; return; }
+          // AND A SCAN NEVER ENDS IN SILENCE. Reading a QR that is not a table sticker used to leave
+          // the camera running with no explanation, which is the same "nothing happened" a dead
+          // button gives. Say which kind of QR it was and send them to the box that always works.
+          stopScan();
+          setNote(foreign
+            ? "That QR belongs to another site — please type your table number."
+            : "That QR doesn’t say which table it is — please type your table number.");
+          setStep("ask_table");
         } catch {} // a frame that fails to decode is normal — just try the next one
       }, 350);
     } catch {
