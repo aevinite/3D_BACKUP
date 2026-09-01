@@ -22,6 +22,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -46,9 +50,11 @@ export async function GET(req: NextRequest) {
   // HEAD count only — uses the (restaurant_id, created_at) index when scoped.
   let q = sb.from("staff_actions").select("id", { count: "exact", head: true });
   if (rid) q = q.eq("restaurant_id", rid);
-  const r = await q;
-  if (r.error) return adminFail("the log cleanup", r.error, { action: "load" });
-  return NextResponse.json({ count: r.count ?? 0, threshold: FULL_THRESHOLD });
+  const reads = new ReadSet("admin/oplog/cleanup", [await rd("count", () => q)]);
+  if (reads.failed("count")) return adminFail("the log cleanup", reads.error("count"), { action: "load" });
+  // count() throws for a failed read instead of `?? 0` — and it cannot be reached failed, because the
+  // line above returned. A confident 0 here would have hidden a log that was actually filling up.
+  return NextResponse.json({ count: reads.count("count"), threshold: FULL_THRESHOLD });
 }
 
 export async function POST(req: NextRequest) {

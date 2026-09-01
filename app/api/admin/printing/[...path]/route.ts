@@ -37,6 +37,13 @@ export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const OS_LIST: HelperOs[] = ["mac", "windows", "linux"];
+// THE ID'S SHAPE, BEFORE IT REACHES A UUID COLUMN (T19 sweep #7, 2026-09-01). Every sibling admin
+// route checks this and this one did not: `?rid=nonsense` went straight into
+// `.eq("restaurant_id", rid)`, so every read behind the board was refused by the database and the
+// screen rendered as a restaurant with no computers and no printers, rather than saying the link was
+// wrong. A stale bookmark is the ordinary way that happens.
+const RID_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const needRid = (rid: string) => (!rid ? "Which restaurant?" : !RID_UUID.test(rid) ? "That isn't a restaurant." : null);
 
 /** The install text for every operating system, with this machine's own code already in it. Shown
  *  ONCE, when the code is minted or replaced: the code is stored only as a hash, so it cannot be
@@ -93,10 +100,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       sb.from("print_jobs").select("restaurant_id, kind, created_at")
         .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
     ]);
+    // …AND THE OTHER THREE, for the same reason one line down (item 20, T19 sweep #7, 2026-09-01).
+    // The restaurants read was checked; these were not, and each one silently redraws the board as a
+    // different lie: with `agents` failed every restaurant reads "no computer", with `settings` failed
+    // printing reads as switched off everywhere, and with `jobs` failed nothing is ever waiting. This
+    // is a HARDWARE board — the answer decides whether he goes and looks at a shop's PC — so a wrong
+    // picture is worse than an error. Nothing here is partial-renderable: the rows are the board.
     // AN EMPTY BOARD IS NOT "NO RESTAURANTS". Every row below is built from this list, so a failed
     // read answered a 200 with `rows: []` — a Printing overview showing nothing at all, which reads
     // as a healthy platform with nobody printing. Same rule as its neighbours in this console.
     if (rests.error) return adminFail("the printing overview", rests.error as { message?: string }, { action: "load" });
+    if (agents.error) return adminFail("the printing overview", agents.error, { action: "load" });
+    if (sets.error) return adminFail("the printing overview", sets.error, { action: "load" });
+    if (jobs.error) return adminFail("the printing overview", jobs.error, { action: "load" });
     const now = Date.now();
     const byRest = new Map<string, { n: number; oldest: number | null }>();
     for (const j of (jobs.data || []) as { restaurant_id: string; created_at: string }[]) {
@@ -145,7 +161,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   // sit below this line and every request answered 400 — the page rendered nothing and said nothing
   // (caught by driving it, 2026-08-27).
   const rid = new URL(req.url).searchParams.get("rid") || "";
-  if (!rid) return err("Which restaurant?");
+  const ridBad = needRid(rid);
+  if (ridBad) return err(ridBad);
 
   if (!seg.length || seg[0] === "state") {
     // ONE read of the shared board — the same call the restaurant's own Settings → Printing makes,
@@ -160,10 +177,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     //     A person switched off is not offered, which is what makes that permission mean something.
     //   · devices — the screens that have actually been the printer before (print_stations), so "that
     //     same PC" is a thing he recognises rather than a hex id he has to guess at.
-    const staff = ((await sb.from("staff_users").select("id, name, username, role, active, permissions")
+    // CHECKED, because an empty picker is a sentence about the restaurant (item 20, 2026-09-01). With
+    // this read's failure swallowed, `people` came back empty and the board said "there is no kitchen
+    // panel available" — the exact words the note below records the owner hitting for real, from a
+    // different cause. An empty list and an unreadable list must not look the same on a screen whose
+    // job is choosing who prints.
+    const staffQ = await sb.from("staff_users").select("id, name, username, role, active, permissions")
       // A CEILING, so PostgREST's own default cannot silently shorten this picker (T17 sweep #7,
       // 2026-08-27). One restaurant's staff, and every other read in this file already states one.
-      .eq("restaurant_id", rid).order("role").limit(500)).data || []) as
+      .eq("restaurant_id", rid).order("role").limit(500);
+    if (staffQ.error) return adminFail("this restaurant's printing board", staffQ.error, { action: "load" });
+    const staff = (staffQ.data || []) as
       { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null;
         permissions?: Record<string, string> | null }[];
     // ── PER PERSON, NOT PER RESTAURANT (owner's review, 2026-08-28) ───────────────────────────
@@ -177,7 +201,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // Both sides call managerHasFlag() now, so the picker and the gate cannot disagree. `access_config`
     // is read as well because it is the CAP: switched off there, nobody may, whatever their own
     // setting says. Still ONE extra column on a query already being made.
-    const perms = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+    // Checked too: this row is the CAP on who may print, so reading it as absent would offer people
+    // the gate then refuses — the very disagreement the note above was written to end.
+    const permsQ = await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle();
+    if (permsQ.error) return adminFail("this restaurant's printing board", permsQ.error, { action: "load" });
+    const perms = permsQ.data as
       { manager_permissions?: Record<string, unknown> | null; access_config?: Record<string, { on?: boolean }> | null } | null;
     const mayBePrinter = (u: { role?: string | null; permissions?: Record<string, string> | null }) =>
       managerHasFlag("print_here", {
@@ -200,8 +228,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         : role === "manager" ? ["manager"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
-    const devices = ((await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
-      .eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(12)).data || []);
+    // The remembered screens are the one TOLERATED read here: an empty "which PC" list only costs a
+    // convenience (he can still name the panel), and the board does not claim it is complete.
+    const devicesQ = await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
+      .eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(12);
+    if (devicesQ.error) console.error("[admin/printing] the remembered screens could not be read:", devicesQ.error.message);
+    const devices = devicesQ.data || [];
 
     return NextResponse.json({
       ...board,
@@ -236,7 +268,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   const seg = (path || []).map(String);
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const rid = String(body.rid || "");
-  if (!rid) return err("Which restaurant?");
+  const ridBad = needRid(rid);
+  if (ridBad) return err(ridBad);
 
   // ── add a computer ────────────────────────────────────────────────────────────────────────
   if (seg[0] === "agents" && seg.length === 1) {
@@ -260,7 +293,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // The old one stops working the instant this returns, which is also how a stolen or sold machine
   // is dealt with: give the code to nobody and it is simply dead.
   if (seg[0] === "agents" && seg[1] && seg[2] === "newcode") {
-    const row = (await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle()).data as { id: string; name: string } | null;
+    // Checked (item 21, 2026-09-01): "No such computer." for a read that merely failed sends him
+    // looking for a machine that is registered perfectly well.
+    const rowQ = await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle();
+    if (rowQ.error) return adminFail("that computer", rowQ.error, { action: "load" });
+    const row = rowQ.data as { id: string; name: string } | null;
     if (!row) return err("No such computer.", 404);
     const { token, hash } = mintAgentToken();
     // The fingerprint is cleared with the code: the next machine to use it is the machine it now
@@ -274,7 +311,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // Marked revoked, never deleted: the record of which machine printed which ticket has to stay
   // readable, and a row nobody can look up is not a record.
   if (seg[0] === "agents" && seg[1] && seg[2] === "revoke") {
-    const row = (await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle()).data as { id: string; name: string } | null;
+    const rowQ = await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle();
+    if (rowQ.error) return adminFail("that computer", rowQ.error, { action: "load" });
+    const row = rowQ.data as { id: string; name: string } | null;
     if (!row) return err("No such computer.", 404);
     await sb.from("print_agents").update({ revoked_at: new Date().toISOString() }).eq("id", row.id).eq("restaurant_id", rid);
     // Any route pointing at it is emptied in the same breath — a route naming a machine that can no

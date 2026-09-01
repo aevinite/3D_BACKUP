@@ -38,13 +38,21 @@ async function postHandler(req: NextRequest) {
   if (body.all === true) {
     if (!body.seen) return err("all-mode only marks seen");
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // COUNTED BEFORE, NOT COUNTED FROM WHAT CAME BACK (T19 sweep #7, 2026-09-01). This ended
+    // `.select("id")` and reported `data.length`, which stops at PostgREST's own row cap: on a day
+    // with more unseen errors than that, every one would be marked seen and the reply would say a
+    // smaller number. A head count with the SAME filter cannot be shortened.
+    const seenCount = sb.from("staff_actions").select("id", { count: "exact", head: true })
+      .eq("level", "error").is("seen_at", null).gte("created_at", since24h);
+    const before = await seenCount;
+    if (before.error) return adminFail("the notification state", before.error, { action: "load" });
     const r = await sb.from("staff_actions").update({ seen_at: nowIso })
-      .eq("level", "error").is("seen_at", null).gte("created_at", since24h).select("id");
+      .eq("level", "error").is("seen_at", null).gte("created_at", since24h);
     // Both branches of this route WRITE (see the rule 4b note in scripts/verify-admin-api-a.mjs):
     // reporting a failed update as "couldn't load" told the admin the wrong thing about whether the
     // bell had changed. "save" promises nothing was changed, which is what actually happened.
     if (r.error) return adminFail("the notification state", r.error, { action: "save" });
-    return NextResponse.json({ ok: true, changed: r.data?.length ?? 0 });
+    return NextResponse.json({ ok: true, changed: before.count ?? 0 });
   }
 
   // Validate + cap the id list (per-row toggles, e.g. "mark unread"; 200 is a safe ceiling).
@@ -53,6 +61,8 @@ async function postHandler(req: NextRequest) {
     : [];
   if (ids.length === 0) return err("no valid action_ids");
 
+  // The id list is capped at 200 above, well under PostgREST's own cap, so counting the returned
+  // rows is safe here — unlike the all-mode branch above.
   const r = await sb.from("staff_actions").update({ seen_at: body.seen ? nowIso : null }).in("id", ids).select("id");
   if (r.error) return adminFail("the notification state", r.error, { action: "save" });
   return NextResponse.json({ ok: true, changed: r.data?.length ?? 0 });

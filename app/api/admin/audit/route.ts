@@ -14,6 +14,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
@@ -44,9 +48,16 @@ export async function GET(req: NextRequest) {
   const detailId = url.searchParams.get("detail");
   if (detailId) {
     if (!/^\d+$/.test(detailId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-    const one = (await sb.from("deletion_audit")
+    // OPENING ONE REMOVAL TELLS A BLIP FROM "NOT FOUND" (item 19, T19 sweep #7, 2026-09-01).
+    // This took `.data` and ignored `.error`, so a failed read answered "not found" — about a row the
+    // admin had just clicked in the list above it, on the record whose whole purpose is proving a sale
+    // did not quietly vanish. The OWNER's identical view was fixed for exactly this in the T9 pass
+    // (verify:read-guards asserts it as finding F8); the admin's own copy never was.
+    const detail = new ReadSet("admin/audit:detail", [await rd("removal", () => sb.from("deletion_audit")
       .select(`${COLS}, session_id, order_id, item_id, device_id, meta`)
-      .eq("id", Number(detailId)).limit(1)).data?.[0] as Record<string, unknown> | undefined;
+      .eq("id", Number(detailId)).limit(1))]);
+    if (detail.failed("removal")) return adminFail("this removal", detail.error("removal"), { action: "load" });
+    const one = detail.rows<Record<string, unknown>>("removal")[0];
     if (!one) return NextResponse.json({ error: "not found" }, { status: 404 });
     const rn = one.restaurant_id
       ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
@@ -54,9 +65,14 @@ export async function GET(req: NextRequest) {
     // Is the thing it describes still restorable? A soft-deleted order can be put back; a
     // cancellation or a menu-item removal is a different kind of correction. Answered from the
     // live row so the button is never offered for something that cannot be undone.
+    // And the same for the row that decides whether RESTORE is offered: with the error swallowed a
+    // blip read as "already put back", so the button vanished from a removal that could still be
+    // undone. Tolerated is not good enough for a button that appears or does not.
     let restorable = false;
     if (one.kind === "order_deleted" && one.order_id) {
-      const live = (await sb.from("orders").select("deleted_at").eq("id", String(one.order_id)).maybeSingle()).data as { deleted_at?: string | null } | null;
+      const liveQ = new ReadSet("admin/audit:live", [await rd("order", () => sb.from("orders").select("deleted_at").eq("id", String(one.order_id)).maybeSingle())]);
+      if (liveQ.failed("order")) return adminFail("this removal", liveQ.error("order"), { action: "load" });
+      const live = liveQ.value<{ deleted_at?: string | null }>("order");
       restorable = !!live?.deleted_at;
     }
     // The two boxes and the bill. `auditAfter` re-reads the order anyway, so the restorable check
@@ -78,17 +94,18 @@ export async function GET(req: NextRequest) {
     q = q.or(`item_title.ilike.%${safe}%,actor.ilike.%${safe}%,reason_note.ilike.%${safe}%`);
   }
 
-  const r = await q;
-  if (r.error) return adminFail("the removals record", r.error, { action: "load" });
-  const rows = r.data ?? [];
+  const reads = new ReadSet("admin/audit", [await rd("removals", () => q)]);
+  if (reads.failed("removals")) return adminFail("the removals record", reads.error("removals"), { action: "load" });
+  const rows = reads.rows<{ id: number; restaurant_id: string | null }>("removals");
 
   // Stamp each row with WHICH restaurant it belongs to — one batched name lookup, no N+1
   // (same pattern as /api/admin/oplog).
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean))) as string[];
   const nameById = new Map<string, string>();
   if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
-    for (const x of rest.data ?? []) nameById.set(x.id, x.name);
+    // Tolerated: a miss leaves a row's restaurant unnamed rather than emptying the record.
+    const rest = new ReadSet("admin/audit:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(2000))]);
+    for (const x of rest.rowsOr<{ id: string; name: string }>("names", [])) nameById.set(x.id, x.name);
   }
   const removals = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));
   return NextResponse.json({ removals });
