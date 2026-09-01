@@ -143,7 +143,12 @@ body.nav-tight .tab-badge { margin-left: 5px; }
 body.nav-compact .nav-burger {
   display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
   gap: 4px; flex: none;
-  width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
+  /* 44, not 40 (owner said do it, 2026-09-01 — item 24). The waiter tablet and the kitchen board
+     both put this control at 44x44 and recorded why on 2026-08-22 ("38x38 … all three sat 6px under
+     the finger target … they get bigger without getting nearer each other"). The manager panel was
+     the last one still short. Its neighbour is 8px away and unmoved, so a bigger target here cannot
+     become a nearer wrong one — the whole of R40's reasoning. */
+  width: 44px; height: 44px; min-height: 44px;
   background: transparent; border: 1px solid var(--line); border-radius: 10px;
   cursor: pointer; padding: 0;
   position: relative;                               /* anchors the .has-news dot below */
@@ -2279,6 +2284,11 @@ body {
   .nav-util { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .nav-util-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
   .nav-util-row:hover { background: var(--panel-2); }
+  /* The 🔔 is injected by the shared guestbell.js at 38x38 and is the one control left on this bar
+     under the finger target (item 24). The waiter tablet already serves it at 44 through its own
+     .theme-toggle rule; this does the same from the panel that owns the bar. Height AND width,
+     because it is a square icon button and its neighbours are 5px away and unmoved. */
+  #lfhBellBtn { width: 44px; height: 44px; min-height: 44px; }
   .top-actions { gap: 6px; }
   /* Icon-only, but ONLY for the everyday "👤 Profile" label. The one-time "👋 Finish setup"
      state keeps its words — that one is an invitation, not a utility button (maint.js sets
