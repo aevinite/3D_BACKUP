@@ -84,6 +84,8 @@
     "verify:split-payment": "node --experimental-strip-types --no-warnings scripts/verify-split-payment.mjs",
     "verify:tax-mode": "node --experimental-strip-types --no-warnings scripts/verify-tax-mode.mjs",
     "verify:t24-money-rules": "node --experimental-strip-types --no-warnings scripts/verify-t24-money-rules.mjs",
+    "verify:t24b": "node scripts/verify-t24b-money-safety.mjs",
+    "verify:t24b-live": "node scripts/verify-t24b-live.mjs",
     "verify:guest-read": "node scripts/verify-guest-read.mjs",
     "verify:tax-mode-e2e": "node scripts/verify-tax-mode-e2e.mjs",
     "verify:merge": "node scripts/verify-merge-party.mjs",
