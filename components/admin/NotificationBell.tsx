@@ -126,10 +126,10 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
       <div ref={ref} tabIndex={-1} role="dialog" aria-label="Notifications"
         style={{
           position: "absolute", top: 0, right: 0, height: "100%", width: "min(420px, 92vw)",
-          background: "var(--panel, var(--bg))", borderLeft: "1px solid var(--line)",
+          background: "var(--panel, var(--bg))", borderLeft: "1px solid var(--border-c, #1d2430)",
           boxShadow: "-12px 0 40px rgba(0,0,0,.25)", display: "flex", flexDirection: "column", outline: "none",
         }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "15px 16px", borderBottom: "1px solid var(--line)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "15px 16px", borderBottom: "1px solid var(--border-c, #1d2430)" }}>
           <i className="fas fa-bell" aria-hidden="true" style={{ opacity: 0.8 }} />
           <b style={{ fontSize: 15 }}>Notifications</b>
           <button className="adm-icnbtn" onClick={onClose} title="Close" aria-label="Close" style={{ marginLeft: "auto" }}>

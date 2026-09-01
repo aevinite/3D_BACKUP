@@ -1,265 +1,150 @@
-# T13 findings — the owner's Menu editor, Team and Settings
+# T13 findings — sweep #7 · the owner's Menu, Team & Settings
 
-Territory: `app/owner/menu/**` · `app/owner/staff/**` · `app/owner/settings/**`
-Phases: P06001–P06500 · Branch: `sweep6/t13-owner-menu-staff` · Port: 4113
-Restaurant written to: **French House** only (Aangan never touched). Every row created was deleted
-by id in the same run; the one `owner_entitlements` flip was restored byte-for-byte and verified.
+**2026-08-27** · branch `sweep7/t13-owner-menu-staff` · port 4213 (production build, proved mine)
+**Territory:** `app/owner/menu/**` · `app/owner/staff/**` · `app/owner/settings/**`
+**Ledger:** `.claude/sweep/LEDGER/T13.md` — P06001–P06500 re-run, P21101–P21600 written
 
-Seven real problems. All seven are the same shape: **the screen said something that was not what
-had actually happened.** All seven are fixed in this branch, one commit each, each with a section
-of `scripts/verify-owner-panel.mjs` (`npm run verify:owner-panel`) numbered to match.
+> ⚠️ The four-part report the owner reads is in the TERMINAL, not in this file — that is his own
+> instruction for sweep #7. This file is the durable record of what was found and fixed, for the
+> next sweep. It carries no improvement ideas.
 
-Numbering below = the numbers in the chat report = the guard's section numbers.
-
----
-
-## 1 · A refused change was refused, and the owner was never told — HIGH · confirmed
-
-**Where:** owner panel → Team → any person's row → "Rename / edit phone" → Save.
-**Phase:** P06211 (also P06207, P06327).
-
-Two people editing the same person's name or phone is the exact case "first save wins, and the
-loser is told" exists for (CLAUDE.md item 11). The server does its half perfectly: it answers 409
-with `clash.plain` — *"Someone else changed the name while you had it open — it now says …"* — and
-`call()` throws that sentence. `saveEdit`'s catch then ran `setErr(msg); await load();`, and
-`load()` ends its success path with `setErr(null)`. So the message was erased by the reload one
-line later, before a single frame was painted with it.
-
-**Measured:** PATCH → `409 {"clash":{"plain":"Someone else changed the name…"}}` on the wire, and
-zero error banners in the DOM afterwards. What the owner saw: the row quietly showing someone
-else's name, their own typing still in the box, no explanation anywhere.
-
-`verify:owner-clash` was green throughout — a text scan can see the sentence being READ out of the
-response, but not being cleared afterwards.
-
-**Fix:** refresh first (the row must show what really landed), then say why. The editor stays open
-with the draft, which is what `clash.todo` tells them to do.
-**Guard:** §1 — isolates `saveEdit`'s catch and requires `await load()` before `setErr(`.
-
-## 2 · A refusal rendered ~950px above the top of the screen — HIGH · confirmed
-
-**Where:** owner panel → Team → the "Add" form at the bottom of the roster, on a phone.
-**Phase:** P06393 (also P06040, P06230, P06345, P06496).
-
-Every refusal on this page renders in one place: a banner at the very top. The one-time password
-card has scrolled itself into view since 2026-07-07 for exactly this reason ("an owner low on the
-page used to never see it"). The banner never did.
-
-**Measured** on a 360×780 phone: submitting the Add form put the banner at **y = −951px**. Read the
-screenshot: the owner tapped Add and nothing on screen changed at all. Same for a Remove the pay
-ledger protects, and for a duplicate username.
-
-**Fix:** the same scroll-into-view the password card uses.
-**Guard:** §2.
-
-## 3 · ⚠️ VETOED BY THE OWNER (2026-08-18) — the disclosure half is REJECTED, R31
-
-> *"owner can't know which option are not given to them only admin should know that"*
->
-> What is withheld from a restaurant is Aevidine's business alone. The card now lists ONLY what is
-> ON — no ✗, no greyed chip, no count — and a section he does not have is simply not mentioned.
-> **What survives:** the label map covers all nine sections, so a section he genuinely HAS can never
-> be missing a chip (it held six of nine, which under-reported what he had). Do not offer the
-> off-state again; see `docs/REJECTED-IDEAS.md` R31.
-
-### The original finding, kept for the record
-
-**Where:** owner panel → Settings → the "What's enabled" card.
-**Phases:** P06193, P06194, P06371, P06399, P06462, P06464b, P06488.
-
-The card is the only place an owner can confirm "that section is off on purpose". It listed 6 of
-the 12 keys the API answers, so **Menu**, **Audit & logs** and **Manager mode** had no chip at all.
-Two of the six were also named after screens that no longer exist: "Staff & powers" (its Powers tab
-went in the access rebuild of 2026-07-31; the sidebar was corrected to "Team" on 2026-08-05 and the
-roster's crumb on 2026-08-14 — this chip was the third copy of the same stale name) and "Feedback &
-issues", which every other surface calls "Feedback & complaints".
-
-**Measured:** with `menu` switched off for French House, the Menu item vanished from the sidebar,
-`/owner/menu` said "ask your administrator", and this card still showed the same six chips.
-Read both screenshots side by side: the sidebar says Menu / Manager mode / Audit & logs; the card
-mentions none of them and names two others wrongly.
-
-**Fix:** nine chips, named and ordered exactly as the sidebar names them. The three `logs_*` keys
-are deliberately still not chips — they are which KINDS of row the Audit & logs page shows, not
-sections; a chip each would read as three more screens he does not have.
-**Guard:** §3 — derives the required set from `OWNER_SECTION_KEYS` and compares every label against
-`OwnerShell`'s own nav label, so both halves of this fault are caught.
-
-## 4 · Closing a person's profile silently switched which owner you were looking at — MEDIUM · confirmed
-
-**Where:** owner panel (opened by Aevidine for a restaurant with two owners) → Team → open a
-person → close the sheet.
-**Phases:** P06029, P06365.
-
-The link INTO a person was fixed to carry `?as=` in the T19 sweep (2026-08-14). The way back built
-its URL from `?rid=` alone, so the pin survived the trip out and was thrown away on the trip home:
-the roster, which resolves the owner from `as`, fell back to the PRIMARY owner's estate — same tab,
-same task, a different person's team, nothing on screen saying so.
-
-**Measured:** closing from `?rid=…&as=…` returned `/owner/staff?rid=…` with no `as` at all.
-
-**Fix:** build the return URL from both pins, memoised on both.
-**Guard:** §4 — and it re-checks the outbound link too, so the T19 fix cannot regress either.
-
-## 5 · The Menu page reported a failed query as "the admin switched it off" — MEDIUM · code-read
-
-**Where:** owner panel → Menu.
-**Phases:** P06010, P06223, P06498.
-
-`entitledSubset` ends in `.data || []`, and the admin branch used `.data` with no error check. An
-empty answer has the same shape whether the admin genuinely switched Menu off or the query simply
-failed — and the page then told the owner, in words, that their menu editor *"isn't switched on for
-your restaurant — ask your administrator"*. That is a lie about their configuration on a database
-blip: it sends them to support about a setting that is fine.
-
-The rest of the product refuses to guess here — `/api/owner/staff` answers 503 "please try again"
-for this exact case and its comment spells out why ("a failed READ is not a switched-off feature"),
-as does `lib/panelAccess.ts` → `OwnedLookupFailed`. This page was the one owner screen still guessing.
-
-Marked **code-read**, honestly: I could not make the database fail from a browser, so I did not
-watch this one happen. The two states and the read error are plainly there in the source.
-
-**Fix:** inspect the error, and answer "couldn't open your menu just now — please reload" for it.
-It is also **one read instead of two** now: asking for `owner_entitlements` alongside `id, name`
-answers the entitlement and the name in a single trip, where the page previously read the
-`restaurants` table twice per render.
-**Guard:** §5 — including that the Menu section switch is still enforced server-side here.
-
-## 6 · The waiter picker drew an empty box and told the owner to pick from it — LOW · confirmed (forced)
-
-**Where:** owner panel → Team → Add → role "waiter".
-**Phases:** P06052, P06423, P06142.
-
-`tableCount` comes from one `settings.table_count` read whose `.error` is not inspected on the
-server, so a blip answers 0. The picker then drew a box with nothing in it, "0 of 0 picked", and
-the line "Pick at least one table" — an instruction the screen was not offering — with Add disabled
-for good and nothing saying why.
-
-**Reachable via:** that floor-size read failing. Stated plainly: the column itself is
-`NOT NULL DEFAULT 12` and the admin clamps it to 1–500, so a genuinely tableless restaurant is not
-a normal state. I reproduced it by forcing `tableCount: 0` and read the screenshot.
-
-**Fix:** name the restaurant and say the floor size could not be read, instead of asking the
-impossible.
-**Guard:** §6. See also 🔗 HANDOFF H2 for the server-side read.
-
-## 7 · Two limits the server enforces were not stated where the value is typed — LOW · confirmed
-
-**Where:** owner panel → Team → the Add form (password, phone) and any row's "Rename / edit phone".
-**Phases:** P06132, P06136, P06345.
-
-* The server refuses a password under **6** characters. The field said only "blank = auto", so the
-  owner learned the rule from a refusal after a round trip — which, before problem 2 was fixed,
-  rendered off the top of the screen. The sibling field on `/owner/settings` already says
-  "min 6 characters".
-* The server cuts a phone number at **20** characters (`.slice(0, 20)`). Neither phone field had a
-  cap, so a longer value — two numbers in one box, or an extension — was accepted and quietly
-  truncated on save. The roster then showed a number the owner had not typed, and nothing said so.
-  The username field beside it has always mirrored its server limit (80) for exactly this reason.
-
-Kept as ONE item because it is one fault in one form: a limit the server enforces must be visible
-where the value is typed. **Measured after the fix:** the password field refuses "abc" before any
-request; both phone fields stop at 20.
-**Guard:** §7 — it reads both limits out of `app/api/owner/staff/route.ts`, so if the server ever
-changes them the guard fails until the form agrees again.
+**Six problems found, six fixed. One of them is a REGRESSION.** One commit each, numbered, so any
+single one can be dropped without unpicking the rest.
 
 ---
 
-## 🔗 HANDOFF — the real fix lives in another terminal's file
+## 1 · REGRESSION — `verify:staff-accounts` was red on clean code (ledger P06276)
 
-### H3 · ✅ CLOSED 2026-08-19 — The first phone-Back press on a person's profile did nothing — `lib/backStack.ts` / `components/admin/useAdminModal.ts`
+**Where it lives:** backend only, nothing on screen. `scripts/verify-staff-accounts.mjs`.
 
-**Where:** owner panel → Team → "Open profile" → press the phone's Back button, on a phone.
-**Phase:** P06366. **Found** 2026-08-18 in the post-merge pass, by driving it.
+The guard asserted that no action name among the last 30 rows of `/api/admin/oplog` contains the
+letters "edit". That log is **platform-wide**, and the product has since grown three legitimate such
+actions — `staff_profile_edit`, `staff_job_edit` (`app/api/owner/staff/route.ts`) and
+`rate_limit_edit` (`app/api/admin/rate-limits/route.ts`) — each a write the owner is meant to see in
+Audit & logs. With several sweep lanes sharing one dev database, one of them landing in the last 30
+rows is close to certain.
 
-Measured on 360×780, logging each press: **press 1 changes nothing** — same URL, sheet still open.
-Press 2 returns to the roster. Escape and the ✕ both close it on the first try, so nobody is stuck;
-it is one wasted press, every time, on the control a phone user reaches for first.
+**The guard was wrong; the route is right.** `app/api/admin/users` calls `logAction` for create,
+set_job, set_permissions, reset_password, enable, disable, set_role, set_access, set_pin and delete,
+and for nothing else. The tell was inside the file: its `before` and `newRows` locals were computed
+and never used, so the row comparison it was reaching for had been started and never finished.
 
-**Cause:** `/owner/staff/<id>` is a ROUTE, so opening it is already one history step. `StaffProfile`
-then ALSO registers a back layer through `useAdminModal` → `useBackClose` — which is right in the
-Aevidine console, where that profile is a modal opened over a page without navigating. In the owner
-cockpit it is a page, so there are two back-steps for one visible layer.
-
-**Why I did not fix it:** the swallowed press is consumed inside `lib/backStack.ts` and
-`components/admin/useAdminModal.ts`. Neither is my territory, and the change carries a trade-off I
-should not pick alone — making the layer's close use `router.back()` fixes the double press but
-strands anyone who reached the profile from a typed or bookmarked URL with no roster behind it.
-
-**FIXED 2026-08-19** by the second of those: `ProfileHost.pageHosted` → `StaffProfile` →
-`useAdminModal({ backLayer: false })`. The default stays ON, so all 13 real admin modals are untouched
-and Aevidine's own profile modal still closes on one Back without leaving the page (regression checked).
-Opening the profile is now ONE history entry; Back pops it natively; closing became a `replace` so that
-tapping ✕ and pressing Back cannot re-open what you just closed. Verified 11/11.
-Guarded: `verify:owner-panel` §10.
-
-### H4 · ✅ CLOSED 2026-08-19 (and my figure here was overstated) — Opening one person's profile was slow — `app/api/owner/staff/route.ts`
-
-**Where:** owner panel → Team → "Open profile". **Measured** five times: 3.9s, 6.4s, 7.0s, 8.7s,
-10.1s to the person's name appearing. One `?staff=` request, status 200, no console errors.
-
-It is **honest** while it waits — the sheet paints "Staff profile" with "Opening…" and a working ✕ —
-so this is slowness, not a lie, which is why it is not one of the numbered problems. But the detail
-endpoint does a lot per open: the person, the pay summaries, a `lfh_staff_performance` RPC, the
-activity feed, `accessStateFor`, `payrollByRid` and `loadLogVisibility`. Several already run in
-parallel; the RPCs look like the long pole.
-
-**FIXED 2026-08-19**, and differently from what I guessed here: nothing needed deferring to after
-first paint. The reads were simply awaited in a ROW — seven sequential round trips to Mumbai — and the
-four around the already-bunched pay reads now start together, after the gates (so a kitchen login still
-costs nothing extra). Seven hops → four.
-
-⚠️ **AND THE FIGURE ABOVE WAS OVERSTATED.** "4–10 seconds" was measured while this machine was running
-repeated test suites and a dev server at the same time. On a quiet machine, production builds both
-sides, five runs each: API median **1901ms → 1123ms**, tap-to-name median **2533ms → 1860ms**. The
-saving is real and structural (~600–700ms, a quarter to a third), but nobody was waiting ten seconds.
-Guarded: `verify:owner-panel` §10.
-
-### H1 · `app/owner/layout.tsx` — a stale comment, and a first-ever blip lands on the error page
-
-Line ~50 says `enabledOwnedRestaurantIds` *"swallows a read error into an empty list rather than
-throwing"*. That stopped being true on 2026-07-31 — it now throws `OwnedLookupFailed` when it has
-no cached answer (`lib/panelAccess.ts` → `staleOrThrow`). The layout's `catch` only handles
-`AuthDbError` and re-throws everything else, so the FIRST such blip for a given owner (nothing
-cached yet) renders `app/error.tsx` instead of the `<OwnerReconnecting />` card the block was
-written to show.
-
-**Change needed:** catch `OwnedLookupFailed` alongside `AuthDbError` and return
-`<OwnerReconnecting />`, and correct the comment in the same commit.
-**Severity:** low (needs a cold cache plus a failed read), but it is the difference between a calm
-"reconnecting" card and a crash page for a paying owner.
-**Not done here:** outside my territory. Found while checking P06022.
-
-### H2 · `app/api/owner/staff/route.ts` — the floor-size read ignores its error
-
-```
-const tcRows = (await sb.from("settings").select("restaurant_id, table_count").in(…)).data || [];
-```
-
-A failed read answers `tableCount: 0` for every restaurant, which is what makes problem 6 above
-reachable at all. Every other read in that file was given this treatment already (`transient()`,
-`rd()`, `payUnread`); this one was missed.
-
-**Change needed:** inspect `.error` and either answer `transient()` or send a `floorUnread: true`
-flag the roster can word, exactly as `payUnread` does for money.
-**Severity:** low. My fix makes the screen honest either way; this makes it correct.
-**Not done here:** outside my territory.
+**Fixed:** it compares log-row id sets before and after, scopes the question to that one person, and
+**proves its own matcher can see the `user_create` row that DOES name them** before it trusts an
+absence. 41/41.
 
 ---
 
-## Checked and deliberately NOT reported
+## 2 · The SECOND identical refusal never reached the screen (ledger P06230)
 
-* **Leftover Powers-tab CSS** in `app/owner/staff/page.tsx` (`.ost-perms`, `.ost-perm*`,
-  `.reach-chip*`, `.reach-legend`) matches no element on the page. Confirmed dead — not reported and
-  not removed: no person is worse off (§5 test 1) and §6 forbids pure tidying. Recorded at P06155 so
-  the next sweep does not raise it as new.
-* **`window.location.href` on the settings page** (a pre-existing lint warning). It is the correct
-  choice: the password change bumps `token_version`, so the session is dead and a full document
-  navigation is what discards the client state. Changing it would make behaviour worse.
-* **`setPayroll(s, false)`'s branch is unreachable from the roster** — the roster offers ADD only;
-  removal lives in the profile sheet. The confirm sentence itself is correct. No person affected.
-* **Kitchen rows being blank** — the owner's own ruling, three times. Not touched.
-* **No owner-side feature toggles** on Settings — the admin owns entitlement. Correct as-is.
-* **Contrast**, both skins, measured not eyeballed: the Add button 4.83:1 light / clears in dark,
-  the manager badge, the "on pay list · rate not set" chip and a picked table tile all clear 4.5:1
-  in both skins. The earlier fixes here are intact.
+**Where it lives:** owner panel → Team → the Add row at the bottom of a restaurant card, on a phone.
+
+Measured on 360×780. Add an existing username: the banner scrolls to y = 194 and is read. Tap Add
+again unchanged: the banner sits at **y = −1190**, off the top, typing still in the boxes.
+
+`setErr(sameString)` is a no-op in React, so nothing re-rendered and the scroll effect — keyed on
+`[err]` — never fired again. F3 (2026-08-17) added that effect precisely because a refusal above the
+fold is the same as no refusal; it only ever worked for the first attempt. **Six earlier passes each
+measured one refusal.**
+
+**Fixed:** the message carries a counter that always moves, and the effect watches it. Re-measured:
+y = 194 both times. Guarded by `verify:owner-panel` §2, which asserts the property rather than the
+spelling and goes red when the dependency is removed (proved).
+
+---
+
+## 3 · The printing card kept asking the server in a tab nobody was looking at
+
+**Where it lives:** owner panel → Settings → "Kitchen printing".
+
+Measured: 4 requests to `/api/owner/printing` in 40s with the tab in front, and **2 more in the next
+35s after it was hidden**. The repeat was unconditional, so a restaurant with printing switched off —
+which shows no card at all (R36) — paid for it too. Each call is five reads (the scope, `settings`,
+then agents + routes + the waiting count): roughly **1,200 reads an hour** for a card nobody is
+looking at. Every other owner page (Customers, Pay Later, Feedback & complaints) already skips a
+hidden tab and stops on `visibilitychange`.
+
+**Fixed:** gated on the card being present, skips a hidden tick, stops and restarts on
+`visibilitychange`, unhooks its own listener. **15s is kept while the card is visible, deliberately** —
+the admin's Printing screen uses the same cadence for the same reason (`HELPER_STALE_MS` is 30s, so a
+slower tick would let the card call a sleeping computer ready). Re-measured: 0 requests while hidden.
+
+---
+
+## 4 · The printer-guide button's icon touched its own first letter
+
+**Where it lives:** owner panel → Settings → Kitchen printing → "Open the printer setup guide".
+
+Measured 0px between the book icon and the "O", at both widths and in both skins. Cause:
+`.owx .adm-btn` is `display: inline-flex` with no `gap`, and a flex container discards the leading
+whitespace of a text run. Its three neighbours escape it only because their emoji sits inside the text.
+
+**Fixed:** an explicit gap on that button (7px, matching `.ost-btn`). Re-measured: 7px.
+
+**Not fixed here, reported:** the same shape affects four more buttons in this console — Refresh /
+Try again on Activity and on Feedback & complaints. One `gap` on `.owx .adm-btn` in
+`app/globals.css` would cure all five. Those files are not this territory's.
+
+---
+
+## 5 · Searching for a disabled person left the "Team" heading empty
+
+**Where it lives:** owner panel → Team → "Find someone".
+
+Search a disabled person's name and every match lands under "Disabled · N", leaving "Team", blank,
+then the group. They *were* found and the header says "1 of 2 shown", but the first thing the eye
+meets is the search term under a heading with nobody beneath it.
+
+**Fixed:** the gap now says "Nobody working matches "X" — the match below cannot sign in.", with a
+no-search wording for a team who are all disabled. Guarded by `verify:owner-panel` §14.
+
+---
+
+## 6 · A second restaurant would have been told the wrong printer
+
+**Where it lives:** owner panel → Settings → Kitchen printing → the restaurant rows.
+
+`/api/owner/printing` answers for ONE restaurant — the pinned one, else the first — and does not say
+which. The card's "which computer prints the kitchen slips" lookup sat inside the per-restaurant loop
+but did not depend on the row being drawn, so an owner with printing on at two restaurants would have
+read the FIRST restaurant's computer and printer on the SECOND restaurant's row.
+
+**Not reachable on this stack** — no owner here holds two restaurants — so it was found and fixed by
+reading. While there is exactly one row the answer provably belongs to it; beyond that the card falls
+back to the per-restaurant sentence, which is correct either way. A single-restaurant owner sees no
+change.
+
+**The fuller fix belongs elsewhere:** `/api/owner/printing` should echo the `restaurant_id` it
+answered for. That route is T20's.
+
+---
+
+## Guards this run leaves behind
+
+| guard | covers |
+|---|---|
+| `verify:owner-panel` (69, was 61) | §2 gains the repeated-refusal check; new §13 (printing: gated, hidden-aware, unhooked, one answer per row, the icon gap, R36) and §14 (the empty Team heading) |
+| `verify:staff-accounts` (41, was 40) | the corrected admin-edit claim, plus a self-proof that its matcher works |
+| `verify:owner-s7` (300, new) | P21101–P21400 |
+| `verify:owner-s7-live` (200, new) | P21401–P21600 |
+
+**Every new check was negative-tested** — the fix was removed and the check confirmed red — rather
+than trusted because it printed a tick.
+
+## Reported, not fixed — outside this territory
+
+1. `.owx .adm-btn` / `.adx .adm-btn` have no `gap`, so any icon+label button in either console loses
+   its space. Five known today. One line in `app/globals.css` (T26/T29).
+2. `/api/owner/printing` does not echo the restaurant it answered for (T20).
+3. `--line` is declared by the panel stylesheets but **not** by the owner/admin console, so
+   `components/owner/OwnerMenuEditor.tsx`'s restaurant-switcher bar falls back to a dark navy
+   hairline in the light skin. Only visible to a two-restaurant owner. `components/owner/` is not
+   this territory's.
+4. `components/admin/TicketCard.tsx` and `components/admin/NotificationBell.tsx` read `var(--line)`
+   with **no fallback at all**, in the same console (T15/T16).
+
+## Nothing was written to the database by this run's own checks
+
+Every forced state was produced by answering this browser's own request differently. The two guards
+that do write clean up by id and assert they left nothing behind. Aangan untouched; AV live never
+referenced; the deploy lock never taken; `main` never touched.
