@@ -166,6 +166,22 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // A plan can be 0 (free/comped) but never negative — a negative would flow straight into
     // Revenue's MRR/ARR as a subtraction and quietly understate the platform's income.
     if (amount != null && amount < 0) return bad("Amount can't be negative.");
+    // A DATE, OR NOTHING — the same rule add_payment already keeps for `paid_on` (T19 sweep #7,
+    // 2026-09-01). These two went straight at `date` columns with no check, so a typed "27/08/2026"
+    // or "next month" answered "Couldn't save this restaurant's plan" — true, but it names no field
+    // and gives the admin nothing to correct. Emptying a date is still allowed: that is how a plan's
+    // next-due is cleared.
+    const dateOr = (v: unknown, field: string): { value: string | null } | { error: string } => {
+      if (v === "" || v == null) return { value: null };
+      const t = String(v);
+      return /^\d{4}-\d{2}-\d{2}$/.test(t) && !Number.isNaN(Date.parse(t))
+        ? { value: t }
+        : { error: `Enter ${field} as YYYY-MM-DD (e.g. 2026-08-19), or leave it empty.` };
+    };
+    const started = dateOr(body.started_on, "the start date");
+    if ("error" in started) return bad(started.error);
+    const nextDue = dateOr(body.next_due_on, "the next-due date");
+    if ("error" in nextDue) return bad(nextDue.error);
     const patch = {
       restaurant_id: rid,
       plan: body.plan ? String(body.plan) : null,
@@ -173,8 +189,8 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       amount,
       currency: body.currency ? String(body.currency) : "INR",
       cycle,
-      started_on: body.started_on ? String(body.started_on) : null,
-      next_due_on: body.next_due_on ? String(body.next_due_on) : null,
+      started_on: started.value,
+      next_due_on: nextDue.value,
       notes: body.notes ? String(body.notes) : null,
       updated_at: new Date().toISOString(),
     };
