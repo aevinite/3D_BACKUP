@@ -253,3 +253,60 @@ Guard: a new `T11-I` section in `verify:owner-reports` (125 → 133 checks).
   That is the period and the generated-on date, both of which belong in the name.
 - **The Times-of-day printed sheet is exactly one page.** It has four rows. A short report is short;
   what matters is that it is not CLIPPED, and it is not.
+
+---
+
+# ROUND 3 — RE-PLANNED FROM SCRATCH, 2026-09-01
+
+He asked for a whole new 500 covering everything in the boundary, planned again rather than
+repeated. So it went at what rounds 1 and 2 had **not** reached: Inventory & stock's five views
+(449 lines no sweep had ever opened), the money and tax rules **executed** rather than read, every
+report across all nine periods, the export in **all three** formats, and the printed sheet for all
+17 screens.
+
+**607 assertions, 500 rows (`P51730`–`P52229`), all green at the end. One problem found.**
+
+## Item 17 · A settings change never reached the report — FIXED
+
+Owner → Reports → Tax / GST. Change your GST rate, edit a tax line, or move the restaurant to the
+composition scheme, and **the report kept showing the old configuration** — the old rate, the old
+CGST/SGST split, the old taxable base. On a document people file returns from.
+
+The snapshot cache's change-detectors ask "have the ORDERS moved?". They never asked "has the tax
+CONFIGURATION moved?" — and the Tax report is built from both. So `revalidate()` saw the same
+fingerprint, re-stamped the row's timestamp and returned **without recomputing**. On a quiet
+restaurant that holds the old rate indefinitely; only pressing Refresh cleared it.
+
+**Measured.** `price_tax_mode` read `excl` in the database while the cached report answered
+`composition = true · rate 0 · components 0`, and a forced read answered
+`composition = false · rate 5 · components 2`.
+
+This is the per-restaurant form of a scar already written down as *"the fingerprint watches data,
+not definitions"*. The global cache version cannot fix it, because the definition that moved belongs
+to one restaurant.
+
+Fixed by making both detectors carry the tax configuration, read through the **same**
+`TAX_SETTINGS_COLUMNS` the report itself is built from, sorted by restaurant id so a scope's member
+order cannot move the fingerprint on its own, and wrapped so a configuration that cannot be read
+never fails a request. It costs a few short columns on an indexed primary key, on the paths that
+already recompute — never on a plain cached read.
+
+Verified end to end: change the setting **without touching a single order**, and the report follows
+it — the composition flag, the rate and the CGST/SGST lines — while an unchanged window is still
+served from the snapshot rather than recomputed on every open.
+
+Guard: a new `T11-M` section in `verify:owner-reports` (146 → 150 checks).
+
+## The three faults round 3 caught in ITSELF
+
+Recorded because each one produced a convincing false failure:
+
+1. **A query parameter that does not exist.** `?open=inventory&sub=buy` looked like it picked a
+   sub-tab; there is no `&sub=` deep link. The first pass tested "On the shelf" five times and
+   reported four product failures. *Tap what a person taps.*
+2. **A toggle clicked twice.** The Export control opens and closes. Reading the menu and then
+   clicking an item closed it, so almost every download silently never happened — and it looked
+   exactly like a broken export.
+3. **A branch that never navigated.** The single-restaurant scope checks read whatever page the
+   previous section had left open. **Two of those three were passing on a page that could not have
+   failed them** — worth more than the one that went red.
