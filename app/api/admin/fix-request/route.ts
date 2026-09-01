@@ -61,9 +61,14 @@ async function postHandler(req: NextRequest) {
 
   if (actionId) {
     // Find the error row, then grab the window of rows around it for the same restaurant.
-    const row = (await sb.from("staff_actions")
+    // A BLIP IS NOT "THAT ENTRY NO LONGER EXISTS" (item 19, T19 sweep #7, 2026-09-01). Same shape as
+    // the removals card next door: the error was swallowed, so a failed read told the admin the error
+    // row he was looking at had been deleted — and the natural next move is to stop trying.
+    const rowQ = await sb.from("staff_actions")
       .select("id, panel, action, detail, restaurant_id, level, created_at")
-      .eq("id", actionId).maybeSingle()).data as { panel: string; action: string; detail: string | null; restaurant_id: string | null; level: string; created_at: string } | null;
+      .eq("id", actionId).maybeSingle();
+    if (rowQ.error) return adminFail("that log entry", rowQ.error, { action: "load" });
+    const row = rowQ.data as { panel: string; action: string; detail: string | null; restaurant_id: string | null; level: string; created_at: string } | null;
     if (!row) return err("That log entry no longer exists.", 404);
     rid = rid || row.restaurant_id;
     source = "error_row";

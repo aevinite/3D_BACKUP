@@ -48,9 +48,16 @@ export async function GET(req: NextRequest) {
   const detailId = url.searchParams.get("detail");
   if (detailId) {
     if (!/^\d+$/.test(detailId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-    const one = (await sb.from("deletion_audit")
+    // OPENING ONE REMOVAL TELLS A BLIP FROM "NOT FOUND" (item 19, T19 sweep #7, 2026-09-01).
+    // This took `.data` and ignored `.error`, so a failed read answered "not found" — about a row the
+    // admin had just clicked in the list above it, on the record whose whole purpose is proving a sale
+    // did not quietly vanish. The OWNER's identical view was fixed for exactly this in the T9 pass
+    // (verify:read-guards asserts it as finding F8); the admin's own copy never was.
+    const detail = new ReadSet("admin/audit:detail", [await rd("removal", () => sb.from("deletion_audit")
       .select(`${COLS}, session_id, order_id, item_id, device_id, meta`)
-      .eq("id", Number(detailId)).limit(1)).data?.[0] as Record<string, unknown> | undefined;
+      .eq("id", Number(detailId)).limit(1))]);
+    if (detail.failed("removal")) return adminFail("this removal", detail.error("removal"), { action: "load" });
+    const one = detail.rows<Record<string, unknown>>("removal")[0];
     if (!one) return NextResponse.json({ error: "not found" }, { status: 404 });
     const rn = one.restaurant_id
       ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
@@ -58,9 +65,14 @@ export async function GET(req: NextRequest) {
     // Is the thing it describes still restorable? A soft-deleted order can be put back; a
     // cancellation or a menu-item removal is a different kind of correction. Answered from the
     // live row so the button is never offered for something that cannot be undone.
+    // And the same for the row that decides whether RESTORE is offered: with the error swallowed a
+    // blip read as "already put back", so the button vanished from a removal that could still be
+    // undone. Tolerated is not good enough for a button that appears or does not.
     let restorable = false;
     if (one.kind === "order_deleted" && one.order_id) {
-      const live = (await sb.from("orders").select("deleted_at").eq("id", String(one.order_id)).maybeSingle()).data as { deleted_at?: string | null } | null;
+      const liveQ = new ReadSet("admin/audit:live", [await rd("order", () => sb.from("orders").select("deleted_at").eq("id", String(one.order_id)).maybeSingle())]);
+      if (liveQ.failed("order")) return adminFail("this removal", liveQ.error("order"), { action: "load" });
+      const live = liveQ.value<{ deleted_at?: string | null }>("order");
       restorable = !!live?.deleted_at;
     }
     // The two boxes and the bill. `auditAfter` re-reads the order anyway, so the restorable check
