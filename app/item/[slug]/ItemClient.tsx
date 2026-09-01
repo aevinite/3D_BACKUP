@@ -444,17 +444,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         // (Reviews load in their own effect below — see why there.)
         setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
-
-        // Load favorite state
-        try {
-          const savedFavorites = tget('lfh-favorites');
-          if (savedFavorites) {
-            const favorites = JSON.parse(savedFavorites);  // text back into a list
-            setFavorited(favorites.includes(dish?.id));    // is this dish in it?
-          }
-        } catch (e) {
-          console.error('Failed to load favorites', e);
-        }
+        // (The heart reads the saved list in its OWN effect below — see why there.)
       })
       .catch((err) => {
         if (cancelled) return;
@@ -538,6 +528,40 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // `reviewsCanBeSeen` stays in the list so a live toggle still re-runs this — it is the hook's
     // own value, which updates when a realtime breadcrumb refreshes the switches.
   }, [item, restaurantId, reviewsCanBeSeen]);
+
+  // IS THIS DISH ALREADY SAVED? — its own effect, not a passenger on the dish fetch.
+  //
+  // THE HEART FORGOT A SAVED DISH, AND THEN SAVED IT TWICE (sweep #8 T2, 2026-09-02 — item 3).
+  //
+  // This read used to live inside the main fetch's `.then(...)`, so it only ever ran when that
+  // fetch RESOLVED. Since item 9 (2026-09-01) the server hands the dish down, so the page now
+  // renders completely — photo, price, Add button — even when the browser's own re-read is slow or
+  // never lands. On that path the `.then` never runs, this read never happens, and the heart is
+  // left at its initial `false` on a dish the guest had saved.
+  //
+  // MEASURED end to end: heart a dish (`lfh-favorites:french-house` → `["avocado-and-cream-cheese"]`,
+  // heart filled), then re-open it with the browser's dish read held open. The dish is on screen and
+  // correct; the heart is EMPTY. Tap it, believing you are saving it → the list becomes
+  // `["avocado-and-cream-cheese","avocado-and-cream-cheese"]`, the same dish twice. One more tap
+  // removes both, so the guest un-saves in the very tap that looked like saving.
+  //
+  // Keyed on the dish's id, so it is right for the dish actually on screen, and it also listens for
+  // `lfh:favorites-updated` — the event this page already FIRES — so un-hearting the same dish on
+  // the menu's Favourites tab in another part of the same tab is reflected here too.
+  useEffect(() => {
+    if (!item?.id) return;
+    const read = () => {
+      try {
+        const saved = tget('lfh-favorites');
+        setFavorited(!!saved && (JSON.parse(saved) as string[]).includes(item.id));
+      } catch (e) {
+        console.error('Failed to load favorites', e);
+      }
+    };
+    read();
+    window.addEventListener("lfh:favorites-updated", read);
+    return () => window.removeEventListener("lfh:favorites-updated", read);
+  }, [item?.id]);
 
   // Load THIS restaurant's Google-review mode + link once (getSettings is cached per
   // restaurant, so this is effectively free). Drives the persistent Google call-to-action
@@ -643,8 +667,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       if (favorited) {
         // It was hearted — remove it.
         favorites = favorites.filter(id => id !== item.id);
-      } else {
-        // It wasn't — add it.
+      } else if (!favorites.includes(item.id)) {
+        // It wasn't — add it. The `includes` test is not belt and braces: without it, any state
+        // where the heart shows empty while the id IS in the list writes the dish a second time,
+        // and the next tap then removes BOTH copies. See the effect above for the measurement.
         favorites.push(item.id);
       }
       tset('lfh-favorites', JSON.stringify(favorites));  // save back

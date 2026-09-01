@@ -286,6 +286,34 @@ check(
     "and losing the listener there would freeze the bar at whatever the first paint decided."
 );
 
+// ── the heart tells the truth even when the dish page's second read never lands (item 3) ─────
+// This read used to be a passenger on the main fetch's .then(...). Since item 9 the server hands
+// the dish down, so the page renders in full even when the browser's re-read stalls — and on that
+// path the heart was left at false on a dish the guest had saved. MEASURED: tapping it then wrote
+// the same id twice, and the next tap removed both.
+{
+  const ic = read(ITEM_CLIENT);
+  check(
+    "the dish page reads its saved-dishes list in its own effect, not inside the dish fetch",
+    /useEffect\(\(\) => \{\s*\n\s*if \(!item\?\.id\) return;[\s\S]{0,900}?\}, \[item\?\.id\]\);/.test(ic) &&
+      !/setFavorited\(favorites\.includes\(dish\?\.id\)\)/.test(ic),
+    "app/item/[slug]/ItemClient.tsx: the heart must not depend on the client re-read resolving, " +
+      "or a stalled read shows an empty heart on a dish the guest already saved."
+  );
+  check(
+    "…and it follows a change made elsewhere in the same tab",
+    /addEventListener\("lfh:favorites-updated", read\)/.test(ic) &&
+      /removeEventListener\("lfh:favorites-updated", read\)/.test(ic),
+    "the heart listens for the same event this page fires, and removes the listener on unmount."
+  );
+  check(
+    "…and saving a dish that is already in the list cannot write it twice",
+    /\} else if \(!favorites\.includes\(item\.id\)\) \{/.test(ic),
+    "app/item/[slug]/ItemClient.tsx: toggleFavorite must not push an id the list already holds — " +
+      "a duplicate is then removed two-at-a-time by the next tap."
+  );
+}
+
 // ── the way out of the zoomed photo stays tappable (sweep #8 T2, item 2) ─────────────────────
 // `.img-lightbox-close` is position:absolute with no z-index, and the photo under it carries a
 // transform, which makes its own stacking context and paints on top once it is scaled up. MEASURED:
