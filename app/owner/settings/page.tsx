@@ -55,10 +55,19 @@ type Data = {
 //
 // logs_signins / logs_service / logs_staff_changes are deliberately absent: they are which KINDS of
 // row the Audit & logs page shows, not sections. Pay Later and Inventory are MODULES, not sections.
+//
+// ONE OF THESE NINE IS NOT A SIDEBAR ROW, AND THE CHIP NOW SAYS SO (owner, 2026-09-01 — "you can
+// do 15"). `ratings` is a real section and the owner really has it, but it is reached as a TAB
+// inside Feedback & complaints (app/owner/issues/page.tsx), not as its own nav item. So an owner
+// read "Guest ratings" on this card, went looking for it in the menu, and it was not there.
+// Naming it "Guest ratings" alone was under-informative; renaming it "Feedback & complaints" would
+// have printed that name twice, since `issues` already carries it. Saying where it lives is the
+// only version that is both true and findable — and it discloses nothing withheld (R36), because
+// the chip only exists when the section is ON.
 const SECTION_LABEL: Record<string, string> = {
   manager_mode: "Manager mode", menu: "Menu", reports: "Reports", staff: "Team",
   customers: "Customers", logs: "Audit & logs", issues: "Feedback & complaints",
-  ratings: "Guest ratings", settings: "Settings",
+  ratings: "Guest ratings — in Feedback & complaints", settings: "Settings",
 };
 
 export default function OwnerSettings() {
@@ -91,11 +100,37 @@ export default function OwnerSettings() {
       setPrinting(j && j.allowed ? j : null);
     } catch { /* leave whatever we had; this card never blocks the page */ }
   }, [scp]);
+  useEffect(() => { loadPrinting(); }, [loadPrinting]);
+  // IT KEPT ASKING WITH THE TAB HIDDEN, AND WITH NOTHING ON SCREEN TO ASK FOR (T13 sweep,
+  // 2026-08-27 — measured: 4 requests in 40s with the tab in front, and 2 more in the next 35s
+  // after the tab was hidden).
+  //
+  // Two separate costs, both avoidable:
+  //   • NOTHING TO REFRESH. The interval was unconditional, but this whole card only renders when
+  //     `data.printing` has a row — a restaurant whose printing is switched off shows nothing at all
+  //     (R36), and still paid four requests a minute for it, for as long as the page was open.
+  //   • A BACKGROUND TAB. Every other page in this console — Customers, Pay Later, Feedback &
+  //     complaints — polls on 60s, skips the tick while `document.hidden`, and stops and restarts on
+  //     visibilitychange. Settings was the one that did not, so an owner who opened it once and left
+  //     the tab behind kept a poll running all night. `/api/owner/printing` is five reads a call
+  //     (the scope, `settings`, then agents + routes + the waiting count), so that is ~1,200 reads
+  //     an hour for a card nobody is looking at. "This product's cost is egress, not effort."
+  //
+  // 15s is KEPT while the card is on screen and the tab is in front, deliberately: the admin's own
+  // Printing screen refreshes on the same cadence for the same reason — "is that computer awake" has
+  // a 30s truth window (HELPER_STALE_MS), so a slower tick would let this card say "ready" about a
+  // computer that had already gone to sleep. The fix is not a slower clock, it is not running the
+  // clock when there is no card and no one watching.
+  const showsPrinting = !!printing;
   useEffect(() => {
-    loadPrinting();
-    const t = setInterval(loadPrinting, 15000);
-    return () => clearInterval(t);
-  }, [loadPrinting]);
+    if (!showsPrinting) return;
+    let t: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!t) t = setInterval(() => { if (!document.hidden) loadPrinting(); }, 15000); };
+    const stop = () => { if (t) { clearInterval(t); t = null; } };
+    const onVis = () => { if (document.hidden) stop(); else { loadPrinting(); start(); } };
+    start(); document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, [showsPrinting, loadPrinting]);
 
   // ── Appearance (mirrors OwnerShell.toggleSkin) ──
   const [skin, setSkin] = useState<"light" | "dark">("dark");
@@ -187,6 +222,12 @@ export default function OwnerSettings() {
             belongs to the computer the printer is attached to. */}
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
           {data.printing.map((p) => {
+            // ── ONE ANSWER, ONE RESTAURANT ─────────────────────────────────────────────────────
+            // T13 (sweep #7) found this independently on 2026-08-27 and fixed it the only way its
+            // own territory allowed — by using the answer only when the list held exactly one row.
+            // T20 had already fixed it PROPERLY the same week, by making the route say which
+            // restaurant it answered for, which is the version kept here: it is right for two
+            // restaurants as well as one, and T13's workaround is superseded, not discarded.
             // ── ONLY FOR THE RESTAURANT THIS ANSWER IS ACTUALLY ABOUT (T20 round 2, 2026-08-31) ────
             // /api/owner/printing answers for ONE restaurant, and this is a LIST — so looking the
             // answer up once and using it for every row named one restaurant's printer and computer
@@ -315,7 +356,17 @@ export default function OwnerSettings() {
             </p>
           </div>
         ) : null}
-        <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        {/* THE EXPLANATION IS BEHIND A TAP (owner, 2026-09-01 — "you can do 14th").
+            Fourteen lines of it sat between "where your paper comes out" and the four guide buttons,
+            so on a phone the owner scrolled past the whole thing to reach the button they came for.
+            NOT ONE WORD IS CHANGED and nothing is summarised — it is the same paragraph, one tap
+            away, with the status and the buttons now next to each other. Closed by default on every
+            width: on a laptop it was five lines of prose doing the same job. `<details>` is the same
+            control the Add form already uses for "Add their details now", so it is not a new idea on
+            this screen, and it needs no JavaScript and no back-button layer. */}
+        <details className="prn-how">
+          <summary>How printing works <span className="adm-muted">· the short version, and what the guide covers</span></summary>
+          <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 10px" }}>
           A kitchen ticket is queued by the server the moment an order is placed, so it can never be
           lost — it waits until a printer takes it, whether that is a computer running the printer
           program or a screen. The full written guide covers setting a printer up
@@ -325,7 +376,15 @@ export default function OwnerSettings() {
           nothing to download — the guide has one menu per operating system and every command has a Copy
           button, because a downloaded script is blocked by macOS and warned about by Windows.
         </p>
+        </details>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* The icon is spaced off its label by `gap` on `.owx .adm-btn` in app/globals.css — a flex
+              container TRIMS the leading whitespace of a text run, so `<i/> Open the…` rendered as
+              one word: the book glyph touching "Open" (measured 0px, T13 sweep, 2026-08-27). This
+              button carried its own inline gap for one commit; the shared rule replaced it on
+              2026-09-01 because four more buttons in this console had the same fault and a per-button
+              override would have hidden the next regression in the shared rule rather than catching
+              it. Do not put the inline gap back — verify:owner-panel §13 now watches the rule. */}
           <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
             <i className="fas fa-book-open" aria-hidden="true" /> Open the printer setup guide
           </a>
@@ -335,6 +394,11 @@ export default function OwnerSettings() {
           <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
           <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
         </div>
+        <style>{`
+          .prn-how { margin: 2px 0 10px; }
+          .prn-how summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--muted); padding: 4px 0; }
+          .prn-how summary::marker { color: var(--muted); }
+        `}</style>
         <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
           Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is
           done for you by Aevidine — ask and it is one switch. The screen that prints is chosen ON that

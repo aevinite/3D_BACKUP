@@ -87,7 +87,10 @@ CREATE TRIGGER zz_orders_disc_gross
 -- that fallback into a re-pricing.
 --
 -- `lfh_already_applied` is created by migration 307, six files after this one, so a FRESH database
--- runs this its single legitimate time and migration 360 records the key. The `to_regprocedure`
+-- runs this its single legitimate time and migration 352 records the key. The `to_regprocedure`
+-- (This line said "migration 360" until 2026-08-28 — that file was renumbered to 352 on merge
+-- and the pointer never followed. The ledger KEY `301_backfill_disc_gross` is unchanged and
+-- must stay so: it is already recorded on every live database.)
 -- gate + EXECUTE is migration 043's pattern, for the same reason.
 DO $reseed_guard$
 DECLARE v_applied boolean := false;

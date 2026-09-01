@@ -19,6 +19,7 @@
     "verify:lifecycle": "node scripts/verify-table-lifecycle.mjs",
     "verify:db-parity": "node scripts/verify-db-parity.mjs",
     "verify:grants": "node scripts/verify-db-grants.mjs",
+    "verify:migration-truth": "node scripts/verify-migration-truth.mjs",
     "verify:run-alone": "node scripts/verify-migration-run-alone.mjs",
     "verify:rpc-scoped": "node scripts/verify-rpc-scoped.mjs",
     "verify:one-number": "node scripts/verify-one-number.mjs",
@@ -83,6 +84,8 @@
     "verify:split-payment": "node --experimental-strip-types --no-warnings scripts/verify-split-payment.mjs",
     "verify:tax-mode": "node --experimental-strip-types --no-warnings scripts/verify-tax-mode.mjs",
     "verify:t24-money-rules": "node --experimental-strip-types --no-warnings scripts/verify-t24-money-rules.mjs",
+    "verify:t24b": "node scripts/verify-t24b-money-safety.mjs",
+    "verify:t24b-live": "node scripts/verify-t24b-live.mjs",
     "verify:guest-read": "node scripts/verify-guest-read.mjs",
     "verify:tax-mode-e2e": "node scripts/verify-tax-mode-e2e.mjs",
     "verify:merge": "node scripts/verify-merge-party.mjs",
@@ -188,7 +191,10 @@
     "verify:admin-refusals": "node scripts/verify-admin-refusals.mjs",
     "verify:retention": "node scripts/verify-retention-lock.mjs",
     "verify:floor-offplan": "node scripts/verify-floor-offplan.mjs",
-    "verify:tip": "node scripts/verify-tip.mjs"
+    "verify:tip": "node scripts/verify-tip.mjs",
+    "verify:owner-s7": "node scripts/verify-owner-territory-s7.mjs",
+    "verify:owner-s7-live": "node scripts/verify-owner-s7-live.mjs",
+    "verify:owner-live500": "node scripts/verify-owner-live-500.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.70.0",

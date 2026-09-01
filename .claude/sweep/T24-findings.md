@@ -1,112 +1,74 @@
-# Sweep 6 · T24 findings — the money and safety libraries
+# Sweep 7 · Terminal 24 — findings
 
-Territory: `lib/clash.ts` · `lib/paySplit.ts` · `lib/tax.ts` · `lib/taxFiling.ts` ·
-`lib/idempotency.ts` · `lib/idempotencyRule.ts` · `lib/logTrail.ts` · `lib/userAuth.ts` ·
-`lib/rateLimit.ts` · `docs/COMPLIANCE-GUARDRAILS.md` · `docs/SAAS-EFFICIENCY-PLAYBOOK.md`.
-
-500 phases (`LEDGER/T24.md`, P11501–P12000). **Five real problems, all fixed in this branch.**
-Every one passed the four-test gate before a line of working code was touched.
+**Territory:** `lib/{clash,clashCompare,paySplit,tax,taxFiling,idempotency,idempotencyRule,logTrail,userAuth,rateLimit}.ts`
+· `docs/COMPLIANCE-GUARDRAILS.md` · `docs/SAAS-EFFICIENCY-PLAYBOOK.md`
+**Branch:** `sweep7/t24-money-libraries` · **ids:** `P26601`–`P27100` · **port:** 4224
+**Ledger:** `.claude/sweep/LEDGER/T24.md` — 1,000 rows now (500 re-run in place, 500 new).
 
 ---
 
-## 1 · A settle that half-failed left the money trail claiming money nobody took — FIXED
+## The regression
 
-- **Where:** manager panel → a table → Settle the bill → pay in parts (and the same drawer on the
-  waiter tablet). Also admin → Bills, and the owner's payment mix, which read the same rows.
-- **Who is worse off:** the owner and the manager. "How did table 6 pay?" answered
-  "₹200 UPI + ₹200 Cash" for a bill still sitting there UNPAID, and the day's payment mix counted
-  money that was never collected.
-- **Reachable when:** the parts insert succeeds and the paid stamp that follows it fails — a DB blip
-  between two writes with no transaction across them. The code already handled `upd.error`, so the
-  author expected it; it just left the legs standing.
-- **Confidence:** code-read. Severity: the money trail says something untrue.
-- **Fix:** the insert now returns the leg ids, and a failed paid-stamp STAMPS them reversed
-  (mig 285's rule — a money record is corrected, never deleted) before answering 500, so the person
-  knows to retry and the trail never claims the settle happened.
-- **Guarded by:** `verify:t24-money-rules` — four checks on the compensating reversal.
+**`P11997` — the rulebook claimed a shipped feature was not built.** It was ✅ in August.
+`docs/COMPLIANCE-GUARDRAILS.md` §3.0b rule 11 ("reopen the TABLE, not the bill") carried a
+**⚠️ NOT BUILT YET** banner and told the reader that `lfh_void_invoice`'s closed-session refusal
+"is what changes". It shipped on 2026-08-26 as
+`supabase/migrations/365_reopen_puts_the_table_back_not_the_bill.sql` — a migration file. Anyone
+reading the rulebook would have gone and built it a second time.
 
-## 2 · The parts were checked as sent and stored rounded — two numbers for one settle — FIXED
-
-- **Where:** same screen. The waiter sees nothing wrong; the difference shows up in the money trail.
-- **Who is worse off:** the owner, reading a payment record whose parts do not add up to the bill
-  they settled.
-- **Reachable when:** a client sends an amount with more than two decimals. The ±2 paise gate was
-  measured on the raw amounts, then each leg was rounded to the paise on the way into
-  `session_payments` — so up to 6 paise of drift could pass the gate and be recorded.
-- **Confidence:** code-read. Severity: small, but it is money and it is silent.
-- **Fix:** each part is rounded ONCE, before the gate, and the same rounded parts feed the gate, the
-  stored legs and the note. Every panel already sends whole rupees, so nothing normal moves.
-- **Guarded by:** `verify:t24-money-rules`, plus the live round trip, which asserts the recorded
-  parts add up to exactly the due that was accepted.
-
-## 3 · A credit note issued from the console said it happened on a screen the console doesn't have — FIXED
-
-- **Where:** admin console → Logs (and owner → Audit & logs) → open a row → the detail card's
-  trail. The row read `… › Aevidine console › Orders & bills › Reopen the bill`.
-- **Who is worse off:** the admin and the owner. "Reopen the bill" is a manager-panel button;
-  "Orders & bills" is not a console area. The admin was on the console's **Bills** page.
-- **Reachable when:** an admin issues a credit note, or deletes an order, from `/aevinite/bill-audit`.
-  Those are the only two action codes written from BOTH the console and the manager panel, and one
-  code could only have one home.
-- **Confidence:** confirmed by reading both write sites and the page's own heading. Severity: the
-  standing rule (owner, 2026-08-12) is that every row says where it happened; this one lied.
-- **Fix:** `placeOf(action, panel?)` takes the panel, `trailOf` passes it, and a tiny explicit
-  `PANEL_PLACE` maps those two codes to `Aevidine console › Bills` when the console did it. The
-  manager panel's own rows are unchanged, and a caller that only holds the code still works.
-- **Guarded by:** `verify:t24-money-rules` — fails if a THIRD dual-written code ever appears without
-  a place, which is exactly how the last two were found by hand.
-
-## 4 · The retention promise in the compliance doc guarded a superseded migration — FIXED
-
-- **Where:** backend only, nothing on screen — `docs/COMPLIANCE-GUARDRAILS.md` §3, the retention
-  paragraph, and the guard it names.
-- **Who is worse off:** whoever next relies on it. The doc says the purge is "guarded by
-  `verify:admin-restaurants`, which fails if migration 342 ever deletes a money table" — but the
-  purge has been rewritten twice since (345, 346), and that guard only reads 342's text. So from
-  345 onwards the promise printed in the doc was not the promise being enforced.
-- **Reachable when:** any future rewrite of `admin_purge_restaurant`. Checked today: 346 (the one
-  that ships) and the installed function both keep every money table, so nothing is wrong right now.
-- **Confidence:** confirmed against the migrations and the installed function.
-- **Fix:** the doc now names the live purge and its six rewrites, and `verify:t24-money-rules`
-  asserts that the SHIPPING definition — and, with `--db`, the INSTALLED function — deletes no money
-  table. `bill_chain`'s append-only trigger is named too.
-- **Handoff:** `scripts/verify-admin-restaurants.mjs` should follow the newest purge definition
-  instead of migration 342's text.
-
-## 5 · The efficiency playbook sent people to redo work that was finished — FIXED
-
-- **Where:** backend only, nothing on screen — `docs/SAAS-EFFICIENCY-PLAYBOOK.md` §5 and its banner.
-- **Who is worse off:** the owner and any future session. Its **High** list still asked for a
-  "pre-aggregated per-restaurant summary" to fix a "~147s freeze" that migration 190 closed (the
-  function reads `orders_daily_agg`) and migration 266 scoped. Its "still open" list called the
-  blocklist limits open (both capped), and pointed at "editor route ~505-511" for the allergen loop,
-  which is now line 3440. Its own banner had said "three later lessons are NOT in this file yet"
-  since 2026-08-04, while CLAUDE.md points here as "the full pattern".
-- **Confidence:** confirmed line by line against the code.
-- **Fix:** the three later lessons are now §0 of the playbook; the finished High items are marked
-  done with the migrations that closed them; every "still open" item was re-checked and either
-  ticked or given a correct line reference; §4 points at `docs/SECURITY-CHECKLIST.md`.
-- **Guarded by:** `verify:t24-money-rules` — five doc-vs-code checks, including "§3a lists every live
-  `revalidateTag(tag, { expire: 0 })` call site and there is no fourth".
+Checked against the **installed** functions rather than the migration's own prose, and that
+mattered: 365 did **not** loosen `lfh_void_invoice` (still refuses on a closed session, LFH01,
+deliberately) — it added a separate `lfh_reopen_table`. Fixed in item 3, and now guarded.
 
 ---
 
-## 🔗 HANDOFF — the real fix lives in someone else's file
+## Problems found and fixed — one commit each
 
-1. **`app/api/owner/reports/route.ts` (~lines 430–440)** re-implements `lib/taxFiling.ts`'s
-   `splitTax` inline: the same "round every line except the last, give the last the remainder" loop,
-   with an identical `num()`/`p2()`. A money rule that exists twice is a money rule that drifts.
-   **Change:** replace the loop with `splitTax(effective.map((c) => c.rate), totals.tax)`.
-2. **`scripts/verify-admin-restaurants.mjs` (~line 281)** reads migration 342's TEXT to prove the
-   purge deletes no money table. 345 and 346 have rewritten that function since. **Change:** resolve
-   the highest-numbered migration defining `admin_purge_restaurant` (or read the installed
-   definition) instead of naming 342.
-3. **`app/api/panel-login/route.ts` (line 92), `app/api/owner/settings/route.ts` (248) and
-   `app/api/panel-profile/route.ts` (207)** call `rateResetOnSuccess(key, subject)`. It now takes an
-   optional third argument that scopes the reset to one restaurant. **Change:** pass the restaurant
-   id where the caller has one. Nothing breaks without it — today's subjects already carry their own
-   restaurant — but a future caller with a bare subject would clear another restaurant's wall.
-4. **Manager panel header, dark skin** (`public/panels/editor/`): the restaurant name beside
-   "Manager" is dark brown on a dark background and is barely legible. Seen at 1280×800 with
-   `lfh_panel_theme=dark`; screenshot read, not inferred. Cosmetic, but it is the one word that tells
-   a person which restaurant they are about to change.
+| # | what was wrong | where | commit |
+|---|---|---|---|
+| 1 | Removing a restaurant for good left its **pending printer handshakes** behind. `verify:purge` has been RED on `main` since migration 368 merged. Same shape as migrations 346 and 354: `print_pairings` declares `ON DELETE CASCADE` on `restaurants(id)`, and migration 309 stopped deleting that row, so the cascade never fires. An allowed-but-uncollected pairing holds a one-time token that would mint a printing code for a restaurant that no longer exists, and `code` is UNIQUE, so the row also holds a pairing code for ever. | Admin console → Restaurants → Recycle bin → "Remove permanently". Nothing on screen changes. | `4534f964` — migration 369 |
+| 2 | **Three comments sent a reader to the wrong migration file.** The pay-later-part migration was renumbered 352 → 364 on 2026-08-22; eleven comments across five files never followed. "mig 352" now points at a file about re-seeding and tax filing. Three of the eleven are in `lib/paySplit.ts`. | Backend only, nothing on screen. | `f0108d02` |
+| 3 | The regression above. | Backend only, nothing on screen. | `e9a2f3e4` |
+
+**The other eight stale "mig 352" pointers** sit in `app/api/editor/[...path]/route.ts` and
+`app/api/tablet/[...path]/route.ts`, plus `docs/GUARD-MAP.md` and `scripts/verify-split-payment.mjs`.
+Fifteen sweep-#7 branches are rewriting those two route files this week, so they are **reported, not
+touched** — reaching in would hand the merge terminal a conflict on a comment. Item 8 in the report.
+
+---
+
+## Improvements made
+
+| # | what | commit |
+|---|---|---|
+| 4 | `npm run verify:t24b` — 432 new re-runnable checks (`--ids` prints each id). Its centre is that **the money rules now face 30,000 randomly generated bills and 20,000 random filing periods** instead of worked examples. Nothing broke. | `41680a5c` |
+| 5 | `npm run verify:t24b-live -- --base <url>` — 66 live checks, READ-ONLY by construction (every write it attempts is one the server refuses). It reads the owner's Tax/GST sheet off the real screen and reconciles it **both ways** — the fault that screen was built to end. | `37abb3f3` |
+
+---
+
+## Looked at and deliberately NOT filed
+
+- **The MRP figure can exceed the subtotal** on an all-MRP bill of GST-inside lines, because it
+  accumulates the GROSS line amount while a GST-inside line contributes only its NET. Found by the
+  random bills. It is only used in arithmetic at a **zero rate**, where the two are the same number,
+  and two independent locks stop the other case existing: a GST-inside MRP line needs
+  `mrp_tax_treatment = 'inclusive'`, and a restaurant that is not on the composition scheme can never
+  reach a zero rate (`NULLIF(tax_rate, 0)` falls back to 5%), while a composition restaurant forces
+  every line to exempt. The TypeScript and the SQL agree exactly, so changing one alone would break
+  parity. **Both locks are now asserted** (P26825–P26828). Ledger row **P27099**. Do not re-file.
+- **A negative `tax_rate` passes straight through** `effectiveTaxRate`. The only write path already
+  clamps it (`v >= 0 && v <= 1`, else null), and `lfh_effective_tax_rate` behaves identically, so
+  parity holds and the value is unstorable. A CHECK constraint would close it at the database without
+  touching either side — carried to the owner as a decision (item 10), not changed unilaterally.
+- **`pingLatestGuestLimit` drops its restaurant filter when `rid` is null.** Already documented at
+  the one caller that matters (`/api/guest/place-order` passes the RPC's own restaurant precisely for
+  this). The public beacon can still omit it, but that door is capped and the alert is deduped.
+
+---
+
+## What this run left behind
+
+**Nothing.** No row was written to any restaurant — every write attempted was one the server refuses
+(400/409). Aangan was never read from or written to. The four screenshots were read and deleted. The
+4224 dev server was stopped. One migration was applied to the **dev** database only:
+`369_a_purge_clears_the_pending_printer_handshakes.sql`. AV live was never touched, not even read.

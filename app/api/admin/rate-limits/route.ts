@@ -178,9 +178,20 @@ export async function POST(req: NextRequest) {
       .update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" })
       .eq("status", "open");
     if (scope) upd = upd.eq("restaurant_id", scope);
-    const r = await upd.select("id");
+    // COUNTED BEFORE, NOT COUNTED FROM WHAT CAME BACK (T19 sweep #7, 2026-09-01 — the same lesson
+    // "Forget all" in app/api/admin/error-memory already carries). Asking the update to RETURN its
+    // rows puts the ANSWER under PostgREST's own row cap: with more open alerts than that, every one
+    // would be cleared and the audit line would record a smaller number. Rule 3 of
+    // verify:admin-api-a deliberately does NOT flag a write's returning clause — correctly, it is not
+    // a list read — so nothing was watching this. Rule 5 in that guard now is. A head count with the
+    // SAME filter moves no rows and cannot be shortened.
+    let cnt = sb.from("rate_limit_events").select("id", { count: "exact", head: true }).eq("status", "open");
+    if (scope) cnt = cnt.eq("restaurant_id", scope);
+    const before = await cnt;
+    if (before.error) return adminFail("the rate limits", before.error, { action: "load" });
+    const r = await upd;
     if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
-    const n = r.data?.length ?? 0;
+    const n = before.count ?? 0;
     await logAction("admin", "rate_limit_dismiss_all", {
       restaurant_id: scope ?? undefined, level: "info",
       detail: `Cleared ${n} limit-reached alert(s)${scope ? " (one restaurant)" : " (all restaurants)"}. No limit changed and nobody was let through or blocked.`,
@@ -193,7 +204,11 @@ export async function POST(req: NextRequest) {
 
   // Block the device/IP behind an admin-login alert from reaching the admin panel.
   if (action === "block") {
-    const e = (await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle()).data as { key: string; subject: string; subject_label: string | null } | null;
+    // A BLIP MUST NOT READ AS "that alert is gone" (item 21, T19 sweep #7, 2026-09-01) — on the
+    // screen where a refusal means a person stays locked out.
+    const eQ = await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle();
+    if (eQ.error) return adminFail("that limit alert", eQ.error, { action: "load" });
+    const e = eQ.data as { key: string; subject: string; subject_label: string | null } | null;
     if (!e) return err("that alert no longer exists", 404);
     if (e.key !== "admin_login") return err("blocking only applies to admin-login alerts");
     // Safeguard: never let the admin block their OWN current IP (would lock themselves out).
@@ -212,7 +227,11 @@ export async function POST(req: NextRequest) {
   // few minutes via login_throttle — this lifts that so a genuine person (e.g. the owner forgot the
   // password) can retry now. Marks the alert handled.
   if (action === "clear") {
-    const e = (await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle()).data as { key: string; subject: string; subject_label: string | null } | null;
+    // Checked like the block path above (item 21): "that alert no longer exists" is a sentence the
+    // admin acts on, and a person waiting to be let back in pays for it being wrong.
+    const eQ = await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle();
+    if (eQ.error) return adminFail("that limit alert", eQ.error, { action: "load" });
+    const e = eQ.data as { key: string; subject: string; subject_label: string | null } | null;
     if (!e) return err("that alert no longer exists", 404);
     if (e.key !== "admin_login") return err("clearing a lockout only applies to admin-login alerts");
     if (e.subject) await throttleUnblock(`admin:${e.subject}`);
@@ -227,7 +246,9 @@ export async function POST(req: NextRequest) {
   // stuck. "clear" above already 404s in exactly this case; these two now match it. Same rule the
   // user DELETE learned in the 2026-07-07 audit: never log and report a change that didn't happen.
   if (action === "allow") {
-    const e = (await sb.from("rate_limit_events").select("id").eq("id", eventId).maybeSingle()).data;
+    const eQ = await sb.from("rate_limit_events").select("id").eq("id", eventId).maybeSingle();
+    if (eQ.error) return adminFail("that limit alert", eQ.error, { action: "load" });
+    const e = eQ.data;
     if (!e) return err("that limit-reached record no longer exists — refresh the page", 404);
     // Reset that subject's counter now (unblock them) + mark the event handled.
     const r = await sb.rpc("lfh_rate_allow", { p_event_id: eventId, p_actor: "admin" });

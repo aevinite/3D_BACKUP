@@ -17,6 +17,12 @@ import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
+// The IST calendar date, from the one helper that already knows the rule.
+import { todayIST } from "@/lib/staffProfileShared";
 
 export const dynamic = "force-dynamic";
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
@@ -66,42 +72,46 @@ export async function GET(req: NextRequest) {
     // Reject a malformed id up front — else Postgres returns a raw "invalid input syntax
     // for type uuid" that leaks straight into the 500 body.
     if (!isUuid(rid)) return bad("Invalid restaurant_id.");
-    const [billingQ, paymentsQ] = await Promise.all([
-      sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle(),
-      sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200),
-    ]);
+    const one = new ReadSet("admin/billing:one", await Promise.all([
+      rd("billing", () => sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle()),
+      rd("payments", () => sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200)),
+    ]));
     // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). These six sites answered with the database's
     // own sentence, so a failure on the platform-billing page read as e.g. `duplicate key value
     // violates unique constraint "restaurant_billing_pkey"` in a red toast. adminFail keeps that
     // text where it is useful (the response `detail` and the server log) and gives the screen a
     // sentence that names the thing AND says whether anything changed — which on a money page is
     // the part the owner actually needs.
-    if (billingQ.error) return adminFail("this restaurant's billing", billingQ.error, { action: "load" });
-    if (paymentsQ.error) return adminFail("this restaurant's payment history", paymentsQ.error, { action: "load" });
-    return ok({ billing: billingQ.data || null, payments: paymentsQ.data || [] });
+    if (one.failed("billing")) return adminFail("this restaurant's billing", one.error("billing"), { action: "load" });
+    if (one.failed("payments")) return adminFail("this restaurant's payment history", one.error("payments"), { action: "load" });
+    // `.maybeSingle()` answers with an object, not rows — `value()` is the shape for that, and it
+    // throws for a failed read rather than handing back null, which on a money screen would read as
+    // "this restaurant has no plan".
+    return ok({ billing: one.value<Billing>("billing") || null, payments: one.rows("payments") });
   }
 
   // Use the IST calendar year (owner + the page label are IST) so "Collected this year"
   // doesn't sum the PREVIOUS year for the first ~5.5h after IST New Year while the heading
   // already shows the new one (QA 2026-07-24). IST = UTC+5:30, no DST.
   const yearStart = `${new Date(Date.now() + 330 * 60000).getUTCFullYear()}-01-01`;
-  const [restQ, billingQ, yearPaymentsQ] = await Promise.all([
+  const reads = new ReadSet("admin/billing", await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
+    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
     // Named columns + a bound (sweep 2026-08-04). This whole-platform read had no .eq(), no column
     // list and no .limit() — the only read in the admin tree missing all three. One row per
     // restaurant makes it small today, but it grows with exactly the number this product is built
     // to increase. BILLING_COLS is the list the page renders.
-    sb.from("restaurant_billing").select(BILLING_COLS).limit(2000),
-    sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
-  ]);
-  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return adminFail("the billing table", q.error, { action: "load" });
+    rd("plans", () => sb.from("restaurant_billing").select(BILLING_COLS).limit(2000)),
+    rd("yearPayments", () => sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000)),
+  ]));
+  // All three, and the sentence names the failed one in the server log rather than "something".
+  if (reads.anyFailed) return adminFail("the billing table", reads.firstError, { action: "load" });
 
-  const billingByRid = new Map<string, Billing>((billingQ.data || []).map((b: Billing) => [b.restaurant_id, b]));
+  const billingByRid = new Map<string, Billing>(reads.rows<Billing>("plans").map((b) => [b.restaurant_id, b]));
   const paidThisYearByRid = new Map<string, number>();
-  for (const p of yearPaymentsQ.data || []) paidThisYearByRid.set(p.restaurant_id, (paidThisYearByRid.get(p.restaurant_id) || 0) + (Number(p.amount) || 0));
-  const rows = (restQ.data || []).map((r: { id: string; name: string; slug: string; active: boolean }) => {
+  for (const p of reads.rows<{ restaurant_id: string; amount: number | null }>("yearPayments")) paidThisYearByRid.set(p.restaurant_id, (paidThisYearByRid.get(p.restaurant_id) || 0) + (Number(p.amount) || 0));
+  const rows = reads.rows<{ id: string; name: string; slug: string; active: boolean }>("restaurants").map((r) => {
     const b = billingByRid.get(r.id) || null;
     return {
       id: r.id, name: r.name, slug: r.slug, active: r.active,
@@ -119,8 +129,15 @@ export async function GET(req: NextRequest) {
     rows.filter((r) => (r.currency || "INR") === "INR").reduce((s, r) => s + r.paidThisYear, 0) * 100
   ) / 100;
   const statusCounts = rows.reduce((m: Record<string, number>, r) => { m[r.status] = (m[r.status] || 0) + 1; return m; }, {});
-  const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  // THE SAME CALENDAR AS THE YEAR TOTAL ABOVE (T19 sweep #7, 2026-09-01). `next_due_on` is a plain
+  // date entered in IST, and these two lines took the UTC date — so between 00:00 and 05:30 IST the
+  // comparison ran against YESTERDAY, and a plan that had just become overdue was counted under
+  // "Due soon" instead. Five and a half hours a night on the card that says who owes us money. The
+  // year total a few lines up already reasons about exactly this; these did not.
+  const today = todayIST();
+  // 30 days on, on the same calendar: shift into IST first, then take the date — the arithmetic
+  // todayIST() uses, one month later.
+  const in30 = new Date(Date.now() + 5.5 * 3600 * 1000 + 30 * 86400000).toISOString().slice(0, 10);
   // "Due soon" = due within the next 30 days but NOT already overdue — a lower bound of
   // today keeps overdue rows out of it (they're counted separately in `overdue`), so the
   // "5 (2 overdue)" card no longer double-counts the same restaurants (audit 2026-07-06).
@@ -157,6 +174,22 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // A plan can be 0 (free/comped) but never negative — a negative would flow straight into
     // Revenue's MRR/ARR as a subtraction and quietly understate the platform's income.
     if (amount != null && amount < 0) return bad("Amount can't be negative.");
+    // A DATE, OR NOTHING — the same rule add_payment already keeps for `paid_on` (T19 sweep #7,
+    // 2026-09-01). These two went straight at `date` columns with no check, so a typed "27/08/2026"
+    // or "next month" answered "Couldn't save this restaurant's plan" — true, but it names no field
+    // and gives the admin nothing to correct. Emptying a date is still allowed: that is how a plan's
+    // next-due is cleared.
+    const dateOr = (v: unknown, field: string): { value: string | null } | { error: string } => {
+      if (v === "" || v == null) return { value: null };
+      const t = String(v);
+      return /^\d{4}-\d{2}-\d{2}$/.test(t) && !Number.isNaN(Date.parse(t))
+        ? { value: t }
+        : { error: `Enter ${field} as YYYY-MM-DD (e.g. 2026-08-19), or leave it empty.` };
+    };
+    const started = dateOr(body.started_on, "the start date");
+    if ("error" in started) return bad(started.error);
+    const nextDue = dateOr(body.next_due_on, "the next-due date");
+    if ("error" in nextDue) return bad(nextDue.error);
     const patch = {
       restaurant_id: rid,
       plan: body.plan ? String(body.plan) : null,
@@ -164,8 +197,8 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       amount,
       currency: body.currency ? String(body.currency) : "INR",
       cycle,
-      started_on: body.started_on ? String(body.started_on) : null,
-      next_due_on: body.next_due_on ? String(body.next_due_on) : null,
+      started_on: started.value,
+      next_due_on: nextDue.value,
       notes: body.notes ? String(body.notes) : null,
       updated_at: new Date().toISOString(),
     };
@@ -226,10 +259,18 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // page took the row off screen, the year's collected total silently disagreed with the history
     // below it, and the platform's money record carried a removal that never happened. Asking the
     // delete which row it took is one word (`.select`) and makes the answer honest.
-    const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id").maybeSingle();
+    // The delete hands back WHICH payment went, so the record can say it (T19 sweep #7, 2026-09-01).
+    // The audit line read "removed a payment" — the platform's money record naming no amount and no
+    // date, so a month later it could not answer "which one?" from the trail alone. Every other money
+    // action on this route writes the figure and the date.
+    const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id, amount, paid_on").maybeSingle();
     if (gone.error) return adminFail("this payment", gone.error, { action: "save" });
     if (!gone.data) return bad("That payment is already gone — refresh the page.", 404);
-    await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: (gone.data as { restaurant_id: string }).restaurant_id || null });
+    const went = gone.data as { restaurant_id: string; amount: number | null; paid_on: string | null };
+    await logAction("admin", "billing_delete_payment", {
+      detail: `removed a payment${went.amount != null ? ` of ₹${went.amount}` : ""}${went.paid_on ? ` dated ${went.paid_on}` : ""}`,
+      restaurant_id: went.restaurant_id || null,
+    });
     return ok({ ok: true });
   }
 
