@@ -203,6 +203,12 @@ export async function GET(req: NextRequest) {
       customers,
     });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // The last door the database's own sentence could walk out of on this route (T19 sweep #7,
+    // 2026-09-01): every read above answers through adminFail, and then the catch handed the raw text
+    // to the console anyway. Logged in full, answered in words, with the raw text kept in `detail`
+    // exactly as adminFail does it.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[admin] unexpected failure in app/api/admin/customers/route.ts", msg);
+    return NextResponse.json({ error: "Couldn't load the guest list just now. Please try again.", detail: msg }, { status: 500 });
   }
 }

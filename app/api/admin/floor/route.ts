@@ -63,11 +63,19 @@ export async function GET(req: NextRequest) {
     });
     // Never fake zeros: if a stats/tiles RPC failed (e.g. a DB missing a migration), say so
     // instead of silently rendering 0 orders / empty floors everywhere.
+    if (statsQ.error) console.error("[admin/floor] order counts unavailable:", statsQ.error.message);
+    if (tilesQ.error) console.error("[admin/floor] live tables unavailable:", tilesQ.error.message);
     return NextResponse.json({
       restaurants: floors,
       generatedAt: new Date().toISOString(),
-      statsError: statsQ.error?.message || null,
-      tilesError: tilesQ.error?.message || null,
+      // SAY IT IN WORDS, NOT IN POSTGRES (T19 sweep #7, 2026-09-01). These two fields carried the
+      // database's own sentence and app/aevinite/floor/page.tsx prints them inside its banner, so the
+      // Live floor could read "Order counts unavailable (function lfh_admin_floor_stats(unknown) does
+      // not exist)". That is the same fault lib/adminFail was written for, on the eight screens fixed
+      // in sweep #6 — this was the ninth, wearing a different field name. The raw text still goes to
+      // the server log, where it is searchable and useful.
+      statsError: statsQ.error ? "couldn't be read just now" : null,
+      tilesError: tilesQ.error ? "couldn't be read just now" : null,
     });
   }
 

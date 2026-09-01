@@ -417,7 +417,16 @@ async function postImpl(req: NextRequest) {
     if (!reason) return NextResponse.json({ error: "A reason is required to issue a credit note." }, { status: 400 });
     const { data, error } = await sb.rpc("lfh_issue_credit_note", { p_session: sessionId, p_amount: amount, p_reason: reason, p_actor: "Admin" });
     // Code first, prose as the fallback for a database without mig 278 (see that migration's header).
-    if (error) return NextResponse.json({ error: (error.code === "LFH02" || /cannot exceed/i.test(error.message)) ? "The credit can't be more than the bill total." : error.message }, { status: error.code === "LFH02" ? 409 : 400 });
+    // Code first, and the ONE named refusal keeps its own sentence. Anything else used to hand the
+    // database's own words back to the console (T19 sweep #7, 2026-09-01): a credit note against a
+    // bill with no invoice, or an RPC missing from this database, answered the admin with a Postgres
+    // sentence in a red toast. adminFail keeps that text in the response `detail` and the server log
+    // and tells the screen nothing was saved, which on a credit note is the half that matters.
+    if (error) {
+      if (error.code === "LFH02" || /cannot exceed/i.test(error.message))
+        return NextResponse.json({ error: "The credit can't be more than the bill total." }, { status: 409 });
+      return adminFail("this credit note", error, { action: "save" });
+    }
     const row = Array.isArray(data) ? data[0] : data;
     await logAction("admin", "credit_note", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
     return NextResponse.json({ ok: true, creditNo: row?.credit_no });
