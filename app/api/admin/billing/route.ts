@@ -251,10 +251,18 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // page took the row off screen, the year's collected total silently disagreed with the history
     // below it, and the platform's money record carried a removal that never happened. Asking the
     // delete which row it took is one word (`.select`) and makes the answer honest.
-    const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id").maybeSingle();
+    // The delete hands back WHICH payment went, so the record can say it (T19 sweep #7, 2026-09-01).
+    // The audit line read "removed a payment" — the platform's money record naming no amount and no
+    // date, so a month later it could not answer "which one?" from the trail alone. Every other money
+    // action on this route writes the figure and the date.
+    const gone = await sb.from("restaurant_payments").delete().eq("id", id).select("restaurant_id, amount, paid_on").maybeSingle();
     if (gone.error) return adminFail("this payment", gone.error, { action: "save" });
     if (!gone.data) return bad("That payment is already gone — refresh the page.", 404);
-    await logAction("admin", "billing_delete_payment", { detail: "removed a payment", restaurant_id: (gone.data as { restaurant_id: string }).restaurant_id || null });
+    const went = gone.data as { restaurant_id: string; amount: number | null; paid_on: string | null };
+    await logAction("admin", "billing_delete_payment", {
+      detail: `removed a payment${went.amount != null ? ` of ₹${went.amount}` : ""}${went.paid_on ? ` dated ${went.paid_on}` : ""}`,
+      restaurant_id: went.restaurant_id || null,
+    });
     return ok({ ok: true });
   }
 
