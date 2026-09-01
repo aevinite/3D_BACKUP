@@ -107,6 +107,10 @@ export async function GET(req: NextRequest) {
   // true, [])), and the change-detector is the same cheap orders fingerprint the owner reports
   // use — with ids = null meaning "every restaurant", so a single order anywhere refreshes it.
   const payload = await cachedOwnerPayload({
+    // v2 → v3 (2026-09-01): the payload gained the "going quiet" comparison. A stored v2 snapshot
+    // has no `quiet` field at all, and the fingerprint watches ORDERS, so the new card would sit
+    // empty on every cached window until an order happened to land in it. Bumping retires them all
+    // on deploy — the same reasoning as the v1 → v2 note below.
     // v1 → v2 (mig 348, 2026-08-20). THE VERSION IN THIS KEY IS NOT DECORATION. The change-detector
     // is an ORDERS fingerprint: it notices a new order, and it cannot notice that the definition of
     // the count changed. So every snapshot stored before mig 348 would have gone on serving the old
@@ -115,7 +119,7 @@ export async function GET(req: NextRequest) {
     // window, which for a 30-day window could be hours and for an old drilled day is never. Bumping
     // the version retires every stale snapshot the moment this deploys. Any future change to what
     // these numbers MEAN has to bump it again.
-    key: `admin:v2:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
+    key: `admin:v3:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
     force,
     fingerprint: () => ordersFingerprint(null, fromIso, toIso),
     compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay),
@@ -123,8 +127,27 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(payload);
 }
 
+// WHAT COUNTS AS "GOING QUIET" — the two numbers, in one place, named so they can be argued with.
+// A restaurant is flagged only if BOTH hold:
+//   · it was genuinely busy before — at least QUIET_MIN_PREV_PER_DAY orders a day in the previous
+//     window. Without this floor, a restaurant that does one order a fortnight is "down 100%" every
+//     other week and the card becomes noise.
+//   · and it has fallen by at least QUIET_DROP of that. 60% is a fall nobody explains away as a
+//     quiet week.
+// A restaurant that went to ZERO having been busy is flagged as `silent` whatever the percentage,
+// because that is the strongest signal on the screen.
+const QUIET_MIN_PREV_PER_DAY = 3;
+const QUIET_DROP = 0.6;
+
 async function computeAnalytics(range: string, from: Date, to: Date, fromIso: string, toIso: string, hourly = false) {
-  const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
+  // The window immediately BEFORE this one, of exactly the same length, so the comparison is
+  // like-for-like (7 days against the previous 7, 30 against the previous 30).
+  const spanMs = to.getTime() - from.getTime();
+  const windowDays = Math.max(1, Math.round(spanMs / 86400000));
+  const quietOn = !hourly && range !== "today" && windowDays >= 2;
+  const prevFromIso = new Date(from.getTime() - spanMs).toISOString();
+
+  const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ, prevQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000),
@@ -144,10 +167,32 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
     // hours, never one flat day bucket); 7d/30d bucket by day. 4-arg overload = mig 129.
     sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: hourly || range === "today" ? "hour" : "day" }),
-    sb.rpc("lfh_admin_busiest_restaurants", { p_from: fromIso, p_to: toIso, p_limit: 10 }),
+    // p_limit 2000, not 10: the SAME rows feed the "going quiet" comparison below, which needs
+    // every live restaurant — a restaurant that fell to zero orders would not be in a top-10 list
+    // at all, which is exactly the one we most need to see. The RPC is a LEFT JOIN from
+    // `restaurants`, so a restaurant with no orders comes back with 0 rather than going missing.
+    // Sliced back to 10 for the `busiest` card, so the payload that card reads is unchanged.
+    sb.rpc("lfh_admin_busiest_restaurants", { p_from: fromIso, p_to: toIso, p_limit: 2000 }),
     sb.rpc("lfh_admin_orders_by_source", { p_from: fromIso, p_to: toIso }),
+    // ── THE PREVIOUS WINDOW OF THE SAME LENGTH — for "which restaurants are going quiet?" ──────
+    // The one number a platform owner needs that this screen never had: the busiest list is a
+    // CROSS-SECTION (every restaurant against the others, in one window). It can never show that a
+    // restaurant used to do 40 orders a day and now does 3, which is the shape of a restaurant
+    // about to stop paying.
+    //
+    // EGRESS: this is ONE more grouped aggregate — the same RPC, the same index on
+    // orders(created_at), just earlier bounds. No raw-orders read, no new migration, no new index,
+    // and it sits inside the snapshot cache with everything else on this route, so it computes when
+    // the orders fingerprint moves and not once per open tab.
+    //
+    // Skipped entirely for `today` and for a drilled day: comparing today against yesterday, or
+    // one Tuesday against one Monday, is noise, and a warning that cries wolf gets ignored. Those
+    // windows return quiet: null and the card says a longer window is needed.
+    quietOn
+      ? sb.rpc("lfh_admin_busiest_restaurants", { p_from: prevFromIso, p_to: fromIso, p_limit: 2000 })
+      : Promise.resolve({ data: null, error: null }),
   ]);
-  for (const q of [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ]) {
+  for (const q of [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ, prevQ]) {
     // THROWN, not returned as a response: this is the cache's `compute`, and it must fail loudly
     // so nothing half-built is ever stored under the key. cachedOwnerPayload lets a sync failure
     // reach the caller and swallows a background one (the stale value already shipped).
@@ -172,11 +217,40 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     activeTablesNow++;
   }
 
-  const busiest = (busiestQ.data || []).map((r: { restaurant_id: string; slug: string; name: string; orders: number }) => ({
+  const allNow = (busiestQ.data || []) as { restaurant_id: string; slug: string; name: string; orders: number }[];
+  const busiest = allNow.slice(0, 10).map((r) => ({
     id: r.restaurant_id, slug: r.slug, name: r.name,
     orders: Number(r.orders) || 0,
     activeTablesNow: openByRid.get(r.restaurant_id) || 0,
   }));
+
+  // ── WHICH RESTAURANTS ARE GOING QUIET? ───────────────────────────────────────────────────────
+  // Each restaurant against ITS OWN previous window, never against the others. Only live
+  // restaurants appear (the RPC already excludes binned ones, mig 135/348).
+  let quiet: { id: string; slug: string; name: string; now: number; before: number; dropPct: number; silent: boolean }[] | null = null;
+  if (quietOn && prevQ.data) {
+    const beforeByRid = new Map<string, number>();
+    for (const r of prevQ.data as { restaurant_id: string; orders: number }[]) {
+      beforeByRid.set(r.restaurant_id, Number(r.orders) || 0);
+    }
+    quiet = allNow
+      .map((r) => {
+        const now = Number(r.orders) || 0;
+        const before = beforeByRid.get(r.restaurant_id) ?? 0;
+        return {
+          id: r.restaurant_id, slug: r.slug, name: r.name, now, before,
+          // A restaurant with 2,115 orders that now has 1 is down 99.95%, and Math.round made that
+          // read "down 100%" beside rows that genuinely have none — the same "a number that says
+          // more than it knows" fault as items 17-19. Capped at 99 while any order remains, so
+          // 100% can only ever mean zero, and `silent` is what actually says zero.
+          dropPct: before > 0 ? Math.min(now > 0 ? 99 : 100, Math.round(((before - now) / before) * 100)) : 0,
+          silent: now === 0 && before > 0,
+        };
+      })
+      .filter((r) => r.before / windowDays >= QUIET_MIN_PREV_PER_DAY && (r.silent || r.dropPct >= QUIET_DROP * 100))
+      // Gone-silent first, then by how far it fell — the order someone would want to read them in.
+      .sort((a, b) => Number(b.silent) - Number(a.silent) || b.dropPct - a.dropPct || b.before - a.before);
+  }
 
   return {
     range,
@@ -192,6 +266,12 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     bucket: range === "today" ? "hour" : "day",
     trend: zeroFill(range, from, to, trendQ.data || []),
     busiest,
+    // null (not []) when the window is too short to compare — the card must be able to tell
+    // "nothing is going quiet" apart from "I cannot answer that for one day".
+    quiet,
+    quietWindowDays: quietOn ? windowDays : null,
+    quietMinPerDay: QUIET_MIN_PREV_PER_DAY,
+    quietDropPct: Math.round(QUIET_DROP * 100),
     bySource: (sourceQ.data || []).map((r: { source: string; orders: number }) => ({ source: r.source, orders: Number(r.orders) || 0 })),
   };
 }

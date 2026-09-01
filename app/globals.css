@@ -4808,6 +4808,33 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
    the phone's screen edge (audit 2026-07-08). */
 .adx-grid2col > * { min-width: 0; }
 
+/* ── ADMIN · ANALYTICS · "GOING QUIET" ROW ─────────────────────────────────────────────────────
+   Five columns on a desktop, folded into three lines on a phone. Measured at 390px before this
+   existed: the restaurant-name column collapsed to nothing, the change badge was cut in half and
+   both buttons sat off the right edge. A "does the page overflow?" check said everything was fine,
+   because .adm-logwrap scrolls sideways and the row was clipped INSIDE its own wrapper.
+   The fold is the same one the Bills Change log uses -- named grid areas, the head row hidden, and
+   ::before labels on the numbers -- because a second way of folding a table would be one too many. */
+.qt-row { grid-template-columns: 1.5fr 90px 90px 120px 1fr; align-items: center; }
+.qt-row > .q-name   { min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-row > .q-before { text-align: right; font-variant-numeric: tabular-nums; }
+.qt-row > .q-now    { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qt-row > .q-chg    { text-align: right; }
+.qt-row > .q-act    { display: flex; gap: 6px; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .adm-logwrap:has(.qt-row) { overflow-x: visible; }
+  .qt-row { min-width: 0; grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas: "name name" "before now" "chg act"; gap: 4px 10px; padding: 11px 12px; }
+  .qt-row.head { display: none; }
+  .qt-row > .q-name   { grid-area: name; white-space: normal; }
+  .qt-row > .q-before { grid-area: before; text-align: left; }
+  .qt-row > .q-now    { grid-area: now; }
+  .qt-row > .q-chg    { grid-area: chg; text-align: left; }
+  .qt-row > .q-act    { grid-area: act; }
+  .qt-row > .q-before::before { content: "was "; opacity: .65; font-weight: 400; }
+  .qt-row > .q-now::before    { content: "now "; opacity: .65; font-weight: 400; }
+}
+
 /* Dashboard KPI stat strip — GLOBAL (not styled-jsx): its cells are <Link>s, and styled-jsx
    can't scope a component's rendered <a>, so the scoped rules never applied and the label+value
    ran together ("RESTAURANTS9 active…"). These global rules give clean, separated stat tiles

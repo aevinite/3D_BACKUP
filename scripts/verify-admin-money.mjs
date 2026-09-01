@@ -1000,6 +1000,74 @@ try {
       await c19.close();
       ok(unnamed.length === 0, `19 · ${name} · every box you can type in or choose from is named${unnamed.length ? " — unnamed: " + unnamed.join(", ") : ""}`);
     }
+
+    // ── 20 · "GOING QUIET" — A RESTAURANT COMPARED WITH ITS OWN PAST ──────────────────────────
+    // The gap all four sweep rounds recorded: the busiest list is a CROSS-SECTION (every restaurant
+    // against the others in one window) and could never show that a restaurant used to do 40 orders
+    // a day and now does 3 — the shape of one about to stop paying. Built 2026-09-01 on his yes.
+    {
+      const q7 = await get("/api/admin/analytics?range=7d");
+      const q30 = await get("/api/admin/analytics?range=30d");
+      const qToday = await get("/api/admin/analytics?range=today");
+
+      ok(Array.isArray(q7?.quiet) && Array.isArray(q30?.quiet),
+        "20 · a multi-day window answers the going-quiet question");
+      // null, NOT [] — the card has to tell "nobody is going quiet" apart from "I cannot answer
+      // that for one day". Comparing today against yesterday is noise, and a warning that cries
+      // wolf is one nobody reads.
+      ok(qToday?.quiet === null,
+        "20 · a one-day window REFUSES the question rather than answering it with noise");
+      ok(q7?.quietWindowDays === 7 && q30?.quietWindowDays === 30 && qToday?.quietWindowDays === null,
+        `20 · each window compares against its own length (${q7?.quietWindowDays}/${q30?.quietWindowDays}/${qToday?.quietWindowDays})`);
+      ok(Number.isFinite(q30?.quietMinPerDay) && Number.isFinite(q30?.quietDropPct),
+        "20 · the two thresholds are sent to the screen, so it can say them out loud");
+
+      const rows = q30?.quiet || [];
+      // Both thresholds actually applied — a list that flags everything is the same as no list.
+      ok(rows.every((r) => r.before / 30 >= q30.quietMinPerDay),
+        "20 · nothing is flagged that was never busy in the first place");
+      ok(rows.every((r) => r.silent || r.dropPct >= q30.quietDropPct),
+        "20 · nothing is flagged that has not actually fallen far");
+      // 100% MUST MEAN ZERO. 2,115 orders down to 1 is 99.95%, and Math.round printed "down 100%"
+      // beside rows that genuinely had none — the same "a number saying more than it knows" fault
+      // as items 17-19, caught on the screenshot before this shipped.
+      ok(rows.every((r) => r.dropPct < 100 || r.now === 0),
+        "20 · \"down 100%\" can only ever mean no orders at all");
+      ok(rows.every((r) => r.silent === (r.now === 0 && r.before > 0)),
+        "20 · the gone-silent flag means exactly that, and nothing else");
+      ok(rows.every((r, i) => i === 0 || Number(rows[i - 1].silent) >= Number(r.silent)),
+        "20 · the ones that went silent are listed first");
+      ok(rows.every((r) => r.name && r.slug && r.id),
+        "20 · every flagged restaurant is named and can be opened from the row");
+
+      // AND IT IS ON THE SCREEN, AT PHONE WIDTH, WITH NOTHING CLIPPED. The first build measured
+      // "not clipped" and was badly broken at 390px: the name column had collapsed to nothing and
+      // both buttons sat off the right edge. `.adm-logwrap` scrolls sideways, so a card-level
+      // overflow check cannot see a row clipped INSIDE its own wrapper — every CELL is measured
+      // against the viewport instead.
+      for (const [w, h, tag] of [[1280, 1000, "desktop"], [390, 900, "phone"]]) {
+        const c20 = await ctx(w, h, w === 390 ? 3 : 1, "dark");
+        const p20 = await c20.newPage();
+        await p20.goto(BASE + "/aevinite/analytics?range=30d", { waitUntil: "domcontentloaded" });
+        await settle(p20);
+        const r20 = await p20.evaluate(() => {
+          document.querySelectorAll("nextjs-portal").forEach((e) => e.remove());
+          const card = [...document.querySelectorAll(".adm-card")].find((c) => /Going quiet/.test(c.querySelector("h2")?.textContent || ""));
+          if (!card) return { found: false };
+          const cells = [...card.querySelectorAll(".qt-row:not(.head) > *")];
+          const bad = cells.filter((e) => { const b = e.getBoundingClientRect();
+            return b.right > window.innerWidth + 1 || b.left < -1 || b.width < 1 || b.height < 1; });
+          const names = [...card.querySelectorAll(".qt-row:not(.head) > .q-name")].map((e) => e.textContent.trim());
+          return { found: true, rows: names.length, blank: names.filter((n) => !n).length, bad: bad.length, cells: cells.length };
+        });
+        await c20.close();
+        ok(r20.found, `20 · the Going quiet card is on the Analytics screen (${tag})`);
+        ok(r20.found && r20.rows > 0 && r20.blank === 0,
+          `20 · every row on it shows the restaurant's name (${tag}: ${r20.rows} rows, ${r20.blank} blank)`);
+        ok(r20.found && r20.bad === 0,
+          `20 · and nothing on it is off the screen or collapsed to nothing (${tag}: ${r20.bad} of ${r20.cells} cells)`);
+      }
+    }
   }
 
 } finally {
