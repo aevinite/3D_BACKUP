@@ -17,6 +17,8 @@ import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// The IST calendar date, from the one helper that already knows the rule.
+import { todayIST } from "@/lib/staffProfileShared";
 
 export const dynamic = "force-dynamic";
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
@@ -119,8 +121,15 @@ export async function GET(req: NextRequest) {
     rows.filter((r) => (r.currency || "INR") === "INR").reduce((s, r) => s + r.paidThisYear, 0) * 100
   ) / 100;
   const statusCounts = rows.reduce((m: Record<string, number>, r) => { m[r.status] = (m[r.status] || 0) + 1; return m; }, {});
-  const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  // THE SAME CALENDAR AS THE YEAR TOTAL ABOVE (T19 sweep #7, 2026-09-01). `next_due_on` is a plain
+  // date entered in IST, and these two lines took the UTC date — so between 00:00 and 05:30 IST the
+  // comparison ran against YESTERDAY, and a plan that had just become overdue was counted under
+  // "Due soon" instead. Five and a half hours a night on the card that says who owes us money. The
+  // year total a few lines up already reasons about exactly this; these did not.
+  const today = todayIST();
+  // 30 days on, on the same calendar: shift into IST first, then take the date — the arithmetic
+  // todayIST() uses, one month later.
+  const in30 = new Date(Date.now() + 5.5 * 3600 * 1000 + 30 * 86400000).toISOString().slice(0, 10);
   // "Due soon" = due within the next 30 days but NOT already overdue — a lower bound of
   // today keeps overdue rows out of it (they're counted separately in `overdue`), so the
   // "5 (2 overdue)" card no longer double-counts the same restaurants (audit 2026-07-06).
