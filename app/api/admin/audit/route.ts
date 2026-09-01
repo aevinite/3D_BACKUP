@@ -14,6 +14,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
@@ -78,17 +82,18 @@ export async function GET(req: NextRequest) {
     q = q.or(`item_title.ilike.%${safe}%,actor.ilike.%${safe}%,reason_note.ilike.%${safe}%`);
   }
 
-  const r = await q;
-  if (r.error) return adminFail("the removals record", r.error, { action: "load" });
-  const rows = r.data ?? [];
+  const reads = new ReadSet("admin/audit", [await rd("removals", () => q)]);
+  if (reads.failed("removals")) return adminFail("the removals record", reads.error("removals"), { action: "load" });
+  const rows = reads.rows<{ id: number; restaurant_id: string | null }>("removals");
 
   // Stamp each row with WHICH restaurant it belongs to — one batched name lookup, no N+1
   // (same pattern as /api/admin/oplog).
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean))) as string[];
   const nameById = new Map<string, string>();
   if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
-    for (const x of rest.data ?? []) nameById.set(x.id, x.name);
+    // Tolerated: a miss leaves a row's restaurant unnamed rather than emptying the record.
+    const rest = new ReadSet("admin/audit:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(2000))]);
+    for (const x of rest.rowsOr<{ id: string; name: string }>("names", [])) nameById.set(x.id, x.name);
   }
   const removals = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));
   return NextResponse.json({ removals });

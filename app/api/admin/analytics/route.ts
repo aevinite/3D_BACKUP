@@ -9,6 +9,9 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { cachedOwnerPayload, ordersFingerprint, scopeKeyOf } from "@/lib/ownerCache";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, and a failure that names WHICH read went.
+import { ReadSet, rd } from "@/lib/readGuard";
 
 export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -147,15 +150,15 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
   const quietOn = !hourly && range !== "today" && windowDays >= 2;
   const prevFromIso = new Date(from.getTime() - spanMs).toISOString();
 
-  const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ, prevQ] = await Promise.all([
+  const reads = new ReadSet("admin/analytics", await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000),
+    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).limit(2000)),
     // Fetch active staff's restaurant_id (bounded) so we can DROP staff that belong to a
     // binned restaurant — a head count included them and over-stated "Active staff".
-    sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000),
-    sb.from("sessions").select("restaurant_id").eq("status", "open").limit(20000),
-    sb.from("settings").select("restaurant_id, table_count").limit(2000),
+    rd("staff", () => sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000)),
+    rd("openSessions", () => sb.from("sessions").select("restaurant_id").eq("status", "open").limit(20000)),
+    rd("tables", () => sb.from("settings").select("restaurant_id, table_count").limit(2000)),
     // THE TILE MUST EQUAL THE LIST UNDER IT (mig 348, 2026-08-20). This was a plain head count
     // over `orders` with no restaurant test, while `lfh_admin_busiest_restaurants` right below has
     // excluded binned restaurants since mig 135 — so the "ORDERS · LAST 30 DAYS" tile read 6,260
@@ -163,17 +166,17 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     // recycle bin. The RPC applies the same live-restaurant test the busiest list uses, so the two
     // now agree by construction instead of by two people remembering the same rule. The trend and
     // by-source RPCs below carry the identical guard in the same migration.
-    sb.rpc("lfh_admin_orders_count", { p_from: fromIso, p_to: toIso }),
+    rd("orderCount", () => sb.rpc("lfh_admin_orders_count", { p_from: fromIso, p_to: toIso })),
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
     // hours, never one flat day bucket); 7d/30d bucket by day. 4-arg overload = mig 129.
-    sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: hourly || range === "today" ? "hour" : "day" }),
+    rd("trend", () => sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: hourly || range === "today" ? "hour" : "day" })),
     // p_limit 2000, not 10: the SAME rows feed the "going quiet" comparison below, which needs
     // every live restaurant — a restaurant that fell to zero orders would not be in a top-10 list
     // at all, which is exactly the one we most need to see. The RPC is a LEFT JOIN from
     // `restaurants`, so a restaurant with no orders comes back with 0 rather than going missing.
     // Sliced back to 10 for the `busiest` card, so the payload that card reads is unchanged.
-    sb.rpc("lfh_admin_busiest_restaurants", { p_from: fromIso, p_to: toIso, p_limit: 2000 }),
-    sb.rpc("lfh_admin_orders_by_source", { p_from: fromIso, p_to: toIso }),
+    rd("busiest", () => sb.rpc("lfh_admin_busiest_restaurants", { p_from: fromIso, p_to: toIso, p_limit: 2000 })),
+    rd("bySource", () => sb.rpc("lfh_admin_orders_by_source", { p_from: fromIso, p_to: toIso })),
     // ── THE PREVIOUS WINDOW OF THE SAME LENGTH — for "which restaurants are going quiet?" ──────
     // The one number a platform owner needs that this screen never had: the busiest list is a
     // CROSS-SECTION (every restaurant against the others, in one window). It can never show that a
@@ -188,36 +191,35 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     // Skipped entirely for `today` and for a drilled day: comparing today against yesterday, or
     // one Tuesday against one Monday, is noise, and a warning that cries wolf gets ignored. Those
     // windows return quiet: null and the card says a longer window is needed.
-    quietOn
+    rd("previousWindow", () => (quietOn
       ? sb.rpc("lfh_admin_busiest_restaurants", { p_from: prevFromIso, p_to: fromIso, p_limit: 2000 })
-      : Promise.resolve({ data: null, error: null }),
-  ]);
-  for (const q of [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ, prevQ]) {
-    // THROWN, not returned as a response: this is the cache's `compute`, and it must fail loudly
-    // so nothing half-built is ever stored under the key. cachedOwnerPayload lets a sync failure
-    // reach the caller and swallows a background one (the stale value already shipped).
-    if (q.error) throw new Error(q.error.message);
-  }
+      : Promise.resolve({ data: null, error: null }))),
+  ]));
+  // THROWN, not returned as a response: this is the cache's `compute`, and it must fail loudly so
+  // nothing half-built is ever stored under the key. cachedOwnerPayload lets a sync failure reach the
+  // caller and swallows a background one (the stale value already shipped). The message now NAMES the
+  // read that went, which `new Error(q.error.message)` never did.
+  if (reads.anyFailed) throw new Error(`[admin/analytics] read(s) failed: ${reads.failedNames.join(", ")}`);
 
-  const restaurants = restQ.data || [];
+  const restaurants = reads.rows<{ id: string; name: string; slug: string; active: boolean | null }>("restaurants");
   const activeRestaurants = restaurants.filter((r) => r.active).length;
   // Only count tables/staff belonging to a LIVE (non-binned) restaurant, so the occupancy
   // denominator and "Active staff" match the restaurant counts beside them (audit 2026-07-06 —
   // a binned restaurant's settings row + staff used to inflate both).
   const liveIds = new Set(restaurants.map((r) => r.id));
-  const totalTables = (tableCountQ.data || [])
+  const totalTables = reads.rows<{ restaurant_id: string | null; table_count: number | null }>("tables")
     .filter((r) => r.restaurant_id && liveIds.has(r.restaurant_id))
     .reduce((s, r) => s + (Number(r.table_count) || 0), 0);
-  const totalStaff = (staffCountQ.data || []).filter((u) => u.restaurant_id && liveIds.has(u.restaurant_id)).length;
+  const totalStaff = reads.rows<{ restaurant_id: string | null }>("staff").filter((u) => u.restaurant_id && liveIds.has(u.restaurant_id)).length;
   const openByRid = new Map<string, number>();
   let activeTablesNow = 0;
-  for (const s of openSessionsQ.data || []) {
+  for (const s of reads.rows<{ restaurant_id: string | null }>("openSessions")) {
     if (!s.restaurant_id || !liveIds.has(s.restaurant_id)) continue; // ignore binned restaurants
     openByRid.set(s.restaurant_id, (openByRid.get(s.restaurant_id) || 0) + 1);
     activeTablesNow++;
   }
 
-  const allNow = (busiestQ.data || []) as { restaurant_id: string; slug: string; name: string; orders: number }[];
+  const allNow = reads.rows<{ restaurant_id: string; slug: string; name: string; orders: number }>("busiest");
   const busiest = allNow.slice(0, 10).map((r) => ({
     id: r.restaurant_id, slug: r.slug, name: r.name,
     orders: Number(r.orders) || 0,
@@ -228,9 +230,9 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
   // Each restaurant against ITS OWN previous window, never against the others. Only live
   // restaurants appear (the RPC already excludes binned ones, mig 135/348).
   let quiet: { id: string; slug: string; name: string; now: number; before: number; dropPct: number; silent: boolean }[] | null = null;
-  if (quietOn && prevQ.data) {
+  if (quietOn && reads.value("previousWindow")) {
     const beforeByRid = new Map<string, number>();
-    for (const r of prevQ.data as { restaurant_id: string; orders: number }[]) {
+    for (const r of reads.rows<{ restaurant_id: string; orders: number }>("previousWindow")) {
       beforeByRid.set(r.restaurant_id, Number(r.orders) || 0);
     }
     quiet = allNow
@@ -256,7 +258,7 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     range,
     totals: {
       // `.data` now, not `.count` — the RPC returns the number itself (mig 348).
-      totalOrders: Number(ordersCountQ.data) || 0,
+      totalOrders: Number(reads.value<number>("orderCount")) || 0,
       activeTablesNow,
       activeRestaurants,
       totalRestaurants: restaurants.length,
@@ -264,7 +266,7 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
       totalTables,
     },
     bucket: range === "today" ? "hour" : "day",
-    trend: zeroFill(range, from, to, trendQ.data || []),
+    trend: zeroFill(range, from, to, reads.rows<{ bucket: string; orders: number }>("trend")),
     busiest,
     // null (not []) when the window is too short to compare — the card must be able to tell
     // "nothing is going quiet" apart from "I cannot answer that for one day".
@@ -272,6 +274,6 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     quietWindowDays: quietOn ? windowDays : null,
     quietMinPerDay: QUIET_MIN_PREV_PER_DAY,
     quietDropPct: Math.round(QUIET_DROP * 100),
-    bySource: (sourceQ.data || []).map((r: { source: string; orders: number }) => ({ source: r.source, orders: Number(r.orders) || 0 })),
+    bySource: reads.rows<{ source: string; orders: number }>("bySource").map((r) => ({ source: r.source, orders: Number(r.orders) || 0 })),
   };
 }

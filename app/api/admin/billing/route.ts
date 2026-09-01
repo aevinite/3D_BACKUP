@@ -17,6 +17,10 @@ import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
 // The IST calendar date, from the one helper that already knows the rule.
 import { todayIST } from "@/lib/staffProfileShared";
 
@@ -68,42 +72,46 @@ export async function GET(req: NextRequest) {
     // Reject a malformed id up front — else Postgres returns a raw "invalid input syntax
     // for type uuid" that leaks straight into the 500 body.
     if (!isUuid(rid)) return bad("Invalid restaurant_id.");
-    const [billingQ, paymentsQ] = await Promise.all([
-      sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle(),
-      sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200),
-    ]);
+    const one = new ReadSet("admin/billing:one", await Promise.all([
+      rd("billing", () => sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle()),
+      rd("payments", () => sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200)),
+    ]));
     // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). These six sites answered with the database's
     // own sentence, so a failure on the platform-billing page read as e.g. `duplicate key value
     // violates unique constraint "restaurant_billing_pkey"` in a red toast. adminFail keeps that
     // text where it is useful (the response `detail` and the server log) and gives the screen a
     // sentence that names the thing AND says whether anything changed — which on a money page is
     // the part the owner actually needs.
-    if (billingQ.error) return adminFail("this restaurant's billing", billingQ.error, { action: "load" });
-    if (paymentsQ.error) return adminFail("this restaurant's payment history", paymentsQ.error, { action: "load" });
-    return ok({ billing: billingQ.data || null, payments: paymentsQ.data || [] });
+    if (one.failed("billing")) return adminFail("this restaurant's billing", one.error("billing"), { action: "load" });
+    if (one.failed("payments")) return adminFail("this restaurant's payment history", one.error("payments"), { action: "load" });
+    // `.maybeSingle()` answers with an object, not rows — `value()` is the shape for that, and it
+    // throws for a failed read rather than handing back null, which on a money screen would read as
+    // "this restaurant has no plan".
+    return ok({ billing: one.value<Billing>("billing") || null, payments: one.rows("payments") });
   }
 
   // Use the IST calendar year (owner + the page label are IST) so "Collected this year"
   // doesn't sum the PREVIOUS year for the first ~5.5h after IST New Year while the heading
   // already shows the new one (QA 2026-07-24). IST = UTC+5:30, no DST.
   const yearStart = `${new Date(Date.now() + 330 * 60000).getUTCFullYear()}-01-01`;
-  const [restQ, billingQ, yearPaymentsQ] = await Promise.all([
+  const reads = new ReadSet("admin/billing", await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
+    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
     // Named columns + a bound (sweep 2026-08-04). This whole-platform read had no .eq(), no column
     // list and no .limit() — the only read in the admin tree missing all three. One row per
     // restaurant makes it small today, but it grows with exactly the number this product is built
     // to increase. BILLING_COLS is the list the page renders.
-    sb.from("restaurant_billing").select(BILLING_COLS).limit(2000),
-    sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
-  ]);
-  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return adminFail("the billing table", q.error, { action: "load" });
+    rd("plans", () => sb.from("restaurant_billing").select(BILLING_COLS).limit(2000)),
+    rd("yearPayments", () => sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000)),
+  ]));
+  // All three, and the sentence names the failed one in the server log rather than "something".
+  if (reads.anyFailed) return adminFail("the billing table", reads.firstError, { action: "load" });
 
-  const billingByRid = new Map<string, Billing>((billingQ.data || []).map((b: Billing) => [b.restaurant_id, b]));
+  const billingByRid = new Map<string, Billing>(reads.rows<Billing>("plans").map((b) => [b.restaurant_id, b]));
   const paidThisYearByRid = new Map<string, number>();
-  for (const p of yearPaymentsQ.data || []) paidThisYearByRid.set(p.restaurant_id, (paidThisYearByRid.get(p.restaurant_id) || 0) + (Number(p.amount) || 0));
-  const rows = (restQ.data || []).map((r: { id: string; name: string; slug: string; active: boolean }) => {
+  for (const p of reads.rows<{ restaurant_id: string; amount: number | null }>("yearPayments")) paidThisYearByRid.set(p.restaurant_id, (paidThisYearByRid.get(p.restaurant_id) || 0) + (Number(p.amount) || 0));
+  const rows = reads.rows<{ id: string; name: string; slug: string; active: boolean }>("restaurants").map((r) => {
     const b = billingByRid.get(r.id) || null;
     return {
       id: r.id, name: r.name, slug: r.slug, active: r.active,

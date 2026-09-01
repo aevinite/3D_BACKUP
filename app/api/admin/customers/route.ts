@@ -14,6 +14,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
 import { safeSearch } from "@/lib/searchText";
 
@@ -63,10 +67,9 @@ export async function GET(req: NextRequest) {
     //     the obvious fix and the wrong one: a guest row belonging to a binned restaurant would
     //     have lost its chip and read "—", which is the exact failure the comment above warns
     //     about. A deleted restaurant's guests are still real people with a real history.
-    const restsQ = await sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").limit(2000);
-    if (restsQ.error) return adminFail("the restaurant list", restsQ.error, { action: "load" });
-    const rests = (restsQ.data || []) as
-      Array<{ id: string; name: unknown; slug: string; accent_color: string | null; deleted_at: string | null }>;
+    const reads = new ReadSet("admin/customers", [await rd("restaurants", () => sb.from("restaurants").select("id, name, slug, accent_color, deleted_at").order("slug").limit(2000))]);
+    if (reads.failed("restaurants")) return adminFail("the restaurant list", reads.error("restaurants"), { action: "load" });
+    const rests = reads.rows<{ id: string; name: unknown; slug: string; accent_color: string | null; deleted_at: string | null }>("restaurants");
     const liveRests = rests.filter((r) => r.deleted_at == null);
     // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
     // string on others — read both, fall back to the slug so a chip is never blank.
@@ -87,7 +90,8 @@ export async function GET(req: NextRequest) {
     // ── one customer's detail: the same number across every restaurant it appears in.
     // This is the admin-only view — "Meera has eaten at 3 of our restaurants".
     if (detail) {
-      const { data, error } = await sb.from("customers").select(COLS).eq("phone", detail).limit(50);
+      const one = new ReadSet("admin/customers:one", [await rd("guest", () => sb.from("customers").select(COLS).eq("phone", detail).limit(50))]);
+      const { data, error } = { data: one.rowsOr<Row>("guest", []), error: one.failed("guest") ? one.error("guest") : null };
       // PLAIN WORDS, not the database's (sweep #6, T19). `throw new Error(error.message)` walked the
       // raw sentence out through the catch at the bottom and into the console's red toast — the same
       // fault lib/adminFail was written for, just wearing a throw. Answered here instead so the raw
@@ -114,6 +118,11 @@ export async function GET(req: NextRequest) {
     if (seg === "regulars") q = q.gte("visits", REPEAT_MIN);
     if (seg === "new") q = q.lt("visits", REPEAT_MIN);
     if (seg === "blocked") q = q.eq("blocked", true);
+    // THE PAGED LIST READ STAYS AS IT IS, deliberately (item 15, 2026-09-01). lib/readGuard answers
+    // one question — did it work — and this read has a THIRD answer: "that page is past the end"
+    // (PGRST103), which the branch below turns into an empty page rather than a failure. Wrapping it
+    // would mean unwrapping it again two lines later to reach the same three-way decision, so the
+    // helper is used for the other two reads on this route and this one keeps its own shape.
     let { data, error, count } = await q;
     // A PAGE PAST THE END IS EMPTY, NOT BROKEN (T18 second 500, 2026-08-31). PostgREST answers an
     // offset beyond the last row with 416 / PGRST103 "Requested range not satisfiable", which came

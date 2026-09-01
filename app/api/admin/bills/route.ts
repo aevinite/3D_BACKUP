@@ -31,6 +31,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
@@ -159,7 +163,7 @@ export async function GET(req: NextRequest) {
     .not("deleted_at", "is", null).not("deleted_by", "is", null);
   if (rid && isUuid(rid)) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
 
-  const [sessQ, restsQ, delQ, delEmptiedR, delPersonR] = await Promise.all([
+  const reads = new ReadSet("admin/bills", await Promise.all([
     // TWO POPULATIONS OUT OF ONE READ, and they are deliberately different (T19 sweep #7, 2026-09-01).
     // This carried `.is("deleted_at", null)`, so a bill belonging to a restaurant now in the recycle
     // bin fell out of the name map and its row rendered "—". Measured on the dev database: NINE
@@ -170,10 +174,15 @@ export async function GET(req: NextRequest) {
     // below still offers only live ones, because narrowing to a deleted restaurant leads nowhere.
     // The identical split, with the identical reasoning, is in app/api/admin/customers/route.ts
     // (T18 handoff H3, approved by the owner 2026-08-20).
-    sq, sb.from("restaurants").select("id, name, deleted_at").limit(2000),
-    delCountQ, delEmptiedQ, delByPersonQ,
-  ]);
-  if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
+    rd("sessions", () => sq),
+    rd("restaurants", () => sb.from("restaurants").select("id, name, deleted_at").limit(2000)),
+    rd("deletedCount", () => delCountQ),
+    // The two breakdown counts are TOLERATED: they only split the Deleted tile's own total into how it
+    // happened, so a failure leaves that split unsaid rather than taking the ledger down.
+    rd("deletedEmptied", () => delEmptiedQ),
+    rd("deletedByPerson", () => delByPersonQ),
+  ]));
+  if (reads.failed("sessions")) return adminFail("the bill ledger", reads.error("sessions"), { action: "load" });
   // ALL THREE READS ARE CHECKED, because on this screen a silent zero is the failure mode that
   // matters most (this file's own header: "THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY
   // TIME"). The count above was written precisely because "the chip said 0 while deleted bills
@@ -181,19 +190,20 @@ export async function GET(req: NextRequest) {
   // blip made the one screen whose job is proving no sale vanished say that none had. The names
   // read is the same story one step down: with it empty every row reads "—" and the restaurant
   // filter has nothing in it, so the admin cannot even narrow the list to look.
-  if (delQ.error) return adminFail("the bill ledger", delQ.error, { action: "load" });
-  if (restsQ.error) return adminFail("the bill ledger", restsQ.error, { action: "load" });
+  if (reads.failed("deletedCount")) return adminFail("the bill ledger", reads.error("deletedCount"), { action: "load" });
+  if (reads.failed("restaurants")) return adminFail("the bill ledger", reads.error("restaurants"), { action: "load" });
 
-  const sessions = (sessQ.data || []) as unknown as BillSession[];
-  const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
+  const sessions = reads.rows<BillSession>("sessions");
+  const restRows = reads.rows<{ id: string; name: string; deleted_at: string | null }>("restaurants");
+  const nameById = new Map<string, string>(restRows.map((r) => [r.id, r.name]));
 
   // Orders for exactly these sessions — one scoped read, grouped in JS.
   const sessionIds = sessions.map((s) => s.id);
   const ordersBySession = new Map<string, BillOrder[]>();
   if (sessionIds.length) {
-    const oQ = await sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000);
-    if (oQ.error) return adminFail("the bill ledger", oQ.error, { action: "load" });
-    for (const o of (oQ.data || []) as unknown as BillOrder[]) {
+    const oReads = new ReadSet("admin/bills:orders", [await rd("orders", () => sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000))]);
+    if (oReads.failed("orders")) return adminFail("the bill ledger", oReads.error("orders"), { action: "load" });
+    for (const o of oReads.rows<BillOrder>("orders")) {
       const k = o.session_id || "";
       const arr = ordersBySession.get(k) || [];
       arr.push(o); ordersBySession.set(k, arr);
@@ -257,7 +267,9 @@ export async function GET(req: NextRequest) {
   // it is a real column, so it gets the true database count and can never under-report.
   const counts: Record<string, number> = {};
   for (const b of bills) counts[b.state] = (counts[b.state] || 0) + 1;
-  counts.deleted = delQ.count ?? counts.deleted ?? 0;
+  // count() throws for a failed read rather than `?? 0` — and it cannot be reached failed here,
+  // because the check above already returned. That is the shape the tile was fixed into in sweep #6.
+  counts.deleted = reads.count("deletedCount");
 
   if (stateFilter) bills = bills.filter((b) => b.state === stateFilter);
 
@@ -281,17 +293,17 @@ export async function GET(req: NextRequest) {
   const full = sessions.length >= limit;
   const nextBefore = full && sessions.length ? sessions[sessions.length - 1].created_at || null : null;
 
-  const restaurants = (restsQ.data || [])
+  const restaurants = restRows
     .filter((r) => r.deleted_at == null)
     .map((r) => ({ id: r.id, name: r.name }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return NextResponse.json({
     bills, counts, total: bills.length, restaurants,
-    deletedTotal: delQ.count ?? 0,
+    deletedTotal: reads.count("deletedCount"),
     // null, never 0, when the split could not be read — "I don't know" and "none" must not look
     // alike on this screen. The tile falls back to its old single sentence.
-    deletedEmptied: delEmptiedR?.error ? null : (delEmptiedR?.count ?? null),
-    deletedByPerson: delPersonR?.error ? null : (delPersonR?.count ?? null),
+    deletedEmptied: reads.failed("deletedEmptied") ? null : reads.count("deletedEmptied"),
+    deletedByPerson: reads.failed("deletedByPerson") ? null : reads.count("deletedByPerson"),
     nextBefore, generatedAt: new Date().toISOString(),
   });
 }

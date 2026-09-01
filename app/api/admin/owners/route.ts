@@ -31,6 +31,10 @@ import { logAction, redactMoney } from "@/lib/oplog";
 import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName, nameTakenMessage } from "@/lib/ownerHome";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 
 export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -151,21 +155,21 @@ export async function GET(req: NextRequest) {
   // ── ?deleted=1 → the RECYCLE BIN: only binned owners, with how long each has sat there.
   // Kept separate from the main list so a binned owner never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {
-    const [binQ, linksQ] = await Promise.all([
-      sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
-        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000),
-      sb.from("restaurant_owners").select("user_id").limit(20000),
-    ]);
-    if (binQ.error) return adminFail("the owners recycle bin", binQ.error, { action: "load" });
+    const binReads = new ReadSet("admin/owners:bin", await Promise.all([
+      rd("binned", () => sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
+        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(2000)),
+      rd("links", () => sb.from("restaurant_owners").select("user_id").limit(20000)),
+    ]));
+    if (binReads.failed("binned")) return adminFail("the owners recycle bin", binReads.error("binned"), { action: "load" });
     // "How many restaurants are still linked" is the number that decides whether a permanent removal
     // is safe — purging hands each of them to a co-owner or to nobody. With this read unchecked a
     // failure read as a confident "0 restaurants", i.e. "nothing is attached, remove away" (T19
     // sweep #7, 2026-09-01).
-    if (linksQ.error) return adminFail("the owners recycle bin", linksQ.error, { action: "load" });
+    if (binReads.failed("links")) return adminFail("the owners recycle bin", binReads.error("links"), { action: "load" });
     const owned = new Map<string, number>();
-    for (const l of linksQ.data || []) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
+    for (const l of binReads.rows<{ user_id: string }>("links")) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
     const now = Date.now();
-    const trashed = (binQ.data || []).map((o) => {
+    const trashed = binReads.rows<{ id: string; username: string; name: string | null; deleted_at: string; deleted_by: string | null; delete_reason: string | null }>("binned").map((o) => {
       const deletedAt = o.deleted_at as string;
       // How long they have SAT in the bin — a fact the admin can use, not a countdown to a
       // permission. `daysLeft` is gone rather than pinned at 0 for a screen to render.
@@ -180,35 +184,38 @@ export async function GET(req: NextRequest) {
     return ok({ trashed, retentionDays: RETENTION_DAYS });
   }
 
-  const [ownersQ, linksQ, restQ] = await Promise.all([
+  const reads = new ReadSet("admin/owners", await Promise.all([
     // deleted_at IS NULL → the live/suspended list; binned owners are hidden here
     // (they live in the recycle bin above).
-    sb.from("staff_users")
+    rd("owners", () => sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
       // PAGED, like lib/ownerScope's scopedRestaurantIds (2026-08-05). A bare select with no
       // .limit() stops at PostgREST's cap and silently drops everyone past it — the same bug that
       // "silently dropped every restaurant past the 100th" in the owner reports. 2000 is far above
       // any real estate and still an explicit ceiling rather than a hidden one.
-      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000),
-    sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000),
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000),
-  ]);
+      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000)),
+    rd("links", () => sb.from("restaurant_owners").select("restaurant_id, user_id").limit(20000)),
+    rd("restaurants", () => sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000)),
+  ]));
   // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). Every failure on this page answered with the
   // database's own sentence — `insert or update on table "restaurant_owners" violates foreign key
   // constraint …` in a red toast. adminFail keeps that text in the response `detail` and the server
   // log and gives the screen a sentence naming the thing and saying whether anything changed; on the
   // page that hands out ownership of a restaurant, "nothing was changed" is the important half.
-  if (ownersQ.error) return adminFail("the owners list", ownersQ.error, { action: "load" });
-  if (linksQ.error) return adminFail("who owns what", linksQ.error, { action: "load" });
-  if (restQ.error) return adminFail("the restaurant list", restQ.error, { action: "load" });
+  if (reads.failed("owners")) return adminFail("the owners list", reads.error("owners"), { action: "load" });
+  if (reads.failed("links")) return adminFail("who owns what", reads.error("links"), { action: "load" });
+  if (reads.failed("restaurants")) return adminFail("the restaurant list", reads.error("restaurants"), { action: "load" });
 
-  const restById = new Map((restQ.data || []).map((r) => [r.id, r]));
+  type RestRow = { id: string; slug: string; name: string; active: boolean | null; owner_user_id: string | null };
+  const restRows = reads.rows<RestRow>("restaurants");
+  const linkRows = reads.rows<{ restaurant_id: string; user_id: string }>("links");
+  const restById = new Map(restRows.map((r) => [r.id, r]));
 
   // Who holds each restaurant's PRIMARY slot right now — including accounts the list
   // above hides (a binned owner keeps its links so Restore works). Without this the
   // screen could only say "Co-owner" with no way to see WHO the primary is, which is
   // exactly the confusion Aangan caused (its binned starter "owner" still held it).
-  const primaryIds = Array.from(new Set((restQ.data || []).map((r) => r.owner_user_id).filter(Boolean) as string[]));
+  const primaryIds = Array.from(new Set(restRows.map((r) => r.owner_user_id).filter(Boolean) as string[]));
   const primaryUser = new Map<string, { name: string; binned: boolean }>();
   if (primaryIds.length) {
     const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds).limit(2000);
@@ -217,7 +224,7 @@ export async function GET(req: NextRequest) {
 
   type OwnedRow = { id: string; slug: string; name: string; active: boolean; primary: boolean; primaryHolder: string | null; primaryBinned: boolean };
   const byOwner = new Map<string, OwnedRow[]>();
-  for (const l of linksQ.data || []) {
+  for (const l of linkRows) {
     const r = restById.get(l.restaurant_id);
     if (!r) continue; // deleted/binned restaurants don't show as owned
     const holder = r.owner_user_id ? primaryUser.get(r.owner_user_id as string) : undefined;
@@ -230,13 +237,13 @@ export async function GET(req: NextRequest) {
     });
     byOwner.set(l.user_id, list);
   }
-  const owners = (ownersQ.data || []).map((o) => ({
+  const owners = reads.rows<{ id: string; username: string; name: string | null; active: boolean | null; last_seen_at: string | null; created_at: string }>("owners").map((o) => ({
     id: o.id, username: o.username, name: o.name || o.username, active: o.active === true,
     lastSeenAt: o.last_seen_at || null, createdAt: o.created_at,
     restaurants: (byOwner.get(o.id) || []).sort((a, b) => a.name.localeCompare(b.name)),
   }));
-  const ownedIds = new Set((linksQ.data || []).map((l) => l.restaurant_id));
-  const restaurants = (restQ.data || []).map((r) => ({
+  const ownedIds = new Set(linkRows.map((l) => l.restaurant_id));
+  const restaurants = restRows.map((r) => ({
     id: r.id, slug: r.slug, name: r.name, active: r.active === true,
     hasOwner: ownedIds.has(r.id),
   }));

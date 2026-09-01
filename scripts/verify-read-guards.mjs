@@ -132,6 +132,33 @@ const GUARDED = [
   ["app/api/owner/staff/route.ts", "the person + pay-history reads are checked (F6, F7)"],
   ["app/api/owner/customers/route.ts", "the guest tiles are counted, not defaulted to 0 (F13)"],
   ["app/api/owner/audit/route.ts", "opening one removal tells a blip from 'not found' (F8)"],
+  // ── THE ADMIN CONSOLE'S OWN ROUTES (T19 sweep #7, item 15, owner-approved 2026-09-01) ──────────
+  // The owner asked for the shared helper across this territory after the same missing `.error`
+  // check had been hand-fixed eleven times across three sweeps. Nineteen of its twenty-six routes
+  // now read through lib/readGuard; the seven that do not are write-first (act-as, act-as/go,
+  // fix-request, maintenance, oplog/ack, printing, rate-limits), where the only reads are single
+  // presence checks and the helper would add a name for nothing. Listed here so a later
+  // "simplification" that strips the ReadSet out of one of them is caught, exactly as the owner
+  // routes above are.
+  ["app/api/admin/dashboard/route.ts", "the eleven home-screen reads say which one went (item 15)"],
+  ["app/api/admin/notifications/route.ts", "the bell's seven reads, three critical and four soft (item 15)"],
+  ["app/api/admin/bills/route.ts", "the ledger's reads, and the deleted count that must never read 0 (item 15)"],
+  ["app/api/admin/bill-audit/route.ts", "the bill trail's rows, names and two totals (item 15)"],
+  ["app/api/admin/billing/route.ts", "the platform-money reads, both batches (item 15)"],
+  ["app/api/admin/health/route.ts", "every block reports its own error, so every read is named (item 15)"],
+  ["app/api/admin/floor/route.ts", "the two floor RPCs are tolerated, and it says so (item 15)"],
+  ["app/api/admin/owners/route.ts", "the owners list and the recycle bin (item 15)"],
+  ["app/api/admin/analytics/route.ts", "the nine reads inside the snapshot cache's compute (item 15)"],
+  ["app/api/admin/attention/route.ts", "all three, or the account-health list says nothing (item 15)"],
+  ["app/api/admin/cancelled-today/route.ts", "the name read that could empty the whole list (item 15)"],
+  ["app/api/admin/custlog/route.ts", "members, blocklist and both count reads (item 15)"],
+  ["app/api/admin/customers/route.ts", "the restaurant list and one guest's record (item 15)"],
+  ["app/api/admin/panels-health/route.ts", "all three, or every panel reads 'device down' (item 15)"],
+  ["app/api/admin/oplog/route.ts", "the activity list, and names that are tolerated (item 15)"],
+  ["app/api/admin/audit/route.ts", "the removals record, and names that are tolerated (item 15)"],
+  ["app/api/admin/error-memory/route.ts", "the fixed-problem list (item 15)"],
+  ["app/api/admin/agent-runs/route.ts", "the working-session history (item 15)"],
+  ["app/api/admin/oplog/cleanup/route.ts", "the log count that must not read a confident 0 (item 15)"],
 ];
 for (const [p, why] of GUARDED) {
   const src = read(p);
