@@ -179,6 +179,17 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // details + Back link + prices all defaulted to restaurant #1 — showing the
   // wrong restaurant's dish for any non-#1 tenant (audit fix 2026-07-06).
   const fromRestaurant = searchParams.get("r") || "";
+  // DO WE KNOW YET WHOSE SCREEN THIS IS? (sweep #8 T2, 2026-09-02 — item 1.)
+  //
+  // `rid` above starts at restaurant #1 and only becomes the real one after an async lookup, so
+  // for the first beat of a `?r=<tenant>` link this component genuinely believes it is #1. That was
+  // harmless while every answer came from the tenant's own database row — and it is NOT harmless
+  // for the one thing that is read off the flagship's own static files, the `/content/items/<folder>`
+  // demo config. See the long note in the config effect below.
+  //
+  // No `?r=` at all means there is nothing to wait for: the address IS restaurant #1's own door, so
+  // this starts true and that path is unchanged, spinner and all.
+  const [ridReady, setRidReady] = useState(!fromRestaurant);
   const itemBase = fromRestaurant ? `/r/${fromRestaurant}` : "";
   // Which category the guest was browsing (carried from the dish page). Preserve
   // it on the Back link so the item page's prev/next arrows keep walking the SAME
@@ -201,7 +212,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
     (async () => {
       let rid = DEFAULT_RESTAURANT_ID;
       if (fromRestaurant) {
-        const r = await getRestaurantBySlug(fromRestaurant);
+        // `.catch(() => null)` is not tidying: this call had no catch, so a dropped signal rejected
+        // the whole IIFE, `unavailable` was never set and `ridReady` below would never be set
+        // either. A restaurant we cannot look up is exactly the case the line under this one exists
+        // for — say "not available" rather than fall through to somebody else's dish.
+        const r = await getRestaurantBySlug(fromRestaurant).catch(() => null);
         // A ?r= that names a restaurant which is inactive, binned or simply unknown used to
         // leave rid at the #1 DEFAULT — so the viewer quietly showed FRENCH HOUSE's dish of
         // that slug (its name, description and price) under another restaurant's link. Say
@@ -209,7 +224,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         if (!r) { if (!cancelled) setUnavailable(true); return; }
         {
           rid = r.id;
-          if (!cancelled) setRid(r.id); // drive useFeatures() for this restaurant
+          if (!cancelled) { setRid(r.id); setRidReady(true); } // drive useFeatures(), and release the config effect
           // TELL THE TAB WHICH RESTAURANT IT IS IN (sweep #6 T2, 2026-08-17).
           //
           // /view has no /r/<slug> in its path, so lib/tenantStorage.ts's tenantSlug() falls back
@@ -376,6 +391,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
   useEffect(() => {
     // CONCURRENCY GUARD: folder can change while a config fetch is still in flight;
     // ignore a stale earlier response so it can't replace the new folder's config.
+    // WAIT UNTIL WE KNOW WHOSE SCREEN THIS IS (sweep #8 T2, 2026-09-02 — item 1). Without this the
+    // first pass of this effect runs while `rid` is still the provisional restaurant #1, which is
+    // precisely the mistake the flagship-only test below exists to prevent. `ridReady` is true from
+    // the start when there is no `?r=`, so restaurant #1's own door is unchanged.
+    if (!ridReady) return;
     let cancelled = false;
     const normalizedFolder = (folder || "");
     // 3D SWITCH (per restaurant): if this restaurant has the 3D viewer turned off,
@@ -385,6 +405,29 @@ export default function ViewerClient({ folder }: { folder: string }) {
     getFeatures(rid).then((feats) => {
       if (cancelled) return;
       if (feats.model3d === false) { setLoading(false); return; }
+      // ── THE STATIC CONFIG BELONGS TO RESTAURANT #1, AND ONLY TO IT ─────────────────────────
+      //
+      // `public/content/items/` holds exactly two folders — `Croissant` and `Waffle` — and they
+      // are restaurant #1's own legacy demo dishes, checked into this repo. Nothing writes to that
+      // directory; `scripts/set-glb-cache.mjs` calls it "legacy demo content holding two dishes".
+      // EVERY other restaurant serves its model, name, description and stats from its own database
+      // row, which is why the 404 a beat below already falls back to an empty config for them.
+      //
+      // The hole was the folder NAME. This route is `/view/<folder>`, and the folder is whatever an
+      // owner typed into the editor — so a second restaurant that calls its croissant folder
+      // "Croissant" scored a hit on #1's file and inherited the lot. MEASURED on this stack:
+      // `/view/Croissant?r=aangan-garden-restaurant` served, under Aangan's own orange, restaurant
+      // #1's model (`croissant_small.glb` + `croissant-optimized.glb`, ~11 MB), #1's dish name
+      // "Croissant Sandwich" in the bottom bar, and #1's three hotspot cards — "Croissant / Sauce /
+      // Salad" with #1's wording — pinned onto the dish. `/view/Waffle?r=pizza-palace` did the same.
+      // The existing `dbModel` rule rescues the MODEL once the tenant's own row lands; it never
+      // covered the hotspots, the title, the subtitle or the stats, and it cannot cover the ~2 MB
+      // that is already downloading by then.
+      //
+      // So the static file is read only when this really is restaurant #1. For every other tenant
+      // this is the empty config they already got — the ONLY case it changes is the name collision,
+      // and it saves them one 404 round trip per 3D open on the way.
+      if (rid !== DEFAULT_RESTAURANT_ID) { setConfig({}); setLoading(false); return; }
       fetch(`/content/items/${normalizedFolder}/config.json`)
         .then((res) => {
           // No static config.json for this folder (only #1's flagship dishes ship one; every
@@ -410,7 +453,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         });
     });
     return () => { cancelled = true; };
-  }, [folder, rid]);
+  }, [folder, rid, ridReady]);
 
   // Once the config is loaded, decide which model file to actually display:
   // prefer the high-quality "optimized" one, but show the small one first if

@@ -286,6 +286,32 @@ check(
     "and losing the listener there would freeze the bar at whatever the first paint decided."
 );
 
+// ── a tenant never inherits restaurant #1's static demo config (sweep #8 T2, item 1) ─────────
+// public/content/items/ holds restaurant #1's own two legacy demo dishes. The 3D route is
+// /view/<folder>, and the folder name is whatever an owner typed — so a second restaurant that
+// calls its folder "Croissant" scored a hit on #1's file. MEASURED: /view/Croissant?r=aangan-…
+// served #1's model, #1's dish name and #1's three hotspot cards under Aangan's own colour.
+{
+  const v = read(VIEWER);
+  check(
+    "the 3D screen reads the static /content config only when it really is restaurant #1",
+    /rid !== DEFAULT_RESTAURANT_ID\s*\)\s*\{\s*setConfig\(\{\}\)/.test(v),
+    "app/view/[folder]/ViewerClient.tsx must refuse `/content/items/<folder>/config.json` for any " +
+      "restaurant other than #1, or a folder-name collision serves the flagship's dish to a tenant."
+  );
+  check(
+    "…and it waits until the restaurant is actually resolved before deciding that",
+    /if \(!ridReady\) return;/.test(v) && /\[folder, rid, ridReady\]/.test(v),
+    "`rid` starts at restaurant #1 and resolves async, so the config effect must be gated on " +
+      "`ridReady` and depend on it — otherwise the first pass decides as though it were #1."
+  );
+  check(
+    "…and a restaurant lookup that fails says 'not available' rather than falling through to #1",
+    /getRestaurantBySlug\(fromRestaurant\)\.catch\(\(\) => null\)/.test(v),
+    "a rejected getRestaurantBySlug left `unavailable` unset and `ridReady` never true."
+  );
+}
+
 // The two guest 404 pages are twins on purpose.
 check(
   "the two guest not-found pages for the dish routes have not drifted apart",
