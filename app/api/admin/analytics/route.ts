@@ -90,7 +90,20 @@ export async function GET(req: NextRequest) {
   // a second read of anything. Validated to a strict date so a junk value can never widen the
   // window or echo back out (the same lesson as ?range= above).
   const rawDay = new URL(req.url).searchParams.get("day") || "";
-  const drillDay = /^\d{4}-\d{2}-\d{2}$/.test(rawDay) ? rawDay : "";
+  // A REAL DATE, NOT JUST THE SHAPE OF ONE (item 22, T19 sweep #7, 2026-09-01).
+  //
+  // This tested the SHAPE only, so `?day=2026-13-45` passed — and then Date.parse of it is NaN,
+  // `new Date(NaN).toISOString()` THROWS, and the Platform analytics page answered 500. Found by
+  // driving the parameter rather than by reading: month 13 looks like a date to a regular expression.
+  // The round-trip test also refuses 2026-02-31, which Date.parse would silently accept as 3 March —
+  // a drill labelled one day showing another day's orders is worse than a refusal.
+  // Note the order: Date.parse FIRST. `new Date("2026-13-45T00:00:00Z").toISOString()` throws, so a
+  // round-trip check written the obvious way crashes on the very value it is meant to refuse — which
+  // it did on the first attempt at this fix.
+  const dayLooksRight = /^\d{4}-\d{2}-\d{2}$/.test(rawDay);
+  const dayMs = dayLooksRight ? Date.parse(`${rawDay}T00:00:00Z`) : NaN;
+  const dayIsReal = Number.isFinite(dayMs) && new Date(dayMs).toISOString().slice(0, 10) === rawDay;
+  const drillDay = dayIsReal ? rawDay : "";
   const { from, to } = drillDay ? istDayBounds(drillDay) : rangeBounds(range);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
