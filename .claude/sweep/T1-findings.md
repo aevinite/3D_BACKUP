@@ -226,3 +226,84 @@ dish names already do, is improvement **#11**. Recorded at P15550/P15554.
 
 Improvement ideas are **not** in this file, by the owner's instruction for sweep #7 — they are
 printed in the terminal window.
+
+---
+
+# T1 · sweep #8 — the guest menu and its three doors
+
+**Territory:** `app/layout.tsx` · `app/page.tsx` · `app/menu/page.tsx` · `app/not-found.tsx` ·
+`app/q/[code]/page.tsx` · `app/r/[restaurant]/menu/page.tsx` ·
+`app/r/[restaurant]/menu/not-found.tsx` · `components/MenuView.tsx`
+
+**Branch** `sweep8/t1-guest-menu-and-three-doors` · **worktree** `~/Documents/Projects/wt-s8-t1` ·
+**port** 4301, serving a PRODUCTION build of this worktree.
+
+| | |
+|---|---|
+| Existing ledger rows re-run | **555** (548 `T1.md`, 6 `T29.md`, 1 `T14.md`) |
+| **Regressions** | **0** |
+| New checks written and executed | **524** (`P54701`–`P55224`) |
+| Product faults found | **1**, fixed |
+| Guard faults found | **3** — two fixed here, one left for its owner |
+
+---
+
+## 1 — A menu with no sections showed no dishes, and blamed a filter · FIXED
+
+**Where:** the guest menu, any door (`/r/<slug>/menu`, `/menu`, `/q/<code>`) — a blank page saying
+"No dishes match these filters. Try turning a filter off." above eight grey chips.
+
+The grouped view is built by walking the category list, so an empty category list produces no
+groups however many dishes arrived. Reachable two ways: the sections half of the menu read blips
+(the two reads run in parallel and only one has to fail), or every category on the menu is
+switched off. `lib/menu.ts` deliberately refuses to filter on an empty set for exactly this
+reason — "far worse than showing one extra dish" — and `MenuView` then blanked it anyway.
+
+Measured on a production build at 360×780, French House, with the sections half of the reply
+emptied and the dishes handed through untouched: **0 tiles drawn, 59 in the payload**, plus the
+wrong message and eight placeholder chips that never resolved. After: **59 tiles, no message, no
+placeholders, no empty strip**.
+
+Fix: `components/MenuView.tsx` — when there are dishes, no groups and no NARROWING chip on, draw
+the dishes flat in the grid a search already uses; and gate the still-loading category arm on
+`!loaded`. Guard: `scripts/verify-guest.mjs` `P55217`–`P55219`, static **and** live.
+
+## 2 — `verify:guest` died on a closed restaurant before printing anything · FIXED
+
+Its live half hard-codes `demo-bistro`, which is in maintenance on this stack, so an unguarded
+`page.fill("#search-input")` threw and the run exited with a TimeoutError **before the report**.
+Reproduced against `origin/main`. Every other live check it had made went unreported with it.
+After: the row records a written skip, and the same command reports **119 passed**.
+
+## 3 — `verify:guest` row 261 was red for doing what the owner asked · FIXED
+
+Row 261 matched `history.replaceState` as well as `pushState`. The owner asked on 2026-08-30 for
+the table number to leave the address bar, so `MenuView` wipes it with `replaceState` — which adds
+no history entry and is the opposite of a back layer. The row had been red on clean `main` ever
+since. `pushState` and `popstate` stay banned; a `replaceState` is allowed only where it sits with
+the `table` parameter being deleted. Proven by three sabotages, not by reading.
+
+---
+
+## Left for their owners (outside this terminal's eight files)
+
+- **`verify:guest` row 110** is red on clean `main`. It asserts the OLD spelling of the reviews
+  gate; `app/item/[slug]/ItemClient.tsx` has replaced it with a stricter one
+  (`reviewsCanBeSeen = features.reviews && features.ratings`, resolved through `getFeatures`).
+  The dish page is another terminal's territory. (`P55222`)
+- **`components/Maintenance.tsx`** prints a restaurant's name markers raw: `alt="Demo *Bistro*"`.
+  The asterisks are highlight markers `Header` and `HeroTitle` both strip. Two of nine live
+  restaurants carry them; both have a logo today, so only a screen reader hears it — but a
+  restaurant with markers and no logo would show them in 40px text. (`P55223`)
+- **`scripts/verify-t24b-live.mjs`** drives the app without the `requireUp` preflight, so the
+  repo's own PostToolUse hook reports a failure on **every** session's write, repo-wide. (`P55224`)
+
+## Not a finding — recorded so nobody files it again
+
+- Demo Bistro's maintenance screen shows a mark that looks like French House's. It is Demo
+  Bistro's OWN uploaded logo (`.maint`, not `.maint-flagship`); the dev fixture was seeded from #1.
+- `P00100`'s subject moved: the per-category ink helper left `MenuView` on 2026-08-26 when the
+  owner ruled one theme colour. The same WCAG maths now lives in `lib/accent.ts` → `inkOnAccent`.
+- All nine live restaurants are set to a LIGHT default, so the dark-default script could only be
+  exercised in the negative direction. Flipping one would change a fixture other terminals are
+  reading this run.
