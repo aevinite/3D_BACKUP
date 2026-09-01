@@ -159,7 +159,17 @@ export async function GET(req: NextRequest) {
   if (rid && isUuid(rid)) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
 
   const [sessQ, restsQ, delQ, delEmptiedR, delPersonR] = await Promise.all([
-    sq, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000),
+    // TWO POPULATIONS OUT OF ONE READ, and they are deliberately different (T19 sweep #7, 2026-09-01).
+    // This carried `.is("deleted_at", null)`, so a bill belonging to a restaurant now in the recycle
+    // bin fell out of the name map and its row rendered "—". Measured on the dev database: NINE
+    // deleted bills from 31 July, every one of them anonymous, on the one screen whose promise is that
+    // a removed sale stays reachable — and the refusal in /api/admin/act-as/go says it in those words:
+    // "its bills are still on record in the Bills ledger". A bill of a deleted restaurant is still a
+    // real sale with a real history. So the NAME MAP keeps every restaurant, and the FILTER DROPDOWN
+    // below still offers only live ones, because narrowing to a deleted restaurant leads nowhere.
+    // The identical split, with the identical reasoning, is in app/api/admin/customers/route.ts
+    // (T18 handoff H3, approved by the owner 2026-08-20).
+    sq, sb.from("restaurants").select("id, name, deleted_at").limit(2000),
     delCountQ, delEmptiedQ, delByPersonQ,
   ]);
   if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
@@ -270,7 +280,10 @@ export async function GET(req: NextRequest) {
   const full = sessions.length >= limit;
   const nextBefore = full && sessions.length ? sessions[sessions.length - 1].created_at || null : null;
 
-  const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const restaurants = (restsQ.data || [])
+    .filter((r) => r.deleted_at == null)
+    .map((r) => ({ id: r.id, name: r.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   return NextResponse.json({
     bills, counts, total: bills.length, restaurants,
     deletedTotal: delQ.count ?? 0,

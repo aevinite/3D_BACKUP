@@ -92,7 +92,8 @@ export async function GET(req: NextRequest) {
   };
   const [aQ, restsQ, totQ, riskQ] = await Promise.all([
     q,
-    sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000),
+    // Every restaurant, binned ones included — see the note under `nameById` below.
+    sb.from("restaurants").select("id, name, deleted_at").limit(2000),
     wantCount ? countOf(actions) : Promise.resolve(null),
     wantCount ? countOf([...RISK]) : Promise.resolve(null),
   ]);
@@ -104,6 +105,11 @@ export async function GET(req: NextRequest) {
   // it. Same rule the sibling account-health route already states for its three reads.
   if (restsQ.error) return adminFail("the bill trail", restsQ.error, { action: "load" });
 
+  // THE NAME MAP KEEPS BINNED RESTAURANTS; THE DROPDOWN DOES NOT (T19 sweep #7, 2026-09-01). This
+  // read excluded them, so a bill change made at a restaurant that has since been deleted rendered
+  // "—" — anonymous, on the one screen whose job is noticing a bill being quietly removed, and
+  // precisely for the tenant whose disappearance makes that question worth asking. Same split, same
+  // reasoning, as app/api/admin/customers/route.ts and the bill ledger beside it.
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   const rows = (aQ.data || []).map((a) => ({
     id: a.id,
@@ -116,7 +122,10 @@ export async function GET(req: NextRequest) {
     risk: RISK.has(a.action),
   }));
   // Restaurants list for the filter dropdown (id + name only).
-  const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const restaurants = (restsQ.data || [])
+    .filter((r) => r.deleted_at == null)
+    .map((r) => ({ id: r.id, name: r.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   // A COUNT THAT FAILED IS NOT A ZERO. This screen's whole purpose is noticing bills being quietly
   // removed, and the sibling ledger route says the same thing in its own words ("a silent zero is
   // the failure mode that matters most"). `null` travels to the page, which then says it does not
