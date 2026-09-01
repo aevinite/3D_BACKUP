@@ -4,7 +4,7 @@
 // never appears. All figures come from /api/admin/revenue (derived from restaurant_billing +
 // restaurant_payments — no schema change). Dark ops-console theme, hand-rolled SVG chart.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
+import { useActiveAutoRefresh, timeAgo, istDate, IST } from "@/components/admin/shared";
 
 type Plan = { plan: string; mrr: number; count: number };
 type Month = { month: string; label: string; collected: number };
@@ -103,14 +103,37 @@ export default function AdminRevenue() {
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
-  const statusMax = d ? Math.max(1, ...Object.values(d.byStatus)) : 1;
+  // A REPLY WITH A FIELD MISSING MUST NOT COST THE WHOLE SCREEN (T18 second 500, 2026-08-31).
+  // `d` being present was taken as every field inside it being present, so a body without
+  // `byStatus` made `Object.values(null)` throw — "Cannot convert undefined or null to object" —
+  // and the error boundary replaced the entire page with the generic "Something went wrong" card.
+  // Its four sibling money screens all degrade IN PLACE instead, keeping their heading and offering
+  // Retry. Not reachable through today's endpoint, which always sends the field; this is about the
+  // screen being able to survive a partial answer at all, which is what the four others already do.
+  // ALL FOUR FIELDS, not just the one that threw first (T18 second 500, 2026-08-31). Item 12
+  // guarded `byStatus` and the screen still died on a reply with everything missing, because the
+  // chart reads `monthly`, the plan table reads `mrrByPlan` and the paying table reads `paying` —
+  // three more `.length`/`.map` calls on undefined, each one enough to lose the whole page. Fixing
+  // the first of four and calling it done is exactly the shape of mistake the block was written to
+  // catch, and it caught mine.
+  const byStatus: Record<string, number> = d?.byStatus ?? {};
+  const monthly = d?.monthly ?? [];
+  const mrrByPlan = d?.mrrByPlan ?? [];
+  const paying = d?.paying ?? [];
+  const statusMax = d ? Math.max(1, ...Object.values(byStatus)) : 1;
   const num = (v: number | undefined) => (v == null ? "…" : v);
 
   const STATS: { k: string; v: string | number; hint?: string; accent?: boolean }[] = [
     { k: "MRR", v: d ? money(d.mrr) : "…", hint: "monthly recurring", accent: true },
     { k: "ARR", v: d ? money(d.arr) : "…", hint: "yearly run-rate" },
     { k: "Active subscriptions", v: d ? num(d.activeSubs) : "…", hint: "paying now" },
-    { k: "Collected this year", v: d ? money(d.collectedThisYear) : "…", hint: "payments in " + new Date().getFullYear() },
+    // THE YEAR COMES FROM THE SERVER'S CLOCK, NOT THE BROWSER'S (T18 sweep #7, item 6). The figure is
+    // counted against the IST calendar year (the route says so and pins it to +05:30); the label was
+    // `new Date().getFullYear()`, the year on whichever device is looking. On 31 December in a
+    // timezone behind IST the two disagree, so the heading would name one year over another year's
+    // money. `generatedAt` is already in the reply.
+    { k: "Collected this year", v: d ? money(d.collectedThisYear) : "…",
+      hint: "payments in " + (d?.generatedAt ? new Date(d.generatedAt).toLocaleDateString("en-IN", { year: "numeric", timeZone: IST }) : "this year") },
     { k: "Collected all-time", v: d ? money(d.collectedAllTime) : "…", hint: "every payment logged" },
   ];
 
@@ -160,7 +183,7 @@ export default function AdminRevenue() {
       <div className="adm-card" style={{ marginBottom: 12 }}>
         <h2 style={{ margin: "0 0 2px" }}>Collected — last 12 months</h2>
         <p className="hint" style={{ marginTop: 0 }}>Real subscription payments recorded each month.</p>
-        {d ? <CollectedChart data={d.monthly} /> : <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>}
+        {d ? <CollectedChart data={monthly} /> : <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>}
       </div>
 
       <div className="adx-grid2col">
@@ -170,7 +193,7 @@ export default function AdminRevenue() {
           {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : (
             <div style={{ display: "grid", gap: 10 }}>
               {(["active", "trial", "paused", "cancelled"] as const).map((st) => {
-                const n = d.byStatus[st] || 0;
+                const n = byStatus[st] || 0;
                 return (
                   <div key={st} style={{ display: "grid", gridTemplateColumns: "120px 1fr 34px", gap: 10, alignItems: "center", fontSize: 13 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ width: 8, height: 8, borderRadius: 999, background: STATUS_COLOR[st] }} />{STATUS_LABEL[st]}</span>
@@ -188,12 +211,12 @@ export default function AdminRevenue() {
         {/* MRR by plan */}
         <div className="adm-card">
           <h2 style={{ margin: "0 0 10px" }}>MRR by plan</h2>
-          {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.mrrByPlan.length === 0 ? (
+          {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : mrrByPlan.length === 0 ? (
             <div className="adm-empty">No active paid plans yet.</div>
           ) : (
             <div className="adm-logwrap">
               <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 60px 100px" }}><span>Plan</span><span style={{ textAlign: "right" }}>Subs</span><span style={{ textAlign: "right" }}>MRR</span></div>
-              {d.mrrByPlan.map((p) => (
+              {mrrByPlan.map((p) => (
                 <div key={p.plan} className="adm-logrow" style={{ gridTemplateColumns: "1fr 60px 100px" }}>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.plan}</span>
                   <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p.count}</span>
@@ -208,20 +231,20 @@ export default function AdminRevenue() {
       {/* Paying restaurants */}
       <div className="adm-card" style={{ marginTop: 12 }}>
         <h2 style={{ margin: "0 0 10px" }}>Paying restaurants</h2>
-        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.paying.length === 0 ? (
+        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : paying.length === 0 ? (
           <div className="adm-empty">No active paying subscriptions yet — set a plan on Billing &amp; plans.</div>
         ) : (
           <div className="adm-logwrap">
             <div className="adm-logrow head" style={{ gridTemplateColumns: "1.4fr 1fr 80px 110px 120px" }}>
               <span>Restaurant</span><span>Plan</span><span>Cycle</span><span style={{ textAlign: "right" }}>Monthly</span><span style={{ textAlign: "right" }}>Next due</span>
             </div>
-            {d.paying.map((r, i) => (
+            {paying.map((r, i) => (
               <div key={i} className="adm-logrow" style={{ gridTemplateColumns: "1.4fr 1fr 80px 110px 120px" }}>
                 <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
                 <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.plan}</span>
                 <span className="adm-muted">{r.cycle === "monthly" ? "Monthly" : "Yearly"}</span>
                 <span style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{money(r.monthly)}</span>
-                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted">{r.nextDue || "—"}</span>
+                <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }} className="adm-muted" title={r.nextDue || undefined}>{istDate(r.nextDue)}</span>
               </div>
             ))}
           </div>

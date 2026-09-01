@@ -28,17 +28,18 @@ export async function GET(req: NextRequest) {
   // page label is IST, so a UTC year flips ~5.5h late and mismatches the heading. UTC+5:30.
   const yearStart = `${new Date(now.getTime() + 330 * 60000).getUTCFullYear()}-01-01`;   // see istNow below
 
-  // ── THE CHART'S MONTHS ARE IST TOO (T20 round 2, 2026-08-31) ──────────────────────────────────
-  // The line above corrects the YEAR boundary to IST and says exactly why: "the page label is IST, so
-  // a UTC year flips ~5.5h late and mismatches the heading". This window, and the month labels built
-  // from it further down, were left on UTC — so for the 5½ hours after IST midnight on the 1st of a
-  // month, `getUTCMonth()` is still the previous month and the chart's window starts a month earlier
-  // than the page's own idea of "the last 12 months". On 1 January that is worse than a shifted edge:
-  // "collected this year" would already say the new year (IST) while the chart is still anchored to
-  // the old one.
-  // One `istNow`, used by both, so the page cannot disagree with itself about which month it is.
-  const istNow = new Date(now.getTime() + 330 * 60000);
-  const monthsFrom = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  // THE TWELVE MONTHS ARE IST MONTHS, LIKE THE YEAR ABOVE (owner, 2026-08-31 — item 10).
+  // This was `now.getUTCMonth()`, the month on the world clock, while "collected this year" three
+  // lines up is deliberately pinned to the IST calendar and says why. For the first five and a half
+  // hours of the 1st of every IST month the two disagreed: UTC is still in the previous month, so
+  // the newest bucket was last month and a payment taken in that window sat outside the chart while
+  // still counting in the yearly figure above it. The same shift also decides the LABELS, so a
+  // process running west of UTC would have printed all twelve of them a month out — not reachable
+  // on Vercel, which runs functions in UTC, but not something to leave resting on that either.
+  const IST_SHIFT_MS = 330 * 60000;
+  const istNow = new Date(now.getTime() + IST_SHIFT_MS);
+  const istY = istNow.getUTCFullYear(), istM = istNow.getUTCMonth();
+  const monthsFrom = new Date(Date.UTC(istY, istM - 11, 1)).toISOString().slice(0, 10);
 
   // ── EVERY FIGURE ON THIS PAGE NOW COUNTS EVERY ROW (owner-approved 2026-08-20, item 13) ───────
   // All three reads used to stop at PostgREST's row cap and say nothing about it, so MRR, the
@@ -115,9 +116,11 @@ export async function GET(req: NextRequest) {
   // Built from the SAME istNow as `monthsFrom`, so a label can never name a month the window did not
   // ask for (see the note on monthsFrom).
   for (let i = 11; i >= 0; i--) {
-    const d = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - i, 1));
+    // Built from the IST month, and LABELLED from the same instant with the timezone named — so the
+    // key and the word under the bar can never come from two different calendars.
+    const d = new Date(Date.UTC(istY, istM - i, 1, 12));
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    monthly.push({ month: key, label: d.toLocaleDateString("en-IN", { month: "short" }), collected: Math.round(byMonth.get(key) || 0) });
+    monthly.push({ month: key, label: d.toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" }), collected: Math.round(byMonth.get(key) || 0) });
   }
 
   // Paying subscriptions table (active INR), biggest first.

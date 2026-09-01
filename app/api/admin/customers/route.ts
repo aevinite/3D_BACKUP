@@ -114,7 +114,25 @@ export async function GET(req: NextRequest) {
     if (seg === "regulars") q = q.gte("visits", REPEAT_MIN);
     if (seg === "new") q = q.lt("visits", REPEAT_MIN);
     if (seg === "blocked") q = q.eq("blocked", true);
-    const { data, error, count } = await q;
+    let { data, error, count } = await q;
+    // A PAGE PAST THE END IS EMPTY, NOT BROKEN (T18 second 500, 2026-08-31). PostgREST answers an
+    // offset beyond the last row with 416 / PGRST103 "Requested range not satisfiable", which came
+    // back to the screen as a red "Couldn't load the guest list" — the same words a real database
+    // failure gets, for a page that simply does not exist. Measured: 87 guests, and ?page=2 was a
+    // 500. The Next button is disabled at the end so a person cannot reach it by tapping, but a
+    // stale "Showing X of Y" or a typed address could, and "this page is empty" and "the guest list
+    // is down" must not read the same. The count is re-taken here because the failed read carried
+    // none, and only on this path, so the ordinary page costs nothing extra.
+    if (error && (error as { code?: string }).code === "PGRST103") {
+      let head = sb.from("customers").select("phone", { count: "exact", head: true });
+      if (rid) head = head.eq("restaurant_id", rid);
+      if (search) head = head.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+      if (seg === "regulars") head = head.gte("visits", REPEAT_MIN);
+      if (seg === "new") head = head.lt("visits", REPEAT_MIN);
+      if (seg === "blocked") head = head.eq("blocked", true);
+      const h = await head;
+      data = []; error = null; count = h.count ?? 0;
+    }
     if (error) return adminFail("the guest list", error, { action: "load" });
     const customers = ((data || []) as Row[]).map((c) => ({
       ...c,
@@ -162,17 +180,26 @@ export async function GET(req: NextRequest) {
     // The per-restaurant bars follow the dropdown: a bar you cannot then filter to, for a
     // restaurant that has been deleted, is the same fault one row down.
     const liveIds = new Set(liveRests.map((r) => r.id));
-    const spread = agg.spreadRaw
+    const spreadAll = agg.spreadRaw
       .filter((s2) => liveIds.has(s2.restaurant_id))
       .map((s2) => ({ id: s2.restaurant_id, name: nameOf(s2.restaurant_id), count: s2.guests, regulars: s2.regulars }))
-      .filter((s2) => s2.count > 0)
-      .slice(0, 8);
+      .filter((s2) => s2.count > 0);
+    const spread = spreadAll.slice(0, 8);
+    // HOW MANY THERE REALLY ARE, so the card can say when it is hiding one (owner, 2026-08-31 —
+    // item 9). The bars are capped at 8 and the page could not know that, so on a platform with a
+    // ninth restaurant that has guests, that restaurant simply was not there — on the card whose
+    // stated job is "how many saved guests each restaurant has". The sibling card on Platform
+    // analytics ("Showing the busiest 8 of 9 restaurants that took an order") was given this on
+    // 2026-08-20; this one was not. Sent as a count, not more rows: the cap is what keeps the read
+    // small, and one number is enough to tell the truth about it.
+    const spreadTotal = spreadAll.length;
 
     return NextResponse.json({
       summary: { total, regulars, blocked, newThisMonth: fresh, matched: count || 0, page, pageSize: PAGE },
       cachedAt: agg.cachedAt,
       restaurants: liveRests.map((r) => ({ id: r.id, name: label(r) })),
       spread,
+      spreadTotal,
       customers,
     });
   } catch (e) {

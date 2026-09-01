@@ -191,7 +191,16 @@ export default function AdminAnalytics() {
             updated {timeAgo(data.cachedAt)}
           </span>
         ) : null}
-        <button className="adm-btn" disabled={loading} onClick={() => load(range, true)}>
+        {/* REFRESH RE-ASKS FOR WHAT IS ON SCREEN, WHICH MAY BE ONE DAY (T18 sweep #7, item 1).
+            This was `load(range, true)` — no third argument, so `day` defaulted to null and the
+            reply was the WHOLE WINDOW, while `drillDay` stayed set and every label on the page
+            went on naming the drilled day. Measured: drill into 24 Aug (0 orders that day), press
+            ↻, and the tile reads "Orders · 24 Aug  1,047" — the week's total under the day's name,
+            with both card hints saying "for 24 Aug" and the chart still offering "← Back to the
+            whole range". That is exactly the fault the drill-labels fix closed in the T18 sweep of
+            2026-08-20, coming back through the one control that fix never touched. The 60s backstop
+            three lines below has always passed `drillDay`; this is the same call. */}
+        <button className="adm-btn" disabled={loading} onClick={() => load(range, true, drillDay)}>
           <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
         </button>
       </div>
@@ -213,7 +222,14 @@ export default function AdminAnalytics() {
             href: "/aevinite/floor", title: "Open the live floor",
             sub: t ? (
               <>
-                <span>of {nf.format(t.totalTables)} tables ({Math.round(occupancy * 100)}%)</span>
+                {/* A PERCENTAGE MUST NOT ROUND ITSELF DOWN TO "NONE" (T18 sweep #7, item 3). The
+                    BAR beside this already refuses to disappear — it keeps a 2% sliver whenever a
+                    table is occupied — but the words said `Math.round(occupancy * 100)`%, so on
+                    this platform the tile read "8" above "of 1,850 tables (0%)": eight tables
+                    occupied, nought per cent, with a visible bar under it. Three readings that do
+                    not agree. Under half a per cent now says so in words instead of claiming zero,
+                    which is the same honesty the sliver was given. */}
+                <span>of {nf.format(t.totalTables)} tables ({occupancy > 0 && occupancy * 100 < 0.5 ? "under 1" : Math.round(occupancy * 100)}%)</span>
                 <span style={{ display: "block", height: 6, borderRadius: 999, background: "color-mix(in srgb, var(--accent) 16%, transparent)", overflow: "hidden", marginTop: 6 }}>
                   <span style={{ display: "block", height: "100%", width: `${Math.max(occupancy * 100, t.activeTablesNow > 0 ? 2 : 0)}%`, background: "var(--accent)", borderRadius: 999 }} />
                 </span>

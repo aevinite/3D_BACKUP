@@ -26,6 +26,9 @@ type Data = {
   // the chip used to be able to say 0 while deleted bills existed. nextBefore is the paging
   // cursor: null once there is nothing older to fetch.
   deletedTotal?: number; nextBefore?: string | null;
+  // The Deleted bucket holds THREE different events; these split it. null means the split could not
+  // be read, and the tile falls back to its old single sentence rather than inventing a zero.
+  deletedEmptied?: number | null; deletedByPerson?: number | null;
 };
 type TrailEvent = { action: string; actor: string | null; detail: string | null; at: string };
 type InvEvent = { event: string; no: number | null; reason: string | null; actor: string | null; at: string };
@@ -44,6 +47,8 @@ const META: Record<BillState, { label: string; tone: string; icon: IconName }> =
   deleted:   { label: "Deleted",       tone: "#ef4444", icon: "deleted" },
 };
 const ORDER: BillState[] = ["running", "settled", "khata", "onhouse", "cancelled", "deleted"];
+// Grouped the Indian way, like every other count in this territory.
+const nf0 = (n: number) => (Number(n) || 0).toLocaleString("en-IN");
 
 // Bill-context wording, deliberately narrower than the shared map (this page is ONE bill's
 // trail, so "Invoice voided" reads better than the generic "Reopened the bill"). Anything not
@@ -302,7 +307,27 @@ export default function AdminBills() {
             {lostUnknown > 0 && <> · {inr(lostUnknown)} not answered</>}
             <br />walk-outs / cancels · on this page
           </>} />
-        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable · every one, all time" calculating={!d} />
+        {/* THREE EVENTS, NOT ONE (owner, 2026-08-31 — he asked why this screen has a "Deleted"
+            bucket at all when a bill can never be deleted). The count was right and the word was
+            doing too much work. Measured on backup: 2,956 tombstoned bills, of which **16** had a
+            person's name against them. 1,752 carry migration 291's own words, "every order on this
+            bill was deleted" — the DATABASE closing a bill out because its last dish came off, one
+            at a time; nobody deleted the bill. The rest have neither a person nor a reason, which is
+            precisely the fingerprint mig 291's header describes: scripts writing `deleted_at`
+            straight through the service role, not the product.
+            The headline stays the true total, because compliance §3.0 wants every tombstone counted
+            and the capability itself is his own (R27: "The Aevidine admin console keeps a soft delete
+            for support work"). What stops is the tile presenting three things as one number. Nothing
+            is renamed and no policy is decided here — the split comes from columns already stored. */}
+        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} calculating={!d}
+          sub={d?.deletedByPerson == null || d?.deletedEmptied == null
+            ? "restorable · every one, all time"
+            : <>
+                {nf0(d.deletedByPerson)} removed by a person · {nf0(d.deletedEmptied)} closed out when the last dish came off
+                {(d.deletedTotal ?? 0) - d.deletedByPerson - d.deletedEmptied > 0
+                  ? <> · {nf0((d.deletedTotal ?? 0) - d.deletedByPerson - d.deletedEmptied)} with nobody recorded</> : null}
+                <br />restorable · every one, all time
+              </>} />
       </div>
 
       {/* Filters */}
@@ -362,11 +387,34 @@ export default function AdminBills() {
           <div className="adm-empty">
             {q || from || to
               ? "No bill matches that search or date range."
-              : state === "deleted" ? "No bills have been deleted." : "No bills in this view."}
+              : state === "deleted" ? "No bills have been deleted."
+              // "NONE ON THIS PAGE" AND "NONE AT ALL" MUST NOT READ THE SAME (T18 sweep #7, item 2).
+              // Five of the six state buckets can only be worked out by rolling a session up with
+              // its orders, so the endpoint narrows them AFTER reading a page of sessions — the
+              // route says so in its own comment. When that page happens to hold none of the chosen
+              // state the list is empty even though older pages have plenty, and this said "No bills
+              // in this view." full stop. Measured on backup: Running, Settled, Pay-later and On the
+              // house all came back empty on the newest page while the server was still handing back
+              // a cursor, and a settled bill (#644, My Little French House, ₹441) was sitting three
+              // pages further back — unreachable, because the Load-older footer below is only drawn
+              // when there is at least one row. On the screen whose stated job is proving no sale
+              // quietly vanished, "the newest bills hold none" was being shown as "there are none".
+              : nextBefore
+                ? (state ? `No “${META[state as BillState].label}” bills on this page — there are older ones.`
+                         : "No bills on this page — there are older ones.")
+                : "No bills in this view."}
           </div>
         )
           : rows.map((b) => {
-            const m = META[b.state];
+            // A STATE THIS SCREEN HAS NEVER HEARD OF COSTS ONE ROW, NOT THE PAGE (T18 second 500,
+            // 2026-08-31). `META[b.state]` was read straight into `m.icon` and `m.tone`, so a bill
+            // whose state is missing or new threw on the first property and the error boundary
+            // replaced the whole ledger — every other bill on the page with it. The same shape as
+            // item 12 on Platform revenue and the Change log, on a third screen. A new bucket added
+            // to lib/billLedger tomorrow would do it too, which is the case that matters: the
+            // ledger's job is showing every bill, and an unknown one must be VISIBLE and plainly
+            // labelled rather than fatal.
+            const m = META[b.state] || { label: String(b.state || "Unknown"), tone: "#8b94a7", icon: "chev" as IconName };
             const isOpen = open === b.sessionId;
             const del = b.state === "deleted";
             return (
@@ -392,8 +440,28 @@ export default function AdminBills() {
                       <div style={{ display: "flex", gap: 11, padding: "12px 14px", borderRadius: 11, border: "1px solid var(--adm-danger)", background: "color-mix(in srgb, #ef4444 12%, transparent)", margin: "12px 0" }}>
                         <span style={{ color: "var(--adm-danger)", flex: "0 0 auto", marginTop: 1 }}><Ico n="trash" s={16} /></span>
                         <div style={{ fontSize: 13 }}>
-                          <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>{b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
-                          {b.deleteReason ? <div style={{ marginTop: 3 }}>Reason: <i>{b.deleteReason}</i></div> : <div style={{ marginTop: 3, opacity: 0.7 }}>No reason recorded.</div>}
+                          {/* WHICH of the three this bill was, in words, from what the record says.
+                              "This bill was deleted" read the same for a person's act, for the
+                              database closing out an emptied bill, and for a row a script wrote —
+                              and 2,940 of the 2,956 on this database are not the first one. */}
+                          {b.deleteReason === "every order on this bill was deleted" ? (
+                            <>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill closed itself out</b> — every dish on it was
+                              removed, one at a time, so nothing was left on the bill{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
+                              <div style={{ marginTop: 3, opacity: 0.7 }}>Nobody deleted the bill. Look at what happened to it below to see who took the dishes off.</div>
+                            </>
+                          ) : !b.deletedBy && !b.deleteReason ? (
+                            <>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill is marked deleted with nobody recorded</b>
+                              {b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
+                              <div style={{ marginTop: 3, opacity: 0.7 }}>No person and no reason were stored, so it did not come through the panels — a script wrote it straight to the database.</div>
+                            </>
+                          ) : (
+                            <>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>{b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
+                              {b.deleteReason ? <div style={{ marginTop: 3 }}>Reason: <i>{b.deleteReason}</i></div> : <div style={{ marginTop: 3, opacity: 0.7 }}>No reason recorded.</div>}
+                            </>
+                          )}
                           <div style={{ marginTop: 3, opacity: 0.7 }}>Kept in full for tax/audit — you can restore it.</div>
                         </div>
                       </div>
@@ -454,14 +522,21 @@ export default function AdminBills() {
           })}
 
         {/* Walking further back. Present whenever the server says there is an older page, so the
-            admin is never silently stopped at the newest one. */}
-        {d && rows.length > 0 && nextBefore && (
+            admin is never silently stopped at the newest one.
+            AND THAT INCLUDES A PAGE THAT CAME BACK EMPTY (T18 sweep #7, item 2). This was gated on
+            `rows.length > 0`, which is the one case where the way onward matters most: the five
+            derived state buckets are narrowed after the page is read, so choosing Settled on a
+            newest page that holds none left the admin looking at "No bills in this view." with no
+            button to press — while the cursor to the next page was right there in the reply. */}
+        {d && nextBefore && (
           <div style={{ padding: "14px 16px", textAlign: "center", borderTop: "1px solid var(--adm-line, rgba(255,255,255,0.06))" }}>
             <button className="adm-btn" onClick={loadMore} disabled={moreBusy}>
               {moreBusy ? "Loading…" : "Load older bills"}
             </button>
             <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
-              Showing {rows.length} — there are older ones. Use the dates or the search to jump straight to a bill.
+              {rows.length > 0
+                ? <>Showing {rows.length} — there are older ones. Use the dates or the search to jump straight to a bill.</>
+                : <>Keep going back, or use the dates and the search to jump straight to a bill.</>}
             </div>
           </div>
         )}
