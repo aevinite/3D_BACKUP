@@ -91,6 +91,24 @@ check("473-474", "a guest can correct a wrong table number, and the dead sheet i
   has(F.cart, "live-order-fixlink", "saveOrderTable") && !has(F.tracker, "ot-sheet"));
 check("158-161", "a switched-off category's dishes are filtered in the data layer", () =>
   has(F.menuLib, "activeCategorySlugs", "inLiveCategory"));
+// ── NO SECTIONS IS NOT "NO DISHES MATCH YOUR FILTERS" (guest sweep T1, sweep #8, 2026-09-02) ──
+// The grouped view is built by walking the categories, so an empty categories list produces no
+// groups however many dishes arrived — and the branch under it said "No dishes match these
+// filters. Try turning a filter off." with no filter on, above 59 undrawn dishes. Measured on a
+// production build at 360x780 with the sections half of the menu read emptied.
+check("P55217", "with dishes but no sections, the menu shows the dishes rather than blaming a filter", () => {
+  const mv = F.menuView;
+  return { ok: has(mv, "allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn")
+             && has(mv, "const anyFilterOn = !!(chefActive || favActive || dietActive)"),
+           note: "the flat grid is reached before the no-match message, and only a NARROWING chip counts as a filter" };
+});
+check("P55218", "a sort alone never counts as a filter, because a sort hides nothing", () =>
+  ({ ok: !rx(F.menuView, /const anyFilterOn = [^;]*currentSort/), note: "anyFilterOn names chef, favourites and diet only" }));
+check("P55219", "the placeholder category chips stop once the menu has loaded", () => {
+  const mv = F.menuView;
+  const n = (mv.match(/\(dbCategories\.length === 0 && !loaded\) \|\| visibleCategories\.length > 0/g) || []).length;
+  return { ok: n === 2, note: `${n} of 2 places (the heading and the bar) gate the still-loading arm on !loaded, so eight grey chips cannot sit there for ever` };
+});
 check("24-27", "the viewer honours the Menu switch + maintenance, and never falls back to #1's dish", () =>
   has(F.viewer, "s.menuEnabled", "s.serviceMode") && rx(F.viewer, /if \(!r\) \{[^}]*setUnavailable\(true\)/));
 check(303, "the offline strip promises a queue on GUEST paths only", () =>
@@ -534,6 +552,42 @@ async function live(base) {
         : (r.guestWords && !r.staffScreen);
       check("P15609", `LIVE: ${label} (${url})`, () => ({ ok, note }));
       await c.close();
+    }
+
+    // LIVE: A MENU WITH NO SECTIONS STILL FEEDS THE DINER (guest sweep T1, sweep #8, 2026-09-02).
+    //
+    // The only thing changed is the SECTIONS half of the reply — the dishes are handed through
+    // untouched — which is what an ordinary blip on one of the two parallel reads looks like, and
+    // what a restaurant with every category switched off looks like. Before the fix this drew a
+    // blank page reading "No dishes match these filters. Try turning a filter off." over 59 dishes,
+    // above eight grey placeholder chips that never resolved.
+    //
+    // The service worker is blocked for this one context: it would serve its own stored copy of the
+    // reply and the injection would never be seen (the trap `verify:offline` records too).
+    {
+      const cc = await b.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, serviceWorkers: "block" });
+      const pg3 = await cc.newPage();
+      await pg3.route("**/api/r/*/menu-data*", async (route) => {
+        try {
+          const res = await route.fetch();
+          const j = await res.json();
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: j.items, categories: [] }) });
+        } catch { await route.continue(); }
+      });
+      await pg3.goto(base + "/r/french-house/menu", { waitUntil: "domcontentloaded", timeout: 60000 });
+      await pg3.waitForTimeout(4000);
+      const r3 = await pg3.evaluate(() => ({
+        cards: document.querySelectorAll(".item-card:not(.skeleton-card)").length,
+        skeletonChips: document.querySelectorAll(".cat-skeleton").length,
+        blamesFilter: /match these filters/i.test(document.body.innerText),
+      }));
+      check("P55217", "LIVE: with the sections missing, the dishes are still drawn", () =>
+        ({ ok: r3.cards > 0, note: `${r3.cards} dish tiles on screen` }));
+      check("P55217", "LIVE: …and the diner is not told a filter they never set hid them", () =>
+        ({ ok: !r3.blamesFilter, note: r3.blamesFilter ? 'the page says "No dishes match these filters"' : "no filter is blamed" }));
+      check("P55219", "LIVE: …and no placeholder chip is left sitting there for ever", () =>
+        ({ ok: r3.skeletonChips === 0, note: `${r3.skeletonChips} grey placeholder chips` }));
+      await cc.close();
     }
 
     // LIVE: the wide list row is laid out and nothing in it overlaps — and the PHONE is untouched.

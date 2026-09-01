@@ -1178,6 +1178,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const nonEmptyCatSlugs = new Set(filteredItems.map((it) => it.category));
   const visibleCategories = categories.filter((c) => nonEmptyCatSlugs.has(c.slug));
 
+  // ── IS A FILTER ACTUALLY ON? ─────────────────────────────────────────────────────────────────
+  // Only the three NARROWING chips count. A sort re-orders the menu, it never hides a dish, so a
+  // sorted menu that shows nothing is not "no dishes match these filters". This is what lets the
+  // empty screen below tell the truth about WHY it is empty (guest sweep T1, sweep #8).
+  const anyFilterOn = !!(chefActive || favActive || dietActive);
+
   // "SLIDE →" IS ONLY TRUE WHEN THE ROW ACTUALLY HAS MORE (T14 tablet sweep, 2026-08-13).
   // The hint was rendered whenever there were categories at all, with no check on the thing it
   // describes. Measured at 1194x834: the row is 1100px wide, and on FOUR of five restaurants
@@ -1241,7 +1247,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             The HINT itself only appears when the row really does have more off to the right
             (`catOverflows`, measured above) — on a tablet most menus fit and there is nothing
             to slide to. */}
-        {!q && (dbCategories.length === 0 || visibleCategories.length > 0) && (
+        {/* `!loaded` on the still-loading arm, not a bare `dbCategories.length === 0`: once the menu
+            HAS loaded and there are still no sections, eight grey placeholder chips are a lie that
+            never resolves, and an empty `.cat-scroller` would be 100px of nothing. Measured with the
+            sections half of the read coming back empty (guest sweep T1, sweep #8): the placeholders
+            sat there for as long as the diner stayed on the page. */}
+        {!q && ((dbCategories.length === 0 && !loaded) || visibleCategories.length > 0) && (
         <div className="section-header">
           <span className="section-title">{t.categories}</span>
           {catOverflows && (
@@ -1259,7 +1270,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         {/* The horizontal row of category tabs — hidden (leaving just the search
             box) when a filter has emptied every category, so there's no empty bar
             (regression fix). Shown while loading (skeletons). */}
-        {!q && (dbCategories.length === 0 || visibleCategories.length > 0) && (
+        {/* The SAME condition as the heading above, deliberately — the two must appear and vanish
+            together. See the note there for why the still-loading arm is gated on `!loaded`. */}
+        {!q && ((dbCategories.length === 0 && !loaded) || visibleCategories.length > 0) && (
         /* I13 — SAY WHAT THESE ACTUALLY DO (T1 improvement 13, 2026-08-12).
             This was role="tablist" with role="tab" + aria-selected children, which tells a screen
             reader the guest is choosing between tab PANELS — and there is no tabpanel anywhere, arrow
@@ -1565,7 +1578,39 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // shows the name + dish count + a chevron; tapping it folds that category.
           // Every dropdown starts OPEN so guests see the whole menu at a glance;
           // closedCats records the ones they folded shut (remembered for 10 min).
-          allGroups.length === 0 ? (
+          allGroups.length === 0 && filteredItems.length > 0 && !anyFilterOn ? (
+            // ── THERE ARE DISHES, BUT NO SECTIONS TO PUT THEM IN ────────────────────────────────
+            // Measured on a production build, 360x780, French House with 59 dishes: with the
+            // SECTIONS half of the menu read coming back empty — an ordinary blip on one of the two
+            // parallel reads, or every category switched off — the diner got a blank page reading
+            // "No dishes match these filters. Try turning a filter off." with no filter on, above a
+            // row of eight grey placeholder chips that never resolved. Fifty-nine dishes were in
+            // the payload and none of them was drawn.
+            //
+            // The grouped view is built by walking `dbCategories`, so no categories means no groups
+            // however many dishes arrived. lib/menu.ts is deliberately careful about exactly this —
+            // "filtering on an empty set would blank the entire menu, which is far worse than
+            // showing one extra dish" — and then this component blanked it anyway, and blamed the
+            // diner's filters for it.
+            //
+            // So: show the dishes. Flat, exactly as a search does, which is the same renderer and
+            // the same card. A menu with no headings is a small loss; a menu with no food is a
+            // diner calling a waiter over. This also covers the narrower case of a single dish whose
+            // category has been switched off while the dish has not — it now appears rather than
+            // silently vanishing.
+            //
+            // Nothing changes when the sections DO arrive: `allGroups` is non-empty and the grouped
+            // view below is untouched. And when a filter really is on, `anyFilterOn` sends us to the
+            // honest message instead. Guarded by `verify:guest`.
+            <div
+              id="items-container"
+              className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
+            >
+              {filteredItems.map((item, index) => (
+                <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} restaurantId={restaurantId} restaurantSlug={restaurantSlug} showDiet={dietShown} />
+              ))}
+            </div>
+          ) : allGroups.length === 0 ? (
             // The active filter(s) matched nothing (e.g. Favorites with none
             // hearted, or Chef's Special before any dish is tagged) — show a
             // friendly hint instead of a blank screen.
