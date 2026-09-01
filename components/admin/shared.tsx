@@ -191,7 +191,7 @@ export const ACT_LABEL: Record<string, string> = {
   // ── sign-in safety ────────────────────────────────────────────────────────
   login_failed: "Wrong password", login_blocked: "Sign-in blocked", login_denied: "Sign-in refused",
   rate_limited: "Limit reached", rate_limit_edit: "Edited a limit rule", rate_limit_allow: "Allowed through a limit",
-  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_lockout_clear: "Cleared a lockout",
+  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_unblock_denied: "Said no to an unblock request", admin_lockout_clear: "Cleared a lockout",
   blocklist_add: "Added to the blocklist", blocklist_remove: "Removed from the blocklist",
   // ── the admin console ─────────────────────────────────────────────────────
   restaurant_create: "Created a restaurant", restaurant_settings: "Changed settings",
@@ -283,6 +283,30 @@ export function formatActionDetail(action: string, detail: string | null | undef
   return order.map((l) => (counts.get(l)! > 1 ? `${l} ×${counts.get(l)}` : l)).join(", ");
 }
 
+// detailForList — the same phrase, minus the machine id, for a LIST LINE.
+//
+// Thirteen admin actions stamp their detail with the row id they touched — `created waiter "ravi"
+// · id 3f8b1c2e-7a4d-4e9f-b1c2-9d8e7f6a5b4c`. That id is worth KEEPING: it is what a support
+// question gets answered with. It is not worth READING, and on a phone a 36-character machine
+// string pushes the four words that matter off the end of the line. Those rows carry a
+// restaurant_id, so they also surface on the OWNER'S Activity log, where the id means nothing to
+// anybody at all and the standing rule is that the log reads as English — a person, a thing, a time.
+//
+// So the LIST drops the tail and the opened row keeps it: LogDetailModal deliberately still calls
+// formatActionDetail, not this. A TRAILING fragment only — a "· id …" in the middle of a sentence
+// is left alone, because that is a sentence whose shape we do not know. (T27 sweep, 2026-08-27.)
+const ID_TAIL = / · (?:id|owner|user)\s+[0-9a-fA-F-]{8,}\s*$/;
+// The OTHER shape the same id takes in these lines: `permanently removed restaurant "X" (uuid) —`
+// and `PERMANENTLY removed owner "X" (uuid) · 2 restaurant(s) released`. A bare uuid in brackets
+// mid-sentence is the same machine string in the same place, so it goes the same way — and unlike
+// the trailing form it has to be matched by SHAPE, because there is no word in front of it. Only a
+// real uuid (8-4-4-4-12) qualifies, so "(2 restaurants)" and "(no name)" are untouched.
+const ID_PAREN = / \((?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\)/g;
+export function detailForList(action: string, detail: string | null | undefined): string {
+  return formatActionDetail(action, detail).replace(ID_TAIL, "").replace(ID_PAREN, "");
+}
+
+
 // openRestaurantPanel — the admin "act-as" pattern, shared by the home command
 // table and the Restaurants detail page. Opens the tab SYNCHRONOUSLY on the
 // /api/admin/act-as/go redirect, which sets the act-as cookie and 302s to the
@@ -312,6 +336,28 @@ export const timeAgo = (iso: string) => {
   if (s < 3600) return Math.floor(s / 60) + "m ago";
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
   return Math.floor(s / 86400) + "d ago";
+};
+
+/** The one timezone this product reasons in. Exported so no screen declares its own copy. */
+export const IST = "Asia/Kolkata";
+
+// istDate — "4 Jul 27". ONE reading of a DATE for the admin console, beside timeAgo (how long ago)
+// and fullWhen (exactly when, to the minute).
+//
+// Two copies of this existed by the end of the T18 sweep #7 run: Customers had one for a guest's
+// first/last visit, and Platform revenue grew a second when its Next-due column stopped printing the
+// database's raw `2027-07-04`. Two copies of a date format is how two screens come to write the same
+// day differently, which is the thing the second one was written to stop — so it is shared before it
+// gets a chance to drift.
+//
+// A BARE `YYYY-MM-DD` IS PINNED TO IST FIRST. `new Date("2027-07-04")` is UTC midnight, which is
+// 05:30 IST — harmless here, but the same value read in a timezone behind UTC lands on the 3rd. A
+// full timestamp is passed through untouched, because it already carries its own offset.
+export const istDate = (iso: string | null | undefined) => {
+  if (!iso) return "—";
+  const t = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + "T00:00:00+05:30" : iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
 };
 
 // fullWhen — the exact, human date + time for a log-detail popup (e.g. "Fri, 25 Jul
@@ -445,7 +491,7 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", maxHeight: 340, overflowY: "auto" }}>
       {rows.map((a) => {
-        const det = formatActionDetail(a.action, a.detail);
+        const det = detailForList(a.action, a.detail);
         return (
         <div key={a.id} role="button" tabIndex={0} onClick={() => setDetailRow(a)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailRow(a); } }}

@@ -93,11 +93,28 @@ console.log("The owner's cockpit — Menu, Team, Settings\n");
   if (src) {
     const bare = code(src);
     const hasRef = /errRef/.test(bare);
-    const scrolls = /errRef\.current\?\.scrollIntoView[\s\S]{0,200}\[err\]/.test(bare);
+    const scrolls = /errRef\.current\?\.scrollIntoView[\s\S]{0,240}\[\s*err\b[^\]]*\]/.test(bare);
     const attached = /ref=\{errRef\}/.test(bare);
     if (hasRef && scrolls && attached) ok("a refusal on the roster brings itself into view");
     else bad(`the roster's error banner is not scrolled into view (ref=${hasRef} effect=${scrolls} attached=${attached}) `
       + "— on a phone it renders above the fold and the tap looks ignored");
+    // …AND SO DOES THE SECOND ONE (T13 sweep, 2026-08-27 — measured).
+    // The effect above was keyed on `[err]` alone. Setting state to the string it already holds is a
+    // no-op in React, so a run of identical refusals — the same username typed twice, the same short
+    // password — re-rendered nothing and the effect never fired again. Measured on a 360×780 phone:
+    // attempt 1 put the banner at y = 194 (on screen), attempt 2 left it at y = -1190 (off the top),
+    // with the owner's typing still in the boxes. The message must therefore carry something that
+    // ALWAYS moves, and the effect must watch it.
+    // This asserts the property, not the name: whatever the counter is called, both `say` and `fail`
+    // must bump it, and the scroll effect must depend on it.
+    const nonce = (bare.match(/const \[(\w+), set(\w+)\] = useState\(0\)/) || [])[1];
+    const bumps = nonce
+      && new RegExp(`say = useCallback\\([\\s\\S]{0,220}set${nonce[0].toUpperCase()}${nonce.slice(1)}\\(`).test(bare)
+      && new RegExp(`fail = useCallback\\([\\s\\S]{0,320}set${nonce[0].toUpperCase()}${nonce.slice(1)}\\(`).test(bare);
+    const watched = nonce && new RegExp(`errRef\\.current\\?\\.scrollIntoView[\\s\\S]{0,240}\\[[^\\]]*\\b${nonce}\\b`).test(bare);
+    if (bumps && watched) ok("…and so does the SECOND identical refusal — the message carries a counter that always moves");
+    else bad(`a repeated identical refusal would not come back onto the screen (counter=${nonce || "none"} bumped=${!!bumps} watched=${!!watched}) `
+      + "— React skips a re-render when the message is unchanged, so the scroll never fires again");
   }
 }
 
@@ -497,6 +514,119 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     ok("the server still nulls the enrolment stamp on removal, so the warning stays true");
   else bad("the server no longer nulls payroll_added_at — re-word the confirm, it is now telling him "
     + "something that does not happen");
+}
+
+// ── 13 · KITCHEN PRINTING ON /owner/settings — the card sweep #6 never saw ───────────────────
+// This card did not exist when the 500 phases were written (mig 336/338/341, +134 lines on this
+// page since). Everything below was found by reading it and driving it on 2026-08-27.
+{
+  const src = read(SETTINGS);
+  if (!src) bad("app/owner/settings/page.tsx not found (if it moved, update this guard)");
+  else {
+    const bare = code(src);
+
+    // ── it must not ask when there is no card, and must stop in a background tab ──
+    // MEASURED before the fix: 4 requests to /api/owner/printing in 40s with the tab in front, and
+    // 2 MORE in the next 35s after it was hidden — from an unconditional `setInterval`. The card
+    // only renders when `data.printing` has a row, and each request is five reads on the server, so
+    // an owner who left this tab open paid ~1,200 reads an hour for a card that may not be there.
+    // Every other page in this console (Customers, Pay Later, Feedback & complaints) does this
+    // right; Settings was the one that did not.
+    const poll = bare.slice(bare.indexOf("const showsPrinting"), bare.indexOf("const showsPrinting") + 900);
+    if (/const showsPrinting/.test(bare) && /if \(!showsPrinting\) return;/.test(poll))
+      ok("printing: nothing on screen → nothing is asked for");
+    else bad("the printing poll runs whether or not the card is rendered — a restaurant with printing "
+      + "switched off pays for a card R36 says it must never see");
+    if (/if \(!document\.hidden\)/.test(poll)) ok("printing: a hidden tab does not tick");
+    else bad("the printing poll keeps asking while the tab is hidden — the one page in this console that does");
+    if (/addEventListener\("visibilitychange"/.test(poll) && /removeEventListener\("visibilitychange"/.test(poll))
+      ok("printing: it stops and restarts on visibilitychange, and unhooks itself");
+    else bad("the printing poll does not stop/restart on visibilitychange (or leaks its listener)");
+
+    // ── one answer must not be put against every restaurant's row ──
+    // /api/owner/printing answers for ONE restaurant and does not say which, so an owner with
+    // printing on at two restaurants would have read the first one's computer and printer on the
+    // second one's row.
+    // T13 (sweep #7) and T20 found this same fault in the same week. T13's fix could only use the
+    // answer when the list held one row; T20's made the ROUTE say which restaurant it answered for,
+    // which is right for two restaurants as well as one, so that is the version on main and the one
+    // asserted here. The claim is unchanged: one restaurant's printer never appears on another's row.
+    if (/printing\.restaurantId === p\.restaurant_id/.test(bare))
+      ok("printing: the answer is matched to the restaurant it is actually about");
+    else bad("the /api/owner/printing answer is applied to every restaurant row — it answers for ONE "
+      + "restaurant, so a second restaurant would be told the wrong printer");
+    if (/restaurantId\?:/.test(read(SETTINGS) || "") )
+      ok("…and the route's answer carries that restaurant id for the page to match on");
+    else bad("the printing answer no longer carries the restaurant it is about — the match above cannot work");
+
+    // ── the icon must not touch its label ──
+    // `.owx .adm-btn` is `display: inline-flex` with no gap, and a flex container trims the leading
+    // space of a text run: `<i/> Open the…` measured 0px between the glyph and the O.
+    // The gap moved from this one button to the shared rule on 2026-09-01, because four more buttons
+    // in this console had the same fault. Watch the RULE — a per-button override would let the shared
+    // one rot unnoticed, which is the whole reason the other four were broken in the first place.
+    const gcss = read("app/globals.css") || "";
+    // Anchored to a line start: ".adx .adm-btn {" is a SUBSTRING of ".adm.adx .adm-btn {", which
+    // sits earlier in the file and is a transition rule with no gap — matching it reported the fault
+    // as unfixed while the real rule was right (caught 2026-09-01).
+    const consoleBtn = (sel) => {
+      const i = gcss.indexOf("\n" + sel); if (i === -1) return "";
+      return gcss.slice(i, gcss.indexOf("}", i) + 1);
+    };
+    if (/gap:\s*\d/.test(consoleBtn(".owx .adm-btn {")))
+      ok("printing: the guide button's icon is spaced off its label (the owner console's shared button rule)");
+    else bad("the owner console's buttons have no gap — a flex container trims the space in the markup, "
+      + "so every icon+label button touches its own first letter (5 of them did, 2026-08-27)");
+    if (/gap:\s*\d/.test(consoleBtn(".adx .adm-btn {")))
+      ok("…and the Aevidine console's shared button rule too, so the two do not drift apart");
+    else bad("the Aevidine console's buttons have no gap — same fault, other console");
+
+    // ── R36 still holds for this whole card ──
+    if (!/switched off for|not enabled|isn.t enabled/i.test(bare.slice(bare.indexOf("Kitchen printing"), bare.indexOf("Kitchen printing") + 4000))
+        || /Automatic printing is switched off at the moment/.test(bare))
+      ok("printing: the card says nothing about a restaurant that does not have it (R36)");
+    else bad("the printing card has grown wording about printing being unavailable — R36: the owner "
+      + "never sees what is withheld");
+  }
+}
+
+// ── 14 · A HEADING WITH NOBODY UNDER IT SAYS SOMETHING ───────────────────────────────────────
+// Search for a DISABLED person and every match lands in the group below, so the card read
+// "Team", blank, "Disabled · 1 — cannot sign in". The person was found; the first thing the
+// owner's eye met was an empty heading under their own search.
+{
+  const src = read(ROSTER);
+  if (src) {
+    const bare = code(src);
+    if (/team\.length > 0 && working\.length === 0/.test(bare))
+      ok("a search that matched only disabled people says so, instead of leaving the Team heading empty");
+    else bad("the Team heading can render with no rows and no sentence under it — a found person reads "
+      + "as 'not found' until the owner scrolls past the empty heading");
+  }
+}
+
+// ── 15 · ONE RESTAURANT = NO SWITCHER BAR (owner, 2026-09-01, STANDING) ─────────────────────
+// *"If the owner has only one restaurant, then there shouldn't be any kind of bar only like to
+// switch the restaurant. If they have two then only it should have."* A picker offering exactly one
+// choice is a control that does nothing, and it costs a row of height on every screen.
+{
+  const src = read("components/owner/OwnerMenuEditor.tsx");
+  if (!src) bad("components/owner/OwnerMenuEditor.tsx not found (if it moved, update this guard)");
+  else {
+    const bare = code(src);
+    if (/restaurants\.length > 1/.test(bare)) ok("Menu: the restaurant bar needs MORE than one restaurant to exist");
+    else bad("the Menu page's restaurant bar is no longer gated on holding more than one restaurant "
+      + "— a single-restaurant owner would be shown a switcher with one option in it");
+    if (/\{many && \(/.test(bare)) ok("…and the whole bar is what is gated, not just the dropdown inside it");
+    else bad("the gate no longer wraps the whole bar — the row, its label and its border would still render");
+    if (!/restaurants\.length >= 1|restaurants\.length > 0/.test(bare)) ok("…and nothing weakens that to 'one or more'");
+    else bad("the gate has been weakened to one-or-more, which shows the bar to every owner");
+    // …and the page can only ever hand it one restaurant on the admin act-as branch
+    const page = code(read("app/owner/menu/page.tsx") || "");
+    if (/restaurants = \[\{ id: row\.id, name: row\.name \}\]/.test(page))
+      ok("…and the admin act-as branch resolves exactly one restaurant, so the bar is absent there too");
+    else bad("the admin act-as branch no longer resolves a single restaurant — re-check whether the bar appears");
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

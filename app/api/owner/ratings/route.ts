@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
+import { ownerScopeOr503, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail, ownerLogPanel, ownerActorName } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -110,7 +110,12 @@ export async function PATCH(req: NextRequest) {
   if (hasNote && typeof body.note !== "string") return NextResponse.json({ error: "note must be text" }, { status: 400 });
   if (!hasAck && !hasNote) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
-  const row = (await sb.from("feedback").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
+  // Same rule as the complaints route beside it (T20 sweep #7, 2026-08-27): a failed read answered a
+  // bare 404, so acknowledging a rating or saving a reply note during a blip vanished with nothing
+  // retryable and nothing said.
+  const rowQ = await sb.from("feedback").select("id, restaurant_id").eq("id", id).maybeSingle();
+  if (rowQ.error) return dbFail("owner/ratings.lookup", rowQ.error, { message: "Couldn't open that rating just now — please try again." });
+  const row = rowQ.data as { restaurant_id: string } | null;
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!inScope(scope, row.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
@@ -125,7 +130,7 @@ export async function PATCH(req: NextRequest) {
   // Record WHO handled it: "admin" for the super-user OR an admin act-as session, else the
   // concrete owner id (traceable when several co-own a restaurant) — matches issues.route,
   // and no longer logs the generic "owner" for a specific co-owner (audit 2026-07-07).
-  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
+  const who = ownerActorName(scope);
   const patch: Record<string, unknown> = {};
   if (hasAck) {
     patch.acknowledged = body.acknowledged;

@@ -179,6 +179,29 @@
 
   // ── back-button layers: every popup peels off with hardware BACK ────────────
   let offLayer = null;
+  /* ASKING, WITHOUT THE BROWSER'S OWN DIALOG (T9 third sweep, 2026-08-31).
+     This file had four of them left: three prompt()s asking WHY a purchase or a waste line is
+     being struck out, and one confirm() before throwing a draft count away. On a kiosk browser, an
+     embedded webview, or Chrome after "prevent this page from creating additional dialogs",
+     prompt() answers NULL and confirm() answers FALSE, both without showing anything at all — and
+     every one of these call sites reads `if (!answer) return;`. So the manager tapped Void, and
+     nothing happened and nothing was said.
+     That is worse than the "add another line" case fixed on 2026-08-30, which at least refused out
+     loud. And the answer here is a REASON KEPT ON RECORD: a void exists to be explainable later.
+     LFH_ASK (maint.js, loaded by every panel that loads this file) is tried first; the browser's
+     own stays as the last resort for a page that somehow has neither. */
+  async function askWhy(question, title) {
+    if (window.LFH_ASK && window.LFH_ASK.text) {
+      return await window.LFH_ASK.text(question, { title: title || "Why?", yes: "Save the reason", placeholder: "Type the reason" });
+    }
+    return window.prompt(question);
+  }
+  async function askYesNo(question, title, yes) {
+    if (typeof confirmDialog === "function") return await confirmDialog(question, yes || "Yes");
+    if (window.LFH_ASK && window.LFH_ASK.confirm) return await window.LFH_ASK.confirm(question, { title: title, yes: yes, danger: true });
+    return window.confirm(question);
+  }
+
   function openPop(id, html, onBind) {
     closePop();
     const wrap = document.createElement("div");
@@ -576,9 +599,19 @@
           const it = itemById(item_id) || { name: "this ingredient", purchase_uom: "" };
           const sofar = already.map((l) => `${l.qty} ${it.purchase_uom} × ₹${l.rate}`).join(" and ");
           const ask = `"${it.name}" is already on this bill (${sofar}). Add another line for it?`;
-          const said = (typeof confirmDialog === "function")
-            ? await confirmDialog(ask, "Add another line")
-            : window.confirm(ask);
+          // …and LFH_ASK (maint.js, loaded by every panel that loads this one) sits between the
+          // editor's own dialog and the browser's, added T9 second sweep 2026-08-30. window.confirm
+          // is the LAST resort for a reason: a kiosk browser, a webview and Chrome after "prevent
+          // this page from creating additional dialogs" all answer it false without showing it, so
+          // on those devices this question could only ever be answered NO — the manager was told
+          // "Not added" every time and had no way at all to put a second line on the bill. It is
+          // still a visible refusal rather than a silent one, which is why this is the third fault
+          // of its kind and not the first, but a dead end is a dead end.
+          //
+          // The chain itself moved into askYesNo() on 2026-08-31, when three more prompt()s and a
+          // confirm() were found in this same file and needed the identical order. Two copies of a
+          // fallback order is how they drift — see "a new way replaces the old one".
+          const said = await askYesNo(ask, "Already on this bill", "Add another line");
           if (!said) { toastMsg("Not added — the line was left as it is"); return; }
         }
         lines.push({ item_id, qty, rate });
@@ -626,7 +659,7 @@
       $("#pdClose", pop).onclick = closePop;
       const vb = $("#pdVoid", pop);
       if (vb) vb.onclick = async () => {
-        const reason = prompt("Why is this purchase being voided? (kept on record)");
+        const reason = await askWhy("This is kept on record, so it can be explained later.", "Why is this purchase being voided?");
         if (!reason || !reason.trim()) return;
         try {
           await inv("POST", `/purchases/${id}/void`, { reason: reason.trim() });
@@ -722,8 +755,25 @@
       };
     });
     $("#ccDiscard").onclick = async () => {
-      if (!confirm("Throw this draft count away?")) return;
-      try { await inv("POST", `/counts/${S.count.id}/discard`); } catch {}
+      if (!(await askYesNo("Everything typed into this draft count will be lost.", "Throw this draft count away?", "Throw it away"))) return;
+      // A REFUSED DISCARD MUST NOT LOOK LIKE A DONE ONE (T9 sweep #7, 2026-08-22).
+      //
+      // This swallowed every error and cleared the sheet anyway. So if the server refused — the
+      // draft had already been submitted from another device, the count no longer existed — the
+      // sheet closed with nothing said, and then came straight back: refreshView() re-reads
+      // /counts, finds the draft still open, and resumes it with every figure still in it. A tap
+      // that produces no result and no sentence is a dropped tap, which this codebase does not
+      // allow. (There is nothing to catch when there is simply no signal: the queue keeps the
+      // discard and answers ok:true, and the resume is then correct rather than confusing.)
+      const btn = $("#ccDiscard");
+      if (btn) btn.disabled = true;
+      try {
+        await inv("POST", `/counts/${S.count.id}/discard`);
+      } catch (e) {
+        if (btn) btn.disabled = false;
+        toastMsg("⚠️ Couldn't throw the count away: " + ((e && e.message) || "the system didn't answer"));
+        return;                       // the sheet stays exactly as it was, with the figures in it
+      }
       S.count = null;
       refreshView();
     };
@@ -784,7 +834,7 @@
     body.querySelectorAll("[data-void]").forEach((x) => {
       x.onclick = async (e) => {
         e.stopPropagation();
-        const reason = prompt("Why strike this out? (kept on record)");
+        const reason = await askWhy("This is kept on record, so it can be explained later.", "Why strike this out?");
         if (!reason || !reason.trim()) return;
         try {
           await inv("POST", `/waste/${x.dataset.void}/void`, { reason: reason.trim() });
@@ -1047,7 +1097,7 @@
     $("#invNewExp").onclick = expensePop;
     body.querySelectorAll("[data-voidexp]").forEach((x) => {
       x.onclick = async () => {
-        const reason = prompt("Why strike this out? (kept on record)");
+        const reason = await askWhy("This is kept on record, so it can be explained later.", "Why strike this out?");
         if (!reason || !reason.trim()) return;
         try {
           await inv("POST", `/expenses/${x.dataset.voidexp}/void`, { reason: reason.trim() });

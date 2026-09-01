@@ -63,6 +63,15 @@
        correction of that answer. Recorded so the record shows the history of the answer, not just the
        answer (owner, 2026-08-18; migration 337). */
     removal_classified: "Cancellation answered: was the food made?",
+    /* A GUEST'S PERSONAL DATA, ERASED ON REQUEST (T12 sweep, 2026-08-29 — the owner said do it).
+       This kind has been written by app/api/owner/customers/route.ts since 2026-08-12 and named in
+       lib/removalAudit.ts's RemovalKind union, and it never got words here — so all four surfaces
+       that read this map printed the column value instead. Measured on French House: the newest row
+       of the owner's record read "customer_erased · Guest ending 1601", the chip strip read
+       "customer_erased 2", and the removal-detail card you open from either read the same.
+       KIND_RISK already classified it as "data", which is why the risk strip could say
+       "Guest data erased" while the row beside it could not. */
+    customer_erased: "Guest record erased",
   };
   /* The glyph each type wears, beside the words so the two cannot drift. Plain text symbols only —
      the manager panel renders these into its own markup and a couple of its rows print to paper. */
@@ -72,6 +81,8 @@
     discount_given: "\uFF05", payment_reverted: "\u21BA", on_the_house: "\uD83C\uDF81",
     bill_changed_after_reopen: "\u21C4", order_restored: "\u267B\uFE0F",
     bill_annotated: "\u270E", removal_classified: "\u2753",
+    /* the broom the risk strip already wears for this level, so the row and the strip match */
+    customer_erased: "\uD83E\uDDF9",
   };
   /* HOW RISKY IS THIS ROW — the ONE answer, for all three panels (owner, 2026-08-13:
      "it should also show whole risk like money wise and all that, how much money is there which

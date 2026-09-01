@@ -46,7 +46,13 @@ const env = Object.fromEntries(
 const SB = env.NEXT_PUBLIC_SUPABASE_URL, SRK = env.SUPABASE_SERVICE_ROLE_KEY, ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 if (!SB || !SRK || !ANON) { console.error("missing supabase env"); process.exit(1); }
 
-const TABLE = "11"; // quiet test table, cleaned up at the end
+// TABLE 15, NOT 11 (T28, 2026-08-30). Table 11 is the PARENT of verify-merged-floor's four-table
+// party (11+12+13+14) — the registry only ever listed 12, 13 and 14 for it, so 11 read as free and
+// was taken here. Run together, as every whole-suite sweep runs them, the two guards scrambled each
+// other's tables and merged-floor reported it as a PRODUCT fault: "the party lost a member",
+// "a table went backwards from preparing to received". Three runs, three different members blamed.
+// Nothing was wrong with the floor. 15 is unclaimed and now registered.
+const TABLE = "15"; // quiet test table, cleaned up at the end
 // EVERY WRITE NAMES ITS RESTAURANT (sweep #6 / T28, 2026-08-22). This file predates the multi-tenant
 // pool: `sessions`, `session_members` and `requests` all gained a NOT NULL restaurant_id, so the very
 // first insert answered 23502 and the script died before its first assertion — 13 checks about the

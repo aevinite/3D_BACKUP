@@ -605,6 +605,12 @@ body.menu-scrolling .chef-call {
 /* letter-by-letter hero reveal (GSAP drives these spans) */
 /* THE GREETING still needs an inline-BLOCK: it is the one that animates `y` (a transform), and a
    transform does nothing to a plain inline box. It is one short tracked word, so it never wraps. */
+/* ⛔ REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. `inline-block` here is what
+   breaks ARABIC in the hero greeting and the intro wordmark: an atomic box per letter, so the
+   browser cannot join the letters or order them right-to-left, and the word reads backwards.
+   It is measured and PARKED — do not switch these to `inline` to "fix" it, and do not report it.
+   (The tagline below IS `inline`, which is why only one of the two hero lines is affected.)
+   Full note: lib/i18n.ts → useTranslation. Pointer added by T27, 2026-08-27. */
 .hero-title-wrap .greet-badge span { display: inline-block; white-space: pre; }
 /* THE TAGLINE MUST NOT BREAK IN THE MIDDLE OF A WORD (T4 sweep, 2026-08-17).
  *
@@ -3859,7 +3865,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   --adm-pop: var(--card);
   --adm-card: var(--card);
   --ow-accent: var(--accent);
-  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
+  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-danger-fill: #d92d20; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
   display: flex; height: 100dvh; width: 100%; overflow: hidden;
   background: var(--bg); color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
@@ -3875,7 +3881,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   --text: #15151d; --muted: #6b7280; --muted2: rgba(24,24,27,0.10);
   --accent: #6d28d9; --accent-dim: rgba(109,40,217,0.6);
   --accent-grad: linear-gradient(135deg,#8b5cf6 0%,#6366f1 100%); --accent-glow: rgba(109,40,217,0.18);
-  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706; --adm-accent: #8f5a0a;
+  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-danger-fill: #dc2626; --adm-warn: #d97706; --adm-accent: #8f5a0a;
   --elev: 0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.30);
   --elev-hi: 0 16px 40px -14px rgba(20,16,50,.34);
   background:
@@ -3888,7 +3894,7 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   --text: #eaf2ff; --muted: #5b6680; --muted2: rgba(234,242,255,0.12);
   --accent: #22d3ee; --accent-dim: rgba(34,211,238,0.6);
   --accent-grad: linear-gradient(135deg,#22d3ee,#0ea5e9); --accent-glow: rgba(34,211,238,0.40);
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-danger-fill: #d92d20; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.04); --elev-hi: 0 0 0 1px var(--accent-glow), 0 22px 48px -24px #000;
   background:
     linear-gradient(#0a0e1a 1px, transparent 1px) 0 0 / 46px 46px,
@@ -4015,6 +4021,13 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-crumbs { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; flex-wrap: wrap; }
 .adm-crumbs a { color: var(--accent) !important; text-decoration: none; }
 .adm-crumbs a:hover { text-decoration: underline; }
+/* A BREADCRUMB IS STILL A TAP TARGET. On a phone these links measured 77 × 16px — a fingertip is
+   about 9mm across, so 16px is a third of what it needs (printing sweep §14, 2026-08-29). The extra
+   height is given ONLY on small screens: a mouse pointer is one pixel and does not need it, and the
+   crumb row stays tight on a desktop where it belongs. */
+@media (max-width: 640px) {
+  .adm-crumbs a { display: inline-block; padding: 9px 0; }
+}
 .adm-crumbs .sep { font-size: 9px; color: var(--muted); }
 .adm-crumbs .cur { color: var(--text); }
 .adm-adminbar-tag {
@@ -4084,7 +4097,14 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-btn:hover { filter: brightness(1.05); }
 .adm-btn:disabled { opacity: .55; cursor: default; }
 .adm-btn.primary { background: var(--accent-grad); border-color: transparent; color: #fff; box-shadow: 0 8px 18px -8px var(--accent); }
-.adm-btn.danger { background: var(--adm-danger); border-color: transparent; color: #fff; }
+/* A FILLED danger button carries WHITE, so its fill has to be dark enough to carry white — which is
+   a different requirement from --adm-danger itself. In the dark skins that token is #f87171, a LIGHT
+   red, and it is light on purpose: it is read as TEXT on dark backgrounds (.adx-pill.bad,
+   .adx-overdue, .owx-delta.down), where light-on-dark is exactly right. Reused as a FILL it measured
+   2.77:1 for the white label sitting on it — the Unlink button on the admin Printing screen
+   (printing sweep §14, 2026-08-29), under the 4.5:1 a 12px label needs. Same shape, and same answer,
+   as --adm-cta above: give the FILL its own token and leave the text token alone. */
+.adm-btn.danger { background: var(--adm-danger-fill, var(--adm-danger)); border-color: transparent; color: #fff; }
 /* !important because something upstream still wins over BOTH this rule and the inline colour on
    the dashboard's "Fix problems" link: measured rgb(17,24,39) — the light skin's near-black body
    text — on the dark-red fill, i.e. 1.78:1 (2026-08-06). Same shape as the guest card's "+" glyph,
@@ -4204,6 +4224,47 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
   .adm-over-row .nm { width: auto; flex: 1 1 100%; }
   .adm-over-row .what { flex: 1 1 100%; }
 }
+
+/* ── THE ONE TOGGLE (owner, 2026-08-28: "I want a simple toggle… you only see the option you have
+   selected"). Two big targets, each carrying its own one-line explanation, because the choice is a
+   MECHANISM and the names alone ("a computer" / "a screen") do not tell you what you get.
+   The chosen one is not marked by colour alone — a tick, a ring, a filled panel and bold weight
+   (WCAG 1.4.1). 64px minimum, because this is the most consequential control on the screen. */
+.adm-mode { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left;
+  flex: 1 1 260px; min-height: 64px; padding: 12px 15px; border-radius: 12px; border: var(--border);
+  background: var(--card); color: var(--muted); font: inherit; cursor: pointer;
+  transition: background .15s, box-shadow .15s; }
+.adm-mode b { font-size: 14px; font-weight: 650; color: var(--text); }
+.adm-mode small { font-size: 12px; line-height: 1.45; }
+.adm-mode:hover:not(.on) { background: color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.adm-mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.adm-mode:disabled { opacity: .6; cursor: progress; }
+
+/* ── THE CONFIRMATION, IN THE PAGE ──────────────────────────────────────────────────────────────
+   Owner, 2026-08-29: "whenever you switch, there is no UI for confirmation or stuff like that."
+   It was a browser confirm() — a grey box with no room to say what the switch actually costs, and
+   on a phone it covers the screen you are trying to read. This strip appears under the two mode
+   buttons, says what will change in the same words the screen uses, and puts Cancel first so the
+   safe answer is the one nearest the thumb. */
+.adm-confirm { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;
+  margin-top: 11px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border-c, #888));
+  background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
+.adm-confirm .txt { flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px; }
+.adm-confirm .txt b { font-size: 13.5px; color: var(--text); }
+.adm-confirm .txt span { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.adm-confirm .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* A SWITCHED-OFF FEATURE'S SETUP IS STILL READABLE, JUST NOT TOUCHABLE (owner, 2026-08-29: "if the
+   printing is off, grey out the stuff which is at the bottom"). Dimmed rather than hidden, because
+   somebody deciding WHETHER to switch printing on needs to see what it involves first. `fieldset
+   [disabled]` already blocks every control inside; this is only how that reads. */
+.adm-offblock { opacity: .45; filter: saturate(.4); transition: opacity .15s; }
+.adm-offblock .adm-card { pointer-events: none; }
+@media (max-width: 640px) { .adm-confirm .acts { width: 100%; } .adm-confirm .acts .adm-btn { flex: 1 1 auto; } }
+.adm-mode.on { background: color-mix(in srgb, var(--accent) 14%, var(--card));
+  box-shadow: inset 0 0 0 2px var(--accent); }
+.adm-mode.on b::before { content: "✓ "; color: var(--accent); font-weight: 800; }
 
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── New-restaurant create card (owner 2026-07-24): sectioned form + access setup ── */
@@ -4413,7 +4474,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
      deeper — already this file's --adm-warn — and takes white to 5.02:1. */
   --adm-cta: #b45309;
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-danger-fill: #d92d20; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
      hard-coded hex from the component, so they could not follow the skin the way --adm-ok /
      -danger / -warn already do. These bright values are for the DARK card, where they measure
@@ -4467,7 +4528,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      Active pill) #15803d came back at 3.69-4.05:1. #106230 is the same hue and reads 5.50-6.02:1
      there. --adm-warn is the same story on the "on pay list · rate not set" chip (3.87:1 -> 4.93:1),
      so it takes the same one step: #9a4708. --adm-danger measured clean on its own tint. */
-  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
+  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-danger-fill: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
   /* The same four one step deeper for the LIGHT card, where the bright values measured
      1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
      5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
@@ -4646,7 +4707,8 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .adx .adm-card { border-radius: 10px; padding: 14px 16px; box-shadow: var(--elev); }
 .adx .adm-card h2 { font-size: 13.5px; }
 .adx .adm-card .hint { font-size: 12px; }
-.adx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; }
+/* Same gap, same reason as .owx .adm-btn above — the two consoles share this button. */
+.adx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; gap: 7px; }
 .adx a.adm-btn { height: auto; min-height: 30px; }
 /* ONE primary (amber CTA) action per screen; blue stays for data/links. */
 .adx .adm-btn.primary { background: var(--adm-cta); border-color: transparent; color: #fff; box-shadow: none; }
@@ -4747,6 +4809,33 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
    the phone's screen edge (audit 2026-07-08). */
 .adx-grid2col > * { min-width: 0; }
 
+/* ── ADMIN · ANALYTICS · "GOING QUIET" ROW ─────────────────────────────────────────────────────
+   Five columns on a desktop, folded into three lines on a phone. Measured at 390px before this
+   existed: the restaurant-name column collapsed to nothing, the change badge was cut in half and
+   both buttons sat off the right edge. A "does the page overflow?" check said everything was fine,
+   because .adm-logwrap scrolls sideways and the row was clipped INSIDE its own wrapper.
+   The fold is the same one the Bills Change log uses -- named grid areas, the head row hidden, and
+   ::before labels on the numbers -- because a second way of folding a table would be one too many. */
+.qt-row { grid-template-columns: 1.5fr 90px 90px 120px 1fr; align-items: center; }
+.qt-row > .q-name   { min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qt-row > .q-before { text-align: right; font-variant-numeric: tabular-nums; }
+.qt-row > .q-now    { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qt-row > .q-chg    { text-align: right; }
+.qt-row > .q-act    { display: flex; gap: 6px; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .adm-logwrap:has(.qt-row) { overflow-x: visible; }
+  .qt-row { min-width: 0; grid-template-columns: minmax(0, 1fr) auto;
+            grid-template-areas: "name name" "before now" "chg act"; gap: 4px 10px; padding: 11px 12px; }
+  .qt-row.head { display: none; }
+  .qt-row > .q-name   { grid-area: name; white-space: normal; }
+  .qt-row > .q-before { grid-area: before; text-align: left; }
+  .qt-row > .q-now    { grid-area: now; }
+  .qt-row > .q-chg    { grid-area: chg; text-align: left; }
+  .qt-row > .q-act    { grid-area: act; }
+  .qt-row > .q-before::before { content: "was "; opacity: .65; font-weight: 400; }
+  .qt-row > .q-now::before    { content: "now "; opacity: .65; font-weight: 400; }
+}
+
 /* Dashboard KPI stat strip — GLOBAL (not styled-jsx): its cells are <Link>s, and styled-jsx
    can't scope a component's rendered <a>, so the scoped rules never applied and the label+value
    ran together ("RESTAURANTS9 active…"). These global rules give clean, separated stat tiles
@@ -4763,6 +4852,40 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .cmd-strip .cell-link:hover .cell-go { opacity: 1; transform: translateX(0); }
 .cmd-manage { color: var(--accent); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .cmd-manage:hover { text-decoration: underline; }
+/* A DIVIDER MUST SEPARATE THE THINGS IT SITS BETWEEN (owner, 2026-08-31 — item 7).
+   This strip is a WRAPPING flexbox, and the dividers used to be `border-right` on every cell,
+   cleared only on :last-child. A border-right is only ever right for a cell that has a neighbour to
+   its RIGHT — so the moment the cells wrap, the last cell on each row draws a line down the card's
+   own edge, dividing nothing. Measured at 360x780 in BOTH skins before this: 4 cells on 4 separate
+   rows, 3 of them still drawing a right border, the line stopping short before "Orders today". It
+   reads as a half-drawn table. At 600px, two across, the same fault appears once instead of three
+   times — so it was never about one phone width.
+   A breakpoint cannot fix that, because the browser decides where to wrap: my first attempt put the
+   swap at 430px and 400px turned out to still be two-across, which just moved the wrong border
+   somewhere else. So the line is not drawn by the cells at all now. The strip shows a 1px gap and
+   the CARD's background shows through it — a separator that is automatically correct in every wrap,
+   horizontally between neighbours and vertically between rows, at any width, forever.
+   Same fault, same shape, on the twin `.rev-strip` (Platform revenue) — fixed there 2026-08-20 with
+   a breakpoint, which has this same hole at its two-across widths. Left alone deliberately: that is
+   Platform revenue's strip and its own screen's call. The ledger row for this one is P08587, which
+   had been ticked green off a mis-read screenshot and now carries the measurement. */
+/* `padding: 0` is repeated here on purpose. The strip is `class="cmd-strip adm-card"`, and
+   `.adm-card`'s own `padding: 14px 16px` is declared LATER in this file, so it was quietly winning
+   over the `padding: 0` in the .cmd-strip rule above — measured: 17px of card showing left and
+   right, 15px top and bottom. Invisible while that band was the card's own colour; the moment the
+   card's background became the divider colour it drew a grey ring round the whole strip. The twin
+   `.rev-strip` never had this fight because its rule lives in a styled-jsx block that loads after
+   this file. Each cell keeps its own 12px/18px padding, so the words move about 2px and the strip
+   now fills its card edge to edge exactly as `.rev-strip` does.
+   TWO classes, not one: the element is `class="cmd-strip adm-card"`, and a single-class rule loses
+   to `.adm-card` on source order no matter where it is put. `.cmd-strip.adm-card` wins on weight,
+   so this cannot come undone by someone moving a block around. */
+.cmd-strip.adm-card { gap: 1px; padding: 0; background: var(--border-c, #e5e7eb); overflow: hidden; }
+.cmd-strip .cell { border-right: 0; background: var(--card); }
+/* The hover tint is translucent, so it has to be LAYERED over the card colour rather than replacing
+   it — otherwise the strip's own background shows through the hovered cell and the divider grid
+   appears to swallow it. */
+.cmd-strip .cell-link:hover { background: linear-gradient(var(--muted2), var(--muted2)), var(--card); }
 @media (max-width: 640px) { .cmd-strip .cell { flex-basis: 45%; } }
 
 /* Health page's status pills (latency / db / realtime). */
@@ -4811,7 +4934,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent-on: #06251a;
   --accent-ink: var(--accent);   /* on a dark tint the bright accent already reads clean — see the light block */
   --own-cta: #b45309;   /* same fix as --adm-cta above: white on it was 3.19:1 */
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-danger-fill: #d92d20; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
      hard-coded hex from the component, so they could not follow the skin the way --adm-ok /
      -danger / -warn already do. These bright values are for the DARK card, where they measure
@@ -4852,7 +4975,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      Active pill) #15803d came back at 3.69-4.05:1. #106230 is the same hue and reads 5.50-6.02:1
      there. --adm-warn is the same story on the "on pay list · rate not set" chip (3.87:1 -> 4.93:1),
      so it takes the same one step: #9a4708. --adm-danger measured clean on its own tint. */
-  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
+  --adm-ok: #106230; --adm-danger: #b91c1c; --adm-danger-fill: #b91c1c; --adm-warn: #9a4708; --adm-accent: #8f5a0a;
   /* The same four one step deeper for the LIGHT card, where the bright values measured
      1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
      5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
@@ -4993,7 +5116,15 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .owx .adm-main { padding: 20px; }
 .owx-wrap { max-width: 1280px; margin: 0 auto; }
 .owx .adm-card { border-radius: 10px; padding: 14px 16px; box-shadow: var(--elev); }
-.owx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; }
+/* `gap`, so an icon never touches its own label (T13, sweep #7, 2026-08-27 — measured 0px).
+   These buttons are flex containers, and a flex container DISCARDS the leading whitespace of a
+   text run — so `<i class="fas fa-book-open"/> Open the printer setup guide` rendered as one
+   smudged word, while a neighbour whose emoji sat INSIDE the text was spaced correctly. Five
+   buttons were wrong at the time of writing (the owner's printer-guide button, Refresh on Audit &
+   logs, Refresh and Try again on Feedback & complaints), and every icon button added in future
+   would have been. 7px matches .ost-btn, the roster's own icon button, rather than inventing a
+   number. A button with no icon is unaffected: gap only applies between two items. */
+.owx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; gap: 7px; }
 .owx .adm-btn.primary { background: var(--own-cta); border-color: transparent; color: #fff; box-shadow: none; }
 .owx .adm-btn.primary:hover { filter: brightness(1.08); }
 .owx .adm-stats { gap: 8px; margin-bottom: 14px; }
@@ -5179,7 +5310,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
     --border: 1px solid #cccccc; --border-c: #cccccc;
     --text: #111111; --muted: #555555; --muted2: #f2f2f2;
     --accent: #047857; --accent-dim: #047857; --accent-grad: #047857; --accent-glow: transparent;
-    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
+    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-danger-fill: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
     --elev: none;
     background: #ffffff !important; color: #111111 !important; color-scheme: light !important;
   }

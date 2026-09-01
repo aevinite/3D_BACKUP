@@ -50,7 +50,13 @@ export async function GET(req: NextRequest) {
   // problems with different fixes, and a person standing at a printer needs to know which they have.
   if (who.kind === "none") return NextResponse.json({ signedIn: false });
   if (!row) return NextResponse.json({ signedIn: true, found: false });
-  if (row.approved_at) return NextResponse.json({ signedIn: true, found: true, already: true });
+  // `who` travels on THIS branch too, and it is load-bearing. The Allow page keeps `who` in state
+  // and only sets it when an answer carries one (`if (d.who) setWho(d.who)`), so a machine that
+  // was ALREADY linked when the page first opened never learns it — and the "Already linked"
+  // screen picks its next step with `who === "admin"`. Without this, an Aevidine admin opening a
+  // link for an already-linked machine was sent to /manager, a restaurant's own panel, instead of
+  // the console. The success screen was unaffected: by then an earlier answer had carried it.
+  if (row.approved_at) return NextResponse.json({ signedIn: true, found: true, already: true, who: who.kind });
 
   const rests = who.kind === "admin"
     ? (((await sb.from("restaurants").select("id, name").order("name")).data || []) as { id: string; name: string }[])

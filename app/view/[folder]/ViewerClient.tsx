@@ -120,6 +120,27 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // (every overlay must register with the back manager — audit fix 2026-07-06).
   useBackClose("viewer-info", showInfo, () => setShowInfo(false));
   const [hintVisible, setHintVisible] = useState(false); // is the hint pill showing?
+  // HOW TALL THE DISH BAR ACTUALLY IS (sweep #7 T2, 2026-08-22 — item 2).
+  //
+  // `.viewer-wrapper #dbl-hint` in app/globals.css pins the hint pill at a HARDCODED
+  // `bottom: 176px`, but `#bar` is `bottom: 0` and its height is content-driven — dish name,
+  // description, a four-stat row, a button row and the safe-area inset. Measured on the running
+  // viewer: the bar is 208 px tall on a 360×780 phone and the pill was pinned 176 px up, so 32 px
+  // of its 34 px sat INSIDE it, and `elementFromPoint` at the pill's own centre came back `#bar` (z-index 30 beats 25).
+  // The bar's background is a gradient that fades to transparent at the top, so the pill was not
+  // even cleanly hidden — its words were left crossing the dish title, which reads as a rendering
+  // fault. Same on 375×667 (32 px of 34) and on a 1280×800 desktop (20 px of 34).
+  //
+  // The sentence being swallowed is the one the owner asked for on 2026-08-12 — "Drag to turn it
+  // around", the only thing that teaches a diner the dish can be spun. It has therefore never
+  // been readable on a phone.
+  //
+  // So the pill is placed from the bar's REAL height instead of a guess. Measured with a
+  // ResizeObserver because the height genuinely moves: a long dish name wraps to two lines, and
+  // rotating a phone re-flows the whole bar. 0 means "not measured yet" — the stylesheet's 176 px
+  // stays in charge until then, so nothing flashes.
+  const [barHeight, setBarHeight] = useState(0);
+  const barRef = useRef<HTMLDivElement>(null);
   // I5 (owner, 2026-08-12): NOTHING told a diner the dish can be turned. The 3D dish is what makes
   // this product different and it relied on people fiddling to find out. The FIRST time the pill pops
   // it now says "Drag to turn it around"; every pop after that is the existing triple-tap reminder.
@@ -131,6 +152,26 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const startedRef = useRef(false);   // has the reveal animation started yet?
   const requestRef = useRef<number>(0); // id of the running animation loop (so we can stop it)
   const modelSeenRef = useRef(false);  // has the model actually appeared on screen?
+  // IS THIS SCREEN STILL ON SCREEN? (sweep #7 T2, 2026-08-22 — item 1.)
+  //
+  // `requestRef` remembers only the LATEST animation-frame handle, so cancelling it stops one
+  // chain and one only. The connector-line loop below re-arms itself every frame, and it can be
+  // STARTED after this component has already gone: `handleLoad` schedules the reveal 800 ms later
+  // and that timer was never cleared, so a diner who glanced at the dish and tapped Back inside
+  // that window left a loop running on the page they went back to. Measured on the dish page,
+  // twenty seconds after leaving the 3D screen: SIX chains, 360 animation frames a second,
+  // forever — each frame reading three elements per hotspot out of a document that no longer has
+  // them. A phone that gets warm holding a menu.
+  //
+  // A ref, not state: it must be readable from a callback that outlives the render that made it.
+  // Set false only by the unmount effect below — never by the model effect's cleanup, which also
+  // runs on an ordinary small→optimized upgrade, where the loop must keep going.
+  // It is set TRUE in the effect body as well as at declaration: React's development Strict Mode
+  // mounts, unmounts and remounts every component once, so a flag that is only ever turned OFF by
+  // a cleanup is left off for the rest of the real mount — which would silently disable the
+  // connector lines instead of merely stopping them at the right time.
+  const aliveRef = useRef(true);
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
   const searchParams = useSearchParams();        // the address's "?..." part
   const fromSlug = searchParams.get("from") || ""; // which dish we came from
   // Which RESTAURANT this viewer belongs to (carried as ?r=<slug> from the dish
@@ -317,6 +358,19 @@ export default function ViewerClient({ folder }: { folder: string }) {
     };
   }, [barVisible, loaderVisible]);
 
+  // Keep `barHeight` honest — see the note where it is declared. The observer watches the bar
+  // itself, so a name that wraps to a second line moves the pill with it. `translateY` does not
+  // affect the measured height, so this is right even before the bar has slid in.
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const read = () => setBarHeight(Math.round(el.getBoundingClientRect().height));
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [config, menuItem]);
+
   // Load this dish folder's config.json (the model URLs + hotspot tags).
   // Re-runs if the folder changes.
   useEffect(() => {
@@ -458,6 +512,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
     if (loading || error || !mvRef.current || !activeUrl) return;  // not ready yet
 
     const mv = mvRef.current;  // the <model-viewer> element
+    // EVERY TIMER THIS EFFECT STARTS IS CLEARED WHEN IT ENDS (sweep #7 T2, 2026-08-22 — item 1).
+    // The two below were fire-and-forget, so leaving the screen inside their window ran them
+    // against a component that no longer existed — and the 800 ms one starts the immortal
+    // connector-line loop. See the note on aliveRef.
+    const timers: ReturnType<typeof setTimeout>[] = [];
 
     // The model finished loading and is now visible.
     const handleLoad = () => {
@@ -465,14 +524,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
       modelWatchlist.unwatchByFolder(folder);  // no need to notify anymore
       setShowTryAgain(false);                  // hide any "taking longer" overlay
       setLoaderVisible(false);                 // hide the spinner
-      setTimeout(() => {
+      timers.push(setTimeout(() => {
         setBarVisible(true);                   // slide in the bottom info bar after 1s
-      }, 1000);
+      }, 1000));
       // keep the "triple-tap to replay" hint visible as a persistent cue
       // Play the reveal animation once, shortly after the model appears.
       if (!startedRef.current) {
         startedRef.current = true;
-        setTimeout(runFullSequence, 800);
+        timers.push(setTimeout(runFullSequence, 800));
       }
     };
 
@@ -507,6 +566,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       mv.removeEventListener("error", handleError);
       mv.removeEventListener("ar-status", handleARStatus);
       clearTimeout(startTimeout);
+      timers.forEach(clearTimeout);
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
       }
@@ -569,6 +629,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
 
   // A continuous loop that keeps every connector line updated, frame by frame.
   const _loop = () => {
+    // The screen has gone — stop, and do not schedule another frame. Without this the chain is
+    // immortal: nothing else holds its handle once the component that started it has unmounted.
+    if (!aliveRef.current) return;
     config?.tags?.forEach(ing => _updateLine(ing));
     requestRef.current = requestAnimationFrame(_loop);  // schedule the next frame
   };
@@ -901,8 +964,16 @@ export default function ViewerClient({ folder }: { folder: string }) {
         </div>
       </div>
 
-      {/* The "triple-tap to replay" hint; the "show" class fades it in/out. */}
-      <div id="dbl-hint" className={hintVisible ? "show" : ""}>
+      {/* The "triple-tap to replay" hint; the "show" class fades it in/out.
+          `bottom` is set from the bar's measured height, not the stylesheet's hardcoded 176px —
+          see the note on barHeight. 12px of air between the two. Inline, because the stylesheet
+          is not this terminal's to edit; if that rule ever learns the bar's height at source,
+          this becomes redundant rather than wrong. */}
+      <div
+        id="dbl-hint"
+        className={hintVisible ? "show" : ""}
+        style={barHeight ? { bottom: barHeight + 12 } : undefined}
+      >
         {hintSpin ? <>🔄 {t.dragToSpin}</> : <>👆 {t.tripleTapReplay}</>}
       </div>
 
@@ -924,7 +995,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       {/* The bottom info bar (name, stats, price, Add to Order). It slides up
           once "on" is added. Values prefer the live menu item, falling back
           to the config. */}
-      <div id="bar" className={barVisible ? "on" : ""}>
+      <div id="bar" ref={barRef} className={barVisible ? "on" : ""}>
         <div className="dname" id="dish-title">
           {menuItem?.title || config?.title || ""}
         </div>

@@ -14,6 +14,7 @@
 // against the owner's estate (app/api/editor → editorScope), so this never widens reach —
 // and every write is logged as the OWNER, no shadow manager account anywhere.
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
@@ -78,20 +79,24 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     else if (restaurants.length) selected = restaurants[0].id;
   }
 
-  if (!restaurants.length) {
-    return (
-      <div className="adm-page">
-        {/* `adm-page-h`, not `adm-page-title` — the latter is declared in no stylesheet, so this
-            heading fell back to the browser's own 32px h1 and looked nothing like every other page
-            in the cockpit (sweep 6 · T14, 2026-08-18). The other two pages that used the same dead
-            class — app/owner/menu/page.tsx and app/aevinite/access/page.tsx — were corrected in the
-            same PR once their owning terminals' branches were checked for an overlap; there is now
-            no `adm-page-title` anywhere in app/, and `verify:owner-money` keeps it that way. */}
-        <h1 className="adm-page-h">Manager mode</h1>
-        <p className="adm-page-sub">No restaurant is available here right now.</p>
-      </div>
-    );
-  }
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31) ─────────────────────────
+  // *"if the inventory is not switch on, then it will not show — it will not even show that
+  //  option… it will not only show 'unable to access', that there is a feature which contains
+  //  inventory."*
+  // This is R36 again, arriving from the page side: *"owner can't know which option are not given
+  // to them, only admin should know that."* The sidebar already hides a withheld section from a
+  // real owner (`OwnerShell` → `if (!on && (!adminViewing || simulated)) return null`). The PAGE
+  // did not: reached by a typed URL or an old bookmark it printed "No restaurant is available here right
+  // now" — which
+  // names a feature he has not been given and invites him to go and ask for it.
+  // That screen is DELETED, not restyled (the standing "a new way replaces the old one" rule), and
+  // he is sent back to his dashboard instead. The ADMIN is unaffected: only a real owner can reach
+  // this line, because the admin act-as branch above is never module-gated — admin = top power, and
+  // its X-ray nav says outright "You can still open it from this view".
+  // The heading that used to sit here was the last user of `adm-page-title`, a class no
+  // stylesheet declares (sweep 6 · T14). It is gone with the screen; `verify:owner-money` still
+  // walks the whole of `app/` to make sure that class never comes back anywhere.
+  if (!restaurants.length) redirect("/owner");
 
   return <OwnerManagerMode restaurants={restaurants} initial={selected} skin={skin} />;
 }

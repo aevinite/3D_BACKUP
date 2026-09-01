@@ -628,8 +628,32 @@ if (READ_ONLY) {
     await F.click("#quickOrderBtn");
     await F.waitForSelector(".om.lite", { timeout: 10000 });
     if (attempt === 1) expect((await F.textContent(".om.lite .om-head h2")).includes("Quick order"), "⚡ Quick order opens the dish browser with NO table chosen yet");
-    await F.click(".dish:not(.out)");
+    // A DISH THAT QUICK-ADDS, NOT JUST THE FIRST ONE (T7 sweep #7, 2026-08-22).
+    //
+    // `.dish:not(.out)` takes whatever the menu happens to put first, and a dish with size/extras
+    // does NOT go into the cart on a tap — it correctly opens the options popup, which is the
+    // panel's own documented rule ("a sized/extra dish can't be quick-added blindly"). On little
+    // French house the first dish IS the only one with options (Espresso, 3 groups), so the cart
+    // stayed empty, SEND stayed correctly `disabled`, and F.click("#sendOrder") below threw an
+    // uncaught 30s timeout — which killed the run at exactly this point. Everything after it never
+    // executed: the whole order → serve → pay → close loop, the touch-size pass, the final
+    // "no page errors anywhere" assertion, and this section's own sweepUp() cleanup.
+    //
+    // It reads as a product failure ("element is not enabled") and it is not one. So pick the dish
+    // the way a waiter picks one they can tap once: no option groups, no open price, not sold out.
+    const plainDish = await F.evaluate(() => {
+      const d = (state.data.dishes || []).find((x) => !(x.tags || []).includes("sold-out") && !x.open_price
+        && !(Array.isArray(x.options) && x.options.length));
+      return d ? d.id : null;
+    });
+    if (!plainDish) { soft("this restaurant's menu has no dish that quick-adds (every one has options or an open price)"); continue; }
+    await F.click(`.dish[data-dish="${plainDish}"]`);
     await page.waitForTimeout(400);
+    // …and PROVE it landed, instead of finding out thirty seconds later at a disabled button.
+    const inCart = await F.evaluate(() => (typeof state !== "undefined" ? state.cart.length : 0));
+    if (!inCart) { soft(`tapping the plain dish (${plainDish}) put nothing in the cart`); continue; }
+    // (T28 found this same fault independently on 2026-08-27 and wrote a tile-by-tile version;
+    // T7's landed on main first and asks the menu directly, which is simpler. Theirs kept.)
     // TWO LAYOUTS, AND ONLY A TOUCH DEVICE SEES THE SECOND ONE. On a touchscreen held sideways the
     // ⚡ Quick order screen is TWO PANES — dishes on the left, the order on the right — so the
     // bottom "View order" pill has nothing to do and the stylesheet hides it

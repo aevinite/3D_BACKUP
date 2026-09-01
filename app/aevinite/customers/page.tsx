@@ -14,8 +14,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SkelList } from "@/components/admin/Skeleton";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+// The console's own "how long ago" — minutes, not days. See the note at the "counted" stamp below.
+import { timeAgo, istDate, IST } from "@/components/admin/shared";
 
-const IST = "Asia/Kolkata";
 
 type Customer = {
   restaurant_id: string; restaurantName: string; phone: string; name: string | null;
@@ -36,8 +37,10 @@ const SEGMENTS = [
   { k: "blocked", label: "Blocked" },
 ] as const;
 
-const dfmt = (iso: string | null) =>
-  !iso ? "—" : new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
+// dfmt was this page's own copy of "4 Jul 27". It is `istDate` in components/admin/shared.tsx now —
+// Platform revenue needed the same format for its Next-due column, and two copies of a date format
+// is how two screens come to write the same day differently (T18 sweep #7, item 6).
+const dfmt = istDate;
 const ago = (iso: string | null) => {
   if (!iso) return "—";
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400e3);
@@ -54,6 +57,7 @@ export default function AdminCustomers() {
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [spread, setSpread] = useState<Spread[]>([]);
+  const [spreadTotal, setSpreadTotal] = useState(0);   // how many restaurants HAVE guests, not how many bars fit
   const [rests, setRests] = useState<Array<{ id: string; name: string }>>([]);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -83,6 +87,7 @@ export default function AdminCustomers() {
       setCustomers(j.customers || []);
       setSummary(j.summary || null);
       setSpread(j.spread || []);
+      setSpreadTotal(Number(j.spreadTotal) || (j.spread || []).length);
       setCachedAt(j.cachedAt || null);
       if (j.restaurants) setRests(j.restaurants);
       setErr(null);
@@ -172,7 +177,17 @@ export default function AdminCustomers() {
       {spread.length > 1 && (
         <div className="adm-card" style={{ marginBottom: 14 }}>
           <h2>Where the guests are</h2>
-          <p className="hint">How many saved guests each restaurant has. Tap one to filter the list.</p>
+          {/* A LIST THAT QUIETLY ENDS IS A LIST HE CANNOT ADD UP (owner, 2026-08-31 — item 9). The
+              server caps the bars at 8; below that the card said nothing either way, so a ninth
+              restaurant with guests was dropped with no sign of it. Says so only when something IS
+              hidden — the same wording and the same rule as the busiest-restaurants card on
+              Platform analytics. */}
+          <p className="hint">
+            How many saved guests each restaurant has. Tap one to filter the list.
+            {spreadTotal > spread.length
+              ? ` Showing the ${spread.length} with the most guests, of ${spreadTotal} restaurants that have any.`
+              : ""}
+          </p>
           <div style={{ display: "grid", gap: 7 }}>
             {spread.map((s) => (
               <button key={s.id} type="button" onClick={() => reset(() => setRid(rid === s.id ? "" : s.id))}
@@ -219,7 +234,20 @@ export default function AdminCustomers() {
           <button className="adm-btn" onClick={() => load({ force: true })} title="Recount the tiles from live data">
             <i className="fas fa-rotate" aria-hidden="true" /> Refresh
           </button>
-          {cachedAt && <span className="adm-muted" style={{ fontSize: 11.5 }}>counted {ago(cachedAt)}</span>}
+          {/* THE STAMP HAS TO BE ABLE TO SAY A TIME (T18 sweep #7, item 4). This used the page's own
+              `ago()`, which answers in DAYS because it was written for a guest's last visit — its
+              first branch is `if (d <= 0) return "today"`. The tiles behind it are a snapshot the
+              cache treats as fresh for five minutes and the page re-reads every sixty seconds, so
+              this line could only ever read "counted today", on every open, forever. Platform
+              analytics and Platform revenue both say "updated just now" / "updated 4m ago" from the
+              shared `timeAgo`, with the exact IST time on hover; this is the same stamp, so it is
+              now the same helper. */}
+          {cachedAt && (
+            <span className="adm-muted" style={{ fontSize: 11.5 }}
+              title={new Date(cachedAt).toLocaleString("en-IN", { timeZone: IST })}>
+              counted {timeAgo(cachedAt)}
+            </span>
+          )}
         </div>
 
         {err && (

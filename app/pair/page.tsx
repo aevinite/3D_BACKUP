@@ -29,6 +29,9 @@ export default function PairPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ name: string } | null>(null);
+  // WHO pressed Allow, remembered separately from `st` — the done screen needs it to decide where
+  // its one button goes, and a later poll could arrive with a different shape.
+  const [who, setWho] = useState<"admin" | "staff" | null>(null);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -42,6 +45,7 @@ export default function PairPage() {
       const r = await fetch(`/api/pair?c=${encodeURIComponent(code)}`, { cache: "no-store" });
       const d = (await r.json()) as State;
       setSt(d);
+      if (d.who) setWho(d.who);
       // The machine's own name is the default, so the box is already right and nobody has to think
       // about it (owner: "what the fuck is a computer name"). It stays editable for the one case
       // that matters — two shops both called "Main PC" in his head, not the machine's.
@@ -87,7 +91,18 @@ export default function PairPage() {
           The helper is already asking for work. It will start again by itself every time this
           computer is switched on, so you never have to come back to this page.
         </p>
-        <a className="pr-btn ghost" href="/aevinite/printing">Choose which printer prints what →</a>
+        {/* ── WHERE THIS BUTTON GOES DEPENDS ON WHO PRESSED ALLOW (owner's review, 2026-08-28) ──
+            It went to the Aevidine console for everybody. But the printing board lives in TWO
+            places — the console, and the restaurant's own Manager panel under Settings → Printing —
+            and the person standing at the printer is usually the manager. So tapping it bounced them
+            to a staff-password screen they have no answer to, which reads like their own login had
+            just failed, at the exact moment the guide says "now go and choose printers". */}
+        {who === "admin"
+          ? <a className="pr-btn ghost" href="/aevinite/printing">Choose which printer prints what →</a>
+          : <>
+              <a className="pr-btn ghost" href="/manager">Choose which printer prints what →</a>
+              <p className="pr-note">You will land on your own panel — it is under <b>Settings → Printing</b>.</p>
+            </>}
       </>
     );
     if (!st) return <p className="pr-lead">Reading…</p>;
@@ -115,7 +130,13 @@ export default function PairPage() {
         <div className="pr-tick" aria-hidden="true">✓</div>
         <h1>Already linked</h1>
         <p className="pr-lead">This computer has been allowed to print. There is nothing left to do.</p>
-        <a className="pr-btn ghost" href="/aevinite/printing">Open Printing →</a>
+        {/* Same rule as the green screen above: a manager gets their own panel, not our console. */}
+        {who === "admin"
+          ? <a className="pr-btn ghost" href="/aevinite/printing">Open Printing →</a>
+          : <>
+              <a className="pr-btn ghost" href="/manager">Open Printing →</a>
+              <p className="pr-note">On your own panel, under <b>Settings → Printing</b>.</p>
+            </>}
       </>
     );
 
@@ -253,15 +274,23 @@ function Style() {
 
   .pr-actions { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
   /* 52px, because this is the one button on the page and it is pressed by somebody standing at a
-     counter, often on a touchscreen till. */
-  .pr-btn { display: block; min-height: 52px; line-height: 52px; border-radius: 12px; border: 0;
-    background: linear-gradient(180deg, #4f8cff, #3a6fe0); color: #fff; font: inherit; font-size: 15px;
-    font-weight: 650; cursor: pointer; text-decoration: none; text-align: center; }
+     counter, often on a touchscreen till.
+     CENTRED WITH GRID, NOT line-height, and that is not a style preference. The font: inherit
+     declaration is a SHORTHAND and it resets line-height to normal; it sat AFTER the line-height
+     declaration, so the 52px was thrown away and every label on this page rendered flush against
+     the top edge of its button with 34px of empty space underneath — measured, on every viewport.
+     Grid centring also survives a label that wraps to two lines, which "Choose which printer prints
+     what" does on a phone; a line-height that tall would have pushed a second line out of the box.
+     (No backticks in this comment: the whole stylesheet is a template literal.) */
+  .pr-btn { display: grid; place-items: center; min-height: 52px; padding: 8px 16px; border-radius: 12px;
+    border: 0; background: linear-gradient(180deg, #4f8cff, #3a6fe0); color: #fff; font: inherit;
+    font-size: 15px; line-height: 1.3; font-weight: 650; cursor: pointer; text-decoration: none;
+    text-align: center; }
   .pr-btn:hover { filter: brightness(1.07); }
   .pr-btn:disabled { opacity: .55; cursor: not-allowed; filter: none; }
   .pr-btn:focus-visible { outline: 2px solid #9ec7ff; outline-offset: 3px; }
   .pr-btn.ghost { background: none; border: 1px solid rgba(255,255,255,.16); color: #cfd7e6;
-    min-height: 44px; line-height: 44px; font-weight: 550; font-size: 14px; }
+    min-height: 44px; font-weight: 550; font-size: 14px; }
 `}</style>
   );
 }

@@ -11,6 +11,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -29,15 +33,16 @@ export async function GET(req: NextRequest) {
     .order("fixed_at", { ascending: false }).limit(100);
   // A NULL-restaurant signature covers every restaurant, so it belongs in a scoped view too.
   if (rid) q = q.or(`restaurant_id.eq.${rid},restaurant_id.is.null`);
-  const r = await q;
-  if (r.error) return adminFail("the fixed-problem list", r.error, { action: "load" });
-  const rows = (r.data ?? []) as { restaurant_id: string | null }[];
+  const reads = new ReadSet("admin/error-memory", [await rd("memories", () => q)]);
+  if (reads.failed("memories")) return adminFail("the fixed-problem list", reads.error("memories"), { action: "load" });
+  const rows = reads.rows<{ restaurant_id: string | null }>("memories");
 
   const ids = [...new Set(rows.map((x) => x.restaurant_id).filter(Boolean))] as string[];
   let names = new Map<string, string>();
   if (ids.length) {
-    const n = await sb.from("restaurants").select("id, name").in("id", ids).limit(2000);
-    names = new Map(((n.data ?? []) as { id: string; name: string }[]).map((x) => [x.id, x.name]));
+    // Tolerated: a miss reads "—" for the restaurant, never a wrong one.
+    const n = new ReadSet("admin/error-memory:names", [await rd("names", () => sb.from("restaurants").select("id, name").in("id", ids).limit(2000))]);
+    names = new Map(n.rowsOr<{ id: string; name: string }>("names", []).map((x) => [x.id, x.name]));
   }
   return NextResponse.json({
     memories: rows.map((x) => ({ ...x, restaurant: x.restaurant_id ? names.get(x.restaurant_id) || "—" : "All restaurants" })),

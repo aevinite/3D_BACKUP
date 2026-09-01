@@ -26,6 +26,7 @@
 // So this loads real 404s and asks, of each one: which screen is in the tree, is ONLY that one in
 // the tree, and where does its way out actually point.
 import { chromium } from "playwright";
+import { requireUp } from "./sweep/appUp.mjs";
 
 const args = process.argv.slice(2);
 const BASE = (args[args.indexOf("--base") + 1] || "").replace(/\/$/, "");
@@ -35,6 +36,10 @@ if (!BASE || !args.includes("--base")) {
     "  npm run verify:notfound -- --base http://localhost:4210\n");
   process.exit(2);
 }
+// …and having a base is not the same as something answering on it. Without this, a stopped server
+// answered with a raw ERR_CONNECTION_REFUSED stack, which reads as "this guard is broken" rather
+// than "start the app" — the exact thing scripts/sweep/appUp.mjs was written to end.
+await requireUp(BASE, "the two 404 screens");
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
@@ -53,7 +58,23 @@ const CASES = [
   ["/owner/no-such-page",               "staff", "/"],
   ["/aevinite/no-such-page",            "staff", "/"],
   ["/editor/no-such-page",              "staff", "/"],
-  ["/signup",                           "staff", "/"],
+  // A STRAY ADDRESS BELONGS TO THE GUEST — and there is deliberately NO BUTTON on it.
+  //
+  // Settled 2026-08-28. This guard and verify:guest had asserted OPPOSITE things about /signup for
+  // two days, and both quoted the owner from 2026-08-26: this one leant on burnt toast being the
+  // default for anyone not obviously a guest, the other on the staff door being offered "if written
+  // login or aevinite then only". He was shown the disagreement and left the call to me.
+  //
+  // A restaurant's public web address is typed at by diners with bad links, not by waiters. Wrong
+  // towards the guest costs a worker one extra tap — "/" is one word away and they know the way in.
+  // Wrong towards staff costs a diner a PASSWORD PROMPT, the exact dead end both screens exist to
+  // remove. So: guest.
+  //
+  // `null` for the way out is the assertion, not an omission. With no restaurant to name we cannot
+  // offer a menu — "/menu" is restaurant #1 by definition and would be the WRONG restaurant — so
+  // the screen shows the advice and no button, and a button reappearing here is a regression.
+  ["/signup",                           "guest", null],
+  ["/no-such-thing/at-all",             "guest", null],
 ];
 
 const run = async () => {
@@ -114,14 +135,18 @@ const run = async () => {
               : "a member of staff sent to the guest 404 is told to scan a QR code on their table");
         } else if (s.both) {
           bad(`${path} has BOTH screens in the tree`, "only one may ever be rendered, or one will show through the other");
-        } else if (s.href !== href) {
+        } else if (href === null && s.href !== null) {
+          bad(`${path} offers a way out (${s.href}) when it does not know which restaurant they meant`,
+            "there is nothing behind it — /menu is restaurant #1, which is the wrong one for a stranger, "
+            + "and it would bounce them straight back to this screen");
+        } else if (href !== null && s.href !== href) {
           bad(`${path}'s way out points at ${s.href}, not ${href}`, `it reads "${s.label}"`);
         } else if (!s.painted) {
           bad(`${path} rendered the right screen but nothing is visible`, "the styles did not arrive");
         } else if (errs.length) {
           bad(`${path} threw`, errs[0]);
         } else {
-          ok(`${path} → ${want}: "${s.title}" · "${s.label}" → ${s.href}`);
+          ok(`${path} → ${want}: "${s.title}"` + (s.href ? ` · "${s.label}" → ${s.href}` : " · no way out offered, and none should be"));
         }
       } catch (e) {
         bad(`${path} could not be loaded`, e.message);

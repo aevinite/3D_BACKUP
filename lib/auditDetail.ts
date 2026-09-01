@@ -158,7 +158,7 @@ export async function auditBillHtml(rid: string, was: Record<string, unknown> | 
     if (!lines.length) return null;
 
     const [setQ, restQ] = await Promise.all([
-      sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label`).eq("restaurant_id", rid).maybeSingle(),
+      sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, restaurant_address, restaurant_phone, gstin, invoice_prefix, bill_footer, tax_label, table_names`).eq("restaurant_id", rid).maybeSingle(),
       sb.from("restaurants").select("id, slug, name, logo_text").eq("id", rid).maybeSingle(),
     ]);
     const settings = (setQ.data || {}) as Record<string, unknown>;
@@ -187,7 +187,20 @@ export async function auditBillHtml(rid: string, was: Record<string, unknown> | 
         ? BILLDOC.invFmt(Number(was.invoice_no), (was.ordered_at as string) || null, bi.prefix)
         : "",
       billNo: was.bill_no != null ? String(was.bill_no) : "",
-      tableDisp: was.table_number != null ? String(was.table_number) : "—",
+      /* THE RECORD NAMES THE TABLE THE WAY THE RESTAURANT DOES (owner, 2026-08-28 — item 22).
+         Every other document in this product resolves a renamed table before printing it: the bill
+         and the KOT through tableDisp / tablePrintLabel, the banquet sheet inside banquetDocHtml
+         itself. This card printed the bare digit, so a restaurant that renamed T5 to "Terrace 2"
+         saw "Terrace 2" on the paper the guest was handed and "5" on the record of that bill being
+         removed — the two documents that most need to match, not matching.
+         `settings.table_names` is already fetched three lines above for the identity, so this costs
+         no extra read. A table with no name still shows its number, which is what it is called. */
+      tableDisp: (() => {
+        const t = String(was.table_number ?? "").trim();
+        if (!t) return "—";
+        const names = (settings.table_names as Record<string, string> | undefined) || {};
+        return (names[t] || "").trim() || t;
+      })(),
       dateStr: was.ordered_at
         ? new Date(String(was.ordered_at)).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })
         : "",

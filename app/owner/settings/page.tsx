@@ -10,6 +10,10 @@ import { asSuffix } from "@/lib/ownerPin";
 
 type Module = { restaurant_id: string; name: string; key: string; label: string; enabled: boolean };
 type PrintingState = {
+  // WHICH restaurant this answer is about. The route answers for exactly one, and this page renders a
+  // LIST — see the note in the map below for what went wrong when the two were not matched up.
+  // Optional so an older deployment's answer still parses; an absent id means "don't apply it".
+  restaurantId?: string;
   allowed: boolean; on: boolean; waiting: number;
   computers: { name: string; connected: boolean; secondsAgo: number | null; printers: string[] }[];
   routes: { kind: string; printer: string | null; computer: string | null; connected: boolean }[];
@@ -24,6 +28,9 @@ type Data = {
   // Kitchen printing, per restaurant that HAS it on (mig 336/338). Absent or empty = nothing to show,
   // and the card does not render at all — his rule: if printing is off, no option appears.
   printing?: { restaurant_id: string; name: string; target: string; station: string | null; stale: boolean }[];
+  // false = the read behind the list failed, so an empty list means "we could not look", NOT
+  // "this restaurant has printing off". Without this the two are the same screen: nothing at all.
+  printingOk?: boolean;
   modules?: Module[];
 };
 // REJECTED (owner, 2026-08-18): DO NOT show the owner which sections are switched OFF.
@@ -48,10 +55,19 @@ type Data = {
 //
 // logs_signins / logs_service / logs_staff_changes are deliberately absent: they are which KINDS of
 // row the Audit & logs page shows, not sections. Pay Later and Inventory are MODULES, not sections.
+//
+// ONE OF THESE NINE IS NOT A SIDEBAR ROW, AND THE CHIP NOW SAYS SO (owner, 2026-09-01 — "you can
+// do 15"). `ratings` is a real section and the owner really has it, but it is reached as a TAB
+// inside Feedback & complaints (app/owner/issues/page.tsx), not as its own nav item. So an owner
+// read "Guest ratings" on this card, went looking for it in the menu, and it was not there.
+// Naming it "Guest ratings" alone was under-informative; renaming it "Feedback & complaints" would
+// have printed that name twice, since `issues` already carries it. Saying where it lives is the
+// only version that is both true and findable — and it discloses nothing withheld (R36), because
+// the chip only exists when the section is ON.
 const SECTION_LABEL: Record<string, string> = {
   manager_mode: "Manager mode", menu: "Menu", reports: "Reports", staff: "Team",
   customers: "Customers", logs: "Audit & logs", issues: "Feedback & complaints",
-  ratings: "Guest ratings", settings: "Settings",
+  ratings: "Guest ratings — in Feedback & complaints", settings: "Settings",
 };
 
 export default function OwnerSettings() {
@@ -84,11 +100,37 @@ export default function OwnerSettings() {
       setPrinting(j && j.allowed ? j : null);
     } catch { /* leave whatever we had; this card never blocks the page */ }
   }, [scp]);
+  useEffect(() => { loadPrinting(); }, [loadPrinting]);
+  // IT KEPT ASKING WITH THE TAB HIDDEN, AND WITH NOTHING ON SCREEN TO ASK FOR (T13 sweep,
+  // 2026-08-27 — measured: 4 requests in 40s with the tab in front, and 2 more in the next 35s
+  // after the tab was hidden).
+  //
+  // Two separate costs, both avoidable:
+  //   • NOTHING TO REFRESH. The interval was unconditional, but this whole card only renders when
+  //     `data.printing` has a row — a restaurant whose printing is switched off shows nothing at all
+  //     (R36), and still paid four requests a minute for it, for as long as the page was open.
+  //   • A BACKGROUND TAB. Every other page in this console — Customers, Pay Later, Feedback &
+  //     complaints — polls on 60s, skips the tick while `document.hidden`, and stops and restarts on
+  //     visibilitychange. Settings was the one that did not, so an owner who opened it once and left
+  //     the tab behind kept a poll running all night. `/api/owner/printing` is five reads a call
+  //     (the scope, `settings`, then agents + routes + the waiting count), so that is ~1,200 reads
+  //     an hour for a card nobody is looking at. "This product's cost is egress, not effort."
+  //
+  // 15s is KEPT while the card is on screen and the tab is in front, deliberately: the admin's own
+  // Printing screen refreshes on the same cadence for the same reason — "is that computer awake" has
+  // a 30s truth window (HELPER_STALE_MS), so a slower tick would let this card say "ready" about a
+  // computer that had already gone to sleep. The fix is not a slower clock, it is not running the
+  // clock when there is no card and no one watching.
+  const showsPrinting = !!printing;
   useEffect(() => {
-    loadPrinting();
-    const t = setInterval(loadPrinting, 15000);
-    return () => clearInterval(t);
-  }, [loadPrinting]);
+    if (!showsPrinting) return;
+    let t: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (!t) t = setInterval(() => { if (!document.hidden) loadPrinting(); }, 15000); };
+    const stop = () => { if (t) { clearInterval(t); t = null; } };
+    const onVis = () => { if (document.hidden) stop(); else { loadPrinting(); start(); } };
+    start(); document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, [showsPrinting, loadPrinting]);
 
   // ── Appearance (mirrors OwnerShell.toggleSkin) ──
   const [skin, setSkin] = useState<"light" | "dark">("dark");
@@ -156,6 +198,21 @@ export default function OwnerSettings() {
           which screen prints are the admin's, and the per-device answer belongs to the computer with
           the printer, not to this account. What belongs here is the DOOR to the guide, which is the
           thing an owner actually needs when a new restaurant is being set up. */}
+      {/* THE SECTION CAN NOW SAY IT WAS SHORTENED. Three states, not two:
+            · rows        → printing is on here, and this is where the paper comes out
+            · nothing     → printing is off for this restaurant (his rule, unchanged: what is
+                            withheld is never mentioned — see R36 above)
+            · this line   → the read failed, so we genuinely do not know which of the two it is
+          The third used to be silently drawn as the second, which is how a section he had been
+          given disappeared and came back with nothing said. */}
+      {data && data.printingOk === false && !(data.printing && data.printing.length) && (
+      <div className="adm-card" style={{ marginBottom: 14 }}>
+        <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Kitchen printing</div>
+        <div className="adm-muted" style={{ fontSize: 13 }}>
+          Couldn&rsquo;t load this just now. Nothing has changed &mdash; refresh the page to try again.
+        </div>
+      </div>
+      )}
       {!!(data?.printing && data.printing.length) && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Kitchen printing</div>
@@ -165,8 +222,23 @@ export default function OwnerSettings() {
             belongs to the computer the printer is attached to. */}
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
           {data.printing.map((p) => {
-            // Only for the restaurant this page is scoped to — /api/owner/printing answers for one.
-            const kotHelper = printing && printing.routes.find((r) => r.kind === "kot" && r.printer) || null;
+            // ── ONE ANSWER, ONE RESTAURANT ─────────────────────────────────────────────────────
+            // T13 (sweep #7) found this independently on 2026-08-27 and fixed it the only way its
+            // own territory allowed — by using the answer only when the list held exactly one row.
+            // T20 had already fixed it PROPERLY the same week, by making the route say which
+            // restaurant it answered for, which is the version kept here: it is right for two
+            // restaurants as well as one, and T13's workaround is superseded, not discarded.
+            // ── ONLY FOR THE RESTAURANT THIS ANSWER IS ACTUALLY ABOUT (T20 round 2, 2026-08-31) ────
+            // /api/owner/printing answers for ONE restaurant, and this is a LIST — so looking the
+            // answer up once and using it for every row named one restaurant's printer and computer
+            // on another restaurant's line. The comment here already said "answers for one"; the code
+            // then used it for all of them.
+            // The route now echoes `restaurantId`, so the match is explicit. `!printing.restaurantId`
+            // keeps an older deployment's answer working (it falls back to the screen branch, which
+            // is what a restaurant with no helper shows anyway) rather than trusting it blindly.
+            const kotHelper = (printing && printing.restaurantId === p.restaurant_id)
+              ? (printing.routes.find((r) => r.kind === "kot" && r.printer) || null)
+              : null;
             return (
             <div key={p.restaurant_id} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", border: "var(--border)", borderRadius: 9, padding: "8px 11px" }}>
               <b style={{ fontSize: 13 }}>{p.name || "This restaurant"}</b>
@@ -186,13 +258,30 @@ export default function OwnerSettings() {
                 </>
               ) : (
                 <>
+                  {/* "both" is GONE, not defaulted (owner, 2026-08-30). It meant "the kitchen prints
+                      and the counter picks up what it leaves" — the backup screen, which was removed —
+                      and the route stopped being able to answer it, so this branch was dead code that
+                      still LOOKED like a supported answer. */}
                   <span className="adm-muted" style={{ fontSize: 12 }}>
-                    tickets print on {p.target === "counter" ? "the counter screen" : p.target === "both" ? "the kitchen screen (counter as backup)" : "the kitchen screen"}
+                    tickets print on {p.target === "counter" ? "the counter screen" : "the kitchen screen"}
                   </span>
+                  {/* ── "GONE QUIET" IS A WARNING, NOT A FOOTNOTE (owner, 2026-08-31 — item 29) ─────
+                      This said "printing now: Kitchen screen · gone quiet" with the second half in
+                      muted grey, i.e. styled as background detail. It is not background detail: the
+                      screen that is supposed to be printing has not checked in for three minutes, so
+                      tickets may not be coming out of the printer at all. That is the one thing on
+                      this card worth interrupting somebody for.
+                      The helper branch above already gets this right — it says "asleep, tickets
+                      waiting", naming the CONSEQUENCE rather than the symptom. This branch now matches
+                      it in both wording and weight: amber, and it says what it means for the food. */}
                   <span style={{ marginLeft: "auto", fontSize: 12.5 }}>
                     {p.station
-                      ? <>printing now: <b>{p.station}</b>{p.stale ? <span className="adm-muted"> · gone quiet</span> : null}</>
-                      : <span className="adm-muted">no screen has taken it yet</span>}
+                      ? p.stale
+                        ? <>printing now: <b>{p.station}</b>
+                            <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}> · gone quiet for 3+ min — tickets may not be printing</span>
+                          </>
+                        : <>printing now: <b>{p.station}</b></>
+                      : <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}>no screen has taken it yet — tickets are waiting</span>}
                   </span>
                 </>
               )}
@@ -201,11 +290,39 @@ export default function OwnerSettings() {
         </div>
         {printing ? (
           <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Where your paper comes out right now</div>
+            {/* ── AND SAY WHICH RESTAURANT THIS BOX IS ABOUT (T20 round 4, 2026-09-01) ────────────
+                Item 30 stopped a printing ROW borrowing another restaurant's printer. This box below
+                the rows had the same fault one level up and kept it: everything in it — the waiting
+                count, the printer names, the computers — comes from /api/owner/printing, which answers
+                for exactly ONE restaurant, and nothing here named it. Under a one-row list that is
+                fine. Under a TWO-row list the owner reads "4 things are waiting to print" and cannot
+                tell whose four.
+                Found by MAKING the two-row case reachable: printing was switched on for a second
+                restaurant, the page was rendered, and the box sat under both names describing one.
+                (Round 3 recorded this case as unreachable on today's data; round 4's job was to reach
+                it.) The route already echoes `restaurantId` for item 30, so the name is free. */}
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+              Where your paper comes out right now
+              {(data.printing?.length ?? 0) > 1 && printing.restaurantId ? (
+                <span className="adm-muted" style={{ fontWeight: 600 }}>
+                  {" · "}{data.printing.find((x) => x.restaurant_id === printing.restaurantId)?.name
+                    ?? data.restaurants.find((x) => x.id === printing.restaurantId)?.name
+                    ?? "one of your restaurants"}
+                </span>
+              ) : null}
+            </div>
             <p className="adm-muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+              {/* ── THE TWO SENTENCES READ AS AN ARGUMENT (owner, 2026-08-31 — item 29) ──────────
+                  The row above says "printing now: Kitchen screen" and this said "No computer is set
+                  up to print yet". Both are true and they are about different things — which screen is
+                  taking the paper, versus whether a dedicated printer computer exists — but read one
+                  after the other they sound like the page contradicting itself. Seen in a screenshot
+                  during the T20 sweep's visual pass.
+                  Reworded so the pair is ONE statement: the second sentence now explains the first
+                  rather than appearing to deny it. */}
               {printing.computers.length
                 ? "A printer program on your own computer does this — no screen has to be open, and nothing you close can stop it."
-                : "No computer is set up to print yet, so a screen has to do it. Ask us to set one up and this becomes automatic."}
+                : "A screen is doing this because no printer computer is set up here yet — so whichever screen has taken it has to stay open. Ask us to set one up and it becomes automatic."}
             </p>
             {printing.computers.map((c) => (
               <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "5px 0" }}>
@@ -239,7 +356,17 @@ export default function OwnerSettings() {
             </p>
           </div>
         ) : null}
-        <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        {/* THE EXPLANATION IS BEHIND A TAP (owner, 2026-09-01 — "you can do 14th").
+            Fourteen lines of it sat between "where your paper comes out" and the four guide buttons,
+            so on a phone the owner scrolled past the whole thing to reach the button they came for.
+            NOT ONE WORD IS CHANGED and nothing is summarised — it is the same paragraph, one tap
+            away, with the status and the buttons now next to each other. Closed by default on every
+            width: on a laptop it was five lines of prose doing the same job. `<details>` is the same
+            control the Add form already uses for "Add their details now", so it is not a new idea on
+            this screen, and it needs no JavaScript and no back-button layer. */}
+        <details className="prn-how">
+          <summary>How printing works <span className="adm-muted">· the short version, and what the guide covers</span></summary>
+          <p className="adm-muted" style={{ fontSize: 12.5, margin: "8px 0 10px" }}>
           A kitchen ticket is queued by the server the moment an order is placed, so it can never be
           lost — it waits until a printer takes it, whether that is a computer running the printer
           program or a screen. The full written guide covers setting a printer up
@@ -249,7 +376,15 @@ export default function OwnerSettings() {
           nothing to download — the guide has one menu per operating system and every command has a Copy
           button, because a downloaded script is blocked by macOS and warned about by Windows.
         </p>
+        </details>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* The icon is spaced off its label by `gap` on `.owx .adm-btn` in app/globals.css — a flex
+              container TRIMS the leading whitespace of a text run, so `<i/> Open the…` rendered as
+              one word: the book glyph touching "Open" (measured 0px, T13 sweep, 2026-08-27). This
+              button carried its own inline gap for one commit; the shared rule replaced it on
+              2026-09-01 because four more buttons in this console had the same fault and a per-button
+              override would have hidden the next regression in the shared rule rather than catching
+              it. Do not put the inline gap back — verify:owner-panel §13 now watches the rule. */}
           <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
             <i className="fas fa-book-open" aria-hidden="true" /> Open the printer setup guide
           </a>
@@ -259,6 +394,11 @@ export default function OwnerSettings() {
           <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
           <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
         </div>
+        <style>{`
+          .prn-how { margin: 2px 0 10px; }
+          .prn-how summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--muted); padding: 4px 0; }
+          .prn-how summary::marker { color: var(--muted); }
+        `}</style>
         <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
           Turning printing on, and choosing whether it comes out in the kitchen or at the counter, is
           done for you by Aevidine — ask and it is one switch. The screen that prints is chosen ON that

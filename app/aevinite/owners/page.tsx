@@ -454,12 +454,15 @@ function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner;
       : { c: "#fbbf24", i: "fa-circle-exclamation", t: "Doesn’t match yet." };
   return (
     <ModalShell id="admin-owner-delete" onClose={onClose} width={460} label={`Move ${owner.name} to the recycle bin`}>
-      <ModalHead tone="danger" icon="fa-trash-can" title={`Move ${owner.name} to the recycle bin?`} sub="Restorable for 90 days — nothing is erased yet." subColor="#fca5a5" />
+      {/* NOT "for 90 days" (T16 sweep #7, 2026-08-27) — the wait was removed on 2026-08-20 and
+          migration 342 dropped the database lock with it. Restoring has no deadline, and a
+          permanent removal has no wait either; both facts are said plainly below. */}
+      <ModalHead tone="danger" icon="fa-trash-can" title={`Move ${owner.name} to the recycle bin?`} sub="Restorable at any time — nothing is erased yet." subColor="#fca5a5" />
       <div style={{ padding: "14px 20px 4px", display: "grid", gap: 12 }}>
         <FactList danger facts={[
           { i: "fa-box-archive", c: "#fbbf24", t: <>They leave the Owners list and go to the <b>Recycle bin</b></> },
           { i: "fa-store", c: "#34d399", t: <>Their restaurants <b>stay linked</b> and come back if you restore</> },
-          { i: "fa-clock-rotate-left", c: "#34d399", t: <><b>Restorable for 90 days</b>; only after that can they be permanently removed</> },
+          { i: "fa-clock-rotate-left", c: "#34d399", t: <><b>Restorable at any time</b> — no deadline; they can also be removed for good from the bin, which can&rsquo;t be undone</> },
         ]} />
         <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Type <b style={{ color: "var(--text)" }}>{owner.username}</b> to confirm:</div>
         <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={owner.username} autoComplete="off" spellCheck={false} aria-label="Type the username to confirm deletion"
@@ -638,6 +641,19 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
 
   // Delete → moves the owner to the RECYCLE BIN (the server soft-deletes now, mig
   // 208). The modal's type-to-confirm gate already guards it, so this just runs it.
+  //
+  // ── `busy` HAS TO COME BACK, AND ON THE HAPPY PATH TOO (T16 sweep #7, 2026-08-27) ──────────
+  // `busy` is the PAGE's state, not this pane's — AdminOwners owns it and hands it down, so it
+  // gates Rename, Reset password, Suspend/Restore, Assign restaurant, Make primary and Remove on
+  // WHOEVER is open. This handler set it true and then released it only in the catch. So a
+  // delete that WORKED left it true for good: the pane emptied, the admin picked the next owner,
+  // and every button on that person was greyed out with nothing on screen saying why. Only a
+  // page reload brought them back. Measured on a temp owner: all four action buttons came back
+  // `disabled` on a different owner straight after the delete.
+  //
+  // `finally`, not a line after onDeleted(): onDeleted() re-loads the roster and clears the
+  // selection, so anything after it is easy to lose in a later edit — and the failure path wants
+  // exactly the same release.
   async function doDelete() {
     setShowDelete(false);
     setMErr(""); setBusy(true);
@@ -646,7 +662,8 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "Delete failed.");
       onDeleted();
-    } catch (e: any) { setMErr(e.message || "Delete failed."); setBusy(false); }
+    } catch (e: any) { setMErr(e.message || "Delete failed."); }
+    finally { setBusy(false); }
   }
 
   const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
@@ -811,12 +828,12 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
           <div className="hue-ink" style={{ fontSize: 13, fontWeight: 700, ["--hue" as string]: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
           {owner.active ? (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              To delete this owner, <b>suspend them first</b> (the reversible step). Deleting then moves them to the <b>Recycle bin</b> — restorable for 90 days.
+              To delete this owner, <b>suspend them first</b> (the reversible step). Deleting then moves them to the <b>Recycle bin</b> — restorable at any time.
             </div>
           ) : (
             <>
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                This owner is suspended. Deleting moves them to the <b>Recycle bin</b>, where they can be <b>restored for 90 days</b>; nothing is erased yet and their restaurants stay linked. Only after 90 days can they be permanently removed.
+                This owner is suspended. Deleting moves them to the <b>Recycle bin</b>, where they can be <b>restored at any time</b>; nothing is erased yet and their restaurants stay linked. From the bin they can also be removed for good whenever you choose, and that cannot be undone.
               </div>
               <button style={btn("#991b1b")} disabled={busy} onClick={() => setShowDelete(true)}><i className="fas fa-trash-can" style={{ marginRight: 6, fontSize: 11 }} aria-hidden="true" />Move to recycle bin</button>
             </>
@@ -865,7 +882,14 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
   const [reveal, setReveal] = useState<{ id: string; name: string; password: string; warn?: string } | null>(null);
   const creatingRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
-  useAdminModal(dialogRef, "admin-new-owner", onClose);
+  // ── CLOSING THIS DIALOG AFTER A CREATE MUST STILL REFRESH THE ROSTER (T16 sweep #7, 2026-08-27)
+  // Only the "Done" button called onCreated(), which is what reloads the list and selects the new
+  // person. Escape, the phone Back button and a tap on the scrim all went to onClose(), which just
+  // hides the card — so an owner who HAD been created was missing from the roster until the page
+  // was reloaded, and the obvious next move is to create them again. `close` routes every exit
+  // through the same answer, and costs no extra request when nothing was created.
+  const close = () => { if (reveal) onCreated(reveal.id); else onClose(); };
+  useAdminModal(dialogRef, "admin-new-owner", close);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -886,7 +910,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
 
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div onClick={close} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="New owner" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         {reveal ? (
           <div style={{ ...card, pointerEvents: "auto", width: "min(100%, 440px)", display: "grid", gap: 12 }}>
@@ -934,7 +958,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button type="submit" disabled={busy} style={{ ...btn("#22c55e"), flex: 1, opacity: busy ? 0.6 : 1 }}>{busy ? "Creating…" : "Create owner & show password"}</button>
-              <button type="button" style={btn("#374151")} onClick={onClose}>Cancel</button>
+              <button type="button" style={btn("#374151")} onClick={close}>Cancel</button>
             </div>
           </form>
         )}

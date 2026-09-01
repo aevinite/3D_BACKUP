@@ -138,16 +138,45 @@ export async function GET(req: NextRequest) {
   // He asked for printing to be visible in the owner panel too — "divide whole printing in both
   // manager as well as owner and kitchen" — and for nothing to show when it is off. So one row per
   // restaurant that HAS it on, saying which screen is printing right now (mig 338). No controls: the
-  // owner is not standing at the printer, and the two switches are the admin's (mig 107/336).
+  // owner is not standing at the printer, and the switch is the admin's (mig 107).
   // Two small indexed reads over restaurants this owner already has, and only when there is one.
   const printing: { restaurant_id: string; name: string; target: string; station: string | null; stale: boolean }[] = [];
+  // WAS THE LIST SHORTENED, OR IS PRINTING SIMPLY OFF? Those two produce the identical answer — an
+  // empty array — and the page showed the identical thing for both: no Kitchen printing section at
+  // all. So a wobble on either read made a section the owner had been given silently disappear and
+  // come back, which reads as "the feature was taken away from me". Neither read checked itself:
+  // `.data || []` turns a failed query into an empty list with no error anywhere.
+  // The page needs the difference, so it is answered here. A restaurant with printing genuinely off
+  // still shows nothing — that rule is his and does not change.
+  //
+  // ── TWO SESSIONS FOUND THIS INDEPENDENTLY, AND THIS IS THE COMBINED VERSION (T20 sweep #7,
+  //    2026-08-31) ─────────────────────────────────────────────────────────────────────────────────
+  // T20 reached the same conclusion on 2026-08-27 and shipped `printingUnread` (present only when
+  // true). THIS contract — `printingOk`, always present — is the one on main and the one the page
+  // reads, so it stays. What T20 kept from its own version is the two `console.error` lines below:
+  // the flag tells the SCREEN that something was unread, and the log is the only place that says
+  // WHICH read and why, which is what a support question actually needs.
+  //
+  // T20's version also raised the flag for a failed `print_stations` read. That was WRONG and this
+  // version is right: a missing station line does not shorten anything — it nulls "which screen is
+  // printing", which already renders null for a restaurant whose helper is asleep — so flagging it
+  // would put a warning on the page for a state that is normal. That is crying wolf, and the project
+  // has a standing rule against it.
+  let printingOk = true;
   try {
     const ids = restaurants.map((r) => r.id);
     if (ids.length) {
       const [setRows, stRows] = await Promise.all([
-        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, kot_print_target").in("restaurant_id", ids),
+        sb.from("settings").select("restaurant_id, auto_print_kot, auto_print_kot_allowed, modules").in("restaurant_id", ids),
         sb.from("print_stations").select("restaurant_id, label, panel, claimed_by, last_seen_at").in("restaurant_id", ids).eq("active", true),
       ]);
+      // A read that failed is not a restaurant with no printing. `print_stations` is the softer of
+      // the two: without it the rows still render and just cannot say WHICH screen is printing, so
+      // it does not shorten anything and must not raise the flag.
+      if (setRows.error) { console.error("[owner/settings] printing rows unread:", setRows.error.message); printingOk = false; }
+      // NOT flagged, but still logged — see the note above the block. The screen is right to stay
+      // quiet about this one; we still want to know it happened.
+      if (stRows.error) console.error("[owner/settings] print stations unread (the rows still render):", stRows.error.message);
       const byRid = new Map(((stRows.data || []) as Record<string, unknown>[]).map((r) => [String(r.restaurant_id), r]));
       const nameOf2 = new Map(restaurants.map((r) => [r.id, r.name]));
       for (const row of (setRows.data || []) as Record<string, unknown>[]) {
@@ -157,14 +186,33 @@ export async function GET(req: NextRequest) {
         printing.push({
           restaurant_id: rid2,
           name: nameOf2.get(rid2) || "",
-          target: String(row.kot_print_target || "kitchen"),
+          // DERIVED FROM THE KITCHEN SLIPS ROUTE (mig 369), never from the retired column. The three
+          // words the owner's page prints are unchanged, so nothing there had to be reworded.
+          target: (() => {
+            const bag = row.modules && typeof row.modules === "object" ? row.modules as Record<string, Record<string, unknown>> : {};
+            const k = ((bag.printing?.routes || {}) as Record<string, Record<string, unknown>>).kot || {};
+            if (k.via !== "screen") return "kitchen";
+            // "both" IS UNREACHABLE and stays deleted (owner, 2026-08-30). It meant "the kitchen
+            // prints and the counter picks up what it leaves" — the backup screen, which is gone.
+            // `k.backupPanel` had already stopped existing, so this read undefined every time and
+            // the branch was dead code that still LOOKED like a supported answer.
+            // (Found twice on 2026-08-31, an hour apart: by pulling the thread of his question about
+            // the Kitchen printing section, and by T25 round 3's re-run of the four old rows that were
+            // still defending the backup printer.)
+            return k.panel === "manager" ? "counter" : "kitchen";
+          })(),
           station: st ? (st.label || (st.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (st.claimed_by ? ` · ${st.claimed_by}` : "") : null,
           stale: !!(st?.last_seen_at && Date.now() - Date.parse(st.last_seen_at) > 3 * 60 * 1000),
         });
       }
     }
-  } catch { /* a printing row is a nicety; never let it shorten the page */ }
-  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing });
+  } catch (e) {
+    // Never fatal — a printing row is a nicety and must not shorten the page — but no longer silent
+    // in either direction: the flag tells the screen, the log says what happened.
+    console.error("[owner/settings] the printing block failed:", e instanceof Error ? e.message : e);
+    printingOk = false;
+  }
+  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules, printing, printingOk });
   } catch (e) {
     // A half-read restaurant list must not silently shorten the admin's page (same rule as
     // `scopedRestaurantIds` everywhere else).
@@ -192,7 +240,16 @@ export async function PATCH(req: NextRequest) {
   if (!scope.all && !scope.admin && !(await entitledSubset([rid], "settings")).length)
     return NextResponse.json({ error: "The admin hasn't given you settings for this restaurant." }, { status: 403 });
   // The toggle only works while the admin has transferred control (and the feature exists).
-  const s = (await sb.from("settings").select(`${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle()).data as Record<string, boolean> | null;
+  // ── A BLIP MUST NOT TELL AN OWNER THEY DON'T HAVE A FEATURE THEY DO HAVE (T20 sweep #7,
+  //    2026-08-27) ─────────────────────────────────────────────────────────────────────────────────
+  // `.error` was never inspected, so a failed read made `s` null and the two refusals below fired:
+  // "This feature isn't enabled for that restaurant." — a confident, non-retryable 403 about the
+  // restaurant's setup, for a switch the admin genuinely handed over. The owner's only move is to
+  // contact us about a configuration that was never wrong. `dbFail` gives them a retry instead, which
+  // is the same answer the GET's own module-switch chunks already give.
+  const sq = await sb.from("settings").select(`${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle();
+  if (sq.error) return dbFail("owner/settings.moduleGate", sq.error, { message: "Couldn't check that switch just now — please try again." });
+  const s = sq.data as Record<string, boolean> | null;
   if (!s?.[def.allowed]) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
   if (!s[def.control]) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
   const { error } = await sb.from("settings").update({ [def.enabled]: enabled }).eq("restaurant_id", rid);

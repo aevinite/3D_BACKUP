@@ -18,6 +18,30 @@ import { NextResponse } from "next/server";
 
 type DbError = { message?: string; code?: string; details?: string } | null | undefined;
 
+/**
+ * WHY THIS ACCEPTS `unknown` (T19 sweep #7, item 15, 2026-09-01).
+ *
+ * lib/readGuard's `ReadSet.error(name)` returns `unknown` — deliberately, because a supabase error
+ * is not typed and the helper refuses to pretend otherwise. This function wanted a shaped object, so
+ * the two could not be used together without an `as` cast at every one of ~30 call sites, and a cast
+ * per call site is how a shape assumption spreads. Widening here instead: the parameter takes
+ * anything, and the two fields this function actually reads are picked out safely. Every existing
+ * caller keeps working unchanged — this only ever accepts MORE than before.
+ */
+function asDbError(e: unknown): DbError {
+  if (e == null) return e as null | undefined;
+  if (typeof e === "string") return { message: e };
+  if (typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    return {
+      message: typeof o.message === "string" ? o.message : undefined,
+      code: typeof o.code === "string" ? o.code : undefined,
+      details: typeof o.details === "string" ? o.details : undefined,
+    };
+  }
+  return { message: String(e) };
+}
+
 /** Was this the database refusing the VALUE rather than failing to serve it? Those keep a 4xx and a
  *  sentence of their own, because retrying changes nothing. Mirrors lib/dbRefusal's code list. */
 const REFUSAL = new Set(["22001", "22003", "22007", "22P02", "23502", "23503", "23505", "23514", "23P01"]);
@@ -29,7 +53,8 @@ const REFUSAL = new Set(["22001", "22003", "22007", "22P02", "23502", "23503", "
  *                     that nothing changed. Defaults to "save", the answer that is safe to be wrong
  *                     about in only one direction.
  */
-export function adminFail(what: string, e: DbError, opts?: { action?: "load" | "save"; status?: number }): NextResponse {
+export function adminFail(what: string, err: unknown, opts?: { action?: "load" | "save"; status?: number }): NextResponse {
+  const e = asDbError(err);
   const raw = e?.message || "the database gave no reason";
   const code = e?.code || "";
   console.error(`[admin] couldn't ${opts?.action === "load" ? "load" : "save"} ${what}:`, code || "", raw);

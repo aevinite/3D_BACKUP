@@ -7,6 +7,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,7 +34,10 @@ export async function POST(req: NextRequest) {
   // the stricter one would be decoration. A binned restaurant needs an explicit `bin: true` (the
   // recycle bin sends it); a PURGED one is refused outright. See the long note in act-as/go.
   const fromBin = body?.bin === true;
-  const r = (await sb.from("restaurants").select("id, name, deleted_at, purged_at").eq("id", rid).limit(1)).data?.[0];
+  // Checked, like the /go twin: a failed read must not answer "restaurant not found" (T19 sweep #7).
+  const rq = await sb.from("restaurants").select("id, name, deleted_at, purged_at").eq("id", rid).limit(1);
+  if (rq.error) return adminFail("this restaurant", rq.error, { action: "load" });
+  const r = rq.data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
   if (r.purged_at) return NextResponse.json({ error: "That restaurant was permanently removed — its panels no longer exist." }, { status: 409 });
   if (r.deleted_at && !fromBin) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
