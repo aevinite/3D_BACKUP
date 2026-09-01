@@ -841,7 +841,17 @@ export default function SessionGate() {
     // fresh one each time — otherwise the same person can appear repeatedly in the
     // staff's list (audit fix bug #18). "open" requests are unaffected.
     if (type === "access" && accessReqRef.current) { setStep("request_sent"); return; }
-    const r = await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
+    // ── SEND THE NAME WE ALREADY HAVE (T4 sweep #8, item 7) ──────────────────────────────────────
+    // The owner's NAME-FIRST rule (2026-06-17) exists so the manager's and tablet's pending-requests
+    // view shows WHO is asking rather than a nameless "Someone". This call passed only what was
+    // typed into `name` — which close() and rescan() both clear, and which is empty on the two
+    // screens a returning diner reaches with a session already on their phone (a failed location
+    // check, and the escape hatch on the intro). The device has known their name all along, session-
+    // scoped, from whenever they last gave it. Using it costs nothing and cannot be worse than null.
+    // (What it still cannot help: a brand-new diner on the very first screen, who has never been
+    // asked. That one needs a decision about adding a name step, not a fallback.)
+    const who = name.trim() || getNickname(sess.current?.token) || null;
+    const r = await requestAccess(p.table, type, who, null, ridRef.current);
     // NOBODY WAS TOLD IS NOT "WE'VE LET THE STAFF KNOW" (sweep 6 T3, 2026-08-17).
     //
     // The answer used to be thrown away: whatever the server said, the next line showed the

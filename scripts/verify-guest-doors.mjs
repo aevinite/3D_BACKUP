@@ -639,6 +639,20 @@ flush();
   check("…and every one of them submits on Enter, so the phone's Go key is never dead",
     named.length === 4 && named.every((b) => /e\.key === "Enter"/.test(b)));
 }
+
+// ── A REQUEST TO STAFF CARRIES THE NAME WE ALREADY HAVE (T4 s8, item 7) ───────────────────────────
+// NAME-FIRST (owner, 2026-06-17) exists so the pending-requests view names who is asking. The
+// escape-hatch path passed only what was typed, which is empty on the two screens a returning diner
+// reaches with a session already on their phone.
+{
+  say("\n11) A request to staff names who is asking, wherever the name came from");
+  check("the escape-hatch request falls back to the name this device already gave",
+    /const who = name\.trim\(\) \|\| getNickname\(sess\.current\?\.token\) \|\| null;/.test(gate));
+  check("…and it is that value that is sent, not the raw box",
+    /requestAccess\(p\.table, type, who, null, ridRef\.current\)/.test(gate));
+  check("the OPEN request still requires a freshly typed name, which is the rule's own screen",
+    /if \(!name\.trim\(\)\) \{ setNote\("Add your name so staff know who's asking\."\); return; \}/.test(gate));
+}
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
