@@ -309,8 +309,11 @@ async function postImpl(req: NextRequest) {
   const sessionId = String(body?.sessionId || "");
   if (!isUuid(sessionId)) return NextResponse.json({ error: "bad sessionId" }, { status: 400 });
 
-  const sess = (await sb.from("sessions").select("id, restaurant_id, table_number, bill_no").eq("id", sessionId).maybeSingle()).data as
-    { id: string; restaurant_id: string | null; table_number: string | null; bill_no: number | null } | null;
+  // "NOT FOUND" HAS TO MEAN NOT FOUND: a failed read said the bill did not exist, which on a delete
+  // or a restore is a sentence the admin would act on (T19 sweep #7, 2026-09-01).
+  const sessQ = await sb.from("sessions").select("id, restaurant_id, table_number, bill_no").eq("id", sessionId).maybeSingle();
+  if (sessQ.error) return adminFail("this bill", sessQ.error, { action: "load" });
+  const sess = sessQ.data as { id: string; restaurant_id: string | null; table_number: string | null; bill_no: number | null } | null;
   if (!sess || !sess.restaurant_id) return NextResponse.json({ error: "bill not found" }, { status: 404 });
   const rid = sess.restaurant_id;
 
@@ -320,7 +323,17 @@ async function postImpl(req: NextRequest) {
     // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
     if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
-    const orderRows = (await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP)).data as ({ id: string } & MoneyCols)[] | null;
+    // A FAILED READ IS NOT AN EMPTY BILL (T19 sweep #7, 2026-09-01). This took `.data` and ignored
+    // `.error`, so a database blip on this one read made `ids` empty — and then every step below
+    // behaved as if the bill genuinely had no orders: softDeleteOrders() returns 0 without touching
+    // anything, no `deletion_audit` row is written, the `!ids.length` branch tombstones the SESSION
+    // anyway, and the reply says ok. The result is a bill that reads "deleted" in the ledger while
+    // its orders are still live on the floor and in the reports, with nothing on the Removals record
+    // saying what was taken out. On the strongest removal in the product, that is the one answer this
+    // route must never give. Refuse instead: nothing has been changed at this point.
+    const ordersQ = await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP);
+    if (ordersQ.error) return adminFail("this bill", ordersQ.error, { action: "save" });
+    const orderRows = ordersQ.data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
     // …and into the Audit, the one place a person looks for "what was removed and why". The
@@ -356,7 +369,12 @@ async function postImpl(req: NextRequest) {
   if (action === "restore") {
     // Read the money BEFORE the restore clears the tombstone, so the audit row can say what came
     // back — the same columns and the same netOf() the delete recorded on the way out.
-    const orderRows = (await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)).data as ({ id: string } & MoneyCols)[] | null;
+    // Checked for the same reason as the delete above: with the error swallowed, `ids` came back
+    // empty, restoreOrders() restored nothing, the session was un-tombstoned regardless and the reply
+    // said "restored" — a bill back on the ledger whose every order is still deleted.
+    const ordersQ = await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP);
+    if (ordersQ.error) return adminFail("this bill", ordersQ.error, { action: "save" });
+    const orderRows = ordersQ.data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     // restoreOrders() now THROWS when the database refuses either write (T7 finding F3 — it used to
     // report the row count it intended and leave the bill deleted). Caught here so the admin gets a
