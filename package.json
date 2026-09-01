@@ -194,10 +194,10 @@
     "verify:owner-live500": "node scripts/verify-owner-live-500.mjs"
   },
   "dependencies": {
-    "@sentry/nextjs": "^10.70.0",
-    "@supabase/supabase-js": "^2.112.3",
+    "@sentry/nextjs": "^10.72.0",
+    "@supabase/supabase-js": "^2.112.4",
     "gsap": "^3.15.0",
-    "next": "16.3.1",
+    "next": "16.3.3",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -212,9 +212,9 @@
     "chart.js": "4.5.1",
     "esbuild": "^0.28.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "16.3.3",
     "playwright": "^1.62.1",
-    "shadcn": "^4.18.0",
+    "shadcn": "^4.19.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
