@@ -168,8 +168,28 @@ check(261, "no guest component hand-rolls history outside the two managers", () 
   const files = ["components/CartPanel.tsx", "components/OrderConfirmModal.tsx", "components/ChefPopup.tsx",
     "components/SessionGate.tsx", "components/OrderTracker.tsx", "components/MenuView.tsx",
     "app/item/[slug]/ItemClient.tsx", "app/view/[folder]/ViewerClient.tsx"];
-  const bad = files.filter((f) => rx(code(f), /history\.(pushState|replaceState)|addEventListener\("popstate"/));
-  return { ok: bad.length === 0, note: bad.join(",") || "clean" };
+  // A BACK-BUTTON LAYER IS pushState AND popstate. THAT is what must go through useBackClose /
+  // LFH_BACK, because that is what the phone's Back key walks (guest sweep T1, sweep #8, 2026-09-02).
+  //
+  // This row was RED on clean main and had been for days, and it was red for doing what the owner
+  // asked for: on 2026-08-30 he said the table number must not sit in the address bar where anyone
+  // can edit it, so MenuView reads `?table=N` once and then removes it with `replaceState`. A
+  // `replaceState` adds NO history entry — it is the opposite of a back layer, and MenuView's own
+  // comment says so and explains why `pushState` would be wrong there. Asserting against it made
+  // the guard defend a rule that had been overruled, which is the one way a guard costs more than
+  // it earns.
+  //
+  // So: pushState and popstate stay banned outright, everywhere in this list. A `replaceState` is
+  // allowed ONLY in a file that is using it for exactly that address tidy-up — it must sit with the
+  // `table` parameter being deleted — so nothing else can slip through under the same name.
+  const layer = files.filter((f) => rx(code(f), /history\.pushState|addEventListener\("popstate"/));
+  const strayReplace = files.filter((f) => {
+    const s = code(f);
+    return rx(s, /history\.replaceState/) && !rx(s, /searchParams\.delete\("table"\)/);
+  });
+  const bad = [...new Set([...layer, ...strayReplace])];
+  return { ok: bad.length === 0,
+           note: bad.length ? bad.join(",") : `clean — ${files.length} files, no pushState, no popstate; the one replaceState is the table-number wipe the owner asked for` };
 });
 check("72-77", "every per-restaurant guest key goes through tenant-scoped storage", () => {
   const want = { "components/FoodCard.tsx": ["lfh_cart"], "components/MiniCart.tsx": ["lfh_cart"],
