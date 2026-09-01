@@ -166,3 +166,11 @@ AS $function$
   HAVING SUM(c.po) > 0 OR SUM(c.gp) <> 0
   ORDER BY revenue DESC;
 $function$;
+
+-- ── AND THE GRANTS, SPELLED OUT (added 2026-09-01, with the 367 → 377 renumber) ────────────────
+-- Mirrors migration 321 exactly — the same signature, the same pair. A new Postgres function is
+-- PUBLIC-executable by default, and CREATE OR REPLACE preserves the privileges this function already
+-- has, so nothing changes on either database; it is written down because the file should not depend
+-- on an earlier file's grants, and `verify:ui-integrity` asks every new migration for it.
+REVOKE ALL ON FUNCTION public.lfh_owner_payment_breakdown(uuid, timestamptz, timestamptz, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.lfh_owner_payment_breakdown(uuid, timestamptz, timestamptz, uuid[]) TO service_role;

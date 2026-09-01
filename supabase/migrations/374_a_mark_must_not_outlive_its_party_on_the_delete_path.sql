@@ -142,3 +142,16 @@ END IF;
 END $reseed_guard$;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ── AND THE GRANTS, SPELLED OUT (added 2026-09-01, with the 369 → 374 renumber) ────────────────
+-- A new Postgres function is PUBLIC-executable by default (the migration 038/267 lesson), and
+-- `verify:ui-integrity` checks every new migration for this pair. It had never looked at this file,
+-- because the file used to be numbered below its high-water mark — the renumber is what surfaced it.
+--
+-- Nothing here CHANGES: `lfh_session_delete_cleanup()` is a TRIGGER function, so Postgres invokes it
+-- when the trigger fires and never checks EXECUTE against the caller, and CREATE OR REPLACE keeps
+-- whatever privileges the function already had. The pair is written down anyway, because the rule is
+-- "every staff-only function carries it" and a file that relies on an earlier file's grants is a file
+-- someone will copy without them.
+REVOKE ALL ON FUNCTION public.lfh_session_delete_cleanup() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.lfh_session_delete_cleanup() TO service_role;
