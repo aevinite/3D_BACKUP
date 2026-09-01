@@ -33,6 +33,16 @@ export default function PairPage() {
   // its one button goes, and a later poll could arrive with a different shape.
   const [who, setWho] = useState<"admin" | "staff" | null>(null);
   const [err, setErr] = useState("");
+  // ── "WE COULD NOT ASK" IS ITS OWN ANSWER (T4 sweep #8, item 3) ───────────────────────────────
+  // The sentence below already existed and could never be seen. body() renders `err` only on the
+  // Allow card, and a failed read never gets that far: the first pass through load() (before the
+  // code is read out of the address) sets { signedIn:false }, so a person standing at the printer,
+  // already signed in, was told to SIGN IN — for a problem that has nothing to do with signing in.
+  // Measured headless with the door unreachable: the card read "Sign in on this computer first".
+  // A non-2xx counts too: /api/pair answering 503 hands back a body with no `signedIn` at all,
+  // which is falsy, which is the same wrong card. The 15-second re-read clears this by itself the
+  // moment the site answers again, so this state needs no dismissing.
+  const [unreachable, setUnreachable] = useState(false);
 
   useEffect(() => {
     const c = (new URLSearchParams(location.search).get("c") || "").toUpperCase();
@@ -43,7 +53,9 @@ export default function PairPage() {
     if (!code) { setSt({ signedIn: false, found: false }); return; }
     try {
       const r = await fetch(`/api/pair?c=${encodeURIComponent(code)}`, { cache: "no-store" });
+      if (!r.ok) { setUnreachable(true); return; }   // 5xx from our own door is "we could not ask", not "sign in"
       const d = (await r.json()) as State;
+      setUnreachable(false);
       setSt(d);
       if (d.who) setWho(d.who);
       // The machine's own name is the default, so the box is already right and nobody has to think
@@ -59,7 +71,7 @@ export default function PairPage() {
       // the setter is the same rule with no dependency at all.
       if (d.machine?.hostname) setName((cur) => cur || d.machine!.hostname!);
       if (d.restaurants?.length) setRid((cur) => cur || d.restaurants![0].id);
-    } catch { setErr("Could not reach the site. Check this computer is online."); }
+    } catch { setUnreachable(true); }
   }, [code]);
 
   useEffect(() => { void load(); }, [load]);
@@ -111,6 +123,23 @@ export default function PairPage() {
               <a className="pr-btn ghost" href="/manager">Choose which printer prints what →</a>
               <p className="pr-note">You will land on your own panel — it is under <b>Settings → Printing</b>.</p>
             </>}
+      </>
+    );
+    if (unreachable) return (
+      <>
+        <div className="pr-ico" aria-hidden="true">📡</div>
+        <h1>Could not reach the site</h1>
+        <p className="pr-lead">
+          This computer is not getting an answer from Aevidine. Nothing is wrong with your login —
+          check this computer is on the internet.
+        </p>
+        <div className="pr-actions">
+          <button className="pr-btn" type="button" onClick={() => void load()}>Try again</button>
+        </div>
+        <p className="pr-note">
+          This page keeps trying by itself every few seconds, so it will come right on its own once
+          the connection is back.
+        </p>
       </>
     );
     if (!st) return <p className="pr-lead">Reading…</p>;
