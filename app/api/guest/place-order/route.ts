@@ -47,6 +47,36 @@ function ridFromResult(data: unknown): string {
   return isUuid(v) ? (v as string) : "";
 }
 
+// ── AND WHEN NEITHER THE REPLY NOR THE BODY KNOWS, ASK THE TOKEN (sweep #8 T3, item 4) ───────────
+//
+// The comment below this used to state, as settled fact, that "`lfh_place_order` returns the
+// session's restaurant, and that is the authoritative value". IT DOES NOT. Every version of that
+// function down to the newest (migration 357) ends `RETURN json_build_object('ok', true,
+// 'order_id', v_order)` — there is no `restaurant_id` in it, and there never was. So
+// ridFromResult() above has always answered "" for a session order, the route has always fallen
+// back to the phone's own field, and T9's finding F20 — "a replayed order reached the kitchen while
+// a manager reloading inside the shared 1.5s window could be handed a floor computed before it
+// existed" — was never actually closed for the body it was written about: one saved by a build old
+// enough not to carry `restaurantId`.
+//
+// This is what the reply cannot tell us and the token can. The route already holds the service-role
+// client, and a session token maps to exactly one restaurant, so ONE narrow read settles it:
+// two single-row lookups, each column-listed and capped, and ONLY on the path where both cheaper
+// answers came back empty — so the ordinary replay, which does carry the field, makes no extra read
+// at all. ridFromResult stays first in the chain: it costs nothing and becomes the right answer for
+// free if that function is ever given the field.
+async function ridFromToken(token: string | undefined): Promise<string> {
+  if (!token) return "";
+  try {
+    const m = await sb.from("session_members").select("session_id").eq("token", token).limit(1).maybeSingle();
+    const sid = m.data?.session_id;
+    if (!sid) return "";
+    const s = await sb.from("sessions").select("restaurant_id").eq("id", sid).limit(1).maybeSingle();
+    const rid = s.data?.restaurant_id;
+    return isUuid(rid) ? String(rid) : "";
+  } catch { return ""; }   // best-effort: a failed lookup must never cost the diner their order
+}
+
 function dropFloorIfPlaced(data: unknown, rid: string): void {
   if (rid && data && typeof data === "object" && (data as { ok?: unknown }).ok !== false) invalidateFloor(rid);
 }
@@ -124,11 +154,13 @@ async function postImpl(req: NextRequest): Promise<Response> {
     // ── AND TO DROP THE FLOOR SNAPSHOT, WHICH IS WHY A MISSING ONE MATTERED (T9 finding F20) ──────
     // When the body carried no (or a malformed) `restaurantId`, `invalidateFloor` was skipped — so a
     // replayed order reached the kitchen while a manager reloading inside the shared 1.5s window
-    // could still be handed a floor computed before that order existed. The token already knows
-    // which restaurant it belongs to, so ask the RPC's own answer for it rather than depending on
-    // the phone to have sent it: `lfh_place_order` returns the session's restaurant, and that is the
-    // authoritative value. The body remains a fallback for older saved orders.
-    const sessionRid = ridFromResult(data) || (isUuid(b.restaurantId) ? (b.restaurantId as string) : "");
+    // could still be handed a floor computed before that order existed. Three answers, cheapest
+    // first: the RPC's own reply (which does not carry it today — see ridFromToken above), the
+    // phone's field, and finally the token itself, which always knows. The third is what makes the
+    // sentence above actually true.
+    const sessionRid = ridFromResult(data)
+      || (isUuid(b.restaurantId) ? (b.restaurantId as string) : "")
+      || await ridFromToken(b.token);
     maybePing(data, sessionRid);
     dropFloorIfPlaced(data, sessionRid);
     if (!sessionRid) {
