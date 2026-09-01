@@ -853,6 +853,42 @@ console.log("\nT11-K · a composition-scheme sheet does not contradict itself");
   );
 }
 
+console.log("\nT11-M · a settings change reaches the report, not just an order");
+{
+  // ── THE FINGERPRINT WATCHED THE ORDERS AND NOT THE DEFINITIONS (T11 item 17, 2026-09-01) ─────
+  // The Tax report is built from the orders AND from the restaurant's tax configuration. Both
+  // change-detectors asked only "have the ORDERS moved?", so changing the rate, editing a tax line
+  // or moving to the composition scheme left the stored snapshot alone: revalidate() saw the same
+  // fingerprint, re-stamped computed_at and returned WITHOUT recomputing. On a quiet restaurant
+  // that holds the old rate on a GST document indefinitely.
+  // Measured: price_tax_mode read `excl` in the database while the cached report answered
+  // composition = true · rate 0 · components 0, and only Refresh fixed it.
+  const cache = read("lib/ownerCache.ts");
+  check(
+    "the change-detector watches the tax configuration, not only the orders",
+    /async function taxConfigPart/.test(cache) &&
+    /ordersFingerprint[\s\S]{0,400}taxConfigPart\(ids\)/.test(cache) &&
+    /reportMonthFingerprint[\s\S]{0,400}taxConfigPart\(ids\)/.test(cache),
+    "lib/ownerCache.ts — BOTH detectors must carry it. The global cache version cannot fix this: the " +
+      "definition that moved belongs to one restaurant.",
+  );
+  check(
+    "…and it reads the SAME columns the report itself is built from",
+    /TAX_SETTINGS_COLUMNS/.test(cache) && /from "@\/lib\/tax"/.test(cache),
+    "lib/ownerCache.ts — a second list of columns is a second answer to \"what is the tax configuration\".",
+  );
+  check(
+    "…sorted, so a scope's member order cannot move the fingerprint on its own",
+    /localeCompare\(String\(b2\.restaurant_id\)\)/.test(cache),
+    "lib/ownerCache.ts — otherwise the same estate fingerprints two different ways and recomputes for nothing.",
+  );
+  check(
+    "…and a configuration it cannot read never fails the request",
+    /catch \{ return ""; \}/.test(cache),
+    "lib/ownerCache.ts — a fingerprint is an optimisation; it must never be able to break a report.",
+  );
+}
+
 console.log("\nT11-L · a quiet day is not a failed read");
 {
   // ── THE ALL-ZERO GUARD HAD NO WAY OUT (T11 item 16, 2026-09-01) ──────────────────────────────
