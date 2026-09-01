@@ -157,6 +157,11 @@ export async function GET(req: NextRequest) {
       sb.from("restaurant_owners").select("user_id").limit(20000),
     ]);
     if (binQ.error) return adminFail("the owners recycle bin", binQ.error, { action: "load" });
+    // "How many restaurants are still linked" is the number that decides whether a permanent removal
+    // is safe — purging hands each of them to a co-owner or to nobody. With this read unchecked a
+    // failure read as a confident "0 restaurants", i.e. "nothing is attached, remove away" (T19
+    // sweep #7, 2026-09-01).
+    if (linksQ.error) return adminFail("the owners recycle bin", linksQ.error, { action: "load" });
     const owned = new Map<string, number>();
     for (const l of linksQ.data || []) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
     const now = Date.now();
@@ -496,7 +501,16 @@ export async function PATCH(req: NextRequest) {
     const password = String(body?.password || "").trim() || genPassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // token_version bump = "log out everywhere" (same rule as /api/admin/users).
-    const cur = (await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1)).data?.[0];
+    // READ IT PROPERLY, OR CHANGE NOTHING (T19 sweep #7, 2026-09-01). This took `.data` and ignored
+    // `.error`, so a failed read fell back to 0 and wrote `token_version: 1`. Two ways that is wrong,
+    // and both are silent: if the real value already IS 1 the column does not move at all, so the
+    // password changes and every session signed in with the old one keeps working; and if the real
+    // value is higher, writing 1 puts the counter BACK, so a cookie signed at version 1 verifies
+    // again. lib/userAuth folds this number into the signature — it is the whole mechanism of
+    // "signed out everywhere", so a guess is not good enough.
+    const curQ = await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1);
+    if (curQ.error) return adminFail("this owner's password", curQ.error, { action: "save" });
+    const cur = curQ.data?.[0];
     const { error } = await sb.from("staff_users")
       .update({ ...(await passwordFields(password)), token_version: ((cur?.token_version as number) || 0) + 1, failed_count: 0, locked_until: null })
       .eq("id", ownerId);
@@ -507,7 +521,12 @@ export async function PATCH(req: NextRequest) {
 
   if (action === "set_active") {
     const active = body?.active === true;
-    const cur = (await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1)).data?.[0];
+    // Same rule as reset_password above, and it matters more here: suspending is what kills a live
+    // owner-panel session, and a token_version that failed to move leaves that session running while
+    // the screen says "suspended".
+    const curQ = await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1);
+    if (curQ.error) return adminFail("this owner's status", curQ.error, { action: "save" });
+    const cur = curQ.data?.[0];
     // Suspending also bumps token_version so any live session dies immediately.
     const patch: Record<string, unknown> = { active };
     if (!active) patch.token_version = ((cur?.token_version as number) || 0) + 1;
