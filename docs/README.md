@@ -18,7 +18,7 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 | document | what it is for |
 |---|---|
 | **`CLAUDE-DETAIL.md`** | the full text of every rule in `CLAUDE.md`, under the same heading. The one to open before acting. |
-| **`GUARD-MAP.md`** | "I changed this file — which of the 146 checks covers it?" Start here before running anything. |
+| **`GUARD-MAP.md`** | "I changed this file — which of the 163 checks covers it?" Start here before running anything. |
 | **`REJECTED-IDEAS.md`** | what the owner has already said NO to. **Read before suggesting any improvement.** |
 | `ACCESS-MODEL.md` | how permissions actually work now (the live model — replaces the retired ladder). |
 | `ACCESS-REDESIGN-SPEC.md` | the access work still owed. A live working list, not history. |
@@ -30,6 +30,23 @@ If you only read one thing: `CLAUDE.md` in the repo root is the rulebook, and
 | `QA-500-PHASES.md` | what the big `verify:everything` suite covers. Its phase numbers move — `-- --list` is the truth. |
 | `PROJECT-HISTORY.md` | 12 numbered sections: the story behind each rule. Cited from `CLAUDE.md` as `§N`. |
 | `FUTURE-AGGREGATOR-FEATURES.md` | Zomato/Swiggy work the owner parked. Not built, not forgotten. |
+| `SECURITY-CHECKLIST.md` | what "check the security" means here — his 20 points plus the 8 this app needs. Log every run in §4. |
+| `KITCHEN-PRINT-SETUP.md` | how a restaurant's printing is set up. **Nothing is ever offered as a download** — the reader types the file by hand. |
+| `PRINT-HELPER.md` | the helper program that lets a COMPUTER own the paper (mig 341). One basket, each kind of paper its own printer. |
+| `PRINT-TEST-PLAN.md` | the whole printing test plan and what running it found. Re-run it after touching printing. |
+| `CANCEL-AND-LOSS-SPEC.md` | was the food actually made? — cancelling, real loss, and the audit tags behind it. |
+
+## STUDIES — a plan for work that is NOT built
+
+Live documents, but nothing in the app answers to them yet. Read one only when its subject comes up;
+never treat it as a description of what exists.
+
+| document | what it is for |
+|---|---|
+| **`HRMEX-INDEX.md`** | 🔑 the keyword. Say **HRMEX** and this file plus its three companions is the whole HR + payroll study. Start here. |
+| `HRMEX-HR-PAYROLL-STUDY.md` | the study itself — what HR and payroll would mean for a restaurant this size. |
+| `HRMEX-MAP-AND-FLOWCHART.md` | the same study as a map: who does what, in what order. |
+| `HRMEX-SCREEN-BY-SCREEN.md` | the same study screen by screen, so a build could start from it. |
 
 ## HISTORY — kept for the "why", never to follow
 

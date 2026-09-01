@@ -48,7 +48,14 @@ for (const f of readdirSync(MIG).filter((x) => x.endsWith(".sql")).sort()) {
 }
 
 // ── 2. every .rpc() call site in the repo ───────────────────────────────────────────────────
-const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".claude"]);
+// `reference/` is the FROZEN SNAPSHOT of the old single-restaurant app, and it is gitignored — it
+// is not shipped, not imported, and never runs. Every one of its .rpc() calls omits
+// p_restaurant_id because back then there genuinely was only one restaurant, so scanning it made
+// this guard permanently red on any machine that has the snapshot, for three faults that cannot
+// happen. A guard that invents a failure protects nothing: people learn to ignore its red, and the
+// day a REAL unscoped call appears it is one line in a list everybody skips.
+// (T28, sweep #7, 2026-08-30 — found by running all 153 guards and re-running every red alone.)
+const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".claude", "reference"]);
 const files = [];
 (function walk(d) {
   for (const e of readdirSync(d)) {
@@ -94,6 +101,15 @@ for (const p of files) {
   }
 }
 
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (takesRid.size < 20 || checked < 20) {
+  console.log(`\n✗ verify:rpc-scoped read ${takesRid.size} restaurant-scoped RPC(s) out of the migrations and found ${checked} call site(s) — there are dozens of each. Nothing was checked.`);
+  process.exit(1);
+}
 console.log("\nEvery call to a restaurant-scoped RPC names its restaurant");
 console.log(`  ${takesRid.size} RPCs take a restaurant (${hasDefault.size} of them still default it to #1); ${checked} call sites checked`);
 if (offenders.length) {

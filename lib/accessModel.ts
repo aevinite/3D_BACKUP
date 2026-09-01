@@ -65,7 +65,7 @@ export const GROUPS: { id: string; name: string; blurb: string; icon: string }[]
   { id: "menu", name: "The menu", blurb: "Who may change dishes, prices and categories.", icon: "book" },
   { id: "money", name: "Bills & money", blurb: "Every action that can move money.", icon: "receipt" },
   { id: "floor", name: "Tables & floor", blurb: "Taking orders and moving parties around the floor.", icon: "grip" },
-  { id: "kitchen", name: "Kitchen", blurb: "Kitchen ticket printing (admin-only hardware setting).", icon: "fire" },
+  { id: "kitchen", name: "Kitchen & printing", blurb: "Who prints this restaurant's paper, and on which printer (the admin decides; the setup itself is on Printing).", icon: "fire" },
   { id: "banquet", name: "Banquet & events", blurb: "Per-plate event billing. A special feature the admin switches on.", icon: "sparkles" },
   { id: "inventory", name: "Inventory & expenses", blurb: "Stock, purchases, counting, waste and the expense book. A special feature the admin switches on.", icon: "box" },
   { id: "reports", name: "Reports & insights", blurb: "Numbers, ratings and the activity log.", icon: "chart" },
@@ -201,9 +201,27 @@ export const PERMISSIONS: Perm[] = [
     what: "Split the floor into sections: each waiter's tablet then shows ONLY the tables they were given, and the server refuses anything else. A table can be given to two waiters, or to one. With this off, every waiter sees the whole floor (today's behaviour).",
     sub: [{ id: "table_assign_edit", name: "Change who serves which table", what: "Opens the section editor in Settings → Tables." }] },
 
-  // ───────────────────────────── KITCHEN (admin switch) ────────────────────
+  // ───────────────────────────── KITCHEN & PRINTING (admin switches) ────────
+  // THE TWO BOARDS MUST SAY THE SAME THING (owner, 2026-08-26: "make sure in the access and permission
+  // there is a auto print printer thing and in the printer there is a printer printing thing. Board
+  // should be sync. Right now it's not"). Access & permissions used to carry ONE printing row — the
+  // auto-print switch — while the whole of who-prints-what lived on the Printing menu and appeared
+  // nowhere here. So the rows below exist on BOTH screens, with the same names, and each screen links
+  // to the other: this file is the list of what may be granted, /aevinite/printing is where the actual
+  // printers are chosen, and neither can now describe a restaurant the other would describe differently.
   { id: "auto_print_kot", group: "kitchen", kind: "switch", adminSwitch: "auto_print_kot_allowed", adminOnly: true, name: "Auto-print kitchen tickets",
-    what: "Tickets print themselves as orders come in. A main hardware setting — only the admin turns it on/off; it is not delegated." },
+    what: "Tickets print themselves as orders come in. A main hardware setting — only the admin turns it on/off; it is not delegated. WHERE they come out is the Printing menu: a computer running the print helper, or a named screen." },
+
+  // WHO MAY BE THE PRINTER, and WHO MAY CHANGE THE SETUP, are deliberately NOT rows here.
+  //
+  //   · "May be the printer" is a MANAGER/WAITER action, so it lives where those live and is enforced
+  //     the way those are enforced: ACTIONS in lib/accessTree.ts, id "print_here". Put here as well it
+  //     would have been a second switch for one question — the drift this file's header warns about.
+  //   · "May change the printing setup" is admin-only, always, by the owner's own instruction ("all
+  //     will be decided by me"). A switch that can never be delegated stores nothing and controls
+  //     nothing: it is a sentence, and this screen already deleted one row for being exactly that
+  //     (see the note on `info` in lib/accessTree.ts). It is stated in the words of the rows instead,
+  //     and enforced by there being no owner or manager route that can write a printing route at all.
   // ⚡ QO/P (mig 257). Kept in step with the Access tree's Main-features row — a switch that
   // exists in one model and not the other is exactly the drift this file warns about above.
   { id: "qop", group: "floor", kind: "switch", adminSwitch: "qop_allowed", adminOnly: true, name: "Quick order / Parcel (QO/P)",

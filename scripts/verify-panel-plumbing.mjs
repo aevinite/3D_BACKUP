@@ -15,9 +15,14 @@
 //
 // Add a check here whenever one of these shared files makes a new promise to a person.
 import fs from "node:fs";
+import { repoRootFrom } from "./sweep/repoRoot.mjs";
 import path from "node:path";
 
-const ROOT = process.argv[2] || process.cwd();
+// The repo to scan: the first argument that really IS one, else the repo this file lives in.
+// It used to be plain `process.argv[2]`, so `-- --base http://localhost:4228` — which every
+// sweep lane passes to every guard — made this scan a folder called "--base" and exit 1.
+// (T28, sweep #7, 2026-08-29; the same fault as verify:test-safety's, in eight more guards.)
+const ROOT = repoRootFrom(import.meta.url);
 const P = (f) => path.join(ROOT, "public/panels", f);
 
 // A missing file means this checkout predates the panels (or is mid-rebase). A guard must never
@@ -27,19 +32,44 @@ function read(f) {
 }
 
 const fails = [];
+
+// EVERY FILE A CHECK NAMES IS READ, BECAUSE A CHECK NAMED IT (T9, second sweep of #7, 2026-08-30).
+//
+// This used to be a hand-written list of eight files, and `has()` returned SILENTLY when a file was
+// not in it. The checks below name thirteen. SIXTEEN of them therefore asserted nothing at all,
+// for weeks, while this guard printed "✓ all checks pass" — and they failed in two different ways:
+//
+//   · realtime.js was never in the list, so all TEN of its checks were dead: the memoised boot,
+//     the self-hosted client, the tenant-scoped socket, the worker heartbeat, the idle channel
+//     drop, catchUp's backoff and its socket-healthy guard. Every promise this guard makes about
+//     live updates was a promise it was not checking.
+//   · errlog.js and theme.js WERE loaded — by an ad-hoc `files[x] = read(x)` further down the
+//     file, placed after some of their own checks. The four errlog checks and two theme checks
+//     above that line ran against `undefined` and returned. Four top-ups like that is what made
+//     the list look complete while it was not.
+//
+// A dead check looks exactly like a passing one, which is why verify:guards-alive exists; it did
+// not catch this because the guard as a WHOLE was very much alive, and only part of it was dead.
+//
+// Reading on demand removes the list, so a check for a new file cannot silently do nothing. A file
+// that is genuinely absent (a checkout mid-rebase) is still forgiven — but it is SAID, once, which
+// is the behaviour the old list only ever gave its eight.
 const files = {};
-for (const f of ["outbox.js", "connbadge.js", "myprofile.js", "maint.js", "undobar.js",
-  "issue-raise.js", "guestbell.js", "editor/inventory.js"]) {
-  files[f] = read(f);
-  if (files[f] == null) { console.log(`· ${f} not in this checkout — skipping its checks`); }
+const announced = new Set();
+function fileFor(f) {
+  if (!(f in files)) {
+    files[f] = read(f);
+    if (files[f] == null && !announced.has(f)) { announced.add(f); console.log(`· ${f} not in this checkout — skipping its checks`); }
+  }
+  return files[f];
 }
 const has = (f, re, why) => {
-  const s = files[f];
+  const s = fileFor(f);
   if (s == null) return;
   if (!re.test(s)) fails.push(`${f}: ${why}`);
 };
 const hasNot = (f, re, why) => {
-  const s = files[f];
+  const s = fileFor(f);
   if (s == null) return;
   if (re.test(s)) fails.push(`${f}: ${why}`);
 };
@@ -52,7 +82,7 @@ has("outbox.js", /function requeueInOrder\s*\(\s*\)\s*\{[\s\S]{0,200}?\.sort\(/,
   "requeueInOrder() is gone — a retried change would go to the back of the queue again");
 {
   // Both hand-retry entry points, checked inside their own function body.
-  const s = files["outbox.js"];
+  const s = fileFor("outbox.js");
   for (const fn of ["async function retryFailed", "async function retryOne"]) {
     if (!s) break;
     const at = s.indexOf(fn);
@@ -98,6 +128,10 @@ hasNot("myprofile.js", /catch\s*\{?\s*availability = false;? *\}?/,
   "available() caches a FAILED read as 'no profile', so one blip hides the button for the session");
 has("myprofile.js", /addEventListener\("online"/,
   "myprofile no longer re-checks when the connection comes back");
+// A save that WORKED must never be reported as a failure. The refresh that follows it has its own
+// catch, so a blip on the read cannot make the screen claim the save was refused (T9 sweep #7).
+has("myprofile.js", /btn\.textContent = "Saved ✓";[\s\S]{0,900}?try \{\s*\n\s*await load\(\);\s*\n\s*render\(\);\s*\n\s*\} catch/,
+  "the re-read after a successful save is back inside the save's own try — one dropped request and the person is told 'Couldn't save' about a save the server accepted");
 
 // ── maint.js — the guest-menu switch must never claim something the server did not do ──────────
 has("maint.js", /if \(!r\.ok\) \{[\s\S]{0,160}?throw e;? *\}\r?\n\s*maintOn = turnOn;/,
@@ -133,9 +167,14 @@ has("issue-raise.js", /function guardedClose\s*\(/,
   "the backdrop/Escape can throw away a voice note being recorded again");
 has("issue-raise.js", /ov\.onclick = function \(e\) \{ if \(e\.target === ov\) guardedClose\(\); \};/,
   "the backdrop no longer goes through the recording guard");
+// …and so does the phone's own Back button, which is the third accidental exit and the likeliest
+// one on the device somebody actually records a voice note on (T9 sweep #7, 2026-08-22). Refusing
+// it also has to RE-ARM the layer, because backstack has already popped it by then — without that,
+// the next Back press leaves the panel entirely.
+has("issue-raise.js", /function doClose\(\) \{[\s\S]{0,320}?rec\.state === "recording"[\s\S]{0,240}?armBack\(\);/,
+  "hardware Back throws away a voice note being recorded again (it must refuse AND re-arm its layer)");
 
 // ── fitnums.js — a bill's figure is the law, and this file must not feed itself ────────────────
-files["fitnums.js"] = read("fitnums.js");
 has("fitnums.js", /var EXACT_SEL = /,
   "the exact-money gate is gone — an order total of ₹1,23,45,678 would render as '₹1.2 Cr'");
 for (const sel of ["bill-amt", "ks-val", "ordtotal", "ctotal", "ord-total", "data-fit-exact"]) {
@@ -148,16 +187,116 @@ has("fitnums.js", /if \(el\.textContent === el\.dataset\.lfhShort\)/,
 has("fitnums.js", /function setText\(el, s\) \{ selfNodes\.add\(el\)/,
   "our own text rewrite no longer marks itself, so the observer feeds this file a scan every frame for ever");
 has("fitnums.js", /if \(mine\) return;/, "the self-write guard was removed from the observer callback");
+// A shortened tile gets a tooltip with the whole figure; the CLIPPED exact one got nothing, so a
+// part-figure on the Bills tab could not be read at all. It carries the same title now — marked as
+// ours, so a panel's own title is never overwritten and ours is withdrawn when a shorter value fits
+// (T9 sweep #7, 2026-08-22).
+has("fitnums.js", /isExact\(el\)\) \{[\s\S]{0,320}?dataset\.lfhTitle/,
+  "a clipped exact figure has nothing that shows the digits the box cut off");
+has("fitnums.js", /if \(over <= 1\) break;/,
+  "fit() returns early when a figure fits, so a tooltip added while it was clipped is left quoting the old value");
 
 // ── guestbell.js — cheap enough to call on every paint, and clear of the home indicator ────────
 has("guestbell.js", /var seenSet = null;/,
   "the seen list is being re-read from storage once per row again");
 has("guestbell.js", /var\(--sab, env\(safe-area-inset-bottom, 0px\)\)/,
   "the bell sheet reads only the injected inset, so its last row hides under a phone's home bar");
+// The bell borrows `.theme-toggle` for its SHAPE, and the waiter tablet hides
+// `.top-actions .theme-toggle` below 760px — a rule written for the sun/moon before this bell
+// existed. So on a phone the bell vanished with it, and it is not in that panel's ☰ drawer either.
+// It re-states its own `display` so borrowing the shape can never mean borrowing the hiding
+// (T9 sweep #7, 2026-08-22).
+has("guestbell.js", /\.top-actions \.lfh-bell[^"]*\{display:inline-flex\}/,
+  "the bell no longer re-states its own display — a panel hiding .theme-toggle on a phone hides the bell with it, and there is no drawer row to reach it by");
+{
+  // …and if a panel ever DOES give it a drawer row, this note is how the next person finds out why
+  // the rule above exists. Belt and braces: the tablet must not be hiding it by id either.
+  const tabCss = (() => { try { return fs.readFileSync(path.join(ROOT, "public/panels/tablet/style.css"), "utf8"); } catch { return ""; } })();
+  if (/#lfhBellBtn[^{]*\{[^}]*display\s*:\s*none/.test(tabCss)) {
+    fails.push("public/panels/tablet/style.css hides #lfhBellBtn outright — the owner asked for the bell on this panel specifically");
+  }
+}
 
 // ── editor/inventory.js — a read gets a ceiling too ────────────────────────────────────────────
 has("editor/inventory.js", /\}\r?\n\s*\/\/ A READ GETS A CEILING TOO[\s\S]{0,600}?opts\.signal = invDeadline\(\);\r?\n\s*try \{/,
   "the inventory deadline is back inside the write-only branch — a read can hang on 'Loading inventory…' forever");
+
+// ── the shared files' own look: a finger can reach it, and motion can be turned off ───────────
+// The owner grew the top bar's small controls to 44px on 2026-08-22. The bell SHEET's ✕ was missed
+// at 32px, and it matters more than the bar's: a miss beside the connection pill costs nothing
+// (R40's own reasoning), but a miss beside this ✕ lands on a row, and a row OPENS THAT TABLE.
+has("guestbell.js", /\.lfh-bell-x\{[\s\S]{0,140}?width:40px;height:40px/,
+  "the bell sheet's ✕ is back under the finger target, and a miss beside it opens a table");
+// …and every file that animates has to offer a way out. connbadge.js and undobar.js always did;
+// these two did not, so a scaling drawer and a pulsing dot could not be turned off.
+for (const f of ["connbadge.js", "undobar.js", "maint.js", "issue-raise.js"]) {
+  has(f, /prefers-reduced-motion/, "animates with no prefers-reduced-motion escape");
+}
+has("issue-raise.js", /prefers-reduced-motion:reduce\)\{[\s\S]{0,200}?\.lfhir-dot\{animation:none\}/,
+  "reduced motion no longer stops the recording dot flashing — or, worse, has hidden it: it must stay VISIBLE and stop moving");
+
+// ── the "→ N more" chip counts what is really off the edge (T9 sweep #7, 2026-08-22) ──────────
+// offsetLeft is measured from the nearest POSITIONED ancestor, and countChip() makes the row's
+// PARENT positioned — so any inset between the two put the count in a different coordinate system
+// from scrollLeft + clientWidth. Measured with 40px of parent padding: "→ 7 more" where six were
+// off the edge, and "→ 1 more" at the end of the row with nothing left.
+{
+    has("swipehint.js", /function hiddenAtEnd\(row\) \{[\s\S]{0,200}?getBoundingClientRect\(\)\.right/,
+    "the chip's count is back on offsetLeft, which is measured from a different box than the row's own scroll position");
+  hasNot("swipehint.js", /c\.offsetLeft \+ c\.offsetWidth > right/,
+    "hiddenAtEnd() compares offsetLeft against a scroll coordinate again — the count drifts by however far the row sits inside its parent");
+}
+
+// ── no tap in the Inventory tab ends in silence (T9 sweep #7, 2026-08-22) ─────────────────────
+// verify:taps covers the three panels' own app.js but not this file, and Discard swallowed every
+// refusal with `catch {}` and cleared the sheet regardless — so a refused discard closed the sheet,
+// said nothing, and then came back with every figure still in it on the next read. Every write in
+// here must either surface its refusal or be a deliberate best-effort read.
+{
+  const src = fileFor("editor/inventory.js");
+  if (src) {
+    // Each `catch {}` / `catch (e) {}` that sits on a POST is a swallowed refusal.
+    const swallowed = [];
+    const re = /(await inv\("(?:POST|PATCH|DELETE|PUT)"[^;]{0,200}?;)\s*\}\s*catch\s*(?:\([^)]*\))?\s*\{\s*\}/g;
+    let m;
+    while ((m = re.exec(src))) swallowed.push(m[1].slice(0, 60));
+    if (swallowed.length) {
+      fails.push(`editor/inventory.js: a write's refusal is thrown away with an empty catch, so the tap ends in silence — ${swallowed.join(" · ")}`);
+    }
+  }
+}
+
+// ── the queue says when a round STARTS, not only when it stops (T9 sweep #7, 2026-08-22) ──────
+// `syncing` is the one flag every surface reads to answer "is this actually moving?". The finally
+// block publishes when a round ends; nothing published when it began, so with exactly ONE change
+// queued — the everyday case — the connection panel read "Waiting to send · next try in 5s", in the
+// red not-moving colour, while that change was being sent. Both halves are guarded: the notify at
+// the top of the round, and the two snapshot shapes agreeing.
+has("outbox.js", /flushing = true;[\s\S]{0,900}?\n\s*notify\(\);/,
+  "flush() no longer says a round has started, so the connection panel calls an in-flight change 'waiting'");
+has("outbox.js", /getSnapshot: \(\) => \(\{[^}]*syncing: flushing[^}]*unsafeStore: unsafeStore/,
+  "getSnapshot() dropped syncing/unsafeStore again — a listener's first snapshot has a different shape from every later one");
+
+// ── leaving the panel moves the WHOLE window, not the frame (T9 sweep #7, 2026-08-22) ─────────
+// /manager, /kitchen and /tablet render the panel inside an iframe, so a bare `location.href` from
+// panel code loads the sign-in page INSIDE the panel and leaves the page around it signed in. The
+// kitchen and tablet fixed their own logout forms with target="_top" on 2026-08-19; these two
+// shared files were still doing it. A guard, because it looks almost right on screen.
+for (const f of ["maint.js", "outbox.js"]) {
+  has(f, /window\.top && window\.top !== window\.self/,
+    "goes to /login without moving the whole window — the sign-in page loads inside the panel frame");
+  hasNot(f, /(?<!window\.)\blocation\.href = "\/login"/,
+    "has a bare location.href = \"/login\" again, which navigates only the panel's iframe");
+  // …AND BACK MAY NOT WALK STRAIGHT BACK IN (owner, 2026-08-28: "how sign out works in Netflix?
+  // I wanted to work like that"). `.replace()` swaps the panel's history entry instead of stacking
+  // a new one on top, so the panel is not in the back list and cannot be restored from the
+  // browser's own cache. With `.href` it was still one Back press away — dead, but on screen,
+  // which is the half-signed-out look. Driven: window leaves, Back lands elsewhere, session gone.
+  has(f, /window\.top\.location\.replace\(url\)/,
+    "leaves for /login with .href instead of .replace, so Back walks straight back into the panel");
+  hasNot(f, /window\.location\.href = url;/,
+    "the same-window fallback is back on .href, so Back returns to a panel whose session is gone");
+}
 
 // ── the standing rules these files must keep ──────────────────────────────────────────────────
 // Nobody may hand-roll history: backstack.js is the one manager.
@@ -189,10 +328,70 @@ has("outbox.js", /if \(j && j\.ok === false\)/, "a 200 whose body says NO is bei
 has("outbox.js", /if \(navigator\.onLine === false\) \{ scheduleRetry\(false\); return; \}/, "a flush during a blip kills the queue's last timer again");
 has("outbox.js", /0\.75 \+ Math\.random\(\) \* 0\.5/, "the retry backoff lost its jitter — every device would retry on the same beat");
 has("outbox.js", /const UNTABLED/, "per-table ordering is gone; one stuck change would hold up every other table");
+// …AND THE HOLD HAS TO BE REAL. send() spots a blocker in `failed`, answers "behind" and then calls
+// flush() — and flush() only walks `queued`, so the change it had just promised to hold went out on
+// the wire anyway. Measured: a discount for table 5 in "Needs you", then Mark paid on table 5, and
+// 5/pay was sent immediately. The bill settles at the FULL amount and the discount the person is
+// about to retry lands on a settled bill. The round must stall a table that is already owed
+// something retryable, before the walk starts (T9 sweep #7, 2026-08-22).
+has("outbox.js", /failed\.forEach\(function \(f\) \{ if \(f\.retryable !== false\) stalled\.add\(orderKey\(f\)\); \}\);[\s\S]{0,80}?let i = 0;/,
+  "flush() no longer stalls a table that already owes a retryable change — a later Mark paid on that table is sent ahead of it, and the bill settles at the wrong amount");
 
 // realtime: the connection budget and the no-amplifier rule
 has("realtime.js", /if \(sbPromise === p\) sbPromise = null/, "a failed realtime boot is remembered forever again");
 has("realtime.js", /import\("\/vendor\/supabase\.js"\)/, "the realtime client is back on a public CDN a restaurant's wifi can block");
+// A SERVER THAT ACCEPTS AND NEVER ANSWERS PARKED LIVE UPDATES FOR EVER (T9, second sweep of #7).
+// The line above handles a REFUSED boot: the rejection drops the memo and the next wake re-boots.
+// A HANG is a different animal — fetch has no timeout of its own, so the boot promise stayed
+// pending for the life of the page, and because it is memoised every later getClient() (including
+// the ones behind "came back to the panel" and "online") was handed that same pending promise and
+// made no request at all. Driven against a route that accepts and never replies: ONE request in
+// the whole run, "Connecting…" still on screen twelve seconds later, and a wake changing nothing.
+// The deadline REJECTS, which is what lets the memo-drop above do its job.
+has("realtime.js", /signal:\s*deadline\(RT_CONFIG_DEADLINE_MS\)/, "the read that boots live updates lost its deadline — a server that hangs parks the panel on \"Connecting…\" for ever, with no retry");
+has("realtime.js", /const RT_CONFIG_DEADLINE_MS = \d+/, "the live-update boot deadline is no longer a named constant");
+has("realtime.js", /AbortSignal\.timeout/, "the boot deadline no longer uses the abort signal the rest of this app uses");
+
+// maint.js — THE SETTINGS DRAWER'S OWN REQUESTS HAVE THE SAME DEADLINE (T9, second sweep of #7).
+// Every fetch in the drawer was open-ended. A server that accepts and never answers left the
+// guest-menu button on "…" for the whole session, and a hung WRITE left the switch pointing the
+// wrong way with nothing said — the silent tap this file had just been fixed for in the other
+// direction. Driven with a route that accepts and never replies: the read now says "Couldn't read
+// the guest menu — tap to check again", and the write says the guest menu has NOT changed.
+has("maint.js", /const PANEL_DEADLINE_MS = \d+/, "the drawer's request deadline is no longer a named constant");
+has("maint.js", /AbortSignal\.timeout/, "the drawer's deadline no longer uses the abort signal the rest of this app uses");
+{
+  // Every fetch in this file carries the signal — a new one added without it is the fault coming back.
+  // Comments stripped first: this file DESCRIBES its old raw fetch()es in prose (deliberately — an
+  // obituary is how the next person learns why they changed), and the first pass counted the word
+  // "fetch()" in a comment as a request with no deadline.
+  // LINE COMMENTS FIRST, THEN BLOCK COMMENTS. The other order looks harmless until a LINE comment
+  // contains the characters that OPEN one — editor/inventory.js carries "/api/inventory/*" in a //
+  // comment on line 3, and that `/*` paired with the next `*/` below it and swallowed 190 lines of
+  // real code. Nothing failed loudly; the checks simply stopped seeing what they were about.
+  // (T9 third sweep, 2026-08-31.)
+  const src = (fileFor("maint.js") || "").replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
+  if (src) {
+    // A fetch call is read to its OWN closing bracket, counting brackets — the first pass used
+    // /fetch\("…"[^)]*\)/ and stopped at the ) inside JSON.stringify({...}), so three calls that
+    // DO carry a deadline were reported as bare. A guard that invents a failure protects nothing.
+    const calls = [];
+    for (let i = src.indexOf("fetch("); i >= 0; i = src.indexOf("fetch(", i + 1)) {
+      let depth = 0, j = i + 5;
+      for (; j < src.length; j++) {
+        if (src[j] === "(") depth++;
+        else if (src[j] === ")") { depth--; if (depth === 0) break; }
+      }
+      calls.push(src.slice(i, j + 1));
+    }
+    const bare = calls.filter((c) => !/signal:\s*deadline\(/.test(c));
+    if (bare.length) fails.push(`maint.js: ${bare.length} of ${calls.length} request(s) have no deadline — a server that hangs leaves the person watching a control that never resolves: ${bare[0].replace(/\s+/g, " ").slice(0, 80)}`);
+  }
+}
+// …and a deadline that fires must speak English. AbortSignal.timeout rejects with a DOMException
+// reading "signal timed out", and the manager saw exactly that on the first pass of this fix.
+has("maint.js", /name === "TimeoutError" \|\| e\.name === "AbortError"/, "a request that ran out of time reports the browser's own words to the manager again (\"signal timed out\")");
+has("myprofile.js", /signal:\s*sig/, "the profile fallback read lost its deadline — \"My profile\" would show Loading… for the whole session");
 has("realtime.js", /topic_rid=eq\./, "the socket is no longer scoped server-side to this restaurant (every tenant's traffic again)");
 has("realtime.js", /worker: true/, "the socket heartbeat left the worker — a backgrounded tablet drops live updates");
 has("realtime.js", /const IDLE_MS = 120000/, "a hidden tab no longer drops its channels");
@@ -223,7 +422,20 @@ has("outbox.js", /window\.LFH_OUTBOX = \{/, "the queue no longer publishes itsel
 }
 
 // undobar / guestbell: the owner's own decisions
-has("undobar.js", /var DEFAULT_SECONDS = 4/, "the take-back window is no longer the 4 seconds the owner asked for");
+// ── THE WINDOW MOVED, SO THIS ASSERTION MOVED WITH IT (2026-08-26) ────────────────────────────
+// It pinned 4 seconds, which is what he asked for on 2026-08-17. On 2026-08-26 he asked for two
+// things at once — a CEILING ("keep undo button for 5 sec like not more") and, of the one bar that
+// survived the cull, a shorter window ("decrese time for it"). So the numbers are 3 and 5, and
+// they are asserted separately because they mean different things: the default is a preference and
+// may move again; the ceiling is a rule and a caller must not be able to exceed it.
+// (This guard went red the moment the default changed — which is the guard working. What would be
+// wrong is "fixing" the code back to satisfy a rule the owner has retired.)
+has("undobar.js", /var DEFAULT_SECONDS = 3;/, "the take-back window is no longer the 3 seconds the owner asked for on 2026-08-26");
+has("undobar.js", /var MAX_SECONDS = 5;/, "the 5-second ceiling is gone — a caller could ask for a longer window again");
+has("undobar.js", /Math\.min\(opts\.seconds != null \? opts\.seconds : DEFAULT_SECONDS, MAX_SECONDS\)/,
+  "the ceiling is no longer APPLIED — declaring it is not enforcing it");
+has("undobar.js", /lfh-undo-x/, "the ✕ that closes the undo card early is gone (owner, 2026-08-26)");
+has("undobar.js", /function attachSwipe\(\)/, "you can no longer flick the undo card away (owner, 2026-08-26)");
 has("guestbell.js", /if \(!menuOn\) \{ unmount\(\); return; \}/, "the bell survives the guest menu being switched off (he stressed this half)");
 hasNot("guestbell.js", /fetch\(/, "the guest bell has grown a request of its own — it must cost nothing to run");
 
@@ -233,8 +445,6 @@ has("editor/inventory.js", /if \(inFlight\.has\(key\)\) throw new Error/, "the i
 has("editor/inventory.js", /document\.querySelector\("\.inv-pop, #invPop"\)/, "the live refresh can repaint over a half-finished count again");
 
 // ── the four the owner asked for on 2026-08-18 ────────────────────────────────────────────────
-files["errlog.js"] = read("errlog.js");
-files["theme.js"] = read("theme.js");
 
 // 21 · a crash with no signal is kept and delivered later
 has("errlog.js", /var PENDING_KEY = "lfh_errlog_pending"/,
@@ -249,6 +459,11 @@ has("errlog.js", /addEventListener\("online", flushPending\)/,
   "nothing delivers the kept crashes when the connection returns");
 has("errlog.js", /offline, "/,
   "a replayed crash no longer says it happened earlier, so it reads as a fault happening now");
+// …and says it ONCE. A refused delivery re-stashes the row, and the row already carries the note, so
+// each attempt used to append another one — squeezing the code location towards the 120-char cut
+// (T9 sweep #7, 2026-08-22).
+has("errlog.js", /replace\(\/ · offline, \[\^·\]\*earlier\/g, ""\)/,
+  "a re-kept crash stacks another 'offline, N earlier' on every attempt, pushing the code line out of the 120-character field");
 has("errlog.js", /if \(!queued\) stash\(payload\)/,
   "a beacon the browser refused to queue is dropped instead of kept");
 

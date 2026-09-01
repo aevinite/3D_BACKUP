@@ -133,4 +133,92 @@ existed — a slow read, not a dead one. A protection must never be the thing th
   process.exit(1);
 }
 
+// ── AND EVERY fetch IN lib/ HAS A CEILING AT ALL (owner picked item 18, 2026-08-30) ──────────────
+//
+// Everything above is about a deadline being asked for SAFELY. This is the other half: five reads in
+// lib/ had no deadline of any kind, so a request that never came back left a spinner turning for
+// ever — the admin console's one safe fetch wrapper, the owner Dashboard's overview, the three reads
+// a statement is assembled from, and the `/api/rt-config` fallback that decides whether live updates
+// exist at all.
+//
+// MEASURED rather than argued: against a server that accepts the request and never answers, a fetch
+// carrying `deadline(400)` gave up in 404ms as a TimeoutError; the same fetch without one was still
+// waiting when the test gave up at 1,200ms.
+//
+// A `keepalive: true` beacon is exempt and named as such — nothing waits on one, and a deadline on a
+// fire-and-forget ping would be a ceiling on something with no floor.
+{
+  const libDir = join(ROOT, "lib");
+  const bare = [];
+  for (const f of readdirSync(libDir).filter((n) => /\.tsx?$/.test(n))) {
+    const src = readFileSync(join(libDir, f), "utf8");
+    // Line comments dropped so a fetch QUOTED in prose is not counted. Never a block-comment
+    // stripper — a `/*` inside a regex literal pairs with a `*/` thousands of characters later.
+    const code = src.split("\n").filter((l) => !/^\s*(\/\/|\*\s|\*\/|\/\*|\*$)/.test(l)).join("\n");
+    for (const m of code.matchAll(/fetch\(/g)) {
+      // Walk the call by paren-matching, so a wrapped argument list is seen whole.
+      let i = code.indexOf("(", m.index), depth = 0, j = i;
+      for (; j < code.length; j++) {
+        if (code[j] === "(") depth++;
+        else if (code[j] === ")") { depth--; if (!depth) break; }
+      }
+      const call = code.slice(m.index, j + 1);
+      if (/keepalive:\s*true/.test(call)) continue;     // a beacon: nothing awaits it
+      // ── MENTIONING A SIGNAL IS NOT HAVING A DEADLINE (T25 round 2, 2026-08-31) ────────────────
+      // This test used to be `/signal|AbortSignal|deadline\(/`, and SABOTAGE showed what that let
+      // through: replacing `opts?.signal ?? deadline(30_000)` with a bare `opts?.signal` left the
+      // call still spelling the word "signal" (`...(signal ? { signal } : {})`), so the guard stayed
+      // GREEN over a fetch with no ceiling at all — the exact fault it was written for.
+      //
+      // What counts now:
+      //   · the call reaches a deadline itself — `deadline(…)`, `AbortSignal.timeout(…)`, or any
+      //     helper whose NAME says so (`sendDeadline()`, `uploadDeadline()`, `orderDeadline()`);
+      //   · or it passes a variable that is assigned from one of those in the same file;
+      //   · or it passes an AbortController's signal — a cancel rather than a clock, which is the
+      //     right shape for a download the app itself calls off (lib/modelLoader.ts).
+      // Anything else is a signal somebody else may or may not have set a ceiling on.
+      if (/(?:^|[^\w$])(?:[a-zA-Z_$][\w$]*)?[dD]eadline\s*\(/.test(call)) continue;
+      if (/AbortSignal\s*\.\s*timeout/.test(call)) continue;
+      const names = [...call.matchAll(/signal:\s*([A-Za-z_$][\w$.]*)/g)].map((x) => x[1])
+        .concat([...call.matchAll(/\{\s*signal\s*\}/g)].length ? ["signal"] : []);
+      let bounded = false;
+      for (const raw of names) {
+        const v = raw.split(".")[0];
+        // Either the DECLARATION carries the deadline, or a later ASSIGNMENT does — lib/aggregators.ts
+        // declares `let signal: AbortSignal | undefined;` and fills it inside a try on the next line,
+        // which is the feature-guarded shape this whole guard asks for.
+        if (/^[a-z_$][\w$]*$/i.test(v) && new RegExp(`\\b${v}\\s*(?::[^=;]*)?=[^;]*?(?:[dD]eadline\\s*\\(|AbortSignal\\s*\\.\\s*timeout|new AbortController)`).test(code)) bounded = true;
+        if (/\.signal$/.test(raw) && /new AbortController/.test(code)) bounded = true;
+      }
+      if (bounded) continue;
+      bare.push(`lib/${f}: ${call.replace(/\s+/g, " ").slice(0, 74)}…`);
+    }
+  }
+  if (bare.length) {
+    console.log(`\n✗ verify:abort-guard — ${bare.length} fetch(es) in lib/ have no deadline at all:\n`);
+    for (const b of bare) console.log("  · " + b);
+    console.log(`
+A read with no ceiling is a spinner that never stops. Use the shared, feature-guarded helper — it is
+in lib/partialRead.ts, which has NO IMPORTS on purpose so a "use client" screen can hold it:
+
+    import { deadline, isDeadline, TOOK_TOO_LONG } from "@/lib/partialRead";
+    const r = await fetch(url, { ...opts, signal: opts?.signal ?? deadline(30_000) });
+
+…and tell a deadline apart from a refusal when you report it: saying "Network error" for a read that
+left the device perfectly well sends a person to look at their wifi for nothing.
+`);
+    process.exit(1);
+  }
+  console.log(`  every fetch in lib/ carries a deadline (or is a keepalive beacon)`);
+}
+
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (files.length < 200) {
+  console.log(`\n✗ verify:abort-guard scanned only ${files.length} file(s) — it should see hundreds. Its walk found nothing, so nothing was checked.`);
+  process.exit(1);
+}
 console.log(`✓ verify:abort-guard — ${scanned} file(s) use AbortSignal.timeout; every browser-reachable one (${guardedFiles}) feature-tests it first`);

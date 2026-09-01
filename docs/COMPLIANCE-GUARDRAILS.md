@@ -64,6 +64,48 @@ under summons. It puts you in jail, and me with you."* Saying no is the whole ga
 >    rewritten entry, and a bill edited after signing, are all *provable* rather than merely
 >    forbidden. The day-close report verifies the day and prints the result.
 
+### 3.0b THE KOT RULE, AND WHAT AN INVOICE LOCKS (owner, 2026-08-26)
+
+Asked directly whether the app should gain a "cancel this whole bill" button — with the research
+above in front of him — he decided the opposite way, and these are his rules. They are recorded
+here because three of them are now enforced in code and the fourth is the next thing to build.
+
+> 7. **A BILL IS NEVER CANCELLED AS AN ACT. Only a KOT is cancelled.** *"there will not be bill
+>    cancellation. Only there will be only KOT cancellation and which will be going on audit
+>    section."* A bill BECOMES cancelled when every KOT on it is cancelled — a derived state, not a
+>    button (`billState()` in the manager panel, `deriveBillState` in `lib/billLedger.ts`). Do not
+>    add a bill-level cancel, a bill-level cancel reason, or a session-level `cancelled_at`.
+>    Recorded as **R47** in `docs/REJECTED-IDEAS.md`.
+> 8. **NO INVOICE, NO BILL NUMBER — anywhere a removal is reported.** *"whenever the print … is not
+>    clicked, the invoice has not been generated, so the KOT will not know which bill number it is
+>    cut from. It will only [show] table and the time."* `bill_no` is an internal daily counter a
+>    table takes the moment it opens; it is not a document anyone has seen. Printing it beside a
+>    cancelled KOT makes a manager read "Bill #1074 was cancelled" when no bill was ever issued.
+>    It is shown only once a tax invoice exists to carry it.
+> 9. **THE RECORD SAYS WHAT THE REMOVAL DID TO THE BILL, IN MONEY, EVERY TIME.** *"previously the
+>    whole bill was this much and after cutting, this has been removed and the bill is this much."*
+>    Bill was → taken out → bill is now. Both ends come from the server
+>    (`lib/auditDetail.ts` → `auditBillSides`): AFTER is the live orders on the session summed now,
+>    REMOVED is the snapshot the audit row already stores, BEFORE is the two added. No bill history
+>    is kept for this and none is guessed.
+> 10. **ONCE THE INVOICE IS PRINTED, NOTHING COMES OFF THE BILL.** *"whenever the invoice has been
+>     printed — like you have clicked the print button — after [that] you won't be able to delete the
+>     thing."* A live invoice number locks every KOT and every dish under it: the paper the guest is
+>     holding and the record must not be able to disagree, and a number must never carry a total that
+>     exists nowhere. Enforced in the route (`invoiceLockedByOrder`), which is the same helper that
+>     already locks the per-dish delete, the quantity stepper and the discount. A **voided** invoice
+>     does not lock — that bill was reopened on purpose, and the reopen retired its number.
+> 11. **REOPEN RE-OPENS THE TABLE, NOT THE BILL — and only onto a FREE table.** ⚠️ **NOT BUILT YET.**
+>     His ruling, 2026-08-26: *"You should reopen table not the bill … if the table has already taken
+>     the order, it shouldn't be able to reopen. If the table is free, then only it should be able to
+>     reopen, and after reopen you can add the order to that particular bill — you can't delete."*
+>     So: a settled bill may be reopened onto its own table **only while that table has no other live
+>     party**, because reopening onto an occupied table would merge two parties' money. After the
+>     reopen the bill is **add-only** — new KOTs may go on, nothing already on it may come off, and
+>     re-printing retires the old invoice number and draws a new one (rule 2). Today
+>     `lfh_void_invoice` (mig 278) refuses on `status = 'closed'` outright; that condition is what
+>     changes, and it changes in a migration so all three doors obey it.
+
 **Why number-keeping is not negotiable (point 2).** CGST Rule 46(b) wants a serial that is
 consecutive and unique for the financial year, and a cancelled invoice retained *with its own
 number, marked cancelled*, so the gap in the sequence is explainable to an officer. Freeing the

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>No internet — your work is safe</title>
+<style>
+  /* DESIGN 9 — THE NOODLE PULL.
+     The deliberate opposite of the game. Somebody whose signal has just died is already agitated;
+     this one is trying to lower the temperature, not raise it. Two hands stretch a strand, fold it,
+     and stretch again, forever — the hypnotic loop of a noodle stall.
+     And it carries the same honest fact as the others: the strand DOUBLES on every pull, exactly
+     as the retry gap doubles. By the time there are sixteen strands the app is waiting a minute
+     between checks. So the picture is a calm thing to watch and also a readout. */
+  :root { color-scheme:dark; --ink:#f6f1e8; --muted:#a99f92; --dough:#f0dfc4; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:26px;
+         background:radial-gradient(120% 100% at 50% 0%, #241f1a 0%, #17130f 60%, #0c0a08 100%);
+         color:var(--ink); font:500 15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:center; }
+  .card { width:min(430px,100%) }
+  #brand { font:800 11px/1 system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase;
+           color:#e0b878; margin-bottom:14px }
+  #brand[hidden]{ display:none }
+
+  .stage { width:100%; height:190px; margin-bottom:2px }
+  svg { width:100%; height:100%; display:block; overflow:visible }
+  /* the two hands drift apart and together — one slow cycle is one "pull" */
+  .hand-l { animation:pullL 4s ease-in-out infinite }
+  .hand-r { animation:pullR 4s ease-in-out infinite }
+  /* each strand sags a little differently, so it never looks like a printed pattern */
+  .strand { fill:none; stroke:var(--dough); stroke-linecap:round; animation:sag 4s ease-in-out infinite }
+  .strand:nth-child(2){ animation-delay:-.28s } .strand:nth-child(3){ animation-delay:-.55s }
+  .strand:nth-child(4){ animation-delay:-.83s } .strand:nth-child(5){ animation-delay:-1.1s }
+  .strand:nth-child(6){ animation-delay:-1.38s } .strand:nth-child(7){ animation-delay:-1.65s }
+  .strand:nth-child(8){ animation-delay:-1.93s }
+  .flour span { animation:drift 4s ease-out infinite }
+
+  @keyframes pullL { 0%,100%{ transform:translateX(0) } 50%{ transform:translateX(-14px) } }
+  @keyframes pullR { 0%,100%{ transform:translateX(0) } 50%{ transform:translateX(14px) } }
+  /* as the hands pull apart the sag flattens — the same physics you watch at a noodle stall */
+  @keyframes sag   { 0%,100%{ transform:translateY(0) scaleY(1) } 50%{ transform:translateY(-5px) scaleY(.86) } }
+  @keyframes drift { 0%{ opacity:0; transform:translate(0,0) } 20%{ opacity:.5 }
+                     100%{ opacity:0; transform:translate(6px,26px) } }
+
+  h1 { font-size:21px; margin:12px 0 6px; font-weight:800 }
+  #why { color:var(--muted); font-size:14px; margin:0 auto; max-width:32ch }
+  .count { margin:12px auto 0; font:600 12.5px/1 ui-monospace,Menlo,monospace; color:#c9a874;
+           letter-spacing:.08em }
+  .safe { margin:16px auto 20px; max-width:34ch; font-size:13px; color:#a8dcb4 }
+  .safe b { color:#86efac }
+  .acts { display:flex; flex-direction:column; gap:10px }
+  button,a { font:700 14.5px/1 system-ui,sans-serif; border-radius:12px; padding:14px 18px;
+             cursor:pointer; text-decoration:none; border:0 }
+  #retry { background:#e0b878; color:#2a1e0a }
+  #home  { background:transparent; color:#e6dccd; border:1px solid rgba(255,255,255,.2) }
+  #hint  { margin-top:14px; font-size:12.5px; color:#968b7d }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hand-l,.hand-r,.strand,.flour span { animation:none }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <div class="stage">
+      <svg viewBox="0 0 300 170" role="img" aria-label="Two hands stretching noodles">
+        <!-- the board -->
+        <rect x="18" y="132" width="264" height="12" rx="6" fill="#3a2f24"/>
+        <g class="flour" fill="rgba(240,223,196,.55)">
+          <circle cx="70" cy="128" r="2"><animate attributeName="opacity" values="0;.6;0" dur="4s" repeatCount="indefinite"/></circle>
+          <circle cx="150" cy="126" r="1.6"><animate attributeName="opacity" values="0;.5;0" dur="4s" begin="1.2s" repeatCount="indefinite"/></circle>
+          <circle cx="226" cy="129" r="2"><animate attributeName="opacity" values="0;.6;0" dur="4s" begin="2.4s" repeatCount="indefinite"/></circle>
+        </g>
+        <!-- the strands. `strands` is filled in by the script so the COUNT can double. -->
+        <g id="strands"></g>
+        <!-- the hands -->
+        <g class="hand-l">
+          <path d="M52 74 q-16 4 -20 16 q-2 8 6 10 q10 2 18-6 z" fill="#eec39b"/>
+          <rect x="46" y="70" width="26" height="12" rx="6" fill="#f3cea8"/>
+        </g>
+        <g class="hand-r">
+          <path d="M248 74 q16 4 20 16 q2 8 -6 10 q-10 2 -18-6 z" fill="#eec39b"/>
+          <rect x="228" y="70" width="26" height="12" rx="6" fill="#f3cea8"/>
+        </g>
+      </svg>
+    </div>
+    <h1 id="title">No internet right now</h1>
+    <p id="why">This screen hasn&rsquo;t been opened on this device yet, so there&rsquo;s nothing saved to show.</p>
+    <div class="count" id="count">1 strand</div>
+    <p class="safe"><b>Anything already saved on this device is safe.</b> It sends itself the moment
+       the connection is back.</p>
+    <div class="acts">
+      <button id="retry" type="button" onclick="location.reload()">Try again</button>
+      <a id="home" href="/">Go to the menu</a>
+    </div>
+    <div id="hint">Checking again in 5s&hellip;</div>
+  </main>
+<script>
+  // THE STRAND COUNT IS THE RETRY GAP.
+  //
+  // 5s → 1 strand, 10s → 2, 20s → 4, 40s → 8, a minute → 16. So the picture answers "is it still
+  // trying, or has it settled down to wait?" — which is the question the words never answered — and
+  // it answers it in a way you can take in without reading.
+  (function () {
+    var g = document.getElementById("strands");
+    var countEl = document.getElementById("count");
+    var hint = document.getElementById("hint");
+    var wait = 5000, dueAt = Date.now() + wait, shown = 0;
+
+    var render = function (n) {
+      if (n === shown) return; shown = n;
+      // Spread n strands across a 34px band, thinning the stroke as they multiply — the way real
+      // dough gets finer every time it is folded.
+      var svgns = "http://www.w3.org/2000/svg", spread = 34, top = 88 - spread / 2;
+      g.textContent = "";
+      for (var i = 0; i < n; i++) {
+        var y = n === 1 ? 88 : top + (spread / (n - 1)) * i;
+        var path = document.createElementNS(svgns, "path");
+        path.setAttribute("class", "strand");
+        path.setAttribute("d", "M72 " + y.toFixed(1) + " Q150 " + (y + 22).toFixed(1) + " 228 " + y.toFixed(1));
+        path.setAttribute("stroke-width", Math.max(1.2, 7 / Math.sqrt(n)).toFixed(2));
+        g.appendChild(path);
+      }
+      countEl.textContent = n === 1 ? "1 strand" : n + " strands";
+    };
+    render(1);
+
+    setInterval(function () {
+      if (document.hidden) return;
+      var left = Math.max(0, dueAt - Date.now());
+      hint.textContent = left > 400 ? "Checking again in " + Math.ceil(left / 1000) + "s…" : "Checking now…";
+      if (left <= 0) {
+        wait = Math.min(wait * 2, 60000);
+        dueAt = Date.now() + Math.round(wait * (0.75 + Math.random() * 0.5));
+        render(Math.min(16, Math.round(wait / 5000)));    // one fold per doubling
+      }
+    }, 250);
+  })();
+  (function(){ try {
+    var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+    if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+  } catch (e) {} })();
+</script>
+</body>
+</html>

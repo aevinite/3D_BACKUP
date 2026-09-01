@@ -7,6 +7,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log (lib/adminFail).
 import { adminFail } from "@/lib/adminFail";
+// Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +46,12 @@ export async function GET(req: NextRequest) {
     range
       ? sb.rpc("lfh_admin_usage_range", { p_from: range.from, p_to: range.to })
       : sb.rpc("lfh_admin_usage"),
-    sb.from("restaurants").select("id, name, slug").is("deleted_at", null),
+    // ── THIS LIST IS A FILTER, SO A SHORT ONE DROPS RESTAURANTS OUTRIGHT (T20 sweep #7, 2026-08-27) ─
+    // Every usage row is kept only `.filter((u) => meta.has(u.restaurant_id))`, so past PostgREST's row
+    // cap a restaurant vanished from the table AND from the totals underneath it — on the screen whose
+    // whole job is telling the operator which restaurants are heavy to serve. Paged (lib/pageAll).
+    pageAll<{ id: string; name: string; slug: string }>("restaurants", (from, to) =>
+      sb.from("restaurants").select("id, name, slug").is("deleted_at", null).order("id").range(from, to)),
   ]);
   const anyErr = usageQ.error || restsQ.error;
   // THE CONSOLE GETS A SENTENCE, NOT A POSTGRES ERROR (T20 sweep, 2026-08-19). This answered the
@@ -52,9 +59,9 @@ export async function GET(req: NextRequest) {
   // not exist`. adminFail keeps BOTH halves — a plain sentence in `error` (which lib/adminFetch is
   // what every screen surfaces) and the raw text in `detail` plus the server log, which is where it
   // is actually useful. Rolled out to forty-odd handlers on 2026-08-14; this one was missed.
-  if (anyErr) return adminFail("the usage figures", anyErr, { action: "load" });
+  if (anyErr) return adminFail("the usage figures", anyErr as { message?: string }, { action: "load" });
 
-  const meta = new Map<string, { name: string; slug: string }>((restsQ.data || []).map((r) => [r.id, { name: r.name, slug: r.slug }]));
+  const meta = new Map<string, { name: string; slug: string }>((restsQ.rows || []).map((r) => [r.id, { name: r.name, slug: r.slug }]));
   const rows = ((usageQ.data as { restaurant_id: string; orders_7d?: number; orders_30d?: number; orders_range?: number; staff_total: number; table_count: number }[]) || [])
     // Keep only LIVE restaurants: if the RPC ever returns a binned tenant it would otherwise
     // show as a nameless "—" row AND inflate the totals below (every sibling route filters to

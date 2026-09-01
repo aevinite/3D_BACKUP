@@ -162,6 +162,18 @@
   function reasonText(code) { return (code && REASONS[code]) || ""; }
 
   // ── helpers ─────────────────────────────────────────────────────────────────
+  // GOING TO /login MEANS THE WHOLE WINDOW. The staff panels are rendered inside an iframe
+  // (components/PanelFrame.tsx), and a bare location.href navigates only the frame — see the note
+  // at the 401 branch of send(). Same helper as maint.js's leaveTo().
+  // `.replace()`, not `.href` — the panel's history entry is REPLACED rather than stacked on, so
+  // Back cannot walk into a panel whose session has just gone (owner, 2026-08-28: sign out the way
+  // Netflix does it). Same helper and same reasoning as maint.js's; see the long note there.
+  function leaveTo(url) {
+    try { if (window.top && window.top !== window.self) { window.top.location.replace(url); return; } }
+    catch (e) { /* not readable — fall through to this frame */ }
+    window.location.replace(url);
+  }
+
   const uuid = () => (self.crypto && self.crypto.randomUUID)
     ? self.crypto.randomUUID()
     : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
@@ -466,7 +478,12 @@
     // branch in flush(), which says so in as many words). IndexedDB outlives the navigation, so
     // this replays itself the moment they sign back in, which is what that branch already
     // promises. The throw is unchanged, so callers behave exactly as before.
-    if (res.status === 401) { await enqueue(item, "signedout"); location.href = "/login"; throw new Error("login"); }
+    // …and the trip to the sign-in page moves the WHOLE WINDOW, not this frame (T9 sweep #7,
+    // 2026-08-22). The panels run inside an iframe, so a bare `location.href` loaded /login INSIDE
+    // the panel: the person saw a sign-in form wearing the panel's top bar, the page's own URL never
+    // changed, and signing in there nested a panel inside a panel. The kitchen and tablet fixed this
+    // for their own Sign out buttons on 2026-08-19; the queue's own 401 path was still doing it.
+    if (res.status === 401) { await enqueue(item, "signedout"); leaveTo("/login"); throw new Error("login"); }
     // THE SERVER IS UP BUT CAN'T TAKE IT (5xx) → this is not a rejection, so don't hand the
     // person an error and drop their work. Save it and let the replay loop deliver it, which is
     // exactly what that loop already does for the SAME statuses once an action is queued
@@ -496,6 +513,17 @@
     // from then on nothing sent, however good the connection became.
     if (navigator.onLine === false) { scheduleRetry(false); return; }
     flushing = true;
+    // SAY THE ROUND HAS STARTED (T9 sweep #7, 2026-08-22).
+    //
+    // `syncing` exists so no surface has to guess whether work is moving, and the `finally` below
+    // publishes the moment it STOPS — but nothing published the moment it starts. With more than one
+    // change queued the first delivery's own notify() covered it; with exactly ONE change, which is
+    // the everyday case, listeners still held `syncing:false` for the whole round. Measured: with a
+    // single write in flight the connection panel read "Waiting to send · next try in 5s", in the red
+    // "not moving" colour, while that very change was being sent — and the countdown it offered was
+    // for a timer the running round had already cleared. That is the same cry-wolf fault this pair of
+    // files was fixed for in the other direction on 2026-08-17.
+    notify();
     let progressed = false; // did anything actually get through this round?
     try {
       // WALK THE QUEUE, DON'T STOP AT THE FIRST OBSTACLE (improvements #2 + #6).
@@ -510,6 +538,25 @@
       // in order again. `i` only advances when the item is still in the queue — a delivered or
       // failed item is spliced out, so the next one has already taken its index.
       const stalled = new Set();
+      // WHAT IS ALREADY OWED TO A TABLE STALLS IT BEFORE THE WALK EVEN STARTS (T9 sweep #7,
+      // 2026-08-22).
+      //
+      // send() spots a blocker in `failed` and answers { queued:true, why:"behind" } — and then
+      // calls flush(). But this walk only ever looked at `queued`, and the blocker is in `failed`,
+      // so the change it had just promised to hold was sent by that very flush.
+      //
+      // Measured, on the exact sequence the note in send() describes: a discount for table 5 runs
+      // out of its automatic tries and moves to "Needs you"; the waiter taps Mark paid on the same
+      // table; the queue answers "behind" and then puts 5/pay on the wire immediately. The bill
+      // settles at the FULL amount, and the discount the person is about to retry would land on an
+      // already-settled bill. That is the swap the whole per-table rule exists to stop, and
+      // requeueInOrder() only fixed the order WITHIN `queued`.
+      //
+      // Only a RETRYABLE failure blocks. A clash is `retryable:false` and deliberately does not
+      // (P04033): it can never be sent, so blocking on it would block for ever. A retryable one has
+      // Retry and Dismiss on screen — in the connection panel and the offline bar — so the wait is
+      // visible and the person has two ways to clear it. Either one unblocks the table.
+      failed.forEach(function (f) { if (f.retryable !== false) stalled.add(orderKey(f)); });
       let i = 0;
       while (i < queued.length && navigator.onLine !== false) {
         const item = queued[i];
@@ -792,7 +839,11 @@
       });
       return out;
     },
-    getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length }),
+    // ONE SNAPSHOT SHAPE. onChange() answers this immediately to a new listener and notify()
+    // publishes its own object afterwards, so the two must carry the same keys — they did not, and a
+    // listener's FIRST snapshot silently had `syncing` and `unsafeStore` undefined. Reading a missing
+    // key as "no" happens to be the safe direction here, which is exactly why it went unnoticed.
+    getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length, syncing: flushing, unsafeStore: unsafeStore }),
     pendingCount: () => queued.length,
     failedCount: () => failed.length,
     // WHEN the oldest thing still waiting was done (ms since epoch, 0 = nothing waiting).

@@ -338,12 +338,61 @@ try {
     const stale = [after.tile, after.sub, after.h2, ...after.hints].filter((t) => /7 days/i.test(t) || /per day/i.test(t));
     ok(stale.length === 0, `after the drill no label still says the whole window${stale.length ? ` — ${JSON.stringify(stale)}` : ` (tile reads "${after.tile}", heading "${after.h2}")`}`);
     ok(after.val === "73", `the tile shows the drilled day's own count (${after.val})`);
-    await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => /Back to the whole range/.test(x.textContent))?.click());
-    await p.waitForTimeout(3500);
-    const back = await read();
-    ok(/7 days/i.test(back.tile) && back.val === "291" && /per day/i.test(back.h2),
-      `Back puts the window's words and figures back together (tile "${back.tile}" ${back.val}, heading "${back.h2}")`);
+    // ↻ REFRESH, STILL DRILLED (sweep #7 item 1). The drill fix above never covered the Refresh
+    // button, which called load(range, true) with no day — so the reply was the whole window while
+    // every label went on naming the drilled day: "Orders · 24 Aug  1,047" over a day that had 0.
+    await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => /hour by hour/.test(x.textContent))?.click());
+    await p.waitForTimeout(4000);
+    await p.evaluate(() => [...document.querySelectorAll("button.adm-btn")].find((x) => /Refresh/.test(x.textContent))?.click());
+    await p.waitForTimeout(4500);
+    const refreshed = await read();
+    const mixed = [refreshed.tile, refreshed.sub, refreshed.h2, ...refreshed.hints].filter((t) => /7 days/i.test(t) || /per day/i.test(t));
+    ok(mixed.length === 0 && refreshed.val === "73",
+      `pressing Refresh while drilled re-asks for the DAY, not the window (tile "${refreshed.tile}" ${refreshed.val}, heading "${refreshed.h2}")${mixed.length ? ` — window words left behind: ${JSON.stringify(mixed)}` : ""}`);
     await p.close(); await c.close();
+  }
+
+  // ── C2(live) · a rounded percentage never says "none" while the count says some ─────────────
+  head('C2(live) · the occupancy tile never prints "(0%)" above a non-zero count');
+  {
+    const c = await ctx();
+    const p = await c.newPage();
+    await p.goto(BASE + "/aevinite/analytics", { waitUntil: "domcontentloaded" });
+    await settle(p);
+    const t = await p.evaluate(() => {
+      const e = [...document.querySelectorAll(".adm-stat")].find((x) => /Tables occupied/i.test(x.textContent));
+      return e ? { v: e.querySelector(".v")?.textContent?.trim(), sub: e.textContent } : null;
+    });
+    if (!t) console.log("⏭ the Tables-occupied tile did not render");
+    else ok(!(Number(String(t.v).replace(/\D/g, "")) > 0 && /\(0%\)/.test(t.sub)),
+      `"${t.v}" occupied and the words read ${(t.sub.match(/\([^)]*%\)/) || ["—"])[0]}`);
+    await p.close(); await c.close();
+  }
+
+  // ── C3 · every money screen's freshness stamp can express MINUTES ──────────────────────────
+  head("C3 · a \"how old are these numbers\" stamp is minutes, never days");
+  {
+    // `ago()` in customers/page.tsx answers in days ("today" for anything under 24h) — it is for a
+    // guest's last visit. The shared timeAgo answers in minutes. A cache stamp must use the latter,
+    // or a five-minute snapshot and a five-hour one read identically (sweep #7 item 4).
+    for (const [f, label] of [["app/aevinite/customers/page.tsx", "Customers"], ["app/aevinite/analytics/page.tsx", "Platform analytics"], ["app/aevinite/revenue/page.tsx", "Platform revenue"]]) {
+      const src = R(f);
+      const stamp = src.match(/(?:counted|updated) \{(\w+)\(/);
+      ok(!!stamp && stamp[1] === "timeAgo", `${label}: the stamp reads ${stamp ? stamp[1] + "()" : "NO STAMP FOUND"}`);
+    }
+  }
+
+  // ── C4 · a heading beside an exact count must not be a capped list's length ─────────────────
+  head("C4 · the Dashboard's headings count everyone, like the cards above them");
+  {
+    // /api/admin/dashboard caps the online list at 200 and the issues list at 50 and sends the exact
+    // totals alongside, saying so in its own comment. A heading built from `list.length` states a
+    // second, smaller number for the same fact on the same screen (sweep #7 item 5).
+    const home = R("app/aevinite/page.tsx");
+    ok(/Working now <span>· \{onlineCount \?\? online\.length\} active<\/span>/.test(home),
+      "\"Working now\" uses the server's exact onlineCount");
+    ok(/Open issues <span>· \{openIssuesCount \?\? openIssues\.length\} open<\/span>/.test(home),
+      "\"Open issues\" uses the server's exact openIssuesCount");
   }
 
   // ── D(live) · every column of a bill row is on screen ──────────────────────────────────────
@@ -367,6 +416,333 @@ try {
     const outside = r.cells.filter((x) => !x.in).map((x) => x.t);
     ok(outside.length === 0 && !r.clipped && !r.pageWide,
       `${tag} ${w}px ${skin}: ${outside.length ? `off screen — ${outside.join(", ")}` : "every column on screen"}${r.clipped ? " · the card CLIPS" : ""}${r.pageWide ? " · the page scrolls sideways" : ""}`);
+    await p.close(); await c.close();
+  }
+
+  // ── C5 · one way of writing a date, and a year label that is the SERVER's ─────────────────
+  head("C5 · the money screens write a date one way, and take the year from the server");
+  {
+    // `next_due_on` is a bare YYYY-MM-DD and Platform revenue printed it raw, so the Paying table
+    // read "2027-07-04" beside a console that writes "4 Jul 27" everywhere else. And the "payments
+    // in <year>" label came from the BROWSER's clock while the figure is counted against the IST
+    // calendar year — on 31 December west of IST the heading names one year over another year's
+    // money (sweep #7 item 6).
+    // COMMENTS STRIPPED FIRST. The fix's own comment QUOTES the `new Date().getFullYear()` it
+    // replaced, and a raw scan reads that as the fault still being there — the same trap that made
+    // one of this sweep's own new checks red on a green file.
+    const rev = R("app/aevinite/revenue/page.tsx").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    // The formatter is SHARED (components/admin/shared.tsx → istDate), so both halves of this are
+    // asserted where each half now lives: the call site here, the null branch and the IST pin there.
+    // Two copies of a date format is how two screens come to write the same day differently.
+    const sh = R("components/admin/shared.tsx");
+    ok(!/\{r\.nextDue \|\| "—"\}/.test(rev) && /\{istDate\(r\.nextDue\)\}/.test(rev),
+      "the next-due date goes through the shared formatter, not straight to the screen");
+    ok(/export const istDate/.test(sh) && /T00:00:00\+05:30/.test(sh) && /if \(!iso\) return "—"/.test(sh),
+      "…and that formatter pins a bare date to IST and renders — for a null");
+    ok((R("app/aevinite/customers/page.tsx").match(/toLocaleDateString\("en-IN", \{ day: "numeric"/g) || []).length === 0,
+      "…and Customers no longer keeps a second copy of the same format");
+    ok(!/new Date\(\)\.getFullYear\(\)/.test(rev) && /d\?\.generatedAt \? new Date\(d\.generatedAt\)/.test(rev),
+      "the \"payments in <year>\" label reads the server's own stamp, not the device's clock");
+  }
+
+  // ── C6(live) · the Dashboard's stat strip draws no divider that divides nothing ────────────
+  head("C6(live) · no stray hairline down the edge of the Dashboard's stat strip");
+  {
+    // `.cmd-strip` is a WRAPPING flexbox. A `border-right` on a cell is only right when that cell
+    // has a neighbour to its right, so at every width where the cells wrap, the last cell of each
+    // row drew a line down the card's own edge. Measured before the fix at 360x780 in both skins:
+    // 4 cells on 4 rows, 3 still drawing a right border. The separator is a 1px gap now, so it is
+    // correct in every wrap — which is why this is measured at four widths, not one (owner item 7).
+    for (const w of [360, 400, 600, 1280]) for (const skin of ["dark", "light"]) {
+      const c = await ctx(w, 820, w < 500 ? 3 : 1, skin);
+      const p = await c.newPage();
+      await p.goto(BASE + "/aevinite", { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const r = await p.evaluate(() => {
+        const s = document.querySelector(".cmd-strip");
+        if (!s) return { none: true };
+        const cs = [...s.querySelectorAll(".cell")];
+        return {
+          cells: cs.length,
+          rows: new Set(cs.map((e) => Math.round(e.getBoundingClientRect().top))).size,
+          borders: cs.filter((e) => parseFloat(getComputedStyle(e).borderRightWidth) > 0
+            || parseFloat(getComputedStyle(e).borderBottomWidth) > 0).length,
+          pad: getComputedStyle(s).padding,
+        };
+      });
+      if (r.none) { console.log(`⏭ ${w}px ${skin}: the stat strip did not render`); await p.close(); await c.close(); continue; }
+      ok(r.borders === 0 && r.pad === "0px",
+        `${w}px ${skin}: ${r.cells} cells on ${r.rows} row(s), ${r.borders} still drawing a border of their own (must be 0), strip padding ${r.pad} (must be 0px, or the gap paints a ring round the card)`);
+      await p.close(); await c.close();
+    }
+  }
+
+  // ── F2(live) · the Change log has no sideways scroll on a phone ────────────────────────────
+  head("F2(live) · every column of a change is on screen at 360px, both skins");
+  {
+    // It was a six-column grid pinned at 720px inside an overflowX:auto box: at 360 the heading read
+    // "TABLI" and By / Reason / When sat off the right edge with nothing saying so — on a log whose
+    // job is answering "who did this, and when". It folds onto three lines now, the same technique
+    // and breakpoint the Bills row next door uses (owner item 8).
+    for (const skin of ["dark", "light"]) for (const [w, tag] of [[360, "phone"], [768, "tablet"], [1280, "desktop"]]) {
+      const c = await ctx(w, 900, w < 500 ? 3 : 1, skin);
+      const p = await c.newPage();
+      await p.goto(BASE + "/aevinite/bill-audit/changes", { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const r = await p.evaluate(() => {
+        const row = document.querySelector(".chg-row:not(.head)");
+        if (!row) return { none: true };
+        const out = [...row.children].filter((s) => {
+          const b = s.getBoundingClientRect();
+          return b.right > innerWidth + 1 || b.left < -1;
+        }).map((s) => (s.textContent || "").trim().slice(0, 12) || "·");
+        const wrap = document.querySelector(".chg-wrap");
+        return { out, wrapScrolls: wrap ? wrap.scrollWidth > wrap.clientWidth + 1 : false,
+                 pageScrolls: document.documentElement.scrollWidth > innerWidth + 1 };
+      });
+      if (r.none) { console.log(`⏭ ${tag} ${skin}: no changes on this database`); await p.close(); await c.close(); continue; }
+      ok(r.out.length === 0 && !r.wrapScrolls && !r.pageScrolls,
+        `${tag} ${w}px ${skin}: ${r.out.length ? `off screen — ${r.out.join(", ")}` : "every column on screen"}${r.wrapScrolls ? " · the row box SCROLLS sideways" : ""}${r.pageScrolls ? " · the page scrolls sideways" : ""}`);
+      await p.close(); await c.close();
+    }
+  }
+
+  // ── E2 · the guest-spread card says when it is hiding a restaurant ─────────────────────────
+  head("E2 · Customers' guest-spread card owns up to its own cap");
+  {
+    // The bars are capped at 8 server-side and the page could not know it, so a ninth restaurant
+    // with guests was dropped in silence — on the card whose stated job is "how many saved guests
+    // each restaurant has". Its sibling on Platform analytics has said "the busiest 8 of 9" since
+    // 2026-08-20 (owner item 9). Asserted three ways: the endpoint sends the true count, the page
+    // reads it, and the sentence is conditional so it stays silent when nothing is hidden.
+    const rt = R("app/api/admin/customers/route.ts"), pg = R("app/aevinite/customers/page.tsx");
+    ok(/const spreadTotal = spreadAll\.length/.test(rt) && /\bspreadTotal,/.test(rt),
+      "the endpoint counts every restaurant that has guests and sends it");
+    ok(/setSpreadTotal\(Number\(j\.spreadTotal\)/.test(pg), "the page reads that count");
+    ok(/spreadTotal > spread\.length[\s\S]{0,200}Showing the/.test(pg) && /: ""/.test(pg),
+      "the sentence appears only when the count is bigger than the bars shown");
+    const j = await api("/api/admin/customers");
+    const n = Array.isArray(j.spread) ? j.spread.length : 0;
+    ok(typeof j.spreadTotal === "number" && j.spreadTotal >= n,
+      `live: ${n} bars, ${j.spreadTotal} restaurants have guests — ${j.spreadTotal > n ? "the card must say so" : "nothing hidden, the card stays quiet"}`);
+  }
+
+  // ── H2 · the revenue chart's twelve months are IST months, and each label is its own month ─
+  head("H2 · Platform revenue's 12-month grid agrees with the year above it");
+  {
+    // "Collected this year" is pinned to the IST calendar and the route says why; the twelve-month
+    // grid beside it was left on the world clock. For the first 5½ hours of the 1st of each IST
+    // month they disagreed — the newest bucket was last month, so a payment taken in that window
+    // sat outside the chart while counting in the yearly figure above it (owner item 10).
+    const rt = R("app/api/admin/revenue/route.ts");
+    ok(!/Date\.UTC\(now\.getUTCFullYear\(\), now\.getUTCMonth\(\)/.test(rt),
+      "the grid is no longer built from the world clock's month");
+    ok(/const istNow = new Date\(now\.getTime\(\) \+ IST_SHIFT_MS\)/.test(rt) && /Date\.UTC\(istY, istM/.test(rt),
+      "…it is built from the IST month, the same calendar as the year boundary");
+    ok(/month: "short", timeZone: "UTC"/.test(rt),
+      "…and each label names its timezone, so a label can never come from a different calendar than its key");
+    const j = await api("/api/admin/revenue");
+    const NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const rows = Array.isArray(j.monthly) ? j.monthly : [];
+    const wrong = rows.filter((m) => !String(m.label).startsWith(NAMES[+String(m.month).slice(5) - 1]));
+    ok(rows.length === 12 && wrong.length === 0,
+      `live: ${rows.length} buckets, ${wrong.length} whose label disagrees with its own month${wrong.length ? ` — ${wrong.map((m) => m.month + ":" + m.label).join(", ")}` : ""}`);
+  }
+
+  // ── F3 · the admin's own bill actions are signed ───────────────────────────────────────────
+  head("F3 · every admin bill action names who did it");
+  {
+    // `logAction` takes an actor and this route passed none, so `staff_actions.actor` was NULL and
+    // the Change log's "By" read "—" for every admin action — on the screen built for spotting
+    // bills being quietly removed (owner item 11). Asserted at the SOURCE, not against live rows:
+    // every row written before this fix keeps its blank honestly, and a live scan would fail on
+    // history rather than on the code.
+    const rt = R("app/api/admin/bills/route.ts");
+    const calls = [...rt.matchAll(/logAction\("admin", "([a-z_]+)", \{([^}]*)\}/g)].map((m) => ({ action: m[1], args: m[2] }));
+    const unsigned = calls.filter((c) => !/actor:/.test(c.args)).map((c) => c.action);
+    ok(calls.length >= 3 && unsigned.length === 0,
+      `${calls.length} admin bill actions logged, ${unsigned.length} of them with nobody named${unsigned.length ? ` — ${unsigned.join(", ")}` : ""}`);
+    // The same word the permanent removals record and the credit note already use, so the two
+    // records cannot name the same act two different ways.
+    ok(/softDeleteOrders\(rid, ids, \{ actor: "Admin"/.test(rt) && (rt.match(/actor: "Admin"/g) || []).length >= 4,
+      "…and it is the same \"Admin\" the removals record and the credit note already write");
+  }
+
+  // ── J(live) · a reply with a field missing costs a number, never the whole screen ──────────
+  head("J(live) · every money screen survives a reply that is missing one field");
+  {
+    // Found by the second 500 (2026-08-31): `d` being present was taken as every field inside it
+    // being present. A body without `byStatus` made Platform revenue throw on Object.values(null);
+    // one without `rows` made the Change log throw on .length. Both times the error boundary
+    // replaced the ENTIRE page — heading and all — with the generic "Something went wrong" card,
+    // while the four sibling screens degrade in place and keep offering Retry. Not reachable
+    // through today's endpoints; this is about surviving a partial answer at all.
+    const CASES = [
+      ["/aevinite/revenue", "/api/admin/revenue", "byStatus", "Platform revenue"],
+      ["/aevinite/bill-audit/changes", "/api/admin/bill-audit", "rows", "Bills · Change log"],
+      ["/aevinite/customers", "/api/admin/customers", "customers", "Customers"],
+      ["/aevinite/bill-audit", "/api/admin/bills", "bills", "Bills"],
+      ["/aevinite/analytics", "/api/admin/analytics", "trend", "Platform analytics"],
+      ["/aevinite", "/api/admin/dashboard", "restaurants", "Dashboard"],
+      // Platform revenue reads FOUR lists, and guarding only the first left the screen dying on the
+      // other three. Each is deleted on its own so a future guard cannot be half-applied again.
+      ["/aevinite/revenue", "/api/admin/revenue", "monthly", "Platform revenue"],
+      ["/aevinite/revenue", "/api/admin/revenue", "mrrByPlan", "Platform revenue"],
+      ["/aevinite/revenue", "/api/admin/revenue", "paying", "Platform revenue"],
+    ];
+    // …an EMPTY body, which is the shape that caught the half-applied guard: `{}` is truthy, so a
+    // page that only checks "did I get an answer" walks straight into every field inside it.
+    for (const [url, ep, h1] of [
+      ["/aevinite/revenue", "/api/admin/revenue", "Platform revenue"],
+      ["/aevinite/bill-audit/changes", "/api/admin/bill-audit", "Bills · Change log"],
+      ["/aevinite/bill-audit", "/api/admin/bills", "Bills"],
+      ["/aevinite/customers", "/api/admin/customers", "Customers"],
+      ["/aevinite/analytics", "/api/admin/analytics", "Platform analytics"],
+      ["/aevinite", "/api/admin/dashboard", "Dashboard"],
+    ]) {
+      const c = await ctx();
+      const p = await c.newPage();
+      await p.route(`**${ep}**`, (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }).catch(() => {}));
+      await p.goto(BASE + url, { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const seen = await p.evaluate(() => ({
+        h1: document.querySelector("h1")?.textContent?.trim() || "",
+        boundary: /Something went wrong on this screen/.test(document.body.innerText),
+      }));
+      ok(seen.h1 === h1 && !seen.boundary,
+        `${h1} given an empty body: ${seen.boundary ? "THE WHOLE SCREEN WAS REPLACED" : "keeps its heading"}`);
+      await p.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+      await p.close(); await c.close();
+    }
+
+    // …and the third shape of the same fault: a ROW whose state this screen has never heard of.
+    // META[b.state] was read straight into m.icon, so one unknown bucket took the whole ledger down.
+    {
+      const c = await ctx();
+      const p = await c.newPage();
+      await p.route("**/api/admin/bills**", async (route) => {
+        const r = await route.fetch();
+        let b; try { b = await r.json(); } catch { b = {}; }
+        if (Array.isArray(b.bills) && b.bills.length) b.bills[0] = { ...b.bills[0], state: "a_state_from_next_year" };
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
+      });
+      await p.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const seen = await p.evaluate(() => ({
+        h1: document.querySelector("h1")?.textContent?.trim() || "",
+        boundary: /Something went wrong on this screen/.test(document.body.innerText),
+        rows: document.querySelectorAll(".blz-row").length,
+      }));
+      ok(seen.h1 === "Bills" && !seen.boundary && seen.rows > 0,
+        `Bills with one row in an unknown state: ${seen.boundary ? "THE WHOLE LEDGER WAS REPLACED" : `keeps its heading and still lists ${seen.rows} bills`}`);
+      await p.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+      await p.close(); await c.close();
+    }
+    for (const [url, ep, field, h1] of CASES) {
+      const c = await ctx();
+      const p = await c.newPage();
+      await p.route(`**${ep}**`, async (route) => {
+        const r = await route.fetch();
+        let b; try { b = await r.json(); } catch { b = {}; }
+        delete b[field];
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
+      });
+      await p.goto(BASE + url, { waitUntil: "domcontentloaded" });
+      await settle(p);
+      const seen = await p.evaluate(() => ({
+        h1: document.querySelector("h1")?.textContent?.trim() || "",
+        boundary: /Something went wrong on this screen/.test(document.body.innerText),
+      }));
+      ok(seen.h1 === h1 && !seen.boundary,
+        `${h1} without "${field}": ${seen.boundary ? "THE WHOLE SCREEN WAS REPLACED by the error card" : `keeps its heading (${JSON.stringify(seen.h1)})`}`);
+      await p.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
+      await p.close(); await c.close();
+    }
+  }
+
+  // ── K · a Customers page past the end is empty, not a red error ────────────────────────────
+  head("K · asking Customers for a page that does not exist");
+  {
+    // PostgREST answers an offset beyond the last row with 416/PGRST103, which reached the screen as
+    // "Couldn't load the guest list" — the same words a real outage gets. 87 guests, ?page=2 was a
+    // 500 (T18 second 500, 2026-08-31).
+    for (const [q, what] of [["page=2", "one page past the end"], ["page=199", "far past the end"],
+                             ["page=2&seg=blocked", "past the end of a filtered group"]]) {
+      const r = await fetch(`${BASE}/api/admin/customers?${q}`, { headers: H, cache: "no-store" });
+      const j = await r.json();
+      ok(r.status === 200 && Array.isArray(j.customers) && j.customers.length === 0 && !j.error && j.summary,
+        `${what}: status ${r.status}, ${(j.customers || []).length} rows, summary ${j.summary ? "kept" : "LOST"}${j.error ? ", error: " + j.error : ""}`);
+    }
+    const first = await api("/api/admin/customers");
+    const past = await api("/api/admin/customers?page=199");
+    ok(first.summary?.matched === past.summary?.matched,
+      `the matched total survives the empty page (${first.summary?.matched} vs ${past.summary?.matched})`);
+  }
+
+  // ── L(live) · the Deleted bucket does not present three events as one ──────────────────────
+  head("L(live) · Bills' Deleted tile names what its number is made of");
+  {
+    // He asked why this screen has a "Deleted" bucket at all when a bill can never be deleted. The
+    // count was right; the word was doing too much work. 2,956 tombstoned bills on backup, of which
+    // 16 had a person's name against them: 1,752 carry migration 291's own words ("every order on
+    // this bill was deleted" — the database closing out a bill whose last dish came off), and the
+    // rest have neither a person nor a reason, the exact fingerprint mig 291's header describes as
+    // scripts writing straight through the service role. The capability itself is his own (R27), and
+    // the headline stays the true total because compliance §3.0 wants every tombstone counted.
+    const j = await api("/api/admin/bills");
+    ok(typeof j.deletedEmptied === "number" && typeof j.deletedByPerson === "number",
+      `the endpoint sends the split (by a person ${j.deletedByPerson}, closed itself out ${j.deletedEmptied}, total ${j.deletedTotal})`);
+    ok((j.deletedByPerson ?? 0) + (j.deletedEmptied ?? 0) <= (j.deletedTotal ?? 0),
+      "…and the two parts never exceed the whole");
+    const src = R("app/aevinite/bill-audit/page.tsx");
+    ok(/deletedByPerson == null \|\| d\?\.deletedEmptied == null/.test(src),
+      "the tile falls back to its old sentence when the split cannot be read, rather than showing a zero");
+    ok(/This bill closed itself out/.test(src) && /marked deleted with nobody recorded/.test(src) && /This bill was deleted/.test(src),
+      "a deleted bill's own panel says WHICH of the three it was");
+    const c = await ctx();
+    const p = await c.newPage();
+    await p.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+    await settle(p);
+    const tile = await p.evaluate(() => [...document.querySelectorAll(".blz-stat")]
+      .map((e) => e.innerText.replace(/\n/g, " | ")).find((t) => /DELETED/.test(t)) || "");
+    ok(/removed by a person/.test(tile) && /last dish came off/.test(tile),
+      `on screen: ${tile.slice(0, 130)}`);
+    ok(/restorable/.test(tile), "…and it still says every one of them can be put back");
+    await p.close(); await c.close();
+  }
+
+  // ── D2(live) · an empty state bucket still offers the way further back ─────────────────────
+  head("D2(live) · a state chip that comes back empty is not a dead end");
+  {
+    // Five of the six buckets are narrowed AFTER a page of sessions is read, so a newest page can
+    // hold none of the chosen state while older pages hold plenty. The footer used to be gated on
+    // there being at least one row, so exactly then the way onward was withheld — and a settled
+    // bill (#644, ₹441) sat three pages back, unreachable by pressing anything (sweep #7 item 2).
+    const c = await ctx();
+    const p = await c.newPage();
+    await p.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+    await settle(p);
+    let measured = 0;
+    for (const chip of ["Running", "Settled", "Pay-later", "On the house"]) {
+      const clicked = await p.evaluate((label) => {
+        const b = [...document.querySelectorAll("button.blz-chip")].find((x) => x.textContent.includes(label));
+        if (!b) return false; b.click(); return true;
+      }, chip);
+      if (!clicked) continue;
+      await p.waitForTimeout(3000);
+      const st = await p.evaluate(() => ({
+        rows: document.querySelectorAll(".blz-row").length,
+        empty: document.querySelector(".adm-empty")?.textContent?.trim() || "",
+        older: !![...document.querySelectorAll("button.adm-btn")].find((b) => /Load older bills/.test(b.textContent)),
+      }));
+      if (st.rows > 0) continue;                       // this bucket has rows here — nothing to prove
+      measured++;
+      const cursor = await api(`/api/admin/bills?state=${chip === "Pay-later" ? "khata" : chip === "On the house" ? "onhouse" : chip.toLowerCase()}`);
+      if (!cursor.nextBefore) { console.log(`⏭ ${chip}: empty and the server says there is nothing older — correctly final`); continue; }
+      ok(st.older && /there are older ones/.test(st.empty),
+        `${chip}: empty page + an older page exists → ${st.older ? "the way back is offered" : "NO Load-older button"}, and the line reads ${JSON.stringify(st.empty)}`);
+    }
+    if (measured === 0) console.log("⏭ every state bucket has rows on the newest page — nothing to measure on this database");
     await p.close(); await c.close();
   }
 
@@ -533,6 +909,165 @@ try {
     // HIGH, so this is the direction that matters.
     ok(bills.every((b) => Number.isFinite(b.amount) && b.amount >= 0 && b.amount >= b.paid - 0.01),
       "12 · every bill's total is a real number and at least what was collected on it");
+
+    // ── 17 · THE LEDGER SHOWS THE INSTANT IT SORTS BY ─────────────────────────────────────────
+    // The endpoint orders sessions by `created_at` and pages with a `created_at` cursor, but the
+    // collapsed row used to print `at` (= closed_at ?? created_at). A bill opened yesterday and
+    // settled today therefore sat in the list by its OPENING time while displaying its SETTLING
+    // time — so reading down the ledger you met "2 days ago" above "1 day ago". Measured on a
+    // 192-row page when this was found: 29 rows out of order, 4 of them visibly so.
+    //
+    // Two things are asserted, because either one alone can pass while the screen is wrong:
+    //   a) the row carries `createdAt` at all — the field the fix added, and the one it must show;
+    //   b) the sequence of those instants really is newest-first, end to end.
+    ok(bills.length > 0 && bills.every((b) => b.createdAt !== undefined),
+      "17 · every bill row carries the instant the ledger is ordered by");
+    let outOfOrder = 0;
+    for (let i = 1; i < bills.length; i++) {
+      const prev = Date.parse(bills[i - 1].createdAt ?? bills[i - 1].at);
+      const cur = Date.parse(bills[i].createdAt ?? bills[i].at);
+      if (Number.isFinite(prev) && Number.isFinite(cur) && prev < cur - 1000) outOfOrder++;
+    }
+    ok(outOfOrder === 0, `17 · the ledger's own times run newest-first, with no older bill above a newer one (${outOfOrder} out of order of ${Math.max(0, bills.length - 1)})`);
+
+    // And the SCREEN must print that instant, not the other one. Read from the rendered row rather
+    // than from the payload, because the whole fault was a screen showing a different field.
+    {
+      const c17 = await ctx(1280, 900, 1, "dark");
+      const pg = await c17.newPage();
+      await pg.goto(BASE + "/aevinite/bill-audit", { waitUntil: "domcontentloaded" });
+      await settle(pg);
+      const whens = await pg.$$eval(".c-when", (els) => els.map((e) => e.getAttribute("title") || ""));
+      await c17.close();
+      const titled = whens.filter((t) => t.trim());
+      ok(titled.length > 0 && titled.every((t) => /^Opened /.test(t)),
+        `17 · and each row's time says which moment it is, in IST, on hover (${titled.length} rows)`);
+    }
+
+    // ── 18 · A NUMBER NOBODY KNOWS IS NEVER PRINTED AS A CONFIDENT ZERO ───────────────────────
+    // Revenue's `money()` was `Number(n) || 0`, so an absent figure rendered "₹0" — "you collected
+    // nothing" — while the count tile beside it honestly rendered "…" for the same absence. Bills'
+    // Deleted tile did the same with `counts.deleted || 0`, and that one is a PLATFORM-WIDE,
+    // all-time claim on the screen whose whole job is proving no sale went missing.
+    //
+    // /api/admin/revenue already refuses to send a partial payload for precisely this reason, so
+    // nobody has seen it in production — this is the screen being made to agree with the decision
+    // its own route had already taken. Driven by handing each screen a reply with the fields
+    // missing, which is the only way to reach it.
+    for (const [name, path, apiGlob, sel18] of [
+      // Revenue: the five headline money/count tiles, plus the four status figures.
+      ["Revenue", "/aevinite/revenue", "**/api/admin/revenue*", ".rev-strip .cell .v"],
+      // Bills: ONLY the Deleted tile — the one that speaks for all time rather than for this page.
+      ["Bills", "/aevinite/bill-audit", "**/api/admin/bills*", ".blz-stat:has-text('DELETED') .fit-num"],
+    ]) {
+      const c18 = await ctx(1280, 900, 1, "dark");
+      const p18 = await c18.newPage();
+      await p18.route(apiGlob, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+      await p18.goto(BASE + path, { waitUntil: "domcontentloaded" });
+      await settle(p18);
+      // Read only the figures that make a claim BEYOND the page in front of you. Bills' first three
+      // tiles say "on this page" in their own subtitle, so 0 on an empty page is the truth and must
+      // NOT be flagged; the Deleted tile says "every one, all time", which is the platform-wide
+      // claim that must never be guessed.
+      const tiles = await p18.$$eval(sel18, (els) => els.map((e) => e.textContent.trim()).filter((t) => t.length && t.length < 24));
+      await c18.close();
+      const zeros = tiles.filter((t) => t === "₹0" || t === "0");
+      ok(tiles.length > 0 && zeros.length === 0,
+        `18 · ${name} · with the figures missing, no all-time number claims a confident zero (${tiles.length} read, ${zeros.length} zero${zeros.length === 1 ? "" : "s"})`);
+      ok(tiles.length > 0 && tiles.every((t) => t === "\u2026" || t === "—"),
+        `18 · ${name} · every one of them says the number is not known instead (${tiles.join(" ")})`);
+    }
+
+    // ── 19 · EVERY BOX YOU CAN TYPE IN OR CHOOSE FROM IS NAMED ────────────────────────────────
+    // The restaurant picker on Bills and on the Change log carried no label of any kind — no
+    // aria-label, no wrapping <label>, no label[for] — so a screen reader announced nothing but
+    // "combo box" and the selected value. Every OTHER control on both screens was already named
+    // (the Find box has an aria-label, the two date boxes are wrapped in labels, the page-jump has
+    // a label[for]), and the sibling picker on Customers has carried aria-label="Restaurant" all
+    // along, so this is one wording across the console rather than a new one.
+    for (const [name, path] of [["Customers", "/aevinite/customers"], ["Bills", "/aevinite/bill-audit"], ["Change log", "/aevinite/bill-audit/changes"]]) {
+      const c19 = await ctx(1280, 900, 1, "dark");
+      const p19 = await c19.newPage();
+      await p19.goto(BASE + path, { waitUntil: "domcontentloaded" });
+      await settle(p19);
+      const unnamed = await p19.evaluate(() => {
+        const main = document.querySelector(".adm-main") || document.body;
+        return [...main.querySelectorAll("input, select, textarea")].filter((el) => !(
+          el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder")
+          || (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest("label")
+        )).map((el) => el.tagName + (el.type ? ":" + el.type : ""));
+      });
+      await c19.close();
+      ok(unnamed.length === 0, `19 · ${name} · every box you can type in or choose from is named${unnamed.length ? " — unnamed: " + unnamed.join(", ") : ""}`);
+    }
+
+    // ── 20 · "GOING QUIET" — A RESTAURANT COMPARED WITH ITS OWN PAST ──────────────────────────
+    // The gap all four sweep rounds recorded: the busiest list is a CROSS-SECTION (every restaurant
+    // against the others in one window) and could never show that a restaurant used to do 40 orders
+    // a day and now does 3 — the shape of one about to stop paying. Built 2026-09-01 on his yes.
+    {
+      const q7 = await get("/api/admin/analytics?range=7d");
+      const q30 = await get("/api/admin/analytics?range=30d");
+      const qToday = await get("/api/admin/analytics?range=today");
+
+      ok(Array.isArray(q7?.quiet) && Array.isArray(q30?.quiet),
+        "20 · a multi-day window answers the going-quiet question");
+      // null, NOT [] — the card has to tell "nobody is going quiet" apart from "I cannot answer
+      // that for one day". Comparing today against yesterday is noise, and a warning that cries
+      // wolf is one nobody reads.
+      ok(qToday?.quiet === null,
+        "20 · a one-day window REFUSES the question rather than answering it with noise");
+      ok(q7?.quietWindowDays === 7 && q30?.quietWindowDays === 30 && qToday?.quietWindowDays === null,
+        `20 · each window compares against its own length (${q7?.quietWindowDays}/${q30?.quietWindowDays}/${qToday?.quietWindowDays})`);
+      ok(Number.isFinite(q30?.quietMinPerDay) && Number.isFinite(q30?.quietDropPct),
+        "20 · the two thresholds are sent to the screen, so it can say them out loud");
+
+      const rows = q30?.quiet || [];
+      // Both thresholds actually applied — a list that flags everything is the same as no list.
+      ok(rows.every((r) => r.before / 30 >= q30.quietMinPerDay),
+        "20 · nothing is flagged that was never busy in the first place");
+      ok(rows.every((r) => r.silent || r.dropPct >= q30.quietDropPct),
+        "20 · nothing is flagged that has not actually fallen far");
+      // 100% MUST MEAN ZERO. 2,115 orders down to 1 is 99.95%, and Math.round printed "down 100%"
+      // beside rows that genuinely had none — the same "a number saying more than it knows" fault
+      // as items 17-19, caught on the screenshot before this shipped.
+      ok(rows.every((r) => r.dropPct < 100 || r.now === 0),
+        "20 · \"down 100%\" can only ever mean no orders at all");
+      ok(rows.every((r) => r.silent === (r.now === 0 && r.before > 0)),
+        "20 · the gone-silent flag means exactly that, and nothing else");
+      ok(rows.every((r, i) => i === 0 || Number(rows[i - 1].silent) >= Number(r.silent)),
+        "20 · the ones that went silent are listed first");
+      ok(rows.every((r) => r.name && r.slug && r.id),
+        "20 · every flagged restaurant is named and can be opened from the row");
+
+      // AND IT IS ON THE SCREEN, AT PHONE WIDTH, WITH NOTHING CLIPPED. The first build measured
+      // "not clipped" and was badly broken at 390px: the name column had collapsed to nothing and
+      // both buttons sat off the right edge. `.adm-logwrap` scrolls sideways, so a card-level
+      // overflow check cannot see a row clipped INSIDE its own wrapper — every CELL is measured
+      // against the viewport instead.
+      for (const [w, h, tag] of [[1280, 1000, "desktop"], [390, 900, "phone"]]) {
+        const c20 = await ctx(w, h, w === 390 ? 3 : 1, "dark");
+        const p20 = await c20.newPage();
+        await p20.goto(BASE + "/aevinite/analytics?range=30d", { waitUntil: "domcontentloaded" });
+        await settle(p20);
+        const r20 = await p20.evaluate(() => {
+          document.querySelectorAll("nextjs-portal").forEach((e) => e.remove());
+          const card = [...document.querySelectorAll(".adm-card")].find((c) => /Going quiet/.test(c.querySelector("h2")?.textContent || ""));
+          if (!card) return { found: false };
+          const cells = [...card.querySelectorAll(".qt-row:not(.head) > *")];
+          const bad = cells.filter((e) => { const b = e.getBoundingClientRect();
+            return b.right > window.innerWidth + 1 || b.left < -1 || b.width < 1 || b.height < 1; });
+          const names = [...card.querySelectorAll(".qt-row:not(.head) > .q-name")].map((e) => e.textContent.trim());
+          return { found: true, rows: names.length, blank: names.filter((n) => !n).length, bad: bad.length, cells: cells.length };
+        });
+        await c20.close();
+        ok(r20.found, `20 · the Going quiet card is on the Analytics screen (${tag})`);
+        ok(r20.found && r20.rows > 0 && r20.blank === 0,
+          `20 · every row on it shows the restaurant's name (${tag}: ${r20.rows} rows, ${r20.blank} blank)`);
+        ok(r20.found && r20.bad === 0,
+          `20 · and nothing on it is off the screen or collapsed to nothing (${tag}: ${r20.bad} of ${r20.cells} cells)`);
+      }
+    }
   }
 
 } finally {

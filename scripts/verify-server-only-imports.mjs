@@ -97,4 +97,13 @@ its own dependency-free module (lib/partialRead.ts is the worked example) and im
 client, or mark the consumer as a server component.\n`);
   process.exit(1);
 }
+// NOTHING TO CHECK IS A FAILURE, NOT A PASS (sweep #7 / T28, 2026-08-27). This guard finds its own
+// subjects by walking a folder. Rename the folder, change the naming convention, or run it from the
+// wrong place and the walk returns an EMPTY list — every check then passes because none of them ran,
+// and the line above says OK. That is the exact shape verify:cache died in for a month. The floor is
+// deliberately well below today's real count, so it never has to be edited when the app grows.
+if (clientFiles.length < 40) {
+  console.log(`\n✗ verify:server-only found only ${clientFiles.length} client file(s) — this app has over a hundred. Nothing was checked.`);
+  process.exit(1);
+}
 console.log(`✓ ${clientFiles.length} client file(s) checked — none reaches ${SERVER_ONLY.join(", ")}`);

@@ -26,7 +26,13 @@ const money = (n: number, currency = "INR") => {
   try { return new Intl.NumberFormat("en-IN", { style: "currency", currency: c, maximumFractionDigits: 0 }).format(Number(n) || 0); }
   catch { return `${c} ${Math.round(Number(n) || 0).toLocaleString("en-IN")}`; }
 };
-const today = () => new Date().toISOString().slice(0, 10);
+// THE IST CALENDAR DAY, the same one the server counts Due-soon and Overdue on (T19 sweep #7,
+// 2026-09-01). This was `new Date().toISOString().slice(0, 10)` — the UTC date — while
+// /api/admin/billing works the two summary cards out on the Indian calendar. Between 00:00 and 05:30
+// IST the two disagreed: the card could say "1 overdue" while the row it means still read as due, or
+// the other way round. `next_due_on` is a plain date typed in IST, so IST is the only calendar that
+// can answer "is that date past?".
+const today = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
 export default function AdminBilling() {
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -54,11 +60,27 @@ export default function AdminBilling() {
   // had its payments disappear from the admin's own income figure with nothing saying so. Same
   // rows the table already has, grouped by currency, so the tile can name what it counted and what
   // it did not.
-  const otherCollected = (rows || []).reduce((m, r) => {
-    const c = (r.currency || "INR").toUpperCase();
-    if (c !== "INR" && r.paidThisYear > 0) m.set(c, (m.get(c) || 0) + r.paidThisYear);
+  //
+  // ── AND A CODE STORED IN LOWER CASE FELL THROUGH BOTH HALVES (T16 sweep #7, 2026-08-27) ──────
+  // The Currency box below is free text and the save route stores whatever is typed, verbatim. So
+  // "inr" is a real possibility, and it used to vanish twice over:
+  //   · the SERVER's total filters `(r.currency || "INR") === "INR"` — case-sensitive, so "inr"
+  //     was not counted; and
+  //   · this line UPPER-CASED before asking "is it something else?", so "inr" was not listed as
+  //     excluded either.
+  // The row itself still printed ₹ (Intl accepts a lower-case code), so the screen showed the
+  // money on the row and silently left it out of the platform's own income figure, with nothing
+  // saying so. One grouping pass now produces BOTH numbers from the rows already on screen, on a
+  // trimmed upper-cased code — so the tile and the table can never disagree, and a legacy row
+  // that is already stored wrong is counted correctly without anyone editing it.
+  const canon = (c: string | null | undefined) => (c || "INR").trim().toUpperCase() || "INR";
+  const byCurrency = (rows || []).reduce((m, r) => {
+    const c = canon(r.currency);
+    if (r.paidThisYear > 0) m.set(c, (m.get(c) || 0) + r.paidThisYear);
     return m;
   }, new Map<string, number>());
+  const rupeesCollected = Math.round((byCurrency.get("INR") || 0) * 100) / 100;
+  const otherCollected = new Map([...byCurrency].filter(([c]) => c !== "INR"));
 
   const needle = q.trim().toLowerCase();
   const filtered = (rows || []).filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle));
@@ -82,7 +104,10 @@ export default function AdminBilling() {
         <div className="adm-stat"><div className="k">Paused / cancelled</div><div className="v">{(summary?.statusCounts.paused || 0) + (summary?.statusCounts.cancelled || 0)}</div></div>
         <div className="adm-stat" title={otherCollected.size ? "Only the restaurants billed in rupees are added up - mixing currencies would be a made-up total." : undefined}>
           <div className="k">Collected this year{otherCollected.size ? " · rupees" : ""}</div>
-          <div className="v">{summary ? money(summary.totalCollectedThisYear, "INR") : "…"}</div>
+          {/* Summed from the SAME rows the table below shows, so the tile and the table can never
+              disagree — and a currency stored as "inr" is counted rather than dropped (see the
+              note on `canon` above). `rows === null` is the only "still loading" state. */}
+          <div className="v">{rows ? money(rupeesCollected, "INR") : "…"}</div>
           {otherCollected.size > 0 && (
             <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 3, lineHeight: 1.4 }}>
               not counted above: {[...otherCollected].map(([c, n]) => money(n, c)).join(" · ")}
@@ -160,6 +185,11 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
   const toast = useToast();
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  // A refusal on a payment ROW belongs beside the payment rows (T16 sweep #7, 2026-08-27).
+  // deletePayment used to write into payMsg, which is rendered next to the "Add payment" button
+  // one section up — on a restaurant with a year of history that message can be well off-screen,
+  // so pressing the bin looked like it did nothing.
+  const [histMsg, setHistMsg] = useState<string | null>(null);
   // Synchronous guard so a double-click can't record the same payment twice (audit 2026-07-07).
   const payingRef = useRef(false);
   // Stable per-payment action id → a lost-response RETRY (same id) is deduped server-side so
@@ -193,7 +223,12 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
     setSaving(true); setMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-        action: "set_plan", restaurant_id: row.id, plan: plan || null, status, amount: amount === "" ? null : amount, currency, cycle,
+        // The currency goes up TRIMMED AND UPPER-CASED (T16 sweep #7, 2026-08-27): this is a free
+        // text box, the route stores what it is given, and every comparison downstream — the
+        // platform's "Collected this year" among them — matches on "INR" exactly. Normalising here
+        // is what stops a new row being created in a shape that reads as a different currency.
+        action: "set_plan", restaurant_id: row.id, plan: plan || null, status, amount: amount === "" ? null : amount,
+        currency: currency.trim().toUpperCase() || "INR", cycle,
         started_on: startedOn || null, next_due_on: nextDueOn || null, notes: notes || null,
       }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
@@ -202,7 +237,11 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   };
 
   const addPayment = async () => {
-    const amt = Number(String(payAmount).replace(/[^0-9.-]/g, "")); // tolerate "12,000" / stray symbols (audit 2026-07-08)
+    // Same rule as the route's parseAmount, and for the same reason (T16 sweep #7, 2026-08-29):
+    // stripping every non-digit turned "x1y2" into 12 and recorded a ₹12 payment. Strip only what
+    // is legitimately typed AROUND a number, then require what is left to BE one.
+    const cleaned = String(payAmount).trim().replace(/[\s,]/g, "").replace(/^[₹$€£]/, "");
+    const amt = /^-?\d+(\.\d+)?$/.test(cleaned) ? Number(cleaned) : NaN;
     if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0 (e.g. 12000)."); return; }
     if (!payDate) { setPayMsg("Pick a payment date."); return; }
     if (payingRef.current) return;
@@ -216,7 +255,13 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't record payment.");
       payActionIdRef.current = null; // committed → the next payment gets a fresh id
       setPayAmount(""); setPayMethod(""); setPayLabel(""); setPayNote("");
-      setPayMsg("Payment recorded.");
+      // THE SERVER'S HALF-DONE ANSWER IS SHOWN, NOT SWALLOWED (T19 sweep #7, 2026-09-01).
+      // "Also move the next due date" is a SECOND write, and /api/admin/billing has answered
+      // { warning } since sweep #6 for the case where the payment saved and the date did not:
+      // the restaurant then reads as due — or overdue — the moment after being paid, and the only
+      // way to find out was to notice. This screen threw that sentence away and said "Payment
+      // recorded." either way. Now it says which of the two happened.
+      setPayMsg(typeof d?.warning === "string" && d.warning ? d.warning : "Payment recorded.");
       // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
       await loadHistory(); onChanged();
     } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); } finally { setPayBusy(false); payingRef.current = false; }
@@ -224,11 +269,13 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
 
   const deletePayment = async (id: string) => {
     if (!confirm("Delete this payment record?")) return;
+    setHistMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_payment", payment_id: id }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't delete.");
       await loadHistory(); onChanged();
-    } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); }
+      setHistMsg("Payment record deleted.");
+    } catch (e) { setHistMsg("Couldn't delete that payment — " + (e instanceof Error ? e.message : String(e))); }
   };
 
   const inputStyle: React.CSSProperties = { padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, width: "100%" };
@@ -267,7 +314,12 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
                     <option value="yearly">Yearly</option><option value="monthly">Monthly</option>
                   </select>
                 </label>
-                <label style={{ fontSize: 12 }}>Currency<input value={currency} onChange={(e) => setCurrency(e.target.value)} style={{ ...inputStyle, marginTop: 4 }} /></label>
+                {/* Settled on blur, so the box shows the code that will really be stored — a
+                    control must never sit there showing something the database is not on. */}
+                <label style={{ fontSize: 12 }}>Currency<input value={currency} onChange={(e) => setCurrency(e.target.value)}
+                  onBlur={() => setCurrency((c) => c.trim().toUpperCase() || "INR")}
+                  placeholder="INR" spellCheck={false} autoCapitalize="characters"
+                  style={{ ...inputStyle, marginTop: 4 }} /></label>
                 <label style={{ fontSize: 12 }}>Started on<input type="date" value={startedOn} onChange={(e) => setStartedOn(e.target.value)} style={{ ...inputStyle, marginTop: 4 }} /></label>
                 <label style={{ fontSize: 12 }}>Next due on<input type="date" value={nextDueOn} onChange={(e) => setNextDueOn(e.target.value)} style={{ ...inputStyle, marginTop: 4 }} /></label>
                 <label style={{ fontSize: 12, gridColumn: "1 / -1" }}>Notes<textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, marginTop: 4, resize: "vertical" }} /></label>
@@ -293,12 +345,30 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
               </label>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                 <button className="adm-btn primary" disabled={payBusy} onClick={addPayment}>{payBusy ? "Recording…" : "Add payment"}</button>
-                {payMsg && <span className="adm-muted" style={{ fontSize: 12 }}>{payMsg}</span>}
+                {payMsg && (
+                  // A warning is not an aside: the half-done case ("the payment was saved, but the
+                  // next-due date could not be moved") has to read as something to act on, while
+                  // "Payment recorded." stays the quiet confirmation it was.
+                  <span
+                    className={/could not|couldn't|not be/i.test(payMsg) ? undefined : "adm-muted"}
+                    style={/could not|couldn't|not be/i.test(payMsg)
+                      ? { fontSize: 12, color: "var(--adm-danger)", fontWeight: 600 }
+                      : { fontSize: 12 }}
+                  >{payMsg}</span>
+                )}
               </div>
             </div>
 
             <div style={{ borderTop: "var(--border)", paddingTop: 16 }}>
               <h2 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 800 }}>Payment history</h2>
+              {histMsg && (
+                <div role="status" style={{ margin: "0 0 10px", padding: "7px 11px", borderRadius: 8, fontSize: 12.5,
+                  color: /^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)",
+                  border: `1px solid color-mix(in srgb, ${/^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)"} 45%, transparent)`,
+                  background: `color-mix(in srgb, ${/^Couldn/.test(histMsg) ? "var(--adm-danger)" : "var(--adm-ok, #16a34a)"} 10%, transparent)` }}>
+                  {histMsg}
+                </div>
+              )}
               {payments === null ? (
                 <SkelList rows={4} label="Loading" />
               ) : payments.length === 0 ? (

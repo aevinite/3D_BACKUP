@@ -14,6 +14,7 @@
 // /login. A manager granted "manage_staff" manages staff from the EDITOR panel, which
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { asSuffix, asValue } from "@/lib/ownerPin";
 
 type Perms = Record<string, boolean>;
@@ -54,6 +55,7 @@ const ROLES = ["manager", "kitchen", "tablet"];
 const money = (n: number | null | undefined) => "\u20b9" + Math.round(Number(n || 0)).toLocaleString("en-IN");
 
 export default function OwnerStaffPage() {
+  const router = useRouter();
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [actor, setActor] = useState<string>("");
@@ -69,6 +71,22 @@ export default function OwnerStaffPage() {
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [notEnabled, setNotEnabled] = useState<string | null>(null); // calm "section off" state, not an error
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31, extended 2026-09-01) ────
+  // *"it will not even show that option… it will not only show 'unable to access', that there is a
+  //  feature which contains inventory."* That is R36 from the page side: *"owner can't know which
+  // option are not given to them, only admin should know that."*
+  // The sidebar already hides a withheld section from a real owner (`OwnerShell` →
+  // `if (!on && (!adminViewing || simulated)) return null`). This page did not — reached by a typed
+  // URL or an old bookmark it printed "Staff management isn't enabled for your
+  // restaurant — contact Aevidine", which names a
+  // section he has not been given and tells him who to ask for it. The card is DELETED, not
+  // restyled (the standing "a new way replaces the old one" rule), and he goes back to his
+  // dashboard. `replace`, not `push`, so Back does not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner, so the X-ray
+  // view still opens every section — its nav says so outright.
+  // Done on his say-so of 2026-09-01 ("okay, give me permission") after T14 shipped the same change
+  // on Customers, Feedback & complaints, Inventory and Manager mode. Six screens, one rule.
+  useEffect(() => { if (notEnabled) router.replace("/owner"); }, [notEnabled, router]);
   // What the owner typed into "Find someone" — a view filter over the list already loaded, never a query.
   const [q, setQ] = useState("");
   const pwRef = useRef<HTMLInputElement>(null);
@@ -131,11 +149,22 @@ export default function OwnerStaffPage() {
   // ONE door for every message on this page, so the heading always matches the reason.
   // `say` is for something we refuse ourselves (a name too short); `fail` is for a thrown error,
   // which knows its own kind — a network throw has no kind at all, and that really is a fault.
-  const say = useCallback((msg: string, kind: ErrKind = "refused") => { setErrKind(kind); setErr(msg); }, []);
+  // THE SAME REFUSAL, A SECOND TIME, WAS NOT BROUGHT BACK ONTO THE SCREEN (T13 sweep, 2026-08-27 —
+  // measured). `setErr("…taken at this restaurant…")` with the string already in state is a no-op:
+  // React sees the same value, does not re-render, and the scroll-into-view effect below — which
+  // depends on `err` — never runs. On a 360×780 phone the first refused Add scrolled the banner to
+  // y = 194 (visible); tapping Add again with the same name left it at y = -1190, off the top of the
+  // screen, with the owner's typing still in the boxes and nothing appearing to happen. Exactly the
+  // fault that effect was added to fix, for every attempt after the first.
+  // So the message carries a counter that always moves, and the effect watches that too. A tap must
+  // never vanish in silence, and "you already know" is not an answer to the second tap.
+  const [errAt, setErrAt] = useState(0);
+  const say = useCallback((msg: string, kind: ErrKind = "refused") => { setErrKind(kind); setErr(msg); setErrAt((n) => n + 1); }, []);
   const fail = useCallback((e: unknown) => {
     const kind: ErrKind = e instanceof CallError ? e.kind : "fault";
     setErrKind(kind);
     setErr(e instanceof Error ? e.message : String(e));
+    setErrAt((n) => n + 1);
   }, []);
 
   const load = useCallback(async () => {
@@ -172,10 +201,12 @@ export default function OwnerStaffPage() {
   // absolutely nothing happen: their typing still in the boxes, no message anywhere on screen.
   // "A tap must never vanish in silence" (CLAUDE.md) — a refusal the person cannot see is the
   // same as no refusal at all.
+  // `errAt` is in the dependency list on purpose — see the note on it above. Without it, only the
+  // FIRST of a run of identical refusals reaches the screen.
   useEffect(() => {
     if (!err) return;
     errRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [err]);
+  }, [err, errAt]);
 
   const canEditPowers = actor === "owner" || actor === "admin";
 
@@ -392,7 +423,8 @@ export default function OwnerStaffPage() {
       )}
 
       {loading && <div className="adm-empty">Loading…</div>}
-      {!loading && notEnabled && <div className="adm-card"><div className="adm-empty">{notEnabled}</div></div>}
+      {/* The card that used to say which section he had not been given is gone (R36) — he is
+          on his way back to the dashboard by the time this renders. */}
       {!loading && !notEnabled && restaurants.length === 0 && <div className="adm-empty">No restaurants are assigned to you yet. Ask the admin to assign one.</div>}
 
       {!notEnabled && restaurants.map((r) => {
@@ -541,11 +573,25 @@ export default function OwnerStaffPage() {
 
             {/* ── TEAM tab: the roster ───────────────────────────────────────────── */}
             {tab === "team" && <>
+            {/* A HEADING WITH NOTHING UNDER IT SAYS NOTHING (T13 sweep, 2026-08-27 — read the
+                screenshot). Search for someone who is DISABLED and every match lands in the group
+                below, so this read: "Team", then blank, then "Disabled · 1 — cannot sign in". The
+                person WAS found and the header said "1 of 2 shown", but the first thing the owner's
+                eye meets is their own search under a heading with no one beneath it, which reads as
+                "not found" until they carry on down the card. So when a search has matched only
+                people who cannot sign in, say that in the gap instead of leaving it empty. */}
             <div className="ost-section-t" style={{ marginTop: 16 }}>Team</div>
             <div className="ost-team">
               {team.length === 0 && (
                 <div className="adm-empty" style={{ padding: "10px 0" }}>
                   {needle ? `Nobody here matches “${q.trim()}”.` : "No staff yet — add the first below."}
+                </div>
+              )}
+              {team.length > 0 && working.length === 0 && (
+                <div className="adm-empty" style={{ padding: "10px 0" }}>
+                  {needle
+                    ? `Nobody working matches “${q.trim()}” — the ${disabled.length === 1 ? "match" : "matches"} below cannot sign in.`
+                    : "Nobody here can sign in right now — everyone is disabled, below."}
                 </div>
               )}
               {working.map(personRow)}
@@ -687,9 +733,10 @@ export default function OwnerStaffPage() {
            nobody — which is exactly how dead code survives. If a permission control ever belongs on
            an owner screen again that is a decision, not a restyle: the switches live on
            /aevinite → Access and permissions. Guarded by verify:owner-panel section 11. */
-        /* Reach badges — one letter shows how far a power reaches (M = managers).
-           Accent-tinted when it reaches, muted outline when it doesn't. The letter
-           itself carries the meaning (never colour-only) + a tooltip. */
+        /* (The comment that used to sit here described the reach badges — part of the same
+           Powers-tab block deleted above. It outlived its rules and was left standing over the
+           .ost-tabs rule, so it read as an explanation of the tab strip. Removed 2026-08-27: after
+           deleting a feature, check the tense of every comment left behind, not only the code.) */
         .ost-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: var(--border); }
         .ost-tab { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
         .ost-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }

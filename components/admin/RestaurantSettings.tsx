@@ -50,10 +50,11 @@ const KEYS = [
   "banquet_tax_components", "banquet_paper", "banquet_paper_size", "banquet_paper_top",
   "banquet_paper_bot", "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign",
   "banquet_paper_fill", "floor_per_row", "floor_layout_mode",
-  // WHICH screen prints the kitchen ticket (mig 336). Must be listed here — the Save button builds
-  // its patch from this array, and a field missing from it looks editable and saves nothing (which
-  // is exactly what happened when the banquet card was first added).
-  "kot_print_target",
+  // `kot_print_target` LEFT THIS LIST on 2026-08-28 (mig 369). It was the coarse "which screen
+  // prints the kitchen ticket" answer, it asked the same question as the Kitchen slips route and
+  // could contradict it, and no control on any screen writes it any more. The column is retired,
+  // not dropped, and nothing reads it — so a key here would let a stale screen write a value that
+  // then misleads whoever reads the database next.
 ] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -128,6 +129,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const [err, setErr] = useState<string | null>(null);
   // KOT auto-print (effective state, via the quick-features single source of truth).
   const [kot, setKot] = useState<boolean | null>(null);
+  // The grant, on its own. `kot` is the EFFECTIVE answer (granted AND switched on); this is the first
+  // half, so the card can say which of the two is missing instead of showing one number that seems to
+  // contradict the switch above it.
+  const [kotAllowed, setKotAllowed] = useState<boolean | null>(null);
   const [kotBusy, setKotBusy] = useState(false);
   const [qrBusy, setQrBusy] = useState<string | null>(null);
   // The bill's logo is the restaurant's own uploaded image (Design and styling → Theme and
@@ -168,8 +173,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     // restaurant's settings" with a Retry button — on the screen an admin opens seconds after
     // creating a restaurant. Retrying once, quietly, is what the situation actually needs: the
     // codes exist by then. If the second attempt fails too the card still locks and still says so,
-    // so a real outage is not hidden. The route's insert should become an upsert as well — that is
-    // a one-line change in app/api/admin/restaurants/settings/route.ts and is HANDOFF H3.
+    // so a real outage is not hidden. The route's own half of this SHIPPED (checked 2026-08-27):
+    // app/api/admin/restaurants/settings/route.ts now upserts the missing rows with
+    // `ignoreDuplicates: true` on (restaurant_id, table_number), so the loser of the race is no
+    // longer a 500 at all — handoff H3 is closed. This retry stays as the belt to that braces.
     const fetchOnce = async () => (await fetch(`/api/admin/restaurants/settings?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
     try {
       let j = await fetchOnce();
@@ -185,7 +192,9 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       if (!s.restaurant_name) s.restaurant_name = restaurant.name;
       if (!s.invoice_prefix) s.invoice_prefix = "INV";
       if (!s.bill_footer) s.bill_footer = "Thank you — please visit again";
-      if (!s.tax_label) s.tax_label = "Tax";
+      // NOT PREFILLED (owner, 2026-08-28) — `tax_label` drives the PRINTED bill as well as the
+      // screen, and they have different right defaults ("GST" on paper, "Tax" on screen). Writing
+      // either one in here made the paper print the screen's word. The field shows it as a hint.
       if (!Array.isArray(s.tax_components) || !(s.tax_components as TaxComp[]).length) {
         const rate = Number(s.tax_rate);
         const pct = (Number.isFinite(rate) && rate > 0 && rate <= 1 ? rate : 0.05) * 100;
@@ -202,7 +211,13 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   useEffect(() => {
     fetch(`/api/admin/restaurants/quick-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((j) => { if (typeof j.auto_print_kot === "boolean") setKot(j.auto_print_kot); })
+      .then((j) => {
+        // Both halves, so the card can name the missing one. The effective value is kept for the
+        // places that only care whether paper is coming out at all.
+        if (typeof j.auto_print_kot_on === "boolean") setKot(j.auto_print_kot_on);
+        else if (typeof j.auto_print_kot === "boolean") setKot(j.auto_print_kot);
+        if (typeof j.auto_print_kot_allowed === "boolean") setKotAllowed(j.auto_print_kot_allowed);
+      })
       .catch(() => {});
   }, [restaurant.id]);
 
@@ -378,14 +393,15 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const toggleKot = async () => {
     if (kot === null || kotBusy) return;
     const next = !kot;
-    setKotBusy(true); setKot(next); // optimistic
+    setKotBusy(true); setKot(next); if (next) setKotAllowed(true); // optimistic — ON grants as well
     try {
       const r = await fetch("/api/admin/restaurants/quick-features", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ restaurant_id: restaurant.id, feature: "auto_print_kot", on: next }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setKot(!!d.auto_print_kot);
+      setKot(!!d.auto_print_kot_on);
+      setKotAllowed(!!d.auto_print_kot_allowed);
     } catch (e) { setKot(!next); setErr(e instanceof Error ? e.message : String(e)); }
     finally { setKotBusy(false); }
   };
@@ -544,9 +560,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       const QR = (await import("qrcode")).default;
       const count = savedCount;
       const cells: string[] = [];
+      // A TABLE WITH NO CODE MUST NOT VANISH FROM THE SHEET IN SILENCE (T16 sweep #7, 2026-08-27).
+      // The loop skipped it and printed a sheet one QR short, which is only noticed at the table
+      // when a diner cannot scan. Codes are minted on load, so this is rare — but "rare and silent"
+      // is exactly the shape that costs a service. Named below.
+      const missing: number[] = [];
       for (let t = 1; t <= count; t++) {
         const code = codes[String(t)];
-        if (!code) continue;
+        if (!code) { missing.push(t); continue; }
         const dataUrl = await QR.toDataURL(qrUrl(code), { width: 480, margin: 2 });
         cells.push(`<div class="cell"><img src="${dataUrl}" alt=""><div class="lbl">${tableLabel(t).replace(/</g, "&lt;")}</div><div class="code">/q/${code}</div></div>`);
       }
@@ -561,6 +582,9 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         @media print{.cell{border-color:#ddd}}</style></head>
         <body onload="setTimeout(function(){window.print()},150)"><div class="grid">${cells.join("")}</div></body></html>`);
       w.document.close();
+      if (missing.length) {
+        setErr(`${missing.length} table${missing.length === 1 ? "" : "s"} had no code yet and ${missing.length === 1 ? "is" : "are"} not on the sheet: ${missing.map((t) => tableLabel(t)).join(", ")}. Reopen this card to mint them, then print again.`);
+      }
     } catch { setErr("Couldn't build the print sheet."); }
     finally { setQrBusy(null); }
   };
@@ -723,6 +747,20 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const seats = (draft.table_seats || {}) as Record<string, number | string>;
   const names = (draft.table_names || {}) as Record<string, string>;
   const setSeat = (t: number, v: string) => set("table_seats", { ...seats, [String(t)]: v });
+  // ── AN EMPTY SEATS BOX MEANS "USE THE DEFAULT", NOT "ONE SEAT" (T16 sweep #7, 2026-08-27) ─────
+  // The card promises "how many people can sit there (nothing set = 4)". Clearing the box left an
+  // empty STRING in table_seats, and the save route does `Math.round(Number(v))` → Number("") is
+  // 0 → clamped into 1..30 → the table was stored with ONE seat. The floor and the tablet then
+  // drew "1" beside the chair, on a table the admin had just tried to reset. Dropping the key on
+  // blur is what makes the promise true: no key ⇒ the readers fall back to their own default.
+  // On blur, not on change, so the box can be emptied and retyped without it refilling under the
+  // cursor — the same rule the number fields above follow.
+  const settleSeat = (t: number, v: string) => {
+    if (v.trim() !== "") return;
+    const next = { ...seats };
+    delete next[String(t)];
+    set("table_seats", next);
+  };
   const setName = (t: number, v: string) => set("table_names", { ...names, [String(t)]: v });
 
   if (loadErr) {
@@ -1052,45 +1090,75 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       {/* ═══ KOT PRINTING — same-to-same with the manager's Kitchen section ═══ */}
       {show("kitchen") && (
       <div id="det-kitchen" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>🖨 KOT printing</h2>
-        <p className="hint">
-          This is for the <b>kitchen</b>, not the bill. When ON, the kitchen screen auto-prints a
-          <b> KOT (kitchen order ticket)</b> — the dishes to make, no prices — the moment a new order arrives,
-          so cooks never have to click. Set up the kitchen device&apos;s printer first (kiosk-printing Chrome for
-          silent prints); leave OFF until the printer is ready. One admin switch — it grants and turns on
-          auto-print in one go (the same value Main features &amp; Access show).
+        <h2><i className="fas fa-print" aria-hidden="true" style={{ marginRight: 8, opacity: .8 }} />Kitchen ticket printing</h2>
+        {/* ═══ TWO FACTS, NOT TWO SWITCHES (owner, 2026-08-26, with a screenshot: "why this ui looks
+            very shit… make both the option looks on the both mode are clearly visible") ═══
+            This card used to carry a SECOND toggle identical to the one on the Access row above it —
+            and the two write different things: the row above grants it (auto_print_kot_allowed), this
+            one grants AND switches on (both columns) while DISPLAYING the AND of the two. So granting
+            it upstairs showed ON above and OFF here, which reads as one switch arguing with itself,
+            and nothing printed. Both facts are now shown as facts, with the single action that fixes a
+            mismatch — and the switch itself stays in ONE place, upstairs. */}
+        <p className="hint" style={{ marginBottom: 12 }}>
+          When both of these are yes, a kitchen ticket prints itself the moment an order arrives — the
+          dishes to make, no prices — so nobody has to tap print.
         </p>
-        <button type="button" className={`adm-toggle ${kot ? "on" : "off"}`} disabled={kot === null || kotBusy} onClick={toggleKot}
-          title={kot ? "On — tap to turn off" : "Off — tap to turn on"}>
-          <span>Auto-print the KOT when a new order arrives</span><span className="pill">{kot === null ? "…" : kot ? "ON" : "OFF"}</span>
-        </button>
-        <div style={{ marginTop: 12 }}>
-          <button className="adm-btn" onClick={previewKot}>🖨 Preview a sample KOT</button>
-          <p className="hint" style={{ margin: "8px 0 0" }}>Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
+        <div className="adm-state">
+          <div className={`adm-state-row ${kotAllowed ? "yes" : "no"}`}>
+            <span className="adm-state-dot" aria-hidden="true" />
+            <span className="who"><b>Aevidine allows it</b> — the switch at the top of this row</span>
+            <span className="adm-state-val">{kotAllowed === null ? "…" : kotAllowed ? "YES" : "NO"}</span>
+          </div>
+          <div className={`adm-state-row ${kot ? "yes" : "no"}`}>
+            <span className="adm-state-dot" aria-hidden="true" />
+            <span className="who"><b>The restaurant has it switched on</b> — their own pause button</span>
+            <span className="adm-state-val">{kot === null ? "…" : kot ? "YES" : "NO"}</span>
+            {kot === false ? (
+              <button type="button" className="adm-btn primary" style={{ fontSize: 12 }} disabled={kotBusy} onClick={toggleKot}>
+                Switch it on
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {kotAllowed && kot === false ? (
+          <p className="hint" style={{ margin: "0 0 12px", color: "var(--adm-warn, #f5a524)" }}>
+            <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ marginRight: 6 }} />
+            Allowed, but switched off — <b>nothing is printing by itself right now.</b>
+          </p>
+        ) : null}
+        <details className="adm-more">
+          <summary>What a kitchen ticket is, and what to set up first</summary>
+          <div>
+            A KOT is the kitchen&apos;s own slip: the dishes to make, no prices. Set the printer up on the
+            machine that will print before switching this on — a printer that is not ready simply means
+            tickets wait in the queue, which is safe but invisible to the kitchen. Where the paper comes
+            out is the Printing board, not here.
+          </div>
+        </details>
+        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="adm-btn" onClick={previewKot}>
+            <i className="fas fa-eye" aria-hidden="true" style={{ marginRight: 6 }} />See a sample ticket
+          </button>
+          <a className="adm-btn" href={`/aevinite/printing?rid=${encodeURIComponent(restaurant.id)}`}>
+            <i className="fas fa-print" aria-hidden="true" style={{ marginRight: 6 }} />Choose the printer
+          </a>
         </div>
 
-        {/* ═══ WHICH SCREEN PRINTS (mig 336) ═══
-            The owner's ask of 2026-08-17: the kitchen has no room for a PC, the printer lives at the
-            counter, and the staff need the MANAGER panel on that screen for billing — so the counter
-            screen has to be allowed to print. It is set HERE and not in the manager panel because
-            that panel's Kitchen-printing section is hidden from everyone by his own 2026-07-31
-            decision ("there shouldn't be grayed out option also"). A counter device also confirms
-            once on its own floor screen, so a manager's PHONE can never claim a ticket. */}
+        {/* ═══ WHERE THE PAPER COMES OUT — ONE BOARD, NOT TWO (2026-08-26) ═══
+            This block used to be three radio cards ("kitchen screen / counter screen / both", mig 336).
+            Since mig 341 the Printing board answers the same question far better — a computer running
+            the helper, or a named panel/person/PC, per kind of paper — and two screens answering one
+            question differently is exactly what the owner asked to end. The radios are gone; the coarse
+            setting still exists underneath for restaurants with no route, and the route now wins when
+            there is one (see the kitchen/manager routes). What is left here is the one line worth
+            knowing, and the door to the board that owns it. */}
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
-          <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>Which screen prints the ticket?</h3>
-          <p className="hint" style={{ margin: "0 0 10px" }}>
-            Only takes effect while auto-print above is ON. A counter screen also has to answer
-            <b> “Yes, print here”</b> once, on its own Tables screen — so a manager&apos;s phone can never
-            take a ticket.
-          </p>
-          {choiceCards("kot_print_target", String(draft.kot_print_target || "kitchen"), [
-            { value: "kitchen", label: "The kitchen screen",
-              ex: "The normal setup: a screen in (or wired to) the kitchen prints every ticket. Nothing else can." },
-            { value: "counter", label: "The counter (manager) screen",
-              ex: "For a kitchen with no computer in it — the printer sits at the counter and the manager screen there prints. The kitchen screen prints nothing." },
-            { value: "both", label: "Both — the counter is the backup",
-              ex: "The kitchen prints as usual, and a counter screen prints anything the kitchen has not printed within 30 seconds. Belt and braces for a flaky kitchen PC." },
-          ])}
+          <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Where the paper comes out</h3>
+          <div className="adm-elsewhere">
+            <span className="lbl">Decided on the</span> <b>Printing</b>
+            <span className="lbl">board: which computer or which person&apos;s screen prints each kind of paper.</span>
+            <a href={`/aevinite/printing?rid=${encodeURIComponent(restaurant.id)}`}>Open Printing →</a>
+          </div>
         </div>
 
         {/* ═══ THE SETUP GUIDE, IN THE APP (owner, 2026-08-18) ═══
@@ -1100,19 +1168,21 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             2026-08-19: the Mac one showed "Apple could not verify… Move to Bin") — the guide now teaches
             the file by hand in three per-OS menus, which no security layer can block. */}
         <div style={{ marginTop: 18, paddingTop: 14, borderTop: "var(--border)" }}>
-          <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>📖 How to set the printer up</h3>
+          <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>
+            <i className="fas fa-book-open" aria-hidden="true" style={{ marginRight: 7, opacity: .8 }} />How to set the printer up
+          </h3>
           <p className="hint" style={{ margin: "0 0 10px" }}>
-            Every step for <b>Windows</b>, a <b>Mac</b> or <b>Linux / a Raspberry Pi</b> — the printer, the paper settings, the one
-            Chrome window that keeps printing when it is minimised or covered, these switches, the test,
-            and what to do when something goes wrong. Opens as its own page and can be saved as a PDF.
-            One menu per operating system, every step by hand with a Copy button on the code — nothing is
-            downloaded, because a downloaded script is blocked by macOS and warned about by Windows.
+            One menu per computer — <b>Windows</b>, <b>Mac</b>, <b>Linux / Raspberry Pi</b> — every step by
+            hand, with a Copy button on the code. Nothing is downloaded, because a downloaded script is
+            blocked by macOS and warned about by Windows. Opens as its own page and saves as a PDF.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Open the setup guide</a>
-            <a className="adm-btn" href="/print-setup.html#windows" target="_blank" rel="noopener">🪟 Windows steps</a>
-            <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">🍎 Mac steps</a>
-            <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">🐧 Linux / Pi steps</a>
+            <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
+              <i className="fas fa-book-open" aria-hidden="true" style={{ marginRight: 6 }} />Open the guide
+            </a>
+            <a className="adm-btn" href="/print-setup.html#windows" target="_blank" rel="noopener">Windows</a>
+            <a className="adm-btn" href="/print-setup.html#mac" target="_blank" rel="noopener">Mac</a>
+            <a className="adm-btn" href="/print-setup.html#linux" target="_blank" rel="noopener">Linux / Pi</a>
           </div>
         </div>
       </div>
@@ -1225,8 +1295,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
                 title='A display name for this table (e.g. "Banquet") — it prints on the bill and the kitchen ticket; the QR code keeps the number'
                 onChange={(e) => setName(t, e.target.value)}
                 style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "5px 8px" }} />
-              <input type="number" min={1} max={30} value={String(seats[String(t)] ?? 4)} title="Seats" disabled={!loadOk || busy}
+              <input type="number" min={1} max={30} value={String(seats[String(t)] ?? 4)}
+                title="Seats — clear it to go back to the default of 4" disabled={!loadOk || busy}
                 onChange={(e) => setSeat(t, e.target.value)}
+                onBlur={(e) => settleSeat(t, e.target.value)}
                 style={{ ...inputStyle, width: 58, padding: "5px 6px" }} />
             </div>
           ))}

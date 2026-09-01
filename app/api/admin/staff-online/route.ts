@@ -10,6 +10,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// Read every row of a one-row-per-restaurant table, past PostgREST's cap — see lib/pageAll.ts.
+import { pageAll } from "@/lib/pageAll";
 
 export const dynamic = "force-dynamic";
 
@@ -29,12 +31,18 @@ export async function GET(req: NextRequest) {
       .gte("last_seen_at", onlineSinceIso)
       .order("last_seen_at", { ascending: false })
       .limit(300),
-    sb.from("restaurants").select("id, name").is("deleted_at", null).order("name"),
+    // Paged: past PostgREST's cap an online staffer's restaurant rendered as null, and the filter
+    // picker below (built from the same rows) lost its entry (T20 sweep #7, 2026-08-27).
+    pageAll<{ id: string; name: string }>("restaurants", (from, to) =>
+      sb.from("restaurants").select("id, name").is("deleted_at", null).order("name").range(from, to)),
   ]);
 
   if (staffQ.error) return adminFail("who is online", staffQ.error, { action: "load" });
 
-  const nameByRid = new Map((restQ.data || []).map((r) => [r.id, r.name]));
+  // The name lookup is not worth refusing the page for — "who is online" is the answer, and a
+  // missing restaurant name renders as null, which the page already handles.
+  if (restQ.error) console.error("[admin/staff-online] restaurant names unread:", (restQ.error as { message?: string })?.message);
+  const nameByRid = new Map((restQ.rows || []).map((r) => [r.id, r.name]));
 
   const staff = (staffQ.data || []).map((u) => ({
     id: u.id,
@@ -49,7 +57,7 @@ export async function GET(req: NextRequest) {
   // Only restaurants that actually HAVE someone online right now populate the filter,
   // so the picker never lists dozens of empty restaurants.
   const liveRids = new Set(staff.map((s) => s.restaurant_id).filter(Boolean));
-  const restaurants = (restQ.data || [])
+  const restaurants = (restQ.rows || [])
     .filter((r) => liveRids.has(r.id))
     .map((r) => ({ id: r.id, name: r.name }));
 

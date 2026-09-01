@@ -5,6 +5,15 @@
 //
 // All reads hit the compute-on-view cached owner APIs (mig 196 + the analytics cache),
 // so even a 7-restaurant gather is fast and egress-cheap.
+// ── EVERY READ HAS A CEILING (owner picked item 18, 2026-08-30) ─────────────────────────────────
+// A statement is assembled from three reads per restaurant, and none of them had an upper bound — so
+// one stalled read left the whole Report spinning with nothing to try again. 45s each: a real
+// statement over a long period genuinely takes a while, and the two failure paths below already
+// exist (a per-restaurant failure is DROPPED and NAMED in `omitted`, never silently absorbed), so a
+// deadline lands on a path that is already built and already honest.
+import { deadline } from "@/lib/partialRead";
+const READ_DEADLINE_MS = 45_000;
+
 import { canonPayMethod } from "@/components/owner/Charts";
 import type { ReportData, ReportPayments } from "@/components/owner/ownerReportDoc";
 import { mapLimit } from "@/lib/mapLimit";
@@ -44,8 +53,8 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
   // analytics could not be read: dropped, and NAMED on the paper.
   const gathered = await mapLimit(list, CONCURRENCY, async (r) => {
     const [a, m] = await Promise.all([
-      fetch(`/api/owner/analytics?${o.periodQs}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()).catch((e) => ({ error: String(e?.message || e) })),
-      fetch(`/api/owner/reports?type=sales&${o.periodQs}&rid=${r.id}${scp}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null),
+      fetch(`/api/owner/analytics?${o.periodQs}&rid=${r.id}&compare=1${scp}`, { cache: "no-store", signal: deadline(READ_DEADLINE_MS) }).then((x) => x.json()).catch((e) => ({ error: String(e?.message || e) })),
+      fetch(`/api/owner/reports?type=sales&${o.periodQs}&rid=${r.id}${scp}`, { cache: "no-store", signal: deadline(READ_DEADLINE_MS) }).then((x) => x.json()).catch(() => null),
     ]);
     if (a.error) { failed.push(r.name); return null; }
     if (!m || m.error) { failed.push(r.name); return null; }
@@ -107,7 +116,7 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
   let khata: { outstanding: number; people: number; collectedMonth: number } | null = null;
   if (!o.activeRid || o.restaurants.length === 1) {
     try {
-      const k = await fetch(`/api/owner/khata${o.scopePin ? `?rid=${o.scopePin}${o.asSuffix}` : ""}`, { cache: "no-store" }).then((x) => x.json());
+      const k = await fetch(`/api/owner/khata${o.scopePin ? `?rid=${o.scopePin}${o.asSuffix}` : ""}`, { cache: "no-store", signal: deadline(READ_DEADLINE_MS) }).then((x) => x.json());
       if (k?.summary && Number(k.summary.totalOutstanding) > 0) {
         khata = { outstanding: Number(k.summary.totalOutstanding) || 0, people: Number(k.summary.peopleCount) || 0, collectedMonth: Number(k.summary.collectedMonth) || 0 };
       }

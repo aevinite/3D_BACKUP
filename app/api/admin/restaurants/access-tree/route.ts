@@ -153,8 +153,19 @@ export async function POST(req: NextRequest) {
   let body: Record<string, any> = {}; try { body = await req.json(); } catch {}
   const rid = String(body.restaurant_id || "");
   if (!uuid(rid)) return bad("Invalid restaurant_id.");
-  const cur = (await sb.from("restaurants")
-    .select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as Record<string, any> | null;
+  // ── A BLIP MUST NOT READ AS "RESTAURANT NOT FOUND" ON THE PERMISSION SCREEN (T20 sweep #7,
+  //    2026-08-27) ─────────────────────────────────────────────────────────────────────────────────
+  // `.error` was never inspected, so a failed read made `cur` null and every save on the Access &
+  // permissions screen answered "Restaurant not found." with a 404 — about the restaurant whose name
+  // is at the top of the page. Nothing retries a 404, so the admin's change is simply lost, and the
+  // sentence sends them looking for a deleted row. This is also the read the merge below starts from:
+  // treating an unreadable row as an EMPTY one would rewrite `manager_permissions`,
+  // `owner_entitlements` or `access_config` from `{}` and quietly drop every stored permission that
+  // was not in this one patch. Refuse on doubt, exactly as the rest of this handler does.
+  const curQ = await sb.from("restaurants")
+    .select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle();
+  if (curQ.error) return adminFail("these permissions", curQ.error, { action: "load" });
+  const cur = curQ.data as Record<string, any> | null;
   if (!cur) return bad("Restaurant not found.", 404);
 
   // ── FIRST SAVE WINS, AND THE LOSER IS TOLD (project rule 11 — wired 2026-08-10) ──────────────

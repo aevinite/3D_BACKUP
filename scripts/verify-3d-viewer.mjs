@@ -235,9 +235,15 @@ for (const [file, label] of [[ITEM_PAGE_1, "restaurant #1's /item door"], [ITEM_
   );
   check(
     `${label} answers 404 for a dish that does not exist`,
-    /getMenuItem\([\s\S]{0,60}?\.catch\(\(\) => null\)\)\) notFound\(\)/.test(src[file]),
+    // Two shapes are both correct, and the second is the one item 9 introduced: the row this read
+    // returns is now KEPT and handed to ItemClient instead of being thrown away. What matters is
+    // that a missing dish reaches notFound(), not which spelling gets it there — asserting the
+    // old spelling turned this guard red on an improvement that made the behaviour better.
+    (/getMenuItem\([\s\S]{0,60}?\.catch\(\(\) => null\)\)\) notFound\(\)/.test(src[file]) ||
+      (/const dish = await getMenuItem\(/.test(src[file]) && /if \(!dish\) notFound\(\)/.test(src[file]))),
     `${file} → a friendly card inside a 200 tells search engines and our own monitoring that the ` +
-      "page is real."
+      "page is real. Either `if (!(await getMenuItem(...))) notFound()` or `const dish = await " +
+      "getMenuItem(...); if (!dish) notFound()` satisfies this."
   );
 }
 
@@ -285,6 +291,323 @@ check(
   "the two guest not-found pages for the dish routes have not drifted apart",
   read("app/item/[slug]/not-found.tsx").trim() === read("app/r/[restaurant]/item/[slug]/not-found.tsx").trim(),
   "app/item/[slug]/not-found.tsx and app/r/[restaurant]/item/[slug]/not-found.tsx must stay identical."
+);
+
+// ── the animation loop must die with the screen (sweep #7 T2, item 1) ─────────────────────────
+// MEASURED on the dish page, twenty seconds after leaving the 3D screen: SIX connector-line loops
+// still running at 360 animation frames a second, forever. `requestRef` holds only the LATEST
+// frame handle, so cancelling it stops one chain; and `handleLoad` scheduled the reveal 800 ms
+// later on a timer nobody cleared, so leaving inside that window STARTED a loop after the screen
+// had already gone — a chain whose handle no live component holds, and which therefore never ends.
+// The window is an ordinary one: glance at the dish, tap Back.
+console.log("\n── the 3D screen's animation loop ends when the screen does ──────────────────");
+check(
+  "the connector-line loop refuses to re-arm once the 3D screen has gone",
+  /const aliveRef = useRef\(true\)/.test(src[VIEWER]) &&
+    /const _loop = \(\) => \{[\s\S]{0,400}?if \(!aliveRef\.current\) return;/.test(src[VIEWER]),
+  `${VIEWER} → _loop() re-arms itself with requestAnimationFrame every frame. It must return ` +
+    "early on !aliveRef.current, or a chain started near unmount runs for the life of the tab."
+);
+check(
+  "…and aliveRef is set true on mount as well, so Strict Mode's remount cannot disable the lines",
+  /useEffect\(\(\) => \{ aliveRef\.current = true; return \(\) => \{ aliveRef\.current = false; \}; \}, \[\]\)/.test(src[VIEWER]),
+  `${VIEWER} → React's development Strict Mode mounts, unmounts and remounts once. A flag only ` +
+    "ever turned off by a cleanup stays off for the real mount, which would kill the hotspot lines."
+);
+check(
+  "every timer handleLoad starts is cleared when the model effect is torn down",
+  /const timers: ReturnType<typeof setTimeout>\[\] = \[\]/.test(src[VIEWER]) &&
+    /timers\.push\(setTimeout\(runFullSequence, 800\)\)/.test(src[VIEWER]) &&
+    /timers\.forEach\(clearTimeout\)/.test(src[VIEWER]),
+  `${VIEWER} → handleLoad's 800 ms reveal timer and 1 s bar timer must be collected and cleared ` +
+    "in the effect's cleanup. The 800 ms one is what starts the immortal loop.",
+);
+
+// ── the server hands the dish down instead of the phone asking twice (owner's item 9) ─────────
+{
+  const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the dish page starts from the dish the server already read",
+    /initialItem\?: FoodItem \| null/.test(code) &&
+      /useState<FoodItem \| null>\(initialItem \?\? null\)/.test(code) &&
+      /useState\(!initialItem\)/.test(code),
+    ITEM_CLIENT + " \u2192 both routes read this row on the server to decide the 404. Starting " +
+      "state from it is what removes the spinner and what makes an offline reload show the dish."
+  );
+  for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R]]) {
+    check(
+      label + " door keeps the dish it read and hands it down",
+      /const dish = await getMenuItem\(/.test(src[file]) && /if \(!dish\) notFound\(\)/.test(src[file]) &&
+        /initialItem=\{dish\}/.test(src[file]),
+      file + " \u2192 do not throw the 404 check's own read away. `if (!(await getMenuItem(...)))` " +
+        "discards the row and the phone then fetches it again."
+    );
+  }
+  check(
+    "…and the browser does NOT read it a second time on a first load",
+    /initialItem && retryNonce === 0\s*\n?\s*\? Promise\.resolve\(initialItem\)/.test(code),
+    ITEM_CLIENT + " \u2192 skip the duplicate read when the server just supplied it, but NOT when " +
+      "retryNonce > 0: Try again must reach the database or the button is a lie."
+  );
+  check(
+    "…the price does not read $ on a rupee menu in the first paint",
+    /useState<CurrencyMeta \| null>\(DEFAULT_CURRENCY\)/.test(code),
+    ITEM_CLIENT + " \u2192 the currency state must START at DEFAULT_CURRENCY. It was null, and " +
+      "every price falls back to `$` while it is \u2014 invisible behind the old spinner, but the " +
+      "first thing on screen once the server renders the dish, and PERMANENT on an offline reload " +
+      "where React never boots. getCurrency() is SSR-safe and returns the same value, so hydration matches."
+  );
+  check(
+    "…and a client re-read that comes back empty cannot blank a page the server rendered",
+    /setItem\(dish \|\| initialItem \|\| null\)/.test(code),
+    ITEM_CLIENT + " \u2192 the re-read is a refresh, not the authority on whether the dish exists."
+  );
+  check(
+    "…and the reviews read asks the RESOLVED switches, not useFeatures' first-render defaults",
+    /const real = await getFeatures\(restaurantId\)/.test(code) &&
+      /if \(!real \|\| !real\.reviews \|\| !real\.ratings\)/.test(code),
+    ITEM_CLIENT + " \u2192 handing the dish down means `item` is set on the FIRST render, when " +
+      "useFeatures() still returns FEATURE_DEFAULTS (ratings and reviews both true). Measured right " +
+      "after item 9 landed: French House, which has ratings off, was reading its review rows again " +
+      "on every dish open \u2014 the exact fault item 5 had just fixed, walked back in by an " +
+      "unrelated change. getFeatures() cannot answer with a default it has not verified."
+  );
+}
+
+// ── the server-rendered dish obeys the RESTAURANT'S switches, not the code defaults ───────────
+// (Finishing item 9.) useFeatures' first value is FEATURE_DEFAULTS, where ratings and reviews are
+// both true. That was invisible behind the old spinner; once the server renders the dish it is the
+// first thing on screen, and on a reload with no signal — where React never boots — it is the ONLY
+// thing. Measured: French House, which has ratings OFF, had a five-star row in its own page's HTML.
+{
+  const feat = read("lib/features.ts");
+  check(
+    "useFeatures can be seeded with the switches a server component already read",
+    /seed\?: Record<string, boolean> \| null/.test(feat) &&
+      /cached\.get\(restaurantId\) \|\| \(seed \?/.test(feat),
+    "lib/features.ts \u2192 keep the optional seed. The cache must still win over it, and the " +
+      "effect must still re-read and subscribe, so a live toggle behaves exactly as before."
+  );
+  check(
+    "…and the seed is the RAW settings bag, so a server component needs no import from that file",
+    !/export function featuresFromSettings/.test(feat),
+    "lib/features.ts imports useEffect, which makes it unimportable from a server component. " +
+      "Exporting a helper here to build the map went blank with \"You're importing a module that " +
+      "depends on useEffect into a React Server Component\". Pass settings.features itself."
+  );
+  for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R]]) {
+    check(
+      label + " door hands its restaurant's switches down with the dish",
+      /initialFeatures=\{settings\.features\}/.test(src[file]),
+      file + " \u2192 the settings row is already read on this route; pass its features bag so the " +
+        "first paint and the offline view obey the same switches the live screen does."
+    );
+  }
+  check(
+    "…and the dish page seeds the hook with them",
+    /useFeatures\(restaurantId, initialFeatures\)/.test(src[ITEM_CLIENT]),
+    ITEM_CLIENT + " \u2192 without the seed the server builds the page with ratings and reviews " +
+      "both on, whatever the restaurant chose."
+  );
+}
+
+// ── the offline warning survives a reload with no signal (owner's item 11) ────────────────────
+// After an offline reload the client JavaScript never boots, so components/OfflineNotice.tsx cannot
+// render and a diner got a page frozen mid-load with no explanation. The static bar is a plain
+// inline script, which is the one thing still standing.
+{
+  const stat = read("components/OfflineNoticeStatic.tsx");
+  check(
+    "there is a no-framework offline bar for the case where React never boots",
+    /export default function OfflineNoticeStatic/.test(stat) && /navigator\.onLine===false/.test(stat),
+    "components/OfflineNoticeStatic.tsx \u2192 it must be a plain inline <script>, not a component " +
+      "that needs hydration. Measured: after an offline reload, --lfh-offbar-h is never set, a " +
+      "synthetic 'offline' event does nothing and a click does nothing."
+  );
+  check(
+    "…it refuses to draw whenever React's own bar is alive, checked on EVERY signal change",
+    /function reactOwnsIt\(\)/.test(stat) && /navigator\.onLine===false && !reactOwnsIt\(\)/.test(stat),
+    "components/OfflineNoticeStatic.tsx \u2192 the check belongs inside sync(), not only in a " +
+      "start-up watch. An earlier version watched for five seconds, and a diner whose signal " +
+      "dropped later than that got BOTH bars, one under the other, saying different things."
+  );
+  check(
+    "…and nothing dynamic is interpolated into it",
+    !/\$\{(?!JSON\.stringify\(BAR_ID\))/.test(stat.split("const SCRIPT")[1] || ""),
+    "components/OfflineNoticeStatic.tsx \u2192 the inlined script must stay a fixed literal. The " +
+      "only interpolation allowed is the hardcoded BAR_ID; a value from the address bar or the " +
+      "database would need resolving and character-checking first, as app/view/[folder]/page.tsx does."
+  );
+  for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R], ["the /view", VIEW_PAGE]]) {
+    check(
+      label + " route renders the no-framework offline bar",
+      /<OfflineNoticeStatic \/>/.test(read(file)),
+      file + " \u2192 a guest can reload this screen with no signal, so it needs the bar that works " +
+        "without React."
+    );
+  }
+}
+
+// ── two callers, one read of the category list (sweep #7 T2, owner's item 12) ─────────────────
+// Both readers of a dish page ask activeCategorySlugs the same question in the same tick, so the
+// same query hit the same table twice. Shared via the in-flight promise — and deliberately with NO
+// cache, because the guest menu's `menu` breadcrumb reads back through here and a TTL would let a
+// switched-off category keep showing its dishes.
+{
+  const menu = read("lib/menu.ts");
+  const code = menu.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the active-category read is shared between the dish page's two callers",
+    /const catSetInflight = new Map<string, Promise<Set<string> \| null>>\(\)/.test(code) &&
+      /const pending = catSetInflight\.get\(restaurantId\)/.test(code) &&
+      /catSetInflight\.delete\(restaurantId\)/.test(code),
+    "lib/menu.ts \u2192 activeCategorySlugs must share its in-flight promise. Without it the dish " +
+      "page reads the categories table twice per open, measured 4\u00d7 against every other read's 2\u00d7."
+  );
+  check(
+    "…and it holds NO cache, so a switched-off category still reaches a browsing guest at once",
+    !/catSetCache/.test(code) && !/CATEGORY_SET_TTL_MS/.test(code),
+    "lib/menu.ts \u2192 do not put a TTL in front of activeCategorySlugs. The guest menu's `menu` " +
+      "breadcrumb reads back through it (MenuView \u2192 refreshMenu \u2192 getMenuItems), and T13 " +
+      "already lost this exact fight for settings: a cache in front of a breadcrumb is how these " +
+      "updates die (mig 299). In-flight sharing fixes the duplication with no staleness at all."
+  );
+}
+
+// ── the dish page's two error cards are centred by INLINE STYLE, not by a utility class ──────
+// (sweep #7 T2, item 7.) Measured on the running page: with `flex flex-col items-center
+// justify-center min-h-genscreen p-4` on the container, `#detail-page` still computed to
+// `padding: 70px 0 0`, `align-items: normal`, `justify-content: normal`, and the heading sat at
+// x=0 — hard against the side of a 360px phone. `#detail-page` is an ID selector in
+// app/globals.css and Tailwind 4 puts its utilities in a layer those author rules outrank, so the
+// classes are inert here. An inline style cannot lose.
+{
+  const code = src[ITEM_CLIENT];
+  check(
+    "the dish page's error cards are laid out inline, so the cascade cannot flatten them",
+    /const ERROR_CARD_LAYOUT: React\.CSSProperties/.test(code) &&
+      (code.match(/style=\{ERROR_CARD_LAYOUT\}/g) || []).length === 2,
+    ITEM_CLIENT + " \u2192 both the timed-out card and the not-found card must use " +
+      "ERROR_CARD_LAYOUT. Tailwind's centring utilities are outranked by #detail-page in " +
+      "app/globals.css, so a card that relies on them renders flush-left with no padding."
+  );
+  check(
+    "…and neither of them has gone back to relying on those utilities",
+    !/item-detail-page flex flex-col items-center justify-center min-h-screen p-4/.test(code),
+    ITEM_CLIENT + " \u2192 that class string looks like it centres the card and does not."
+  );
+}
+
+// ── a screen must never spin forever (sweep #7 T2, item 6) ───────────────────────────────────
+// Measured with the dish page's data reads held open: "PLATING YOUR DISH" at 2s, 5s, 10s, 20s and
+// 35s — a spinner with no dish, no honest word and no way out. Every read on this screen now has a
+// deadline, and past it the guest gets a card that says so, with Try again and Back to menu.
+{
+  const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the dish page puts a deadline on its own read, so it can never spin forever",
+    /const DISH_READ_DEADLINE_MS = \d+/.test(code) &&
+      /const deadline = setTimeout\(/.test(code) &&
+      /setReadTimedOut\(true\)/.test(code) && /setLoading\(false\)/.test(code),
+    ITEM_CLIENT + " \u2192 keep DISH_READ_DEADLINE_MS and the timer that trips it. Without it a " +
+      "stalled read leaves the guest on 'Plating your dish' with no dish and no way out."
+  );
+  check(
+    "…the deadline is cleared when the reply lands, and when the screen goes",
+    /landed = true;\s*\n\s*clearTimeout\(deadline\)/.test(code) &&
+      /return \(\) => \{ cancelled = true; clearTimeout\(deadline\); \}/.test(code),
+    ITEM_CLIENT + " \u2192 a reply that beats the deadline must cancel it, and leaving the page must too."
+  );
+  check(
+    "…a late reply still wins, so the screen heals itself",
+    /setReadTimedOut\(false\)/.test(code),
+    ITEM_CLIENT + " \u2192 when the read finally lands, clear the honest card rather than making " +
+      "the guest tap Try again for something that has already arrived."
+  );
+  check(
+    "…and the honest card is not the 'dish not found' one, which would be a lie",
+    // Anchored to the RENDER branches by their own markup, not to the first `if (!item)` in the
+    // file: item 9's reviews effect legitimately opens with `if (!item) { setLocalReviews([]);`,
+    // which sits far earlier and made a naive index comparison fail on a correct file.
+    (() => {
+      const timedOut = code.indexOf("if (!item && readTimedOut)");
+      const notFound = code.indexOf("if (!item) {\n    return (");
+      return timedOut > -1 && notFound > -1 && timedOut < notFound;
+    })(),
+    ITEM_CLIENT + " \u2192 the timed-out branch must come FIRST and say something about the " +
+      "connection. 'Dish not found' would send a diner looking for a dish that is on the paper " +
+      "menu in front of them."
+  );
+  check(
+    "…and Try again really re-reads",
+    /setRetryNonce\(\(v\) => v \+ 1\)/.test(code) && /\[slug, restaurantId, retryNonce\]/.test(code),
+    ITEM_CLIENT + " \u2192 the retry counter must be a dependency of the fetch, or the button does nothing."
+  );
+}
+
+// ── do not fetch what no switch will let you draw (sweep #7 T2, item 5) ──────────────────────
+// The review fetch was keyed on `features.reviews` alone, but every surface that DRAWS a review is
+// behind `features.ratings && features.reviews`. Measured on French House, which has reviews on and
+// ratings off: one `reviews` read per dish open, limit 20, for a section that returns null.
+{
+  const code = src[ITEM_CLIENT].replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  check(
+    "the dish page only fetches reviews when BOTH switches let it show them",
+    /const reviewsCanBeSeen = !!features\.reviews && !!features\.ratings/.test(code) &&
+      /const real = await getFeatures\(restaurantId\)/.test(code) &&
+      /if \(!real \|\| !real\.reviews \|\| !real\.ratings\)/.test(code) &&
+      /\}, \[item, restaurantId, reviewsCanBeSeen\]\)/.test(code),
+    ITEM_CLIENT + " \u2192 gate getItemReviews on the same pair the display uses, AND ask the " +
+      "resolved switches rather than useFeatures' first-render defaults. Keying it on " +
+      "features.reviews alone makes a ratings-off restaurant pay for 20 review rows on every dish " +
+      "open and render none of them; keying it on the hook's first value does the same thing now " +
+      "that the server hands the dish down on render one."
+  );
+  // …and the display condition must not drift away from the fetch condition.
+  check(
+    "…and the condition that DRAWS them still asks for the same two switches",
+    /const normalOn = features\.ratings && features\.reviews/.test(code),
+    ITEM_CLIENT + " \u2192 if `normalOn` ever stops requiring both, the fetch gate above becomes " +
+      "wrong in the other direction and a restaurant would show an empty review list."
+  );
+}
+
+// ── a maintenance restaurant does not preview its dish either (sweep #7 T2, item 4) ──────────
+// Both doors already RETURN the maintenance screen for Service mode. Both doors' generateMetadata
+// checked only the Menu master switch — so the page said "we'll be right back" while the same link
+// pasted into WhatsApp still previewed the dish, its photo and its price. The 3D screen beside them
+// has treated the two switches as one meaning since 2026-08-04.
+for (const [label, file] of [["restaurant #1's /item", ITEM_PAGE_1], ["the /r/<slug>/item", ITEM_PAGE_R]]) {
+  // STRIP THE COMMENTS FIRST. Both of these files EXPLAIN this rule in prose right above the
+  // line that enforces it, so a naive /serviceMode/ match passes on the explanation alone — the
+  // guard would stay green with the fix torn out. Assert the enforcement, never the comment.
+  const meta = (src[file].split("export async function generateMetadata")[1]?.split("export default")[0] || "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  check(
+    label + " door does not preview a shared dish link while the restaurant is in Service mode",
+    /settings\.serviceMode/.test(meta),
+    file + " \u2192 generateMetadata must refuse on settings.serviceMode as well as !menuEnabled. " +
+      "The page body already does; the share card is the half that was left open."
+  );
+}
+
+// ── every scoped read is keyed on the thing that scopes it (sweep #7 T2, item 3) ─────────────
+// Both reads in the dish page's main fetch are scoped by `restaurantId`, but it was missing from
+// the dependency list, so the fetch only re-ran on a slug change. `/r/<a>/item/x` → `/r/<b>/item/x`
+// is the same route pattern with the same slug, so React reconciles ItemClient in place instead of
+// remounting it — and it would keep restaurant A's dish, price and menu list under B's address.
+check(
+  "the dish page's main fetch re-runs when the RESTAURANT changes, not only the dish",
+  // Assert that BOTH are in the list, not that the list is exactly those two — a later fix
+  // legitimately added `retryNonce` (item 6) and an exact match turned this red for no fault.
+  (() => {
+    const m = /\}, \[slug,([^\]]*)\]\);/.exec(src[ITEM_CLIENT]);
+    return !!m && /\brestaurantId\b/.test(m[1]);
+  })(),
+  `${ITEM_CLIENT} → the effect calling getMenuItem(slug, restaurantId) and ` +
+    "getMenuItems(restaurantId, CARD_COLUMNS) must depend on BOTH. The reviews effect and the " +
+    "Google-settings effect beside it already do."
 );
 
 // Every overlay on these screens registers with the back-button manager.

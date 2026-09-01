@@ -55,7 +55,12 @@ const handled = await q(`
   ORDER BY es.fixed_at DESC LIMIT 60;
 `).catch(() => []); // table absent on a stack that hasn't run mig 218 yet — don't break the fetch
 
-const DATE = new Date().toISOString().slice(0, 10);
+// LOCAL date, not UTC: nightly-repair.sh names its log/report with `date +%Y-%m-%d`, and the run
+// starts at ~02:30 IST — which is still the PREVIOUS day in UTC. toISOString() therefore wrote an
+// input file the agent's own prompt ("read repair-input-<today>.md") could never find, so a night
+// with real fix requests could look like an empty one. Same clock as the runner, every night.
+const now = new Date();
+const DATE = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 const out = join(root, ".claude", "audits", `repair-input-${DATE}.md`);
 mkdirSync(dirname(out), { recursive: true });
 

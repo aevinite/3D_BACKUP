@@ -112,6 +112,7 @@ export async function getFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID):
       .then((s) => {
         const map = { ...FEATURE_DEFAULTS, ...(s.features || {}) } as FeatureMap;
         cached.set(restaurantId, map);
+        // best-effort: a phone with storage switched off still gets the flags from the fetch above
         try { localStorage.setItem(lsKey(restaurantId), JSON.stringify(map)); } catch {}
         return map;
       })
@@ -131,8 +132,36 @@ export async function getFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID):
 // localStorage here would cause a hydration mismatch. The effect then (1) applies
 // the saved switches from the last visit right away (one frame, no network wait)
 // and (2) refreshes from live settings. Re-subscribes if restaurantId changes.
-export function useFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID): FeatureMap {
-  const [f, setF] = useState<FeatureMap>(cached.get(restaurantId) || ({ ...FEATURE_DEFAULTS } as FeatureMap));
+/**
+ * `seed` — THE SWITCHES THE SERVER ALREADY KNEW (sweep #7 T2, 2026-09-01, finishing item 9).
+ *
+ * Without it this hook's FIRST value is always FEATURE_DEFAULTS, and the real switches land a tick
+ * later. That was invisible while every screen showed a spinner until its data arrived. It stopped
+ * being invisible the moment the dish page began rendering its dish on the server: the
+ * server-rendered HTML was built with `ratings: true` and `reviews: true` because those are the
+ * DEFAULTS, so a restaurant with ratings switched OFF had a five-star row in its own page's HTML.
+ * On a normal load React corrects it in a frame and nobody sees it. On a reload with no signal
+ * React never boots at all — measured on this stack — so that star row was simply the page.
+ *
+ * A server component that has already read `settings` can hand the derived map in here, and then
+ * the first paint, the shared HTML and the offline view all obey the same switches the live screen
+ * does. Optional, so every existing caller is unchanged.
+ */
+export function useFeatures(
+  restaurantId: string = DEFAULT_RESTAURANT_ID,
+  // The RAW `settings.features` bag, not a finished FeatureMap — deliberately, so a SERVER
+  // component can pass it without importing anything from this file. This module imports
+  // `useEffect`, which makes it unimportable from a server component at all: the first version of
+  // this exported a `featuresFromSettings()` helper here and the two dish routes went blank with
+  // *"You're importing a module that depends on useEffect into a React Server Component"*. A plain
+  // JSON object crosses the boundary with no import, and the spread below turns it into the map.
+  seed?: Record<string, boolean> | null,
+): FeatureMap {
+  const [f, setF] = useState<FeatureMap>(
+    // The seed only ever LEADS: the cache still wins when this tab has already learned the truth,
+    // and the effect below still re-reads and still subscribes, so a live toggle behaves as before.
+    cached.get(restaurantId) || (seed ? ({ ...FEATURE_DEFAULTS, ...seed } as FeatureMap) : ({ ...FEATURE_DEFAULTS } as FeatureMap)),
+  );
   useEffect(() => {
     let alive = true;
     if (!cached.get(restaurantId)) { const saved = readSaved(restaurantId); if (saved && alive) setF(saved); }

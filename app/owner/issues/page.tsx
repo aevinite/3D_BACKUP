@@ -19,6 +19,8 @@
 // `--border-c` is the declared COLOUR (`#1d2430` dark, `#e5e8ee` light). Use that where a colour is
 // wanted, and the bare `var(--border)` shorthand where a whole border is wanted.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { actorLabel, actorTitle } from "@/lib/ownerActor";
 import { asSuffix } from "@/lib/ownerPin";
 // Client-safe by design (lib/partialRead has zero imports) — see that file's header.
 import { partialNote } from "@/lib/partialRead";
@@ -40,14 +42,48 @@ type Rating = {
 type Summary = { total: number; avg: number; dist: number[]; unhandled: number };
 
 const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-word" };
+// ── A DATABASE ID NEVER REACHES THIS SCREEN — and the fix is now the SHARED one ────────────────
+// Sweep 7 · T14 (2026-08-27) found `handled by c0af7b5b-…` on a rating card and added a local
+// `handledBy()` here. T12's sweep (2026-08-29) had already done it properly: the five owner routes
+// now record the login NAME (`lib/ownerScope` → `ownerActorName`), and `lib/ownerActor.ts` turns a
+// legacy uuid row into the same em dash a nameless row already uses, keeping the reference in the
+// hover text. So the local copy is DELETED rather than left beside it — one way, not two.
 const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
-const Stars = ({ n }: { n: number }) => (
-  <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
-    {"★".repeat(n)}<span style={{ color: "var(--border-c, #ccc)" }}>{"★".repeat(5 - n)}</span>
-  </span>
-);
+// ── A DATE WE CANNOT READ SHOWS A DASH (sweep 7 · T14 round 2, 2026-08-31) ───────────────────────
+// `new Date("nope").toLocaleString()` returns the literal string "Invalid Date". Customers and Pay
+// Later were guarded in the same round (item 17) and this screen's three dates were not, so a
+// complaint with an unreadable `resolved_at` printed "· resolved Invalid Date" under an otherwise
+// correct card. Not reachable from our own data — all three columns are set by the server — but the
+// same dash these screens use for everything else is the honest answer.
+const okDate = (iso: string | null | undefined) => !!iso && Number.isFinite(new Date(iso).getTime());
+const dt = (iso: string) => (okDate(iso)
+  ? new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })
+  : "—");
+const dOnly = (iso: string) => (okDate(iso)
+  ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })
+  : "—");
+// ── ONE ODD ROW MUST NOT TAKE THE WHOLE SCREEN DOWN (sweep 7 · T14 round 2, 2026-08-31) ──────────
+// `"★".repeat(5 - n)` throws `RangeError: Invalid count value` the moment `n` is above 5, and
+// `"★".repeat(n)` throws below 0. A throw inside render is not a missing star — React unmounts the
+// tree and the owner gets the shell's error boundary: "We couldn't load this just now. Something
+// went wrong on our side." So a single bad number would lose the average, the distribution, every
+// other rating AND the complaints tab, with nothing on screen saying which row did it.
+// Measured 2026-08-31 by feeding the screen `rating: 6` and `rating: -1`: both blanked the page.
+// It is NOT reachable from this app's own data — `feedback.rating` is `CHECK (rating BETWEEN 1 AND
+// 5)` (mig 037) and `lfh_leave_feedback` refuses anything else — so this is a guard, not a repair.
+// It costs one clamp and it means the worst a bad row can ever do is draw the wrong number of
+// stars, which the `aria-label` beside it still reports honestly.
+const Stars = ({ n }: { n: number }) => {
+  const filled = Math.max(0, Math.min(5, Math.round(Number(n) || 0)));
+  return (
+    <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
+      {"★".repeat(filled)}<span style={{ color: "var(--border-c, #ccc)" }}>{"★".repeat(5 - filled)}</span>
+    </span>
+  );
+};
 
 export default function OwnerFeedback() {
+  const router = useRouter();
   const [tab, setTab] = useState<"ratings" | "issues">("ratings");
   // Admin-in-one-restaurant scope pin (bug C1) — rides on EVERY call as ?scope= so a
   // second tab's shared act-as cookie can't hijack this tab. Null for a real owner.
@@ -87,7 +123,7 @@ export default function OwnerFeedback() {
   const [err, setErr] = useState<string | null>(null);
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [noteVal, setNoteVal] = useState("");
-  const decided = useRef(false); // pick the first available tab only once
+  // (a `decided` ref used to live here — see the tab effect below for why it could never work)
 
   const loadRatings = useCallback(async () => {
     try {
@@ -119,12 +155,23 @@ export default function OwnerFeedback() {
   const loadAll = useCallback(async () => { await Promise.all([loadRatings(), loadIssues()]); }, [loadRatings, loadIssues]);
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Default to the first available tab once we know what's enabled.
+  // ── A TAB THAT IS SWITCHED OFF MUST NOT BE THE ONE YOU ARE ON (sweep 7 · T14, 2026-08-27) ───────
+  // This was a `decided` ref: "pick the first available tab, once". It ran on the FIRST render,
+  // when `ratingsOff`/`issuesOff` are still their initial `false` — so `else if (!ratingsOff)` was
+  // always true and `decided` was latched before either request had answered. When ratings then
+  // came back switched off, the effect returned early and `tab` stayed on "ratings".
+  // What that looks like, watched on 2026-08-27 with Guest ratings off and Complaints on: the page
+  // renders the heading, then a card holding ONLY a "Complaints · 1" button and Refresh — and
+  // nothing at all underneath. The ratings block is hidden because that section is off; the
+  // complaints block is hidden because the open tab is still "ratings". A restaurant with an open
+  // complaint was shown an empty screen. Broken since PR #199 and never seen, because the check
+  // that covered it READ this effect instead of driving it.
+  // No latch now: if the tab you are on is off and the other one is on, move. It can never fight a
+  // real click, because a switched-off tab has no button to click.
   useEffect(() => {
-    if (decided.current) return;
-    if (ratingsOff && !issuesOff) { setTab("issues"); decided.current = true; }
-    else if (!ratingsOff) { decided.current = true; }
-  }, [ratingsOff, issuesOff]);
+    if (tab === "ratings" && ratingsOff && !issuesOff) setTab("issues");
+    else if (tab === "issues" && issuesOff && !ratingsOff) setTab("ratings");
+  }, [tab, ratingsOff, issuesOff]);
 
   // 60s backstop refresh, paused while the tab is hidden (egress-safe).
   useEffect(() => {
@@ -212,6 +259,16 @@ export default function OwnerFeedback() {
   const issueRows = (issues || []).filter((i) => iFilter === "all" || i.status === "open");
   const ratingRows = (ratings || []).filter((r) => rFilter === "all" || !r.acknowledged);
   const bothOff = ratingsOff && issuesOff;
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31) ─────────────────────────
+  // R36 again, from the page side: *"owner can't know which option are not given to them, only
+  // admin should know that."* The sidebar already hides a withheld section from a real owner;
+  // this page did not — reached by a typed URL or an old bookmark it printed "This section isn't enabled for your restaurant — contact Aevidine",
+  // which names a feature he has not been given and tells him who to ask for it. The card is
+  // DELETED, not restyled, and he goes back to his dashboard. `replace`, not `push`, so Back does
+  // not bounce him straight into it again.
+  // The ADMIN never lands here: the route only answers `disabled` for a REAL owner
+  // (`if (!scope.all && !scope.admin)`), so the X-ray view still opens every section.
+  useEffect(() => { if (bothOff) router.replace("/owner"); }, [bothOff, router]);
   // ── A LIST THAT IS ONLY PART OF THE LIST HAS TO SAY SO (sweep 6 · T14, 2026-08-18) ──────────────
   // The two sister screens in this panel already do it — Customers says "the N most-recent of M",
   // Pay Later says "the N people who owe the most, of M". This one said nothing, and on French House
@@ -230,9 +287,9 @@ export default function OwnerFeedback() {
       <h1 className="adm-page-h">Feedback &amp; complaints</h1>
       <p className="adm-page-sub">What your guests rated and the complaints your staff raised — read it, handle it, mark it done.</p>
 
-      {bothOff ? (
-        <div className="adm-card"><div className="adm-empty">This section isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
-      ) : (
+      {/* Nothing at all while the redirect above runs — never a sentence naming a section he
+          has not been given (R36). */}
+      {bothOff ? null : (
       <div className="adm-card">
         {/* Tabs (hide a tab the admin switched off) */}
         <div className="own-range" style={{ marginBottom: 14 }}>
@@ -322,8 +379,17 @@ export default function OwnerFeedback() {
                         </div>
                         {r.comment && <p style={{ margin: "8px 0 0", color: "var(--text)", fontSize: 13, lineHeight: 1.5, ...wrap }}>“{r.comment}”</p>}
                         <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)", ...wrap }}>
-                          {r.name ? <b>{r.name}</b> : <span>Guest</span>} · {new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
-                          {r.acknowledged && r.acknowledged_by ? ` · handled by ${r.acknowledged_by}` : ""}
+                          {r.name ? <b>{r.name}</b> : <span>Guest</span>} · {dt(r.created_at)}
+                          {/* NEVER A DATABASE ID WHERE A PERSON'S NAME GOES (T12 sweep, 2026-08-29).
+                              Five owner routes used to record the owner's uuid as the person; they
+                              now record the login name (lib/ownerScope → ownerActorName). Rows
+                              written BEFORE that still hold the uuid, and this line printed it as
+                              "handled by c0af7b5b-…". lib/ownerActor.ts turns a bare id into the
+                              same em dash a nameless row already uses, with the reference kept in
+                              the hover text. */}
+                          {r.acknowledged && r.acknowledged_by
+                            ? <span title={actorTitle(r.acknowledged_by)}> · handled by {actorLabel(r.acknowledged_by)}</span>
+                            : ""}
                         </div>
                         {r.staff_note && noteFor !== r.id && (
                           <div style={{ marginTop: 8, fontSize: 12.5, background: "var(--card2, rgba(127,127,127,.08))", borderRadius: 8, padding: "6px 9px", ...wrap }}>
@@ -401,8 +467,8 @@ export default function OwnerFeedback() {
                         <audio controls preload="none" src={i.audio_url} style={{ display: "block", marginTop: 10, maxWidth: "100%" }} />
                       )}
                       <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
-                        Raised by <b>{i.raised_by || "—"}</b> ({i.raised_role || "staff"}) · {new Date(i.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
-                        {i.resolved_at ? ` · resolved ${new Date(i.resolved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })}` : ""}
+                        Raised by <b title={actorTitle(i.raised_by)}>{actorLabel(i.raised_by)}</b> ({i.raised_role || "staff"}) · {dt(i.created_at)}
+                        {okDate(i.resolved_at) ? ` · resolved ${dOnly(i.resolved_at as string)}` : ""}
                       </div>
                     </div>
                   );

@@ -169,6 +169,33 @@ const api = async (method, path, body, opts) => {
   }
   return j;
 };
+// ── DID A MEMBER OF STAFF PUNCH THIS ORDER, OR DID THE GUEST? (owner, 2026-08-26) ───────────────
+//
+// The chime used to key on `member_id`, and that was the fault: a guest who scans the QR and orders
+// WITHOUT joining the table's session has no member id — which is exactly what a waiter-placed order
+// looks like — so it landed on the pass in about two seconds and rang NOTHING. A cook facing away
+// from the board had no way to know food had come in. (Recorded as H1 by the T6 sweep since
+// 2026-08-17; it was thought to need a new column on `orders`. It does not.)
+//
+// `placed_by_id` / `placed_by` have been on `orders` since migration 220 and the manager route says
+// what they mean in its own words: *"NULL keeps meaning the guest ordered it themselves."* Staff
+// panels stamp them when a waiter or manager punches an order; the guest path (lfh_place_order)
+// never touches them. So "did a person standing at the table place this?" is already answered.
+//
+// The change is deliberately additive: everything that rings today still rings. The only case that
+// changes is the silent one — `preparing`, no member id, and nobody stamped on it — which is a guest
+// order and now rings. A waiter's own order stays silent, because the waiter is at the table.
+// The board sends `guest: 1` and NOTHING else — the raw `placed_by_id` / `placed_by` never leave the
+// server (lib/liveBoard.ts → stripPlacedBy), because one is a person's name and together they are
+// ~77 bytes on every order of every board read to answer a yes/no question. The flag is only
+// present when it is TRUE, so a floor of waiter-punched tickets costs nothing at all.
+//
+// One honest edge: on the waiter tablet the stamp is `actor?.id ?? null` with a matching name, so an
+// ADMIN placing an order while acting as nobody leaves both empty and this reads it as a guest's.
+// That way round is the safe one — a chime that should not have rung, rather than food arriving in
+// silence — and an admin punching an order into a live kitchen is not a thing that happens in service.
+const guestPlaced = (o) => !!o && o.guest === 1;
+
 // ── table naming (mig 131) ───────────────────────────────────────────────────
 // The restaurant's OWN name for a table ("A1", "Patio"), from settings.table_names.
 // Empty string when that table has no name, so callers fall back to the number.
@@ -177,7 +204,15 @@ const tname = (t) => (((state.tableNames || {})[String(t)]) || "").trim();
 // if the owner renamed table 1 to "A1", the ticket and the printed KOT must say "A1",
 // because that is what is written on the table (owner 2026-07-29). No name → the plain
 // number. Display only — every id/bill still uses the number.
-const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket header)
+// GUARDED THE SAME WAY tlong IS (T6 sweep #7, 2026-08-22). This was `tname(t) || \`T${t}\``, so an
+// order with no table — a banquet bill with the table left blank, which `orders` allows and the
+// live-board query does not exclude — put the literal **"Tnull"** in the ticket header a cook reads.
+// "Tundefined" and a bare "T" were reachable the same way. tlong() was hardened for exactly this
+// case and says "T?"; tshort() was not, so the SCREEN and the PAPER disagreed about the same ticket
+// — and the title attribute on that very span is already guarded against it, so half this line was
+// fixed and half was missed. A raw `null` on a staff screen is on verify:live's own leaked-value
+// list. Same answer as tlong now: "T?".
+const tshort = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`));   // tight spots (ticket header)
 // T7, never "Table 7" (owner, 2026-08-05: "it should always be T7"). A table with a NAME set
 // shows the name instead. One short form everywhere — panels, tickets and the printed bill.
 const tlong = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`)); // prints, toasts
@@ -373,12 +408,46 @@ const rowsOf = (o, dbRowsOpt) => {
   return (Array.isArray(o.items) ? o.items : []).map((i) => ({ id: null, title: i.title, qty: i.qty || 1, status: i.status || o.status, note: i.note, options: i.options, removed: i.removed, fromDb: false }));
 };
 
+// ── ONE NOTE FOR THE WHOLE TABLE IS SHOWN ONCE, NOT UNDER EVERY DISH (owner, 2026-08-26) ────────
+//
+// "the note is for particular or for the whole order" — and the honest answer is that the DATABASE
+// cannot tell you. `orders` has no note column at all: when a waiter types one instruction for the
+// table, lfh_staff_place_order copies that same text onto EVERY order_items.note. A per-dish note is
+// a genuinely separate thing (lfh_staff_edit_item_note, from the tablet and the manager panel) and
+// it lands in the very same column. So the two are indistinguishable by field — but not by shape.
+//
+// THE RULE, and it is deliberately the cautious one: a note is treated as belonging to the whole
+// order ONLY when EVERY dish on the ticket carries the IDENTICAL non-empty note, and there is more
+// than one dish. Anything else — one dish edited to say something different, some dishes with a
+// note and some without, a single-dish ticket — and every note stays exactly where it is today, on
+// its own line. That way the only case that changes is the one that is provably one instruction
+// repeated, and a dish with its own instruction can never lose it or inherit somebody else's.
+//
+// Measured before the change: a six-dish order with one note rendered that sentence six times and
+// made the ticket six screens tall on a phone, nearly all of it the same words.
+//
+// This is NOT the allergy rule and does not touch it. The order-wide "avoid" stays DISTRIBUTED onto
+// every dish line (owner, 2026-06-14) because a cook plating one dish must see the restriction on
+// that dish. Only the free-text note collapses.
+function sharedOrderNote(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return "";
+  const first = (rows[0] && rows[0].note != null ? String(rows[0].note) : "").trim();
+  if (!first) return "";
+  for (const r of rows) {
+    const n = (r && r.note != null ? String(r.note) : "").trim();
+    if (n !== first) return "";
+  }
+  return first;
+}
+
 function ticketHtml(o, rows) {
   rows = rows || rowsOf(o);
   // NO common allergy banner anywhere (owner, 2026-06-14). The order-wide "avoid" is
   // DISTRIBUTED onto every item, so each dish shows its own "NO x" — matching the
   // manager and tablet. Each item = its own removals ∪ the order-wide allergens.
   const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
+  // One instruction for the whole table is drawn ONCE, above the dishes (see sharedOrderNote).
+  const orderNote = sharedOrderNote(rows);
   const lines = rows.map((r) => {
     const lineRemoved = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
     // Allergens render as HTML so a staff-ADDED one carries a green "＋"; options/note
@@ -386,8 +455,12 @@ function ticketHtml(o, rows) {
     const added = new Set((Array.isArray(r.added_allergens) ? r.added_allergens : []).map((x) => String(x).toLowerCase()));
     const segs = [];
     if (Array.isArray(r.options) && r.options.length) segs.push(esc(r.options.map((op) => `+ ${op.label || op}`).join(" · ")));
-    if (lineRemoved.length) segs.push(lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", "));
-    if (r.note) segs.push(esc(`✎ ${r.note}`));
+    // WRAPPED ON ITS OWN (redesign, owner 2026-08-28). Options, allergens and the note used to share
+    // one grey <small>, so the one line a cook must never miss looked exactly like "+ extra cheese".
+    // The wrapper is what lets the stylesheet colour ONLY the allergens as a warning.
+    if (lineRemoved.length) segs.push(`<span class="alg">${lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", ")}</span>`);
+    // …unless it IS the whole-table note, which is drawn once above instead of once per dish
+    if (r.note && !(orderNote && String(r.note).trim() === orderNote)) segs.push(esc(`✎ ${r.note}`));
     const small = segs.length ? `<small>${segs.join(" · ")}</small>` : "";
     const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
@@ -432,12 +505,21 @@ function ticketHtml(o, rows) {
   // once drawn and a cook had no way to see that table 6 was the owner's guest. The board now
   // ships `tableTags` ({ "6": "vip" }) the same way it ships `tableNames`, and the ticket looks
   // its own table up. A parcel has no table, so it has no mark either.
+  // The whole-table instruction, once, where a cook reads it before starting anything. It sits
+  // ABOVE the dishes on purpose: it applies to all of them, so reading it after the food would be
+  // reading it too late.
+  const orderNoteHtml = orderNote ? `<div class="onote" title="This note is for the whole table">✎ ${esc(orderNote)}</div>` : "";
   const ttag = (state.tableTags || {})[String(o.table_number)] || "";
   const tb = TAG_BADGE[ttag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
-  return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
+  // The LANE this ticket is in, as a class. `st-<status>` cannot say it: an order sitting in Ready
+  // and one still Cooking are both `preparing`. The coloured left edge (see the stylesheet) is what
+  // lets a cook tell the lanes apart from across the kitchen without reading the headings — the same
+  // device platform tickets have always used for their channel.
+  const phase = orderPhase(o, rows);
+  return `<div class="ticket st-${esc(o.status)} ph-${esc(phase)}" data-ticket="${esc(o.id)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
-    ${lines}${action}</div>`;
+    ${orderNoteHtml}${lines}${action}</div>`;
 }
 
 // A kitchen ticket's column comes from its DISHES, not the coarse order status:
@@ -516,8 +598,8 @@ function platTicketHtml(p) {
 // Advance a platform order (accept/ready/handed_over), then refresh.
 function platAct(id, status) {
   api("POST", `/platform/${id}/status`, { status })
-    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } freshLoad(); })
-    .catch((e) => { toast("Failed: " + e.message); freshLoad(); });
+    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } refreshQuietly(); })
+    .catch((e) => { toast("Failed: " + e.message); refreshQuietly(); });
 }
 
 // INCREMENTAL tile patcher. Given a container and the DESIRED ordered list of tickets
@@ -603,9 +685,17 @@ function renderColumns() {
   });
   const pb = { new: [], cooking: [], ready: [] };
   (state.platform || []).forEach((p) => { const c = platPhase(p.status); if (pb[c]) pb[c].push(p); });
+  // ── ONE QUEUE INSIDE EACH LANE, NOT TWO (owner, 2026-08-26) ──────────────────────────────────
+  // The WALL board was made first-come-first-served in the T6 sweep of 2026-08-17; the columns were
+  // not. Dine-in tickets were listed first and platform tickets glued on after, so in a busy Cooking
+  // lane an hour-old Zomato order sat below a one-minute table order — and a late delivery order is
+  // the one an aggregator penalises the restaurant for. Both channels are now sorted in ONE pass on
+  // created_at, through the same NaN-safe comparator the wall uses: a platform ticket's created_at
+  // comes from a webhook, so it is exactly the value that must not be subtracted blind.
   const draw = (key, list, plist) => {
-    const desired = list.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
-      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
+    const desired = list.map(({ o, rows }) => ({ id: String(o.id), at: o.created_at, html: ticketHtml(o, rows) }))
+      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, at: p.created_at, html: platTicketHtml(p) })));
+    desired.sort((a, b) => cmpTime(a.at, b.at));
     reconcileList($("#list-" + key), desired);
     $("#count-" + key).textContent = String(list.length + (plist ? plist.length : 0)); // show "0", not a blank pill, when a column is empty (2026-07-05)
   };
@@ -798,7 +888,7 @@ function markItemReady(id, btn) {
     // says" and repaints it from the truth. Cheap, and it cannot make anything else stale.
     forgetCardHtml(o ? o.id : it.order_id);
     toast("Failed: " + e.message);
-    freshLoad();
+    refreshQuietly();
   });
 }
 
@@ -808,16 +898,31 @@ function markItemReady(id, btn) {
 // load() at the end (instead of surgical patching) is fine and keeps state honest.
 async function undoReady(snap, orderId) {
   if (orderId != null) pendingReadyOrders.delete(orderId);
+  // Every ticket this take-back touches, so its card can be told to forget what it thinks it says.
+  const touched = new Set(orderId != null ? [orderId] : []);
   snap.forEach((s) => {
     pendingReady.delete(s.id);
     const it = (state.items || []).find((x) => x.id === s.id);
-    if (it && it.status !== "served") it.status = s.prev;
+    if (it && it.status !== "served") { it.status = s.prev; if (it.order_id != null) touched.add(it.order_id); }
   });
-  // (The take-back does NOT need forgetCardHtml. It looks like it should — the tap patched the card
-  // in place, so the stamp is stale here too — but it was measured both ways, tapping UNDO the
-  // instant the bar appears, and the board behaves identically: the freshLoad() at the end of this
-  // function is what puts the ✓ back, in about the same moment either way. Adding the call changed
-  // nothing a cook could see, so it is not here. T6 re-check, 2026-08-19.)
+  // THE TAKE-BACK NEEDS forgetCardHtml TOO — and the note that used to sit here said the opposite.
+  //
+  // It said the call changed nothing a cook could see, "measured both ways, 2026-08-19". That
+  // measurement can only have been taken on a SINGLE-dish ticket, where finishing the dish moves the
+  // card to the Ready lane and moveCardToReady() rebuilds it (re-stamping __kdsHtml) on the way over
+  // and again on the way back. On a ticket with MORE THAN ONE cooking dish the card never changes
+  // lane, so nothing rebuilds it — and then this is the exact fault the refused ✓ above was fixed
+  // for: the ✓ tap edited one line in place (btn.outerHTML), which does not touch __kdsHtml, so once
+  // the status is restored the desired html matches that stale stamp exactly, reconcileList concludes
+  // "unchanged, reuse the node", and the node it reuses is the one with no ✓ on it.
+  //
+  // Watched happening on the running board (T6 sweep #7, 2026-08-22), two-dish ticket, UNDO tapped
+  // 450ms after the bar appeared: the write landed and the server read `preparing` within a second,
+  // and the screen still said "1× Pink Pineapple Smoothie READY" with no ✓ ten seconds later and
+  // after a forced whole-board read. A cook is told the dish was put back and cannot re-send it; the
+  // waiter's tablet and the manager's floor show the truth, so the two screens disagree. It only
+  // heals when something ELSE changes that ticket's html — the age text, once an hour on an old one.
+  for (const id of touched) forgetCardHtml(id);
   render();
   try {
     // ONE REQUEST FOR THE WHOLE TICKET (owner-picked improvement, 2026-08-07). This used to be
@@ -840,7 +945,7 @@ async function undoReady(snap, orderId) {
   } catch (e) {
     toast("Undo failed: " + e.message);
   }
-  freshLoad();   // a write just landed — do not accept a read that predates it
+  refreshQuietly();   // a write just landed — do not accept a read that predates it
 }
 // Move ONE fully-ready ticket into the Ready column without a whole-board rebuild:
 // re-render just that card (now shows "ready — waiter serving", no buttons), drop it
@@ -913,7 +1018,7 @@ function markOrderReady(orderId) {
     pendingReadyOrders.delete(orderId);
     snap.forEach((s) => pendingReady.delete(s.id));
     toast("Failed: " + e.message);
-    freshLoad();
+    refreshQuietly();
   });
 }
 
@@ -943,7 +1048,17 @@ function renderDishes() {
   // Trim so a stray space / spaces-only search isn't treated as a real query that matches
   // nothing (it used to blank the whole drawer).
   const q = ($("#dishSearch").value || "").trim().toLowerCase();
-  const list = state.dishes.filter((d) => !q || (d.title || "").toLowerCase().includes(q));
+  // ── "JUST SHOW ME WHAT IS SOLD OUT" (owner, 2026-08-26) ────────────────────────────────────────
+  // To answer "what have we 86'd tonight?" a cook used to scroll every dish on the menu hunting for
+  // red. This is one tap. It is deliberately NOT remembered: a filter that survives the drawer
+  // closing is a filter a cook forgets is on, and then mid-rush the drawer looks nearly empty and
+  // the dish they came to mark is missing. It resets every time the drawer opens (see openDrawer).
+  const outOnly = !!state.dishOutOnly;
+  const isOut = (d) => (d.tags || []).includes("sold-out");
+  const list = state.dishes
+    .filter((d) => !q || (d.title || "").toLowerCase().includes(q))
+    .filter((d) => !outOnly || isOut(d));
+  const outCount = state.dishes.filter(isOut).length;
   const rows = list.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     return `<div class="dish-row ${out ? "is-out" : ""}">
@@ -953,7 +1068,12 @@ function renderDishes() {
   }).join("");
   // Never show a blank drawer: an empty result gets an honest message (a cook who mistypes
   // couldn't tell if the board broke), otherwise nothing seeded yet.
-  const html = rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet"}</div>`;
+  // The toggle says the COUNT, so a cook can answer "how many are off?" without opening it at all.
+  const toggle = `<button class="outfilter${outOnly ? " on" : ""}" id="outOnlyBtn" type="button" aria-pressed="${outOnly ? "true" : "false"}">${outOnly ? "◉" : "○"} Sold out only <span class="oc">${outCount}</span></button>`;
+  const empty = outOnly
+    ? (q ? `No sold-out dish matches “${esc(q)}”` : "Nothing is sold out right now")
+    : (q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet");
+  const html = toggle + (rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${empty}</div>`);
   // Skip the rebuild when nothing changed (audit 2026-07-07): a poll while the drawer is
   // open used to blow away #dishList on EVERY refresh, which (a) lost the search box's focus/
   // caret mid-type and (b) orphaned the button node the optimistic toggle + UNDO closure hold,
@@ -973,6 +1093,15 @@ function renderDishes() {
   const set86 = (id, out) => {
     const dish = state.dishes.find((d) => d.id === id);
     if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
+    // KEEP THE COUNT ON THE SWITCH HONEST (found by the 500-phase run, 2026-08-29). Marking a dish
+    // sold out flips its button optimistically and deliberately does NOT re-render the drawer — a
+    // rebuild loses the search caret mid-type and orphans the UNDO's button. But the "Sold out only"
+    // switch carries a COUNT, and without this it kept saying 0 while a cook marked three dishes off.
+    // So the one number is patched in place, exactly like the button beside it.
+    // The LIST is deliberately left alone: a dish put back on the menu stays visible while the filter
+    // is on, so the row the UNDO bar is talking about is still there to look at.
+    { const oc = document.querySelector("#outOnlyBtn .oc");
+      if (oc) oc.textContent = String(state.dishes.filter(isOut).length); }
     const btn = document.querySelector(`[data-86="${window.CSS && CSS.escape ? CSS.escape(id) : id}"]`);
     if (!btn) return;
     btn.dataset.out = out ? "1" : "0";
@@ -980,6 +1109,8 @@ function renderDishes() {
     btn.classList.toggle("danger", out);
     btn.closest(".dish-row")?.classList.toggle("is-out", out);
   };
+  { const ob = document.getElementById("outOnlyBtn");
+    if (ob) ob.onclick = () => { state.dishOutOnly = !state.dishOutOnly; renderDishes(); }; }
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
     if (b.disabled) return;
     const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
@@ -1127,7 +1258,7 @@ async function loadTables(tables) {
   // land on the pass silently. Waiter orders (member_id null) stay chime-free: the
   // waiter is standing at the table. An accepted first order can't double-chime — its
   // id entered knownIds while it was still 'received'.
-  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
+  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && guestPlaced(o))) && !state.knownIds.has(o.id));
   if (newReceived.length) chime();
   // The targeted slice never carries `queuedFor` (it is a whole-board answer), so the net stays out
   // of it on purpose — the queue prints these, and the next full read runs the net if it must.
@@ -1419,7 +1550,6 @@ function openKitchenMenu() {
     <button class="dw-row" type="button" data-kdw="settings">⚙️ Settings</button>
     <button class="dw-row" type="button" data-kdw="printer">🖨 Printer</button>
     <button class="dw-row" type="button" data-kdw="issue">🚩 Report an issue</button>
-    <a class="dw-row" href="/print-setup.html" target="_blank" rel="noopener">📖 Printer setup guide</a>
     <div class="dw-foot" id="kdsBuild"></div>`;
   document.body.appendChild(back); document.body.appendChild(dw);
   const close = () => { back.remove(); dw.remove(); if (kdsDrawerOff) { const o = kdsDrawerOff; kdsDrawerOff = null; o(); } };
@@ -1477,6 +1607,14 @@ function renderKitchenSettings() {
   // PRINTING IS ABSENT, NOT GREYED, WHEN IT IS OFF FOR THE RESTAURANT (owner's rule). `auto` is
   // already "on AND this room prints", so a counter-only restaurant sees the explanation once, not a
   // set of controls it can never use.
+  // ── FACTS ONLY (owner, 2026-08-29) ────────────────────────────────────────────────────────
+  // This used to carry the same "take the printer over / stop printing here / setup guide" controls
+  // as the manager panel's strip — the model from BEFORE the Printing board, where a restaurant
+  // worked out who printed by tapping around its own screens. Keeping it alongside the new one meant
+  // two printing systems on one restaurant: "right now there is two printing things, one is working
+  // and one is just showing."
+  //
+  // The admin names one person on Printing. This screen states where the paper comes out and stops.
   const printSection = (!auto && tgt !== "counter") ? "" : `
     <div class="kset-sec">
       <h4>🖨 Printing</h4>
@@ -1484,17 +1622,11 @@ function renderKitchenSettings() {
       <div class="kset-line"><span>Automatic printing</span><b>${auto ? "ON" : "OFF"}</b></div>
       <div class="kset-line"><span>Tickets print on</span><b>${esc(where)}</b></div>
       <div class="kset-line"><span>Printing right now</span><b>${printingHere ? "THIS screen" : st && st.active ? (st.stale ? holder + " (gone quiet)" : holder) : "no screen yet"}</b></div>
-      ${printingHere
-        ? `<p class="kset-note">Tickets are coming out of this screen's printer. It keeps working when this window is minimised or covered — that is what the setup guide's launcher is for.</p>
-           <div class="kset-btns"><button class="btn" type="button" data-kstation="release">Stop printing on this screen</button>
-           <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`
+      <p class="kset-note">${printingHere
+        ? "Tickets are coming out of this screen's printer, and they keep coming when this window is minimised or covered."
         : heldByOther
-          ? `<p class="kset-note">Tickets are coming out at <b>${holder}</b>. If the printer is actually here, take it over — the other screen stops printing straight away.</p>
-             <div class="kset-btns"><button class="btn primary" type="button" data-kstation="take">🖨 Print here instead</button>
-             <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`
-          : `<p class="kset-note">No screen is printing yet. Turn it on here, on the computer the printer is attached to.</p>
-             <div class="kset-btns"><button class="btn primary" type="button" data-kstation="take">🖨 Print on this screen</button>
-             <a class="btn" href="/print-setup.html" target="_blank" rel="noopener">📖 Setup guide</a></div>`}
+          ? `Tickets are coming out at <b>${holder}</b>.`
+          : "No screen has taken the printer yet. Aevidine chooses which screen prints, on the Printing screen."}</p>
       `}
     </div>`;
   box.innerHTML = `
@@ -1532,21 +1664,9 @@ function renderKitchenSettings() {
     if (el) el.click();
     renderKitchenSettings();
   }));
-  box.querySelectorAll("[data-kstation]").forEach((b) => (b.onclick = async () => {
-    if (b.disabled) return;
-    b.disabled = true;
-    const take = b.dataset.kstation === "take";
-    try {
-      const r = await api("POST", take ? "/print-station/take" : "/print-station/release", {});
-      if (r && r.station) state.station = r.station;
-      toast(take ? "This screen now prints the kitchen tickets ✓" : "This screen has stopped printing.");
-      renderKitchenSettings();
-      if (take) load().catch(() => {});     // anything already waiting prints straight away
-    } catch (e) {
-      b.disabled = false;
-      toast("Couldn't change that: " + (e.message || "try again"));
-    }
-  }));
+  // [data-kstation] is gone with the buttons it bound — taking the printer off another screen was
+  // the old model's answer to a question the Printing board answers now. The named screen claims it
+  // by itself (public/panels/editor/app.js → managerPrintPass), so there is nothing to tap.
 }
 
 // ── One-tap printer problem report (owner, 2026-08-04) ──────────────────────────────
@@ -1554,6 +1674,97 @@ function renderKitchenSettings() {
 // manager's floor with one tap. Same overlay discipline as the 86 board: registered as a
 // back layer, closable by ✕/backdrop/back button, and the tap is never swallowed in
 // silence (buttons disable while sending, every outcome toasts).
+// ── HOW FAR BEHIND THE PRINTER IS, said the same way in three places ─────────────────────────
+// Owner, 2026-08-27: the sheet already answered "is printing on", "which screen prints" and "who is
+// printing right now" — it never answered "how much has piled up". A number alone cannot say it:
+// four waiting is normal for two seconds and an emergency after ten minutes. So the number ALWAYS
+// travels with the age of the oldest one, and only the age is allowed to raise an alarm.
+function waitingWords() {
+  const w = state.waiting || { n: 0, oldestMs: null };
+  const n = Number(w.n || 0);
+  if (!n) return { n: 0, stuck: false, text: "none — everything has printed", cls: "ok" };
+  const ms = Number(w.oldestMs || 0);
+  const stuck = ms >= (state.stuckAfterMs || 60000);
+  const age = ms < 60000 ? "just now"
+    : ms < 3600000 ? Math.round(ms / 60000) + " min ago"
+    : Math.round(ms / 3600000) + "h ago";
+  return {
+    n, stuck, age, cls: stuck ? "bad" : "ok",
+    text: `${n} ticket${n === 1 ? "" : "s"} — oldest ${age}`,
+  };
+}
+
+// The status rows at the top of the 🖨 sheet. ONE copy, used by the first render and by every board
+// read afterwards, so a sheet left open never quietly goes out of date while a cook reads it.
+function printerStatusHtml() {
+  const tgt = state.kotPrintTarget || "kitchen";
+  // A COMPUTER, NOT A SCREEN (mig 341). When a helper program owns the kitchen slips, this screen
+  // prints nothing at all — and the cook must be able to read WHY and WHERE from here, or a quiet
+  // screen beside a working printer is a mystery. The helper's name and printer are the answer.
+  const hlp = state.helper && state.helper.owned ? state.helper : null;
+  // WHY, in the words a cook can act on. `printRefused` is the server's own reason (screenMayPrint),
+  // and it outranks the coarse kitchen|counter|both target — a route that names another screen or a
+  // computer is the decision, and saying "this screen" under it would be a lie.
+  const refused = state.printRefused || null;
+  const where = hlp ? (esc(hlp.printer) + " — from " + esc(hlp.agent))
+    : refused === "off" ? "nobody — kitchen slips are switched off for this restaurant"
+    : refused === "other_panel" ? "another screen — not this one"
+    : refused === "other_person" ? "one named person's screen — not this one"
+    : refused === "other_device" ? "one named computer — not this one"
+    : tgt === "counter" ? "the counter screen — not this one"
+    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
+    : "this screen";
+  // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
+  const stn = state.station || null;
+  const nowPrinting = hlp
+    ? (hlp.connected ? esc(hlp.agent) + " (ready)" : esc(hlp.agent) + " — asleep, tickets are waiting")
+    : stn && stn.mine ? "THIS screen"
+    : stn && stn.active ? (esc(stn.active.label || (stn.active.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (stn.stale ? " (gone quiet)" : ""))
+    : "no screen yet";
+  const w = waitingWords();
+  return `<div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
+      <div><span>Tickets print on</span><b>${where}</b></div>
+      <div><span>Printing right now</span><b>${nowPrinting}</b></div>
+      <div class="prsheet-wait ${w.cls}"><span>Tickets waiting</span><b>${esc(w.text)}</b></div>
+      ${w.stuck ? `<p class="prsheet-stuck"><b>Nothing has printed for a while.</b> ${w.n} ticket${w.n === 1 ? " is" : "s are"} stacked up behind the printer — <b>read the orders off this screen</b> and cook from it while somebody looks at the paper. Nothing is lost: every one of them still prints, in order, the moment the printer is working.</p>` : ""}
+      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}${hlp.backup ? ` If it prints nothing for a minute, ${esc(hlp.backup.printer)} takes over.` : ""}</p>` : ""}
+      ${!hlp && !state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
+      ${!hlp && tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}`;
+}
+
+// Keep an OPEN sheet truthful. A cook opens it, walks to the printer, comes back — and the number
+// they left is the number they read. Repainting only the status block keeps their scroll position
+// and never re-enables a report button they are mid-tap on.
+function paintPrinterSheetStatus() {
+  const host = document.querySelector("#prSheet .prsheet-status");
+  if (host) host.innerHTML = printerStatusHtml();
+}
+
+// …and the count on the bar itself, so nobody has to open the sheet to find out. It appears ONLY
+// when the oldest ticket is genuinely old (STUCK_AFTER_MS, sent by the server): a badge that showed
+// "1" every time a ticket passed through the queue would be permanent furniture, and permanent
+// furniture is invisible — which is how a real pile-up gets missed.
+function paintPrinterBadge() {
+  const btn = document.getElementById("printerBtn");
+  if (!btn) return;
+  const w = waitingWords();
+  let tag = btn.querySelector(".prbadge");
+  if (!w.stuck) {
+    if (tag) tag.remove();
+    btn.removeAttribute("data-stuck");
+    btn.title = "Report a printer problem — the manager is told right away";
+    return;
+  }
+  if (!tag) { tag = document.createElement("span"); tag.className = "prbadge"; btn.appendChild(tag); }
+  tag.textContent = w.n > 99 ? "99+" : String(w.n);
+  btn.dataset.stuck = "1";
+  // The button already has a title; it becomes the whole sentence, because a badge is a number and
+  // a number is not an instruction.
+  btn.title = `${w.n} kitchen ticket${w.n === 1 ? "" : "s"} waiting to print, oldest ${w.age}. Tap to see what to do.`;
+  // Screen readers get the same sentence: the badge is decorative, the label carries the meaning.
+  btn.setAttribute("aria-label", btn.title);
+}
+
 let prSheetOff = null;
 function openPrinterSheet() {
   if (document.getElementById("prSheet")) return;
@@ -1565,45 +1776,27 @@ function openPrinterSheet() {
   ];
   const ov = document.createElement("div");
   ov.id = "prSheet"; ov.className = "prsheet-ov";
-  // ── WHERE PRINTING STANDS, ON THE KITCHEN SCREEN ITSELF (owner, 2026-08-18) ─────────────────
-  // "It should be shown in kitchen panel, able to see the whole thing." A cook at a silent printer
-  // should not have to ask anyone whether this screen is even meant to be printing — the two answers
-  // that decide it are the admin's, so they are shown as plain sentences, never as dead switches.
-  const tgt = state.kotPrintTarget || "kitchen";
-  // A COMPUTER, NOT A SCREEN (mig 341). When a helper program owns the kitchen slips, this screen
-  // prints nothing at all — and the cook must be able to read WHY and WHERE from here, or a quiet
-  // screen beside a working printer is a mystery. The helper's name and printer are the answer.
-  const hlp = state.helper && state.helper.owned ? state.helper : null;
-  const where = hlp ? (esc(hlp.printer) + " — from " + esc(hlp.agent))
-    : tgt === "counter" ? "the counter screen — not this one"
-    : tgt === "both" ? "this screen, with the counter as a 30-second backup"
-    : "this screen";
-  // Who is printing RIGHT NOW (mig 338) — the question a cook at a silent printer actually has.
-  const stn = state.station || null;
-  const nowPrinting = hlp
-    ? (hlp.connected ? esc(hlp.agent) + " (ready)" : esc(hlp.agent) + " — asleep, tickets are waiting")
-    : stn && stn.mine ? "THIS screen"
-    : stn && stn.active ? (esc(stn.active.label || (stn.active.panel === "editor" ? "A counter screen" : "A kitchen screen")) + (stn.stale ? " (gone quiet)" : ""))
-    : "no screen yet";
-  const status = `<div class="prsheet-status">
-      <div><span>Automatic printing</span><b>${state.autoPrintKot ? "ON" : "OFF"}</b></div>
-      <div><span>Tickets print on</span><b>${esc(where)}</b></div>
-      <div><span>Printing right now</span><b>${nowPrinting}</b></div>
-      ${hlp ? `<p>A printer program on <b>${esc(hlp.agent)}</b> prints these tickets, so this screen never has to be in front and nothing here can stop them.${hlp.connected ? "" : ` It has not been heard from for ${hlp.secondsAgo == null ? "a while" : Math.round(hlp.secondsAgo / 60) + " min"} — tickets are waiting, and print the moment it is back.`}${hlp.backup ? ` If it prints nothing for a minute, ${esc(hlp.backup.printer)} takes over.` : ""}</p>` : ""}
-      ${!hlp && !state.autoPrintKot && tgt !== "counter" ? `<p>Nothing prints by itself yet — the manager or your admin turns it on.</p>` : ""}
-      ${!hlp && tgt === "counter" ? `<p>This screen is not the printer: tickets come out at the counter. The 🖨 button on a ticket still prints here if this screen has a printer.</p>` : ""}
-    </div>`;
+  // WHERE PRINTING STANDS, ON THE KITCHEN SCREEN ITSELF (owner, 2026-08-18: "it should be shown in
+  // kitchen panel, able to see the whole thing"). The rows themselves live in printerStatusHtml() —
+  // one copy, because a board read repaints them under a sheet that is already open.
+  const status = `<div class="prsheet-status">${printerStatusHtml()}</div>`;
   ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer</h3><button class="btn" data-prclose>✕</button></div>
     ${status}
     <p class="prsheet-sub">Something wrong? One tap — the manager is told right away.</p>
     ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}
-    <!-- THE SETUP GUIDE LIVES HERE ON THIS SCREEN (owner, 2026-08-18: "where is this setup in the app").
-         The kitchen panel has no settings screen and its top bar is deliberately fought over to the pixel
-         (see buildMoreMenu) — so the guide goes where somebody standing at a misbehaving printer already
-         reaches: the 🖨❗ sheet. A link, not a button that does something, so a cook cannot mistake it for a
-         report. The full switches live in the manager panel's Settings → Kitchen printing. -->
-    <button class="btn prsheet-row prsheet-help" type="button" data-prsettings><span>⚙️</span> Printer settings on this screen</button>
-    <a class="btn prsheet-row prsheet-help" href="/print-setup.html" target="_blank" rel="noopener"><span>📖</span> How to set this printer up (full guide)</a></div>`;
+    <!-- ⚠️ THE GUIDE IS BACK, AND THE REASON IT LEFT HAS GENUINELY EXPIRED.
+         Previously (owner, 2026-08-29): *"inside the kitchen screen also kitchen panel also there is
+         how to print… remove that completely"* — and it was right at the time. A cook's screen could
+         not be the printer: the admin named ONE person on the Printing board, so telling a cook how
+         to set a printer up was an instruction to do something this screen would refuse.
+         LATEST (owner, 2026-08-31): *"kitchen panel will always be on and there will be guide for
+         it."* The model changed underneath the old rule — THIS screen is now the default printer for
+         kitchen slips, with nobody named and nothing switched on (lib/printHelpers → resolveTarget).
+         So the guide is no longer an instruction to do the impossible; it is the instructions for the
+         machine this sheet is standing on. It goes straight to the print-station file — the .bat /
+         .command that opens this panel in its own minimised Chrome. -->
+    <a class="btn prsheet-row prsheet-help" href="/print-setup.html#station" target="_blank" rel="noopener"><span>🖨</span> Set this screen up to print</a>
+    <button class="btn prsheet-row prsheet-help" type="button" data-prsettings><span>⚙️</span> Where printing stands</button></div>`;
   document.body.appendChild(ov);
   const close = () => { ov.remove(); if (prSheetOff) { const off = prSheetOff; prSheetOff = null; off(); } };
   prSheetOff = window.LFH_BACK ? LFH_BACK.layer("printer-problem", close) : null;
@@ -1728,6 +1921,24 @@ let markFullRead = () => {};
 function freshLoad() {
   return loadInFlight ? loadInFlight.catch(() => {}).then(() => loadImpl()) : loadImpl();
 }
+// refreshQuietly(): freshLoad() for the five callers that fire one and walk away.
+//
+// load() and freshLoad() REJECT when the read fails — deliberately, because backoffPoll and
+// LFH_RT.catchUp back off on exactly that. Every timer and listener in this file therefore writes
+// `load().catch(() => {})`. Five post-write refreshes did not: platAct's two branches, the refused ✓,
+// the refused ALL READY, and the trailing read at the end of a take-back. Nothing awaited them, so a
+// read that failed became an UNHANDLED PROMISE REJECTION — and public/panels/errlog.js reports every
+// one of those into the owner's Everything Log.
+//
+// Watched happening (T6 sweep #7, 2026-08-22): with the board answering 503 "the database is very
+// busy", a cook tapping UNDO produced `REJECTION: the database is very busy` in the log and NOTHING
+// on screen. On a busy evening that is one unactionable row per take-back, in the log the owner reads
+// — which is the "don't cry wolf" rule and the rush rule pointing the same way. The person has
+// already been told what they need: the refusal toast fired, and the offline/busy bar owns "the
+// system is very busy". The read simply tries again on the next breadcrumb or the 60s backstop.
+//
+// It swallows the READ, never a write: every write on this screen still reports its own outcome.
+const refreshQuietly = () => freshLoad().catch(() => {});
 function load() {
   if (loadInFlight) { loadQueued = true; return loadInFlight; }
   const p = loadImpl();
@@ -1757,7 +1968,7 @@ async function loadImpl() {
   // brand-new platform order.
   const ids = new Set([...data.orders.map((o) => o.id), ...((data.platform || []).map((p) => p.id))]);
   if (state.knownIds) {
-    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
+    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && guestPlaced(o))) && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
     if (newReceived.length || freshPlat) chime();
     // The QUEUE prints new orders now (processPrintJobs, below — mig 335). This is only the net
@@ -1800,7 +2011,26 @@ async function loadImpl() {
   // Shown in ☰ → Settings and on the 🖨 sheet, so "where is the paper coming out?" is answered on
   // the screen instead of by walking to the printer.
   state.station = data.station || null;
+  // A COMPUTER, NOT A SCREEN (mig 341) — and this line was MISSING since the day the helper shipped
+  // (found 2026-08-27 while adding the waiting count). The 🖨 sheet has always read `state.helper`
+  // to say "these tickets print on <printer> from <computer>", and nothing ever assigned it: the
+  // whole helper branch of that sheet was dead code, so a cook standing beside a perfectly good
+  // printer at a silent screen got the generic answer instead of the true one. That is precisely the
+  // mystery the branch was written to end.
+  state.helper = data.helper || null;
+  // …and WHY this screen is not the printer, when it is not (screenMayPrint's reason). Also never
+  // stored before. It is the difference between "a computer has it" and "the owner named somebody
+  // else's screen", which are two different things for a cook to do about it.
+  state.printRefused = data.printRefused || null;
+  // HOW FAR BEHIND THE PRINTER IS (owner, 2026-08-27: "'the printer is off' and 'the printer is off
+  // and eleven orders are stacked up' stop looking the same"). { n, oldestMs } from the same board
+  // read — this screen CANNOT count it from data.printJobs, because when a computer owns the paper
+  // this screen is handed nothing at all, which is the exact case that matters.
+  state.waiting = data.waiting || { n: 0, oldestMs: null };
+  state.stuckAfterMs = typeof data.stuckAfterMs === "number" ? data.stuckAfterMs : 60000;
+  paintPrinterBadge();
   if (window.__kdsSettingsOpen) renderKitchenSettings();   // the sheet is open: keep it truthful
+  if (document.getElementById("prSheet")) paintPrinterSheetStatus();  // …and so is the 🖨 sheet
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
   // Reprints the manager sent to THIS kitchen's printer (mig 269) — claim, print with the
@@ -1854,6 +2084,7 @@ $("#muteBtn").onclick = () => {
 // drawer (via LFH_BACK) instead of leaving the kitchen panel.
 let drawerOff = null;
 function openDrawer() {
+  state.dishOutOnly = false;   // never inherited from last time — see the note in renderDishes
   $("#drawerOverlay").hidden = false; renderDishes();
   drawerOff = window.LFH_BACK ? LFH_BACK.layer("86-board", closeDrawer) : null;
 }
@@ -2189,12 +2420,13 @@ function backoffPoll(baseMs) {
     if (!w || (!w.higherView && !sim)) return;
     const rb = document.createElement("div"); rb.id = "xrayRibbon";
     const who = sim || w.actor === "admin" ? "Admin" : w.actor.charAt(0).toUpperCase() + w.actor.slice(1);
-    // ADMIN came from the console → show the PATH (Restaurants › name › Kitchen
-    // panel), the owner panel's breadcrumb language (owner, 2026-07-06). Any other
-    // higher role keeps the plain name — no console to crumb back to.
+    // ADMIN came from the console → show the PATH (Dashboard › name › Kitchen panel), the owner
+    // panel's breadcrumb language. Any other higher role keeps the plain name — no console to
+    // crumb back to. It starts at the DASHBOARD because that is where the admin came from
+    // (owner, 2026-08-26); "Restaurants" was a step he never took.
     const body = who === "Admin"
-      ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-        `<span class="rb-sep">›</span><span id="xrayRest"></span>` +
+      ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Dashboard</a>` +
+        `<span class="rb-sep">›</span><a id="xrayRest"></a>` +
         `<span class="rb-sep">›</span><span>Kitchen panel</span></nav>`
       : `<span class="rb-rest" id="xrayRest"></span>`;
     // The kitchen has no gated controls, so the "actual view" only drops the admin extras;
@@ -2221,10 +2453,18 @@ function backoffPoll(baseMs) {
     document.body.insertBefore(rb, document.body.firstChild);
     const simB = document.getElementById("xraySimBtn");
     if (simB) simB.onclick = () => setViewReal(!sim);
-    const home = document.getElementById("xrayHome");
-    if (home) home.onclick = () => {
-      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    // GO BACK TO THE ADMIN CONSOLE, AND STOP ACTING AS THIS RESTAURANT ON THE WAY OUT.
+    // The crumb used to be a plain jump: the admin left the panel but the act-as cookie stayed
+    // set for six hours, so re-opening a panel silently re-entered this restaurant. The owner
+    // panel's bar was fixed for exactly that on 2026-07-06 and these three were not.
+    const goConsole = async (href) => {
+      try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+      try { window.top.location.href = href; } catch { window.location.href = href; }
     };
+    const home = document.getElementById("xrayHome");
+    if (home) home.onclick = () => goConsole("/aevinite");
+    const restLink = document.getElementById("xrayRest");
+    if (restLink && restLink.tagName === "A") restLink.onclick = () => goConsole("/aevinite/restaurants");
     // The restaurant name lands with the first /board load — mirror it when it does.
     const restEl = document.getElementById("restName");
     if (restEl) {

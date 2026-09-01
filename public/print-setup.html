@@ -195,6 +195,7 @@
     <li><a href="#helper">Let a computer print, not a screen</a></li>
     <li><a href="#why">Why printing used to stop</a></li>
     <li><a href="#buy">What to buy</a></li>
+    <li><a href="#twoways">Two ways to print — pick one</a></li>
     <li data-only="win"><a href="#windows">① Windows — set it up by hand</a></li>
     <li data-only="mac"><a href="#mac">② Mac — set it up by hand</a></li>
     <li data-only="linux"><a href="#linux">③ Linux &amp; Raspberry Pi — by hand</a></li>
@@ -291,27 +292,70 @@
   <div class="plain"><b>In simple words:</b> before, a browser window had to be the printer. Now a small
     program is the printer, and it doesn't care what is on the screen.</div>
 
-  <h3>How to set it up — four steps</h3>
+  <h3>How to set it up — four steps, and you type nothing</h3>
+  <div class="ok"><b>Do all four ON the computer the printer is plugged into.</b> That is the whole
+    trick: the machine that has the printer is the machine that knows its own printers, so it is the
+    one that sets them up. Not a phone, not a tablet, not somebody else's laptop.</div>
   <ol class="steps">
-    <li><b>Ask us to add your computer.</b> We do it on our side in seconds and hand you a block of
-      text with a <b>Copy</b> button — it already has your site address and your computer's own code
-      inside it. <b>You are given the text, never a file to download</b>, because a downloaded script
-      is what macOS and Windows block.</li>
-    <li><b>Make the file yourself</b> — the same way as the starter file in your own menu below:
-      Notepad on Windows (<b>Save as type: All Files</b>), TextEdit on a Mac (<b>Format → Make Plain
-      Text</b>), or <code>nano</code> on Linux. Save it with the exact name we give you.</li>
-    <li><b>Double-click it once.</b> Nothing appears on screen — that is correct. It is now telling the
-      app which printers this computer has, and they show up on our side straight away.</li>
-    <li><b>Tell us which printer prints what</b> — kitchen slips, bills, banquet sheets. We set those
-      three lines, and paper starts coming out. Change your mind any time; it takes effect on the next
-      couple of seconds, with nothing to reinstall.</li>
+    <li><b>Get the helper file.</b> It is <b>the same file for every restaurant</b> — there is nothing
+      secret in it, so it can be emailed, kept on a USB stick, or copied off the screen. Aevidine shows
+      it on the Printing screen with a <b>Copy</b> button.</li>
+    <li><b>Make the file yourself</b> — Notepad on Windows (<b>Save as type: All Files</b>), TextEdit on
+      a Mac (<b>Format → Make Plain Text</b>), or <code>nano</code> on Linux. Save it on the Desktop
+      with the exact name the screen gives you. <b>You are given text, never a download</b> — a
+      downloaded script is exactly what macOS and Windows block.</li>
+    <li><b>Double-click it.</b> A small window opens showing this computer's name and its printers, and
+      <b>your browser opens by itself</b>.</li>
+    <li><b>Press ALLOW</b> in that page. That is it. Within a couple of seconds the computer appears on
+      the Printing screen with all its printers listed, each with a <b>Test page</b> button.</li>
   </ol>
+  <div class="plain"><b>In simple words:</b> type the little file once, double-click it, press Allow.
+    Nothing to name, no code to copy, no password to type.</div>
+  <div class="ok"><b>It starts itself from then on.</b> The helper installs its own start-up entry the
+    first time it runs, so after a shutdown, a power cut or a reboot it comes back <b>by itself</b>.
+    Nobody has to remember anything in the morning.</div>
+
+  <h3 id="after">It is installed — now what? (the questions everybody asks)</h3>
+  <table>
+    <tr><th>What happens</th><th>What you do</th></tr>
+    <tr><td><b>They shut the computer down at night.</b></td>
+        <td><b>Nothing.</b> It starts again by itself when the computer is switched on. It never asks to be
+          linked again — that is saved on the machine for good.</td></tr>
+    <tr><td><b>Power cut.</b></td>
+        <td><b>Nothing.</b> Same as above. Every slip that could not print is waiting, and they all come out
+          in order once it is back — never twice.</td></tr>
+    <tr><td><b>Somebody closed the little window by accident.</b></td>
+        <td><b>Double-click the file again.</b> On a Mac it also restarts itself within a few seconds
+          without anybody doing anything.</td></tr>
+    <tr><td><b>How do I know it is running?</b></td>
+        <td>The Printing screen says <b>connected · seen 2s ago</b> in green. If it says <b>asleep</b>, the
+          helper is not running on that computer.</td></tr>
+    <tr><td><b>Nothing is printing.</b></td>
+        <td>Look at the kitchen screen's <b>🖨</b> sheet: it says how many slips are waiting and how long it
+          has been. Then check the printer is on, has paper, and that the little window is running.</td></tr>
+    <tr><td><b>I want to restart it by hand.</b></td>
+        <td>Close the window (or the Terminal), then double-click the file again. Nothing is lost.</td></tr>
+    <tr><td><b>They got a new computer.</b></td>
+        <td>On the Printing screen press <b>Unlink</b> on the old one. Then make the file on the new
+          computer and press Allow. Choose the printers again — three taps.</td></tr>
+    <tr><td><b>Where does it live on the machine?</b></td>
+        <td data-only="mac">The file wherever you saved it; its saved link in <code>~/.aevidine-print</code>;
+          its log in <code>~/Library/Caches/aevidine-print/helper.log</code>.</td>
+        <td data-only="win">The file wherever you saved it; its saved link and log in
+          <code>%LOCALAPPDATA%\AevidinePrintHelper</code>.</td>
+        <td data-only="linux">The file wherever you saved it; its saved link in
+          <code>~/.aevidine-print</code>; its log in <code>~/.cache/aevidine-print/helper.log</code>.</td></tr>
+  </table>
+  <div class="warn"><b>Two helpers on one computer is not a problem.</b> If somebody double-clicks the file
+    while it is already running, the second one says <i>"already running"</i> and closes itself. Nothing
+    prints twice, ever.</div>
 
   <h3>What you will see once it is running</h3>
   <ul>
     <li>Your <b>kitchen screen's 🖨 sheet</b> says <i>"Tickets print on: &lt;your printer&gt; — from
       &lt;your computer&gt;"</i>, and says so plainly if that computer has gone to sleep.</li>
-    <li>Your <b>manager screen</b> stops asking "should this screen print?" — a program is doing it.</li>
+    <li>Your <b>manager screen</b> stops asking "should this screen print?" — a program is doing it —
+      and <b>Settings → Printing</b> shows the computer's name in green with "seen 2s ago".</li>
     <li>Pressing <b>Print</b> on a bill opens <b>no window at all</b>: you get a line saying which
       printer it went to.</li>
   </ul>
@@ -322,6 +366,48 @@
   <div class="plain"><b>Still want the old way?</b> It has not gone anywhere. A restaurant that installs
     nothing keeps printing exactly as this guide's own menus describe — one screen volunteers, and the
     app uses it. The helper is the better path, not the only one.</div>
+</div>
+
+<h2 id="twoways">Two ways to print — and there is nothing to choose <span class="tag">new</span></h2>
+<div class="card">
+  <div class="ok"><b>There is no longer a question to answer here.</b> The kitchen screen prints the
+    kitchen slips on its own, with nothing switched on. If you also set a <b>computer</b> up, that
+    computer takes over the papers you give it, and the screen stands down for those. Set up one, or
+    both, or neither — nothing has to be told which way you went.</div>
+
+  <table>
+    <tr><th></th><th>① A computer <span class="tag">optional</span></th><th>② The kitchen screen <span class="tag">already on</span></th></tr>
+    <tr><td><b>What runs</b></td><td>a small program — the <b>helper</b></td><td>a <b>Chrome</b> of its own, out of the way</td></tr>
+    <tr><td><b>Does anything have to be open?</b></td><td><b>no</b> — no window, nobody logged in</td><td>that Chrome stays running, minimised</td></tr>
+    <tr><td><b>More than one printer?</b></td><td><b>yes</b> — each paper can have its own</td><td>no — whatever that machine's default printer is</td></tr>
+    <tr><td><b>Anything to install?</b></td><td>one small file you type</td><td>one small file you type (Chrome is already there)</td></tr>
+    <tr><td><b>Someone has to sign in?</b></td><td><b>no</b></td><td>yes — <b>once</b>, in the window it opens</td></tr>
+  </table>
+  <div class="plain"><b>In simple words:</b> the second way is already happening — the kitchen screen
+    prints the kitchen slips by itself. The first way is a little program you can put on the computer
+    the printer is plugged into, and then that program does the printing instead, silently, with no
+    window open. You do not tell Aevidine which one you want: whichever is there, does it.</div>
+
+  <h3 id="station">② The print-station file — three steps</h3>
+  <ol class="steps">
+    <li><b>Make the file.</b> Aevidine's Printing screen shows it with a <b>Copy</b> button. It is the
+      <b>same file for every restaurant</b> and there is nothing secret in it. Notepad on Windows
+      (<b>Save as type: All Files</b>), TextEdit on a Mac (<b>Format → Make Plain Text</b>),
+      <code>nano</code> on Linux.</li>
+    <li><b>Double-click it.</b> A small Chrome opens <b>out of the way</b> — on a Mac the window you were
+      using keeps the screen; on Windows it starts minimised.</li>
+    <li><b>Sign in once</b> in that window, as the person Aevidine named on the Printing screen. It
+      remembers from then on.</li>
+  </ol>
+  <div class="ok"><b>Why it does not get in the way.</b> It is a <b>separate</b> Chrome with its own
+    profile, so your own Chrome, your tabs, your history and your logins are untouched — and closing one
+    does not close the other. It prints with <b>no dialog</b> and it never comes to the front.</div>
+  <div class="warn"><b>Leave it running, and do not let the computer sleep.</b> The file keeps the machine
+    awake for as long as it is open. A sleeping computer prints nothing, and that is the single most
+    common reason a restaurant says "it stopped overnight".</div>
+  <div class="plain"><b>One thing worth knowing:</b> a browser can only ever print to the computer's
+    <b>default</b> printer — that is a rule of every browser, not ours. So if a shop needs kitchen slips
+    on one printer and bills on another, that is what way ① is for.</div>
 </div>
 
 <h2 id="why">Why printing used to stop (worth 60 seconds)</h2>

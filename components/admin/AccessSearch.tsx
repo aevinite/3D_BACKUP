@@ -38,7 +38,6 @@ import { SECTIONS, type Node, type Section } from "@/lib/accessTree";
 const SYNONYMS: Record<string, string> = {
   allergy_notes: "allergy allergen nuts note request",
   allergy_other: "allergy own custom",
-  auto_print_kot: "printer print kot kitchen ticket thermal",
   banquet: "banquet event party hall per plate",
   banquet_setup: "banquet fields number series tax paper layout",
   bill: "bill invoice receipt gst tax legal",
@@ -295,6 +294,17 @@ export default function AccessSearch({ isOn, onPick }: {
           })}
         </div>
       ) : null}
+      {/* ── THE LAYER, SAID OUT LOUD (owner, 2026-08-27, with the screen in front of him: "in the
+          admin, Access and permission, the UI is clashing and overlaying") ────────────────────────
+          He was right, and I could reproduce it. The results panel is capped at 560px while the
+          cards behind it run to ~1015px, so it covered the LEFT half of every card and left the
+          right half fully lit — sentences chopped mid-word ("…no greyed-out leftovers", "…ult —
+          switch one on") with the count pills still glowing beside them. Two layers of text in one
+          place, and nothing said which was on top.
+          A scrim is the fix, not a wider panel: it makes the page behind read as behind, and it
+          gives the list somewhere to be dismissed FROM (clicking the dim area closes it, which is
+          what every person tries first). */}
+      {open && q.trim() ? <div className="as-scrim" onMouseDown={() => setOpen(false)} aria-hidden="true" /> : null}
     </div>
   );
 }
@@ -302,7 +312,25 @@ export default function AccessSearch({ isOn, onPick }: {
 function SearchStyle() {
   return (
     <style>{`
-  .as-wrap { position: relative; flex: 1 1 320px; min-width: 0; max-width: 560px; }
+  /* z-index 41 — ABOVE the scrim (39) and the list (40), so the field you are typing in is never
+     dimmed by the very thing your typing opened. */
+  .as-wrap { position: relative; flex: 1 1 320px; min-width: 0; max-width: 560px; z-index: 41; }
+  /* Dims the whole page while results are showing. Deliberately gentle: this is a typeahead, not a
+     modal — enough that the cards stop competing with the list, not so much that it feels like a
+     dialog you have to deal with. */
+  /* A DIM IS NOT ENOUGH ON A NEAR-BLACK SKIN — measured, not assumed. At 0.42 alpha the pixel
+     behind the panel went from rgb(16,20,27) to rgb(10,15,23): a real change, and invisible to a
+     human. Darkening something that is already almost black cannot say "this is behind".
+     So the scrim also BLURS. Blur is the honest signal here for two reasons: it works on a black
+     skin and a cream one alike, and in this app blur already means "the thing behind is
+     dismissable" — which is exactly true, clicking it closes the list.
+     ONE unprefixed backdrop-filter line. Hand-adding -webkit- makes the build DROP the blur
+     entirely (see app/globals.css → what "blur" means). */
+  .as-scrim { position: fixed; inset: 0; z-index: 39; background: rgba(3, 7, 16, 0.5);
+    backdrop-filter: blur(2.5px);
+    animation: as-scrim-in .13s ease-out; }
+  @keyframes as-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .as-scrim { animation: none; } }
   .as-field { display: flex; align-items: center; gap: 8px; padding: 0 10px;
     background: var(--adm-field, rgba(255,255,255,.04)); border: 1px solid var(--adm-line, rgba(255,255,255,.14));
     border-radius: 11px; height: 38px; transition: border-color .14s, box-shadow .14s; }
@@ -318,10 +346,16 @@ function SearchStyle() {
     font-size: 19px; line-height: 1; padding: 0 3px; }
   .as-clear:hover { opacity: 1; }
 
-  .as-list { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0;
+  /* WIDER THAN THE FIELD, on purpose. A result is a name AND the path it lives at ("Manager ›
+     Permission for manager"), and at 560px both were being cut with an ellipsis — so the one thing
+     the list is for, telling you WHERE a setting is, was the first thing to go. It grows to the
+     right, never past the viewport. The heavier shadow is the other half of the layer: with the
+     scrim behind it, the panel now reads as one sheet lying on top instead of a patch. */
+  .as-list { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: auto;
+    width: max(100%, min(690px, calc(100vw - 60px)));
     max-height: min(58vh, 420px); overflow-y: auto; padding: 5px;
     background: var(--adm-pop, #171a20); border: 1px solid var(--adm-line, rgba(255,255,255,.14));
-    border-radius: 13px; box-shadow: 0 18px 44px rgba(0,0,0,.42); }
+    border-radius: 13px; box-shadow: 0 24px 60px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.3); }
   .as-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
     background: none; border: 0; color: inherit; cursor: pointer; padding: 8px 10px; border-radius: 9px; }
   /* The highlighted result — hover AND the keyboard cursor land on the same class, so both read
@@ -338,6 +372,7 @@ function SearchStyle() {
   /* On a phone the list is the whole width of the card and the rows are finger-sized. */
   @media (max-width: 640px) {
     .as-wrap { flex: 1 1 100%; max-width: none; }
+    .as-list { width: 100%; }
     .as-item { padding: 11px 10px; }
     .as-nm { white-space: normal; }
   }

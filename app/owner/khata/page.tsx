@@ -34,8 +34,15 @@ type Person = {
 // zero — showing "₹0 collected today" for a read that failed is a claim about the till.
 type Summary = { totalOutstanding: number; peopleCount: number; billCount: number; collectedMonth: number | null; collectedToday: number | null };
 
-const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
+// ── A DATE WE CANNOT READ SHOWS A DASH, NEVER "Invalid Date" OR "oldest NaN days" ────────────────
+// (sweep 7 · T14 round 2, 2026-08-31.) `new Date("nope")` gives NaN and both of these printed it
+// straight out — measured: a row read "oldest NaN days" and its bill line read "Invalid Date". Not
+// reachable from real data (the route only returns rows whose `khata_at` is set), but a credit book
+// is the last screen that should ever look broken, and the guard is one function.
+const ok = (iso: string) => Number.isFinite(new Date(iso).getTime());
+const fmt = (iso: string) => (ok(iso) ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }) : "—");
 const ageDays = (iso: string) => {
+  if (!ok(iso)) return "—";
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
   return d <= 0 ? "today" : d === 1 ? "1 day" : `${d} days`;
 };
@@ -47,7 +54,7 @@ const ageDays = (iso: string) => {
 // The WORDS do not change ("oldest 92 days"), so the colour adds emphasis rather than carrying the
 // meaning on its own, and a fresh tab looks exactly as it always did.
 const OldestTab = ({ iso }: { iso: string }) => {
-  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  const d = ok(iso) ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : 0;
   const tone = d >= 60 ? "var(--adm-danger, #e5484d)" : d >= 30 ? "var(--adm-warn, #c98a2b)" : null;
   return (
     <span style={tone ? { color: tone, fontWeight: 700 } : undefined}
@@ -158,8 +165,21 @@ export default function OwnerKhata() {
           </div>
         )}
 
+        {/* ── A READ THAT FAILED IS NOT AN EMPTY BOOK (sweep 7 · T14 round 2, 2026-08-31) ──────────────────
+            The loading branch was guarded — `customers === null && !err` — but the EMPTY branch below it was
+            not, so a failed first load fell straight through to it. Measured: with the route answering 500,
+            Pay Later showed the red "Couldn't load" card AND, underneath it, **"No one owes anything right
+            now."** That is a claim about money made from no data, on the one screen whose whole job is to
+            say who owes what; Customers did the same with "No customers yet".
+            The sister screen already had this right — Feedback & complaints says "this is a loading error,
+            not 'no ratings'" — so this is the same sentence, in the same shape, on the two that lacked it. */}
         {customers === null && !err ? (
           <div className="adm-empty">Loading Pay Later…</div>
+        ) : customers === null ? (
+          <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
+            Couldn&apos;t read the credit book — this is a loading error, not &ldquo;nobody owes anything.&rdquo;{" "}
+            <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => load()}>Try again</button>
+          </div>
         ) : rows.length === 0 ? (
           // A SEARCH THAT FOUND NOBODY MUST SAY WHERE IT LOOKED (sweep 6 · T14, 2026-08-18). This box
           // filters the list already on the page, and that list is the biggest `shown.showing` debts

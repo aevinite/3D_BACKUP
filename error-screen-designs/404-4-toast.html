@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Burnt that one</title>
+<style>
+  /* DESIGN 4 — BURNT TOAST.
+     A toaster pops up a slice burnt black, with 404 branded into it, and one wisp of smoke. Tap
+     the toaster and it pops again — a toy, deliberately NOT a game: it never asks for a score and
+     never stands between the person and the way out. This is the most playful of the five and the
+     one a child at the table would poke at. */
+  :root { color-scheme:light; --ink:#241a12; --muted:#7d6d5e; --chrome:#cfd4dc; --bg:#fff8ec; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:26px;
+         background:radial-gradient(120% 100% at 50% -10%, #fffdf8, var(--bg) 50%, #f6e6cd 100%);
+         color:var(--ink); font:500 15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:center; }
+  .card { width:min(430px,100%); }
+  .stage { height:210px; display:grid; place-items:end center; }
+  .toaster { position:relative; width:150px; height:104px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .toaster:focus-visible { outline:3px solid var(--ink); outline-offset:6px; border-radius:18px; }
+
+  /* the slice, behind the body so it rises out of the slot */
+  .slice { position:absolute; left:50%; bottom:56px; width:76px; height:66px; margin-left:-38px;
+           border-radius:10px 10px 4px 4px;
+           background:linear-gradient(#3b2a1d,#221610 62%,#1a110c);
+           box-shadow:inset 0 2px 0 rgba(255,255,255,.08);
+           display:grid; place-items:center; z-index:0;
+           transform:translateY(70px);
+           animation:pop .62s cubic-bezier(.2,1.5,.4,1) .55s both; }
+  .slice b { font:800 25px/1 ui-monospace,SFMono-Regular,Menlo,monospace; color:#6d5a48;
+             letter-spacing:.04em; text-shadow:0 1px 0 rgba(0,0,0,.5); }
+  /* charred blotches, so it reads as burnt rather than just dark */
+  .slice::before { content:""; position:absolute; inset:0; border-radius:inherit; opacity:.5;
+    background:radial-gradient(10px 7px at 22% 30%, #000 40%, transparent 42%),
+               radial-gradient(8px 6px at 74% 22%, #000 40%, transparent 42%),
+               radial-gradient(12px 8px at 62% 72%, #000 40%, transparent 42%),
+               radial-gradient(7px 5px at 30% 76%, #000 40%, transparent 42%); }
+
+  /* the toaster body */
+  .body { position:absolute; left:0; bottom:0; width:150px; height:74px; border-radius:16px 16px 12px 12px;
+          background:linear-gradient(165deg,#f2f4f8 0%,var(--chrome) 45%,#9aa0aa 100%);
+          box-shadow:inset -6px -5px 12px rgba(255,255,255,.55), 0 10px 20px rgba(70,55,40,.26); z-index:1; }
+  .slot { position:absolute; left:20px; top:-5px; width:110px; height:12px; border-radius:8px;
+          background:linear-gradient(#4a4f58,#2a2e35); box-shadow:inset 0 2px 4px rgba(0,0,0,.6); }
+  .lever{ position:absolute; right:-8px; top:18px; width:12px; height:26px; border-radius:6px;
+          background:linear-gradient(#e9ecf1,#a7adb7); transform-origin:50% 0;
+          animation:lever .62s ease-out .55s both; }
+  .dial { position:absolute; left:16px; bottom:16px; width:20px; height:20px; border-radius:50%;
+          background:radial-gradient(circle at 35% 30%, #fff, #9aa0aa); box-shadow:0 1px 3px rgba(0,0,0,.3); }
+  .dial::after { content:""; position:absolute; left:9px; top:3px; width:2px; height:8px; background:#3d434c; border-radius:2px; }
+
+  .smoke { position:absolute; left:50%; bottom:112px; translate:-50% 0; width:54px; height:74px; pointer-events:none; z-index:0; }
+  .smoke span { position:absolute; bottom:0; width:9px; height:9px; border-radius:50%;
+                background:rgba(90,80,70,.34); opacity:0; }
+  .smoke span:nth-child(1){ left:10px; animation:rise 3s ease-out 1.15s infinite }
+  .smoke span:nth-child(2){ left:24px; animation:rise 3s ease-out 1.75s infinite }
+  .smoke span:nth-child(3){ left:37px; animation:rise 3s ease-out 2.35s infinite }
+
+  @keyframes pop   { 0%{ transform:translateY(70px) } 70%{ transform:translateY(-6px) } 100%{ transform:translateY(0) } }
+  @keyframes lever { 0%{ transform:translateY(22px) } 100%{ transform:translateY(0) } }
+  @keyframes rise  { 0%{ opacity:0; transform:translateY(0) scale(.6) }
+                     20%{ opacity:.5 } 100%{ opacity:0; transform:translateY(-58px) scale(2.1) } }
+  /* re-running the pop on a tap: the class is removed and re-added, so the animation restarts */
+  .again .slice { animation:pop .62s cubic-bezier(.2,1.5,.4,1) both }
+  .again .lever { animation:lever .62s ease-out both }
+
+  #brand { font:800 11.5px/1 system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase;
+           color:#b07b3f; margin-bottom:10px }
+  #brand[hidden]{ display:none }
+  h1 { font-size:22px; margin:14px 0 8px; font-weight:800 }
+  #why { color:var(--muted); font-size:14.5px; margin:0 auto 8px; max-width:33ch }
+  .poke { font-size:12.5px; color:#a4947f; margin:0 0 22px }
+  .acts { display:flex; flex-direction:column; gap:10px }
+  a,button.b { font:700 14.5px/1 system-ui,sans-serif; border-radius:12px; padding:14px 18px;
+               cursor:pointer; text-decoration:none; border:0 }
+  #home { background:var(--ink); color:#fff9f0 }
+  #retry{ background:transparent; color:var(--ink); border:1px solid rgba(36,26,18,.22) }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slice,.lever,.again .slice,.again .lever { animation:none; transform:none }
+    .smoke span { animation:none; opacity:.3 }
+    .poke { display:none }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <div class="stage">
+      <div class="toaster" id="toaster" role="button" tabindex="0" aria-label="Pop the toast again">
+        <div class="smoke"><span></span><span></span><span></span></div>
+        <div class="slice"><b>404</b></div>
+        <div class="body"><div class="slot"></div><div class="lever"></div><div class="dial"></div></div>
+      </div>
+    </div>
+    <h1 id="title">We burnt that one</h1>
+    <p id="why">The page you asked for isn&rsquo;t here. If you&rsquo;re at a table, scan the QR code again
+       &mdash; or ask a member of staff.</p>
+    <p class="poke">(go on, tap the toaster)</p>
+    <div class="acts">
+      <a id="home" href="/">Go to the menu</a>
+      <button id="retry" class="b" type="button" onclick="location.reload()">Try again</button>
+    </div>
+    <div id="hint" style="margin-top:14px;font-size:12.5px;color:var(--muted)"></div>
+  </main>
+<script>
+  // The toy. Restarting a CSS animation needs the class off for one frame, which is what the
+  // reflow read is for. Deliberately does nothing except pop — no score, no state, nothing to lose.
+  (function () {
+    var t = document.getElementById("toaster");
+    var pop = function () {
+      t.classList.remove("again");
+      void t.offsetWidth;           // force a reflow so the animation can restart
+      t.classList.add("again");
+    };
+    t.addEventListener("click", pop);
+    t.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pop(); } });
+  })();
+  (function(){ try {
+    var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+    if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+  } catch (e) {} })();
+</script>
+</body>
+</html>

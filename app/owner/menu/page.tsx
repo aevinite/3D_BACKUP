@@ -6,6 +6,7 @@
 // The embedded panel echoes ?rid on every API call; the editor route validates that rid
 // against the owner's estate (app/api/editor → editorScope), so this never widens reach.
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
@@ -89,18 +90,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     );
   }
 
-  if (!selected) {
-    return (
-      <div className="adm-page">
-        <h1 className="adm-page-h">Menu</h1>
-        {/* Reached only when the entitlement really said no — a failed read is answered above,
-            and an owner with no restaurant at all never gets past app/owner/layout.tsx. */}
-        <p className="adm-page-sub">
-          The menu editor isn&apos;t switched on for your restaurant — ask your administrator.
-        </p>
-      </div>
-    );
-  }
+  // ── A SECTION YOU DO NOT HAVE SIMPLY IS NOT THERE (owner, 2026-08-31, extended 2026-09-01) ────
+  // R36 from the page side: *"owner can't know which option are not given to them, only admin
+  // should know that."* This printed "The menu editor isn't switched on for your restaurant — ask
+  // your administrator", which names a section he has not been given and sends him to support about
+  // it. Deleted, not restyled, and he goes back to his dashboard.
+  // The careful thing ABOVE this line is untouched and is why the redirect is safe: a failed READ
+  // is answered separately (T13, 2026-08-17), so only a genuine entitlement "no" reaches here — a
+  // database blip can never send him away. Sixth of the six screens; see app/owner/customers.
+  if (!selected) redirect("/owner");
 
   return <OwnerMenuEditor restaurants={restaurants} initial={selected} skin={skin} />;
 }

@@ -24,6 +24,18 @@ export const DIAG_LOGINS = {
   owner: { username: "diago1", password: "diag-o1-2026", route: "/owner" },
   kitchen: { username: "diagkitchen", password: "diag-kitchen-2026", route: "/kitchen" },
   tablet: { username: "diagt1", password: "diag-t1-2026", route: "/tablet" },
+  // ── AN OWNER WHO OWNS TWO RESTAURANTS (owner, 2026-08-29) ────────────────────────────────────
+  // Roughly a third of the owner dashboard exists ONLY for an owner with more than one restaurant:
+  // the estate table and its ten columns, the side drawer, the "top performer / needs attention"
+  // banner, the stacked daily bars, the restaurant picker, and the top-bar switcher's re-scope on
+  // Dashboard / Reports / Manager mode / Audit & logs. `owner` above owns ONE, so every sweep so
+  // far has READ that code and none has DRIVEN it — the T12 ledger says so in P21092, honestly, and
+  // that is exactly the gap that let two faults sit for months.
+  //
+  // Member of My Little French House AND Pizza Palace, via restaurant_owners (mig 097). It is a
+  // membership only: no data of its own, nothing seeded, nothing owned exclusively, so it changes
+  // no figure any other lane measures. Deliberately NOT Aangan, which stays the read-only control.
+  ownerMulti: { username: "diagmulti", password: "diag-multi-2026", route: "/owner" },
 };
 
 // role: a DIAG_LOGINS key, or pass `creds` = { username, password, route } for the

@@ -6,7 +6,7 @@
 // React's built-in tools: useState (remember a value), useEffect (run code at
 // certain times, like after the page appears), useRef (a value that survives
 // re-draws without causing one).
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { warmDataCache } from "@/lib/warmData";
 // Link = Next's fast, no-full-reload navigation between pages.
 import Link from "next/link";
@@ -43,6 +43,9 @@ import { useFeatures, refreshFeatures, getFeatures } from "@/lib/features";
 import { useRealtime } from "@/lib/useRealtime";
 // The default restaurant id, to keep restaurant #1's chrome byte-for-byte identical.
 import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
+// The phone's BACK button. A search is something the diner OPENED, so back must close it before
+// the app ever offers to leave the site — see the note at the call below.
+import { useBackClose } from "@/lib/backStack";
 
 // The card list works with the CARD shape — the full dish row minus the five detail-only fields the
 // grid never reads (long description, nutrition, ingredients, reviews, related slugs). The cached
@@ -67,21 +70,9 @@ const DIETS = [
 // Small helper: turn a dish's rating (stored as text) into a number so we can
 // sort by it. If it's missing/garbled, treat it as 0.
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
-// WHICH INK READS ON A CATEGORY'S OWN COLOUR. The selected chip fills with the colour the owner
-// picked, and that can be anything from pale yellow to dark brown — so the icon and label can't use
-// one fixed ink. WCAG relative luminance, the same maths the rest of the app's contrast checks use:
-// a light fill gets near-black, a dark fill gets white. (T1 improvement 6, 2026-08-07.)
-function inkOn(hex: string): string {
-  const h = hex.trim().replace(/^#/, "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return "#ffffff"; // unparseable → today's default
-  const ch = (i: number) => {
-    const v = parseInt(full.slice(i, i + 2), 16) / 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-  };
-  const lum = 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
-  return lum > 0.42 ? "#1a0f0a" : "#ffffff";
-}
+// (The per-category ink helper that used to live here was removed on 2026-08-26 — see the note on
+// the category chip below. With every chip on the restaurant's own theme colour there is exactly
+// one ink to choose, and the stylesheet has always chosen it.)
 
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
@@ -166,6 +157,49 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       if (digits) {
         setScannedTable(digits);                                // remember it
         window.dispatchEvent(new Event("lfh:table-scanned"));   // tell the app
+        // ── AND THE NUMBER LEAVES THE ADDRESS BAR (owner, 2026-08-30) ─────────────────────────
+        // His words: *"instead of numbers for table, do you use some kind of code right? Because
+        // people can't able to change the table number from top just by changing the URL."*
+        //
+        // The answer is the `/q/<code>` door (mig 210), and it is what every QR this app generates
+        // has encoded since — `components/admin/RestaurantSettings.tsx` builds `/q/<code>` and
+        // nothing builds `?table=N` any more. On that door the number never appears in the address
+        // bar at all, which is exactly what he is describing.
+        //
+        // These two OLDER doors — `/menu?table=N` and `/r/<slug>/menu?table=N` — are kept alive only
+        // so a laminated sticker printed before mig 210 keeps working. So the number is read ONCE
+        // and then wiped out of the address, which leaves nothing on screen to edit and no
+        // ?table= to share by accident. The stored value is what the app uses from here on.
+        //
+        // WHY NOT REDIRECT TO `/q/<code>` INSTEAD, which was the obvious idea: the code is a
+        // PRIVATE random string (mig 210's own words). A route that turned "table 7" into "table 7's
+        // code" would let anyone learn every table's private code by walking 1…30 — trading a
+        // guessable number for a harvestable secret. Strictly worse.
+        //
+        // AND IT IS NOT A GATE, WHICH MATTERS MORE THAN THE TIDINESS. A diner can still name a table
+        // by TYPING it (SessionGate's `ask_table` step) — the address bar was never the only way. What
+        // actually protects a table that already has a party is the session: `lfh_join_session` makes
+        // a second arrival a `guest` whose `approved` comes from `sessions.auto_approve`, which
+        // migration 018 set to DEFAULT FALSE — so the head has to let them in — and
+        // `lib/tableConnection.ts` refuses to add to the basket until they are approved. On top of
+        // that `lfh_geo_ok` refuses anyone outside the restaurant's radius once its coordinates are
+        // set. Removing the number from the URL removes a duplicate way in; those two are the guard.
+        //
+        // `replaceState`, never `pushState`: the back button must not walk the diner through a
+        // history entry that puts the number back.
+        try {
+          if (!qrTable && window.location.search) {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("table") || url.searchParams.has("t")) {
+              url.searchParams.delete("table");
+              url.searchParams.delete("t");
+              const clean = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : "") + url.hash;
+              // Spread the existing state so Next's own router bookkeeping survives — the same rule
+              // lib/backStack.ts records for its synthetic entries.
+              history.replaceState({ ...(history.state as object) }, "", clean);
+            }
+          }
+        } catch {}
       }
     } catch {}  // if anything goes wrong, just carry on without a table number
   }, [qrTable]);
@@ -176,13 +210,6 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     slug: c.slug,
     name: localized(c.name, lang),
     icon: c.icon || "fa-utensils",
-    // NULL when the owner never picked one, so the CSS fallback (`var(--cat-color, var(--accent))`)
-    // does the deciding. It used to default to the literal `"#d4a574"` — restaurant #1's gold — on
-    // every tenant, and it was written into a variable NO rule read, so the editor's per-category
-    // colour picker had never actually done anything. Now: colour set → that colour; nothing set →
-    // this restaurant's own accent, which is what the bar has always looked like.
-    // (T1 improvement 6, 2026-08-07.)
-    color: c.color || null,
   }));
 
   // Tapping a category NEVER narrows the menu — it always keeps the full grouped
@@ -726,7 +753,30 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         // sets it and has nothing to scroll either. The shrink and frost maths below still run on
         // mount, which is what that mount call was actually for.
         if (restoreSettled.current) {
-          try { sessionStorage.setItem(sk("lfh_menu_scroll"), String(el.scrollTop)); } catch {}
+          // REMEMBER THE DISH, NOT JUST THE PIXEL (owner, 2026-08-26 — "can do the 10 and 11").
+          //
+          // A pixel offset is a fact about a page that has not finished growing. Every dish photo
+          // is lazy with no reserved box, so the list gets TALLER after the diner leaves and the
+          // number we saved stops meaning the same place — which is why coming back needed a
+          // re-aiming loop and could still land short. The dish under the header is a fact about
+          // the MENU, and it stays true however the page settles.
+          //
+          // Both are stored: the id is what we aim at, the pixel is the fallback for when that
+          // dish is no longer on screen (a filter changed, the dish was taken off the menu, or the
+          // guest came back to a different restaurant). A value written by an older build is a bare
+          // number and is still read correctly — see the restore.
+          try {
+            const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
+            // THE FIRST DISH THE DINER CAN ACTUALLY SEE — the one whose top is at or below the
+            // header line, not the one half-hidden behind it. Anchoring on the half-hidden card put
+            // it fully below the header on the way back, which moved the whole list up by one row
+            // and returned the diner to the dish BEFORE the one they left at. Measured: left at
+            // "Mint Melon Juice", came back to "Nutella Shake".
+            const first = Array.from(el.querySelectorAll<HTMLElement>(".item-card-link"))
+              .find((c) => c.getBoundingClientRect().top >= head - 4);
+            const id = first?.getAttribute("href") || "";
+            sessionStorage.setItem(sk("lfh_menu_scroll"), JSON.stringify({ y: Math.round(el.scrollTop), id }));
+          } catch {}
         }
         // SCROLL-LINKED SHRINK. The brand bar (.nav) is LOCKED at the top. As the
         // category bar pins right under it and you keep scrolling, the cards
@@ -819,7 +869,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     if (scrollRestored.current || !menuData.length) return;
     scrollRestored.current = true;  // mark done so we never jump twice
     try {
-      const y = parseInt(sessionStorage.getItem(sk("lfh_menu_scroll")) || "0", 10);
+      // Reads BOTH shapes: `{ y, id }` from this build, and a bare number from an older one still
+      // sitting in a diner's tab. Neither can throw the restore off — a bad blob just means no
+      // memory, which is where every first visit starts anyway.
+      const raw = sessionStorage.getItem(sk("lfh_menu_scroll")) || "";
+      let y = 0, wantId = "";
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") { y = parseInt(String(parsed.y), 10) || 0; wantId = String(parsed.id || ""); }
+        else y = parseInt(String(parsed), 10) || 0;
+      } catch { y = parseInt(raw, 10) || 0; }
       const el = document.getElementById("main-scroll");
       if (y > 0 && el) {
         // TWO FRAMES IS NOT ENOUGH — THE PAGE IS STILL GROWING (guest sweep T1, sweep #7).
@@ -840,17 +899,50 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         // INSTANT, never smooth: `#main-scroll` carries `scroll-behavior: smooth` (globals.css) for
         // the category tap, so a plain `el.scrollTop = y` ANIMATES — the diner would watch the menu
         // scroll past on the way back, and the re-aim could not tell that motion from their own.
+        // WHERE ARE WE AIMING? The remembered DISH if it is still on this menu, and its position is
+        // re-read every tick — so as the lazy photos above it arrive and push it down, the target
+        // follows it instead of going stale. That is the thing a saved pixel can never do. No dish
+        // (or it has gone) → the pixel, exactly as before.
+        const targetTop = () => {
+          if (wantId) {
+            const card = el.querySelector<HTMLElement>(`.item-card-link[href="${CSS.escape(wantId)}"]`);
+            if (card) {
+              const head = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 0;
+              return Math.max(0, el.scrollTop + card.getBoundingClientRect().top - head - 12);
+            }
+          }
+          return y;
+        };
+        // BEING ON TARGET IS NOT THE SAME AS BEING FINISHED. The first version of this stopped the
+        // moment it reached the dish — and then the lazy photos ABOVE it loaded, pushed it down, and
+        // nothing was watching any more. Measured: French House landed 234px short and Aangan 364px,
+        // both exactly one row above the right dish. So it only stops once it is on the dish AND the
+        // page has stopped growing for three ticks running.
         let lastSet = -1, lastHeight = -1, stalls = 0;
         const started = Date.now();
         const aim = () => {
-          if (lastSet >= 0 && Math.abs(el.scrollTop - lastSet) > 2) { restoreSettled.current = true; return; }
-          if (el.scrollTop >= y - 2) { restoreSettled.current = true; return; }
+          // The guest scrolled themselves — they have taken over, get out of the way.
+          //
+          // …BUT NOT IN THE FIRST HALF-SECOND. Next's router scrolls this container back to the top
+          // as part of the hop, and that lands AFTER our first aim — so the position moved without
+          // us moving it and this test read the ROUTER as the diner and gave up. Measured: the
+          // restore stopped 202px short and never corrected, on every menu. Nobody scrolls a page
+          // they have not seen yet, so the first 700ms belong to the browser, not to them.
+          if (Date.now() - started > 700 && lastSet >= 0 && Math.abs(el.scrollTop - lastSet) > 2) {
+            restoreSettled.current = true; return;
+          }
           const h = el.scrollHeight;
           stalls = h === lastHeight ? stalls + 1 : 0;
           lastHeight = h;
-          if (stalls >= 3 || Date.now() - started > 2500) { restoreSettled.current = true; return; }
-          el.scrollTo({ top: y, behavior: "instant" as ScrollBehavior });
-          lastSet = el.scrollTop;
+          const want = targetTop();
+          const onTarget = Math.abs(el.scrollTop - want) <= 4;
+          // There, and the page has settled underneath us. Or we have simply run out of patience:
+          // 4s covers a 199-dish menu filling in its photos, and the loop is a scrollTop read.
+          if ((onTarget && stalls >= 3) || Date.now() - started > 4000) { restoreSettled.current = true; return; }
+          if (!onTarget) {
+            el.scrollTo({ top: want, behavior: "instant" as ScrollBehavior });
+            lastSet = el.scrollTop;
+          }
           setTimeout(aim, 100);
         };
         requestAnimationFrame(() => requestAnimationFrame(aim));
@@ -950,6 +1042,23 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   // q = the search text, tidied up (trimmed, lowercased, accent-folded).
   const q = fold(searchQuery.trim());
+
+  // BACK CLOSES THE SEARCH — IT DOES NOT OFFER TO LEAVE THE SITE (owner, 2026-08-26).
+  //
+  // *"when you click back button on serch it doesn't stop serch it ask to exit website make that
+  // also back button backable"*. Measured before the fix: with "coffee" typed, one press of Back
+  // left the search running — the box still said "coffee" and all six suggestions were still on
+  // screen — and put the Stay-or-Leave dialog over the top of it. So the one gesture every phone
+  // user reaches for to dismiss something offered to throw the diner off the restaurant's menu
+  // instead, mid-order.
+  //
+  // The exit dialog itself is fine and stays exactly as it is (checked: Stay stays, Leave leaves).
+  // The fault was that nothing told the back manager a search is an OPEN THING. Every other overlay
+  // on the guest side already writes this one line — the language and currency pickers do — and the
+  // manager keeps its own history entries in step, so back walks: close the search, then (nothing
+  // left open) ask about leaving. Clearing the box is exactly what the ✕ inside it does, so a diner
+  // gets the same result from the gesture they already know.
+  useBackClose("menu-search", !!q, () => setSearchQuery(""));
   // Get a category's display name (in the current language), accent-folded.
   const catNameOf = (slug: string) =>
     fold(localized(dbCategories.find((c) => c.slug === slug)?.name, lang));
@@ -1097,7 +1206,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
     // AppShell = the shared outer frame (header, footer, etc.).
-    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || restaurantName || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)} theme={isDefault ? undefined : theme} logoUrl={isDefault ? undefined : logoUrl}>
+    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || restaurantName || undefined)} brandName={restaurantName || logoText || undefined} brandSlug={restaurantSlug || ""} accentColor={isDefault ? undefined : (accentColor || undefined)} theme={isDefault ? undefined : theme} logoUrl={isDefault ? undefined : logoUrl}>
       {/* ONE fixed frosted backdrop behind the whole pinned header (brand +
           category + search). A single blur region = no seam between the brand
           and the categories. Its height is driven live by the scroll handler. */}
@@ -1188,17 +1297,24 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   // scroll-spy) — there's no "selected" category anymore.
                   aria-current={spyCat === cat.slug ? "true" : undefined}
                   className={`cat-card ${spyCat === cat.slug ? "active" : ""}`}
-                  // Only emitted when this category HAS a colour — an absent variable is what lets
-                  // the stylesheet fall back to the restaurant's accent. `--cat-grad` is the same
-                  // colour as a gradient for the selected chip's fill, built the way lib/accent.ts
-                  // builds the accent one so the two look like siblings.
-                  style={cat.color
-                    ? ({
-                        ["--cat-color" as string]: cat.color,
-                        ["--cat-grad" as string]: `linear-gradient(135deg, ${cat.color} 0%, color-mix(in srgb, ${cat.color} 82%, #000) 100%)`,
-                        ["--cat-on" as string]: inkOn(cat.color),
-                      } as CSSProperties)
-                    : undefined}
+                  // ONE THEME COLOUR, NOT TWENTY-ONE (owner, 2026-08-26): *"do the theme colour one
+                  // only it look professional like it was previous no random colours"*.
+                  //
+                  // The chip used to emit --cat-color / --cat-grad / --cat-on from a colour picked
+                  // per category, so a menu could show a blue chip beside an orange one beside a
+                  // pink one. Emitting nothing is what makes the stylesheet fall back to
+                  // `var(--accent)` and `var(--accent-grad)` — the restaurant's own theme colour —
+                  // which is EXACTLY how the bar looked before 2026-08-07, because until then those
+                  // variables were set here and no rule ever read them. So this is a return to the
+                  // look he is describing, not a new one.
+                  //
+                  // It settles a measured readability problem for free. Across the 21 distinct
+                  // category colours in the database, 11 gave the chip's label the weaker of the two
+                  // inks — white on #22c55e is 2.3:1 where 4.5:1 is the standard. The accent has one
+                  // known ink, and the stylesheet has always had it right.
+                  //
+                  // The editor's per-category colour picker is removed in the same commit, so no
+                  // control is left that quietly does nothing.
                   // Tapping a category just smooth-scrolls to its section — always
                   // the full grouped menu, never narrowing to one category.
                   onClick={() => scrollToCategory(cat.slug)}

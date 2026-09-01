@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>No internet — your work is safe</title>
+<style>
+  /* DESIGN 10 — THE KITCHEN PASS.
+     The one that speaks to STAFF rather than to diners, and the only one built around a moment
+     instead of a loop. A service window with a bell: every time the app checks the connection, the
+     bell rings — a ripple, a tick of the striker — and a docket slides across the pass. So the
+     screen is not "waiting", it is visibly WORKING, once every few seconds, which is the thing a
+     waiter with a dead tablet actually wants to know.
+     And when the connection comes back, a plate lands on the pass. That is the payoff: the picture
+     completes at the exact moment the screen is about to reload. */
+  :root { color-scheme:dark; --ink:#f2f5fa; --muted:#9aa8bd; --brass:#d9b160; --steel:#2f3540; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100dvh; display:grid; place-items:center; padding:26px;
+         background:radial-gradient(120% 100% at 50% 0%, #1d232e 0%, #12161e 60%, #0a0d12 100%);
+         color:var(--ink); font:500 15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:center; }
+  .card { width:min(440px,100%) }
+  #brand { font:800 11px/1 system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase;
+           color:var(--brass); margin-bottom:14px }
+  #brand[hidden]{ display:none }
+
+  /* ── the pass ──────────────────────────────────────────────────────────── */
+  .stage { position:relative; width:100%; height:200px; margin-bottom:4px; overflow:hidden;
+           border-radius:14px; background:linear-gradient(#171c25,#101419);
+           border:1px solid rgba(148,163,184,.16) }
+  /* the hatch the food comes through */
+  .hatch { position:absolute; left:8%; right:8%; top:14px; height:96px; border-radius:8px;
+           background:linear-gradient(#0a0d12,#151a22); box-shadow:inset 0 6px 18px rgba(0,0,0,.8);
+           border:1px solid rgba(148,163,184,.14) }
+  .hatch::after { content:""; position:absolute; left:0; right:0; top:0; height:9px;
+                  background:linear-gradient(var(--steel),#1c212a); border-radius:8px 8px 0 0 }
+  /* the warming lamps, which glow gently */
+  .lamp { position:absolute; top:20px; width:22px; height:9px; border-radius:0 0 11px 11px;
+          background:var(--brass); opacity:.85; box-shadow:0 10px 26px 5px rgba(217,177,96,.22) }
+  .lamp.l { left:24% } .lamp.r { right:24% }
+
+  /* the shelf */
+  .shelf { position:absolute; left:6%; right:6%; top:112px; height:12px; border-radius:6px;
+           background:linear-gradient(#3a424f,#232a34); box-shadow:0 8px 18px rgba(0,0,0,.55) }
+
+  /* the bell */
+  .bell { position:absolute; right:12%; top:74px; width:44px; height:38px }
+  .dome { position:absolute; inset:0; border-radius:100px 100px 5px 5px;
+          background:radial-gradient(circle at 34% 28%, #f3dfa9, var(--brass) 55%, #9c7a33 100%);
+          box-shadow:0 4px 10px rgba(0,0,0,.5) }
+  .dome::after { content:""; position:absolute; left:50%; translate:-50% 0; top:-6px; width:9px; height:9px;
+                 border-radius:50%; background:#f0dba2 }
+  .base { position:absolute; left:-5px; bottom:-5px; width:54px; height:7px; border-radius:4px;
+          background:linear-gradient(#c9a253,#8d6c2c) }
+  /* the ripple that says "it just rang" */
+  .ring { position:absolute; left:50%; top:50%; translate:-50% -50%; width:44px; height:44px;
+          border-radius:50%; border:2px solid rgba(217,177,96,.75); opacity:0; pointer-events:none }
+  .bell.dinged .dome { animation:shake .42s ease-out }
+  .bell.dinged .ring { animation:ripple .8s ease-out }
+
+  /* the docket that slides across on each check */
+  .docket { position:absolute; top:126px; left:-90px; width:74px; height:44px; border-radius:3px;
+            background:#fffdf4; box-shadow:0 5px 12px rgba(0,0,0,.5);
+            padding:6px 7px; text-align:left;
+            font:700 8px/1.35 ui-monospace,Menlo,monospace; color:#3a332a }
+  .docket.go { animation:slide 2.6s linear }
+  .docket b { display:block; font-size:9.5px; letter-spacing:.06em }
+  .docket i { display:block; font-style:normal; color:#8d8474 }
+
+  /* the payoff: a plate lands on the pass when the connection returns */
+  .dish { position:absolute; left:50%; translate:-50% 0; top:96px; width:76px; height:26px; opacity:0 }
+  .dish .pl { position:absolute; inset:0; border-radius:50%;
+              background:linear-gradient(#fff,#dfe6f0); box-shadow:0 5px 12px rgba(0,0,0,.5) }
+  .dish .st { position:absolute; left:50%; translate:-50% 0; top:-16px; width:5px; height:5px;
+              border-radius:50%; background:rgba(230,240,255,.45) }
+  .stage.back .dish { animation:land .7s cubic-bezier(.2,1.3,.4,1) forwards }
+
+  @keyframes shake  { 0%,100%{ transform:rotate(0) } 25%{ transform:rotate(-7deg) } 60%{ transform:rotate(5deg) } }
+  @keyframes ripple { 0%{ opacity:.9; transform:translate(-50%,-50%) scale(.6) }
+                      100%{ opacity:0; transform:translate(-50%,-50%) scale(3.1) } }
+  @keyframes slide  { from { left:-90px } to { left:110% } }
+  @keyframes land   { 0%{ opacity:0; transform:translate(-50%,-34px) scale(.86) }
+                      100%{ opacity:1; transform:translate(-50%,0) scale(1) } }
+
+  h1 { font-size:21px; margin:12px 0 6px; font-weight:800 }
+  #why { color:var(--muted); font-size:14px; margin:0 auto; max-width:32ch }
+  .safe { margin:16px auto 20px; max-width:34ch; font-size:13px; color:#a8dcb4 }
+  .safe b { color:#86efac }
+  .acts { display:flex; flex-direction:column; gap:10px }
+  button,a { font:700 14.5px/1 system-ui,sans-serif; border-radius:12px; padding:14px 18px;
+             cursor:pointer; text-decoration:none; border:0 }
+  #retry { background:var(--brass); color:#241a06 }
+  #home  { background:transparent; color:#dbe3ef; border:1px solid rgba(148,163,184,.3) }
+  #hint  { margin-top:14px; font-size:12.5px; color:#8b98ab }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bell.dinged .dome, .bell.dinged .ring, .docket.go, .stage.back .dish { animation:none }
+    .lamp { box-shadow:none }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div id="brand" hidden></div>
+    <div class="stage" id="stage">
+      <div class="hatch"></div>
+      <div class="lamp l"></div><div class="lamp r"></div>
+      <div class="dish"><div class="st"></div><div class="pl"></div></div>
+      <div class="shelf"></div>
+      <div class="bell" id="bell"><span class="ring"></span><div class="dome"></div><div class="base"></div></div>
+      <div class="docket" id="docket"><b>CHECKING</b><i>the connection</i><i id="dno">#1</i></div>
+    </div>
+    <h1 id="title">No internet right now</h1>
+    <p id="why">This screen hasn&rsquo;t been opened on this device yet, so there&rsquo;s nothing saved to show.</p>
+    <p class="safe"><b>Anything already saved on this device is safe.</b> It sends itself the moment
+       the connection is back.</p>
+    <div class="acts">
+      <button id="retry" type="button" onclick="location.reload()">Try again</button>
+      <a id="home" href="/">Go to the menu</a>
+    </div>
+    <div id="hint">Checking again in 5s&hellip;</div>
+  </main>
+<script>
+  // EVERY CHECK IS A VISIBLE EVENT.
+  //
+  // The other four designs show a state (how done, how calm, how many strands). This one shows the
+  // MOMENT: the bell rings and a docket crosses the pass each time the app actually checks. For a
+  // waiter staring at a dead tablet, "it just tried, three seconds ago" is more reassuring than any
+  // sentence, because it proves the thing is alive.
+  (function () {
+    var bell = document.getElementById("bell"), docket = document.getElementById("docket");
+    var stage = document.getElementById("stage"), hint = document.getElementById("hint"), dno = document.getElementById("dno");
+    var wait = 5000, dueAt = Date.now() + wait, n = 0, back = false;
+
+    var ding = function () {
+      n++; dno.textContent = "#" + n;
+      // restart both animations: the class off for one frame, then on
+      bell.classList.remove("dinged"); docket.classList.remove("go");
+      void bell.offsetWidth;
+      bell.classList.add("dinged"); docket.classList.add("go");
+    };
+
+    setInterval(function () {
+      if (document.hidden || back) return;         // paused while nobody is looking
+      var left = Math.max(0, dueAt - Date.now());
+      hint.textContent = left > 400 ? "Checking again in " + Math.ceil(left / 1000) + "s…" : "Checking now…";
+      if (left <= 0) {
+        ding();
+        wait = Math.min(wait * 2, 60000);
+        dueAt = Date.now() + Math.round(wait * (0.75 + Math.random() * 0.5));
+        // Prototype: on the third check, show the payoff — the dish landing as the connection
+        // returns, which is the frame just before the real page reloads itself.
+        if (wait >= 20000) {
+          back = true; stage.classList.add("back");
+          document.getElementById("title").textContent = "Back online";
+          hint.textContent = "Reloading…";
+        }
+      }
+    }, 250);
+  })();
+  (function(){ try {
+    var b = JSON.parse(localStorage.getItem("lfh_brand") || "null");
+    if (b && b.name) { var el = document.getElementById("brand"); el.textContent = b.name; el.hidden = false; }
+  } catch (e) {} })();
+</script>
+</body>
+</html>

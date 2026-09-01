@@ -479,9 +479,10 @@ The panels are routes inside it:
 The editor/kitchen/tablet UIs are the original vanilla files served from
 `public/panels/<name>/` (embedded full-screen); their old Express APIs are ported
 to Next route handlers at `app/api/<name>/[...path]/route.ts` (service-role via
-`lib/supabaseAdmin.ts`). The admin-only floating switcher (`components/AdminSwitcher`)
-hops between panels. The old standalone folders + the separate editor repo were deleted
-(`docs/PROJECT-HISTORY.md` §12).
+`lib/supabaseAdmin.ts`). There is **no** floating panel switcher: `components/AdminSwitcher.tsx`
+was DELETED on 2026-06-26 (commit `2b9d3933`, "kill dead AdminSwitcher") and the admin reaches any
+restaurant's panels from `/aevinite` instead — do not re-create it. The old standalone folders +
+the separate editor repo were deleted (`docs/PROJECT-HISTORY.md` §12).
 
 ## Security gate (2026-06-13)
 
@@ -492,7 +493,7 @@ env vars are reliable in the Node runtime, which edge middleware could not promi
 actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 - **`/aevinite` (the admin console)** — `app/aevinite/layout.tsx` checks `tokenIsValid` server-side.
-- **`/api/admin/**`** — every one of the 50 route files checks `tokenIsValid` (usually via a local
+- **`/api/admin/**`** — every one of the 49 route files checks `tokenIsValid` (usually via a local
   `admin(req)` / `requireAdmin(req)` helper), and in every handler the gate call precedes any
   database call. `/api/staff-login` stores the hashed `ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`).
 - **`/api/{editor,kitchen,tablet,inventory}/**`** — `requireRole()` (`lib/userAuth.ts`), which ALSO
@@ -507,6 +508,21 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   sha-256 hash (mig 341). Not a cookie and not a login: a printing machine that must survive a power
   cut cannot depend on somebody signing in afterwards. It is scoped to ONE restaurant and to three
   verbs, so it is a printing-only credential — see `docs/PRINT-HELPER.md`.
+  - **TWO verbs under it are deliberately unauthenticated, and grant nothing** (mig 368):
+    `pair/start` — a machine with no credential yet describes itself and is handed a public CODE plus
+    a private SECRET; the row it creates can do exactly one thing, be shown to a signed-in human for
+    approval. And `pair/poll` — answers `waiting`/`expired`, or hands over the token **once**, and
+    only to the process holding that secret. **A wrong secret is answered identically to a code that
+    does not exist**, so this cannot be used to discover codes. The restaurant is chosen by the
+    approver at `/api/pair`, never by the helper.
+- **`/api/pair`** — the print helper's ALLOW door (mig 368). It takes **either** credential and
+  checks them in this order: `tokenIsValid` (the admin), else the staff cookie + `managerCan(…,
+  "print_setup")`. Neither → `signedIn: false` on the GET and **401** on the POST, so a stranger
+  holding a pairing code can do nothing with it.
+  - **A staff member can only ever adopt a machine into their OWN restaurant** — the request's `rid`
+    is ignored for them and taken from their session. Trusting it would let any manager attach a
+    printer to somebody else's shop.
+  - Its two unauthenticated siblings live under `/api/print-agent/pair/*` below, not here.
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
@@ -715,6 +731,38 @@ silence. And never use a shorthand he cannot place: "history file" is banned; wr
 | Admin console | `/aevinite/*` (23 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |
 | Printed paper | — | `public/panels/billdoc.js` | the one print document (bill + KOT) |
 
+## Never ask permission to delete — the full text, and what the guard actually checks
+
+Owner, 2026-08-06, STANDING. The rule itself lives at owner level in `~/.claude/CLAUDE.md`; this is
+the part `CLAUDE.md` used to carry inline and no longer has room for. Nothing here is new — it was
+moved out of the index on 2026-08-28 (T29 sweep #7) so the index could go back to being an index.
+
+**"Anything" means anything.** Files, folders, branches, worktrees, screenshots, temp scripts, dev
+rows, stale doc sections, dead code paths. None of it gets a question first.
+
+**It holds in every permission mode, and especially in bypass-permissions** — where a question
+defeats the whole point of the mode he chose. So: don't hedge it with "shall I remove…", don't offer
+removal as an option in a question, and don't leave junk lying around "to be safe". Report what you
+removed in the reply instead.
+
+**The four carve-outs are HIS rules, not caution anyone invented** — the AV-live stack · the Brain
+vault (`~/Brain`, where a deleted note is not recoverable from git) · another live session's
+uncommitted work in this shared folder · force-pushing `main`. The last two destroy work that is not
+yours to throw away.
+
+**`npm run verify:no-ask`** (auto-runs after any settings or CLAUDE.md edit) fails on three things,
+and the third is the one that matters most:
+
+1. an `ask` permission rule reappearing in any settings file;
+2. the standing order going missing from `~/.claude/CLAUDE.md`, or no longer naming
+   bypass-permissions mode;
+3. **the AV-live `deny` rules being removed in the name of "stop asking me".** "Stop asking me
+   about deletions" must never be implemented by taking the guards off the paying-client stack.
+
+Those denies live in `.claude/settings.local.json`, which is gitignored — so a worktree or a fresh
+clone legitimately has none, and the guard says so rather than crying wolf. Checked on the owner's
+own folder 2026-08-28: 30 deny rules present, both live-stack protections intact.
+
 ## Operational rules — one line each; open the detail/doc BEFORE working in that area
 
 CLAUDE.md carries these as one-liners; this is where each one's full text lives. They are separate
@@ -789,7 +837,7 @@ sections below rather than one long list, because each was written the day its b
 
 ## Routes
 
-There are **56** `page.tsx` routes, not four — count them with
+There are **57** `page.tsx` routes, not four — count them with
 `find app -name page.tsx | wc -l` rather than trusting a list in a document. The ones worth
 knowing by heart:
 
@@ -1255,14 +1303,19 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
     unconditional dark default** — the older wording here said tenants default dark full stop, and a
     "both skins" test written from that line expects dark and gets light. Checked 2026-08-22 (T29):
     neither restaurant on the dev database has it set, so both tenant doors open LIGHT today.
-    ⚠️ **AND THE DISH PAGE DOES NOT REPEAT IT.** `app/r/[restaurant]/item/[slug]/page.tsx` renders
-    outside `AppShell`, which is why the maintenance switch, the menu switch and the accent each had
-    to be repeated there. The tenant default-skin boot script is a FOURTH thing of exactly that
-    shape and it is missing: for a dark-default restaurant, a **full page load** of a dish URL (a
-    shared link, a refresh, a QR pointing at a dish) renders in the LIGHT skin while the menu is
-    dark. A client-side tap through from the menu is fine — `data-theme` survives the navigation —
-    so this only shows on a cold load. Reported by the T29 sweep; the file belongs to another
-    terminal's territory, so the code fix was handed off rather than made there.
+    ✅ **AND THE DISH PAGE NOW REPEATS IT — fixed 2026-08-28 (T29 sweep #7, on the owner's word).**
+    `app/r/[restaurant]/item/[slug]/page.tsx` renders outside `AppShell`, which is why the
+    maintenance switch, the menu switch and the accent each had to be repeated there. The tenant
+    default-skin boot script is a **FOURTH thing of exactly that shape**, and it was missing: for a
+    dark-default restaurant, a **full page load** of a dish URL (a shared link, a refresh, a QR
+    pointing at a dish) rendered LIGHT while the menu was dark. A tap through from the menu was
+    fine — `data-theme` survives the navigation — so it only ever showed on a cold load, which is
+    why it went unreported for months. The dish page now emits the byte-identical line behind the
+    same condition. Driven end to end: with `spice-route` flipped to dark, a cold load of its dish
+    URL came back `data-theme="dark"` on a dark canvas, and a guest who had chosen light kept light;
+    the setting was restored in the same run. **Guarded** — `.github/scripts/verify-unowned-routes.mjs`
+    fails if either page loses the line. **If you add a FIFTH thing to the menu page's first paint,
+    it has to be repeated here too.**
   - **Manager / kitchen / tablet panels** — their own toggle (`#themeToggle`, wired by
     `public/panels/theme.js`), stored as `lfh_panel_theme`, default **LIGHT** (owner 2026-06-26).
     **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back
@@ -1452,3 +1505,37 @@ driven by the ☀/🌙 button in `OwnerShell.tsx`: tapping it turns the cards wh
 survives a reload, and it pushes the same skin into the embedded panel by postMessage —
 `useOwnerSkin` exists precisely because those two drifted apart once. DARK IS THE DEFAULT and the
 owner asked to keep it that way; that part of the old note always stood.
+
+## A new way replaces the old one
+
+Owner, 2026-08-29, STANDING. He found the retired "Should **this screen** print the kitchen tickets?"
+banner still live on the manager floor while the new Printing board was running underneath it:
+
+> *"Why this fucking thing is coming in the panel? I told you to remove old logic, keep only one logic
+> which we have build right now… right now there is two printing things, one is working and one is
+> just showing, so it shouldn't be like that."*
+
+**The rule.** If you ADD something, the existing thing that did the same job is removed in the SAME
+change. If you CHANGE how a feature works, the previous way goes with it. Not deprecated, not left
+"in case" — removed.
+
+**Why it is not pedantry.** Two ways to answer one question do not sit quietly side by side:
+ - they DRIFT, because only one of them gets the next fix;
+ - they DISAGREE ON SCREEN, and a restaurant cannot tell which is telling the truth;
+ - the staff learn whichever they found first, which is usually the dead one.
+The printing case had three copies of the old model — a floor banner with its own localStorage
+yes/no, "take the printer over" buttons in the kitchen panel, and a setup guide in four places —
+all describing a setup the app no longer performed.
+
+**What "remove" covers.** The screen, its buttons, the handlers bound to them, the storage keys, the
+server fields only it read, and every duplicate explanation of it. Leave an obituary comment where it
+stood, naming the date and the reason, so the next session does not helpfully restore it.
+
+**What survives.** Only a genuinely DIFFERENT feature. A "the printer is stuck" alert is not a second
+setup screen; a problem-report sheet is not a second Printing board. If in doubt, ask what QUESTION
+each one answers — same question, one of them goes.
+
+**Guards are not exempt.** A guard defending the replaced rule must be INVERTED, not satisfied. Two
+were, the day this rule was made: `verify:print-helper` had required Access ↔ Printing to
+cross-reference, and `verify-print-queue` had required the setup guide in four panels. Both now
+assert the opposite, carrying the old quote and the new one so the history is legible.

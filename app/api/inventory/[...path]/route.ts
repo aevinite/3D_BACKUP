@@ -26,7 +26,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { inventoryLadder } from "@/lib/tableTags";
 import { panelFailure } from "@/lib/panelFailure";
-import { managerGrantValue, isConfigurableGrant } from "@/lib/accessTree";
+import { managerCan } from "@/lib/managerCan";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +78,7 @@ const num = (v: unknown): number => { const n = Number(v); return Number.isFinit
 const isUuid = (v: unknown): boolean => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 const badId = () => err("That item no longer exists — refresh the page.", 400);
 
-// ── auth + power gates (the editor route's managerCan, scoped to this module) ──
+// ── auth + power gates (lib/managerCan.ts — the SHARED rule, asked here too) ──
 async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | NextResponse> {
   const g = await requireRole(req, "manager");
   if (!g.ok) {
@@ -97,27 +97,32 @@ async function moduleOn(g: { user: StaffUser | null }, rid: string): Promise<boo
   return (await inventoryLadder(rid)).effective;
 }
 
-// inv_stock / inv_expenses. These had NO row on any screen after the access rebuild, so an
-// absent grant (= "off" under the old rule) left a manager locked out of Inventory with nothing
-// anywhere able to grant it — the admin could switch the Inventory module ON and the manager
-// would still be refused. The module toggle IS the switch for them now; managerGrantValue()
-// gives the same answer here as the Access screen does (lib/accessTree.ts). A per-person
-// override and the admin cap still win, in that order.
-async function invCan(g: { user: StaffUser | null }, rid: string, flag: "inv_stock" | "inv_expenses"): Promise<boolean> {
-  const u = g.user;
-  if (!u || u.role === "owner") return true;
-  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
-    { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  // The old ladder's admin cap (power_<flag>) left on 2026-08-06 — nothing can write
-  // owner_entitlements except the access-tree route, and that allow-lists owner PAGE keys only,
-  // so this was permanently true. The live cap for a configurable grant is access_config[flag].on,
-  // checked above, which is the Feature half of that row on the Access screen. (Same change as
-  // app/api/editor/[...path]/route.ts — the two must answer a manager identically.)
-  const ov = u.permissions?.[flag];
-  if (ov === "on" || ov === "pin") return true;
-  if (ov === "off") return false;
-  return managerGrantValue(flag, r?.manager_permissions?.[flag]);
-}
+// ── inv_stock / inv_expenses NOW ASK THE SHARED RULE (owner picked item 23, 2026-08-30) ──────────
+//
+// This file carried its own `invCan()` — a near-copy of lib/managerCan.ts's override-then-grant tail.
+// lib/managerCan.ts exists precisely because "a permission rule with two copies is the exact bug
+// class the access rebuild exists to remove — one copy drifts, and the screen and the server start
+// disagreeing about who may do what." It was extracted for two doors and this was the third.
+//
+// The copies agreed on everything EXCEPT ONE THING, and it is the one that would have bitten: the
+// shared rule checks `access_config[flag].on` — the FEATURE half of a row on the Access screen —
+// before any per-person override or grant, and this copy never did. So the day somebody adds an
+// Access row for inv_stock, the two doors would answer a manager differently: the shared one would
+// honour the switch and this one would ignore it.
+//
+// BEHAVIOUR IS UNCHANGED TODAY, checked rather than assumed:
+//   · the admin super-user (no staff user) → true from both;
+//   · an OWNER → true from both (managerCan short-circuits for every flag except edit_menu);
+//   · a MANAGER → the same per-person override, then the same managerGrantValue(); the extra
+//     Feature-half test can only refuse when `access_config[<flag>].on === false`, and on the
+//     backup stack NO restaurant has that stored — 60 checked, 2 carry a row for these ids at all
+//     and neither is switched off. `inv_stock`/`inv_expenses` are also not nodes on the Access
+//     screen yet, so nothing can write one.
+//   · one indexed read either way (the shared rule takes three columns in the same select).
+//
+// The MODULE rung is a separate question and stays where it is: `moduleOn()` above reads
+// inventoryLadder(rid), which is what makes Inventory exist for a restaurant at all. That is the
+// Feature half FOR THE MODULE; access_config is the Feature half for the individual POWER.
 const denied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 const actorOf = (g: { user: StaffUser | null }) =>
   g.user ? `${g.user.name || g.user.username} (${g.user.role})` : "admin";
@@ -179,6 +184,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const g = await gate(req);
   if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // ⛔ REJECTED (owner, 2026-08-28) — docs/REJECTED-IDEAS.md → R48. "No restaurant scope" STAYS.
+  // It was reworded into plain words as the T27 sweep's item 3 and he turned it down on
+  // REACHABILITY, not on the wording: *"if you make everthing perfect the no 3 will not even
+  // happen"*. He is right, and it is worth writing here rather than re-deriving: panelRestaurantId
+  // returns `g.user.restaurant_id || DEFAULT_RESTAURANT_ID` for ANY signed-in staff member, so this
+  // can never fire for a waiter, a manager or a cook. Its only reader is the ADMIN super-user who
+  // opened a panel directly instead of through the console — one person, who knows the word.
+  // Do not reword it, and do not re-report it as jargon.
   if (!rid) return err("No restaurant scope.", 400);
   if (!(await moduleOn(g, rid))) return err("Inventory isn't enabled for this restaurant.", 403);
   const path = (await ctx.params).path || [];
@@ -188,7 +201,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // whoami — the manager UI asks once per open which buttons to draw. Server-side
     // gates above re-check every write, so this is display truth only.
     if (path[0] === "whoami") {
-      const [canStock, canExp] = await Promise.all([invCan(g, rid, "inv_stock"), invCan(g, rid, "inv_expenses")]);
+      const [canStock, canExp] = await Promise.all([managerCan(g, rid, "inv_stock"), managerCan(g, rid, "inv_expenses")]);
       return ok({ role: g.user?.role || "admin", can: { stock: canStock, expenses: canExp } });
     }
 
@@ -384,7 +397,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
   try {
     // ── expenses: the broken-lamp flow ─────────────────────────────────────────
     if (path[0] === "expenses" && !path[1]) {
-      if (!(await invCan(g, rid, "inv_expenses"))) return denied("record expenses");
+      if (!(await managerCan(g, rid, "inv_expenses"))) return denied("record expenses");
       const { body, photo } = await readBody(req);
       const category = String(body.category || "");
       const title = String(body.title || "").trim().slice(0, 120);
@@ -404,7 +417,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: ins.data.id });
     }
     if (path[0] === "expenses" && path[1] && path[2] === "void") {
-      if (!(await invCan(g, rid, "inv_expenses"))) return denied("record expenses");
+      if (!(await managerCan(g, rid, "inv_expenses"))) return denied("record expenses");
       if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const reason = String(body.reason || "").trim();
@@ -418,7 +431,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
     }
 
     // Everything below is the stock register.
-    if (!(await invCan(g, rid, "inv_stock"))) return denied("manage stock");
+    if (!(await managerCan(g, rid, "inv_stock"))) return denied("manage stock");
 
     // ── Stage 2: recipe writes + prep production ──────────────────────────────
     // Replace a dish's (or prep item's) ingredient list in one go. Lines are validated
@@ -729,10 +742,12 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: ins.data.id });
     }
     if (path[0] === "counts" && path[1] && path[2] === "line") {
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const itemId = String(body.item_id || "");
       const counted = num(body.counted_base);
       if (!itemId || !Number.isFinite(counted) || counted < 0) return err("Bad count line.");
+      if (!isUuid(itemId)) return badId();
       const c = await sb.from("inv_counts").select("id, status").eq("restaurant_id", rid).eq("id", path[1]).maybeSingle();
       if (!c.data || c.data.status !== "draft") return err("This count is no longer open.", 409);
       const it = await sb.from("inv_items").select("qty_base, avg_cost").eq("restaurant_id", rid).eq("id", itemId).maybeSingle();
@@ -747,6 +762,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok();
     }
     if (path[0] === "counts" && path[1] && path[2] === "submit") {
+      if (!isUuid(path[1])) return badId();
       const c = await sb.from("inv_counts").select("id, status").eq("restaurant_id", rid).eq("id", path[1]).maybeSingle();
       if (!c.data) return err("Count not found.", 404);
       if (c.data.status !== "draft") return err("This count was already submitted.", 409);
@@ -770,6 +786,21 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ adjusted });
     }
     if (path[0] === "counts" && path[1] && path[2] === "discard") {
+      // ── AN ID THAT IS NOT AN ID IS A BAD REQUEST, NOT A BUSY SERVER (T10 sweep #7) ────────────
+      // The rule is stated at the top of this file — "Every id this route accepts is a uuid our own
+      // UI produced. Anything else is a BAD REQUEST — without this, Postgres raises 'invalid input
+      // syntax for type uuid' and the handler answered 500 with the raw DB text." Six branches here
+      // enforce it; the three `counts` ones never did, and this was the one that hurt.
+      //
+      // A missing client id arrives as the literal "undefined" (the reason the three sibling
+      // catch-all routes all carry emptyIdSegment). `.eq("id","undefined")` then errors 22P02,
+      // `up.error` is set, and writeFail answers **500** — which public/panels/outbox.js reads as
+      // "the server is up but can't take it": it QUEUES the discard, retries it several times, and
+      // only then files it under "needs you" saying "The system couldn't accept this after several
+      // tries." That is a sentence about the server, for a value that will never be accepted, and
+      // it is the exact inversion of this codebase's rule that a 4xx is told to the person while a
+      // 5xx is saved and retried (verify:busy — "busy = offline, both ways").
+      if (!isUuid(path[1])) return badId();
       const up = await sb.from("inv_counts").update({ status: "discarded" })
         .eq("restaurant_id", rid).eq("id", path[1]).eq("status", "draft").select("id");
       // A FAILED WRITE IS NOT A WRONG-STATE REFUSAL (T17 sweep, 2026-08-13, finding F11). This

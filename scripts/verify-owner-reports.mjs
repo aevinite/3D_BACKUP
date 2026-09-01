@@ -545,6 +545,26 @@ console.log("\nT11-A · the Reports Studio page");
     "app/owner/reports/page.tsx — write `order${n === 1 ? \"\" : \"s\"}`, the way the day sheet, the volume " +
       "report, the tips line and the staff-pay line in this same file already do. Found " + bareOrders + " place(s).",
   );
+
+  // ── 3b · …AND THE GUARD ITSELF WATCHED ONLY ONE WORD (T11 sweep #7, 2026-08-27) ────────────
+  // The check above was written for the word "orders" and nobody widened it, so the SAME fault
+  // survived two sweeps in the Payment settlement report's own tiles: "1 bills settled" under
+  // TOTAL COLLECTED, and "· 1 bills" under TOP METHOD — on any period a single bill settled,
+  // while the day sheet's settlement rows one click away read "1 bill" correctly. Every plural
+  // this file counts is watched now, not just the one that was found first.
+  const COUNTED = ["orders", "bills", "days", "people", "payments", "items", "dishes", "months", "hours"];
+  const bareAny = [];
+  for (const w of COUNTED) {
+    const n = [...reportsPage.matchAll(new RegExp(`\\)\\}\\s*${w}[\`\\s]`, "g"))].length
+      + [...reportsPage.matchAll(new RegExp(`\\}\\s+${w}[\`\\s]`, "g"))].length;
+    if (n > 0) bareAny.push(`${w}×${n}`);
+  }
+  check(
+    "no count on the Reports page is followed by ANY bare plural",
+    bareAny.length === 0,
+    "app/owner/reports/page.tsx — a count of one must read \"1 bill\", \"1 day\", \"1 person\". Write " +
+      "`bill${n === 1 ? \"\" : \"s\"}`. Found: " + bareAny.join(", "),
+  );
 }
 
 console.log("\nT11-B · the chart kit");
@@ -617,6 +637,39 @@ console.log("\nT11-C · a report must read the takings, not the discount");
     "the newest lfh_owner_revenue_timeseries no longer carries the explicit hist column list — a later " +
       "migration has re-introduced an older body. Take the TRUE LATEST definition before replacing one of these.",
   );
+
+  // ── …AND A CALENDAR-DAY ROLLUP MUST NEVER ANSWER A 05:00 WINDOW (mig 367) ────────────────
+  // orders_daily_agg.day is the IST CALENDAR date (mig 190), so the rollup cannot answer a
+  // BUSINESS day (05:00 IST → 05:00 IST) — which is what range=day / today / yesterday all ask
+  // for. lfh_owner_sales_report has always fenced this (rollup only on a month bucket), which is
+  // why the day sheet's MONEY was right; lfh_owner_payment_breakdown had no fence, so the
+  // Settlement panel underneath that money silently answered for the calendar day. Measured on
+  // French House before mig 367: 22 Aug read ₹94,952 collected over a settlement of ₹1,23,386,
+  // and 23 Aug read ₹0 over a settlement of ₹441.
+  const pb = latestBodyOf("lfh_owner_payment_breakdown");
+  check(
+    "the settlement reads the same day the money does",
+    !!pb && /use_rollup/.test(pb.text) && /date_trunc\('day', p_from AT TIME ZONE 'Asia\/Kolkata'\)/.test(pb.text),
+    `${pb ? pb.file : "not found"} — lfh_owner_payment_breakdown must only read orders_daily_agg when ` +
+      "p_from really is IST midnight, and read live orders otherwise. Without that fence the Day summary's " +
+      "Settlement panel answers for the CALENDAR day while the Total collected tile above it answers for the " +
+      "BUSINESS day, and the two disagree on any day already rolled up.",
+  );
+  check(
+    "…and it drops BOTH rollup bounds when the window is not calendar-aligned",
+    !!pb && /hist_max_day/.test(pb.text) && /tail_start FROM bounds/.test(pb.text),
+    `${pb ? pb.file : "not found"} — fencing hist alone is not enough: tail_start must fall to -infinity too, ` +
+      "or the live branch still starts at the watermark and the window loses everything before it.",
+  );
+  // lfh_owner_revenue_timeseries is correct today only because its day-bucket fence happens to
+  // line up with the fact that every day-bucket window this app asks for starts at IST midnight.
+  // Say so out loud, so a future business-day day-bucket window is not added silently.
+  check(
+    "…and the revenue timeseries still refuses the rollup on any bucket but 'day'",
+    !!ts && /\(SELECT b FROM params\) = 'day'/.test(ts.text),
+    "the newest lfh_owner_revenue_timeseries has lost its rollup fence. It reads the same calendar-day " +
+      "rollup, so an hour-bucket or a business-day window must not touch it.",
+  );
 }
 
 console.log("\nT11-D · printing, and the phone");
@@ -649,6 +702,371 @@ console.log("\nT11-D · printing, and the phone");
     /@media \(max-width: 640px\)[\s\S]{0,300}?\.owr-btn\.main\s*\{[^}]*min-height:\s*44px/.test(reportsPage),
     "app/owner/reports/page.tsx — the period control measured 31px on an A35.",
   );
+  // ── …AND THE CONTROLS THAT FIX MISSED (T11 sweep #7, 2026-08-27) ──────────────────────────
+  // The 2026-08-18 pass raised the control STRIP and stopped there. Re-measured on an A35, the
+  // same screen still offered two sizes of the same gesture: "← All reports" 23px (the only way
+  // back to the hub), the sub-tab strip 34px, the day sheet's "Full report →" drill 22px and the
+  // overlay ✕ 32px, under a row of 44px buttons.
+  const phoneNav = [
+    [".rs-back", /\.rs-back\s*\{[^}]*min-height:\s*44px/],
+    [".rs-subtab", /\.rs-subtab\s*\{[^}]*min-height:\s*44px/],
+    [".rs-drill", /\.rs-drill\s*\{[^}]*min-height:\s*44px/],
+    [".rs-ovl-x", /\.rs-ovl-x\s*\{[^}]*height:\s*44px/],
+  ];
+  // Only the phone blocks — a desktop rule matching these would be a false pass.
+  const phoneCss = kit.split("@media (max-width: 640px)").slice(1).join("\n@media\n");
+  const missed = phoneNav.filter(([, re]) => !re.test(phoneCss)).map(([c]) => c);
+  check(
+    "…and so are the controls you MOVE with — back, sub-tabs, the drill link, the overlay close",
+    missed.length === 0,
+    "components/owner/reports/kit.tsx — under 640px these must reach 44px too, or one screen offers two " +
+      "sizes of the same gesture. Still small: " + missed.join(", "),
+  );
+}
+
+console.log("\nT11-H · the manager's till count names the same methods the owner's does");
+{
+  // ── A COLUMN READ FOUR TIMES HAS TO BE ASKED FOR (owner-approved item 9, 2026-08-30) ───────
+  // The Z-report's day-close query selected the day's orders WITHOUT payment_method and then read
+  // `o.payment_method` four times, so every read was undefined: the till breakdown labelled every
+  // bill not settled in parts "Not recorded", and onHouseCount/onHouseNet could never be anything
+  // but zero. Measured 2026-08-26, same business day and same 05:00 window: the Z-report said
+  // "Not recorded ₹1,932 / 4 bills" where the owner's day sheet said "Cash ₹1,932 / 4 bills".
+  const editor = read("app/api/editor/[...path]/route.ts");
+  const zi = editor.indexOf('if (p === "zreport") {');
+  // The block runs to the next endpoint, not to a guessed character count — the payload is
+  // assembled ~330 lines in, and a 9,000-character window stopped short of it.
+  const zEnd = editor.indexOf('if (p === "gst-report"', zi);
+  const zblk = zi < 0 ? "" : editor.slice(zi, zEnd > zi ? zEnd : zi + 30000);
+  const sel = (zblk.match(/from\("orders"\)\.select\("([^"]*)"\)/) || [])[1] || "";
+  const reads = (zblk.match(/\.payment_method/g) || []).length;
+  // ── ITEM 11 · A LEG ON A TABLE THAT IS STILL SITTING IS NOT TODAY'S TAKINGS ───────────────
+  // The stated side already skipped a bill that was still open; the legs loop skipped nothing but
+  // a reversal, so a table that had part-paid and was still sitting was counted as money
+  // collected. Recomputed over one snapshot of the real rows, three ways:
+  //   before the fix (every leg + every bill)     → +₹1,932 over the day's takings
+  //   a NAIVE fix (leg only if the bill is 'paid')→ −₹966, because it throws away a bill CLOSED
+  //                                                 with one part on a tab, whose collected parts
+  //                                                 really were collected today (mig 364)
+  //   now (leg unless its table is STILL OPEN)    → keeps that ₹966, drops the double count
+  // Hence the test is the SESSION, not payment_status. These checks pin that choice down.
+  const zLegsBlock = zblk.slice(zblk.indexOf("HOW THE MONEY CAME IN"), zblk.indexOf("const payments = [...byMethod."));
+  check(
+    "the till count knows which of today's tables are still sitting",
+    /openSessions/.test(zLegsBlock) && /is\("closed_at", null\)/.test(zblk),
+    "app/api/editor/[...path]/route.ts — the day-close till list must read the OPEN sessions and set " +
+      "their payment legs aside. Without it a table that has part-paid is counted as money collected " +
+      "and the list totals more than the day's takings printed above it.",
+  );
+  check(
+    "…and it does NOT key that off payment_status",
+    !/openSessions[\s\S]{0,400}payment_status/.test(zLegsBlock),
+    "app/api/editor/[...path]/route.ts — a bill closed with one part on a TAB is deliberately not " +
+      "stamped 'paid' (money that never arrived is never claimed), but its collected parts WERE " +
+      "collected today. Keying off payment_status throws that cash out of the till count.",
+  );
+  check(
+    "…and the money it sets aside is still reported, not thrown away",
+    /aside: r2\(asideNet\), asideCount/.test(zblk),
+    "app/api/editor/[...path]/route.ts — the cash is in the drawer. Excluding it silently leaves a " +
+      "manager counting over with nothing on the report to explain it. Its own line, like a reversal.",
+  );
+  check(
+    "…and the manager's Z-report screen prints that line",
+    /z\.payments\.aside > 0 \?/.test(read("public/panels/editor/app.js")),
+    "public/panels/editor/app.js — a payload field nothing renders is not a fix.",
+  );
+  check(
+    "the Z-report asks for every order column it reads",
+    !!sel && (reads === 0 || sel.split(",").includes("payment_method")),
+    `app/api/editor/[...path]/route.ts — the day-close block reads .payment_method ${reads} time(s) and its ` +
+      `orders select is "${sel}". A column that is read but never selected is undefined, and undefined ` +
+      "here means every bill is filed as \"nobody wrote down how this was paid\" at day close.",
+  );
+}
+
+console.log("\nT11-J · a report he does not have never shows him its shape");
+{
+  // ── R36, ON THE ONE ROUTE THAT WAS SUPPOSED TO REVEAL NOTHING (owner item 15, 2026-09-01) ────
+  // Two of the eight reports belong to admin-controlled modules. The CARD was already hidden when
+  // a module is off — but `?open=inventory` still opened the report shell: its title, its icon and
+  // the five sub-tab names, over a body saying "Inventory isn't enabled for this restaurant". So
+  // the link that revealed nothing described the whole feature.
+  check(
+    "a deep link to a MODULE report is held until the entitlement is known",
+    /MODULE_REPORTS/.test(reportsPage) && /pendingOpen/.test(reportsPage),
+    "app/owner/reports/page.tsx — team and inventory belong to modules the admin switches on. Opening " +
+      "one before the flags arrive puts the whole feature on screen for an owner who does not have it.",
+  );
+  check(
+    "…and dropped to the hub when the module is off",
+    /if \(!on\) return;/.test(reportsPage),
+    "app/owner/reports/page.tsx — an unknown ?open= value already falls back to the hub; a withheld one must too.",
+  );
+  check(
+    "…and closed if the admin switches it off while he is standing in it",
+    /mod === "payroll" \? !hasPayroll : !hasInventory\) backToHub\(\)/.test(reportsPage),
+    "app/owner/reports/page.tsx — otherwise he is left on a shell with nothing behind it.",
+  );
+  check(
+    "…while the six reports everyone has still open at once",
+    /else if \(a\) \{ setSel\(a\.sel\)/.test(reportsPage),
+    "app/owner/reports/page.tsx — hold ONLY the module reports. Gating all eight would make every " +
+      "deep link wait for the entitlement read.",
+  );
+}
+
+console.log("\nT11-K · a composition-scheme sheet does not contradict itself");
+{
+  // The composition flag is the mode the restaurant is on TODAY — there is no history of when it
+  // changed. So a restaurant that switched mid-year shows a window still holding GST it really did
+  // collect, under a sheet that says it charges none: "TAX COLLECTED ₹17,555 · composition scheme
+  // — no GST charged", above a tax chart with real bars. That money is never hidden — it is owed to
+  // the government — it is LABELLED.
+  check(
+    "the sheet knows the difference between 'charges no GST' and 'this window still holds some'",
+    /const legacyTax = composition && Math\.round\(t\.tax\) > 0/.test(reportsPage),
+    "app/owner/reports/page.tsx — without it the tile says \"no GST charged\" over real money.",
+  );
+  check(
+    "…so the tile stops claiming 'no GST charged' when there is some",
+    /legacyTax \? "collected before the change — still yours to file"/.test(reportsPage),
+    "app/owner/reports/page.tsx — the caption must follow the figure above it.",
+  );
+  check(
+    "…and a line explains where that money came from",
+    /This period still contains/.test(reportsPage) && /before the move to the composition scheme/.test(reportsPage),
+    "app/owner/reports/page.tsx — a number the reader cannot account for is a number they distrust.",
+  );
+  check(
+    "…and the tax chart is KEPT when there is tax, and dropped when there is none",
+    /\{\(!composition \|\| legacyTax\) && \(/.test(reportsPage),
+    "app/owner/reports/page.tsx — that money is still owed to the government, so it is never hidden. " +
+      "But \"Not enough data yet\" under \"Tax over time\" on an always-composition restaurant reads as a " +
+      "broken feed rather than as the truth.",
+  );
+  check(
+    "…and the by-period table drops a GST column only when EVERY figure in it would be zero",
+    /hideTax=\{composition && !legacyTax\}/.test(reportsPage) && /hideTax\?: boolean/.test(reportsPage),
+    "app/owner/reports/page.tsx — real tax is never dropped from a table; a column of ₹0 under a sheet " +
+      "that has just said there is no GST is a column asking to be misread.",
+  );
+}
+
+console.log("\nT11-M · a settings change reaches the report, not just an order");
+{
+  // ── THE FINGERPRINT WATCHED THE ORDERS AND NOT THE DEFINITIONS (T11 item 17, 2026-09-01) ─────
+  // The Tax report is built from the orders AND from the restaurant's tax configuration. Both
+  // change-detectors asked only "have the ORDERS moved?", so changing the rate, editing a tax line
+  // or moving to the composition scheme left the stored snapshot alone: revalidate() saw the same
+  // fingerprint, re-stamped computed_at and returned WITHOUT recomputing. On a quiet restaurant
+  // that holds the old rate on a GST document indefinitely.
+  // Measured: price_tax_mode read `excl` in the database while the cached report answered
+  // composition = true · rate 0 · components 0, and only Refresh fixed it.
+  const cache = read("lib/ownerCache.ts");
+  check(
+    "the change-detector watches the tax configuration, not only the orders",
+    /async function taxConfigPart/.test(cache) &&
+    /ordersFingerprint[\s\S]{0,400}taxConfigPart\(ids\)/.test(cache) &&
+    /reportMonthFingerprint[\s\S]{0,400}taxConfigPart\(ids\)/.test(cache),
+    "lib/ownerCache.ts — BOTH detectors must carry it. The global cache version cannot fix this: the " +
+      "definition that moved belongs to one restaurant.",
+  );
+  check(
+    "…and it reads the SAME columns the report itself is built from",
+    /TAX_SETTINGS_COLUMNS/.test(cache) && /from "@\/lib\/tax"/.test(cache),
+    "lib/ownerCache.ts — a second list of columns is a second answer to \"what is the tax configuration\".",
+  );
+  check(
+    "…sorted, so a scope's member order cannot move the fingerprint on its own",
+    /localeCompare\(String\(b2\.restaurant_id\)\)/.test(cache),
+    "lib/ownerCache.ts — otherwise the same estate fingerprints two different ways and recomputes for nothing.",
+  );
+  check(
+    "…and a configuration it cannot read never fails the request",
+    /catch \{ return ""; \}/.test(cache),
+    "lib/ownerCache.ts — a fingerprint is an optimisation; it must never be able to break a report.",
+  );
+}
+
+console.log("\nT11-L · a quiet day is not a failed read");
+{
+  // ── THE ALL-ZERO GUARD HAD NO WAY OUT (T11 item 16, 2026-09-01) ──────────────────────────────
+  // Once a stored snapshot held money and the honest answer became ZERO — a restaurant closed on
+  // its day off, a window whose only bills were cancelled — every recompute was refused and the OLD
+  // money was served to everyone for ever, with "updated X ago" beside it. Caught by the app's own
+  // warning: four "[ownerCache] refused to store an all-zero payload" lines in one run, while a
+  // forced read answered one thing and every other reader was handed another.
+  const cache = read("lib/ownerCache.ts");
+  check(
+    "the all-zero guard is keyed on the AGE of the snapshot it is protecting",
+    /isFresh\(prev\.computed_at, maxAgeMs\) && collapsedToZero/.test(cache),
+    "lib/ownerCache.ts — it was written for a BLIP, a read that fails seconds after a good one. With " +
+      "no time limit a genuinely quiet day froze yesterday's money onto the console permanently.",
+  );
+  check(
+    "…and both call sites use the timed rule, not the old unconditional one",
+    (cache.match(/zeroIsSuspicious\(/g) || []).length >= 2 && !/collapsedToZero\(payload,/.test(cache),
+    "lib/ownerCache.ts — the background path and the forced path must agree.",
+  );
+  check(
+    "…and it reuses the freshness the read path already has, rather than a second definition",
+    /const zeroIsSuspicious[\s\S]{0,200}isFresh\(/.test(cache),
+    "lib/ownerCache.ts — two notions of \"recent\" is how the last pair of these drifted apart.",
+  );
+  check(
+    "…and it counts MONEY, not the tax configuration",
+    /const withoutConfig/.test(cache) && /numbersIn\(withoutConfig\(prev\)\)/.test(cache),
+    "lib/ownerCache.ts — a money payload carries the configured rate and the CGST/SGST components. " +
+      "Switching a restaurant to the composition scheme legitimately zeroes those, and the guard read " +
+      "a deliberate settings change as a failed read.",
+  );
+}
+
+console.log("\nT11-I · the file you download IS the report you were looking at");
+{
+  // ── A REPORT THAT SHARES A PAYLOAD SHAPE STILL HAS ITS OWN TABLE (T11 round 2, 2026-09-01) ──
+  // The export branched on the payload SHAPE, and several bodies share one: by-hour and
+  // times-of-day are both "hourly", day-of-week and average-bill are both "money". So the file
+  // was headed with the right report and filled with a different one. Measured, 30 days:
+  //   Times of day      → 24 hourly rows instead of Morning/Afternoon/Evening/Late night
+  //   Day of week       → dated by-period rows instead of Monday…Sunday
+  //   Which dishes earn → the plain dish list, with the Star/Workhorse/Puzzle/Dog grouping gone
+  //   Average bill      → the by-period table WITHOUT the Avg bill column it is named after
+  check(
+    "the export is told WHICH report is on screen, not just its payload shape",
+    /body\?: string/.test(sectionExport) && /body: bodyKey/.test(reportsPage),
+    "components/owner/reports/sectionExport.tsx + app/owner/reports/page.tsx — pass the body. Branching " +
+      "on `kind` alone writes one report's table under another report's heading.",
+  );
+  for (const [body, mustHave] of [["daypart", /Day part", "Orders", "Revenue"/], ["weekday", /Days counted", "Paid bills"/], ["menu", /Dish", "Group", "Sold"/]]) {
+    check(
+      `…and "${body}" builds its own table`,
+      new RegExp(`meta\\.body === "${body}"`).test(sectionExport) && mustHave.test(sectionExport),
+      `components/owner/reports/sectionExport.tsx — the ${body} export must rebuild what the screen shows.`,
+    );
+  }
+  check(
+    "…and the Average bill file carries the column the report is named after",
+    /const avg = meta\.body === "avgbill"/.test(sectionExport) && /avg \? \["Avg bill"\]/.test(sectionExport),
+    "components/owner/reports/sectionExport.tsx — the screen shows an Avg bill column; the file must too.",
+  );
+  // ONE definition of each grouping, or the screen and the file drift apart again.
+  check(
+    "the day parts and the weekdays are defined ONCE, where both the screen and the file can read them",
+    /export const DAYPARTS/.test(kit) && /export const WEEKDAY_SHORT/.test(kit) && /export const istWeekday/.test(kit),
+    "components/owner/reports/kit.tsx — they used to live inside page.tsx where the export could not " +
+      "reach them, which is exactly how the two came to describe different groupings.",
+  );
+  check(
+    "…and the page reads those, rather than keeping its own copy",
+    /DAYPARTS, WEEKDAY_SHORT, WEEKDAY_FULL, istWeekday/.test(reportsPage) &&
+    !/^const DAYPARTS/m.test(reportsPage) && !/const NAMES = \["Mon"/.test(reportsPage),
+    "app/owner/reports/page.tsx — import them from the kit; a second copy is a second answer.",
+  );
+  check(
+    "…and the weekday grouping is done in IST",
+    /timeZone: "Asia\/Kolkata"/.test(kit.slice(kit.indexOf("export const istWeekday"), kit.indexOf("export const istWeekday") + 240)),
+    "components/owner/reports/kit.tsx — a non-IST reader would group a day into the wrong weekday.",
+  );
+}
+
+console.log("\nT11-G · with no internet, the saved figures can still be found");
+{
+  // The scope comes from /api/owner/overview. Offline that read answers `{ error: "offline" }`
+  // (public/sw.js returns 503 rather than throwing), so the restaurant list is empty and `rid`
+  // stays "" — while every cache key on this page carries the rid. Measured on a PRODUCTION build,
+  // offline: the hub printed ₹0 / 0 bills / ₹0 avg / ₹0 GST and the chart said "Not enough data
+  // yet", over a device whose own sessionStorage held ₹13,42,142 under `money|<rid>|30d`.
+  check(
+    "the page remembers the scope the device last saw",
+    /savedRid = useRef/.test(reportsPage) && /savedRid\.current = s\.rid/.test(reportsPage),
+    "app/owner/reports/page.tsx — the instant-paint snapshot already stores the rid; keep it so the " +
+      "figures the device is holding can be found when the server cannot name the scope.",
+  );
+  check(
+    "…and falls back to it ONLY when the restaurant list could not be read",
+    /!list\.length\)\s*\{\s*setNoSignal\(true\);[\s\S]{0,80}savedRid\.current/.test(reportsPage) &&
+    /catch\(\(\) => \{[\s\S]{0,160}savedRid\.current/.test(reportsPage),
+    "app/owner/reports/page.tsx — restoring it unconditionally would break the owner's rule that " +
+      "Reports always OPENS on All restaurants (2026-07-26). It is a failure fallback, not a memory.",
+  );
+  check(
+    "…and the saved sheet is headed with the restaurant's own name",
+    /restName: rid \? rests\.find/.test(reportsPage) && /savedName\.current \|\| "This restaurant"/.test(reportsPage),
+    "app/owner/reports/page.tsx — without the name the offline sheet reads \"This restaurant\" while " +
+      "showing that restaurant's own figures.",
+  );
+  // ── AND IT SAYS SO AT THE TOP, IN HIS OWN WORDS (owner, 2026-08-30) ───────────────────────
+  // "you can just say there is no internet, or if it was loaded previously you can show the
+  // previously and write a note on the top: the internet is not available, this is not the
+  // current data."
+  check(
+    "the page says at the top that the internet is not available",
+    /The internet is not available\./.test(reportsPage) && /rs-offnote/.test(reportsPage) && /\.rs-offnote \{/.test(kit),
+    "app/owner/reports/page.tsx — his words, at the top of the page. A \"— couldn't load\" tacked onto " +
+      "the end of a caption is not a person telling you something.",
+  );
+  check(
+    "…and the note is the FIRST thing on the page, not buried under the controls",
+    reportsPage.indexOf("rs-offnote") < reportsPage.indexOf('className="rs-head"'),
+    "app/owner/reports/page.tsx — he asked for a note ON TOP. Render it above the title strip.",
+  );
+  check(
+    "…and it says WHICH of the two cases he is in",
+    /This is not the current data/.test(reportsPage) && /Nothing has been saved on this device/.test(reportsPage),
+    "app/owner/reports/page.tsx — \"there is no internet\" and \"there is no internet AND nothing saved\" " +
+      "are different situations and he has to act differently in each.",
+  );
+  check(
+    "…and with nothing saved it prints a DASH, never a confident ₹0",
+    /blank\?: boolean/.test(reportsPage) && /blank \? <span className="rs-ov-dash">—<\/span>/.test(reportsPage) &&
+    (reportsPage.match(/\{blank \? "—" :/g) || []).length >= 5,
+    "app/owner/reports/page.tsx — a ₹0 headline with five ₹0 tiles tells the owner his restaurant took " +
+      "nothing. The whole point of the note is that we do not know.",
+  );
+  check(
+    "…and the chart does not explain the silence as a fact about the restaurant",
+    /blank\s*\?\s*<div className="rs-ov-blank"/.test(reportsPage),
+    "app/owner/reports/page.tsx — \"Not enough data yet, come back once there's a bit more\" is a sentence " +
+      "about the RESTAURANT. Draw nothing and let the note speak.",
+  );
+}
+
+console.log("\nT11-F · the downloaded file is the same report as the screen");
+{
+  // ── MERGE BY CANONICAL METHOD, DON'T JUST RELABEL (T11 sweep #7, 2026-08-27) ──────────────
+  // French House really stores both "Cash" and "cash". The day sheet, the Payments table and
+  // the donut all MERGE them; the export ran the raw rows through canonPayMethod for the LABEL
+  // only, so the downloaded CSV listed "Cash,274,316864" and "Cash,2,525" where the screen shows
+  // one row of Rs 3,17,389. The totals reconciled, which is why it survived — but anyone
+  // pivoting the file by method got two Cash groups.
+  const exp = read("components/owner/reports/sectionExport.tsx");
+  check(
+    "the export merges payment methods, the way the screen does",
+    /const mergePays\b/.test(exp),
+    "components/owner/reports/sectionExport.tsx — canonPayMethod() gives a method its canonical NAME; it " +
+      "does not add the two rows together. Merge first, then filter and sort, or a method split across two " +
+      "casings can be dropped in halves.",
+  );
+  const payBranch = exp.slice(exp.indexOf('if (meta.kind === "payments")'), exp.indexOf('if (meta.kind === "hourly")'));
+  check(
+    "…in the Payments report's own file",
+    /mergePays\(/.test(payBranch),
+    "components/owner/reports/sectionExport.tsx — the payments branch still maps the raw rows one for one.",
+  );
+  const dayBranch = exp.slice(exp.indexOf("data.payments?.length"), exp.indexOf("money out and money held"));
+  check(
+    "…and in the day sheet's settlement block",
+    /mergePays\(/.test(dayBranch),
+    "components/owner/reports/sectionExport.tsx — the day-sheet settlement block still maps the raw rows.",
+  );
+  check(
+    "…and the Payments file carries a Total row, like the screen's table foot",
+    /\["Total", bills/.test(payBranch),
+    "components/owner/reports/sectionExport.tsx — the screen's per-method table has a tfoot; a file without " +
+      "one makes the reader add the column up by hand and get a different answer from the tile.",
+  );
 }
 
 console.log("\nT11-E · saying so when a read failed");
@@ -665,11 +1083,16 @@ console.log("\nT11-E · saying so when a read failed");
       "full of money is what made the swapped-column fault read as a quiet day for months.",
   );
   const cache = read("lib/ownerCache.ts");
+  // The RULE, not its spelling. This asserted the exact call `collapsedToZero(payload,
+  // prevRow?.payload)` and went red when item 16 replaced it with the timed `zeroIsSuspicious`,
+  // against code that does the same job better — the "a guard asserting a retired rule" shape.
+  // What must hold: the FORCED path still reads the row it is about to replace, and still runs the
+  // guard on it. See T11-L for the timing rule itself.
   check(
-    "a forced Refresh cannot store an all-zero payload over a good one",
-    /prevRow/.test(cache) && /collapsedToZero\(payload,\s*prevRow\?\.payload\)/.test(cache),
-    "lib/ownerCache.ts — `force` skipped the read of the row it was about to replace, so the all-zero guard " +
-      "could never fire on the path most likely to need it (Refresh is pressed BECAUSE the numbers look wrong).",
+    "a forced Refresh still reads the row it is about to replace, and still guards it",
+    /prevRow/.test(cache) && /else if \(zeroIsSuspicious\(payload, prevRow, maxAgeMs\)\)/.test(cache),
+    "lib/ownerCache.ts — `force` used to skip that read, so the all-zero guard could never fire on the " +
+      "path most likely to need it (Refresh is pressed BECAUSE the numbers look wrong).",
   );
 }
 

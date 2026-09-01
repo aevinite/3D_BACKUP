@@ -184,6 +184,14 @@ export default function AdminUsage() {
         <p className="hint" style={{ marginTop: 0 }}>
           {ranged ? <>Orders between <b>{rangeLabel}</b>.</> : <>Order volume over the last 7 and 30 days.</>}{" "}
           The bar shows each restaurant&rsquo;s share of the busiest one. Tap any heading to sort by it.
+          {/* ON A PHONE, TWO OF THOSE HEADINGS ARE PAST THE EDGE (T17 sweep #7, 2026-08-27).
+              The table slides sideways on a narrow screen, which is the RIGHT call for a table you
+              read down a column of — that is T7's standing decision and it is not being changed
+              here. What changed since that decision is that the headings became sort BUTTONS, so
+              the sentence above now promises something two of the five cannot deliver: measured at
+              360px the card is 296px and the row 540px, leaving Staff and Tables entirely
+              off-screen with nothing hinting they are there. One line, phone only. */}
+          <span className="us-slide"> On a phone the table slides sideways — drag it left for <b>Staff</b> and <b>Tables</b>.</span>
         </p>
         {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : rows.length === 0 ? (
           <div className="adm-empty">No restaurants yet.</div>
@@ -239,6 +247,11 @@ export default function AdminUsage() {
         .us-th.on { color: var(--accent); }
         .us-th.on i { opacity: 1; }
         .us-th:hover i { opacity: .8; }
+
+        /* The slide hint exists only where the table actually slides. 560px is the same breakpoint
+           the stat strip below uses, and comfortably below the ~540px the row needs. */
+        .us-slide { display: none; }
+        @media (max-width: 560px) { .us-slide { display: inline; } }
 
         /* ON A PHONE the four numbers took a whole screen and left a stray rule (T17 sweep,
            2026-08-19). Each cell asked for 150px plus 36px of padding, so two would not fit in

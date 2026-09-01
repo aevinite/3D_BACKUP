@@ -191,6 +191,16 @@ export async function settleBillInParts(
   // check AND for the row. Every panel sends whole rupees, so nothing normal moves.
   const parts = splits.map((s) => ({ ...s, amount: r2(Number(s.amount)) }));
   const sum = r2(parts.reduce((s, x) => s + x.amount, 0));
+  // A SUM THAT IS NOT A NUMBER MUST NOT SLIP THROUGH THE GATE BELOW (split-bill 500, block A,
+  // 2026-08-29). `Math.abs(NaN - due) > 0.02` is **false**, so a NaN sum would satisfy "the parts
+  // add up" and go on to be written. Nothing can reach here with one today — badSplitShape()
+  // refuses NaN, Infinity arrives as `null` over JSON and is refused the same way — so this is not
+  // a hole that is open. It is the ONLY thing standing between a not-a-number and a settle being
+  // recorded, and it stands one gate away, in a different function, for a reason nobody reading
+  // this line would know. On a money path that is one line too few.
+  if (!Number.isFinite(sum)) {
+    return { ok: false, status: 400, message: "One of the parts is not a real amount — re-enter them." };
+  }
   if (Math.abs(sum - due) > 0.02) {
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };
   }
@@ -303,9 +313,10 @@ export async function reverseSplitLegs(
   opts: { rid: string; sessionId: string; since: string; actor?: string | null; reason?: string | null },
 ): Promise<{ reversed: number; amount: number }> {
   const { rid, sessionId, since } = opts;
+  // BOUNDED below (T25 round 2, item 31): 500 part-payments on one table is far past anything real.
   const live = (await sb.from("session_payments").select("id, amount")
     .eq("session_id", sessionId).eq("restaurant_id", rid)
-    .is("reversed_at", null).gte("created_at", since)).data as { id: string; amount: number }[] | null;
+    .is("reversed_at", null).gte("created_at", since).limit(500)).data as { id: string; amount: number }[] | null;
   const ids = (live || []).map((l) => l.id);
   if (!ids.length) return { reversed: 0, amount: 0 };
   const amount = Math.round((live || []).reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;

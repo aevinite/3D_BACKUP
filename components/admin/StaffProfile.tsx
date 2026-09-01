@@ -979,6 +979,15 @@ function Pay({ d, patch, reload, flash }: Kit) {
 }
 
 // ── ⑦ papers ─────────────────────────────────────────────────────────────────
+/** The LAST four digits of whatever was typed or pasted — which is what the two fields below are
+ *  labelled. They used to keep `slice(0, 4)`, the FIRST four, so pasting a whole Aadhaar or
+ *  account number stored the wrong four under a label that says "last 4", silently, and the
+ *  record then pointed at nothing. Typing exactly four is unchanged: four digits taken from
+ *  either end are the same four. Typing a longer number leaves the last four you typed, which is
+ *  the answer the field is asking for. The server applies the same rule (`digits()` in
+ *  lib/staffProfileShared.ts), so a paste that never went through this input lands right too. */
+const last4 = (v: string) => v.replace(/\D/g, "").slice(-4);
+
 function Papers({ d, patch, reload, flash }: Kit) {
   const pr = d.person.profile || {};
   const [f, setF] = useState({ id_type: pr.id_type || "", id_last4: pr.id_last4 || "", upi_id: pr.upi_id || "", bank_last4: pr.bank_last4 || "", id_verified: !!pr.id_verified });
@@ -1000,9 +1009,9 @@ function Papers({ d, patch, reload, flash }: Kit) {
             {["Aadhaar", "PAN", "Driving licence", "Voter ID", "Passport"].map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
-        <Field label="Last 4 digits" v={f.id_last4} on={(v) => setF({ ...f, id_last4: v.replace(/\D/g, "").slice(0, 4) })} />
+        <Field label="Last 4 digits" v={f.id_last4} on={(v) => setF({ ...f, id_last4: last4(v) })} />
         <Field label="UPI id" v={f.upi_id} on={(v) => setF({ ...f, upi_id: v })} placeholder="name@bank" />
-        <Field label="Bank account · last 4" v={f.bank_last4} on={(v) => setF({ ...f, bank_last4: v.replace(/\D/g, "").slice(0, 4) })} />
+        <Field label="Bank account · last 4" v={f.bank_last4} on={(v) => setF({ ...f, bank_last4: last4(v) })} />
       </div>
       <button className={`stp-tgl ${f.id_verified ? "on" : ""}`} style={{ marginTop: 12 }}
         onClick={() => { const next = { ...f, id_verified: !f.id_verified }; setF(next); save(next); }}>
