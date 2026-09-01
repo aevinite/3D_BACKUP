@@ -4707,7 +4707,8 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .adx .adm-card { border-radius: 10px; padding: 14px 16px; box-shadow: var(--elev); }
 .adx .adm-card h2 { font-size: 13.5px; }
 .adx .adm-card .hint { font-size: 12px; }
-.adx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; }
+/* Same gap, same reason as .owx .adm-btn above — the two consoles share this button. */
+.adx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; gap: 7px; }
 .adx a.adm-btn { height: auto; min-height: 30px; }
 /* ONE primary (amber CTA) action per screen; blue stays for data/links. */
 .adx .adm-btn.primary { background: var(--adm-cta); border-color: transparent; color: #fff; box-shadow: none; }
@@ -5115,7 +5116,15 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .owx .adm-main { padding: 20px; }
 .owx-wrap { max-width: 1280px; margin: 0 auto; }
 .owx .adm-card { border-radius: 10px; padding: 14px 16px; box-shadow: var(--elev); }
-.owx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; }
+/* `gap`, so an icon never touches its own label (T13, sweep #7, 2026-08-27 — measured 0px).
+   These buttons are flex containers, and a flex container DISCARDS the leading whitespace of a
+   text run — so `<i class="fas fa-book-open"/> Open the printer setup guide` rendered as one
+   smudged word, while a neighbour whose emoji sat INSIDE the text was spaced correctly. Five
+   buttons were wrong at the time of writing (the owner's printer-guide button, Refresh on Audit &
+   logs, Refresh and Try again on Feedback & complaints), and every icon button added in future
+   would have been. 7px matches .ost-btn, the roster's own icon button, rather than inventing a
+   number. A button with no icon is unaffected: gap only applies between two items. */
+.owx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; gap: 7px; }
 .owx .adm-btn.primary { background: var(--own-cta); border-color: transparent; color: #fff; box-shadow: none; }
 .owx .adm-btn.primary:hover { filter: brightness(1.08); }
 .owx .adm-stats { gap: 8px; margin-bottom: 14px; }

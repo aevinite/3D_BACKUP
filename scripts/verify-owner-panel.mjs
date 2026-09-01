@@ -552,13 +552,24 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
     else bad("the /api/owner/printing answer is applied to every restaurant row — it answers for ONE "
       + "restaurant and does not say which, so a second restaurant would be told the wrong printer");
 
-    // ── the icon must not touch its label ──
-    // `.owx .adm-btn` is `display: inline-flex` with no gap, and a flex container trims the leading
-    // space of a text run: `<i/> Open the…` measured 0px between the glyph and the O.
-    const guide = bare.slice(bare.indexOf("print-setup.html\""), bare.indexOf("print-setup.html\"") + 300);
-    if (/gap:\s*\d/.test(guide)) ok("printing: the guide button's icon is spaced off its label");
-    else bad("the printer-guide button's icon touches its first letter — the console's button is a "
-      + "flex box with no gap, so the space in the markup is trimmed away");
+    // The gap moved from this one button to the shared rule on 2026-09-01, because four more buttons
+    // in this console had the same fault. Watch the RULE — a per-button override would let the shared
+    // one rot unnoticed, which is the whole reason the other four were broken in the first place.
+    const gcss = read("app/globals.css") || "";
+    // Anchored to a line start: ".adx .adm-btn {" is a SUBSTRING of ".adm.adx .adm-btn {", which
+    // sits earlier in the file and is a transition rule with no gap — matching it reported the fault
+    // as unfixed while the real rule was right (caught 2026-09-01).
+    const consoleBtn = (sel) => {
+      const i = gcss.indexOf("\n" + sel); if (i === -1) return "";
+      return gcss.slice(i, gcss.indexOf("}", i) + 1);
+    };
+    if (/gap:\s*\d/.test(consoleBtn(".owx .adm-btn {")))
+      ok("printing: the guide button's icon is spaced off its label (the owner console's shared button rule)");
+    else bad("the owner console's buttons have no gap — a flex container trims the space in the markup, "
+      + "so every icon+label button touches its own first letter (5 of them did, 2026-08-27)");
+    if (/gap:\s*\d/.test(consoleBtn(".adx .adm-btn {")))
+      ok("…and the Aevidine console's shared button rule too, so the two do not drift apart");
+    else bad("the Aevidine console's buttons have no gap — same fault, other console");
 
     // ── R36 still holds for this whole card ──
     if (!/switched off for|not enabled|isn.t enabled/i.test(bare.slice(bare.indexOf("Kitchen printing"), bare.indexOf("Kitchen printing") + 4000))
@@ -581,6 +592,30 @@ const LOG_VIEW_KEYS = ["logs_signins", "logs_service", "logs_staff_changes"];
       ok("a search that matched only disabled people says so, instead of leaving the Team heading empty");
     else bad("the Team heading can render with no rows and no sentence under it — a found person reads "
       + "as 'not found' until the owner scrolls past the empty heading");
+  }
+}
+
+// ── 15 · ONE RESTAURANT = NO SWITCHER BAR (owner, 2026-09-01, STANDING) ─────────────────────
+// *"If the owner has only one restaurant, then there shouldn't be any kind of bar only like to
+// switch the restaurant. If they have two then only it should have."* A picker offering exactly one
+// choice is a control that does nothing, and it costs a row of height on every screen.
+{
+  const src = read("components/owner/OwnerMenuEditor.tsx");
+  if (!src) bad("components/owner/OwnerMenuEditor.tsx not found (if it moved, update this guard)");
+  else {
+    const bare = code(src);
+    if (/restaurants\.length > 1/.test(bare)) ok("Menu: the restaurant bar needs MORE than one restaurant to exist");
+    else bad("the Menu page's restaurant bar is no longer gated on holding more than one restaurant "
+      + "— a single-restaurant owner would be shown a switcher with one option in it");
+    if (/\{many && \(/.test(bare)) ok("…and the whole bar is what is gated, not just the dropdown inside it");
+    else bad("the gate no longer wraps the whole bar — the row, its label and its border would still render");
+    if (!/restaurants\.length >= 1|restaurants\.length > 0/.test(bare)) ok("…and nothing weakens that to 'one or more'");
+    else bad("the gate has been weakened to one-or-more, which shows the bar to every owner");
+    // …and the page can only ever hand it one restaurant on the admin act-as branch
+    const page = code(read("app/owner/menu/page.tsx") || "");
+    if (/restaurants = \[\{ id: row\.id, name: row\.name \}\]/.test(page))
+      ok("…and the admin act-as branch resolves exactly one restaurant, so the bar is absent there too");
+    else bad("the admin act-as branch no longer resolves a single restaurant — re-check whether the bar appears");
   }
 }
 

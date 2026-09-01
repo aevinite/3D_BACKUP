@@ -358,17 +358,14 @@ export default function OwnerSettings() {
           button, because a downloaded script is blocked by macOS and warned about by Windows.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {/* `gap`, not the space in the markup (T13 sweep, 2026-08-27 — measured 0px). The console's
-              own rule makes this button a flex box — `.owx .adm-btn { display: inline-flex }` in
-              app/globals.css, with no gap — and a flex container TRIMS the leading whitespace of a
-              text run, so `<i/> Open the…` rendered as one word: the book glyph touching "Open". The
-              three OS buttons below escape it only because their emoji sits INSIDE the text. Every
-              icon+label button in this file's neighbours that looks right carries an explicit gap
-              (.ost-mini.open uses 6px, .ost-btn 7px), so this one does too.
-              🔗 The same shape affects four more buttons in this console — the Refresh / Try again
-              buttons on Activity and on Feedback & complaints. Those files are not this territory's;
-              one `gap` on `.owx .adm-btn` would cure all five at once. */}
-          <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener" style={{ gap: 7 }}>
+          {/* The icon is spaced off its label by `gap` on `.owx .adm-btn` in app/globals.css — a flex
+              container TRIMS the leading whitespace of a text run, so `<i/> Open the…` rendered as
+              one word: the book glyph touching "Open" (measured 0px, T13 sweep, 2026-08-27). This
+              button carried its own inline gap for one commit; the shared rule replaced it on
+              2026-09-01 because four more buttons in this console had the same fault and a per-button
+              override would have hidden the next regression in the shared rule rather than catching
+              it. Do not put the inline gap back — verify:owner-panel §13 now watches the rule. */}
+          <a className="adm-btn" href="/print-setup.html" target="_blank" rel="noopener">
             <i className="fas fa-book-open" aria-hidden="true" /> Open the printer setup guide
           </a>
           {/* Straight into one OS menu — the guide is three by-hand menus now, and the person setting a
