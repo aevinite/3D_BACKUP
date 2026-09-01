@@ -33,7 +33,7 @@ re-runs it. So:
 A row marked **`✅ NOT a finding`** or **`✅ deliberate`** exists precisely so nobody files it
 again. Read those before reporting anything.
 
-**Next free ID: `P46801`.**
+**Next free ID: `P47301`.**
 
 > **`P46301`–`P46800` is CLAIMED by T25's THIRD freshly-planned 500** (`lib/**` — every shared library
 > file no other terminal owns, 2026-08-31). The owner's word, after round 2 was merged and deployed:
@@ -184,6 +184,7 @@ again. Read those before reporting anything.
 >
 > | T26 · THE LOOK | `P27601`–`P28100` | ✅ 500 written, 500 executed (401 ✅ · 24 ❌→✅ fixed on the branch · 65 ⚠️ measured-and-offered · 10 ⏭) — plus all 500 of `P12501`–`P13000` re-run: **NO REGRESSION**, 4 expectations moved, and `P12751`–`P12800` found to hold **no check at all** (their whole text is one letter each — a sweep-#6 generator fault, 50 ids spent on nothing). **7 problems found, 7 fixed, one commit each**, plus 2 guard commits. Six of the seven were on the skin the surface OPENS in. |
 > | T26 · THE LOOK, round 2 | `P46301`–`P46800` | ✅ 500 written, 500 executed (388 ✅ · 35 ❌→✅ · 62 ⚠️ · 15 ⏭). The owner picked items 9–14 from the round-1 report and asked for a fresh 500-phase test around them: that test then found **eight more faults**, the sharpest being the manager **Bills** screen with nine things under the line **including the bill's own total at 2.03:1**. **14 problems fixed across items 9–22, one commit each.** Also carries a correction: round 1 reported the manager's phone floor as "2 tables of 30" when the steady figure was 4 — that measurement was taken with a one-time prompt on screen. |
+> | T26 · THE LOOK, round 3 | `P46301`–`P47300` | ✅ 500 written, 500 executed (418 ✅ · 11 ❌→✅ · 71 ⚠️). He authorised items 23 and 24: the manager's phone floor now shows **6 tables where it showed 2**, and the last two short controls on its bar are 44px. **Neither R11 nor R25 had to be reversed** — R11's button line is untouched and R25's list is unchanged; the colour key MOVED into the ☰ menu, it did not change. The whole-territory re-test grew the surface list 24 → 32 (the three ☰ drawers had never been opened by any sweep) and found **two more screens with faults — manager Platform and admin Access — both clean in every previous sweep only because no sweep had opened them.** Final pass: **256 records, 0 faults of any kind.** **2000 rows now stand in this ledger.** |
 >
 > Other sweep-#7 terminals add their own line here. **Rebuilding this whole file honestly from what
 > is on disk is terminal 40's job** — this is the one line the ID guard needs in the meantime, kept
