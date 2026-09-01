@@ -168,7 +168,7 @@ const adminRoute = read("app/api/admin/restaurants/settings/route.ts");
 //   both    → a screen route on the kitchen panel WITH backupPanel = manager
 // The column stays (schema changes here are additive, one folder feeds two databases) but nothing
 // may read or write it. These three checks are what stop it creeping back.
-const mig369 = read("supabase/migrations/369_the_old_coarse_print_target_becomes_a_route.sql");
+const mig369 = read("supabase/migrations/376_the_old_coarse_print_target_becomes_a_route.sql");
 check(/kot_print_target/.test(mig336) && /'kitchen', 'counter', 'both'/.test(mig336),
   "mig 336 is untouched — the column and its CHECK constraint stay where they were",
   "mig 336 was edited. A migration that has run everywhere is history: retire a column in a NEW file, never by rewriting the old one");
