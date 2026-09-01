@@ -214,6 +214,22 @@ if (wronglyPurged.length === 0) {
     + "KEEP is right, this is a sale or a financial record being erased and the migration must go.");
 }
 
+// ── AND THE THIRD DIRECTION, WHICH ONLY T23 HAD (integrating #1147, 2026-09-01) ────────────────
+// T22 and T23 fixed this same guard independently, in the same window, and T22's version reached
+// main first. It turned out to be the stronger of the two — `mustSurvive`/`wronglyPurged` above is
+// T23's "KEEP has to mean kept" assertion, and T22 added the UNDECIDED mirror and the SELF_CLEARING
+// proofs on top. One assertion existed ONLY in T23's version, so it is carried over here rather
+// than lost in the merge: a table listed as "deleted LAST, after every child" must still actually be
+// deleted. If a rewrite of admin_purge_restaurant() stops clearing `settings` or `staff_users`, the
+// ordering note above becomes a promise about something that no longer happens.
+const lastButKept = [...DELETED_LAST].filter((t) => !purged.has(t));
+if (lastButKept.length === 0) pass(`${DELETED_LAST.size} tables are deleted LAST, on purpose, after every child`);
+else for (const t of lastButKept) {
+  fail(`${t} is listed as "deleted last by the purge" but admin_purge_restaurant() does not delete it `
+    + "any more — move it to KEEP with the reason, or the ordering note is describing something that "
+    + "no longer happens");
+}
+
 // And the mirror of it, so the remaining-work list cannot rot again: a name on UNDECIDED that the
 // purge actually clears is a false to-do, and it is what made this section unreadable.
 const falseTodo = [...UNDECIDED.keys()].filter((t) => purged.has(t));
