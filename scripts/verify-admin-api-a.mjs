@@ -427,6 +427,70 @@ for (const rel of PART_A) {
   else fail(`${rel} reports a failed save (${wrong.join(", ")}) as "couldn't load" — the sentence has to tell the admin nothing was changed (rule 4b)`);
 }
 
+// ── RULE 5 — a WRITE'S RETURNING CLAUSE MUST NOT BE COUNTED (T19 sweep #7, 2026-09-01) ──────────
+//
+// Rule 3 deliberately does not flag `const r = await upd.select("id")` as an unbounded list read,
+// and it is right not to: that is an update's RETURNING clause, not a read. But the rows it hands
+// back are still capped by PostgREST's own limit — so counting them is the same silent-short-number
+// fault wearing a write's clothes. Two live examples, both fixed in the same commit as this rule:
+//
+//   Rate limits → "Clear all alerts": `const n = r.data?.length ?? 0` on an unbounded update, and
+//   that n goes into the AUDIT LINE. Clearing 1,500 alerts would have recorded 1,000.
+//   The bell's "mark all seen": the same shape, reported back to the screen.
+//
+// app/api/admin/error-memory already carries the pattern this rule enforces, in its own words:
+// "COUNTED BEFORE, NOT COUNTED FROM WHAT CAME BACK … A head count moves no rows and cannot be
+// shortened." So the rule is: if a variable is assigned from a chain containing .update( / .delete(
+// / .insert( AND a .select(, then `<var>.data.length` is only allowed when the same chain carries an
+// explicit ceiling (.limit / .range) or the ids it filters on were themselves capped — the second
+// case is spelled out in a comment, so the allowance is named rather than guessed.
+// THREE THINGS ARE DELIBERATELY NOT FLAGGED, because all three are already safe, and a guard that
+// invents a failure is worse than no guard (this file's own header):
+//   · a PRESENCE test — `if (!r.data?.length) return 404`. It asks "did anything match", not "how
+//     many", and one row is one row whatever the cap is (app/api/admin/maintenance).
+//   · a write filtered by `.in("id", ids)`. The id list is built in code and is finite: ack slices
+//     it to 200, resolve-error takes it from a read capped at 500. Both are far under PostgREST's
+//     own cap, so the returned rows cannot be shortened.
+//   · a chain that states its own `.limit(`/`.range(`.
+// What IS flagged is the dangerous shape: a FILTER-based bulk write, no ceiling, and its returned
+// rows counted as the number that gets reported or recorded.
+for (const rel of PART_A) {
+  const src = strip(readFileSync(join(root, rel), "utf8"));
+  const counted = [];
+  for (const m of src.matchAll(/\b([A-Za-z_$][\w$]*)\.data\??\.length/g)) {
+    const v = m[1];
+    // A boolean presence test, not a count: `!r.data?.length`, `r.data?.length === 0`, `? :`.
+    const before = src.slice(Math.max(0, m.index - 12), m.index);
+    const after = src.slice(m.index + m[0].length, m.index + m[0].length + 14);
+    if (/[!(]\s*$/.test(before) && !/\?\?/.test(after)) continue;
+    if (/^\s*(===|!==|==|!=|>|<)\s*0/.test(after)) continue;
+    const assign = new RegExp(`(?:const|let|var)\\s+${v}\\s*=\\s*(?:await\\s+)?([\\s\\S]{0,600}?);`).exec(src);
+    let chain = assign ? assign[1] : "";
+    // FOLLOW THE BUILDER, the same way rule 3 had to learn to (T20 sweep #7). The dangerous shape is
+    // written over several lines, so the `.update(` is not in this statement at all:
+    //     let upd = sb.from("x").update({…}).eq(…).is(…);
+    //     if (scope) upd = upd.eq("restaurant_id", scope);
+    //     const bulk = await upd.select("id");     ← this is what `<var>.data.length` counts
+    // Without this step the rule sees only `upd.select("id")`, finds no write verb, and passes the
+    // very shape it exists for — which is exactly what it did on its first run.
+    const viaBuilder = /^\s*([A-Za-z_$][\w$]*)\s*\.\s*select\s*\(/.exec(chain);
+    if (viaBuilder) {
+      const b = viaBuilder[1];
+      // Every line that assigns the builder, joined — the write verb is in the first, the extra
+      // filters in the later ones, and a ceiling could be in any of them.
+      const parts = [...src.matchAll(new RegExp(`(?:const|let|var)?\\s*\\b${b}\\s*=\\s*([\\s\\S]{0,400}?);`, "g"))].map((x) => x[1]);
+      if (parts.length) chain = chain + " " + parts.join(" ");
+    }
+    if (!/\.(insert|update|upsert|delete)\s*\(/.test(chain)) continue;   // a plain read — rule 3's business
+    if (!/\.select\s*\(/.test(chain)) continue;                          // no returning clause to count
+    if (/\.(limit|range)\s*\(/.test(chain)) continue;                    // it states its own ceiling
+    if (/\.in\s*\(/.test(chain)) continue;                               // a finite id list, built in code
+    counted.push(v);
+  }
+  if (!counted.length) ok(`${rel} never counts a write's returning rows as the number it reports`);
+  else fail(`${rel} counts a write's returning rows (${counted.join(", ")}) — those stop at PostgREST's own cap, so the number can be smaller than what was changed. Count first with a head count on the same filter (rule 5)`);
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);
 if (fails.length) {

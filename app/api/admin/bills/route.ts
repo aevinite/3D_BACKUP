@@ -31,6 +31,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
@@ -84,11 +88,12 @@ export async function GET(req: NextRequest) {
     // refused elsewhere as implausible, so 500 is far above anything real.
     const orderRows = (await sb.from("orders").select("id").eq("session_id", trail).limit(500)).data as { id: string }[] | null;
     const orderIds = (orderRows || []).map((o) => o.id);
-    // Actions linked to this bill's orders (delete/discount/revert/invoice) OR table-level
-    // events on the session's table around its lifetime. order_id link is exact; the rest we
-    // scope to the session's table + restaurant for context.
-    const sess = (await sb.from("sessions").select("table_number, restaurant_id, opened_at, created_at, closed_at").eq("id", trail).maybeSingle()).data as
-      { table_number: string | null; restaurant_id: string | null; opened_at: string | null; created_at: string | null; closed_at: string | null } | null;
+    // Actions linked to this bill's orders (delete/discount/revert/invoice). The order_id link is
+    // exact, which is the whole trail: a read of the SESSION used to sit here "to scope table-level
+    // events to the session's table + restaurant for context", and that second query was never
+    // written — nothing used the row, so every expand of a bill paid for a read whose answer was
+    // thrown away (T19 sweep #7, 2026-09-01). Removed rather than left as a promise; if table-level
+    // context is wanted later it comes back with the query that uses it.
     let events: { action: string; actor: string | null; detail: string | null; at: string }[] = [];
     if (orderIds.length) {
       const byOrder = (await sb.from("staff_actions").select("action, actor, detail, created_at").in("order_id", orderIds).order("created_at", { ascending: true }).limit(200)).data as
@@ -158,11 +163,26 @@ export async function GET(req: NextRequest) {
     .not("deleted_at", "is", null).not("deleted_by", "is", null);
   if (rid && isUuid(rid)) { delEmptiedQ = delEmptiedQ.eq("restaurant_id", rid); delByPersonQ = delByPersonQ.eq("restaurant_id", rid); }
 
-  const [sessQ, restsQ, delQ, delEmptiedR, delPersonR] = await Promise.all([
-    sq, sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000),
-    delCountQ, delEmptiedQ, delByPersonQ,
-  ]);
-  if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
+  const reads = new ReadSet("admin/bills", await Promise.all([
+    // TWO POPULATIONS OUT OF ONE READ, and they are deliberately different (T19 sweep #7, 2026-09-01).
+    // This carried `.is("deleted_at", null)`, so a bill belonging to a restaurant now in the recycle
+    // bin fell out of the name map and its row rendered "—". Measured on the dev database: NINE
+    // deleted bills from 31 July, every one of them anonymous, on the one screen whose promise is that
+    // a removed sale stays reachable — and the refusal in /api/admin/act-as/go says it in those words:
+    // "its bills are still on record in the Bills ledger". A bill of a deleted restaurant is still a
+    // real sale with a real history. So the NAME MAP keeps every restaurant, and the FILTER DROPDOWN
+    // below still offers only live ones, because narrowing to a deleted restaurant leads nowhere.
+    // The identical split, with the identical reasoning, is in app/api/admin/customers/route.ts
+    // (T18 handoff H3, approved by the owner 2026-08-20).
+    rd("sessions", () => sq),
+    rd("restaurants", () => sb.from("restaurants").select("id, name, deleted_at").limit(2000)),
+    rd("deletedCount", () => delCountQ),
+    // The two breakdown counts are TOLERATED: they only split the Deleted tile's own total into how it
+    // happened, so a failure leaves that split unsaid rather than taking the ledger down.
+    rd("deletedEmptied", () => delEmptiedQ),
+    rd("deletedByPerson", () => delByPersonQ),
+  ]));
+  if (reads.failed("sessions")) return adminFail("the bill ledger", reads.error("sessions"), { action: "load" });
   // ALL THREE READS ARE CHECKED, because on this screen a silent zero is the failure mode that
   // matters most (this file's own header: "THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY
   // TIME"). The count above was written precisely because "the chip said 0 while deleted bills
@@ -170,19 +190,20 @@ export async function GET(req: NextRequest) {
   // blip made the one screen whose job is proving no sale vanished say that none had. The names
   // read is the same story one step down: with it empty every row reads "—" and the restaurant
   // filter has nothing in it, so the admin cannot even narrow the list to look.
-  if (delQ.error) return adminFail("the bill ledger", delQ.error, { action: "load" });
-  if (restsQ.error) return adminFail("the bill ledger", restsQ.error, { action: "load" });
+  if (reads.failed("deletedCount")) return adminFail("the bill ledger", reads.error("deletedCount"), { action: "load" });
+  if (reads.failed("restaurants")) return adminFail("the bill ledger", reads.error("restaurants"), { action: "load" });
 
-  const sessions = (sessQ.data || []) as unknown as BillSession[];
-  const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
+  const sessions = reads.rows<BillSession>("sessions");
+  const restRows = reads.rows<{ id: string; name: string; deleted_at: string | null }>("restaurants");
+  const nameById = new Map<string, string>(restRows.map((r) => [r.id, r.name]));
 
   // Orders for exactly these sessions — one scoped read, grouped in JS.
   const sessionIds = sessions.map((s) => s.id);
   const ordersBySession = new Map<string, BillOrder[]>();
   if (sessionIds.length) {
-    const oQ = await sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000);
-    if (oQ.error) return adminFail("the bill ledger", oQ.error, { action: "load" });
-    for (const o of (oQ.data || []) as unknown as BillOrder[]) {
+    const oReads = new ReadSet("admin/bills:orders", [await rd("orders", () => sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000))]);
+    if (oReads.failed("orders")) return adminFail("the bill ledger", oReads.error("orders"), { action: "load" });
+    for (const o of oReads.rows<BillOrder>("orders")) {
       const k = o.session_id || "";
       const arr = ordersBySession.get(k) || [];
       arr.push(o); ordersBySession.set(k, arr);
@@ -246,7 +267,9 @@ export async function GET(req: NextRequest) {
   // it is a real column, so it gets the true database count and can never under-report.
   const counts: Record<string, number> = {};
   for (const b of bills) counts[b.state] = (counts[b.state] || 0) + 1;
-  counts.deleted = delQ.count ?? counts.deleted ?? 0;
+  // count() throws for a failed read rather than `?? 0` — and it cannot be reached failed here,
+  // because the check above already returned. That is the shape the tile was fixed into in sweep #6.
+  counts.deleted = reads.count("deletedCount");
 
   if (stateFilter) bills = bills.filter((b) => b.state === stateFilter);
 
@@ -270,14 +293,17 @@ export async function GET(req: NextRequest) {
   const full = sessions.length >= limit;
   const nextBefore = full && sessions.length ? sessions[sessions.length - 1].created_at || null : null;
 
-  const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const restaurants = restRows
+    .filter((r) => r.deleted_at == null)
+    .map((r) => ({ id: r.id, name: r.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   return NextResponse.json({
     bills, counts, total: bills.length, restaurants,
-    deletedTotal: delQ.count ?? 0,
+    deletedTotal: reads.count("deletedCount"),
     // null, never 0, when the split could not be read — "I don't know" and "none" must not look
     // alike on this screen. The tile falls back to its old single sentence.
-    deletedEmptied: delEmptiedR?.error ? null : (delEmptiedR?.count ?? null),
-    deletedByPerson: delPersonR?.error ? null : (delPersonR?.count ?? null),
+    deletedEmptied: reads.failed("deletedEmptied") ? null : reads.count("deletedEmptied"),
+    deletedByPerson: reads.failed("deletedByPerson") ? null : reads.count("deletedByPerson"),
     nextBefore, generatedAt: new Date().toISOString(),
   });
 }
@@ -296,8 +322,11 @@ async function postImpl(req: NextRequest) {
   const sessionId = String(body?.sessionId || "");
   if (!isUuid(sessionId)) return NextResponse.json({ error: "bad sessionId" }, { status: 400 });
 
-  const sess = (await sb.from("sessions").select("id, restaurant_id, table_number, bill_no").eq("id", sessionId).maybeSingle()).data as
-    { id: string; restaurant_id: string | null; table_number: string | null; bill_no: number | null } | null;
+  // "NOT FOUND" HAS TO MEAN NOT FOUND: a failed read said the bill did not exist, which on a delete
+  // or a restore is a sentence the admin would act on (T19 sweep #7, 2026-09-01).
+  const sessQ = await sb.from("sessions").select("id, restaurant_id, table_number, bill_no").eq("id", sessionId).maybeSingle();
+  if (sessQ.error) return adminFail("this bill", sessQ.error, { action: "load" });
+  const sess = sessQ.data as { id: string; restaurant_id: string | null; table_number: string | null; bill_no: number | null } | null;
   if (!sess || !sess.restaurant_id) return NextResponse.json({ error: "bill not found" }, { status: 404 });
   const rid = sess.restaurant_id;
 
@@ -307,7 +336,17 @@ async function postImpl(req: NextRequest) {
     // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
     if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
-    const orderRows = (await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP)).data as ({ id: string } & MoneyCols)[] | null;
+    // A FAILED READ IS NOT AN EMPTY BILL (T19 sweep #7, 2026-09-01). This took `.data` and ignored
+    // `.error`, so a database blip on this one read made `ids` empty — and then every step below
+    // behaved as if the bill genuinely had no orders: softDeleteOrders() returns 0 without touching
+    // anything, no `deletion_audit` row is written, the `!ids.length` branch tombstones the SESSION
+    // anyway, and the reply says ok. The result is a bill that reads "deleted" in the ledger while
+    // its orders are still live on the floor and in the reports, with nothing on the Removals record
+    // saying what was taken out. On the strongest removal in the product, that is the one answer this
+    // route must never give. Refuse instead: nothing has been changed at this point.
+    const ordersQ = await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).is("deleted_at", null).limit(BILL_ORDER_CAP);
+    if (ordersQ.error) return adminFail("this bill", ordersQ.error, { action: "save" });
+    const orderRows = ordersQ.data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
     // …and into the Audit, the one place a person looks for "what was removed and why". The
@@ -343,7 +382,12 @@ async function postImpl(req: NextRequest) {
   if (action === "restore") {
     // Read the money BEFORE the restore clears the tombstone, so the audit row can say what came
     // back — the same columns and the same netOf() the delete recorded on the way out.
-    const orderRows = (await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP)).data as ({ id: string } & MoneyCols)[] | null;
+    // Checked for the same reason as the delete above: with the error swallowed, `ids` came back
+    // empty, restoreOrders() restored nothing, the session was un-tombstoned regardless and the reply
+    // said "restored" — a bill back on the ledger whose every order is still deleted.
+    const ordersQ = await sb.from("orders").select(MONEY_COLS).eq("session_id", sessionId).not("deleted_at", "is", null).limit(BILL_ORDER_CAP);
+    if (ordersQ.error) return adminFail("this bill", ordersQ.error, { action: "save" });
+    const orderRows = ordersQ.data as ({ id: string } & MoneyCols)[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     // restoreOrders() now THROWS when the database refuses either write (T7 finding F3 — it used to
     // report the row count it intended and leave the bill deleted). Caught here so the admin gets a
@@ -386,7 +430,16 @@ async function postImpl(req: NextRequest) {
     if (!reason) return NextResponse.json({ error: "A reason is required to issue a credit note." }, { status: 400 });
     const { data, error } = await sb.rpc("lfh_issue_credit_note", { p_session: sessionId, p_amount: amount, p_reason: reason, p_actor: "Admin" });
     // Code first, prose as the fallback for a database without mig 278 (see that migration's header).
-    if (error) return NextResponse.json({ error: (error.code === "LFH02" || /cannot exceed/i.test(error.message)) ? "The credit can't be more than the bill total." : error.message }, { status: error.code === "LFH02" ? 409 : 400 });
+    // Code first, and the ONE named refusal keeps its own sentence. Anything else used to hand the
+    // database's own words back to the console (T19 sweep #7, 2026-09-01): a credit note against a
+    // bill with no invoice, or an RPC missing from this database, answered the admin with a Postgres
+    // sentence in a red toast. adminFail keeps that text in the response `detail` and the server log
+    // and tells the screen nothing was saved, which on a credit note is the half that matters.
+    if (error) {
+      if (error.code === "LFH02" || /cannot exceed/i.test(error.message))
+        return NextResponse.json({ error: "The credit can't be more than the bill total." }, { status: 409 });
+      return adminFail("this credit note", error, { action: "save" });
+    }
     const row = Array.isArray(data) ? data[0] : data;
     await logAction("admin", "credit_note", { restaurant_id: rid, actor: "Admin", table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
     return NextResponse.json({ ok: true, creditNo: row?.credit_no });

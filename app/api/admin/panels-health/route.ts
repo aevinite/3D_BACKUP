@@ -8,6 +8,11 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). Every read gets one retry on a transient connection failure, a failure is logged once
+// naming WHICH read went, and a read the screen tolerates says so at the call site. The console's
+// answer is unchanged: adminFail, plain words, raw text in `detail`.
+import { ReadSet, rd } from "@/lib/readGuard";
 
 export const dynamic = "force-dynamic";
 const ROLES = ["manager", "kitchen", "tablet", "owner"] as const;
@@ -16,17 +21,17 @@ export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const [restsQ, setQ, staffQ] = await Promise.all([
-    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000),
-    sb.from("settings").select("restaurant_id, enabled_panels").limit(2000),
+  const reads = new ReadSet("admin/panels-health", await Promise.all([
+    rd("restaurants", () => sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name").limit(2000)),
+    rd("settings", () => sb.from("settings").select("restaurant_id, enabled_panels").limit(2000)),
     // Active operational staff only, explicit columns, bounded — we just need the latest
     // last_seen per (restaurant, role); aggregated below in JS.
-    sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("last_seen_at", { ascending: false, nullsFirst: false }).limit(3000),
-  ]);
+    rd("staff", () => sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("last_seen_at", { ascending: false, nullsFirst: false }).limit(3000)),
+  ]));
   // Check ALL three — a failed settings/staff read would otherwise show every panel "Off"/"Never
   // seen" (false "device down" for everyone) with a confident 200 (audit). Order the staff read
   // by last_seen so at scale the 3000-row cap keeps the MOST-RECENTLY-ACTIVE staff, not random ones.
-  const anyErr = restsQ.error || setQ.error || staffQ.error;
+  const anyErr = reads.firstError;
   // PLAIN WORDS FOR THE CONSOLE (sweep #6, T19). This answered with the database's own
   // sentence, so a failure here read as e.g. `relation "…" does not exist` in a red toast —
   // right for a developer, useless on the screen the owner runs his platform from. adminFail
@@ -34,10 +39,12 @@ export async function GET(req: NextRequest) {
   // and gives the screen a sentence that names the thing and says whether anything changed.
   if (anyErr) return adminFail("the panel-connectivity list", anyErr, { action: "load" });
 
-  const panelsByRid = new Map<string, Record<string, boolean> | null>((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
+  const panelsByRid = new Map<string, Record<string, boolean> | null>(
+    reads.rows<{ restaurant_id: string; enabled_panels?: Record<string, boolean> | null }>("settings")
+      .map((r) => [r.restaurant_id, r.enabled_panels || null]));
   // Latest last_seen per "restaurant|role".
   const latest = new Map<string, string>();
-  for (const s of staffQ.data || []) {
+  for (const s of reads.rows<{ restaurant_id: string; role: string; last_seen_at: string | null }>("staff")) {
     if (!s.last_seen_at) continue;
     const key = `${s.restaurant_id}|${s.role}`;
     const cur = latest.get(key);
@@ -52,7 +59,7 @@ export async function GET(req: NextRequest) {
     return mins < 5 ? "online" : mins < 60 ? "idle" : "offline";
   };
 
-  const rows = (restsQ.data || []).map((r) => {
+  const rows = reads.rows<{ id: string; name: string; slug: string; active: boolean | null }>("restaurants").map((r) => {
     const enabled = panelsByRid.get(r.id) || null;
     const panels = ROLES.map((role) => {
       const on = !enabled || enabled[role] !== false; // enabled unless explicitly false

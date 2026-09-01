@@ -574,6 +574,29 @@ function checkMigrations() {
                + `remove the row`);
       }
     }
+    // 2b · a guarded file that TELLS the reader which migration records its key must name the file
+    //      that really does. Sweep #7 (T23, 2026-08-28) found two of these pointing at
+    //      `360_the_last_half_of_a_retired_stub.sql`: the recording file was written as 360 and
+    //      renumbered to 352 on merge, and neither pointer followed. Nothing breaks — the key is
+    //      matched by its TEXT, not by a file number — but the next person to read 235 or 301 is
+    //      sent to an unrelated migration while trying to understand a one-time data rewrite, which
+    //      is the worst moment to be misdirected. Cheap to check, so it is checked.
+    for (const f of files) {
+      const sql = readFileSync(join(root, "supabase", "migrations", f), "utf8");
+      if (!/lfh_already_applied\(/.test(sql)) continue;
+      for (const m of sql.matchAll(/migration (\d{3}) records the key/gi)) {
+        const named = files.filter((x) => x.startsWith(m[1] + "_"));
+        if (!named.length) { bad.push(`${f} says "migration ${m[1]} records the key" and no such migration exists`); continue; }
+        const keysHere = [...sql.matchAll(/lfh_already_applied\(\s*'([^']+)'\s*\)/g)].map((k) => k[1]);
+        const recordedThere = named.some((n) => keysHere.some((k) => readFileSync(join(root, "supabase", "migrations", n), "utf8").includes(`'${k}'`)));
+        if (!recordedThere) {
+          bad.push(`${f} says "migration ${m[1]} records the key", but ${named.join("/")} does not `
+                 + `record any of the keys this file checks (${keysHere.join(", ")}) — the pointer `
+                 + `was left behind by a renumber. Fix the COMMENT, never the key: the key text is `
+                 + `already in lfh_applied_once on every live database.`);
+        }
+      }
+    }
     // 3 · the two originals, still named for their measured blast radius
     for (const [file, key] of Object.entries({
       "043_inr_base_currency.sql": "043_inr_base_currency",

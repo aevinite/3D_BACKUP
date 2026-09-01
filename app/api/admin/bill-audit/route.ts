@@ -28,6 +28,10 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+// ONE ANSWER TO "DID EVERY ONE OF THESE READS WORK?" — lib/readGuard (item 15, owner-approved
+// 2026-09-01). One retry on a transient connection failure, one log line naming WHICH read went, and
+// a tolerated read that says so at the call site. The console's answer is unchanged.
+import { ReadSet, rd } from "@/lib/readGuard";
 import { redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -90,22 +94,31 @@ export async function GET(req: NextRequest) {
     if (rid && isUuid(rid)) c = c.eq("restaurant_id", rid);
     return c;
   };
-  const [aQ, restsQ, totQ, riskQ] = await Promise.all([
-    q,
-    sb.from("restaurants").select("id, name").is("deleted_at", null).limit(2000),
-    wantCount ? countOf(actions) : Promise.resolve(null),
-    wantCount ? countOf([...RISK]) : Promise.resolve(null),
-  ]);
-  if (aQ.error) return adminFail("the bill trail", aQ.error, { action: "load" });
+  const reads = new ReadSet("admin/bill-audit", await Promise.all([
+    rd("rows", () => q),
+    // Every restaurant, binned ones included — see the note under `nameById` below.
+    rd("restaurants", () => sb.from("restaurants").select("id, name, deleted_at").limit(2000)),
+    // The two totals are asked for only when the caller wants them, and they are TOLERATED: a failed
+    // count travels as null so the page says it does not know, rather than "no removals".
+    rd("total", () => (wantCount ? countOf(actions) : Promise.resolve({ data: null, error: null, count: null }))),
+    rd("riskTotal", () => (wantCount ? countOf([...RISK]) : Promise.resolve({ data: null, error: null, count: null }))),
+  ]));
+  if (reads.failed("rows")) return adminFail("the bill trail", reads.error("rows"), { action: "load" });
   // BOTH reads, not just the rows. This is a cross-restaurant screen: the restaurant NAME is how
   // the admin tells one tenant's bill changes from another's, and it feeds the filter dropdown as
   // well. With this read unchecked a failure left every row labelled "—" and the dropdown empty,
   // so the page looked like a working list of anonymous events and the admin had no way to narrow
   // it. Same rule the sibling account-health route already states for its three reads.
-  if (restsQ.error) return adminFail("the bill trail", restsQ.error, { action: "load" });
+  if (reads.failed("restaurants")) return adminFail("the bill trail", reads.error("restaurants"), { action: "load" });
 
-  const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
-  const rows = (aQ.data || []).map((a) => ({
+  // THE NAME MAP KEEPS BINNED RESTAURANTS; THE DROPDOWN DOES NOT (T19 sweep #7, 2026-09-01). This
+  // read excluded them, so a bill change made at a restaurant that has since been deleted rendered
+  // "—" — anonymous, on the one screen whose job is noticing a bill being quietly removed, and
+  // precisely for the tenant whose disappearance makes that question worth asking. Same split, same
+  // reasoning, as app/api/admin/customers/route.ts and the bill ledger beside it.
+  const restRows = reads.rows<{ id: string; name: string; deleted_at: string | null }>("restaurants");
+  const nameById = new Map<string, string>(restRows.map((r) => [r.id, r.name]));
+  const rows = reads.rows<{ id: number; action: string; actor: string | null; detail: string | null; table_number: string | null; restaurant_id: string | null; created_at: string }>("rows").map((a) => ({
     id: a.id,
     action: a.action,
     restaurantName: (a.restaurant_id && nameById.get(a.restaurant_id)) || "—",
@@ -116,13 +129,16 @@ export async function GET(req: NextRequest) {
     risk: RISK.has(a.action),
   }));
   // Restaurants list for the filter dropdown (id + name only).
-  const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
+  const restaurants = restRows
+    .filter((r) => r.deleted_at == null)
+    .map((r) => ({ id: r.id, name: r.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   // A COUNT THAT FAILED IS NOT A ZERO. This screen's whole purpose is noticing bills being quietly
   // removed, and the sibling ledger route says the same thing in its own words ("a silent zero is
   // the failure mode that matters most"). `null` travels to the page, which then says it does not
   // know rather than "no removals" or "1 page".
-  const total = totQ && !totQ.error ? (totQ.count ?? null) : null;
-  const riskCount = riskQ && !riskQ.error ? (riskQ.count ?? null) : null;
+  const total = wantCount && !reads.failed("total") ? reads.count("total") : null;
+  const riskCount = wantCount && !reads.failed("riskTotal") ? reads.count("riskTotal") : null;
   return NextResponse.json({
     rows, riskCount, restaurants,
     total, page, per,

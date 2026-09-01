@@ -126,6 +126,36 @@ const tileText = async (crew, t) => {
     return [txt, ...titles].join(" · ");
   } catch { return ""; }
 };
+// WHERE THE STATE WORD ACTUALLY LIVES (T28 sweep, 2026-08-22).
+//
+// The state check below used to require the RPC's `label` — "New order", "Preparing", "Served" —
+// to appear in the tile's VISIBLE text, and it failed on every table that had dishes on it:
+//     ✗ T2: tile "2 · 4 · 0/1 served · ＋ · Take order" vs database "New order"
+// Nothing was wrong with the product. `floorTileHtml()` gives row 3 to whichever of the two is
+// MORE informative:
+//   · dishes on the table → the visible text is the progress ("0/1 served") and the label moves to
+//     the row's `title`:  <div class="ft-line" title="New order · …">
+//   · no dishes yet       → there is no progress to draw, so the label IS the visible text ("Free",
+//     "Open", "Wants in") — and it is still on the title too.
+// So the label is always present, and it is only sometimes visible. Reading `innerText` could
+// therefore only ever pass on an EMPTY table.
+//
+// This is the same lesson the payment-ring check further down already wrote out — "the tile's
+// outline is the payment signal, so check the CLASS, not the label" — and the same rule the wording
+// sweep states for the product: assert on the code, never on the prose that happens to be rendered.
+// Read the title, and treat the state CLASS as the second witness.
+const tileLabel = async (crew, t) => {
+  try { return (await crew.fr.locator(`.ftile[data-floor-table="${t}"] .ft-line`).first().getAttribute("title")) || ""; }
+  catch { return ""; }
+};
+// RPC state → the class floorTileHtml() puts on the tile. Two names for one fact; if either drifts
+// this mapping is the thing to update, and it will fail loudly rather than silently.
+const STATE_CLASS = { received: "ft-new", preparing: "ft-prep", ready: "ft-ready", served: "ft-done",
+                      free: "ft-free", open: "ft-seated", seated: "ft-seated", pending: "ft-waiting" };
+const tileClass = async (crew, t) => {
+  try { return (await crew.fr.locator(`.ftile[data-floor-table="${t}"]`).getAttribute("class")) || ""; }
+  catch { return ""; }
+};
 // waitForTile: poll the OPEN page (never reload it) until the tile matches — that is the whole
 // point: the panel has to update itself.
 async function waitForTile(crew, t, re, label) {
@@ -236,13 +266,19 @@ try {
       const shown = await tileText(crew, t);
       const truth = tiles[t];
       if (!truth) continue;
-      const okLabel = shown.includes(truth.label);
+      // The label lives on the row's title; when the table is empty it is the visible text too.
+      const title = await tileLabel(crew, t);
+      const cls = await tileClass(crew, t);
+      const wantCls = STATE_CLASS[truth.state];
+      const okLabel = (title && title.includes(truth.label)) || shown.includes(truth.label)
+        || (wantCls ? new RegExp(`\\b${wantCls}\\b`).test(cls) : false);
       const dueTruth = Number(truth.due) > 0 ? Math.round(Number(truth.due)) : 0;
       const dueShown = (shown.match(/₹([\d,]+)/) || [])[1];
       const dueOk = dueTruth === 0 ? true : dueShown && Math.abs(Number(dueShown.replace(/,/g, "")) - dueTruth) <= 1;
       okLabel && dueOk
         ? pass(`${crew.label} T${t}: tile "${shown}" matches the database (${truth.label}${dueTruth ? `, ₹${dueTruth} due` : ""})`)
-        : fail(`${crew.label} T${t}: tile "${shown}" vs database "${truth.label}"${dueTruth ? ` ₹${dueTruth} due` : ""}`);
+        : fail(`${crew.label} T${t}: tile "${shown}" (title "${title}", class "${cls}") vs database `
+              + `"${truth.label}" / state "${truth.state}"${dueTruth ? ` ₹${dueTruth} due` : ""}`);
     }
     const others = Object.keys(tiles).filter((t) => !crew.tables.includes(t) && tiles[t].state === "free");
     let bled = 0;
