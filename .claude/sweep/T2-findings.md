@@ -249,3 +249,63 @@ With the server always supplying the dish, item 6's "We couldn't load this dish"
 **unreachable on both doors** — which is the point of item 9, not an oversight. The deadline stays
 as a bounded safety net for any caller that renders `ItemClient` without `initialItem`, and it costs
 nothing: the promise resolves instantly and clears the timer.
+
+---
+
+# THE 5-PHASE LIVE TEST — and a correction to round 2
+
+Run against **https://3-d-backup.vercel.app** after the merge, on his instruction. Five phases
+covering the whole territory: the download-once engine, the 3D screen, the dish page, the look, and
+the project's own rules. **115 checks, 115 green, 0 faults found.** Five rows came back red and all
+five were my own test being wrong — each is written up in the ledger so nobody re-files them.
+
+## ⚠️ THE CORRECTION, which matters more than the greens
+
+Round 2 said, in a commit message and in a report to the owner, that *"after an offline reload the
+dish page's client JavaScript never boots"*. **That is true on the dev server and FALSE on the live
+site.**
+
+Measured on production, offline, after one warm visit: `--lfh-offbar-h` is `69px`, the model loader
+is alive, React's own offline bar renders, and the page is interactive — tapping the photo opened
+the lightbox. The freeze exists only under `next dev`, whose chunks the service worker does not
+hold. Same class of trap as this ledger's standing pre-empt about the dev server compiling each
+route on first hit.
+
+**What it changes, stated plainly:**
+
+* **Item 11's static offline bar is insurance, not a rescue.** On production, React's own bar already
+  appears after an offline reload. The static one refuses to draw whenever React is alive — proven,
+  and guarded — so it is not a duplicate, and it does make the dev experience honest. But I sold it
+  on a fault that a real diner never met.
+* **Item 9 is unaffected.** No spinner, one fewer browser read, the dish in the server HTML: all
+  three verified on the live site. Its value never depended on the offline claim.
+* The honest description of the dish page offline is: **it already worked on production**, and item 9
+  makes it arrive sooner and cost less.
+
+I would rather correct this in writing than leave a commit message overstating what was wrong.
+
+## What the live test confirmed about the seven sweep fixes
+
+| fix | verified on the live site |
+|---|---|
+| 1 · the animation loop | 0 animation frames a second remain after three look-and-leave cycles |
+| 2 · the hint pill | "Drag to turn it around" clears the dish bar — overlap 0, and the point at its centre belongs to the model canvas |
+| 3 · the fetch's dependency | backend only; asserted by guard |
+| 4 · the maintenance share card | asserted by guard on both doors |
+| 5 · the review rows | 0 review reads on a ratings-off restaurant; 1 on a ratings-on one |
+| 6 · the read deadline | now a bounded safety net — see the note on item 9 |
+| 7 · the error cards | centred, both skins, all three sizes |
+| 9 · the server-rendered dish | no spinner, ₹550 not $550, 1 browser dish read → 0, ratings-off respected in the HTML |
+| 11 · the offline bar | exactly one bar in all four states across both screens — never two |
+| 12 · the category read | 1 read per dish open, not 2 |
+
+**One dish open on the live site now costs six browser reads** — guest settings, categories, the dish
+row, its rating, the ban check and the device greeting — and nothing polls in the fifteen seconds
+after it settles.
+
+## Still open
+
+* **H1 · the guest MENU page's offline warning** — retested on live and it DOES show React's bar, so
+  this is no longer a fault, only a missing belt-and-braces. `components/OfflineNoticeStatic.tsx` is
+  there if that route's owner wants it. Downgraded from a handoff to a note.
+* **H3 · `verify:offline` pinned to port 4000** — held, awaiting the owner's permission (item 15).
