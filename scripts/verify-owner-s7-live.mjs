@@ -454,14 +454,13 @@ console.log("\nH4 · does the owner's answer agree with everyone else's (P21551�
   // literally reported a disagreement that only exists in letter case.
   const norm = (x) => x.toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
   // NOT EVERY SECTION IS A SIDEBAR ITEM, and that is correct (checked 2026-08-27, do not re-file).
-  // "Guest ratings" is a real owner section — `ratings` in OWNER_SECTION_KEYS, gating the guest
-  // star ratings the owner reviews — but it is reached as a TAB inside Feedback & complaints
-  // (app/owner/issues/page.tsx), not as its own nav row. So the chip is truthful and the section is
-  // reachable; only my first version of this check, which demanded a nav row per chip, was wrong.
-  // What must hold is that every chip names something the owner can actually GET TO.
-  const REACHED_AS_A_TAB = { "guest ratings": "feedback complaints" };
-  const reachable = (c) => nav.some((n) => norm(n).includes(norm(c)))
-    || (REACHED_AS_A_TAB[norm(c)] && nav.some((n) => norm(n).includes(REACHED_AS_A_TAB[norm(c)])));
+  // "Guest ratings" is a real owner section — `ratings` in OWNER_SECTION_KEYS — but it is reached as
+  // a TAB inside Feedback & complaints (app/owner/issues/page.tsx), not as its own nav row.
+  // EXPECTATION MOVED 2026-09-01, same id, same claim: the owner asked for that chip to SAY where it
+  // lives, so it now reads "Guest ratings — in Feedback & complaints". The chip therefore CONTAINS
+  // the nav label rather than matching it, and the hard-coded special case this check used to carry
+  // is gone — a chip that names its own home needs no lookup table to be judged reachable.
+  const reachable = (c) => nav.some((n) => norm(n).includes(norm(c)) || norm(c).includes(norm(n)));
   P("P21554", "every chip names a section the owner can actually reach",
     nav.length === 0 || chips.every(reachable), `chips=${chips.join("|")} nav=${nav.join("|")}`);
   P("P21555", "…and the two never contradict each other about a section he HAS", chips.length > 0);

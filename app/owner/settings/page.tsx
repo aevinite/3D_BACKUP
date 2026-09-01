@@ -55,10 +55,19 @@ type Data = {
 //
 // logs_signins / logs_service / logs_staff_changes are deliberately absent: they are which KINDS of
 // row the Audit & logs page shows, not sections. Pay Later and Inventory are MODULES, not sections.
+//
+// ONE OF THESE NINE IS NOT A SIDEBAR ROW, AND THE CHIP NOW SAYS SO (owner, 2026-09-01 — "you can
+// do 15"). `ratings` is a real section and the owner really has it, but it is reached as a TAB
+// inside Feedback & complaints (app/owner/issues/page.tsx), not as its own nav item. So an owner
+// read "Guest ratings" on this card, went looking for it in the menu, and it was not there.
+// Naming it "Guest ratings" alone was under-informative; renaming it "Feedback & complaints" would
+// have printed that name twice, since `issues` already carries it. Saying where it lives is the
+// only version that is both true and findable — and it discloses nothing withheld (R36), because
+// the chip only exists when the section is ON.
 const SECTION_LABEL: Record<string, string> = {
   manager_mode: "Manager mode", menu: "Menu", reports: "Reports", staff: "Team",
   customers: "Customers", logs: "Audit & logs", issues: "Feedback & complaints",
-  ratings: "Guest ratings", settings: "Settings",
+  ratings: "Guest ratings — in Feedback & complaints", settings: "Settings",
 };
 
 export default function OwnerSettings() {
