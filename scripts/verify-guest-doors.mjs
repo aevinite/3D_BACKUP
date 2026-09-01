@@ -599,6 +599,28 @@ flush();
   check("the basket still deregisters on the first ORDER result, which is why the gate must not spend it",
     /if \(d\?\.action !== "order"\) return;/.test(cart) && /removeEventListener\("lfh:session-done", onDone\)/.test(cart));
 }
+
+// ── THE TABLE CARD'S OWN WORDS (T4 s8, items 5 and 6) ─────────────────────────────────────────────
+// 5 · `calls` from lfh_session_state is every OPEN request at the table, from any member (mig 318
+//     builds it from waiter_calls by session_id) — the card labelled it "You called for".
+// 6 · every message from this card went out with no variant, so ToastHost fell back to a green tick
+//     and to its shortest life. MEASURED on the rendered page: 1,283 ms for a twelve-word sentence,
+//     and the same tick and length for "You've been removed from this table". After: 3,800 ms, •.
+{
+  say("\n9) The table card's own words say the right thing, for long enough to read");
+  check("the shared list of requests is named as the TABLE's, not this diner's",
+    /This table asked for/.test(widget) && !/You called for/.test(widget));
+  check("the card can ask for a mark and a length, instead of always taking the flash default",
+    /const toast = \(message: string, kicker = "table", variant = "success", duration\?: number\)/.test(widget));
+  check("…and the three endings and the keep-this-page-open instruction all use it",
+    (widget.match(/"table", "info", NEWS_MS\)/g) || []).length === 4);
+  check("…with a neutral mark, not an error — nothing went wrong and there is nothing to fix",
+    /const NEWS_MS = 3400;/.test(widget) && !/"table", "error"/.test(widget));
+  check("the flash default is still what ToastHost gives an unmarked message, which is why this matters",
+    /variant === "error" \? 2200 : 1100/.test(read("components/ToastHost.tsx")));
+  check("…and `duration` is still a thing ToastHost honours",
+    /typeof d\.duration === "number" && d\.duration > 0/.test(read("components/ToastHost.tsx")));
+}
 if (fail) {
   console.log(`\n❌ ${fail} check(s) failed — a guest door, a promise to a diner, or their order list regressed.`);
   process.exit(HOOK ? 2 : 1);
