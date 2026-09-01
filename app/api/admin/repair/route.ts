@@ -93,9 +93,25 @@ async function handler(req: NextRequest) {
     if (op === "void_bill") {
       const sessionId = String(body.session_id || "");
       if (!UUID.test(sessionId)) return err("invalid session_id");
-      const owns = (await sb.from("sessions").select("id, table_number, invoice_no, bill_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null; bill_no?: number | null } | null;
+      const owns = (await sb.from("sessions").select("id, table_number, invoice_no, invoice_voided, bill_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null; invoice_voided?: boolean | null; bill_no?: number | null } | null;
       if (!owns) return err("That table isn't for this restaurant.", 404);
       if (!owns.invoice_no) return err("This bill has no invoice to void.", 409);
+      // ── AND IT MUST NOT BE VOIDED TWICE (T20, 2026-09-01) ────────────────────────────────────────
+      // A void KEEPS the invoice number — retired and marked cancelled, never erased, because a number
+      // is never reused. So `invoice_no` is still set afterwards, and the check above passed a SECOND
+      // time: the reopen ran again, answered ok, and wrote a SECOND `invoice_voided` row into the
+      // Removals record — each carrying the full bill amount.
+      //
+      // That is the worst version of this fault so far, because the Removals record is where the owner
+      // and the manager answer "what came off my bills, and how much?". Two rows for one void means
+      // anybody totalling that column reads DOUBLE the money. Reproduced on a fixture: one ₹315 void,
+      // two ₹315 rows.
+      //
+      // The MANAGER's own void — the twin this handler's header promises it matches, "so the rules
+      // can't drift" — has refused this since it was written, in these words. Second time in one round
+      // that this file made that promise and broke it (see the re-fire above). Same sentence, so the
+      // two screens say the same thing about the same state.
+      if (owns.invoice_voided) return err("This bill is already reopened — it's open for edits right now.", 409);
       // What the bill stood at BEFORE it was reopened, so the audit row can say what changed —
       // the same figures the manager's own void records (editor route, invoice_void).
       // ── THE AUDIT'S AMOUNT IS THE POINT OF THE AUDIT ROW (T20 sweep #7, 2026-08-27) ──────────────

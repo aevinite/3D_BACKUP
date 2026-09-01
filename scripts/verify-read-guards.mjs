@@ -548,6 +548,41 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
   }
 }
 
+// ── 18 · A BILL CANNOT BE VOIDED TWICE, AND THE MONEY COUNTED TWICE (T20, 2026-09-01) ────────────
+// A void KEEPS the invoice number — retired and marked cancelled, never erased, because a number is
+// never reused. So `invoice_no` is STILL SET afterwards, and a guard that only asks "does it have an
+// invoice?" passes a second time: the reopen runs again and writes a SECOND `invoice_voided` row into
+// the Removals record, each carrying the full bill amount.
+//
+// The Removals record is where the owner and the manager answer "what came off my bills, and how
+// much?". Two rows for one void means anybody totalling that column reads DOUBLE the money.
+// Reproduced on a fixture with a real issued invoice: one ₹315 void, two ₹315 rows.
+//
+// The MANAGER's own void has refused this since it was written. The Repair Kit's twin promises in its
+// own header to reuse the same primitives "so the rules can't drift", and this is the SECOND place in
+// that same file where the promise was broken (the other is the re-fire, rule 14).
+{
+  const rep = read("app/api/admin/repair/route.ts");
+  if (!rep) fail("app/api/admin/repair/route.ts is missing");
+  else {
+    const vb = rep.slice(rep.indexOf('op === "void_bill"'), rep.indexOf('op === "delete_order"'));
+    if (/select\("id, table_number, invoice_no, invoice_voided, bill_no"\)/.test(vb))
+      ok("the Repair Kit's void reads whether the invoice is ALREADY voided");
+    else fail("the Repair Kit's void no longer reads `invoice_voided` — a void KEEPS the number, so an invoice_no test alone passes a second time and the Removals record gets two rows for one void");
+    if (/owns\.invoice_voided\)\s*return err/.test(vb))
+      ok("…and refuses rather than writing a second Removals row for the same void");
+    else fail("the Repair Kit's void can run twice on one bill — the Removals record would count that money twice");
+    // and the two screens must keep saying the same thing about the same state
+    const ed = read("app/api/editor/[...path]/route.ts");
+    const phrase = "This bill is already reopened";
+    if (vb.includes(phrase) && ed.includes(phrase))
+      ok("…in the SAME words the manager's own void uses, so the two screens agree");
+    else if (!ed.includes(phrase))
+      ok("the manager's void changed its wording — the pairing is no longer assertable here");
+    else fail("the Repair Kit and the manager panel now say different things about an already-reopened bill");
+  }
+}
+
 // ── 17 · THIS SUITE ASSERTS ITS OWN SIZE (T20 round 4, 2026-09-01) ───────────────────────────────
 // Rule 12 lost a branch to a refactor and NOTHING went red: the count slid 66 → 65 and every remaining
 // check still passed. A guard that quietly shrinks is the same failure as a guard that quietly passes,
@@ -557,7 +592,7 @@ else fail("the guest erase no longer writes an audit row — an irreversible era
 // So the suite counts itself. The floor is deliberately a FLOOR, not an equality: adding checks is the
 // normal direction and must never need a second edit. LOSING them is the thing that has to be loud.
 // Raise this number when you add a rule — the failure message tells you to.
-const CHECK_FLOOR = 66;
+const CHECK_FLOOR = 69;
 if (oks.length + fails.length < CHECK_FLOOR) {
   fail(`this suite ran ${oks.length + fails.length} checks and the floor is ${CHECK_FLOOR} — ${CHECK_FLOOR - (oks.length + fails.length)} stopped running without going red. That is how rule 12 disappeared: an if/else-if with no final else, silently satisfied by neither. Find the branch that ends in nothing, or raise CHECK_FLOOR if you deliberately removed one.`);
 }
