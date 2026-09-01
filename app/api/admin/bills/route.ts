@@ -84,11 +84,12 @@ export async function GET(req: NextRequest) {
     // refused elsewhere as implausible, so 500 is far above anything real.
     const orderRows = (await sb.from("orders").select("id").eq("session_id", trail).limit(500)).data as { id: string }[] | null;
     const orderIds = (orderRows || []).map((o) => o.id);
-    // Actions linked to this bill's orders (delete/discount/revert/invoice) OR table-level
-    // events on the session's table around its lifetime. order_id link is exact; the rest we
-    // scope to the session's table + restaurant for context.
-    const sess = (await sb.from("sessions").select("table_number, restaurant_id, opened_at, created_at, closed_at").eq("id", trail).maybeSingle()).data as
-      { table_number: string | null; restaurant_id: string | null; opened_at: string | null; created_at: string | null; closed_at: string | null } | null;
+    // Actions linked to this bill's orders (delete/discount/revert/invoice). The order_id link is
+    // exact, which is the whole trail: a read of the SESSION used to sit here "to scope table-level
+    // events to the session's table + restaurant for context", and that second query was never
+    // written — nothing used the row, so every expand of a bill paid for a read whose answer was
+    // thrown away (T19 sweep #7, 2026-09-01). Removed rather than left as a promise; if table-level
+    // context is wanted later it comes back with the query that uses it.
     let events: { action: string; actor: string | null; detail: string | null; at: string }[] = [];
     if (orderIds.length) {
       const byOrder = (await sb.from("staff_actions").select("action, actor, detail, created_at").in("order_id", orderIds).order("created_at", { ascending: true }).limit(200)).data as
