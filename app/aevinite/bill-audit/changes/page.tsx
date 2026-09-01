@@ -199,7 +199,7 @@ export default function AdminBillChanges() {
             {k === "all" ? "All changes" : "At-risk only (deletions & reverts)"}
           </button>
         ))}
-        <select value={rid} onChange={(e) => refilter(() => setRid(e.target.value))} style={{ marginLeft: "auto", padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
+        <select aria-label="Restaurant" value={rid} onChange={(e) => refilter(() => setRid(e.target.value))} style={{ marginLeft: "auto", padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
           <option value="">All restaurants</option>
           {(d?.restaurants || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>

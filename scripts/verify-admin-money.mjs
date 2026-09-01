@@ -977,6 +977,29 @@ try {
       ok(tiles.length > 0 && tiles.every((t) => t === "\u2026" || t === "—"),
         `18 · ${name} · every one of them says the number is not known instead (${tiles.join(" ")})`);
     }
+
+    // ── 19 · EVERY BOX YOU CAN TYPE IN OR CHOOSE FROM IS NAMED ────────────────────────────────
+    // The restaurant picker on Bills and on the Change log carried no label of any kind — no
+    // aria-label, no wrapping <label>, no label[for] — so a screen reader announced nothing but
+    // "combo box" and the selected value. Every OTHER control on both screens was already named
+    // (the Find box has an aria-label, the two date boxes are wrapped in labels, the page-jump has
+    // a label[for]), and the sibling picker on Customers has carried aria-label="Restaurant" all
+    // along, so this is one wording across the console rather than a new one.
+    for (const [name, path] of [["Customers", "/aevinite/customers"], ["Bills", "/aevinite/bill-audit"], ["Change log", "/aevinite/bill-audit/changes"]]) {
+      const c19 = await ctx(1280, 900, 1, "dark");
+      const p19 = await c19.newPage();
+      await p19.goto(BASE + path, { waitUntil: "domcontentloaded" });
+      await settle(p19);
+      const unnamed = await p19.evaluate(() => {
+        const main = document.querySelector(".adm-main") || document.body;
+        return [...main.querySelectorAll("input, select, textarea")].filter((el) => !(
+          el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder")
+          || (el.id && document.querySelector(`label[for="${el.id}"]`)) || el.closest("label")
+        )).map((el) => el.tagName + (el.type ? ":" + el.type : ""));
+      });
+      await c19.close();
+      ok(unnamed.length === 0, `19 · ${name} · every box you can type in or choose from is named${unnamed.length ? " — unnamed: " + unnamed.join(", ") : ""}`);
+    }
   }
 
 } finally {

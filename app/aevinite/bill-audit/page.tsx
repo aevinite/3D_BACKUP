@@ -344,7 +344,7 @@ export default function AdminBills() {
             {META[k].label} <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? (counts[k] || 0) : "\u2014"}</span>
           </button>
         ))}
-        <select value={rid} onChange={(e) => { setRid(e.target.value); setOpen(null); }} style={{ marginLeft: "auto", padding: "9px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
+        <select aria-label="Restaurant" value={rid} onChange={(e) => { setRid(e.target.value); setOpen(null); }} style={{ marginLeft: "auto", padding: "9px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
           <option value="">All restaurants</option>
           {(d?.restaurants || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
