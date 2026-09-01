@@ -184,3 +184,68 @@ Every one was **proven to turn red** with its fix reverted, and green with it re
 had to be hardened while proving them: the Service-mode check matched its own explanatory comment
 until it stripped comments first, and item 3's check asserted the dependency list too literally and
 turned red on item 6's legitimate extra dependency.
+
+---
+
+# ROUND 2 — the seven decisions the owner picked (2026-09-01)
+
+He answered T2's report with items **8, 9, 10, 11, 12** to do, **14** left to my judgment, **13**
+declined, and **15** held back until he gives permission.
+
+**Three of the seven were already built.** Reporting that honestly is the whole value of this
+round: two were already solved at a LOWER level than the report understood, and one had been fixed
+by another terminal after the report was written. Building them would have left two mechanisms
+doing one job, which `CLAUDE.md`'s *"a new way replaces the old one"* bans outright.
+
+| item | outcome |
+|---|---|
+| 8 · quiet retry before showing the error | **ALREADY HANDLED — I built it and then deleted it.** `lib/supabase.ts` already puts a 15-second deadline on every browser read, and the page already recovers on its own: measured WITHOUT my change, the dish arrives by itself at 17.2s; WITH it, 16.1s. One second, for extra requests. My first attempt was also genuinely worse — 15 attempts in 75 seconds and still climbing, the fast-retry-while-reads-fail the busy rules ban. |
+| 9 · send the dish down with the page | **BUILT.** No spinner, browser dish-reads 2 → 0, and an offline reload now shows the dish. Four faults found on the way — see below. |
+| 10 · tell a restaurant its 3D dish is broken | **ALREADY BUILT** by T17 on 2026-08-27: admin → System health → "3D dishes", plus `broken3d` in `/api/admin/health`, capped at 200, `null` for unreadable rather than a reassuring zero. I proved it CATCHES one, which it had never been shown to do. |
+| 11 · a visible offline warning | **HALF ALREADY BUILT, HALF BUILT.** The existing bar works when the signal drops on an open page. It cannot work after a reload with no signal, because the client JavaScript never boots at all. Added a no-framework bar for exactly that case. |
+| 12 · the category list read twice | **BUILT**, and deliberately WITHOUT the cache the obvious fix would have used. |
+| 13 · a second restaurant with a 3D dish | **DECLINED by the owner.** |
+| 14 · the capitalised link that splits the basket | **ALREADY FIXED** by T1 on 2026-08-17. Proven by landing straight on a capitalised dish link: one folded key, heart still on at the lower-case address. **This closes handoff H2.** |
+| 15 · `verify:offline` pinned to port 4000 | **NOT AUTHORISED YET** — *"you can do 15 once I give you permission"*. `P00697` and `P00813` stay ⏭. |
+
+## The four faults item 9 caused, all found by measuring rather than by reading
+
+Item 9 is the reason this round is worth reading. Rendering the dish on the server is plainly
+right — and it made four things visible or wrong that the spinner had been hiding:
+
+1. **`$550` on a rupee menu.** Every price falls back to `$` while the currency state is null. That
+   was invisible behind the spinner; it became the first thing on screen, and PERMANENT on an
+   offline reload where React never boots to correct it.
+2. **Reviews read again on a ratings-off restaurant** — the exact fault item 5 had fixed two
+   commits earlier. Handing the dish down means `item` is set on render one, when `useFeatures()`
+   still returns the code defaults with ratings and reviews both on.
+3. **A five-star row in French House's own HTML**, on a restaurant that has ratings switched off,
+   because the server built the page with those same defaults.
+4. **Both dish routes went blank** when I tried to fix (3) by exporting a helper from
+   `lib/features.ts` — that file imports `useEffect`, so a server component cannot import from it
+   at all.
+
+## Four of my own guards went stale in one afternoon
+
+`verify:3d-viewer` turned red four times on correct code, because I had written the checks against
+a literal shape instead of the behaviour: the 404 check pinned one spelling of a read, the
+honest-card check compared against the first `if (!item)` anywhere in the file, and the reviews
+check pinned a condition item 9 strengthened. All three rewritten to assert what must be TRUE. This
+is the "stale expectation" pattern `LEDGER/INDEX.md` predicted T28 would find, arriving on schedule
+in my own work.
+
+## What is still open after this round
+
+* **H1 · the guest MENU page offline** — `components/OfflineNoticeStatic.tsx` is written and ready
+  to drop into that route, but the route is not this territory's. The dish page and the 3D screen
+  are covered.
+* **H3 · `verify:offline` is still pinned to port 4000** — held, awaiting his permission (item 15).
+* **H4 · nothing.** The category double-read it described is fixed (item 12).
+* **H2 · CLOSED** — fixed by T1; `P00852` is now ✅.
+
+## Item 6, honestly
+
+With the server always supplying the dish, item 6's "We couldn't load this dish" card is now
+**unreachable on both doors** — which is the point of item 9, not an oversight. The deadline stays
+as a bounded safety net for any caller that renders `ItemClient` without `initialItem`, and it costs
+nothing: the promise resolves instantly and clears the timer.
