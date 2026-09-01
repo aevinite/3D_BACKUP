@@ -49,10 +49,18 @@ export default function PairPage() {
       // The machine's own name is the default, so the box is already right and nobody has to think
       // about it (owner: "what the fuck is a computer name"). It stays editable for the one case
       // that matters — two shops both called "Main PC" in his head, not the machine's.
-      if (d.machine?.hostname && !name) setName(d.machine.hostname);
-      if (d.restaurants?.length && !rid) setRid(d.restaurants[0].id);
+      // FILLED IN FROM INSIDE THE SETTER, NOT FROM A DEPENDENCY (T4 sweep #8, item 9).
+      // These two used to read `name` and `rid` from the closure, so both had to be dependencies of
+      // load() — which made load() a NEW function every time either changed, and the effect below
+      // re-ran and asked the door again. So opening this page fired three GETs in a row instead of
+      // one (the answer sets the name, which re-runs it, which sets the restaurant, which re-runs
+      // it), and typing in the "Call it" box asked the door once per character. Every one of those
+      // also tore down and rebuilt the 15-second timer. Deciding "only if it is still empty" inside
+      // the setter is the same rule with no dependency at all.
+      if (d.machine?.hostname) setName((cur) => cur || d.machine!.hostname!);
+      if (d.restaurants?.length) setRid((cur) => cur || d.restaurants![0].id);
     } catch { setErr("Could not reach the site. Check this computer is online."); }
-  }, [code, name, rid]);
+  }, [code]);
 
   useEffect(() => { void load(); }, [load]);
 
