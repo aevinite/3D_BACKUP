@@ -293,7 +293,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // The old one stops working the instant this returns, which is also how a stolen or sold machine
   // is dealt with: give the code to nobody and it is simply dead.
   if (seg[0] === "agents" && seg[1] && seg[2] === "newcode") {
-    const row = (await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle()).data as { id: string; name: string } | null;
+    // Checked (item 21, 2026-09-01): "No such computer." for a read that merely failed sends him
+    // looking for a machine that is registered perfectly well.
+    const rowQ = await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle();
+    if (rowQ.error) return adminFail("that computer", rowQ.error, { action: "load" });
+    const row = rowQ.data as { id: string; name: string } | null;
     if (!row) return err("No such computer.", 404);
     const { token, hash } = mintAgentToken();
     // The fingerprint is cleared with the code: the next machine to use it is the machine it now
@@ -307,7 +311,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // Marked revoked, never deleted: the record of which machine printed which ticket has to stay
   // readable, and a row nobody can look up is not a record.
   if (seg[0] === "agents" && seg[1] && seg[2] === "revoke") {
-    const row = (await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle()).data as { id: string; name: string } | null;
+    const rowQ = await sb.from("print_agents").select("id, name").eq("id", seg[1]).eq("restaurant_id", rid).maybeSingle();
+    if (rowQ.error) return adminFail("that computer", rowQ.error, { action: "load" });
+    const row = rowQ.data as { id: string; name: string } | null;
     if (!row) return err("No such computer.", 404);
     await sb.from("print_agents").update({ revoked_at: new Date().toISOString() }).eq("id", row.id).eq("restaurant_id", rid);
     // Any route pointing at it is emptied in the same breath — a route naming a machine that can no

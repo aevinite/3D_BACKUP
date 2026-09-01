@@ -310,7 +310,14 @@ export async function POST(req: NextRequest) {
   if (action === "restore_owner") {
     const ownerId = String(body?.owner_id || "");
     if (!ownerId) return bad("Missing owner_id.");
-    const o = (await sb.from("staff_users").select("id, username, name, role, deleted_at, restaurant_id").eq("id", ownerId).limit(1)).data?.[0];
+    // A BLIP MUST NOT READ AS A REFUSAL (item 21, T19 sweep #7, 2026-09-01). Eight lookups on this
+    // route's write paths took `.data` and ignored `.error`, so a failed read answered "That user
+    // isn't an owner." or "Restaurant not found." — a definite sentence about the thing on screen,
+    // which is exactly the answer a person acts on. purge_owner below was given this check in sweep
+    // #6 and the rest were not; they all have it now.
+    const oQ0 = await sb.from("staff_users").select("id, username, name, role, deleted_at, restaurant_id").eq("id", ownerId).limit(1);
+    if (oQ0.error) return adminFail("this owner", oQ0.error, { action: "load" });
+    const o = oQ0.data?.[0];
     if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
     if (!o.deleted_at) return bad("That owner isn't in the recycle bin.", 409);
 
@@ -447,14 +454,18 @@ export async function PATCH(req: NextRequest) {
   const ownerId = String(body?.owner_id || "");
   const action = String(body?.action || "");
   if (!ownerId) return bad("Missing owner_id.");
-  const owner = (await sb.from("staff_users").select("id, name, username, role").eq("id", ownerId).limit(1)).data?.[0];
+  const ownerQ = await sb.from("staff_users").select("id, name, username, role").eq("id", ownerId).limit(1);
+  if (ownerQ.error) return adminFail("this owner", ownerQ.error, { action: "load" });
+  const owner = ownerQ.data?.[0];
   if (!owner || owner.role !== "owner") return bad("That user isn't an owner.", 404);
   const who = owner.name || owner.username;
 
   if (action === "attach") {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
-    const r = (await sb.from("restaurants").select("id, name").eq("id", rid).is("deleted_at", null).limit(1)).data?.[0];
+    const rQ = await sb.from("restaurants").select("id, name").eq("id", rid).is("deleted_at", null).limit(1);
+    if (rQ.error) return adminFail("this restaurant", rQ.error, { action: "load" });
+    const r = rQ.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     const e = await attach(ownerId, rid);
     if (e) return bad(e, 500);
@@ -471,10 +482,16 @@ export async function PATCH(req: NextRequest) {
   if (action === "set_primary") {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
-    const r = (await sb.from("restaurants").select("id, name, owner_user_id").eq("id", rid).is("deleted_at", null).limit(1)).data?.[0];
+    const rQ = await sb.from("restaurants").select("id, name, owner_user_id").eq("id", rid).is("deleted_at", null).limit(1);
+    if (rQ.error) return adminFail("this restaurant", rQ.error, { action: "load" });
+    const r = rQ.data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     if (r.owner_user_id === ownerId) return ok({ ok: true, already: true });
-    const member = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", ownerId).limit(1)).data?.[0];
+    // The membership test decides whether the write happens at all, so a failed read must not read
+    // as "they are not linked" — that refusal sends the admin off to attach something already there.
+    const memberQ = await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", ownerId).limit(1);
+    if (memberQ.error) return adminFail("who owns this restaurant", memberQ.error, { action: "load" });
+    const member = memberQ.data?.[0];
     if (!member) return bad("Assign this restaurant to the owner first — only a linked owner can be made primary.", 409);
     const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
     if (error) return adminFail("this restaurant's primary owner", error, { action: "save" });
@@ -571,7 +588,14 @@ export async function PATCH(req: NextRequest) {
 // the join rows, then deletes the staff_users row. Returns how many restaurants
 // were released. staff_actions rows are kept on purpose (audit outlives account).
 async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; released: number }> {
-  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000)).data || [];
+  // CHECKED (item 21, 2026-09-01). A failed read made `links` empty, so no restaurant was handed to
+  // a co-owner before the join rows went — the database's own ON DELETE SET NULL (mig 092) then saves
+  // it from a dangling pointer, but the audit line would still record "0 restaurant(s) released" for
+  // a purge that released several, and nobody would know which co-owner inherited what. Refuse
+  // instead: a permanent removal is the last place to guess.
+  const linksQ = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId).limit(2000);
+  if (linksQ.error) return { error: dbNote("read this owner's restaurants", linksQ.error), released: 0 };
+  const links = linksQ.data || [];
   for (const l of links) {
     const rid = l.restaurant_id as string;
     const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
@@ -603,7 +627,9 @@ export async function DELETE(req: NextRequest) {
   const url = new URL(req.url);
   const ownerId = url.searchParams.get("id") || "";
   if (!ownerId) return bad("Missing id.");
-  const o = (await sb.from("staff_users").select("id, username, name, role, active, deleted_at").eq("id", ownerId).limit(1)).data?.[0];
+  const oQ = await sb.from("staff_users").select("id, username, name, role, active, deleted_at").eq("id", ownerId).limit(1);
+  if (oQ.error) return adminFail("this owner", oQ.error, { action: "load" });
+  const o = oQ.data?.[0];
   if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
   if (o.active) return bad("Suspend this owner first — deleting only moves a suspended account to the recycle bin.", 409);
   if (o.deleted_at) return bad("That owner is already in the recycle bin.", 409);
