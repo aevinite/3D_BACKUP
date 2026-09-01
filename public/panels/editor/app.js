@@ -10608,8 +10608,46 @@ function layoutFloatingRow() {
 // "→ N more" chip honest. Both are gone with the sideways scroll itself (owner, 2026-08-15). R8 in
 // docs/REJECTED-IDEAS.md — his refusal to make that chip smarter — moved to Reversed for the only
 // reason a rejection ever should: the thing it was about no longer exists.)
+// THE COLOUR KEY MOVES INTO THE ☰ MENU ON A PHONE (item 23, owner gave permission 2026-09-01:
+// "can do the two things I give you the permission").
+//
+// WHY: on a 360px screen the floor header is 169px, and 45px of that is the two-line colour key.
+// The first table sat 300px down a 780px screen and a manager saw FOUR tables of 31, against the
+// waiter tablet's six. The key is a learning aid — you read it in your first week and never again —
+// so it is the one block in that header that does not need to be on screen while you work.
+//
+// WHAT THIS IS NOT: it does not touch `const LEG`. Every entry R25 protects is still there, in the
+// same order, saying the same thing — the strip stays exactly as short as he asked for, it just
+// lives one tap away on the smallest screen. And it does not re-flow the 🧾 KOT ▾ / ⚡ QO/P pair,
+// which is what R11 settled; that line is untouched at every width.
+//
+// ABOVE 760px NOTHING MOVES: the key stays in the header where it has always been.
+function syncLegendToDrawer() {
+  const tabs = document.getElementById("mainTabs");
+  if (!tabs) return;
+  const phone = window.matchMedia("(max-width: 760px)").matches;
+  let slot = tabs.querySelector(".nav-legend");
+  if (!phone) { if (slot) slot.remove(); return; }   // back on a big screen: give it up again
+  const live = document.querySelector(".floor-head .floor-legend");
+  if (!live) return;
+  if (!slot) {
+    slot = document.createElement("div");
+    slot.className = "nav-legend";
+    const h = document.createElement("div");
+    h.className = "nav-legend-h";
+    h.textContent = "What the colours mean";   // textContent: never build a label from HTML
+    slot.appendChild(h);
+    tabs.appendChild(slot);
+  }
+  // MOVE the live node, never a clone: the floor re-renders this element on every board update
+  // (merged tables add a "Merged" entry and remove it again), and a clone would quietly go stale.
+  const held = slot.querySelector(".floor-legend");
+  if (held !== live) { if (held) held.remove(); slot.appendChild(live); }
+}
+
 function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
+  syncLegendToDrawer();  // phone: the colour key lives in the ☰ menu (item 23)
   const ed = $("#editor");
   // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
   //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
@@ -16801,7 +16839,7 @@ setTimeout(buildNavUtilRows, 4000);
   if (close) close.onclick = () => navDrawerSet(false);
   // crossing the phone breakpoint → re-decide the nav mode (syncNavFit closes an open
   // drawer itself whenever the tabs go back into the bar)
-  window.matchMedia("(max-width: 760px)").addEventListener("change", () => syncNavFit());
+  window.matchMedia("(max-width: 760px)").addEventListener("change", () => { syncNavFit(); syncLegendToDrawer(); });
 }
 // Top tabs + Editor sub-nav switch views — but first guard any unsaved edits.
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) { setTab(t.dataset.tab); navDrawerSet(false); } }));

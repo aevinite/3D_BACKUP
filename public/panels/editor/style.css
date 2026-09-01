@@ -348,6 +348,8 @@ body.nav-rail .top-actions { margin-left: auto; }
 /* The drawer's utility rows exist only in the phone layout — above 760px every one of these
    buttons is on the bar, and offering the same action twice on one screen is its own fault. */
 .nav-util { display: none; }
+/* Same for the colour key the phone layout moves in here (item 23). */
+.nav-legend { display: none; }
 @media (prefers-reduced-motion: reduce) {
   body.nav-rail .tabs, body.nav-rail .layout { transition: none; }
 }
@@ -2284,6 +2286,18 @@ body {
   .nav-util { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .nav-util-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
   .nav-util-row:hover { background: var(--panel-2); }
+  /* THE COLOUR KEY, moved in from the floor header on a phone (item 23). It costs 45px of a 780px
+     screen up there and is read once, in your first week — a manager needs the TABLES, not the key.
+     app.js MOVES the live node in (never a clone: the floor rebuilds it whenever tables merge), so
+     it is the same strip, saying the same things, one tap away. */
+  /* `display: block` matters: the base rule above hides this, and the first cut of the phone rule
+     set only the spacing — so the key was moved into the drawer correctly and then never shown.
+     Caught by opening the drawer and MEASURING the strip's box rather than trusting that it moved. */
+  .nav-legend { display: block; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .nav-legend-h { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .nav-legend .floor-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 0; }
+  /* …and it stops taking a row in the header, which is the whole point. */
+  .floor-head .floor-legend { display: none; }
   /* The 🔔 is injected by the shared guestbell.js at 38x38 and is the one control left on this bar
      under the finger target (item 24). The waiter tablet already serves it at 44 through its own
      .theme-toggle rule; this does the same from the panel that owns the bar. Height AND width,
