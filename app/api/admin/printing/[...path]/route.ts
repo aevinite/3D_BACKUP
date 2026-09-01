@@ -100,10 +100,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       sb.from("print_jobs").select("restaurant_id, kind, created_at")
         .in("status", ["queued", "printing"]).eq("kind", "kot").limit(2000),
     ]);
+    // …AND THE OTHER THREE, for the same reason one line down (item 20, T19 sweep #7, 2026-09-01).
+    // The restaurants read was checked; these were not, and each one silently redraws the board as a
+    // different lie: with `agents` failed every restaurant reads "no computer", with `settings` failed
+    // printing reads as switched off everywhere, and with `jobs` failed nothing is ever waiting. This
+    // is a HARDWARE board — the answer decides whether he goes and looks at a shop's PC — so a wrong
+    // picture is worse than an error. Nothing here is partial-renderable: the rows are the board.
     // AN EMPTY BOARD IS NOT "NO RESTAURANTS". Every row below is built from this list, so a failed
     // read answered a 200 with `rows: []` — a Printing overview showing nothing at all, which reads
     // as a healthy platform with nobody printing. Same rule as its neighbours in this console.
     if (rests.error) return adminFail("the printing overview", rests.error as { message?: string }, { action: "load" });
+    if (agents.error) return adminFail("the printing overview", agents.error, { action: "load" });
+    if (sets.error) return adminFail("the printing overview", sets.error, { action: "load" });
+    if (jobs.error) return adminFail("the printing overview", jobs.error, { action: "load" });
     const now = Date.now();
     const byRest = new Map<string, { n: number; oldest: number | null }>();
     for (const j of (jobs.data || []) as { restaurant_id: string; created_at: string }[]) {
@@ -168,10 +177,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     //     A person switched off is not offered, which is what makes that permission mean something.
     //   · devices — the screens that have actually been the printer before (print_stations), so "that
     //     same PC" is a thing he recognises rather than a hex id he has to guess at.
-    const staff = ((await sb.from("staff_users").select("id, name, username, role, active, permissions")
+    // CHECKED, because an empty picker is a sentence about the restaurant (item 20, 2026-09-01). With
+    // this read's failure swallowed, `people` came back empty and the board said "there is no kitchen
+    // panel available" — the exact words the note below records the owner hitting for real, from a
+    // different cause. An empty list and an unreadable list must not look the same on a screen whose
+    // job is choosing who prints.
+    const staffQ = await sb.from("staff_users").select("id, name, username, role, active, permissions")
       // A CEILING, so PostgREST's own default cannot silently shorten this picker (T17 sweep #7,
       // 2026-08-27). One restaurant's staff, and every other read in this file already states one.
-      .eq("restaurant_id", rid).order("role").limit(500)).data || []) as
+      .eq("restaurant_id", rid).order("role").limit(500);
+    if (staffQ.error) return adminFail("this restaurant's printing board", staffQ.error, { action: "load" });
+    const staff = (staffQ.data || []) as
       { id: string; name?: string | null; username?: string | null; role?: string | null; active?: boolean | null;
         permissions?: Record<string, string> | null }[];
     // ── PER PERSON, NOT PER RESTAURANT (owner's review, 2026-08-28) ───────────────────────────
@@ -185,7 +201,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     // Both sides call managerHasFlag() now, so the picker and the gate cannot disagree. `access_config`
     // is read as well because it is the CAP: switched off there, nobody may, whatever their own
     // setting says. Still ONE extra column on a query already being made.
-    const perms = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+    // Checked too: this row is the CAP on who may print, so reading it as absent would offer people
+    // the gate then refuses — the very disagreement the note above was written to end.
+    const permsQ = await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle();
+    if (permsQ.error) return adminFail("this restaurant's printing board", permsQ.error, { action: "load" });
+    const perms = permsQ.data as
       { manager_permissions?: Record<string, unknown> | null; access_config?: Record<string, { on?: boolean }> | null } | null;
     const mayBePrinter = (u: { role?: string | null; permissions?: Record<string, string> | null }) =>
       managerHasFlag("print_here", {
@@ -208,8 +228,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         : role === "manager" ? ["manager"] : [];
       return { id: u.id, name: String(u.name || u.username || "").slice(0, 80), role, panels };
     }).filter((u) => u.panels.length);
-    const devices = ((await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
-      .eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(12)).data || []);
+    // The remembered screens are the one TOLERATED read here: an empty "which PC" list only costs a
+    // convenience (he can still name the panel), and the board does not claim it is complete.
+    const devicesQ = await sb.from("print_stations").select("device_id, label, panel, last_seen_at")
+      .eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(12);
+    if (devicesQ.error) console.error("[admin/printing] the remembered screens could not be read:", devicesQ.error.message);
+    const devices = devicesQ.data || [];
 
     return NextResponse.json({
       ...board,
