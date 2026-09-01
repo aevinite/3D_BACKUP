@@ -23,6 +23,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +61,13 @@ export async function GET(req: NextRequest) {
   // A PURGED restaurant is still refused outright — its menu, staff and settings are gone, so its
   // panels would be an empty shell pretending to be a restaurant.
   const fromBin = req.nextUrl.searchParams.get("bin") === "1";
-  const r = (await sb.from("restaurants").select("id, name, deleted_at, purged_at").eq("id", rid).limit(1)).data?.[0];
+  const rq = await sb.from("restaurants").select("id, name, deleted_at, purged_at").eq("id", rid).limit(1);
+  // "NOT FOUND" HAS TO MEAN NOT FOUND (T19 sweep #7, 2026-09-01). This took `.data` and ignored
+  // `.error`, so a database blip on the quick-open answered "restaurant not found" — a sentence the
+  // admin would believe about a restaurant sitting in the list he clicked it from. Told apart now:
+  // one says the restaurant is gone, the other says we could not look.
+  if (rq.error) return adminFail("this restaurant", rq.error, { action: "load" });
+  const r = rq.data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
   if (r.purged_at) return NextResponse.json({ error: "That restaurant was permanently removed — its panels no longer exist. Its bills are still on record in the Bills ledger." }, { status: 409 });
   if (r.deleted_at && !fromBin) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
